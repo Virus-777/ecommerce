@@ -70,6 +70,10 @@ export interface StockItem {
   /** Primary bin from warehouse, e.g. A-03-2 */
   binCode?: string | null;
   nextIncoming?: IncomingCue | null;
+  /** Fulfilled by Marketly: the company location this seller item sells from (setServiceLocation). While set, quantities are those at that location ('At Marketly') */
+  serviceLocationId?: string | null;
+  /** Set with serviceLocationId: units at the seller's own location, kept but not on sale while Marketly fulfils the item (decision D4) */
+  ownLocationQuantities?: StockQuantities | null;
   archived: boolean;
   updatedAt: string;
 }
@@ -102,6 +106,10 @@ export const StockItem: z.ZodType<StockItem> = z.object({
   binCode: z.string().describe("Primary bin from warehouse, e.g. A-03-2").nullish(),
   get nextIncoming() {
     return IncomingCue.nullish();
+  },
+  serviceLocationId: z.uuid().describe("Fulfilled by Marketly: the company location this seller item sells from (setServiceLocation). While set, quantities are those at that location ('At Marketly')").nullish(),
+  get ownLocationQuantities() {
+    return StockQuantities.nullish();
   },
   archived: z.boolean(),
   updatedAt: z.iso.datetime({ offset: true }),
@@ -233,14 +241,14 @@ export const LocationInput: z.ZodType<LocationInput> = z.object({
 }).register(common.apiTypes, { id: "inventory.LocationInput" });
 
 export interface MovementRef {
-  kind: "order" | "reservation" | "purchase_order" | "receipt" | "return" | "adjustment" | "bulk_update" | "transfer" | "count" | "discrepancy" | "initial" | "merge";
+  kind: "order" | "reservation" | "purchase_order" | "receipt" | "return" | "adjustment" | "bulk_update" | "transfer" | "count" | "discrepancy" | "initial" | "merge" | "service_inbound" | "service_return" | "service_removal" | "service_reconcile";
   id: string;
   /** e.g. 'Received PUR-2610-0031', 'Return RT-261001-0161' */
   label: string;
 }
 
 export const MovementRef: z.ZodType<MovementRef> = z.object({
-  kind: z.enum(["order", "reservation", "purchase_order", "receipt", "return", "adjustment", "bulk_update", "transfer", "count", "discrepancy", "initial", "merge"]),
+  kind: z.enum(["order", "reservation", "purchase_order", "receipt", "return", "adjustment", "bulk_update", "transfer", "count", "discrepancy", "initial", "merge", "service_inbound", "service_return", "service_removal", "service_reconcile"]),
   id: z.string(),
   label: z.string().describe("e.g. 'Received PUR-2610-0031', 'Return RT-261001-0161'"),
 }).register(common.apiTypes, { id: "inventory.MovementRef" });
@@ -346,6 +354,10 @@ export interface SellerStockRow {
   state: "in_stock" | "low_stock" | "out_of_stock";
   /** e.g. 'Oct 6, 4:30 PM · Avery Stone' */
   lastChange?: string | null;
+  /** True while the item has a service location: available and reserved are 'At Marketly' and the row is read-only (SERVICE_MANAGED) */
+  fulfilledByMarketly: boolean;
+  /** With fulfilledByMarketly: units at the seller's own location, 'At your location (not on sale)' */
+  ownLocationAvailable?: number | null;
   updatedAt: string;
 }
 
@@ -363,6 +375,8 @@ export const SellerStockRow: z.ZodType<SellerStockRow> = z.object({
   lowStockThreshold: z.number().int().nullish(),
   state: z.enum(["in_stock", "low_stock", "out_of_stock"]),
   lastChange: z.string().describe("e.g. 'Oct 6, 4:30 PM · Avery Stone'").nullish(),
+  fulfilledByMarketly: z.boolean().describe("True while the item has a service location: available and reserved are 'At Marketly' and the row is read-only (SERVICE_MANAGED)"),
+  ownLocationAvailable: z.number().int().describe("With fulfilledByMarketly: units at the seller's own location, 'At your location (not on sale)'").nullish(),
   updatedAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "inventory.SellerStockRow" });
 
@@ -607,8 +621,15 @@ export interface InboundReceipt {
   receiptId: string;
   /** e.g. REC-261006-03 */
   receiptRef: string;
-  purchaseOrderId: string;
-  purchaseOrderRef: string;
+  /** What the units arrive against: a purchase order (company stock) or a Fulfilled by Marketly inbound shipment (seller stock) */
+  source: ReceiptSource;
+  /** seller for service_inbound receipts */
+  ownerType: "official" | "seller";
+  sellerId?: string | null;
+  /** Null for service_inbound receipts */
+  purchaseOrderId?: string | null;
+  purchaseOrderRef?: string | null;
+  /** The supplier; for service_inbound receipts the seller's name */
   supplierName: string;
   locationId: string;
   receivedBy: common.Actor;
@@ -631,9 +652,14 @@ export const InboundReceipt: z.ZodType<InboundReceipt> = z.object({
   id: z.uuid(),
   receiptId: z.uuid(),
   receiptRef: z.string().describe("e.g. REC-261006-03"),
-  purchaseOrderId: z.uuid(),
-  purchaseOrderRef: z.string(),
-  supplierName: z.string(),
+  get source() {
+    return ReceiptSource;
+  },
+  ownerType: z.enum(["official", "seller"]).describe("seller for service_inbound receipts"),
+  sellerId: z.uuid().nullish(),
+  purchaseOrderId: z.uuid().describe("Null for service_inbound receipts").nullish(),
+  purchaseOrderRef: z.string().nullish(),
+  supplierName: z.string().describe("The supplier; for service_inbound receipts the seller's name"),
   locationId: z.uuid(),
   get receivedBy() {
     return common.Actor;
@@ -665,7 +691,8 @@ export interface InboundLine {
   damaged: number;
   shortage: number;
   binCode?: string | null;
-  unitCost: common.Money;
+  /** Null for service_inbound receipts (seller stock has no company cost) */
+  unitCost?: common.Money | null;
   /** Proposed received − damaged; set on confirmation */
   sellable: number;
   outOfStockNow: boolean;
@@ -681,11 +708,25 @@ export const InboundLine: z.ZodType<InboundLine> = z.object({
   shortage: z.number().int(),
   binCode: z.string().nullish(),
   get unitCost() {
-    return common.Money;
+    return common.Money.nullish();
   },
   sellable: z.number().int().describe("Proposed received − damaged; set on confirmation"),
   outOfStockNow: z.boolean(),
 }).register(common.apiTypes, { id: "inventory.InboundLine" });
+
+export interface ReceiptSource {
+  kind: "purchase_order" | "service_inbound";
+  /** Purchase order id or fulfillment-service inbound shipment id */
+  id: string;
+  /** PO or IB- reference */
+  ref: string;
+}
+
+export const ReceiptSource: z.ZodType<ReceiptSource> = z.object({
+  kind: z.enum(["purchase_order", "service_inbound"]),
+  id: z.uuid().describe("Purchase order id or fulfillment-service inbound shipment id"),
+  ref: z.string().describe("PO or IB- reference"),
+}).register(common.apiTypes, { id: "inventory.ReceiptSource" });
 
 export interface ConfirmInboundLine {
   stockItemId: string;
@@ -991,7 +1032,7 @@ export interface InventoryStockChangedEvent {
   previousAvailable: number;
   state: "in_stock" | "low_stock" | "out_of_stock";
   archived: boolean;
-  /** e.g. hold, allocate, release, fulfil, adjustment, bulk_update, receipt, return, item_updated, archived, unarchived, merge */
+  /** e.g. hold, allocate, release, fulfil, adjustment, bulk_update, receipt, return, item_updated, archived, unarchived, merge, service_location (setServiceLocation), service_stock (moveServiceStock) */
   cause: string;
 }
 
@@ -1007,7 +1048,7 @@ export const InventoryStockChangedEvent: z.ZodType<InventoryStockChangedEvent> =
   previousAvailable: z.number().int(),
   state: z.enum(["in_stock", "low_stock", "out_of_stock"]),
   archived: z.boolean(),
-  cause: z.string().describe("e.g. hold, allocate, release, fulfil, adjustment, bulk_update, receipt, return, item_updated, archived, unarchived, merge"),
+  cause: z.string().describe("e.g. hold, allocate, release, fulfil, adjustment, bulk_update, receipt, return, item_updated, archived, unarchived, merge, service_location (setServiceLocation), service_stock (moveServiceStock)"),
 });
 
 /** inventory.stock.low: Available drops to or below the threshold (once per cooldown) */
@@ -1022,6 +1063,8 @@ export interface InventoryStockLowEvent {
   label: string;
   available: number;
   threshold: number;
+  /** The item is Fulfilled by Marketly (service location set): the fulfillment service tells the seller (seller.fulfillment.stock_low); notifications skips its generic seller notice */
+  serviceManaged: boolean;
 }
 
 export const InventoryStockLowEvent: z.ZodType<InventoryStockLowEvent> = z.object({
@@ -1035,6 +1078,7 @@ export const InventoryStockLowEvent: z.ZodType<InventoryStockLowEvent> = z.objec
   label: z.string(),
   available: z.number().int(),
   threshold: z.number().int(),
+  serviceManaged: z.boolean().describe("The item is Fulfilled by Marketly (service location set): the fulfillment service tells the seller (seller.fulfillment.stock_low); notifications skips its generic seller notice"),
 });
 
 /** inventory.stock.low_digest: Daily low-stock digest (job inventory.low-stock-digest): one event per seller with low or out-of-stock items, and one for the Official Store (ownerType official); nothing when there is nothing to report */
@@ -1094,13 +1138,16 @@ export const InventoryReservationReleasedEvent: z.ZodType<InventoryReservationRe
   },
 });
 
-/** inventory.adjustment.recorded: A seller or staff adjustment is applied */
+/** inventory.adjustment.recorded: A seller or staff adjustment is applied (adjustments, count corrections and discrepancy resolutions that move units; never moveServiceStock) */
 export interface InventoryAdjustmentRecordedEvent {
   adjustmentId?: string | null;
   movementId: string;
   stockItemId: string;
+  locationId: string;
   ownerType: string;
   sellerId?: string | null;
+  /** A seller item moved at its service location (Fulfilled by Marketly); the fulfillment service's ownership ledger follows */
+  serviceManaged: boolean;
   fromGroup: string;
   toGroup: string;
   quantity: number;
@@ -1112,8 +1159,10 @@ export const InventoryAdjustmentRecordedEvent: z.ZodType<InventoryAdjustmentReco
   adjustmentId: z.uuid().nullish(),
   movementId: z.uuid(),
   stockItemId: z.uuid(),
+  locationId: z.uuid(),
   ownerType: z.string(),
   sellerId: z.uuid().nullish(),
+  serviceManaged: z.boolean().describe("A seller item moved at its service location (Fulfilled by Marketly); the fulfillment service's ownership ledger follows"),
   fromGroup: z.string(),
   toGroup: z.string(),
   quantity: z.number().int(),
@@ -1123,11 +1172,17 @@ export const InventoryAdjustmentRecordedEvent: z.ZodType<InventoryAdjustmentReco
   },
 });
 
-/** inventory.receipt.confirmed: The Inventory Manager confirms a receipt */
+/** inventory.receipt.confirmed: The Inventory Manager confirms a receipt (purchase or Fulfilled by Marketly) */
 export interface InventoryReceiptConfirmedEvent {
   inboundId: string;
   receiptId: string;
-  purchaseOrderId: string;
+  source: ReceiptSource;
+  ownerType: "official" | "seller";
+  sellerId?: string | null;
+  /** Null for service_inbound receipts */
+  purchaseOrderId?: string | null;
+  locationId: string;
+  /** Confirmed sellable and damaged per line */
   lines: InboundLine[];
   confirmedBy: common.Actor;
 }
@@ -1135,7 +1190,13 @@ export interface InventoryReceiptConfirmedEvent {
 export const InventoryReceiptConfirmedEvent: z.ZodType<InventoryReceiptConfirmedEvent> = z.object({
   inboundId: z.uuid(),
   receiptId: z.uuid(),
-  purchaseOrderId: z.uuid(),
+  get source() {
+    return ReceiptSource;
+  },
+  ownerType: z.enum(["official", "seller"]),
+  sellerId: z.uuid().nullish(),
+  purchaseOrderId: z.uuid().describe("Null for service_inbound receipts").nullish(),
+  locationId: z.uuid(),
   get lines() {
     return z.array(InboundLine);
   },
@@ -1279,6 +1340,18 @@ export interface InventoryPublicApi {
   getStockSummary(locationId?: string): Promise<StockSummary>;
   /** Export rows for reports datasets inventory.admin.stock and inventory.seller.stock (seller rows scoped to the principal's seller) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
+  /** Fulfilled by Marketly: designates the company location a seller item sells from (stock_items.service_location_id); null returns it to the seller's own location. While set, the item sells only from that location and the seller's own-location units are kept but not on sale (decision D4). Refused for Official Store items and for locations that are not active company warehouses (VALIDATION_FAILED). Publishes inventory.stock.changed (cause service_location). Same value again is a no-op Used by: fulfillment-service. */
+  setServiceLocation(stockItemId: string, locationId: string | null, actor: common.Actor): Promise<StockItem>;
+  /** One atomic movement of a seller item at its service location (null = outside stock: entering or leaving). Idempotent per key through the inbox (the same key returns the first result). Only for seller items whose service_location_id is locationId (VALIDATION_FAILED otherwise); INSUFFICIENT_STOCK if a group would go negative. Moving into damaged_held writes a held_stock row. Publishes inventory.stock.changed (and inventory.stock.low when it applies); not inventory.adjustment.recorded, so the fulfillment service never hears its own movements back Used by: fulfillment-service. */
+  moveServiceStock(input: { key: string, stockItemId: string, locationId: string, from: 'available'|'reserved'|'incoming'|'damaged_held'|'returned'|null, to: 'available'|'reserved'|'incoming'|'damaged_held'|'returned'|null, quantity: number, reasonCode: 'service_return_received'|'service_return_restocked'|'service_return_unsellable'|'service_return_disposed'|'service_removal_reserved'|'service_removal_completed'|'service_found'|'service_reconcile', ref: MovementRef, actor: common.Actor }): Promise<{ movementId: string, levels: StockQuantities }>;
+  /** Incoming at the service location for a submitted inbound shipment (incoming_expectations source_kind service_inbound, source_id inboundId); repeated calls replace the open quantities for that inbound Used by: fulfillment-service. */
+  expectServiceInbound(input: { inboundId: string, ref: string, locationId: string, lines: { stockItemId: string, quantity: number, expectedDate?: string }[] }): Promise<void>;
+  /** Removes the open Incoming of a cancelled or completed inbound shipment; no-op when nothing is open Used by: fulfillment-service. */
+  cancelServiceInbound(inboundId: string): Promise<void>;
+  /** Like submitInbound for a Fulfilled by Marketly receiving record, without cost: the receipt (source service_inbound, ownerType seller) waits in the same confirmation queue and the Inventory Manager confirms it on confirmInbound (decision D3). Confirmation moves Incoming → Available / Damaged or held at the service location without unit cost or valuation; units beyond the open Incoming are added at confirmation. Same receiptId returns the first receipt Used by: fulfillment-service. */
+  submitServiceReceipt(receipt: { receiptId: string, receiptRef: string, inboundId: string, inboundRef: string, sellerId: string, sellerName: string, locationId: string, receivedBy: common.Actor, receivedAt: string, lines: { stockItemId: string, expected: number, received: number, damaged: number, binCode?: string }[] }): Promise<InboundReceipt>;
+  /** Quantities of the items at one location, keyed by stock item id (zeros for items with no level row there); the fulfillment service reconciles its ownership ledger with it Used by: fulfillment-service. */
+  getLevels(stockItemIds: string[], locationId: string): Promise<Record<string, StockQuantities>>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -1316,6 +1389,8 @@ export interface InventoryDb {
     currency: string;
     primary_bin_code: string | null;
     low_since: Date | null;
+    /** Fulfilled by Marketly: the company location this seller item sells from; null = the seller's own location */
+    service_location_id: string | null;
     archived: boolean;
     created_at: Date;
     updated_at: Date;
@@ -1353,12 +1428,12 @@ export interface InventoryDb {
     after: Json;
     at: Date;
   };
-  /** Open incoming quantities from purchase orders (and transfers) */
+  /** Open incoming quantities from purchase orders, transfers and Fulfilled by Marketly inbound shipments */
   incoming_expectations: {
     id: string;
     stock_item_id: string;
     location_id: string;
-    source_kind: 'purchase_order' | 'transfer';
+    source_kind: 'purchase_order' | 'transfer' | 'service_inbound';
     source_id: string;
     source_ref: string;
     quantity_open: number;
@@ -1418,13 +1493,19 @@ export interface InventoryDb {
     source_ref: string | null;
     released_at: Date | null;
   };
-  /** Counted receipts from purchasing waiting for confirmation */
+  /** Counted receipts from purchasing and from the fulfillment service waiting for confirmation */
   inbound_receipts: {
     id: string;
     receipt_id: string;
     receipt_ref: string;
-    purchase_order_id: string;
-    purchase_order_ref: string;
+    source_kind: 'purchase_order' | 'service_inbound';
+    /** purchase order or inbound shipment id; existing rows backfilled from purchase_order_id */
+    source_id: string | null;
+    source_ref: string | null;
+    owner_type: 'official' | 'seller';
+    seller_id: string | null;
+    purchase_order_id: string | null;
+    purchase_order_ref: string | null;
     supplier_name: string;
     location_id: string;
     received_by: string;
@@ -1441,7 +1522,8 @@ export interface InventoryDb {
     received: number;
     damaged: number;
     bin_code: string | null;
-    unit_cost_amount: number;
+    /** null for service_inbound receipts */
+    unit_cost_amount: number | null;
     sellable: number | null;
     reason: string | null;
   };
@@ -1635,7 +1717,7 @@ export const endpoints = defineEndpoints({
     body: () => SellerAdjustmentRequest,
     response: () => Movement,
     status: 201,
-    errors: ["VALIDATION_FAILED","STOCK_ITEM_ARCHIVED","CONFLICT"],
+    errors: ["VALIDATION_FAILED","STOCK_ITEM_ARCHIVED","CONFLICT","SERVICE_MANAGED"],
     events: ["inventory.stock.changed","inventory.adjustment.recorded","inventory.stock.low"],
     screens: ["seller/inventory"],
     phase: 1,
@@ -1648,6 +1730,7 @@ export const endpoints = defineEndpoints({
     permission: "inventory.stock.adjust",
     scope: "own-seller",
     summary: "Save several inline quantity edits at once (each with a reason)",
+    desc: "Items Fulfilled by Marketly (service location set) fail one by one with error code SERVICE_MANAGED in their result; the others are saved.",
     body: () => z.object({
       get items() {
         return z.array(SellerAdjustmentItem);
@@ -1837,7 +1920,7 @@ export const endpoints = defineEndpoints({
     permission: "inventory.stock.adjust-official",
     scope: "staff",
     summary: "Move company stock between groups, or into or out of stock, with a reason",
-    desc: "Reserved units cannot be adjusted here (they stay with their orders; use discrepancies). Moving into Damaged or held needs a review date. The response shows before/after; above the limit it is pending_review with approval details.",
+    desc: "Also seller items at their service location (Fulfilled by Marketly: units found, lost or damaged in our warehouse); those publish inventory.adjustment.recorded with serviceManaged true and the fulfillment service's ledger follows. Reserved units cannot be adjusted here (they stay with their orders; use discrepancies). Moving into Damaged or held needs a review date. The response shows before/after; above the limit it is pending_review with approval details.",
     body: () => AdjustmentRequest,
     response: () => Adjustment,
     status: 201,
@@ -1967,6 +2050,7 @@ export const endpoints = defineEndpoints({
     query: () =>
       z.object({
         state: z.enum(["awaiting_confirmation", "confirmed"]).optional(),
+        source: z.enum(["purchase_order", "service_inbound"]).describe("Purchase receipts or Fulfilled by Marketly receipts; both by default").optional(),
       }),
     paging: true,
     response: () => InboundReceipt,
@@ -1999,7 +2083,7 @@ export const endpoints = defineEndpoints({
     permission: "inventory.inbound.confirm",
     scope: "staff",
     summary: "Make received units available for sale",
-    desc: "Incoming → Available (sellable) and → Damaged or held (damaged). Updates weighted average unit cost with the receipt's unit cost. Open pick shortages on these SKUs are listed so they can be resolved first (no backorders at launch).",
+    desc: "Incoming → Available (sellable) and → Damaged or held (damaged). Updates weighted average unit cost with the receipt's unit cost (purchase receipts only: service_inbound receipts are seller stock at the service location, with no cost and no valuation; units beyond the open Incoming are added from outside). Open pick shortages on these SKUs are listed so they can be resolved first (no backorders at launch).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2088,7 +2172,7 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["ILLEGAL_TRANSITION","GROUP_QUANTITY_EXCEEDED"],
     audited: true,
-    events: ["inventory.discrepancy.resolved","inventory.stock.changed"],
+    events: ["inventory.discrepancy.resolved","inventory.stock.changed","inventory.adjustment.recorded"],
     screens: ["ops/inventory","ops/pick-pack"],
     phase: 1,
   },
@@ -2341,7 +2425,7 @@ export const spec = defineModuleSpec({
   summary: "How many units exist and in which stock group: stock items per offer/SKU with Available, Reserved, Incoming, Damaged or held and Returned quantities per location, checkout holds and order allocations, an append-only movement ledger, reasoned adjustments with second review, low-stock alerts, receipt confirmation and return stock outcomes.",
   dependsOn: [],
   optionalDeps: ["access","audit","catalog","finance","fulfillment-service","media","purchasing","reports","workqueues","offers"],
-  publicApi: ["createStockItem","getAvailability","hold","extendHold","attachOrder","releaseHold","allocateForOrder","getLocations","getDefaultLocation","updateStockItem","unarchiveStockItem","mergeStockItems","getSalesRate","applyBulkQuantities","getUnitCost","expectIncoming","cancelIncoming","submitInbound","reportDiscrepancy","findBySku","getStockItems","getOfferAvailability","getStockForOffers","listStockForVariants","getSellerStockSummary","getStockSummary","exportRows"],
+  publicApi: ["createStockItem","getAvailability","hold","extendHold","attachOrder","releaseHold","allocateForOrder","getLocations","getDefaultLocation","updateStockItem","unarchiveStockItem","mergeStockItems","getSalesRate","applyBulkQuantities","getUnitCost","expectIncoming","cancelIncoming","submitInbound","reportDiscrepancy","findBySku","getStockItems","getOfferAvailability","getStockForOffers","listStockForVariants","getSellerStockSummary","getStockSummary","exportRows","setServiceLocation","moveServiceStock","expectServiceInbound","cancelServiceInbound","submitServiceReceipt","getLevels"],
   permissions: [
     {
       "key": "inventory.stock.adjust",
@@ -2564,8 +2648,8 @@ export const spec = defineModuleSpec({
       "inventory.stock.low_digest": { when: "Daily low-stock digest (job inventory.low-stock-digest): one event per seller with low or out-of-stock items, and one for the Official Store (ownerType official); nothing when there is nothing to report", payload: () => InventoryStockLowDigestEvent },
       "inventory.reservation.allocated": { when: "A hold is allocated to an accepted order, or allocateForOrder allocates units for a replacement or exchange", payload: () => InventoryReservationAllocatedEvent },
       "inventory.reservation.released": { when: "Held or allocated units return to Available (cancel, expiry, abandoned checkout, staff release, hold units no accepted item matched)", payload: () => InventoryReservationReleasedEvent },
-      "inventory.adjustment.recorded": { when: "A seller or staff adjustment is applied", payload: () => InventoryAdjustmentRecordedEvent },
-      "inventory.receipt.confirmed": { when: "The Inventory Manager confirms a receipt", payload: () => InventoryReceiptConfirmedEvent },
+      "inventory.adjustment.recorded": { when: "A seller or staff adjustment is applied (adjustments, count corrections and discrepancy resolutions that move units; never moveServiceStock)", payload: () => InventoryAdjustmentRecordedEvent },
+      "inventory.receipt.confirmed": { when: "The Inventory Manager confirms a receipt (purchase or Fulfilled by Marketly)", payload: () => InventoryReceiptConfirmedEvent },
       "inventory.return_outcome.recorded": { when: "Stock outcome of a return is recorded", payload: () => InventoryReturnOutcomeRecordedEvent },
       "inventory.discrepancy.reported": { when: "Warehouse reports a shortage or damage", payload: () => InventoryDiscrepancyReportedEvent },
       "inventory.discrepancy.resolved": { when: "Inventory resolves a discrepancy", payload: () => InventoryDiscrepancyResolvedEvent },
@@ -2692,6 +2776,10 @@ export const spec = defineModuleSpec({
     "STOCK_ITEM_ARCHIVED": {
       "status": 409,
       "meaning": "The stock item is archived (its offer was removed)"
+    },
+    "SERVICE_MANAGED": {
+      "status": 409,
+      "meaning": "Marketly holds and sells this item's stock; change it through the fulfillment service."
     }
   },
   tables: {
@@ -2800,6 +2888,10 @@ export const spec = defineModuleSpec({
       },
       "low_since": {
         "type": "timestamptz",
+        "nullable": true
+      },
+      "service_location_id": {
+        "type": "uuid",
         "nullable": true
       },
       "archived": {
@@ -3154,13 +3246,33 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": false
       },
+      "source_kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "source_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "source_ref": {
+        "type": "text",
+        "nullable": true
+      },
+      "owner_type": {
+        "type": "text",
+        "nullable": false
+      },
+      "seller_id": {
+        "type": "uuid",
+        "nullable": true
+      },
       "purchase_order_id": {
         "type": "uuid",
-        "nullable": false
+        "nullable": true
       },
       "purchase_order_ref": {
         "type": "text",
-        "nullable": false
+        "nullable": true
       },
       "supplier_name": {
         "type": "text",
@@ -3222,7 +3334,7 @@ export const spec = defineModuleSpec({
       },
       "unit_cost_amount": {
         "type": "bigint",
-        "nullable": false
+        "nullable": true
       },
       "sellable": {
         "type": "int",
@@ -3505,6 +3617,9 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     },
     "stock_items": {
+      "seller": "seller_id"
+    },
+    "inbound_receipts": {
       "seller": "seller_id"
     }
   },

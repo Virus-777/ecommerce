@@ -166,7 +166,8 @@ Turns a cart (or a Buy now offer) into an accepted order: identify the customer 
 | key | `string` |
 | label | `string` 'Package 2 of 3' |
 | seller | `cart.SellerLabel` |
-| soldAndShippedBy | `string` 'Sold and shipped by Northwind Audio' |
+| soldAndShippedBy | `string` 'Sold and shipped by Northwind Audio'; for marketly_service packages 'Sold by Northwind Audio · Shipped by Marketly' |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` Becomes the order group's fulfilledBy |
 | shipsFrom | `string` |
 | lines | `CheckoutLine[]` |
 | options | `shipping.DeliveryOption[]` |
@@ -614,7 +615,8 @@ Indexes: `(customer_id, status)`, `(guest_session_id, status)`, `(status, expire
 | product_id | uuid |
 | variant_id | uuid |
 | stock_item_id | uuid |
-| profile_id | uuid |
+| profile_id | uuid (Offer.shipping.profileId) |
+| fulfilled_by | text (official_warehouse|seller|marketly_service) |
 | package_key | text |
 | quantity | int |
 | unit_price | int |
@@ -633,6 +635,7 @@ Indexes: `(session_id)`
 | package_key | text |
 | owner_type | text |
 | seller_id | uuid? |
+| fulfilled_by | text (official_warehouse|seller|marketly_service) |
 | ships_from | text |
 | options | jsonb |
 | selected_option_id | text? |
@@ -783,7 +786,7 @@ Indexes: `unique (session_id, idempotency_key)`
 - Promotions input: evaluateCart lines carry the seller id, or OFFICIAL_STORE_ID for Official Store lines (never '' or null), categoryId when known, and contactEmail for guests (per-customer limits by email hash).
 - Payment method tokens: payment_selection stores the method kind, label and saved method id. A new card or wallet providerToken lives only until the authorize call of the place or retry request that uses it, then it is cleared; a later attempt with a new card needs a new token (PAYMENT_METHOD_INVALID otherwise).
 - catalog is optional (decision D-C1): when enabled, review lines and admin rows read product titles, images and category from catalog; otherwise from the offer title and snapshot.
-- Fulfilled by Marketly (fulfillment-service, phase 4) is not wired: checkout never sets fulfilledBy marketly_service and does not call fulfillment-service.isServiceOffer yet. Enabling fulfillment-service must be refused at boot until checkout, offers and orders call isServiceOffer (decision O6 / D-C2).
+- Fulfilled by Marketly (fulfillment-service, phase 4): every line takes fulfilledBy, its shipping profile and dispatch from the offer's effective Offer.shipping (offers resolves Marketly's terms; checkout never calls fulfillment-service). Packages are keyed packageKey(ownerType, sellerId, fulfilledBy, shipsFrom) like the cart, so one seller's Marketly-fulfilled and self-shipped items become two packages with their own options. shipping.quoteOptions gets the package's fulfilledBy (marketly_service: Official settings, closures and cutoffs, origin the service location). createOrder gets each group's fulfilledBy and shipsFrom from the package (never hard-coded). Revalidation also compares the line's fulfilledBy with the offer's, and a change is a terms_changed Change. Views and the confirmation say 'Sold by <seller> · Shipped by Marketly' for those packages.
 
 ## GraphQL (read layer)
 

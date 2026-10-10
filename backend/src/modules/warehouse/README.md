@@ -34,7 +34,7 @@ Physical work for Official Store stock: bins, put-away of received goods, pick w
 | POST | `/api/admin/warehouse/bins` | Create bins (one or a list of codes) _(audited)_ | staff<br>`warehouse.bins.manage` | `{ locationId: uuid, codes: string[], kind: enum(pick|bulk|returns|quarantine|packing|dock) }` → `Bin[]` |
 | PATCH | `/api/admin/warehouse/bins/{id}` | Change kind or deactivate a bin _(audited)_ | staff<br>`warehouse.bins.manage` | `{ kind: enum(pick|bulk|returns|quarantine|packing|dock)?, active: bool? }` → `Bin` |
 | PUT | `/api/admin/warehouse/stock-items/{stockItemId}/bins` | Set the bins a company stock item is stored in (one primary) _(audited)_ | staff<br>`warehouse.bins.manage` | `{ bins: BinAssignmentInput[] }` → `BinAssignment[]` |
-| GET | `/api/admin/warehouse/fulfillments` | Official Store orders to pick and pack, most urgent first | staff<br>`warehouse.view` | Page<FulfillmentRow> |
+| GET | `/api/admin/warehouse/fulfillments` | Official Store and Fulfilled by Marketly orders to pick and pack, most urgent first | staff<br>`warehouse.view` | Page<FulfillmentRow> |
 | GET | `/api/admin/warehouse/fulfillments/{id}` | One fulfillment with lines, bins, packages, hold reason and mixed-order note | staff<br>`warehouse.view` | `Fulfillment` |
 | POST | `/api/admin/warehouse/waves` | Create a pick wave (given orders, or all awaiting pick due before the carrier pickup) | staff<br>`warehouse.waves.manage` | `{ locationId: uuid, fulfillmentIds: uuid[]?, carrierPickupAt: datetime? }` → `Wave` |
 | GET | `/api/admin/warehouse/waves` | Pick waves | staff<br>`warehouse.view` | Page<Wave> |
@@ -136,7 +136,10 @@ Physical work for Official Store stock: bins, put-away of received goods, pick w
 | orderId | `uuid` |
 | orderRef | `string` |
 | sellerGroupId | `uuid` |
-| locationId | `uuid` |
+| fulfilledBy | `enum(official_warehouse|marketly_service)` official_warehouse: an Official Store group; marketly_service: a seller's group Marketly fulfils from seller-owned stock |
+| sellerId | `uuid?` The seller of record of a marketly_service fulfilment; null for the Official Store |
+| sellerName | `string?` Shown on the packing slip: 'Sold by <seller> · Fulfilled by Marketly' |
+| locationId | `uuid` The service location (fulfillment-service.getServiceLocation) for marketly_service, else the default location |
 | status | `enum(awaiting_pick|picking|picked|packing|packed|dispatched|on_hold|cancelled)` |
 | shipBy | `datetime` |
 | deadline | `Deadline` |
@@ -157,6 +160,8 @@ Physical work for Official Store stock: bins, put-away of received goods, pick w
 |---|---|
 | id | `uuid` |
 | orderRef | `string` |
+| fulfilledBy | `enum(official_warehouse|marketly_service)` |
+| sellerName | `string?` |
 | status | `enum(awaiting_pick|picking|picked|packing|packed|dispatched|on_hold|cancelled)` |
 | deadline | `Deadline` |
 | shipBy | `datetime` |
@@ -496,7 +501,7 @@ Indexes: `unique (location_id, code)`, `unique (barcode)`, `(location_id, zone)`
 
 Indexes: `pk (stock_item_id, bin_id)`, `unique (stock_item_id) where primary_bin`, `(bin_id)`
 
-**fulfillments**: One per Official Store seller group of an accepted order
+**fulfillments**: One per Official Store or Fulfilled by Marketly seller group of an accepted order
 
 | Column | Type |
 |---|---|
@@ -504,6 +509,9 @@ Indexes: `pk (stock_item_id, bin_id)`, `unique (stock_item_id) where primary_bin
 | order_id | uuid |
 | order_ref | text |
 | seller_group_id | uuid unique |
+| fulfilled_by | text (official_warehouse|marketly_service) |
+| seller_id | uuid? (seller of record of a marketly_service group) |
+| seller_name | text? |
 | location_id | uuid |
 | status | text |
 | ship_by | timestamptz |
@@ -666,24 +674,25 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `warehouse.fulfillment.created` | An accepted order's Official Store group reaches the warehouse | `{ fulfillmentId: uuid, orderId: uuid, sellerGroupId: uuid, shipBy: datetime }` | - |
-| `warehouse.fulfillment.status_changed` | Any fulfillment status transition | `{ fulfillmentId: uuid, orderId: uuid, sellerGroupId: uuid, from: string, to: string, reason: string? }` | orders |
+| `warehouse.fulfillment.created` | An accepted order's Official Store or Fulfilled by Marketly group reaches the warehouse | `{ fulfillmentId: uuid, orderId: uuid, sellerGroupId: uuid, fulfilledBy: enum(official_warehouse|marketly_service), sellerId: uuid?, shipBy: datetime }` | - |
+| `warehouse.fulfillment.status_changed` | Any fulfillment status transition | `{ fulfillmentId: uuid, orderId: uuid, sellerGroupId: uuid, fulfilledBy: enum(official_warehouse|marketly_service), sellerId: uuid?, from: string, to: string, reason: string? }` | fulfillment-service, orders |
 | `warehouse.fulfillment.at_risk` | Not packed within the at-risk window before ship-by | `{ fulfillmentId: uuid, orderId: uuid, shipBy: datetime, status: string }` | - |
 | `warehouse.shortage.reported` | A picker finds fewer units than expected | `{ fulfillmentId: uuid, orderId: uuid, stockItemId: uuid, binCode: string?, quantityShort: int, discrepancyId: uuid }` | - |
 | `warehouse.damage.reported` | A damaged unit is found at pick or pack | `{ fulfillmentId: uuid, orderId: uuid, stockItemId: uuid, quantity: int, discrepancyId: uuid }` | - |
-| `warehouse.package.packed` | A package is packed with its label | `{ packageId: uuid, fulfillmentId: uuid, orderId: uuid, sellerGroupId: uuid, items: PackageItem[], carrier: string, service: string, trackingNumber: string, weight: Weight, dimensions: Dimensions? }` | shipping |
+| `warehouse.package.packed` | A package is packed with its label | `{ packageId: uuid, fulfillmentId: uuid, orderId: uuid, sellerGroupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|marketly_service), items: PackageItem[], carrier: string, service: string, trackingNumber: string, weight: Weight, dimensions: Dimensions? }` | shipping |
 | `warehouse.bin.assigned` | A stock item's bins change or put-away completes | `{ stockItemId: uuid, binId: uuid, binCode: string, primary: bool }` | inventory |
 | `warehouse.return_parcel.received` | A return parcel is scanned in at the warehouse | `{ parcelId: uuid, returnId: uuid?, unexpected: bool, parcelCondition: string, receivedAt: datetime }` | workqueues |
 | `warehouse.return_parcel.handed_over` | A parcel is handed to returns inspection | `{ parcelId: uuid, returnId: uuid?, inspectorId: uuid? }` | - |
 
 | Consumes | From | Does |
 |---|---|---|
-| `orders.order.accepted` | orders | Create a fulfillment for the order's Official Store seller group (lines carry stock item ids from the purchase snapshot and ship-by from shipping) |
+| `orders.order.accepted` | orders | Create a fulfillment for each Official Store group and each Fulfilled by Marketly group (fulfilledBy marketly_service; at fulfillment-service.getServiceLocation, else the default location; seller stored). Lines carry stock item ids from the purchase snapshot and ship-by from shipping |
 | `orders.item.split` | orders | A line was split (partial cancel, shipment or return; decision S-D1): split the fulfillment line of itemId so newItemId gets its own line with quantity units (picked units stay on the original line first), so later cancel and dispatch events that name either item find their line. Idempotent per newItemId |
 | `orders.item.cancelled` | orders | Cancel the line; if already picked, return units to the bin; if packed, flag the package to be reopened |
 | `inventory.discrepancy.resolved` | inventory | Resume a held fulfillment when the shortage or damage was reallocated |
 | `purchasing.receipt.recorded` | purchasing | Create put-away tasks for received units (damaged units to a quarantine bin) |
-| `returns.return.approved` | returns | Expect a return parcel when the return goes to an Official Store warehouse |
+| `fulfillment-service.inbound.received` | fulfillment-service | Create put-away tasks for a Fulfilled by Marketly receiving record like a purchase receipt: sellable units (received − damaged) to the suggested bin, damaged units to quarantine; receipt_id = receiptId, receipt_ref = the IB- ref, location = locationId. Idempotent per receiptId |
+| `returns.return.approved` | returns | Expect a return parcel when the return goes to a Marketly warehouse (Official Store returns and Fulfilled by Marketly returns, fulfilledBy marketly_service) |
 | `shipping.shipment.dispatched` | shipping | Mark packages and the fulfillment dispatched |
 | `shipping.dispatch.overdue` | shipping | Raise the fulfillment to the top of the pick list and flag it |
 
@@ -752,8 +761,8 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 
 ## Notes
 - Event consumers and once-only jobs are idempotent through the kernel inbox (ctx.inbox), never through scan_log rows: orders.item.cancelled claims item-cancelled:<cancellationId>, shipping.dispatch.overdue claims dispatch-overdue:<exceptionId> and the at-risk job claims at-risk:<fulfillmentId>. scan_log stays a troubleshooting and productivity log.
-- Scope is Official Store stock only at launch. Outside sellers pick and pack their own orders; their tasks and shipments are in orders and shipping. The future fulfillment service (phase 4) reuses fulfillments, waves and packing for seller-owned stock.
-- Mixed orders: a fulfillment covers only the Official Store seller group. The packing slip lists only those items and says which package number it is and that other packages ship separately.
+- Scope is Official Store and Fulfilled by Marketly groups. Other outside sellers pick and pack their own orders; their tasks and shipments are in orders and shipping. Fulfilled by Marketly (fulfillment-service, phase 4) reuses fulfillments, waves and packing for seller-owned stock at the service location: the label is bought from the service location's address and billed to the seller (shipping.createLabel billedTo seller, decision D1), the packing slip reads 'Sold by <seller> · Fulfilled by Marketly', warehouse.package.packed carries the seller as owner, and serials are recorded as for Official lines. Every consumer that used to skip non-official groups (item cancelled, dispatch overdue, shipment dispatched, return parcels) finds its fulfilment by seller_group_id, so a missing row is the only filter. Put-away also covers Fulfilled by Marketly receiving records (fulfillment-service.inbound.received). Physical removal orders stay staff-handled for now (decision D9).
+- Mixed orders: a fulfillment covers only one Official Store or Fulfilled by Marketly seller group. The packing slip lists only those items and says which package number it is and that other packages ship separately.
 - Labels are bought through shipping (shipping.createLabel with the package, the delivery choice and an idempotency key); warehouse never talks to carriers directly.
 - Shortage and damage at pick/pack create inventory discrepancies; inventory decides (reallocate from another bin or Returned, or adjust). Damaged reserved units move to Damaged or held in inventory immediately.
 - Return receipt: warehouse scans the parcel in and hands it over; returns owns inspection, condition and outcome proposal; inventory records the stock outcome; finance approves refunds. Receiving calls returns.recordWarehouseReceipt in-process (returns publishes returns.return.received); warehouse.return_parcel.received is for work queues and reports.

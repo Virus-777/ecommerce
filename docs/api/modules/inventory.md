@@ -120,6 +120,8 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | valueAtCost | `Money?` |
 | binCode | `string?` Primary bin from warehouse, e.g. A-03-2 |
 | nextIncoming | `IncomingCue?` |
+| serviceLocationId | `uuid?` Fulfilled by Marketly: the company location this seller item sells from (setServiceLocation). While set, quantities are those at that location ('At Marketly') |
+| ownLocationQuantities | `StockQuantities?` Set with serviceLocationId: units at the seller's own location, kept but not on sale while Marketly fulfils the item (decision D4) |
 | archived | `bool` |
 | updatedAt | `datetime` |
 
@@ -193,7 +195,7 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 
 | Field | Type |
 |---|---|
-| kind | `enum(order|reservation|purchase_order|receipt|return|adjustment|bulk_update|transfer|count|discrepancy|initial|merge)` |
+| kind | `enum(order|reservation|purchase_order|receipt|return|adjustment|bulk_update|transfer|count|discrepancy|initial|merge|service_inbound|service_return|service_removal|service_reconcile)` |
 | id | `string` |
 | label | `string` e.g. 'Received PUR-2610-0031', 'Return RT-261001-0161' |
 
@@ -257,6 +259,8 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | lowStockThreshold | `int?` |
 | state | `enum(in_stock|low_stock|out_of_stock)` |
 | lastChange | `string?` e.g. 'Oct 6, 4:30 PM · Avery Stone' |
+| fulfilledByMarketly | `bool` True while the item has a service location: available and reserved are 'At Marketly' and the row is read-only (SERVICE_MANAGED) |
+| ownLocationAvailable | `int?` With fulfilledByMarketly: units at the seller's own location, 'At your location (not on sale)' |
 | updatedAt | `datetime` |
 
 ### SellerStockSummary
@@ -380,9 +384,12 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | id | `uuid` |
 | receiptId | `uuid` |
 | receiptRef | `string` e.g. REC-261006-03 |
-| purchaseOrderId | `uuid` |
-| purchaseOrderRef | `string` |
-| supplierName | `string` |
+| source | `ReceiptSource` What the units arrive against: a purchase order (company stock) or a Fulfilled by Marketly inbound shipment (seller stock) |
+| ownerType | `enum(official|seller)` seller for service_inbound receipts |
+| sellerId | `uuid?` |
+| purchaseOrderId | `uuid?` Null for service_inbound receipts |
+| purchaseOrderRef | `string?` |
+| supplierName | `string` The supplier; for service_inbound receipts the seller's name |
 | locationId | `uuid` |
 | receivedBy | `Actor` |
 | receivedAt | `datetime` |
@@ -405,9 +412,17 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 | damaged | `int` |
 | shortage | `int` |
 | binCode | `string?` |
-| unitCost | `Money` |
+| unitCost | `Money?` Null for service_inbound receipts (seller stock has no company cost) |
 | sellable | `int` Proposed received − damaged; set on confirmation |
 | outOfStockNow | `bool` |
+
+### ReceiptSource
+
+| Field | Type |
+|---|---|
+| kind | `enum(purchase_order|service_inbound)` |
+| id | `uuid` Purchase order id or fulfillment-service inbound shipment id |
+| ref | `string` PO or IB- reference |
 
 ### ConfirmInboundLine
 
@@ -681,11 +696,12 @@ Phase 4. apply creates count_correction adjustments; those above the limit go to
 | currency | char(3) |
 | primary_bin_code | text? |
 | low_since | timestamptz? |
+| service_location_id | uuid? → locations (Fulfilled by Marketly: the company location this seller item sells from; null = the seller's own location) |
 | archived | bool |
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `unique (owner_type, coalesce(seller_id, '00000000-0000-0000-0000-000000000000'), sku)`, `(seller_id, archived)`, `(offer_id)`, `(variant_id)`
+Indexes: `unique (owner_type, coalesce(seller_id, '00000000-0000-0000-0000-000000000000'), sku)`, `(seller_id, archived)`, `(offer_id)`, `(variant_id)`, `(service_location_id) where service_location_id is not null`
 
 **stock_levels**: Current quantities per item and location; changed only together with a movement row
 
@@ -727,14 +743,14 @@ Indexes: `pk (stock_item_id, location_id)`, `(location_id)`
 
 Indexes: `(stock_item_id, at)`, `(ref_kind, ref_id)`, `(reason_code, at)`
 
-**incoming_expectations**: Open incoming quantities from purchase orders (and transfers)
+**incoming_expectations**: Open incoming quantities from purchase orders, transfers and Fulfilled by Marketly inbound shipments
 
 | Column | Type |
 |---|---|
 | id | uuid pk |
 | stock_item_id | uuid → stock_items |
 | location_id | uuid → locations |
-| source_kind | text (purchase_order|transfer) |
+| source_kind | text (purchase_order|transfer|service_inbound) |
 | source_id | uuid |
 | source_ref | text |
 | quantity_open | int |
@@ -814,15 +830,20 @@ Indexes: `(state, created_at)`, `(stock_item_id)`, `(approval_request_id)`
 
 Indexes: `(review_date) where released_at is null`
 
-**inbound_receipts**: Counted receipts from purchasing waiting for confirmation
+**inbound_receipts**: Counted receipts from purchasing and from the fulfillment service waiting for confirmation
 
 | Column | Type |
 |---|---|
 | id | uuid pk |
 | receipt_id | uuid unique |
 | receipt_ref | text |
-| purchase_order_id | uuid |
-| purchase_order_ref | text |
+| source_kind | text (purchase_order|service_inbound) |
+| source_id | uuid? (purchase order or inbound shipment id; existing rows backfilled from purchase_order_id) |
+| source_ref | text? |
+| owner_type | text (official|seller) |
+| seller_id | uuid? |
+| purchase_order_id | uuid? |
+| purchase_order_ref | text? |
 | supplier_name | text |
 | location_id | uuid → locations |
 | received_by | text |
@@ -844,7 +865,7 @@ Indexes: `(state, received_at)`
 | received | int |
 | damaged | int |
 | bin_code | text? |
-| unit_cost_amount | bigint |
+| unit_cost_amount | bigint? (null for service_inbound receipts) |
 | sellable | int? |
 | reason | text? |
 
@@ -963,12 +984,12 @@ Indexes: `pk (count_id, stock_item_id)`
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
 | `inventory.stock.changed` | Available or Reserved changes for a stock item, or the item is re-keyed, archived or unarchived | `{ stockItemId: uuid, offerId: uuid?, ownerType: string, sellerId: uuid?, productId: uuid, variantId: uuid, available: int, reserved: int, previousAvailable: int, state: enum(in_stock|low_stock|out_of_stock), archived: bool, cause: string }` | advertising, cart, catalog, content, offers, promotions, reports, search, wishlist, workqueues |
-| `inventory.stock.low` | Available drops to or below the threshold (once per cooldown) | `{ stockItemId: uuid, offerId: uuid?, ownerType: string, sellerId: uuid?, productId: uuid, variantId: uuid, sku: string, label: string, available: int, threshold: int }` | advertising, fulfillment-service, notifications, purchasing, workqueues |
+| `inventory.stock.low` | Available drops to or below the threshold (once per cooldown) | `{ stockItemId: uuid, offerId: uuid?, ownerType: string, sellerId: uuid?, productId: uuid, variantId: uuid, sku: string, label: string, available: int, threshold: int, serviceManaged: bool }` | advertising, fulfillment-service, notifications, purchasing, workqueues |
 | `inventory.stock.low_digest` | Daily low-stock digest (job inventory.low-stock-digest): one event per seller with low or out-of-stock items, and one for the Official Store (ownerType official); nothing when there is nothing to report | `{ ownerType: enum(official|seller), sellerId: uuid?, date: date, lowCount: int, outOfStockCount: int, items: LowStockDigestItem[] }` | notifications |
 | `inventory.reservation.allocated` | A hold is allocated to an accepted order, or allocateForOrder allocates units for a replacement or exchange | `{ reservationId: uuid, orderId: uuid, lines: ReservationLine[], source: enum(checkout|replacement|exchange) }` | - |
 | `inventory.reservation.released` | Held or allocated units return to Available (cancel, expiry, abandoned checkout, staff release, hold units no accepted item matched) | `{ reservationId: uuid, orderId: uuid?, reason: enum(cancelled|expired|abandoned|staff|unmatched), lines: ReservationLine[] }` | - |
-| `inventory.adjustment.recorded` | A seller or staff adjustment is applied | `{ adjustmentId: uuid?, movementId: uuid, stockItemId: uuid, ownerType: string, sellerId: uuid?, fromGroup: string, toGroup: string, quantity: int, reasonCode: string, actor: Actor }` | - |
-| `inventory.receipt.confirmed` | The Inventory Manager confirms a receipt | `{ inboundId: uuid, receiptId: uuid, purchaseOrderId: uuid, lines: InboundLine[], confirmedBy: Actor }` | purchasing |
+| `inventory.adjustment.recorded` | A seller or staff adjustment is applied (adjustments, count corrections and discrepancy resolutions that move units; never moveServiceStock) | `{ adjustmentId: uuid?, movementId: uuid, stockItemId: uuid, locationId: uuid, ownerType: string, sellerId: uuid?, serviceManaged: bool, fromGroup: string, toGroup: string, quantity: int, reasonCode: string, actor: Actor }` | fulfillment-service |
+| `inventory.receipt.confirmed` | The Inventory Manager confirms a receipt (purchase or Fulfilled by Marketly) | `{ inboundId: uuid, receiptId: uuid, source: ReceiptSource, ownerType: enum(official|seller), sellerId: uuid?, purchaseOrderId: uuid?, locationId: uuid, lines: InboundLine[], confirmedBy: Actor }` | fulfillment-service, purchasing |
 | `inventory.return_outcome.recorded` | Stock outcome of a return is recorded | `{ returnId: uuid, stockItemId: uuid, outcome: string, targetStockItemId: uuid?, quantity: int, valueAtCost: Money? }` | - |
 | `inventory.discrepancy.reported` | Warehouse reports a shortage or damage | `{ discrepancyId: uuid, kind: string, stockItemId: uuid, orderId: uuid?, quantity: int }` | - |
 | `inventory.discrepancy.resolved` | Inventory resolves a discrepancy | `{ discrepancyId: uuid, resolution: string, orderId: uuid? }` | warehouse |
@@ -1020,6 +1041,12 @@ Indexes: `pk (count_id, stock_item_id)`
 | getSellerStockSummary | `(sellerId: uuid) => SellerStockSummary`<br>In stock, low, out of stock and reserved totals for the seller dashboard | graphql, reports |
 | getStockSummary | `(locationId?: uuid) => StockSummary`<br>Official Store units and value at cost per stock group with low and out-of-stock counts | graphql, reports |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets inventory.admin.stock and inventory.seller.stock (seller rows scoped to the principal's seller) | reports |
+| setServiceLocation | `(stockItemId: uuid, locationId: uuid | null, actor: Actor) => StockItem`<br>Fulfilled by Marketly: designates the company location a seller item sells from (stock_items.service_location_id); null returns it to the seller's own location. While set, the item sells only from that location and the seller's own-location units are kept but not on sale (decision D4). Refused for Official Store items and for locations that are not active company warehouses (VALIDATION_FAILED). Publishes inventory.stock.changed (cause service_location). Same value again is a no-op | fulfillment-service |
+| moveServiceStock | `(input: { key: string, stockItemId: uuid, locationId: uuid, from: 'available'|'reserved'|'incoming'|'damaged_held'|'returned'|null, to: 'available'|'reserved'|'incoming'|'damaged_held'|'returned'|null, quantity: int, reasonCode: 'service_return_received'|'service_return_restocked'|'service_return_unsellable'|'service_return_disposed'|'service_removal_reserved'|'service_removal_completed'|'service_found'|'service_reconcile', ref: MovementRef, actor: Actor }) => { movementId: uuid, levels: StockQuantities }`<br>One atomic movement of a seller item at its service location (null = outside stock: entering or leaving). Idempotent per key through the inbox (the same key returns the first result). Only for seller items whose service_location_id is locationId (VALIDATION_FAILED otherwise); INSUFFICIENT_STOCK if a group would go negative. Moving into damaged_held writes a held_stock row. Publishes inventory.stock.changed (and inventory.stock.low when it applies); not inventory.adjustment.recorded, so the fulfillment service never hears its own movements back | fulfillment-service |
+| expectServiceInbound | `(input: { inboundId: uuid, ref: string, locationId: uuid, lines: { stockItemId: uuid, quantity: int, expectedDate?: date }[] }) => void`<br>Incoming at the service location for a submitted inbound shipment (incoming_expectations source_kind service_inbound, source_id inboundId); repeated calls replace the open quantities for that inbound | fulfillment-service |
+| cancelServiceInbound | `(inboundId: uuid) => void`<br>Removes the open Incoming of a cancelled or completed inbound shipment; no-op when nothing is open | fulfillment-service |
+| submitServiceReceipt | `(receipt: { receiptId: uuid, receiptRef: string, inboundId: uuid, inboundRef: string, sellerId: uuid, sellerName: string, locationId: uuid, receivedBy: Actor, receivedAt: datetime, lines: { stockItemId: uuid, expected: int, received: int, damaged: int, binCode?: string }[] }) => InboundReceipt`<br>Like submitInbound for a Fulfilled by Marketly receiving record, without cost: the receipt (source service_inbound, ownerType seller) waits in the same confirmation queue and the Inventory Manager confirms it on confirmInbound (decision D3). Confirmation moves Incoming → Available / Damaged or held at the service location without unit cost or valuation; units beyond the open Incoming are added at confirmation. Same receiptId returns the first receipt | fulfillment-service |
+| getLevels | `(stockItemIds: uuid[], locationId: uuid) => map<StockQuantities>`<br>Quantities of the items at one location, keyed by stock item id (zeros for items with no level row there); the fulfillment service reconciles its ownership ledger with it | fulfillment-service |
 
 ## Permissions
 
@@ -1058,6 +1085,7 @@ Checked through the access module (limits per role, second reviewer).
 | `SELLABLE_EXCEEDS_RECEIVED` | 400 | Sellable + damaged cannot exceed the received quantity on a line |
 | `SKU_TAKEN` | 409 | A stock item with this SKU already exists for this owner |
 | `STOCK_ITEM_ARCHIVED` | 409 | The stock item is archived (its offer was removed) |
+| `SERVICE_MANAGED` | 409 | Marketly holds and sells this item's stock; change it through the fulfillment service. |
 
 ## Background jobs
 
@@ -1086,7 +1114,10 @@ Checked through the access module (limits per role, second reviewer).
 - Work items: merge candidates after catalog.product.merged (two company stock items now hold the same variant and condition) are raised as manual_task items in the inventory.merge_candidates queue (owner Inventory Manager); order allocation problems go to inventory.reservations.
 - Stock groups are quantities, not statuses: each stock item carries all five numbers per location. Every change writes one stock_movements row and updates stock_levels in the same transaction with an optimistic version check (CONFLICT on race).
 - Sellable quantity = Available at sellable locations. Checkout cannot hold more than Available (plan ch. 9: prevent selling beyond eligible available quantities).
-- Seller stock and company stock are separate stock items with ownerType; summaries never add them together. The future fulfillment service keeps ownerType = seller at a company warehouse location, so reports can name the stock owner.
+- Seller stock and company stock are separate stock items with ownerType; summaries never add them together. The fulfillment service keeps ownerType = seller at a company warehouse location, so reports can name the stock owner.
+- Fulfilled by Marketly sellable rule (decision D4): a seller item sells from its service_location_id when one is set, and otherwise only from its seller-virtual location; company locations never sell a seller item that is not designated there. The rule applies everywhere sellable stock is read or taken: sellable levels and availability (getAvailability, getOfferAvailability), hold, low stock and inventory.stock.changed. While set, the seller's own-location units are kept but not on sale; clearing it (setServiceLocation null) makes them sellable again.
+- Seller quantity edits on items with a service location are refused with SERVICE_MANAGED: adjustOwnStock, each batchAdjustOwnStock item and each applyBulkQuantities row (error per row). Staff adjustments, stock counts and discrepancy resolutions at the service location stay allowed and publish inventory.adjustment.recorded with serviceManaged true (moveServiceStock never publishes it). The seller's stock views split 'At Marketly' from 'At your location (not on sale)' (StockItem.ownLocationQuantities, SellerStockRow.fulfilledByMarketly).
+- Fulfilled by Marketly receiving (decision D3): fulfillment-service plans Incoming with expectServiceInbound (incoming_expectations source_kind service_inbound), submits each counted receiving record with submitServiceReceipt and the Inventory Manager confirms it in the same queue as purchase receipts (listInbound source filter). inventory.receipt.confirmed carries source, ownerType and sellerId; purchasing ignores service_inbound receipts and fulfillment-service ignores purchase_order ones. Returns of service items stay out of inventory's return outcomes (the fulfillment service records them with moveServiceStock, decision D8).
 - Receiving flow (plan ch. 2, 9): purchasing records the counted receipt (warehouse staff) → inventory.submitInbound keeps the units in Incoming → Inventory Manager confirms with confirmInbound → Available / Damaged or held. Warehouse puts the units away in bins in parallel.
 - Return flow: warehouse receives the parcel → returns inspects and proposes an outcome → inventory records the stock outcome (recordReturnOutcome) → finance handles the refund. Inventory never decides the refund.
 - Second review limits come from access approval limits (e.g. Inventory Manager: adjustments over 50 units); inventory calls access.check(principal, 'inventory.adjustments.apply', { number: units }) and, on approval_required, access.requestApproval (value at cost shown to the reviewer); the adjustment stays pending until access.approval.decided.

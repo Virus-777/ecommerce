@@ -38174,7 +38174,7 @@
           "Seller API · Fulfillment service"
         ],
         "summary": "Stop using the service for a SKU",
-        "description": "**Permission:** `fulfillment-service.inbound.manage`\n\n**Screens:** seller/inventory\n\n**Launch phase:** 4",
+        "description": "**Permission:** `fulfillment-service.inbound.manage`\n\n**Publishes:** `fulfillment-service.offer.service_changed`\n\n**Screens:** seller/inventory\n\n**Launch phase:** 4",
         "security": [
           {
             "bearer": []
@@ -38259,6 +38259,9 @@
         "x-permission": "fulfillment-service.inbound.manage",
         "x-screens": [
           "seller/inventory"
+        ],
+        "x-events": [
+          "fulfillment-service.offer.service_changed"
         ],
         "x-phase": 4
       }
@@ -40284,7 +40287,7 @@
           "Admin API · Fulfillment service"
         ],
         "summary": "Suspend, reinstate, offboard or close an enrollment",
-        "description": "**Permission:** `fulfillment-service.enrollment.review`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `fulfillment-service.enrollment.decided`\n\n**Screens:** admin/seller\n\n**Launch phase:** 4",
+        "description": "**Permission:** `fulfillment-service.enrollment.review`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `fulfillment-service.enrollment.decided`, `fulfillment-service.offer.service_changed`\n\n**Screens:** admin/seller\n\n**Launch phase:** 4",
         "security": [
           {
             "bearer": []
@@ -40412,7 +40415,8 @@
           "admin/seller"
         ],
         "x-events": [
-          "fulfillment-service.enrollment.decided"
+          "fulfillment-service.enrollment.decided",
+          "fulfillment-service.offer.service_changed"
         ],
         "x-audited": true,
         "x-phase": 4
@@ -40860,7 +40864,7 @@
           "Admin API · Fulfillment service"
         ],
         "summary": "Record received and damaged units (partial or complete)",
-        "description": "Counts go to inventory as seller-owned stock (incoming → available after inspection, damaged → held). Completing with differences opens a discrepancy for the seller.\n\n**Permission:** `fulfillment-service.inbound.receive`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `fulfillment-service.inbound.received`\n\n**Screens:** ops/receiving\n\n**Launch phase:** 4",
+        "description": "Each call is one receiving record: counts accrue receiving and label fees, are submitted to inventory as a service receipt (inventory.submitServiceReceipt; the Inventory Manager confirms it on inventory confirmInbound) and stay in the receiving group until then. Confirmation makes sellable units available and damaged units held (decision D3). Completing with differences opens a discrepancy for the seller.\n\n**Permission:** `fulfillment-service.inbound.receive`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `fulfillment-service.inbound.received`\n\n**Screens:** ops/receiving\n\n**Launch phase:** 4",
         "security": [
           {
             "bearer": []
@@ -41299,7 +41303,7 @@
           "Admin API · Fulfillment service"
         ],
         "summary": "Record the inspection outcome of a returned service unit",
-        "description": "**Permission:** `fulfillment-service.inbound.receive`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `fulfillment-service.return.inspected`\n\n**Screens:** ops/return-inspection\n\n**Launch phase:** 4",
+        "description": "The single stock decision for a returned service unit (decision D8), prefilled from returns' proposed outcome: restocked → inventory returned → available, unsellable or removal → damaged_held, disposed → out of stock (inventory.moveServiceStock with reasons service_return_restocked, service_return_unsellable, service_return_disposed). The seller is notified (seller.fulfillment.return_inspected).\n\n**Permission:** `fulfillment-service.inbound.receive`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `fulfillment-service.return.inspected`\n\n**Screens:** ops/return-inspection\n\n**Launch phase:** 4",
         "security": [
           {
             "bearer": []
@@ -41875,6 +41879,323 @@
           "admin/seller",
           "ops/inventory"
         ],
+        "x-phase": 4
+      }
+    },
+    "/api/admin/fulfillment-service/stock-differences": {
+      "get": {
+        "operationId": "fulfillment-service.listStockDifferences",
+        "tags": [
+          "Admin API · Fulfillment service"
+        ],
+        "summary": "Differences between the ownership ledger and inventory found by the daily reconciliation",
+        "description": "**Permission:** `fulfillment-service.operations.view`\n\n**Screens:** ops/inventory\n\n**Launch phase:** 4",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "open",
+                "resolved"
+              ]
+            }
+          },
+          {
+            "name": "sellerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "day",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll.",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Opaque cursor from the previous response. Used by the Android app's infinite scroll."
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page number. Used by the website's numbered pages.",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "1-based page number. Used by the website's numbered pages."
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Items per batch, 1–100, default 24",
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Items per batch, 1–100, default 24"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/fulfillment-service.StockDifference"
+                      }
+                    },
+                    "nextCursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as ?cursor= for the next batch (app). Null at the end."
+                    },
+                    "page": {
+                      "type": "integer"
+                    },
+                    "totalPages": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\").",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "fulfillment-service",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "fulfillment-service.operations.view",
+        "x-screens": [
+          "ops/inventory"
+        ],
+        "x-phase": 4
+      }
+    },
+    "/api/admin/fulfillment-service/stock-differences/{id}/resolve": {
+      "post": {
+        "operationId": "fulfillment-service.resolveStockDifference",
+        "tags": [
+          "Admin API · Fulfillment service"
+        ],
+        "summary": "Resolve a stock difference: adjust the ledger, reimburse the seller or leave it",
+        "description": "adjust_ledger writes an adjusted ledger movement so the ledger matches inventory; reimburse accrues a reimbursement for units lost or damaged in Marketly's custody (amount required; decision D11) through the approval action fulfillment-service.reimbursements.approve; no_change records the reason. Resolves the fulfillment.reconciliation work item.\n\n**Permission:** `fulfillment-service.inbound.receive`\n\n**Approval:** Approval action fulfillment-service.reimbursements.approve. Reimbursements above the caller's limit need Finance approval; the difference stays open with approval until access.approval.decided\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Screens:** ops/inventory\n\n**Launch phase:** 4",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same body returns the first result.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "adjust_ledger",
+                      "reimburse",
+                      "no_change"
+                    ]
+                  },
+                  "amount": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/Money"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "decision",
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/fulfillment-service.StockDifference"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\").",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "fulfillment-service",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "fulfillment-service.inbound.receive",
+        "x-screens": [
+          "ops/inventory"
+        ],
+        "x-idempotent": true,
+        "x-audited": true,
         "x-phase": 4
       }
     },
@@ -47999,7 +48320,7 @@
             }
           },
           "409": {
-            "description": "STOCK_ITEM_ARCHIVED: The stock item is archived (its offer was removed)\nCONFLICT: Concurrent change; reload and retry.",
+            "description": "STOCK_ITEM_ARCHIVED: The stock item is archived (its offer was removed)\nCONFLICT: Concurrent change; reload and retry.\nSERVICE_MANAGED: Marketly holds and sells this item's stock; change it through the fulfillment service.",
             "content": {
               "application/json": {
                 "schema": {
@@ -48031,7 +48352,7 @@
           "Seller API · Inventory"
         ],
         "summary": "Save several inline quantity edits at once (each with a reason)",
-        "description": "**Permission:** `inventory.stock.adjust`\n\n**Publishes:** `inventory.stock.changed`, `inventory.adjustment.recorded`, `inventory.stock.low`\n\n**Screens:** seller/inventory",
+        "description": "Items Fulfilled by Marketly (service location set) fail one by one with error code SERVICE_MANAGED in their result; the others are saved.\n\n**Permission:** `inventory.stock.adjust`\n\n**Publishes:** `inventory.stock.changed`, `inventory.adjustment.recorded`, `inventory.stock.low`\n\n**Screens:** seller/inventory",
         "security": [
           {
             "bearer": []
@@ -49026,7 +49347,7 @@
           "Admin API · Inventory"
         ],
         "summary": "Move company stock between groups, or into or out of stock, with a reason",
-        "description": "Reserved units cannot be adjusted here (they stay with their orders; use discrepancies). Moving into Damaged or held needs a review date. The response shows before/after; above the limit it is pending_review with approval details.\n\n**Permission:** `inventory.stock.adjust-official`\n\n**Approval:** Approval action inventory.adjustments.apply. Above the requester's adjustment limit in access (example: Inventory Manager 50 units) a second reviewer must approve before anything moves\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `inventory.stock.changed`, `inventory.adjustment.recorded`, `inventory.stock.low`\n\n**Screens:** ops/inventory",
+        "description": "Also seller items at their service location (Fulfilled by Marketly: units found, lost or damaged in our warehouse); those publish inventory.adjustment.recorded with serviceManaged true and the fulfillment service's ledger follows. Reserved units cannot be adjusted here (they stay with their orders; use discrepancies). Moving into Damaged or held needs a review date. The response shows before/after; above the limit it is pending_review with approval details.\n\n**Permission:** `inventory.stock.adjust-official`\n\n**Approval:** Approval action inventory.adjustments.apply. Above the requester's adjustment limit in access (example: Inventory Manager 50 units) a second reviewer must approve before anything moves\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `inventory.stock.changed`, `inventory.adjustment.recorded`, `inventory.stock.low`\n\n**Screens:** ops/inventory",
         "security": [
           {
             "bearer": []
@@ -49927,6 +50248,22 @@
             }
           },
           {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "purchase_order",
+                "service_inbound"
+              ],
+              "description": "Purchase receipts or Fulfilled by Marketly receipts; both by default"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "required": false,
@@ -50140,7 +50477,7 @@
           "Admin API · Inventory"
         ],
         "summary": "Make received units available for sale",
-        "description": "Incoming → Available (sellable) and → Damaged or held (damaged). Updates weighted average unit cost with the receipt's unit cost. Open pick shortages on these SKUs are listed so they can be resolved first (no backorders at launch).\n\n**Permission:** `inventory.inbound.confirm`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `inventory.receipt.confirmed`, `inventory.stock.changed`\n\n**Screens:** ops/receiving, admin/purchasing",
+        "description": "Incoming → Available (sellable) and → Damaged or held (damaged). Updates weighted average unit cost with the receipt's unit cost (purchase receipts only: service_inbound receipts are seller stock at the service location, with no cost and no valuation; units beyond the open Incoming are added from outside). Open pick shortages on these SKUs are listed so they can be resolved first (no backorders at launch).\n\n**Permission:** `inventory.inbound.confirm`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `inventory.receipt.confirmed`, `inventory.stock.changed`\n\n**Screens:** ops/receiving, admin/purchasing",
         "security": [
           {
             "bearer": []
@@ -50680,7 +51017,7 @@
           "Admin API · Inventory"
         ],
         "summary": "Resolve a shortage or damage report (reallocate, adjust or no change)",
-        "description": "**Permission:** `inventory.discrepancies.resolve`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `inventory.discrepancy.resolved`, `inventory.stock.changed`\n\n**Screens:** ops/inventory, ops/pick-pack",
+        "description": "**Permission:** `inventory.discrepancies.resolve`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `inventory.discrepancy.resolved`, `inventory.stock.changed`, `inventory.adjustment.recorded`\n\n**Screens:** ops/inventory, ops/pick-pack",
         "security": [
           {
             "bearer": []
@@ -50779,7 +51116,8 @@
         ],
         "x-events": [
           "inventory.discrepancy.resolved",
-          "inventory.stock.changed"
+          "inventory.stock.changed",
+          "inventory.adjustment.recorded"
         ],
         "x-audited": true,
         "x-phase": 1
@@ -69670,7 +70008,7 @@
           "Store API · Orders"
         ],
         "summary": "Request cancellation of selected items",
-        "description": "One request per seller group is created (items from several sellers produce several requests). Official Store items not yet picked are accepted at once; seller items wait for the seller until respondBy, then are auto-accepted if unshipped. Other items continue as normal.\n\n**Idempotent:** send an Idempotency-Key.\n\n**Publishes:** `orders.cancellation.requested`, `orders.cancellation.decided`, `orders.item.cancelled`\n\n**Screens:** account/cancel",
+        "description": "One request per seller group is created (items from several sellers produce several requests). Official Store and Fulfilled by Marketly items not yet picked are accepted at once; seller items wait for the seller until respondBy, then are auto-accepted if unshipped. Other items continue as normal.\n\n**Idempotent:** send an Idempotency-Key.\n\n**Publishes:** `orders.cancellation.requested`, `orders.cancellation.decided`, `orders.item.cancelled`\n\n**Screens:** account/cancel",
         "security": [
           {
             "bearer": []
@@ -70225,7 +70563,7 @@
           "Seller API · Orders"
         ],
         "summary": "The seller's fulfillment tasks by stage, with dispatch deadlines and next action",
-        "description": "Only this seller's groups and items; buyers appear as first name and last initial. Default sort: dispatch deadline, soonest first.\n\n**Permission:** `orders.fulfillment.view`\n\n**Screens:** seller/orders, seller/dashboard",
+        "description": "Only this seller's groups and items; buyers appear as first name and last initial. Default sort: dispatch deadline, soonest first. Fulfilled by Marketly groups show nextAction marketly_fulfils and are left out of the new, preparing and cancellation_requests tabs and of overdueOnly.\n\n**Permission:** `orders.fulfillment.view`\n\n**Screens:** seller/orders, seller/dashboard",
         "security": [
           {
             "bearer": []
@@ -70248,6 +70586,22 @@
                 "completed",
                 "cancellation_requests"
               ]
+            }
+          },
+          {
+            "name": "fulfilledBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "seller",
+                "marketly_service"
+              ],
+              "description": "Only self-shipped or only Fulfilled by Marketly groups"
             }
           },
           {
@@ -70674,7 +71028,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations.",
             "content": {
               "application/json": {
                 "schema": {
@@ -70705,7 +71059,7 @@
           "Seller API · Orders"
         ],
         "summary": "Mark several new tasks as preparing",
-        "description": "**Permission:** `orders.fulfillment.manage`\n\n**Publishes:** `orders.item.state_changed`\n\n**Screens:** seller/orders",
+        "description": "Fulfilled by Marketly groups are listed in failed with code FULFILLED_BY_MARKETLY; the others are updated.\n\n**Permission:** `orders.fulfillment.manage`\n\n**Publishes:** `orders.item.state_changed`\n\n**Screens:** seller/orders",
         "security": [
           {
             "bearer": []
@@ -70909,7 +71263,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations.",
             "content": {
               "application/json": {
                 "schema": {
@@ -71055,7 +71409,7 @@
             }
           },
           "409": {
-            "description": "CANCELLATION_NOT_ALLOWED: One or more items cannot be cancelled now (shipped, delivered, already in a return). details.items lists each item with the reason and the alternative (return, refuse delivery).",
+            "description": "CANCELLATION_NOT_ALLOWED: One or more items cannot be cancelled now (shipped, delivered, already in a return). details.items lists each item with the reason and the alternative (return, refuse delivery).\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations.",
             "content": {
               "application/json": {
                 "schema": {
@@ -71183,7 +71537,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations.",
             "content": {
               "application/json": {
                 "schema": {
@@ -71322,7 +71676,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSHIPMENT_REQUIRED: Declining because the items shipped needs a recorded shipment with tracking first.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSHIPMENT_REQUIRED: Declining because the items shipped needs a recorded shipment with tracking first.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations.",
             "content": {
               "application/json": {
                 "schema": {
@@ -71431,6 +71785,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "FULFILLED_BY_MARKETLY: Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "x-module": "orders",
@@ -71450,7 +71814,7 @@
           "Seller API · Orders"
         ],
         "summary": "One PDF with packing slips for several tasks",
-        "description": "**Permission:** `orders.fulfillment.view`\n\n**Screens:** seller/orders",
+        "description": "Refused with FULFILLED_BY_MARKETLY when any task is Fulfilled by Marketly (the warehouse prints those slips).\n\n**Permission:** `orders.fulfillment.view`\n\n**Screens:** seller/orders",
         "security": [
           {
             "bearer": []
@@ -71517,6 +71881,16 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "FULFILLED_BY_MARKETLY: Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations.",
             "content": {
               "application/json": {
                 "schema": {
@@ -71760,6 +72134,23 @@
                 "official",
                 "marketplace"
               ]
+            }
+          },
+          {
+            "name": "fulfilledBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "official_warehouse",
+                "seller",
+                "marketly_service"
+              ],
+              "description": "Orders with at least one group fulfilled this way"
             }
           },
           {
@@ -118603,7 +118994,7 @@
             }
           },
           "409": {
-            "description": "ITEMS_NOT_SHIPPABLE: Items are not in this group, cancelled, already shipped, or the quantity is more than remains. details.items.\nTRACKING_ALREADY_USED: This tracking number is on another active shipment.",
+            "description": "ITEMS_NOT_SHIPPABLE: Items are not in this group, cancelled, already shipped, or the quantity is more than remains. details.items.\nTRACKING_ALREADY_USED: This tracking number is on another active shipment.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -118994,7 +119385,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -119115,7 +119506,7 @@
             }
           },
           "409": {
-            "description": "ITEMS_NOT_SHIPPABLE: Items are not in this group, cancelled, already shipped, or the quantity is more than remains. details.items.",
+            "description": "ITEMS_NOT_SHIPPABLE: Items are not in this group, cancelled, already shipped, or the quantity is more than remains. details.items.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -119237,7 +119628,7 @@
             }
           },
           "409": {
-            "description": "QUOTE_EXPIRED: The label quote expired; get a new quote.\nITEMS_NOT_SHIPPABLE: Items are not in this group, cancelled, already shipped, or the quantity is more than remains. details.items.",
+            "description": "QUOTE_EXPIRED: The label quote expired; get a new quote.\nITEMS_NOT_SHIPPABLE: Items are not in this group, cancelled, already shipped, or the quantity is more than remains. details.items.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -119367,7 +119758,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -119809,7 +120200,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nFULFILLED_BY_MARKETLY: Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -137242,7 +137633,7 @@
         "tags": [
           "Admin API · Warehouse"
         ],
-        "summary": "Official Store orders to pick and pack, most urgent first",
+        "summary": "Official Store and Fulfilled by Marketly orders to pick and pack, most urgent first",
         "description": "**Permission:** `warehouse.view`\n\n**Screens:** ops/pick-pack, ops/dispatch",
         "security": [
           {
@@ -137269,6 +137660,22 @@
                 "on_hold",
                 "cancelled"
               ]
+            }
+          },
+          {
+            "name": "fulfilledBy",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "official_warehouse",
+                "marketly_service"
+              ],
+              "description": "Official Store only or Fulfilled by Marketly only; both by default"
             }
           },
           {
@@ -152549,7 +152956,7 @@
         "properties": {
           "key": {
             "type": "string",
-            "description": "Stable grouping key: owner type + seller id + ship-from (offers DispatchTerms.shipsFrom)"
+            "description": "Stable grouping key: owner type + seller id + fulfilledBy + ship-from (offers Offer.shipping: fulfilledBy and dispatch.shipsFrom), so a seller's Marketly-fulfilled and self-shipped items are separate packages"
           },
           "label": {
             "type": "string",
@@ -152557,6 +152964,15 @@
           },
           "seller": {
             "$ref": "#/components/schemas/cart.SellerLabel"
+          },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ],
+            "description": "marketly_service packages read 'Ships from Marketly' and are quoted with the service profile"
           },
           "shipsFrom": {
             "type": "string",
@@ -152596,6 +153012,7 @@
           "key",
           "label",
           "seller",
+          "fulfilledBy",
           "shipsFrom",
           "items",
           "returnTerms",
@@ -153236,6 +153653,14 @@
           "packageKey": {
             "type": "string"
           },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ]
+          },
           "quantity": {
             "type": "integer"
           },
@@ -153255,6 +153680,7 @@
           "productId",
           "variantId",
           "packageKey",
+          "fulfilledBy",
           "quantity",
           "acceptedUnitPrice",
           "currentUnitPrice"
@@ -156011,7 +156437,16 @@
           },
           "soldAndShippedBy": {
             "type": "string",
-            "description": "'Sold and shipped by Northwind Audio'"
+            "description": "'Sold and shipped by Northwind Audio'; for marketly_service packages 'Sold by Northwind Audio · Shipped by Marketly'"
+          },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ],
+            "description": "Becomes the order group's fulfilledBy"
           },
           "shipsFrom": {
             "type": "string"
@@ -156050,6 +156485,7 @@
           "label",
           "seller",
           "soldAndShippedBy",
+          "fulfilledBy",
           "shipsFrom",
           "lines",
           "options",
@@ -165312,6 +165748,28 @@
           "capacity": {
             "$ref": "#/components/schemas/fulfillment-service.Capacity"
           },
+          "expectedSkus": {
+            "type": "integer",
+            "description": "From the application; the approved allowance is capacity.maxSkus"
+          },
+          "expectedMonthlyUnits": {
+            "type": "integer"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Catalog categories the seller expects to store"
+          },
+          "contactNote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The applicant's note; reason holds only staff decision reasons"
+          },
           "reason": {
             "type": [
               "string",
@@ -165348,6 +165806,9 @@
           "termsVersion",
           "feeScheduleVersion",
           "capacity",
+          "expectedSkus",
+          "expectedMonthlyUnits",
+          "categories",
           "createdAt"
         ]
       },
@@ -165479,6 +165940,16 @@
               "null"
             ]
           },
+          "hazmat": {
+            "type": "boolean",
+            "description": "Declared by the seller at enrollment"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "state": {
             "type": "string",
             "enum": [
@@ -165511,7 +165982,264 @@
           "sizeTier",
           "labelRequired",
           "restricted",
+          "hazmat",
           "state"
+        ]
+      },
+      "fulfillment-service.ServiceTerms": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skuEnrollmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stockItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sellable": {
+            "type": "boolean",
+            "description": "True while the enrollment is active and a shipping profile exists; false while it is suspended or offboarding (the offer is Ineligible, never seller-shipped, decision D5)"
+          },
+          "notSellableReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "enrollment_suspended",
+              "enrollment_offboarding",
+              "service_unavailable"
+            ]
+          },
+          "locationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The service location (getServiceLocation)"
+          },
+          "shipsFrom": {
+            "type": "string",
+            "description": "e.g. 'Reno, NV (Marketly warehouse)'"
+          },
+          "dispatch": {
+            "type": "object",
+            "properties": {
+              "businessDays": {
+                "type": "integer"
+              },
+              "sameDayCutoff": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "businessDays"
+            ]
+          },
+          "shippingProfileId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Setting serviceShippingProfileId, else shipping.getOfficialDefaultProfile"
+          },
+          "parcel": {
+            "type": "object",
+            "properties": {
+              "weightGrams": {
+                "type": "integer"
+              },
+              "dimensionsCm": {
+                "$ref": "#/components/schemas/fulfillment-service.Dimensions"
+              }
+            },
+            "required": [
+              "weightGrams",
+              "dimensionsCm"
+            ]
+          }
+        },
+        "required": [
+          "offerId",
+          "sellerId",
+          "skuEnrollmentId",
+          "stockItemId",
+          "sellable",
+          "locationId",
+          "shipsFrom",
+          "dispatch",
+          "shippingProfileId",
+          "parcel"
+        ]
+      },
+      "fulfillment-service.StockDifference": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "skuEnrollmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "day": {
+            "type": "string",
+            "format": "date"
+          },
+          "ledger": {
+            "description": "Ownership ledger groups mapped to inventory groups: { incoming, available, reserved, damagedHeld, returned }"
+          },
+          "inventory": {
+            "description": "inventory.getLevels at the service location: { incoming, available, reserved, damagedHeld, returned }"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved"
+            ]
+          },
+          "decision": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "adjust_ledger",
+              "reimburse",
+              "no_change"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decidedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "skuEnrollmentId",
+          "sku",
+          "sellerId",
+          "day",
+          "ledger",
+          "inventory",
+          "state"
+        ]
+      },
+      "fulfillment-service.ServiceReceipt": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Also the receiptId given to inventory.submitServiceReceipt"
+          },
+          "seq": {
+            "type": "integer",
+            "description": "1, 2, … per inbound shipment (one per receiving record)"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "confirmed"
+            ],
+            "description": "submitted: counted, waiting for the Inventory Manager (inventory confirmInbound); confirmed: units are sellable seller-owned stock"
+          },
+          "received": {
+            "type": "integer"
+          },
+          "damaged": {
+            "type": "integer"
+          },
+          "countedBy": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "countedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "confirmedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confirmedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "seq",
+          "state",
+          "received",
+          "damaged",
+          "countedBy",
+          "countedAt"
         ]
       },
       "fulfillment-service.Dimensions": {
@@ -165789,6 +166517,13 @@
               "$ref": "#/components/schemas/fulfillment-service.InboundLine"
             }
           },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/fulfillment-service.ServiceReceipt"
+            },
+            "description": "Receiving records; units become available only when inventory confirms each one"
+          },
           "discrepancy": {
             "anyOf": [
               {
@@ -165828,6 +166563,7 @@
           "shipFrom",
           "boxes",
           "lines",
+          "receipts",
           "labels",
           "fees",
           "timeline"
@@ -165936,6 +166672,40 @@
           "damaged"
         ]
       },
+      "fulfillment-service.ReceivedEventLine": {
+        "type": "object",
+        "properties": {
+          "skuEnrollmentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stockItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sku": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "received": {
+            "type": "integer",
+            "description": "Units counted in this receiving record, damaged included"
+          },
+          "damaged": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "skuEnrollmentId",
+          "stockItemId",
+          "sku",
+          "label",
+          "received",
+          "damaged"
+        ]
+      },
       "fulfillment-service.FulfillmentRequest": {
         "type": "object",
         "properties": {
@@ -165972,7 +166742,7 @@
           "items": {
             "type": "array",
             "items": {},
-            "description": "orderItemId, offerId, sku, quantity, picked"
+            "description": "orderItemId, offerId, sku, quantity, cancelled, picked, shipped (units dispatched so far; a request is shipped when every uncancelled unit has shipped, across several packages)"
           },
           "warehouseTaskId": {
             "type": [
@@ -165986,10 +166756,18 @@
               "string",
               "null"
             ],
-            "format": "uuid"
+            "format": "uuid",
+            "description": "Latest shipment of the request"
           },
           "dispatchBy": {
             "$ref": "#/components/schemas/Deadline"
+          },
+          "shortReportedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           },
           "createdAt": {
             "type": "string",
@@ -166030,6 +166808,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "orderItemId": {
+            "type": "string",
+            "format": "uuid"
+          },
           "quantity": {
             "type": "integer"
           },
@@ -166042,6 +166824,13 @@
               "removal",
               "disposed"
             ]
+          },
+          "proposedOutcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "returns' proposedStockOutcome from returns.return.inspected; staff confirm the outcome with recordReturnOutcome (decision D8)"
           },
           "inspectionNote": {
             "type": [
@@ -166069,6 +166858,7 @@
           "returnRef",
           "sellerId",
           "skuEnrollmentId",
+          "orderItemId",
           "quantity",
           "outcome",
           "evidence"
@@ -166184,8 +166974,28 @@
               }
             ]
           },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "createdAt": {
             "type": "string",
+            "format": "date-time"
+          },
+          "approvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "date-time"
           }
         },
@@ -168113,6 +168923,25 @@
               }
             ]
           },
+          "serviceLocationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Fulfilled by Marketly: the company location this seller item sells from (setServiceLocation). While set, quantities are those at that location ('At Marketly')"
+          },
+          "ownLocationQuantities": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/inventory.StockQuantities"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set with serviceLocationId: units at the seller's own location, kept but not on sale while Marketly fulfils the item (decision D4)"
+          },
           "archived": {
             "type": "boolean"
           },
@@ -168412,7 +169241,11 @@
               "count",
               "discrepancy",
               "initial",
-              "merge"
+              "merge",
+              "service_inbound",
+              "service_return",
+              "service_removal",
+              "service_reconcile"
             ]
           },
           "id": {
@@ -168687,6 +169520,17 @@
             ],
             "description": "e.g. 'Oct 6, 4:30 PM · Avery Stone'"
           },
+          "fulfilledByMarketly": {
+            "type": "boolean",
+            "description": "True while the item has a service location: available and reserved are 'At Marketly' and the row is read-only (SERVICE_MANAGED)"
+          },
+          "ownLocationAvailable": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "With fulfilledByMarketly: units at the seller's own location, 'At your location (not on sale)'"
+          },
           "updatedAt": {
             "type": "string",
             "format": "date-time"
@@ -168700,6 +169544,7 @@
           "available",
           "reserved",
           "state",
+          "fulfilledByMarketly",
           "updatedAt"
         ]
       },
@@ -169233,15 +170078,42 @@
             "type": "string",
             "description": "e.g. REC-261006-03"
           },
-          "purchaseOrderId": {
+          "source": {
+            "$ref": "#/components/schemas/inventory.ReceiptSource",
+            "description": "What the units arrive against: a purchase order (company stock) or a Fulfilled by Marketly inbound shipment (seller stock)"
+          },
+          "ownerType": {
             "type": "string",
+            "enum": [
+              "official",
+              "seller"
+            ],
+            "description": "seller for service_inbound receipts"
+          },
+          "sellerId": {
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid"
           },
+          "purchaseOrderId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Null for service_inbound receipts"
+          },
           "purchaseOrderRef": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "supplierName": {
-            "type": "string"
+            "type": "string",
+            "description": "The supplier; for service_inbound receipts the seller's name"
           },
           "locationId": {
             "type": "string",
@@ -169316,8 +170188,8 @@
           "id",
           "receiptId",
           "receiptRef",
-          "purchaseOrderId",
-          "purchaseOrderRef",
+          "source",
+          "ownerType",
           "supplierName",
           "locationId",
           "receivedBy",
@@ -169360,7 +170232,15 @@
             ]
           },
           "unitCost": {
-            "$ref": "#/components/schemas/Money"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for service_inbound receipts (seller stock has no company cost)"
           },
           "sellable": {
             "type": "integer",
@@ -169378,9 +170258,34 @@
           "received",
           "damaged",
           "shortage",
-          "unitCost",
           "sellable",
           "outOfStockNow"
+        ]
+      },
+      "inventory.ReceiptSource": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "purchase_order",
+              "service_inbound"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Purchase order id or fulfillment-service inbound shipment id"
+          },
+          "ref": {
+            "type": "string",
+            "description": "PO or IB- reference"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "ref"
         ]
       },
       "inventory.ConfirmInboundLine": {
@@ -173848,12 +174753,26 @@
             "description": "Maximum units per customer"
           },
           "dispatch": {
-            "$ref": "#/components/schemas/offers.DispatchTerms"
+            "$ref": "#/components/schemas/offers.DispatchTerms",
+            "description": "The seller's own dispatch terms as saved. For a Marketly-fulfilled offer they are kept but have no customer effect; read shipping for what customers get"
           },
           "shippingProfileId": {
             "type": "string",
             "format": "uuid",
-            "description": "shipping module profile (rates, services, coverage)"
+            "description": "shipping module profile (rates, services, coverage) as saved by the seller; see shipping for the effective one"
+          },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ],
+            "description": "Who ships it: official_warehouse for Official Store offers, marketly_service while fulfillment-service fulfils the offer (fulfillment-service.offer.service_changed), else seller"
+          },
+          "shipping": {
+            "$ref": "#/components/schemas/offers.OfferShipping",
+            "description": "Effective customer-facing fulfilment: seller offers = their own shippingProfileId and dispatch; Official Store as today; marketly_service = fulfillment-service.getServiceTerms (Marketly's profile, dispatch and ships-from). Cart, checkout, delivery estimates and the featured rule read this, never shippingProfileId and dispatch directly"
           },
           "returnTerms": {
             "$ref": "#/components/schemas/offers.ReturnTerms"
@@ -173926,6 +174845,8 @@
           "price",
           "dispatch",
           "shippingProfileId",
+          "fulfilledBy",
+          "shipping",
           "returnTerms",
           "warranty",
           "status",
@@ -173993,6 +174914,33 @@
           "businessDays",
           "shipsFrom",
           "label"
+        ]
+      },
+      "offers.OfferShipping": {
+        "type": "object",
+        "properties": {
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ]
+          },
+          "profileId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Shipping profile customers are quoted with: the offer's own, or the service profile (fulfillment-service ServiceTerms.shippingProfileId) for marketly_service"
+          },
+          "dispatch": {
+            "$ref": "#/components/schemas/offers.DispatchTerms",
+            "description": "Dispatch promise and ships-from customers see; for marketly_service the service dispatch and shipsFrom from fulfillment-service ServiceTerms"
+          }
+        },
+        "required": [
+          "fulfilledBy",
+          "profileId",
+          "dispatch"
         ]
       },
       "offers.ReturnTerms": {
@@ -174150,8 +175098,10 @@
               "staff_hold",
               "removed_by_staff",
               "ended_by_seller",
-              "enforcement"
-            ]
+              "enforcement",
+              "fulfillment_service_suspended"
+            ],
+            "description": "fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service"
           },
           "text": {
             "type": "string"
@@ -174728,7 +175678,15 @@
             ]
           },
           "shipsFrom": {
-            "type": "string"
+            "type": "string",
+            "description": "Effective ships-from (Offer.shipping.dispatch.shipsFrom): for marketly_service the Marketly warehouse, e.g. 'Reno, NV (Marketly warehouse)'"
+          },
+          "fulfilledByLabel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "'Ships from Marketly' for marketly_service offers (the seller stays named in seller); null otherwise"
           },
           "dispatchLabel": {
             "type": "string"
@@ -174933,6 +175891,14 @@
               "removed"
             ]
           },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ]
+          },
           "termsVersion": {
             "type": "integer"
           }
@@ -174953,6 +175919,7 @@
           "featured",
           "featuredEligible",
           "status",
+          "fulfilledBy",
           "termsVersion"
         ]
       },
@@ -175634,6 +176601,13 @@
                 "type": "null"
               }
             ]
+          },
+          "fulfillmentNote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For marketly_service offers: 'Fulfilled by Marketly: customers see Marketly's delivery terms. Your dispatch time and shipping profile are saved but apply only if you leave the service.'"
           }
         },
         "required": [
@@ -176790,7 +177764,20 @@
             ]
           },
           "dispatch": {
-            "$ref": "#/components/schemas/offers.DispatchTerms"
+            "$ref": "#/components/schemas/offers.DispatchTerms",
+            "description": "Effective dispatch terms at purchase (Offer.shipping.dispatch): Marketly's for marketly_service offers"
+          },
+          "fulfilledBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ],
+            "description": "Offer.fulfilledBy at purchase; offers always sets it (optional only so snapshots built elsewhere, e.g. test fixtures, stay valid)"
           },
           "returnTerms": {
             "$ref": "#/components/schemas/offers.ReturnTerms"
@@ -178846,6 +179833,14 @@
             "type": "string",
             "description": "'Due today 5:00 PM', 'Overdue 3 h', 'Shipped Oct 6 · 1 day late'"
           },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ]
+          },
           "nextAction": {
             "type": "string",
             "enum": [
@@ -178854,8 +179849,10 @@
               "ship_remaining",
               "view_tracking",
               "respond_cancellation",
-              "view"
-            ]
+              "view",
+              "marketly_fulfils"
+            ],
+            "description": "marketly_fulfils for Fulfilled by Marketly groups: Marketly picks, packs and ships; the seller only views"
           },
           "note": {
             "type": [
@@ -178878,6 +179875,7 @@
           "statusLabel",
           "dispatchDeadline",
           "deadlineLabel",
+          "fulfilledBy",
           "nextAction"
         ]
       },
@@ -178904,6 +179902,10 @@
           },
           "dueToday": {
             "type": "integer"
+          },
+          "fulfilledByMarketly": {
+            "type": "integer",
+            "description": "Open Fulfilled by Marketly groups; they are left out of new, preparing, cancellationRequests, overdue and dueToday"
           }
         },
         "required": [
@@ -178913,7 +179915,8 @@
           "completed",
           "cancellationRequests",
           "overdue",
-          "dueToday"
+          "dueToday",
+          "fulfilledByMarketly"
         ]
       },
       "orders.SellerOrderItem": {
@@ -179057,7 +180060,16 @@
             "type": "string"
           },
           "statusLabel": {
-            "type": "string"
+            "type": "string",
+            "description": "For Fulfilled by Marketly groups 'Fulfilled by Marketly · <warehouse stage>', e.g. 'Fulfilled by Marketly · Picking'"
+          },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ]
           },
           "dispatchDeadline": {
             "$ref": "#/components/schemas/Deadline"
@@ -179093,7 +180105,7 @@
           },
           "shipTo": {
             "$ref": "#/components/schemas/Address",
-            "description": "Full address and phone for the carrier, only while the task is open plus the return window"
+            "description": "Full address and phone for the carrier, only while the task is open plus the return window. Fulfilled by Marketly groups: city and region only (decision D10)"
           },
           "delivery": {
             "$ref": "#/components/schemas/orders.DeliveryPromise"
@@ -179137,7 +180149,8 @@
                 "respond_cancellation",
                 "print_packing_slip"
               ]
-            }
+            },
+            "description": "Empty for Fulfilled by Marketly groups"
           }
         },
         "required": [
@@ -179149,6 +180162,7 @@
           "paymentAccepted",
           "status",
           "statusLabel",
+          "fulfilledBy",
           "dispatchDeadline",
           "items",
           "money",
@@ -188019,7 +189033,11 @@
               "customers.admin.accounts",
               "sellers.admin.accounts",
               "audit.admin.entries",
-              "trust.admin.reports"
+              "trust.admin.reports",
+              "fulfillment-service.seller.fees",
+              "fulfillment-service.seller.stock",
+              "fulfillment-service.admin.stock_by_owner",
+              "fulfillment-service.admin.fees"
             ],
             "description": "Every dataset a screen can export. See the exportDatasets setting for owner, permission, audience and screens."
           }
@@ -188057,7 +189075,11 @@
               "customers.admin.accounts",
               "sellers.admin.accounts",
               "audit.admin.entries",
-              "trust.admin.reports"
+              "trust.admin.reports",
+              "fulfillment-service.seller.fees",
+              "fulfillment-service.seller.stock",
+              "fulfillment-service.admin.stock_by_owner",
+              "fulfillment-service.admin.fees"
             ],
             "description": "An ExportDatasetKey value"
           },
@@ -191684,6 +192706,15 @@
           "policyApplied": {
             "$ref": "#/components/schemas/returns.EffectiveTerms"
           },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ],
+            "description": "From the order group. marketly_service: Marketly handles the return (platform handling, Marketly returns dock); the seller sees it read-only and funds the refund"
+          },
           "shippingPaidBy": {
             "type": "string",
             "enum": [
@@ -191864,6 +192895,7 @@
           "customer",
           "payment",
           "policyApplied",
+          "fulfilledBy",
           "shippingPaidBy",
           "deadlines",
           "flags",
@@ -203741,6 +204773,18 @@
             ],
             "format": "uuid"
           },
+          "fulfilledBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "official_warehouse",
+              "seller",
+              "marketly_service"
+            ],
+            "description": "marketly_service (a seller package Marketly ships): Official dispatch settings, closures and cutoffs, the profile-owner check as for official (items carry the service profile, an Official profile), its free-shipping threshold, and origin the service location (fulfillment-service.getServiceLocation). Omitted = official_warehouse for official, seller for seller"
+          },
           "shipsFrom": {
             "type": "string"
           },
@@ -210782,9 +211826,33 @@
             "type": "string",
             "format": "uuid"
           },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "marketly_service"
+            ],
+            "description": "official_warehouse: an Official Store group; marketly_service: a seller's group Marketly fulfils from seller-owned stock"
+          },
+          "sellerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The seller of record of a marketly_service fulfilment; null for the Official Store"
+          },
+          "sellerName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Shown on the packing slip: 'Sold by <seller> · Fulfilled by Marketly'"
+          },
           "locationId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "The service location (fulfillment-service.getServiceLocation) for marketly_service, else the default location"
           },
           "status": {
             "type": "string",
@@ -210867,6 +211935,7 @@
           "orderId",
           "orderRef",
           "sellerGroupId",
+          "fulfilledBy",
           "locationId",
           "status",
           "shipBy",
@@ -210888,6 +211957,19 @@
           },
           "orderRef": {
             "type": "string"
+          },
+          "fulfilledBy": {
+            "type": "string",
+            "enum": [
+              "official_warehouse",
+              "marketly_service"
+            ]
+          },
+          "sellerName": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "status": {
             "type": "string",
@@ -210931,6 +212013,7 @@
         "required": [
           "id",
           "orderRef",
+          "fulfilledBy",
           "status",
           "deadline",
           "shipBy",

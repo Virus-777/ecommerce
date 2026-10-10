@@ -1,4 +1,4 @@
-import { routes } from '../../../kernel/http/index.js';
+import { routes, notImplemented } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/fulfillment-service.js';
 import type { FulfillmentServiceService } from '../service.js';
 import type { By } from '../service/core.js';
@@ -46,5 +46,9 @@ export const adminRoutes = (service: FulfillmentServiceService) => {
     listFeeChargesAdmin: async (i) => p.fees.listAdmin(i.query, i.page),
     /** POST /fees/{id}/reverse: Reverse a fee charge with a reason */
     reverseFeeCharge: async (i) => p.fees.reverse(i.params.id, i.body.reason, by(i)),
+    /** GET /stock-differences: Differences between the ownership ledger and inventory found by the daily reconciliation (TODO pass 3: implement) */
+    listStockDifferences: notImplemented,
+    /** POST /stock-differences/{id}/resolve: Resolve a stock difference: adjust the ledger, reimburse the seller or leave it (TODO pass 3: implement) */
+    resolveStockDifference: notImplemented,
   });
 };

@@ -853,9 +853,9 @@ export const WorkqueuesDayEndPreparedEvent: z.ZodType<WorkqueuesDayEndPreparedEv
 
 /** What other modules may call in-process: `ctx.use('workqueues')` (or `ctx.tryUse` for an optional dependency). */
 export interface WorkqueuesPublicApi {
-  /** Create or refresh a work item. Idempotent on dedupeKey: a second call updates title, deadline and amount instead of creating a duplicate. For checks that are not events (e.g. finance's daily reconciliation, returns' deadline job). input.sourceModule names the caller. Used by: finance, returns, support, sellers, trust, inventory, warehouse, customers, reviews, purchasing, messaging, payments. */
+  /** Create or refresh a work item. Idempotent on dedupeKey: a second call updates title, deadline and amount instead of creating a duplicate. For checks that are not events (e.g. finance's daily reconciliation, returns' deadline job). input.sourceModule names the caller. Used by: finance, returns, support, sellers, trust, inventory, warehouse, customers, reviews, purchasing, messaging, payments, fulfillment-service. */
   raise(input: RaiseInput): Promise<WorkItem>;
-  /** Close open items for a fixed source; returns how many closed Used by: finance, returns, support, sellers, trust, inventory, warehouse, reviews, purchasing, messaging, payments. */
+  /** Close open items for a fixed source; returns how many closed Used by: finance, returns, support, sellers, trust, inventory, warehouse, reviews, purchasing, messaging, payments, fulfillment-service. */
   resolveBySource(dedupeKey: string, outcome: { note: string, by: common.Actor }): Promise<number>;
   /** Open items about one order, seller, case or payout, for detail pages Used by: orders, sellers, support, finance, graphql. */
   listForSubject(subjectType: string, subjectId: string): Promise<WorkItem[]>;
@@ -1946,9 +1946,9 @@ export const spec = defineModuleSpec({
       "workqueues.day_end.prepared": { when: "Today's day-end review is built and still open (the reminder for dayEndSharedRoles); not published when the review was already completed", payload: () => WorkqueuesDayEndPreparedEvent },
     },
     consumes: {
-      "shipping.dispatch.overdue": "Open an overdue_dispatch item about the order (seller-visible for marketplace sellers) with the payload exceptionId as a related delivery_exception subject, so Remind seller can call shipping; resolves on shipping.shipment.dispatched or orders.item.cancelled",
+      "shipping.dispatch.overdue": "Open an overdue_dispatch item about the order (seller-visible for marketplace sellers) with the payload exceptionId as a related delivery_exception subject, so Remind seller can call shipping; resolves on shipping.shipment.dispatched or orders.item.cancelled. fulfilledBy marketly_service: summary 'Fulfilled by Marketly (warehouse)', queue warehouse.pick_pack, not seller-visible",
       "shipping.shipment.dispatched": "Resolve overdue dispatch and missing tracking items for that order item",
-      "shipping.shipment.exception": "Open a delivery_exception item (lost, damaged, failed delivery, missing tracking)",
+      "shipping.shipment.exception": "Open a delivery_exception item (lost, damaged, failed delivery, missing tracking). fulfilledBy marketly_service: summary 'Fulfilled by Marketly (warehouse)', not seller-visible",
       "shipping.shipment.delivered": "Resolve delivery exception items for the shipment",
       "orders.item.cancelled": "Resolve dispatch items for the cancelled item",
       "inventory.stock.low": "Open a low_stock item for Official Store stock",
@@ -2092,9 +2092,13 @@ export const spec = defineModuleSpec({
         "trust.reports",
         "reviews.moderation",
         "access.approvals",
-        "customers.data_requests"
+        "customers.data_requests",
+        "fulfillment.receiving",
+        "fulfillment.reconciliation",
+        "fulfillment.requests",
+        "fulfillment.enrollments"
       ],
-      "desc": "Queues created at install with placeholder leads that must be set before launch",
+      "desc": "Queues created at install with placeholder leads that must be set before launch (a migration adds the fulfillment.* queues to existing installs)",
       "type": "json",
       "editable": false
     }

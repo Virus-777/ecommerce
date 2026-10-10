@@ -163,9 +163,10 @@ One cart across the Official Store and marketplace sellers for customers and gue
 
 | Field | Type |
 |---|---|
-| key | `string` Stable grouping key: owner type + seller id + ship-from (offers DispatchTerms.shipsFrom) |
+| key | `string` Stable grouping key: owner type + seller id + fulfilledBy + ship-from (offers Offer.shipping: fulfilledBy and dispatch.shipsFrom), so a seller's Marketly-fulfilled and self-shipped items are separate packages |
 | label | `string` 'Package 2 of 3' |
 | seller | `SellerLabel` |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` marketly_service packages read 'Ships from Marketly' and are quoted with the service profile |
 | shipsFrom | `string` e.g. 'Reno, NV warehouse' |
 | items | `CartItem[]` |
 | delivery | `PackageDelivery?` Null when every item in the package is unavailable or shipping is disabled |
@@ -350,6 +351,7 @@ One cart across the Official Store and marketplace sellers for customers and gue
 | productId | `uuid` |
 | variantId | `uuid` |
 | packageKey | `string` |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` |
 | quantity | `int` |
 | acceptedUnitPrice | `Money` |
 | currentUnitPrice | `Money` |
@@ -442,6 +444,7 @@ Indexes: `unique (customer_id) where status = 'active'`, `unique (guest_session_
 | variant_id | uuid |
 | stock_item_id | uuid |
 | ships_from | text |
+| fulfilled_by | text? (official_warehouse|seller|marketly_service) (Offer.shipping.fulfilledBy at the last check; null only for lines added before it was kept, until their next check) |
 | condition | text? (new|used_like_new|used_good|used_acceptable|refurbished) (offer condition at add; null only for lines added before it was kept, until their next check) |
 | quantity | int |
 | price_at_add | int (minor units) |
@@ -573,7 +576,7 @@ Indexes: `unique (customer_id, offer_id)`, `unique (guest_session_id, offer_id)`
 - Owner resolution: a customer session uses the customer's cart; otherwise the X-Guest-Session header identifies the guest cart (guest sessions are issued by identity). Requests with neither get UNAUTHORIZED.
 - Never switch sellers: a line's offerId only changes through POST /cart/items/{id}/switch-offer. Alternatives are only hinted (count and lowest price), never applied.
 - Change detection runs on every GET /cart and before getCartForCheckout through offers.getOffers (one batch read of every line's offer, any status) and offers.revalidate (lines with offerId, quantity, acceptedTermsVersion, acceptedUnitPrice; postal code of the deliver-to location) plus inventory.getAvailability; OfferChange kinds map to notices (price → price_increased/price_decreased, availability → out_of_stock/quantity_reduced, delivery → delivery_estimate_changed or not_shippable, removed → offer_ended, seller_restricted → seller_unavailable, terms → terms_changed). Promotion-driven price changes come from promotions.priceOffers. Baseline = acceptedUnitPrice and the quantity the customer chose. Increases create a warning notice that must be accepted; decreases are info notices accepted automatically. Out of stock, offer ended, seller unavailable, product unavailable and not shippable are blocking: the line stays visible, is excluded from checkout and the rest of the cart is unchanged.
-- Packages: lines group by seller and ship-from location. Delivery estimate and shipping per package come from shipping.quoteOptions for the default (cheapest eligible) method; checkout lets the customer pick other options. Package labels ('Package 2 of 3') are computed per view, not stored.
+- Packages: lines group by owner, seller, fulfilledBy and ship-from location (packageKey(ownerType, sellerId, fulfilledBy, shipsFrom), the same function as checkout), all taken from the offer's effective Offer.shipping; the line's profile and dispatch come from Offer.shipping too. Delivery estimate and shipping per package come from shipping.quoteOptions (with the package's fulfilledBy) for the default (cheapest eligible) method; checkout lets the customer pick other options. A Marketly-fulfilled package shows 'Ships from Marketly' and keeps the seller named. Package labels ('Package 2 of 3') are computed per view, not stored.
 - Quantity limits: the line maximum is min(offer purchase limit, deal purchase limit (promotions), available stock, maxQuantityPerLine); maxQuantityPerLine applies to every line, with or without an offer limit. maxLines caps distinct lines (CART_FULL). Per-customer limits that count earlier orders are enforced in checkout, which can read order history.
 - Merge on sign-in: same offer combines up to the limit; different offers for the same variant are both kept (kept_separate_offer); unavailable guest lines are dropped and listed in the report; guest coupon codes are carried over when still valid; guest saved-for-later items move to the customer, deduplicated on (customer_id, offer_id).
 - Promotions input: cart passes every line to promotions.evaluateCart with a non-empty sellerId (the seller id, or OFFICIAL_STORE_ID from common constants for Official Store lines; never '' or null) and categoryId when known (null otherwise). Checkout does the same. CheckoutCartLine.sellerId itself stays null for the Official Store, as in offers.

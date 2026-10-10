@@ -721,7 +721,7 @@ Indexes: `(status, created_at)`, `(supplier_id)`
 
 | Consumes | From | Does |
 |---|---|---|
-| `inventory.receipt.confirmed` | inventory | Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline |
+| `inventory.receipt.confirmed` | inventory | Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline. Receipts with source.kind service_inbound (Fulfilled by Marketly) are not purchasing's and are ignored |
 | `inventory.stock.low` | inventory | Refresh reorder suggestions for company stock items |
 | `access.approval.decided` | access | Send an approved PO; record a rejection on the PO timeline |
 

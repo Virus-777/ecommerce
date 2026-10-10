@@ -571,7 +571,8 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | statusLabel | `string` |
 | dispatchDeadline | `Deadline` |
 | deadlineLabel | `string` 'Due today 5:00 PM', 'Overdue 3 h', 'Shipped Oct 6 · 1 day late' |
-| nextAction | `enum(prepare|record_shipment|ship_remaining|view_tracking|respond_cancellation|view)` |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` |
+| nextAction | `enum(prepare|record_shipment|ship_remaining|view_tracking|respond_cancellation|view|marketly_fulfils)` marketly_fulfils for Fulfilled by Marketly groups: Marketly picks, packs and ships; the seller only views |
 | note | `string?` e.g. '1 of 2 items shipped' |
 
 ### SellerOrderCounts
@@ -585,6 +586,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | cancellationRequests | `int` |
 | overdue | `int` |
 | dueToday | `int` |
+| fulfilledByMarketly | `int` Open Fulfilled by Marketly groups; they are left out of new, preparing, cancellationRequests, overdue and dueToday |
 
 ### SellerOrderItem
 
@@ -626,21 +628,22 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | buyerName | `string` |
 | paymentAccepted | `bool` |
 | status | `string` |
-| statusLabel | `string` |
+| statusLabel | `string` For Fulfilled by Marketly groups 'Fulfilled by Marketly · <warehouse stage>', e.g. 'Fulfilled by Marketly · Picking' |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` |
 | dispatchDeadline | `Deadline` |
 | timeLeftMinutes | `int?` |
 | dispatchResult | `string?` 'Shipped on time' after shipment |
 | items | `SellerOrderItem[]` |
 | mixedOrderNote | `string?` 'The customer's order also has items from other sellers. You only see and handle your own items.' |
 | money | `SellerOrderMoney` |
-| shipTo | `Address` Full address and phone for the carrier, only while the task is open plus the return window |
+| shipTo | `Address` Full address and phone for the carrier, only while the task is open plus the return window. Fulfilled by Marketly groups: city and region only (decision D10) |
 | delivery | `DeliveryPromise` |
 | giftNote | `string?` |
 | hidePricesOnSlip | `bool` |
 | shipments | `ShipmentRef[]` |
 | cancellationRequests | `CancellationRequest[]` |
 | timeline | `TimelineEvent[]` |
-| allowedActions | `enum(start_preparing|report_delay|record_shipment|cancel_items|respond_cancellation|print_packing_slip)[]` |
+| allowedActions | `enum(start_preparing|report_delay|record_shipment|cancel_items|respond_cancellation|print_packing_slip)[]` Empty for Fulfilled by Marketly groups |
 
 ### BulkResult
 
@@ -949,7 +952,7 @@ stateDiagram-v2
   declined --> accepted: staff_override
 ```
 
-Customer requests start as requested; the seller confirms by respondBy (end of the next business day by default) or the request is auto-accepted if nothing has shipped. Official Store requests are accepted at once while warehouse picking has not started. Seller ('cannot fulfill') and staff cancellations are created directly as accepted. accepted publishes orders.item.cancelled per item with the refund breakdown; payments sends the refund under the cancellation policy (no Finance approval).
+Customer requests start as requested; the seller confirms by respondBy (end of the next business day by default) or the request is auto-accepted if nothing has shipped. Official Store and Fulfilled by Marketly requests (any group whose fulfilledBy is not seller) are accepted at once while warehouse picking has not started; after that they wait for the Order Manager (decideCancellationAdmin, orders.cancellations.decide) and the seller endpoints refuse them with FULFILLED_BY_MARKETLY (decision D6). Seller ('cannot fulfill') and staff cancellations are created directly as accepted. accepted publishes orders.item.cancelled per item with the refund breakdown; payments sends the refund under the cancellation policy (no Finance approval).
 
 ## Data (schema `orders`)
 
@@ -1202,16 +1205,16 @@ Indexes: `(order_id, at desc)`
 
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
-| `orders.order.placed` | An order is created after an authorized or pending payment | `{ orderId: uuid, ref: string, checkoutSessionId: uuid, customerId: uuid?, guestEmail: email?, paymentIntentId: uuid, paymentState: enum(accepted|pending_check), total: Money, couponCodes: string[], groups: PlacedGroup[], placedAt: datetime, attemptNo: int, deliveryAddressId: uuid?, contactName: string, visitorId: string? }` | advertising, customers, fulfillment-service, payments, promotions, reports, search, trust, wallet |
-| `orders.order.accepted` | Payment accepted: fulfillment tasks start, confirmation is sent | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email, total: Money, groups: PlacedGroup[], items: AcceptedItem[], reservationId: uuid?, acceptedAt: datetime }` | finance, inventory, notifications, payments, reports, sellers, shipping, warehouse |
-| `orders.order.cancelled` | A pending payment was declined, or every item was cancelled | `{ orderId: uuid, ref: string, reason: enum(payment_declined|all_items_cancelled), checkoutSessionId: uuid }` | checkout, payments, search |
+| `orders.order.placed` | An order is created after an authorized or pending payment | `{ orderId: uuid, ref: string, checkoutSessionId: uuid, customerId: uuid?, guestEmail: email?, paymentIntentId: uuid, paymentState: enum(accepted|pending_check), total: Money, couponCodes: string[], groups: PlacedGroup[], placedAt: datetime, attemptNo: int, deliveryAddressId: uuid?, contactName: string, visitorId: string? }` | advertising, customers, payments, promotions, reports, search, trust, wallet |
+| `orders.order.accepted` | Payment accepted: fulfillment tasks start, confirmation is sent | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email, total: Money, groups: PlacedGroup[], items: AcceptedItem[], reservationId: uuid?, acceptedAt: datetime }` | finance, fulfillment-service, inventory, notifications, payments, reports, sellers, shipping, warehouse |
+| `orders.order.cancelled` | A pending payment was declined, or every item was cancelled | `{ orderId: uuid, ref: string, reason: enum(payment_declined|all_items_cancelled), checkoutSessionId: uuid }` | checkout, fulfillment-service, payments, search |
 | `orders.order.completed` | Every item is final and no return, case or refund is open | `{ orderId: uuid, ref: string, completedAt: datetime }` | messaging, reports |
 | `orders.item.state_changed` | Any item state change (for timelines, notifications and reports) | `{ orderId: uuid, groupId: uuid, itemId: uuid, from: string, to: string, actor: Actor, at: datetime }` | - |
-| `orders.item.cancelled` | Items are cancelled (customer request accepted, seller cannot fulfill, staff) | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email?, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, cancellationId: uuid, initiatedBy: enum(customer|seller|staff|system), reasonCode: string, beforeDispatch: bool, countsAgainstSeller: bool, refund: RefundBreakdownPayload, paymentIntentId: uuid, trustReportId: uuid?, notifyCustomer: bool }` | advertising, finance, fulfillment-service, inventory, notifications, payments, promotions, reports, returns, reviews, sellers, shipping, support, trust, warehouse, workqueues |
-| `orders.item.split` | A partial cancellation, shipment or return splits an item line: the original line keeps its id with the remaining quantity and a new line takes the split-off quantity (splitFromItemId = original) | `{ orderId: uuid, groupId: uuid, itemId: uuid, newItemId: uuid, rootItemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, remainingQuantity: int, reason: enum(cancellation|shipment|return|replacement), at: datetime }` | inventory, promotions, warehouse |
+| `orders.item.cancelled` | Items are cancelled (customer request accepted, seller cannot fulfill, staff) | `{ orderId: uuid, ref: string, customerId: uuid?, contactEmail: email?, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), itemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, cancellationId: uuid, initiatedBy: enum(customer|seller|staff|system), reasonCode: string, beforeDispatch: bool, countsAgainstSeller: bool, refund: RefundBreakdownPayload, paymentIntentId: uuid, trustReportId: uuid?, notifyCustomer: bool }` | advertising, finance, fulfillment-service, inventory, notifications, payments, promotions, reports, returns, reviews, sellers, shipping, support, trust, warehouse, workqueues |
+| `orders.item.split` | A partial cancellation, shipment or return splits an item line: the original line keeps its id with the remaining quantity and a new line takes the split-off quantity (splitFromItemId = original) | `{ orderId: uuid, groupId: uuid, itemId: uuid, newItemId: uuid, rootItemId: uuid, offerId: uuid, stockItemId: uuid, quantity: int, remainingQuantity: int, reason: enum(cancellation|shipment|return|replacement), at: datetime }` | fulfillment-service, inventory, promotions, warehouse |
 | `orders.item.delayed` | Items become Delayed (seller report or overdue dispatch) | `{ orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, itemIds: uuid[], source: enum(seller|overdue), expectedDispatchBy: datetime?, reason: string }` | notifications |
 | `orders.item.delivered` | Items in a delivered shipment become Delivered | `{ orderId: uuid, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, itemId: uuid, quantity: int, deliveredAt: datetime, returnWindowEndsAt: datetime, customerId: uuid?, contactEmail: email? }` | finance, reports, returns, reviews |
-| `orders.cancellation.requested` | A customer asks to cancel items that need the seller's confirmation | `{ cancellationId: uuid, orderId: uuid, groupId: uuid, sellerId: uuid?, itemIds: uuid[], respondBy: datetime }` | - |
+| `orders.cancellation.requested` | A customer asks to cancel items that need the seller's confirmation (or, for Official Store and Fulfilled by Marketly groups already being picked, the Order Manager's decision) | `{ cancellationId: uuid, orderId: uuid, groupId: uuid, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), itemIds: uuid[], respondBy: datetime }` | notifications |
 | `orders.cancellation.decided` | A request is accepted, auto-accepted, declined or withdrawn | `{ cancellationId: uuid, orderId: uuid, customerId: uuid?, contactEmail: email?, outcome: enum(accepted|auto_accepted|declined|withdrawn), by: Actor }` | notifications |
 | `orders.dispatch_deadline.changed` | A group's dispatch deadline is recalculated or extended by staff | `{ orderId: uuid, groupId: uuid, dueAt: datetime, previousDueAt: datetime, reason: string, by: Actor }` | shipping |
 | `orders.confirmation.requested` | Staff resend the order confirmation | `{ orderId: uuid, email: email }` | - |
@@ -1248,11 +1251,11 @@ Indexes: `(order_id, at desc)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| createOrder | `(input: OrderCreateInput) => OrderDetail`<br>Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per (checkoutSessionId, attemptNo): a second call with the same pair returns the existing order; a retry after a finally declined pending payment passes the next attemptNo and gets a new order (the declined one stays cancelled). paymentState is the real authorize result: accepted creates the order open in one step; only pending_check creates it payment_pending. Attaches each item's snapshot image to the order (media.attach, usage kind order_evidence, ref the order id) so the image outlives catalog changes. | checkout |
+| createOrder | `(input: OrderCreateInput) => OrderDetail`<br>Create the order from an authorized or pending payment. Freezes catalog.snapshotForOrder and offers.snapshotForOrder per item. Fulfilled by Marketly check: with fulfillment-service on, a marketly_service group must hold only offers where fulfillment-service.isServiceOffer is true and a seller group none (VALIDATION_FAILED); with it off a marketly_service group is refused. Status open when paymentState=accepted (publishes orders.order.placed and orders.order.accepted in one transaction), payment_pending otherwise (publishes orders.order.placed only). Idempotent per (checkoutSessionId, attemptNo): a second call with the same pair returns the existing order; a retry after a finally declined pending payment passes the next attemptNo and gets a new order (the declined one stays cancelled). paymentState is the real authorize result: accepted creates the order open in one step; only pending_check creates it payment_pending. Attaches each item's snapshot image to the order (media.attach, usage kind order_evidence, ref the order id) so the image outlives catalog changes. | checkout |
 | acceptOrder | `(orderId: uuid, paymentIntentId: uuid) => OrderDetail`<br>payment_pending → open when the payment result arrives (also done on payments.payment.authorized). Idempotent. | checkout |
 | cancelForDeclinedPayment | `(orderId: uuid) => void`<br>payment_pending → cancelled when a pending payment is finally declined (also done on payments.payment.failed). | checkout |
 | getOrder | `(orderId: uuid) => OrderDetail | null`<br>Full order for other modules (no access check) | payments, shipping, returns, support, finance, messaging, warehouse, reviews |
-| getFulfillmentTask | `(groupId: uuid) => FulfillmentTask`<br>Seller group with ship-to address, delivery promise, dispatch deadline and items still to ship | shipping, warehouse, fulfillment-service |
+| getFulfillmentTask | `(groupId: uuid) => FulfillmentTask`<br>Seller group with ship-to address, delivery promise, dispatch deadline and items still to ship | shipping, warehouse |
 | canShipItems | `(groupId: uuid, lines: { orderItemId: uuid, quantity: int }[]) => { ok: bool, problems: string[] }`<br>Items belong to the group, are not cancelled or already shipped, and quantities fit | shipping, warehouse |
 | setDispatchDeadline | `(groupId: uuid, dueAt: datetime, reason: string, actor: Actor) => void`<br>Recalculated deadline (e.g. a payment accepted late) or a staff extension; publishes orders.dispatch_deadline.changed | shipping |
 | getPaidAmounts | `(orderId: uuid) => ItemPaidAmount[]`<br>Per item: paid amount split into item, discount share, shipping share and tax share, for refund caps | payments, returns, support |
@@ -1268,10 +1271,10 @@ Indexes: `(order_id, at desc)`
 | listOrdersForCustomer | `(customerId: uuid, filter: { q?: string, range?: string, from?: date, to?: date, tab?: string }, page: PageInput) => Page<OrderDetail>`<br>Order history with search, date range and status tab (same filters as GET /orders); fields are resolved lazily so list cards stay cheap | graphql |
 | countOrdersByTab | `(customerId: uuid, range?: string) => { all: int, inProgress: int, delivered: int, returns: int, cancelled: int, delayedPackages: int }`<br>Counts per status tab plus delayed packages (account overview tiles, order list tabs, customer 360) | graphql |
 | getOrderForSeller | `(sellerId: uuid, ref: string) => { order: OrderDetail, groups: SellerOrderDetail[] } | null`<br>One order as a seller sees it: only the seller's own groups (items, money, ship-to while needed, cancellations, timeline) and seller-safe order fields. Null (NOT_FOUND) when the order has no group of this seller. | graphql |
-| listOrdersForSeller | `(sellerId: uuid, filter: { tab?: string, tabs?: string[], q?: string, placedFrom?: date, placedTo?: date, overdueOnly?: bool, sort?: string }, page: PageInput) => Page<{ order: OrderDetail, groups: SellerOrderDetail[] }>`<br>The seller's orders by stage with dispatch deadlines (same filters as seller GET /orders); own groups only | graphql, search |
+| listOrdersForSeller | `(sellerId: uuid, filter: { tab?: string, tabs?: string[], q?: string, placedFrom?: date, placedTo?: date, overdueOnly?: bool, sort?: string, fulfilledBy?: string }, page: PageInput) => Page<{ order: OrderDetail, groups: SellerOrderDetail[] }>`<br>The seller's orders by stage with dispatch deadlines (same filters as seller GET /orders); own groups only | graphql, search |
 | countSellerOrders | `(sellerId: uuid) => SellerOrderCounts`<br>Seller tab counts plus overdue and due today | graphql |
 | getOrderAdmin | `(ref: string, principal?: identity.Principal) => AdminOrderDetail | null`<br>Order 360 across sellers for staff: groups, items, money by seller, after-sales, flags, notes and staff history. Contact details masked unless the principal holds orders.customers.view-contact (masked when no principal is given). | graphql |
-| listOrdersAdmin | `(filter: { q?: string, sellerType?: string, sellerId?: uuid, customerId?: uuid, fulfillmentStatus?: string, paymentState?: string, placedFrom?: date, placedTo?: date, flag?: string, savedFilterId?: uuid }, page: PageInput) => Page<AdminOrderDetail>`<br>Staff order list (same filters as admin GET /orders plus customerId) for the customer and seller 360 views | graphql, search |
+| listOrdersAdmin | `(filter: { q?: string, sellerType?: string, sellerId?: uuid, customerId?: uuid, fulfillmentStatus?: string, paymentState?: string, placedFrom?: date, placedTo?: date, flag?: string, savedFilterId?: uuid, fulfilledBy?: string }, page: PageInput) => Page<AdminOrderDetail>`<br>Staff order list (same filters as admin GET /orders plus customerId) for the customer and seller 360 views | graphql, search |
 | getOrdersByIds | `(viewer: { area: 'store'|'seller'|'admin', customerId?: uuid, guestSessionId?: uuid, sellerId?: uuid }, orderIds: uuid[]) => map<OrderDetail | { order: OrderDetail, groups: SellerOrderDetail[] } | AdminOrderDetail | null>`<br>Batched order lookup for order fields on other modules' records (Case.order, Return.order, RefundRequest.order). Same visibility as order / sellerOrder / orderAdmin: store → only orders of the signed-in customer or a guest session with access; seller → only the caller's own groups and seller-safe fields (null when the order has no group of this seller); admin → order 360 (contact masked unless orders.customers.view-contact). Not visible → null (never an error that reveals the order exists). | graphql |
 | countOrdersForSellers | `(sellerIds: uuid[]) => map<{ open: int, overdueDispatch: int, dueToday: int, cancellationRequests: int, cancellations30d: int }>`<br>Seller 360 order tiles (staff): open orders (a group of the seller not yet delivered or cancelled), groups past their dispatch deadline, due today, pending customer cancellation requests and cancellations in the last 30 days. Recent orders use listOrdersAdmin with filter.sellerId. | graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets orders.admin.orders and orders.seller.orders (seller rows are the seller's own groups; customer email and phone masked without orders.customers.view-contact) | reports |
@@ -1305,6 +1308,7 @@ Indexes: `(order_id, at desc)`
 | `CANCELLATION_ALREADY_REQUESTED` | 409 | A pending cancellation request already covers the item. details.cancellationId. |
 | `SHIPMENT_REQUIRED` | 409 | Declining because the items shipped needs a recorded shipment with tracking first. |
 | `EXPORT_TOO_LARGE` | 422 | More than reports.maxExportRows rows; narrow the filters. details.max. |
+| `FULFILLED_BY_MARKETLY` | 409 | Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations. |
 
 ## Background jobs
 
@@ -1337,6 +1341,7 @@ Indexes: `(order_id, at desc)`
 - Line splits: every split publishes orders.item.split in the same transaction, so inventory (reservations and allocations) and promotions (redemption lines) split their per-item rows and later events on the new id (cancellation, shipment, refund) find them.
 - Order search (decision S-D2): no tsvector column. q matches ref exactly or by prefix, contact name and email through trigram indexes, and tracking numbers through shipment_refs.
 - Admin exports and saved filters cover plan ch. 18 'saved filters and authorized exports'. Bulk actions on overdue orders (remind sellers, assign owner, escalate) are shipping exception actions. Exports run through reports (requestExport, getExport): orders registers datasets orders.admin.orders (staff, orders.orders.export) and orders.seller.orders (seller, orders.fulfillment.export, own groups only) and serves the rows through exportRows, which masks customer email and phone unless the requester has orders.customers.view-contact.
+- Fulfilled by Marketly groups (fulfilledBy marketly_service; fulfillment-service, phase 4): the seller stays the seller of record but Marketly's warehouse picks, packs and ships. Seller views show nextAction marketly_fulfils, no allowedActions, statusLabel 'Fulfilled by Marketly · <warehouse stage>' and only the city and region of the address (decision D10); the group is left out of the seller's new, preparing, cancellation, overdue and due-today counts and counted in fulfilledByMarketly. Seller actions on it (start preparing, delay, cancel items, answer cancellations, packing slips) answer 409 FULFILLED_BY_MARKETLY (decision D6). Cancellations work like Official Store groups (instant until picking starts, then the Order Manager decides). Warehouse status and shipping events move its items exactly as for Official Store groups. Customers read 'Sold by <seller> · Shipped by Marketly' and the handling note 'Marketly ships this package and handles its returns'.
 
 ## GraphQL (read layer)
 

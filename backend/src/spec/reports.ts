@@ -407,16 +407,16 @@ export const ReportSchedule: z.ZodType<ReportSchedule> = z.object({
 
 export interface ExportDatasetKey {
   /** Every dataset a screen can export. See the exportDatasets setting for owner, permission, audience and screens. */
-  key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports";
+  key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
 }
 
 export const ExportDatasetKey: z.ZodType<ExportDatasetKey> = z.object({
-  key: z.enum(["reports.report_result", "catalog.admin.products", "offers.admin.offers", "offers.seller.offers", "inventory.admin.stock", "inventory.seller.stock", "purchasing.admin.receiving", "shipping.admin.exceptions", "returns.admin.requests", "returns.seller.requests", "returns.admin.inspections", "support.admin.cases", "finance.admin.ledger", "finance.admin.payout_run", "finance.admin.checks", "finance.seller.ledger", "promotions.admin.campaigns", "workqueues.admin.items", "orders.admin.orders", "orders.seller.orders", "customers.admin.accounts", "sellers.admin.accounts", "audit.admin.entries", "trust.admin.reports"]).describe("Every dataset a screen can export. See the exportDatasets setting for owner, permission, audience and screens."),
+  key: z.enum(["reports.report_result", "catalog.admin.products", "offers.admin.offers", "offers.seller.offers", "inventory.admin.stock", "inventory.seller.stock", "purchasing.admin.receiving", "shipping.admin.exceptions", "returns.admin.requests", "returns.seller.requests", "returns.admin.inspections", "support.admin.cases", "finance.admin.ledger", "finance.admin.payout_run", "finance.admin.checks", "finance.seller.ledger", "promotions.admin.campaigns", "workqueues.admin.items", "orders.admin.orders", "orders.seller.orders", "customers.admin.accounts", "sellers.admin.accounts", "audit.admin.entries", "trust.admin.reports", "fulfillment-service.seller.fees", "fulfillment-service.seller.stock", "fulfillment-service.admin.stock_by_owner", "fulfillment-service.admin.fees"]).describe("Every dataset a screen can export. See the exportDatasets setting for owner, permission, audience and screens."),
 }).register(common.apiTypes, { id: "reports.ExportDatasetKey" });
 
 export interface ExportDataset {
   /** An ExportDatasetKey value */
-  key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports";
+  key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
   /** Module that supplies the rows through its publicApi exportRows */
   owner: string;
   title: string;
@@ -433,7 +433,7 @@ export interface ExportDataset {
 }
 
 export const ExportDataset: z.ZodType<ExportDataset> = z.object({
-  key: z.enum(["reports.report_result", "catalog.admin.products", "offers.admin.offers", "offers.seller.offers", "inventory.admin.stock", "inventory.seller.stock", "purchasing.admin.receiving", "shipping.admin.exceptions", "returns.admin.requests", "returns.seller.requests", "returns.admin.inspections", "support.admin.cases", "finance.admin.ledger", "finance.admin.payout_run", "finance.admin.checks", "finance.seller.ledger", "promotions.admin.campaigns", "workqueues.admin.items", "orders.admin.orders", "orders.seller.orders", "customers.admin.accounts", "sellers.admin.accounts", "audit.admin.entries", "trust.admin.reports"]).describe("An ExportDatasetKey value"),
+  key: z.enum(["reports.report_result", "catalog.admin.products", "offers.admin.offers", "offers.seller.offers", "inventory.admin.stock", "inventory.seller.stock", "purchasing.admin.receiving", "shipping.admin.exceptions", "returns.admin.requests", "returns.seller.requests", "returns.admin.inspections", "support.admin.cases", "finance.admin.ledger", "finance.admin.payout_run", "finance.admin.checks", "finance.seller.ledger", "promotions.admin.campaigns", "workqueues.admin.items", "orders.admin.orders", "orders.seller.orders", "customers.admin.accounts", "sellers.admin.accounts", "audit.admin.entries", "trust.admin.reports", "fulfillment-service.seller.fees", "fulfillment-service.seller.stock", "fulfillment-service.admin.stock_by_owner", "fulfillment-service.admin.fees"]).describe("An ExportDatasetKey value"),
   owner: z.string().describe("Module that supplies the rows through its publicApi exportRows"),
   title: z.string(),
   permission: z.string().describe("Dataset permission, checked in addition to reports.exports.create (staff) or by itself (seller)"),
@@ -698,7 +698,7 @@ export const ReportsScheduledReportReadyEvent: z.ZodType<ReportsScheduledReportR
 
 /** What other modules may call in-process: `ctx.use('reports')` (or `ctx.tryUse` for an optional dependency). */
 export interface ReportsPublicApi {
-  /** Owner modules register the columns of their datasets at boot. Only keys in the export dataset registry (ExportDatasetKey, setting exportDatasets) are accepted. Rows are read page by page through the owner's own publicApi function exportRows(dataset, filters, principal, cursor); reports runs the job, filters columns by permission and stores the file. Used by: catalog, offers, inventory, purchasing, shipping, returns, support, finance, promotions, workqueues, orders, customers, sellers, audit, trust. */
+  /** Owner modules register the columns of their datasets at boot. Only keys in the export dataset registry (ExportDatasetKey, setting exportDatasets) are accepted. Rows are read page by page through the owner's own publicApi function exportRows(dataset, filters, principal, cursor); reports runs the job, filters columns by permission and stores the file. Used by: catalog, offers, inventory, purchasing, shipping, returns, support, finance, promotions, workqueues, orders, customers, sellers, audit, trust, fulfillment-service. */
   registerDataset(dataset: ExportDataset): Promise<void>;
   /** Used by other modules' export endpoints; same rules as POST /exports, including the dataset's own permission for the principal (jsonl only for audit.admin.entries). Their status endpoints read the job back with getExport. Used by: catalog, offers, inventory, returns, orders, customers, sellers, workqueues, audit, trust, finance. */
   requestExport(input: { dataset: string, filters: unknown, format: 'csv' | 'xlsx' | 'jsonl', principal: identity.Principal, sellerId?: string }): Promise<ExportJob>;
@@ -890,6 +890,8 @@ export interface ReportsDb {
     accepted_at: Date | null;
     /** seller group of the order; payments.payment.captured is matched on it */
     group_id: string | null;
+    /** the group's PlacedGroup.fulfilledBy from orders.order.placed; null for rows recorded before it was kept */
+    fulfilled_by: 'official_warehouse' | 'seller' | 'marketly_service' | null;
   };
   /** One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order */
   fact_refunds: {
@@ -929,6 +931,8 @@ export interface ReportsDb {
     payouts_failed: number;
     owed_minor: number;
     ad_charges_minor: number;
+    /** Fulfilled by Marketly fees charged less reversals */
+    service_fees_minor: number;
   };
   /** Per seller and day: dispatch, tracking, cancellations, response time, cases, delivery issues */
   fact_service_daily: {
@@ -946,6 +950,14 @@ export interface ReportsDb {
     cases_opened: number;
     cases_open_eod: number;
     complaints_by_category: Json;
+  };
+  /** Per seller of record and day: dispatches Marketly's warehouse made for Fulfilled by Marketly groups (kept out of fact_service_daily so seller dispatch metrics only count what the seller shipped) */
+  fact_marketly_fulfillment_daily: {
+    seller_id: string;
+    day: string;
+    dispatched: number;
+    dispatched_on_time: number;
+    overdue: number;
   };
   /** Per product and day: views, cart additions, purchases, stockout minutes */
   fact_discovery_daily: {
@@ -1814,8 +1826,8 @@ export const spec = defineModuleSpec({
       "orders.order.placed": "fact_order_items rows with placement date; fact_customers",
       "orders.order.accepted": "Mark items accepted (orders count from acceptance)",
       "payments.payment.captured": "Payment date basis",
-      "shipping.shipment.dispatched": "Shipment date basis; on-time dispatch in fact_service_daily",
-      "shipping.dispatch.overdue": "Overdue counts in fact_service_daily",
+      "shipping.shipment.dispatched": "Shipment date basis; on-time dispatch in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service (never in the seller's row)",
+      "shipping.dispatch.overdue": "Overdue counts in fact_service_daily, or in fact_marketly_fulfillment_daily when fulfilledBy is marketly_service",
       "shipping.shipment.exception": "Delivery issues",
       "orders.item.delivered": "Delivered date",
       "orders.order.completed": "Completion date basis",
@@ -1836,7 +1848,9 @@ export const spec = defineModuleSpec({
       "promotions.coupon.redeemed": "Campaign sales, discount cost and funding owner",
       "promotions.redemption.reversed": "Reverse discount cost on cancellation",
       "advertising.charge.posted": "Ad spending per campaign and seller",
-      "advertising.charge.credited": "Ad credits"
+      "advertising.charge.credited": "Ad credits",
+      "fulfillment-service.fee.charged": "Fulfilled by Marketly fees per seller and day: fact_marketplace_finance_daily.service_fees_minor (claimed per chargeId)",
+      "fulfillment-service.fee.reversed": "Subtract reversed Fulfilled by Marketly fees from service_fees_minor on the reversal day"
     },
   },
   jobs: {
@@ -2154,6 +2168,46 @@ export const spec = defineModuleSpec({
             "admin/trust"
           ],
           "phase": 1
+        },
+        {
+          "key": "fulfillment-service.seller.fees",
+          "owner": "fulfillment-service",
+          "permission": "fulfillment-service.fees.view",
+          "audience": "seller",
+          "screens": [
+            "seller/finance"
+          ],
+          "phase": 4
+        },
+        {
+          "key": "fulfillment-service.seller.stock",
+          "owner": "fulfillment-service",
+          "permission": "fulfillment-service.inbound.manage",
+          "audience": "seller",
+          "screens": [
+            "seller/inventory"
+          ],
+          "phase": 4
+        },
+        {
+          "key": "fulfillment-service.admin.stock_by_owner",
+          "owner": "fulfillment-service",
+          "permission": "fulfillment-service.operations.view",
+          "audience": "staff",
+          "screens": [
+            "ops/inventory"
+          ],
+          "phase": 4
+        },
+        {
+          "key": "fulfillment-service.admin.fees",
+          "owner": "fulfillment-service",
+          "permission": "fulfillment-service.fees.manage",
+          "audience": "staff",
+          "screens": [
+            "admin/finance"
+          ],
+          "phase": 4
         }
       ],
       "desc": "Export dataset registry (seed of export_datasets). Adding a dataset needs a new ExportDatasetKey value and an exportRows provider in the owner module.",
@@ -2776,6 +2830,10 @@ export const spec = defineModuleSpec({
       "group_id": {
         "type": "uuid",
         "nullable": true
+      },
+      "fulfilled_by": {
+        "type": "text",
+        "nullable": true
       }
     },
     "fact_refunds": {
@@ -2898,6 +2956,10 @@ export const spec = defineModuleSpec({
       "ad_charges_minor": {
         "type": "bigint",
         "nullable": false
+      },
+      "service_fees_minor": {
+        "type": "bigint",
+        "nullable": false
       }
     },
     "fact_service_daily": {
@@ -2951,6 +3013,28 @@ export const spec = defineModuleSpec({
       },
       "complaints_by_category": {
         "type": "jsonb",
+        "nullable": false
+      }
+    },
+    "fact_marketly_fulfillment_daily": {
+      "seller_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "day": {
+        "type": "date",
+        "nullable": false
+      },
+      "dispatched": {
+        "type": "int",
+        "nullable": false
+      },
+      "dispatched_on_time": {
+        "type": "int",
+        "nullable": false
+      },
+      "overdue": {
+        "type": "int",
         "nullable": false
       }
     },
@@ -3146,6 +3230,9 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     },
     "fact_service_daily": {
+      "seller": "seller_id"
+    },
+    "fact_marketly_fulfillment_daily": {
       "seller": "seller_id"
     }
   },

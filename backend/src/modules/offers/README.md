@@ -118,8 +118,10 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | compareAt | `CompareAtPrice?` |
 | saleEndsAt | `datetime?` |
 | purchaseLimit | `int?` Maximum units per customer |
-| dispatch | `DispatchTerms` |
-| shippingProfileId | `uuid` shipping module profile (rates, services, coverage) |
+| dispatch | `DispatchTerms` The seller's own dispatch terms as saved. For a Marketly-fulfilled offer they are kept but have no customer effect; read shipping for what customers get |
+| shippingProfileId | `uuid` shipping module profile (rates, services, coverage) as saved by the seller; see shipping for the effective one |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` Who ships it: official_warehouse for Official Store offers, marketly_service while fulfillment-service fulfils the offer (fulfillment-service.offer.service_changed), else seller |
+| shipping | `OfferShipping` Effective customer-facing fulfilment: seller offers = their own shippingProfileId and dispatch; Official Store as today; marketly_service = fulfillment-service.getServiceTerms (Marketly's profile, dispatch and ships-from). Cart, checkout, delivery estimates and the featured rule read this, never shippingProfileId and dispatch directly |
 | returnTerms | `ReturnTerms` |
 | warranty | `WarrantyTerms` |
 | status | `enum(draft|active|paused|out_of_stock|ineligible|removed)` |
@@ -148,6 +150,14 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | sameDayCutoff | `string?` Local cutoff HH:mm for same-day dispatch, market time zone |
 | shipsFrom | `string` City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), set at save and refreshed by the hourly offers.reevaluate-eligibility job when that location changes (inventory publishes no location event; the refresh does not bump termsVersion); seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config). |
 | label | `string` e.g. 'Ships today', 'Ships in 1 business day' |
+
+### OfferShipping
+
+| Field | Type |
+|---|---|
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` |
+| profileId | `uuid` Shipping profile customers are quoted with: the offer's own, or the service profile (fulfillment-service ServiceTerms.shippingProfileId) for marketly_service |
+| dispatch | `DispatchTerms` Dispatch promise and ships-from customers see; for marketly_service the service dispatch and shipsFrom from fulfillment-service ServiceTerms |
 
 ### ReturnTerms
 
@@ -189,7 +199,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 
 | Field | Type |
 |---|---|
-| code | `enum(awaiting_launch_review|seller_restricted|seller_suspended|seller_closed|product_hidden|product_suspended|product_merged|staff_hold|removed_by_staff|ended_by_seller|enforcement)` |
+| code | `enum(awaiting_launch_review|seller_restricted|seller_suspended|seller_closed|product_hidden|product_suspended|product_merged|staff_hold|removed_by_staff|ended_by_seller|enforcement|fulfillment_service_suspended)` fulfillment_service_suspended: the seller's Fulfilled by Marketly enrollment is suspended or offboarding, so the offer stops selling (it never switches to seller shipping); restored when the enrollment is reinstated or the SKU leaves the service |
 | text | `text` |
 | affectedActivity | `string?` For restrictions: what is stopped, e.g. 'Refurbished offers and new listings' |
 | appealRoute | `string?` For restrictions and removals: how to appeal |
@@ -309,7 +319,8 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | freeOver | `Money?` Free-shipping threshold for this seller, if any |
 | carrier | `string?` |
 | service | `string?` |
-| shipsFrom | `string` |
+| shipsFrom | `string` Effective ships-from (Offer.shipping.dispatch.shipsFrom): for marketly_service the Marketly warehouse, e.g. 'Reno, NV (Marketly warehouse)' |
+| fulfilledByLabel | `string?` 'Ships from Marketly' for marketly_service offers (the seller stays named in seller); null otherwise |
 | dispatchLabel | `string` |
 | orderWithinMinutes | `int?` Countdown to the cutoff that keeps this date |
 | serviceNotice | `string?` Holiday or known interruption (from shipping) |
@@ -351,6 +362,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | featuredEligible | `bool` |
 | ineligibleNote | `string?` Shown under ineligible offers on the all-offers page |
 | status | `enum(draft|active|paused|out_of_stock|ineligible|removed)` |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)` |
 | termsVersion | `int` |
 
 ### AutomaticDiscount
@@ -517,6 +529,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | otherOfferCount | `int` |
 | lowestNewPrice | `Money?` |
 | officialStorePrice | `Money?` |
+| fulfillmentNote | `string?` For marketly_service offers: 'Fulfilled by Marketly: customers see Marketly's delivery terms. Your dispatch time and shipping profile are saved but apply only if you leave the service.' |
 
 ### PricePoint
 
@@ -798,7 +811,8 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | missingItems | `string[]` |
 | price | `Money` Offer (regular) price at purchase. Campaign markdowns, flash prices, coupons and automatic discounts are not in it: the price the customer paid per unit comes from checkout (promotions evaluation) on the order item. |
 | compareAt | `Money?` |
-| dispatch | `DispatchTerms` |
+| dispatch | `DispatchTerms` Effective dispatch terms at purchase (Offer.shipping.dispatch): Marketly's for marketly_service offers |
+| fulfilledBy | `enum(official_warehouse|seller|marketly_service)?` Offer.fulfilledBy at purchase; offers always sets it (optional only so snapshots built elsewhere, e.g. test fixtures, stay valid) |
 | returnTerms | `ReturnTerms` |
 | warranty | `WarrantyTerms` |
 | stockItemId | `uuid` |
@@ -894,6 +908,7 @@ Nothing changes until apply. Only rows marked ready are applied; error rows are 
 | same_day_cutoff | time? |
 | ships_from | text |
 | shipping_profile_id | uuid |
+| fulfilled_by | text (official_warehouse|seller|marketly_service) |
 | return_kind | text |
 | return_window_days | int |
 | free_return_shipping | bool |
@@ -904,7 +919,7 @@ Nothing changes until apply. Only rows marked ready are applied; error rows are 
 | warranty_handled_by | text? |
 | status | text |
 | status_before_ineligible | text? |
-| ineligible_source | jsonb? ({ kind: restriction|suspension|product|staff, id }) |
+| ineligible_source | jsonb? ({ kind: restriction|suspension|product|staff|fulfillment_service, id }) |
 | status_reason | jsonb? |
 | publish_on_approval | bool |
 | content_gaps | text[] |
@@ -1092,6 +1107,7 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result)`
 | `trust.enforcement.reversed` | trust | Undo what trust.enforcement.recorded did for that enforcementId (inbox-claimed per event): offers it removed go back to Paused (same path as reinstateOffer, stock item unarchived by inventory, seller told and asked to resume); offers it held are released to their previous status; offers since changed by someone else (seller ended, staff removed for another reason) are left alone (noted in offer_status_log; trust's owner work item covers the rest). Publishes offers.offer.status_changed with trustEnforcementId |
 | `promotions.campaign.started` | promotions | Mark featured decisions dirty for offers whose automatic discount changes the comparable total |
 | `promotions.campaign.ended` | promotions | Same as started |
+| `fulfillment-service.offer.service_changed` | fulfillment-service | Inbox-claimed per event: set fulfilled_by (marketly_service or seller), bump terms_version and mark featured decisions dirty. With sellable false make the offer Ineligible (statusReason fulfillment_service_suspended, ineligible_source { kind: fulfillment_service, id: skuEnrollmentId }); with sellable true (or fulfilledBy seller) restoreEligibility on offers whose ineligible_source is fulfillment_service |
 
 ## In-process API (for other modules)
 
@@ -1211,6 +1227,7 @@ Checked through the access module (limits per role, second reviewer).
 - Offer title (decision O4): the title column of the offers table is denormalised from catalog so admin q search and shipping's profile usage lists need no catalog join.
 - Trust enforcements on offers (decision D8): suspend_offer / remove_offer recommendations are owned by the Catalog Manager, who holds offers.offers.remove. Reversals arrive as trust.enforcement.reversed and are undone here (see consumes).
 - Shipping profile ownership: create, update and bulk rows that set shippingProfileId check the owner with shipping.getProfileOwners([profileId]) (seller id, or official); a profile of another seller is SHIPPING_PROFILE_INVALID.
+- Fulfilled by Marketly (fulfillment-service, phase 4): offers.fulfilled_by is official_warehouse for Official Store offers and seller for seller offers (backfilled), and follows fulfillment-service.offer.service_changed. Read paths (getOffer, getOffers, quoteOffer, getOfferView, compareOffers, storefront views, revalidate, snapshotForOrder) resolve Offer.shipping for marketly_service rows with one batched fulfillment-service.getServiceTerms call. If the fulfillment service is off or returns null for such a row, the offer is treated as not sellable (Ineligible view), never as seller-shipped (decision D5). The delivery estimate and the featured rule use the effective profile and dispatch; SellerCue keeps the seller name while DeliveryEstimate.shipsFrom and fulfilledByLabel say Marketly. Seller edits of dispatch or shipping profile on a service offer are saved but have no customer effect while it is a service offer (SellerOfferDetail.fulfillmentNote).
 
 ## GraphQL (read layer)
 

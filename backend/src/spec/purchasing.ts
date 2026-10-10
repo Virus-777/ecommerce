@@ -2004,7 +2004,7 @@ export const spec = defineModuleSpec({
       "purchasing.claim.settled": { when: "A supplier settles a claim", payload: () => PurchasingClaimSettledEvent },
     },
     consumes: {
-      "inventory.receipt.confirmed": "Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline",
+      "inventory.receipt.confirmed": "Mark the receipt confirmed (who made the stock sellable) and add it to the PO timeline. Receipts with source.kind service_inbound (Fulfilled by Marketly) are not purchasing's and are ignored",
       "inventory.stock.low": "Refresh reorder suggestions for company stock items",
       "access.approval.decided": "Send an approved PO; record a rejection on the PO timeline"
     },
