@@ -175,7 +175,7 @@ export function toInboundLine(l: Row<'inbound_lines'>, item: Row<'stock_items'> 
   };
 }
 
-export function toInbound(r: Row<'inbound_receipts'>, lines: InboundLine[], waitingOrders: number): InboundReceipt {
+export function toInbound(r: Row<'inbound_receipts'>, lines: InboundLine[], openPickShortages: number): InboundReceipt {
   return {
     id: r.id,
     receiptId: r.receipt_id,
@@ -194,7 +194,7 @@ export function toInbound(r: Row<'inbound_receipts'>, lines: InboundLine[], wait
       shortage: lines.reduce((n, l) => n + l.shortage, 0),
       sellable: lines.reduce((n, l) => n + l.sellable, 0),
     },
-    waitingOrders,
+    openPickShortages,
     confirmedBy: actorOf(r.confirmed_by),
     confirmedAt: isoOrNull(r.confirmed_at),
   };

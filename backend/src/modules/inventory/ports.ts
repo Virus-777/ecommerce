@@ -105,6 +105,8 @@ export interface InventoryRepository {
   movementsByRef(refKind: string, refIds: string[]): Promise<Row<'stock_movements'>[]>;
   /** Units that left stock through dispatch since a time, per item */
   dispatchedSince(itemIds: string[], since: Date): Promise<Map<string, number>>;
+  /** Units moved with these reason codes since a time, per item */
+  unitsByReasonSince(itemIds: string[], since: Date, reasonCodes: string[]): Promise<Map<string, number>>;
 
   /* ---------------------------------------------------------------- incoming */
   expectations(filter: { sourceKind?: string; sourceId?: string; itemIds?: string[]; openOnly?: boolean }, lock?: Lock): Promise<Row<'incoming_expectations'>[]>;
@@ -114,6 +116,8 @@ export interface InventoryRepository {
   reservationsByOrder(orderId: string, lock?: Lock): Promise<Row<'reservations'>[]>;
   lines(reservationIds: string[], lock?: Lock): Promise<Row<'reservation_lines'>[]>;
   linesWhere(filter: { orderItemIds?: string[]; itemIds?: string[]; states?: string[] }, lock?: Lock): Promise<Row<'reservation_lines'>[]>;
+  /** Reservations whose key starts with a prefix (allocations made with allocateForOrder) for an order */
+  reservationsByKeyPrefix(orderId: string, prefix: string): Promise<Row<'reservations'>[]>;
   pageReservations(filter: { orderId?: string; stockItemId?: string; state?: string }, page: PageRequest): Promise<Page<Row<'reservations'>>>;
   /** Held reservations past their expiry */
   dueHolds(now: Date, limit: number): Promise<Row<'reservations'>[]>;

@@ -1,3 +1,4 @@
+import { GraphQLError } from 'graphql';
 import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type { Actor, Money } from '../../../spec/common.js';
@@ -47,6 +48,13 @@ function batcher<K, V>(load: (keys: K[], arg: string) => Promise<Map<K, V>>) {
     b.keys.add(key);
     return (await b.result).get(key);
   };
+}
+
+/** Stock fields resolve for the owning seller (own items only) or staff holding inventory.stock.view */
+async function assertStockReader(ctx: GraphQLContext) {
+  if (ctx.principal?.kind === 'staff' && !(await ctx.can('inventory.stock.view'))) {
+    throw new GraphQLError('Needs permission inventory.stock.view', { extensions: { code: 'FORBIDDEN' } });
+  }
 }
 
 /** The seller the caller acts for in the Seller Center; staff see company and seller items */
@@ -105,12 +113,16 @@ export const resolvers = (service: InventoryService): ModuleResolvers => {
         return a ? { ...a, state: up(a.state) } : { state: 'OUT_OF_STOCK', quantity: null, maxPerOrder: 0, purchaseLimit: root.purchaseLimit ?? null, label: 'Out of stock', expectedRestockDate: null };
       },
       stock: async (root: { id: string }, _args, ctx) => {
+        await assertStockReader(ctx);
         const s = await stockForOffers(ctx, root.id, viewerOf(ctx).sellerId ?? '');
         return s ? stockItemOut(s) : null;
       },
     },
     Variant: {
-      stock: async (root: { id: string }, _args, ctx) => ((await stockForVariants(ctx, root.id, viewerOf(ctx).sellerId ?? '')) ?? []).map(stockItemOut),
+      stock: async (root: { id: string }, _args, ctx) => {
+        await assertStockReader(ctx);
+        return ((await stockForVariants(ctx, root.id, viewerOf(ctx).sellerId ?? '')) ?? []).map(stockItemOut);
+      },
     },
     Query: {
       myStockSummary: async (_root, _args, ctx) => service.getSellerStockSummary(ctx.principal?.sellerId ?? '00000000-0000-0000-0000-000000000000'),

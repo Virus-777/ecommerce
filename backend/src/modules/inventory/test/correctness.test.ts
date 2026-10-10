@@ -61,6 +61,7 @@ describe('getStockItems', () => {
       locationId: second.id,
       locationCode: 'SEC2',
       binCode: null,
+      gtin: null, // catalog is off in these tests
     });
     // a seller's stock lives in the seller's virtual location
     expect(refs[1]).toMatchObject({ ownerType: 'seller', sellerId, offerId: own.offerId, locationCode: `SV-${sellerId}` });
@@ -128,6 +129,7 @@ describe('mapping reservation lines to the accepted order items', () => {
       quantity,
       cancellationId: newId(),
       initiatedBy: 'customer',
+      notifyCustomer: true,
       reasonCode: 'changed_mind',
       beforeDispatch: true,
       countsAgainstSeller: false,
