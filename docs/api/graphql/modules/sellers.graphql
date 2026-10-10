@@ -447,7 +447,7 @@ type SellerAppealDecision @areas(in: [SELLER, ADMIN]) {
 "A seller's appeal. Decided by someone other than the original decider; level 2 goes to the next reviewer."
 type SellerAppeal @areas(in: [SELLER, ADMIN]) {
   id: UUID!
-  "e.g. AP-261004-021"
+  "e.g. SAP-261004-021 (appeals filed before pass 4 keep their AP- reference)"
   ref: String!
   subject: SellerAppealSubject!
   subjectId: UUID!

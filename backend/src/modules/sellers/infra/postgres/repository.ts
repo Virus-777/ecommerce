@@ -5,7 +5,9 @@ import type { SellersRepository, Where } from '../../ports.js';
 
 /** jsonb columns per table: values are sent as JSON text (pg would turn JS arrays into PG arrays) */
 const JSON_COLUMNS: Record<string, readonly string[]> = {
-  sellers: ['business_address', 'contact', 'verification_checked', 'launch_review'],
+  sellers: ['business_address', 'contact', 'verification_checked', 'launch_review', 'payout_blocked_reasons'],
+  payout_changes: ['requested_by'],
+  pending_changes: ['payload', 'requested_by'],
   applications: ['completed_steps', 'account', 'business', 'verification', 'payout', 'return_address', 'decision'],
   information_requests: ['items'],
   risk_reviews: ['flags'],

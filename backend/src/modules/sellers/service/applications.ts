@@ -532,6 +532,7 @@ export class ApplicationsPart extends Part {
         launch_review: { state: 'not_started', issues: [] } as never,
         payout_readiness: 'not_added',
         payout_destination_label: null,
+        payout_blocked_reasons: [] as never,
         account_manager_id: null,
         application_id: locked.id,
         approved_at: null,
@@ -1067,7 +1068,7 @@ export class ApplicationsPart extends Part {
       let payout: Awaited<ReturnType<typeof this.parts.accounts.submitDestination>> | undefined;
       const details = sec.payout?.current;
       if (details) {
-        payout = await this.parts.accounts.submitDestination(tx, seller, app, details, by);
+        payout = await this.parts.accounts.submitDestination(tx, seller, details, by);
         seller = payout.after;
       }
       await this.core.timeline(tx, seller.id, { kind: 'approved', title: 'Seller account approved', detail: body.note ?? null, actor: by.actor, ref: a.ref });

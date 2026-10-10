@@ -36,7 +36,10 @@ export interface StoredVerification {
   w9DocumentId?: string | null;
 }
 
-/** applications.payout jsonb: the destination collected in the application, then the seller's payout account */
+/**
+ * applications.payout jsonb holds the destination collected in the application (current). The seller's payout
+ * account itself is read from payout_changes and sellers.payout_blocked_reasons in the same shape (core.payoutState).
+ */
 export interface StoredPayout {
   current?: StoredPayoutDetails | null;
   pendingChange?: (StoredPayoutDetails & { changeId: string; requestedAt: string }) | null;

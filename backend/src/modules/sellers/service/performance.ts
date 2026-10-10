@@ -152,7 +152,8 @@ export class PerformancePart extends Part {
         reason: reason.trim(),
         requestedBy: this.core.principalOf(by),
       });
-      throw new AppError('APPROVAL_REQUIRED', check.reason, { approvalRequestId: req.id });
+      const pending = await this.core.savePendingChange({ kind: 'performance_targets', approvalRequestId: req.id, payload: { targets, reason: reason.trim(), setBy: by.actor }, reason: reason.trim(), actor: by.actor });
+      throw new AppError('APPROVAL_REQUIRED', check.reason, { approvalRequestId: req.id, pendingChangeId: pending.id });
     }
     return this.applyTargets(targets, reason.trim(), by);
   }
