@@ -465,6 +465,8 @@ enum CartNoticeKind @areas(in: [STORE]) {
   NOT_SHIPPABLE
   DELIVERY_ESTIMATE_CHANGED
   COUPON_NO_LONGER_APPLIES
+  "The offer's return, warranty or dispatch terms changed; accepting moves the accepted terms version"
+  TERMS_CHANGED
 }
 
 enum CartNoticeSeverity @areas(in: [STORE]) {
@@ -540,6 +542,14 @@ type Variant {
   options: [VariantOption!]!
   gtin: String
   images: [MediaRef!]!
+  "Shipping weight of one unit in its retail packaging, in grams (parcel data for shipping quotes and labels)"
+  weightGrams: Int
+  "Packaged length of one unit, in centimetres"
+  lengthCm: Int
+  widthCm: Int
+  heightCm: Int
+  "Manufacturer list price (MSRP) set by Marketly staff; offers may show it as a reference price"
+  listPrice: Money
 }
 
 type VariantOption {
@@ -1042,6 +1052,8 @@ enum CheckoutChangeKind @areas(in: [STORE]) {
   COUPON_AMOUNT_CHANGED
   NOT_SHIPPABLE
   PURCHASE_LIMIT
+  "The offer's return, warranty or dispatch terms changed since the line was quoted"
+  TERMS_CHANGED
 }
 
 enum CheckoutChangeChoice @areas(in: [STORE]) {
@@ -4711,6 +4723,10 @@ type StoreInfoMarket {
   timeZone: String!
   locale: String!
   serviceRegionLabel: String!
+  "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"
+  legalName: String!
+  "One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"
+  companyLine: String!
 }
 
 type StoreInfoSupport {
@@ -5547,7 +5563,9 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   itemId: UUID
   product: Product!
   variant: Variant
-  "Seller the alert is limited to, if any"
+  "Seller the alert is limited to, if any (Alert.sellerId)"
+  sellerId: UUID
+  "Seller the alert is limited to. Null until the sellers module provides a shared mapper (wishlist has no sellers dependency): use sellerId"
   seller: SellerPublicProfile
   kind: WishlistAlertKind!
   "e.g. Any drop below $329.00; Olive, from Trailhead Outfitters"
@@ -5558,6 +5576,8 @@ type WishlistAlert @areas(in: [STORE]) @phase(n: 3) {
   triggeredAt: DateTime
   triggeredPrice: Money
   pausedReason: String
+  "Back-in-stock: when the item was seen unavailable (a restock can fire it); null while it has stayed in stock since the alert was switched on"
+  armedAt: DateTime
   createdAt: DateTime!
 }
 
