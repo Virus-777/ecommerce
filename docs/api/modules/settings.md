@@ -633,6 +633,10 @@ type StoreInfoMarket {
   timeZone: String!
   locale: String!
   serviceRegionLabel: String!
+  "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"
+  legalName: String!
+  "One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"
+  companyLine: String!
 }
 
 type StoreInfoSupport {

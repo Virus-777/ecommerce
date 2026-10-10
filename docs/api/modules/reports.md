@@ -24,7 +24,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/store/reports/signals` | Batched anonymous discovery signals from the website and app (product views) | shopper | `{ signals: json[] }` → 204 No content |
+| POST | `/api/store/reports/signals` | Batched anonymous discovery signals from the website and app (product views) | shopper | `{ signals: json[] }` → 202 No content |
 
 ## Seller API
 
@@ -46,7 +46,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | POST | `/api/admin/reports/reports/{key}/query` | Run a report with filters | staff<br>`reports.library.view` | `ReportQuery` → `ReportResult` |
 | GET | `/api/admin/reports/dashboard` | Admin dashboard figures: gross sales, orders, fee income, refunds and the sales split | staff<br>`reports.dashboard.view` | `AdminDashboard` |
 | GET | `/api/admin/reports/metrics` | Metric definitions | staff<br>`reports.library.view` | `MetricDefinition[]` |
-| GET | `/api/admin/reports/metrics/{key}` | A metric with its version history | staff<br>`reports.library.view` | `{ metric: MetricDefinition, versions: MetricDefinition[], suggestions: MetricSuggestion[] }` |
+| GET | `/api/admin/reports/metrics/{key}` | A metric with its version history | staff<br>`reports.library.view` | `{ metric: MetricDefinition, versions: MetricDefinition[], suggestions: MetricSuggestion[], ownerChanges: MetricOwnerChange[] }` |
 | POST | `/api/admin/reports/metrics` | Create a metric definition (draft) _(audited)_ | staff<br>`reports.definitions.manage` | `{ key: string, metric: MetricInput }` → `MetricDefinition` |
 | PATCH | `/api/admin/reports/metrics/{key}` | Revise a definition (new draft version) _(audited)_ | staff<br>`reports.definitions.manage` | `MetricInput` → `MetricDefinition` |
 | POST | `/api/admin/reports/metrics/{key}/publish` | Publish the draft version with an effective date _(audited)_ | staff<br>`reports.definitions.manage` | `{ effectiveFrom: date, changeNote: text }` → `MetricDefinition` |
@@ -123,6 +123,16 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | ownerId | `uuid?` Staff member who owns the metric; may be named later (PUT /metrics/{key}/owner) |
 | effectiveFrom | `date?` |
 | changeNote | `text` |
+
+### MetricOwnerChange
+
+| Field | Type |
+|---|---|
+| from | `StaffRef?` |
+| to | `StaffRef` |
+| reason | `text` |
+| changedBy | `Actor` |
+| changedAt | `datetime` |
 
 ### MetricSuggestion
 
@@ -293,7 +303,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 | sha256 | `string?` Checksum of the finished file, so a downloaded export (e.g. audit entries) can be checked for changes |
 | downloadUrl | `url?` Signed, single-user link while ready |
 | expiresAt | `datetime?` |
-| error | `string?` |
+| error | `string?` Why a failed job failed, e.g. More than 100,000 rows matched; narrow the filters (EXPORT_TOO_LARGE) |
 | createdAt | `datetime` |
 | finishedAt | `datetime?` |
 
@@ -311,7 +321,7 @@ Business reporting with stated meanings: metric definitions with a named owner a
 
 | Field | Type |
 |---|---|
-| period | `enum(today|last_7_days|last_30_days)` |
+| period | `enum(today|last_7_days|last_14_days|last_30_days)` |
 | range | `DateRange` |
 | asOf | `datetime` |
 | dateBasis | `string` Gross sales by order placement date |
@@ -426,6 +436,21 @@ Accepting opens a new draft version of the metric for its owner.
 | version | int |
 | effective_from | date |
 | reviewed_at | date? |
+| change_note | text? (what the current draft changes, or the published version's note) |
+
+**metric_owner_changes**: Who owned a metric when: every PUT /metrics/{key}/owner (not a new version)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| metric_key | text → metric_definitions |
+| from_staff_id | uuid? |
+| to_staff_id | uuid |
+| reason | text |
+| changed_by | text |
+| changed_at | timestamptz |
+
+Indexes: `(metric_key, changed_at desc)`
 
 **metric_versions**: Every published version of a definition; reports state which version they used
 
@@ -580,8 +605,10 @@ Indexes: `(requested_by_id, created_at desc)`, `(state, created_at)`
 | refunded_minor | bigint |
 | last_refund_at | timestamptz? |
 | buying_cost_minor | bigint? (Official Store, from inventory.getUnitCost) |
+| accepted_at | timestamptz? (order acceptance; rows recorded before pass 4 hold the placement time) |
+| group_id | uuid? (seller group of the order; payments.payment.captured is matched on it) |
 
-Indexes: `(placed_at)`, `(paid_at)`, `(shipped_at)`, `(completed_at)`, `(seller_id, placed_at)`, `(product_id, placed_at)`
+Indexes: `(placed_at)`, `(paid_at)`, `(shipped_at)`, `(completed_at)`, `(seller_id, placed_at)`, `(product_id, placed_at)`, `(order_id, group_id)`
 
 **fact_refunds**: One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order
 
@@ -646,7 +673,7 @@ Indexes: `unique(seller_id, day)`
 | seller_cancellations | int |
 | delivery_exceptions | int |
 | messages_received | int |
-| first_reply_minutes_p50 | int? |
+| first_reply_minutes_p50 | int? (median first reply minutes of the day from messaging.sellerResponseStats, its average when no median; a range shows the average of the daily medians) |
 | cases_opened | int |
 | cases_open_eod | int |
 | complaints_by_category | jsonb |
@@ -706,6 +733,25 @@ Indexes: `unique(day, query_norm)`
 
 Indexes: `unique(campaign_kind, campaign_id, day)`
 
+**open_stockouts**: Out-of-stock intervals still open per stock item (inventory.stock.changed); closing one adds its minutes to fact_discovery_daily
+
+| Column | Type |
+|---|---|
+| stock_item_id | uuid pk |
+| product_id | uuid |
+| since | timestamptz |
+
+**campaign_refs**: Campaign behind a coupon redemption or ad charge, for the reversal or credit that names only the redemption or charge
+
+| Column | Type |
+|---|---|
+| kind | text (redemption|charge) |
+| ref_id | uuid |
+| campaign_id | uuid |
+| created_at | timestamptz |
+
+Indexes: `pk (kind, ref_id)`
+
 **read_model_checkpoints**
 
 | Column | Type |
@@ -760,7 +806,7 @@ Indexes: `unique(campaign_kind, campaign_id, day)`
 | Function | Signature | Used by |
 |---|---|---|
 | registerDataset | `(dataset: ExportDataset) => void`<br>Owner modules register the columns of their datasets at boot. Only keys in the export dataset registry (ExportDatasetKey, setting exportDatasets) are accepted. Rows are read page by page through the owner's own publicApi function exportRows(dataset, filters, principal, cursor); reports runs the job, filters columns by permission and stores the file. | catalog, offers, inventory, purchasing, shipping, returns, support, finance, promotions, workqueues, orders, customers, sellers, audit, trust |
-| requestExport | `(input: { dataset: string, filters: json, format: 'csv' | 'xlsx' | 'jsonl', principal: identity.Principal, sellerId?: uuid }) => ExportJob`<br>Used by other modules' export endpoints; same rules as POST /exports (jsonl only for audit.admin.entries). Their status endpoints read the job back with getExport. | catalog, offers, inventory, returns, orders, customers, sellers, workqueues, audit, trust, finance |
+| requestExport | `(input: { dataset: string, filters: json, format: 'csv' | 'xlsx' | 'jsonl', principal: identity.Principal, sellerId?: uuid }) => ExportJob`<br>Used by other modules' export endpoints; same rules as POST /exports, including the dataset's own permission for the principal (jsonl only for audit.admin.entries). Their status endpoints read the job back with getExport. | catalog, offers, inventory, returns, orders, customers, sellers, workqueues, audit, trust, finance |
 | recordSignal | `(signal: { kind: 'product_view' | 'search_no_result' | 'cart_add', productId?: uuid, offerId?: uuid, query?: string, sessionKey?: string, at: datetime }) => void`<br>Discovery signals that are not events (anonymous counts only) | catalog, search, customers |
 | metric | `(key: string) => MetricDefinition | null`<br>Published definition text for tooltips in other modules' screens | sellers, finance, advertising, promotions |
 | getAdminDashboard | `(period: 'today' | 'last_7_days' | 'last_14_days' | 'last_30_days', principal: identity.Principal) => AdminDashboard`<br>Admin dashboard figures with definitions (same as GET /api/admin/reports/dashboard) | graphql |
@@ -792,7 +838,7 @@ Indexes: `unique(campaign_kind, campaign_id, day)`
 | Code | Status | Meaning |
 |---|---|---|
 | `RANGE_TOO_LARGE` | 422 | The range is longer than maxRangeDays |
-| `EXPORT_TOO_LARGE` | 422 | More than maxExportRows rows; narrow the filters |
+| `EXPORT_TOO_LARGE` | 422 | The export matched more than maxExportRows rows. Known only while the job runs (no request answers it): the job fails with this message in ExportJob.error (details.maxRows, details.matchedRows = rows read before stopping); narrow the filters and export again. |
 | `OWNER_REQUIRED` | 422 | A metric needs a named owner before it is published |
 | `METRIC_IN_USE` | 409 | A published report still uses this metric |
 | `DATASET_UNAVAILABLE` | 409 | The dataset is not in the export registry or its owner module is disabled |

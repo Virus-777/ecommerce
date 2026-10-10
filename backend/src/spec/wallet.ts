@@ -288,6 +288,8 @@ export interface CustomerWalletAdmin {
   goodwillLast30Days: common.Money;
   goodwillLimitPerCustomer: common.Money;
   pendingGrants: GoodwillGrant[];
+  /** Corrections waiting for a second reviewer */
+  pendingCorrections: CreditCorrection[];
 }
 
 export const CustomerWalletAdmin: z.ZodType<CustomerWalletAdmin> = z.object({
@@ -306,7 +308,55 @@ export const CustomerWalletAdmin: z.ZodType<CustomerWalletAdmin> = z.object({
   get pendingGrants() {
     return z.array(GoodwillGrant);
   },
+  get pendingCorrections() {
+    return z.array(CreditCorrection);
+  },
 }).register(common.apiTypes, { id: "wallet.CustomerWalletAdmin" });
+
+export interface CreditCorrection {
+  id: string;
+  customerId: string;
+  /** Signed: positive adds credit, negative takes it away */
+  amount: common.Money;
+  reason: string;
+  reference?: string | null;
+  state: "pending_approval" | "applied" | "rejected" | "failed";
+  approval?: common.ApprovalInfo | null;
+  /** The ledger entry once applied */
+  entry?: LedgerEntry | null;
+  /** Why an approved correction could not be applied (e.g. the customer no longer has the credit to take away) */
+  failure?: string | null;
+  requestedBy: common.Actor;
+  decidedBy?: common.Actor | null;
+  createdAt: string;
+  decidedAt?: string | null;
+}
+
+export const CreditCorrection: z.ZodType<CreditCorrection> = z.object({
+  id: z.uuid(),
+  customerId: z.uuid(),
+  get amount() {
+    return common.Money;
+  },
+  reason: z.string(),
+  reference: z.string().nullish(),
+  state: z.enum(["pending_approval", "applied", "rejected", "failed"]),
+  get approval() {
+    return common.ApprovalInfo.nullish();
+  },
+  get entry() {
+    return LedgerEntry.nullish();
+  },
+  failure: z.string().describe("Why an approved correction could not be applied (e.g. the customer no longer has the credit to take away)").nullish(),
+  get requestedBy() {
+    return common.Actor;
+  },
+  get decidedBy() {
+    return common.Actor.nullish();
+  },
+  createdAt: z.iso.datetime({ offset: true }),
+  decidedAt: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "wallet.CreditCorrection" });
 
 export interface LoyaltyAccount {
   customerId: string;
@@ -530,6 +580,8 @@ export interface WalletPublicApi {
   grantGoodwill(input: GoodwillInput, actor: common.Actor, idempotencyKey: string): Promise<GoodwillGrant>;
   /** Staff view of a customer's credit: balance, lots, goodwill in the last 30 days against the per-customer limit, and pending grants (GET /admin/wallet/customers/{customerId}). Used by: graphql. */
   getCustomerWallet(customerId: string): Promise<CustomerWalletAdmin>;
+  /** Customer data export hook (FORMAT.md): the customer's store credit lots (source, amounts, expiry) and ledger entries (what was added, used, returned, expired, corrected) as plain records. Staff names and internal reasons are left out. Called by customers when it builds a data export Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -638,6 +690,25 @@ export interface WalletDb {
     redeemed_by: string | null;
     redeemed_at: Date | null;
     created_by: string;
+    created_at: Date;
+  };
+  /** Staff balance corrections. One within the caller's adjustment limit is applied at once (state applied); one above it is saved pending_approval with its access approval request and applied (or rejected, or failed when the credit is no longer there) on access.approval.decided */
+  credit_corrections: {
+    id: string;
+    customer_id: string;
+    /** signed */
+    amount: number;
+    currency: string;
+    reason: string;
+    reference: string | null;
+    state: 'pending_approval' | 'applied' | 'rejected' | 'failed';
+    approval_request_id: string | null;
+    requested_by: string;
+    decided_by: string | null;
+    decided_at: Date | null;
+    ledger_entry_id: string | null;
+    failure: string | null;
+    idempotency_key: string;
     created_at: Date;
   };
   /** Phase 4 experiment: points earned and spent */
@@ -779,11 +850,11 @@ export const endpoints = defineEndpoints({
     permission: "wallet.goodwill.grant",
     scope: "staff",
     summary: "Grant goodwill credit with a reason",
-    desc: "Within the staff member's goodwill limit (from access) it is granted now; above it, the grant waits for approval and the response is 202 with the approval request. Per-customer 30-day limit applies.",
+    desc: "Within the staff member's goodwill limit (from access) it is granted now; above it, the grant is saved with state pending_approval and the response is still 201, with the approval request in `approval` (FORMAT.md, Approval responses); it is credited or rejected when the approval is decided. Per-customer 30-day limit applies.",
     body: () => GoodwillInput,
     response: () => GoodwillGrant,
     status: 201,
-    errors: ["APPROVAL_REQUIRED","GOODWILL_LIMIT_EXCEEDED"],
+    errors: ["GOODWILL_LIMIT_EXCEEDED"],
     idempotent: true,
     audited: true,
     approval: "Approval action wallet.goodwill.grant. Above the staff member's goodwill limit (e.g. Support $50) it goes to a Finance member whose limit covers it",
@@ -844,6 +915,7 @@ export const endpoints = defineEndpoints({
     permission: "wallet.credit.correct",
     scope: "staff",
     summary: "Correct a balance (positive or negative) with a reason",
+    desc: "Within the caller's adjustment limit (from access) the correction is applied now (state applied, with its ledger entry). Above it, the correction is saved with state pending_approval and the response is still 201, with the approval request in `approval` (FORMAT.md, Approval responses); it is applied when approved (or ends rejected, or failed when a negative correction no longer finds the credit). Retrying with the same Idempotency-Key answers the same correction.",
     params: () =>
       z.object({
         customerId: z.uuid(),
@@ -855,9 +927,9 @@ export const endpoints = defineEndpoints({
       reason: z.string(),
       reference: z.string().nullish(),
     }),
-    response: () => LedgerEntry,
+    response: () => CreditCorrection,
     status: 201,
-    errors: ["APPROVAL_REQUIRED","INSUFFICIENT_CREDIT"],
+    errors: ["INSUFFICIENT_CREDIT"],
     idempotent: true,
     audited: true,
     approval: "Approval action wallet.credit.correct. Corrections above the caller's adjustment limit need a second Finance reviewer",
@@ -886,7 +958,6 @@ export const endpoints = defineEndpoints({
       codesAvailableUntil: z.iso.datetime({ offset: true }).nullish(),
     }),
     status: 201,
-    errors: ["APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
     approval: "Approval action wallet.gift-cards.issue. Batch total above the caller's limit needs Finance approval",
@@ -975,7 +1046,7 @@ export const spec = defineModuleSpec({
   summary: "Customer store credit with an auditable ledger (refunds to credit, goodwill credit within approval limits, price adjustments, use at checkout, expiry), gift cards, and a placeholder for loyalty rewards. Checkout and payments use the balance through the in-process public API.",
   dependsOn: ["customers","payments"],
   optionalDeps: ["access","support","orders","notifications","finance","audit","media"],
-  publicApi: ["getBalance","holdCredit","captureHold","releaseHold","extendHold","getLiabilityTotal","creditRefund","grantGoodwill","getCustomerWallet"],
+  publicApi: ["getBalance","holdCredit","captureHold","releaseHold","extendHold","getLiabilityTotal","creditRefund","grantGoodwill","getCustomerWallet","exportCustomerData"],
   permissions: [
     {
       "key": "wallet.credit.view",
@@ -1022,6 +1093,27 @@ export const spec = defineModuleSpec({
     }
   ],
   stateMachines: {
+    "Credit correction": {
+      "field": "CreditCorrection.state",
+      "initial": "pending_approval",
+      "transitions": [
+        [
+          "pending_approval",
+          "apply",
+          "applied"
+        ],
+        [
+          "pending_approval",
+          "reject",
+          "rejected"
+        ],
+        [
+          "pending_approval",
+          "fail",
+          "failed"
+        ]
+      ]
+    },
     "Credit hold": {
       "field": "CreditHold.state",
       "initial": "held",
@@ -1579,6 +1671,68 @@ export const spec = defineModuleSpec({
         "nullable": false
       }
     },
+    "credit_corrections": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "customer_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "currency": {
+        "type": "text",
+        "nullable": false
+      },
+      "reason": {
+        "type": "text",
+        "nullable": false
+      },
+      "reference": {
+        "type": "text",
+        "nullable": true
+      },
+      "state": {
+        "type": "text",
+        "nullable": false
+      },
+      "approval_request_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "requested_by": {
+        "type": "text",
+        "nullable": false
+      },
+      "decided_by": {
+        "type": "text",
+        "nullable": true
+      },
+      "decided_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "ledger_entry_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "failure": {
+        "type": "text",
+        "nullable": true
+      },
+      "idempotency_key": {
+        "type": "text",
+        "nullable": false
+      },
+      "created_at": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
     "loyalty_entries": {
       "id": {
         "type": "uuid",
@@ -1621,6 +1775,9 @@ export const spec = defineModuleSpec({
     },
     "goodwill_grants": {
       "seller": "seller_id",
+      "customer": "customer_id"
+    },
+    "credit_corrections": {
       "customer": "customer_id"
     },
     "loyalty_entries": {

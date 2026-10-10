@@ -114,6 +114,12 @@ export interface MediaAsset {
   usageCount: number;
   /** Evidence files cannot be deleted before this */
   retainUntil?: string | null;
+  /** Taken down by staff (status removed); null otherwise */
+  removedAt?: string | null;
+  /** The takedown reason given by staff (status removed) */
+  removedReason?: string | null;
+  /** Taken-down public files: true when url and the old rendition URLs serve the neutral placeholder, false when they stop serving (no url). Null unless removed */
+  showPlaceholder?: boolean | null;
   createdAt: string;
   readyAt?: string | null;
 }
@@ -147,6 +153,9 @@ export const MediaAsset: z.ZodType<MediaAsset> = z.object({
   inUse: z.boolean(),
   usageCount: z.number().int(),
   retainUntil: z.iso.datetime({ offset: true }).describe("Evidence files cannot be deleted before this").nullish(),
+  removedAt: z.iso.datetime({ offset: true }).describe("Taken down by staff (status removed); null otherwise").nullish(),
+  removedReason: z.string().describe("The takedown reason given by staff (status removed)").nullish(),
+  showPlaceholder: z.boolean().describe("Taken-down public files: true when url and the old rendition URLs serve the neutral placeholder, false when they stop serving (no url). Null unless removed").nullish(),
   createdAt: z.iso.datetime({ offset: true }),
   readyAt: z.iso.datetime({ offset: true }).nullish(),
 }).register(common.apiTypes, { id: "media.MediaAsset" });
@@ -448,7 +457,7 @@ export const MediaAssetDeletedEvent: z.ZodType<MediaAssetDeletedEvent> = z.objec
 export interface MediaPublicApi {
   /** Asset with renditions and status Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, customers. */
   getAsset(assetId: string): Promise<MediaAsset | null>;
-  /** common.MediaRef (id, url, alt, width, height) for embedding in responses; removed files return the placeholder Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, search, cart, orders, wishlist. */
+  /** common.MediaRef (id, url, alt, width, height) for embedding in responses; removed files return the placeholder (or are left out when taken down without one) Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, search, cart, orders, wishlist. */
   refs(assetIds: string[], size?: 'thumb' | 'small' | 'medium' | 'large' | 'zoom'): Promise<common.MediaRef[]>;
   /** Record that a record uses a file. Fails if the asset is not ready, belongs to another owner (ASSET_NOT_OWNED) or the purpose does not fit the usage. Evidence usages extend retainUntil. Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, warehouse, trust. */
   attach(assetId: string, usage: UsageInput, expectedOwner: MediaOwner): Promise<void>;
@@ -501,6 +510,10 @@ export interface MediaDb {
     rejection_reason: string | null;
     removed_reason: string | null;
     removed_by: string | null;
+    /** set while status is removed */
+    removed_at: Date | null;
+    /** while removed: public URLs serve the neutral placeholder; false = they stop serving */
+    show_placeholder: boolean | null;
     retain_until: Date | null;
     /** generated files */
     expires_at: Date | null;
@@ -1001,7 +1014,7 @@ export const endpoints = defineEndpoints({
     permission: "media.assets.moderate",
     scope: "staff",
     summary: "Take a file down (policy, rights, privacy) with a reason",
-    desc: "Works even when in use. Using modules receive media.asset.removed and flag the record (e.g. product needs a new image).",
+    desc: "Works even when in use. Using modules receive media.asset.removed and flag the record (e.g. product needs a new image). The asset keeps removedAt, removedReason and showPlaceholder; with showPlaceholder false, MediaRef lookups (refs) leave the file out instead of returning the placeholder.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1023,6 +1036,7 @@ export const endpoints = defineEndpoints({
     permission: "media.assets.moderate",
     scope: "staff",
     summary: "Restore a removed file",
+    desc: "Brings the public renditions back and clears removedAt, removedReason and showPlaceholder.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1541,6 +1555,14 @@ export const spec = defineModuleSpec({
       },
       "removed_by": {
         "type": "text",
+        "nullable": true
+      },
+      "removed_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "show_placeholder": {
+        "type": "bool",
         "nullable": true
       },
       "retain_until": {

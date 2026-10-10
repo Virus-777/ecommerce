@@ -1178,6 +1178,7 @@ enum ConversationPartyKind @areas(in: [STORE, SELLER]) {
 
 type ConversationParticipant @areas(in: [STORE, SELLER]) {
   kind: ConversationParticipantKind!
+  "CUSTOMER: customers-module id; GUEST: order:<orderId>; SELLER: seller id (OFFICIAL_STORE_ID for the Official Store); STAFF: staff account id"
   id: String!
   name: String!
   "e.g. Marketly Support"
@@ -1188,6 +1189,8 @@ type ConversationParticipant @areas(in: [STORE, SELLER]) {
 
 enum ConversationParticipantKind @areas(in: [STORE, SELLER]) {
   CUSTOMER
+  "The buyer of a guest order (participant id order:<orderId>)"
+  GUEST
   SELLER
   STAFF
 }
@@ -3308,7 +3311,7 @@ enum ReviewAuthorKind {
 }
 
 type ReviewSoldBy {
-  "Null for the Official Store"
+  "OFFICIAL_STORE_ID for the Official Store"
   sellerId: UUID
   name: String!
 }
@@ -3464,10 +3467,10 @@ type SellerFeedbackPage implements Paged {
 
 """
 Seller feedback summary over the last 12 months, e.g. 98% positive · 4,812 ratings. Also given for the Official Store
-(official true, sellerId null), which collects the same package feedback.
+(official true, sellerId OFFICIAL_STORE_ID), which collects the same package feedback.
 """
 type SellerRating {
-  "Null for the Official Store"
+  "OFFICIAL_STORE_ID for the Official Store"
   sellerId: UUID
   "True for the Official Store"
   official: Boolean!
@@ -4493,7 +4496,7 @@ evidence files, deadlines and history (dispute review).
 """
 type Case {
   id: UUID!
-  "CS-NNNNNN"
+  "CS-YYMMDD-NNNN"
   ref: String!
   kind: CaseKind!
   subject: String!

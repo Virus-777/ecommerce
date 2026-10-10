@@ -57,6 +57,7 @@ export interface StockItem {
   condition: string;
   /** Product title and variant, e.g. 'Halden Aurora ANC Headphones, Black' */
   label: string;
+  /** The variant's first image, else the product's (read from catalog.getProducts; null while catalog is off) */
   image?: common.MediaRef | null;
   quantities: StockQuantities;
   state: "in_stock" | "low_stock" | "out_of_stock";
@@ -548,8 +549,10 @@ export const Adjustment: z.ZodType<Adjustment> = z.object({
 
 export interface Reservation {
   id: string;
-  /** Checkout session key (idempotency) */
+  /** Idempotency key within its source: the checkout session key (holds), order:<orderId> (an order re-allocated after its hold expired), or the caller's key for allocateForOrder */
   key: string;
+  /** checkout: a checkout hold and the order's own allocation; replacement or exchange: allocateForOrder for a replacement or exchange shipment (no expiry; releaseHold may release it) */
+  source: "checkout" | "replacement" | "exchange";
   state: "held" | "allocated" | "fulfilled" | "released" | "expired";
   orderId?: string | null;
   orderRef?: string | null;
@@ -562,7 +565,8 @@ export interface Reservation {
 
 export const Reservation: z.ZodType<Reservation> = z.object({
   id: z.uuid(),
-  key: z.string().describe("Checkout session key (idempotency)"),
+  key: z.string().describe("Idempotency key within its source: the checkout session key (holds), order:<orderId> (an order re-allocated after its hold expired), or the caller's key for allocateForOrder"),
+  source: z.enum(["checkout", "replacement", "exchange"]).describe("checkout: a checkout hold and the order's own allocation; replacement or exchange: allocateForOrder for a replacement or exchange shipment (no expiry; releaseHold may release it)"),
   state: z.enum(["held", "allocated", "fulfilled", "released", "expired"]),
   orderId: z.uuid().nullish(),
   orderRef: z.string().nullish(),
@@ -886,7 +890,10 @@ export const LowStockRow: z.ZodType<LowStockRow> = z.object({
 
 export interface Transfer {
   id: string;
+  /** TRF-YYMMDD-NNNN (numbered per market day) */
   ref: string;
+  /** Planner's note from createTransfer */
+  note?: string | null;
   fromLocationId: string;
   toLocationId: string;
   state: "draft" | "in_transit" | "received" | "cancelled";
@@ -898,7 +905,8 @@ export interface Transfer {
 
 export const Transfer: z.ZodType<Transfer> = z.object({
   id: z.uuid(),
-  ref: z.string(),
+  ref: z.string().describe("TRF-YYMMDD-NNNN (numbered per market day)"),
+  note: z.string().describe("Planner's note from createTransfer").nullish(),
   fromLocationId: z.uuid(),
   toLocationId: z.uuid(),
   state: z.enum(["draft", "in_transit", "received", "cancelled"]),
@@ -1358,6 +1366,7 @@ export interface InventoryDb {
   };
   reservations: {
     id: string;
+    source: 'checkout' | 'replacement' | 'exchange';
     key: string;
     order_id: string | null;
     order_ref: string | null;
@@ -1480,6 +1489,7 @@ export interface InventoryDb {
     to_location_id: string;
     state: string;
     created_by: string;
+    note: string | null;
     shipped_at: Date | null;
     received_at: Date | null;
   };
@@ -1489,6 +1499,16 @@ export interface InventoryDb {
     stock_item_id: string;
     quantity: number;
     received_quantity: number | null;
+  };
+  /** Daily company stock valuation per stock group (job inventory.valuation-snapshot) for trading reports; one row per market day and group, rewritten if the job runs again that day */
+  valuation_snapshots: {
+    snapshot_date: string;
+    stock_group: 'available' | 'reserved' | 'incoming' | 'damaged_held' | 'returned';
+    units: number;
+    value_at_cost_amount: number;
+    currency: string;
+    sku_count: number;
+    taken_at: Date;
   };
   /** Phase 4 */
   stock_counts: {
@@ -2585,7 +2605,7 @@ export const spec = defineModuleSpec({
     },
     "inventory.valuation-snapshot": {
       "schedule": "daily 23:59 market time",
-      "does": "Snapshot units and value at cost per group for company trading reports"
+      "does": "Snapshot units and value at cost per group of company stock into valuation_snapshots (one row per market day and group) for company trading reports"
     }
   },
   settings: {
@@ -2940,6 +2960,10 @@ export const spec = defineModuleSpec({
     "reservations": {
       "id": {
         "type": "uuid",
+        "nullable": false
+      },
+      "source": {
+        "type": "text",
         "nullable": false
       },
       "key": {
@@ -3366,6 +3390,10 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": false
       },
+      "note": {
+        "type": "text",
+        "nullable": true
+      },
       "shipped_at": {
         "type": "timestamptz",
         "nullable": true
@@ -3391,6 +3419,36 @@ export const spec = defineModuleSpec({
       "received_quantity": {
         "type": "int",
         "nullable": true
+      }
+    },
+    "valuation_snapshots": {
+      "snapshot_date": {
+        "type": "date",
+        "nullable": false
+      },
+      "stock_group": {
+        "type": "text",
+        "nullable": false
+      },
+      "units": {
+        "type": "int",
+        "nullable": false
+      },
+      "value_at_cost_amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "currency": {
+        "type": "char(3)",
+        "nullable": false
+      },
+      "sku_count": {
+        "type": "int",
+        "nullable": false
+      },
+      "taken_at": {
+        "type": "timestamptz",
+        "nullable": false
       }
     },
     "stock_counts": {

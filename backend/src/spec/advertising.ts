@@ -9,15 +9,6 @@ import * as common from './common.js';
 
 /* ------------------------------------------------------------------ types */
 
-export interface PageType {
-  /** Page types used for eligibility and blocking */
-  page: "home" | "category" | "search" | "product" | "campaign" | "collection" | "deals" | "brand" | "seller_store" | "official_store" | "cart" | "checkout" | "payment_result" | "order_tracking" | "returns" | "account" | "help";
-}
-
-export const PageType: z.ZodType<PageType> = z.object({
-  page: z.enum(["home", "category", "search", "product", "campaign", "collection", "deals", "brand", "seller_store", "official_store", "cart", "checkout", "payment_result", "order_tracking", "returns", "account", "help"]).describe("Page types used for eligibility and blocking"),
-}).register(common.apiTypes, { id: "advertising.PageType" });
-
 export interface CreativeFormat {
   device: "desktop" | "phone" | "any";
   width: number;
@@ -117,7 +108,7 @@ export interface Placement {
   enabled: boolean;
   /** Plan ch. 16/20: launch = full-screen, banners, pop-ups */
   availability: "launch" | "pilot" | "later";
-  /** PageType values, e.g. home, category, campaign */
+  /** Page types (see notes), e.g. home, category, campaign */
   eligiblePages: string[];
   pagesLabel: string;
   formats: CreativeFormat[];
@@ -144,7 +135,7 @@ export const Placement: z.ZodType<Placement> = z.object({
   kind: z.enum(["overlay", "inline", "card", "strip"]),
   enabled: z.boolean(),
   availability: z.enum(["launch", "pilot", "later"]).describe("Plan ch. 16/20: launch = full-screen, banners, pop-ups"),
-  eligiblePages: z.array(z.string()).describe("PageType values, e.g. home, category, campaign"),
+  eligiblePages: z.array(z.string()).describe("Page types (see notes), e.g. home, category, campaign"),
   pagesLabel: z.string(),
   get formats() {
     return z.array(CreativeFormat);
@@ -319,6 +310,7 @@ export const PromotedItem: z.ZodType<PromotedItem> = z.object({
 export interface AdBudget {
   billing: "none" | "cpc" | "cpm" | "fixed_daily";
   rate?: common.Money | null;
+  /** Spending limit per market day: midnight to midnight in the market time zone (kernel config), whatever the campaign's publication timeZone; charges accrue per market day (ad_charges.day) */
   dailyLimit?: common.Money | null;
   totalLimit?: common.Money | null;
   /** Maximum displays (own promotions have no budget charge) */
@@ -374,7 +366,7 @@ export interface AdCampaignInput {
   ownerStaffId?: string | null;
   linkedPromotionId?: string | null;
   placementKey: string;
-  /** PageType values within the placement's eligible pages */
+  /** Page types (see notes) within the placement's eligible pages */
   pages: string[];
   /** Limit category pages, e.g. Home & Kitchen */
   pageCategoryIds?: string[] | null;
@@ -409,7 +401,7 @@ export const AdCampaignInput: z.ZodType<AdCampaignInput> = z.object({
   ownerStaffId: z.uuid().nullish(),
   linkedPromotionId: z.uuid().nullish(),
   placementKey: z.string(),
-  pages: z.array(z.string()).describe("PageType values within the placement's eligible pages"),
+  pages: z.array(z.string()).describe("Page types (see notes) within the placement's eligible pages"),
   pageCategoryIds: z.array(z.uuid()).describe("Limit category pages, e.g. Home & Kitchen").nullish(),
   get audience() {
     return Audience;
@@ -599,6 +591,10 @@ export interface AdCampaign {
   status: "draft" | "in_review" | "approved" | "scheduled" | "live" | "paused" | "finished" | "archived" | "rejected";
   pausedReason?: string | null;
   pausedBy?: common.Actor | null;
+  /** Set when the system paused the campaign automatically (the matching event or sweep resumes promotion, offer, stock, product and availability pauses; seller and trust pauses stay for staff); null for a staff or seller pause */
+  pauseCause?: "promotion" | "offer" | "stock" | "product" | "availability" | "seller" | "trust" | null;
+  /** Why the campaign was rejected (status rejected) */
+  rejectedReason?: string | null;
   finishedReason?: "ended" | "budget_reached" | "delivery_cap_reached" | "promotion_ended" | "offer_unavailable" | "stopped_early" | "seller_restricted" | null;
   approvals: ApprovalStep[];
   checks: ReviewCheck[];
@@ -666,6 +662,8 @@ export const AdCampaign: z.ZodType<AdCampaign> = z.object({
   get pausedBy() {
     return common.Actor.nullish();
   },
+  pauseCause: z.enum(["promotion", "offer", "stock", "product", "availability", "seller", "trust"]).describe("Set when the system paused the campaign automatically (the matching event or sweep resumes promotion, offer, stock, product and availability pauses; seller and trust pauses stay for staff); null for a staff or seller pause").nullish(),
+  rejectedReason: z.string().describe("Why the campaign was rejected (status rejected)").nullish(),
   finishedReason: z.enum(["ended", "budget_reached", "delivery_cap_reached", "promotion_ended", "offer_unavailable", "stopped_early", "seller_restricted"]).nullish(),
   get approvals() {
     return z.array(ApprovalStep);
@@ -1028,7 +1026,7 @@ export const SponsoredProductSlot: z.ZodType<SponsoredProductSlot> = z.object({
 }).register(common.apiTypes, { id: "advertising.SponsoredProductSlot" });
 
 export interface ServeRequest {
-  /** PageType value */
+  /** Page type (see notes); an unknown or blocked page gets an empty decision */
   page: string;
   context: ServeContext;
   device: "desktop" | "phone" | "app";
@@ -1046,7 +1044,7 @@ export interface ServeRequest {
 }
 
 export const ServeRequest: z.ZodType<ServeRequest> = z.object({
-  page: z.string().describe("PageType value"),
+  page: z.string().describe("Page type (see notes); an unknown or blocked page gets an empty decision"),
   get context() {
     return ServeContext;
   },
@@ -1114,14 +1112,15 @@ export const ServeDecision: z.ZodType<ServeDecision> = z.object({
 export interface TrackEvent {
   impressionToken: string;
   kind: "display" | "click" | "dismiss" | "close" | "video_play";
-  at: string;
+  /** Client time, informational only: the server records its own time for frequency, attribution and charges */
+  at?: string | null;
   visibleMs?: number | null;
 }
 
 export const TrackEvent: z.ZodType<TrackEvent> = z.object({
   impressionToken: z.string(),
   kind: z.enum(["display", "click", "dismiss", "close", "video_play"]),
-  at: z.iso.datetime({ offset: true }),
+  at: z.iso.datetime({ offset: true }).describe("Client time, informational only: the server records its own time for frequency, attribution and charges").nullish(),
   visibleMs: z.number().int().nullish(),
 }).register(common.apiTypes, { id: "advertising.TrackEvent" });
 
@@ -1600,13 +1599,13 @@ export const AdvertisingCampaignEndingSoonEvent: z.ZodType<AdvertisingCampaignEn
 /** What other modules may call in-process: `ctx.use('advertising')` (or `ctx.tryUse` for an optional dependency). */
 export interface AdvertisingPublicApi {
   /** Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. personalizationAllowed false: only page context (query, category, product) is used, frequency state is kept per session only and clicks are not kept for attribution by visitor; customerId (signed-in shopper) lets frequency caps and attribution follow the customer across devices when personalization is allowed. Used by: search, catalog. */
-  sponsoredForResults(ctx: { page: PageType, query?: string, categoryId?: string, productId?: string, visitorId: string, sessionId: string, device: string, organicOfferIds: string[], personalizationAllowed: boolean, customerId?: string }): Promise<SponsoredProductSlot[]>;
+  sponsoredForResults(ctx: { page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help', query?: string, categoryId?: string, productId?: string, visitorId: string, sessionId: string, device: string, organicOfferIds: string[], personalizationAllowed: boolean, customerId?: string }): Promise<SponsoredProductSlot[]>;
   /** Ad positions on a page, so content can show them as locked markers in homepage sections. Used by: content. */
-  adPositionsFor(page: PageType): Promise<{ placementKey: string, name: string, enabled: boolean }[]>;
+  adPositionsFor(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help'): Promise<{ placementKey: string, name: string, enabled: boolean }[]>;
   /** Ads linked to a promotion (shown on the promotion detail). Used by: promotions, graphql. */
   campaignsForPromotion(promotionId: string): Promise<AdCampaignSummary[]>;
   /** True for checkout, payment results, order tracking and returns; used by front-end shells to skip the serve call. Used by: content. */
-  isAdBlockedPage(page: PageType): Promise<boolean>;
+  isAdBlockedPage(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help'): Promise<boolean>;
   /** Displays, clicks, dismissals, attributed purchases and spend per campaign and day, from the daily_stats read model (days still open are marked partial). Used by: reports. */
   dailyPerformance(range: common.DateRange, filter?: { campaignId?: string, sellerId?: string }): Promise<CampaignDayPerformance[]>;
   /** Read-only advertising summary for the Admin dashboard tile: live now (own and paid), starting in 7 days, ending soon, waiting approval, spend this month and short campaign lists. Records nothing; ad serving stays on POST /api/store/advertising/decisions. Used by: graphql, reports. */
@@ -1681,6 +1680,12 @@ export interface AdvertisingDb {
     after_approval: 'schedule' | 'activate';
     status: string;
     paused_reason: string | null;
+    /** Actor kind:id of the last pause */
+    paused_by: string | null;
+    paused_at: Date | null;
+    /** automatic pauses only */
+    pause_cause: 'promotion' | 'offer' | 'stock' | 'product' | 'availability' | 'seller' | 'trust' | null;
+    rejected_reason: string | null;
     finished_reason: string | null;
     note_to_reviewers: string | null;
     created_by: string;
@@ -1691,9 +1696,11 @@ export interface AdvertisingDb {
   /** Promoted offers, products, stores or brands */
   campaign_items: {
     campaign_id: string;
-    kind: string;
+    kind: 'offer' | 'product' | 'seller_store' | 'brand';
     target_id: string;
     label: string | null;
+    /** the product: target_id for kind product, the offer's product for kind offer; null for stores and brands */
+    product_id: string | null;
   };
   campaign_creatives: {
     campaign_id: string;
@@ -1783,6 +1790,10 @@ export interface AdvertisingDb {
     session_displays: number;
     window_displays: number;
     window_started_at: Date;
+    /** market day day_displays counts; null for rows written before it was kept */
+    display_day: string | null;
+    day_displays: number;
+    total_displays: number;
     last_display_at: Date | null;
     suppressed_until: Date | null;
   };
@@ -2347,11 +2358,11 @@ export const endpoints = defineEndpoints({
     permission: "advertising.rules.manage",
     scope: "staff",
     summary: "Change global rules (Business Owner approval)",
-    desc: "Always becomes an approval request; the new version takes effect at effectiveAt after approval.",
+    desc: "Always becomes an approval request (access.requestApproval, action advertising.rules.change: Business Owner, second person always; no access.check because nobody may apply it alone): the pending version is saved and the answer is 202 with approval (ApprovalInfo), never 409 APPROVAL_REQUIRED. The new version takes effect at effectiveAt after approval.",
     body: () => GlobalRulesInput,
     response: () => GlobalRules,
     status: 202,
-    errors: ["APPROVAL_REQUIRED","VALIDATION_FAILED"],
+    errors: ["VALIDATION_FAILED"],
     audited: true,
     approval: "Approval action advertising.rules.change. Always needs Business Owner approval",
     screens: ["admin/ad-placements","admin/settings"],
@@ -3447,6 +3458,22 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       },
+      "paused_by": {
+        "type": "text",
+        "nullable": true
+      },
+      "paused_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "pause_cause": {
+        "type": "text",
+        "nullable": true
+      },
+      "rejected_reason": {
+        "type": "text",
+        "nullable": true
+      },
       "finished_reason": {
         "type": "text",
         "nullable": true
@@ -3487,6 +3514,10 @@ export const spec = defineModuleSpec({
       },
       "label": {
         "type": "text",
+        "nullable": true
+      },
+      "product_id": {
+        "type": "uuid",
         "nullable": true
       }
     },
@@ -3777,6 +3808,18 @@ export const spec = defineModuleSpec({
       },
       "window_started_at": {
         "type": "timestamptz",
+        "nullable": false
+      },
+      "display_day": {
+        "type": "date",
+        "nullable": true
+      },
+      "day_displays": {
+        "type": "int",
+        "nullable": false
+      },
+      "total_displays": {
+        "type": "int",
         "nullable": false
       },
       "last_display_at": {

@@ -155,7 +155,7 @@ export interface Limits {
   usageCap?: number | null;
   /** Uses per customer */
   perCustomer?: number | null;
-  /** Coupons of this campaign per order */
+  /** Codes of this campaign per order: empty or 1. A campaign applies at most once per order (a second code of the same campaign is rejected with per_order_limit); a value above 1 is refused with VALIDATION_FAILED */
   perOrder?: number | null;
   /** Purchase limit in units (markdowns, flash sales) */
   perCustomerUnits?: number | null;
@@ -167,7 +167,7 @@ export const Limits: z.ZodType<Limits> = z.object({
   },
   usageCap: z.number().int().describe("Total redemptions").nullish(),
   perCustomer: z.number().int().describe("Uses per customer").nullish(),
-  perOrder: z.number().int().describe("Coupons of this campaign per order").nullish(),
+  perOrder: z.number().int().describe("Codes of this campaign per order: empty or 1. A campaign applies at most once per order (a second code of the same campaign is rejected with per_order_limit); a value above 1 is refused with VALIDATION_FAILED").nullish(),
   perCustomerUnits: z.number().int().describe("Purchase limit in units (markdowns, flash sales)").nullish(),
 }).register(common.apiTypes, { id: "promotions.Limits" });
 
@@ -176,7 +176,7 @@ export interface Funding {
   /** Platform share of the discount on seller offers when shared, e.g. 5000 */
   platformShareBps?: number | null;
   costCenter?: string | null;
-  /** Official Store items: the discount is a company cost shown in company trading margin */
+  /** Funding note for Finance (column campaigns.funding_note), e.g. Official Store items: the discount is a company cost shown in company trading margin */
   note?: string | null;
 }
 
@@ -184,7 +184,7 @@ export const Funding: z.ZodType<Funding> = z.object({
   owner: z.enum(["platform", "seller", "shared"]),
   platformShareBps: z.number().int().describe("Platform share of the discount on seller offers when shared, e.g. 5000").nullish(),
   costCenter: z.string().nullish(),
-  note: z.string().describe("Official Store items: the discount is a company cost shown in company trading margin").nullish(),
+  note: z.string().describe("Funding note for Finance (column campaigns.funding_note), e.g. Official Store items: the discount is a company cost shown in company trading margin").nullish(),
 }).register(common.apiTypes, { id: "promotions.Funding" });
 
 export interface StackingRules {
@@ -1251,7 +1251,7 @@ export interface OfferPromotion {
   flash?: FlashCountdown | null;
   /** e.g. 10% off orders over $100 from Northwind Audio, applied automatically */
   sellerPromos: PromoBanner[];
-  /** Per-unit discount the customer gets without doing anything (autoApply campaigns with no minimum spend, e.g. an automatic 10% off), on top of price. Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none */
+  /** Per-unit discount the customer gets without doing anything (running autoApply coupon campaigns for everyone, or every signed-in customer when signed in, e.g. an automatic 10% off), on top of price. A minimum spend counts when one unit at price reaches it; category and brand scopes are matched from catalog (getProducts). Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none */
   automaticDiscount?: common.Money | null;
   automaticDiscountLabel?: string | null;
 }
@@ -2060,7 +2060,7 @@ export interface PromotionsPublicApi {
   priceOffers(offerIds: string[], ctx: { customerId?: string, at?: string }): Promise<OfferPromotion[]>;
   /** Runs eligibility, stacking, limits and budgets for a cart or checkout quote. Returns per-line discounts with the funding split, free-shipping packages, applied codes with the items they cover and rejected codes with a reason the customer can read. Pure read: nothing is reserved. Used by: cart, checkout. */
   evaluateCart(input: CartEvaluationInput): Promise<CartEvaluation>;
-  /** Holds budget, usage counts and flash deal stock for a quote while payment runs. Fails with BUDGET_EXHAUSTED, USAGE_LIMIT_REACHED or DEAL_SOLD_OUT so checkout can show the revised total before the customer commits (plan ch. 6). Used by: checkout. */
+  /** Holds budget, usage counts and flash deal stock for a quote while payment runs. Fails with BUDGET_EXHAUSTED, USAGE_LIMIT_REACHED (total, per-customer or code limit, details.limit) or DEAL_SOLD_OUT so checkout can show the revised total before the customer commits (plan ch. 6); also PURCHASE_LIMIT_EXCEEDED (per-customer unit limit of a markdown or flash price, details.limit), COUPON_NOT_ELIGIBLE (details.reason expired: a campaign of the quote is no longer running), CONFLICT (the quote's validUntil has passed: evaluate again), NOT_FOUND (unknown evaluationId) and VALIDATION_FAILED (no idempotency key). Same evaluation and key while the hold is live: the same reservation. Used by: checkout. */
   reserveRedemption(evaluationId: string, idempotencyKey: string): Promise<RedemptionReservation>;
   /** Binds a reservation to the placed order (line id → order item id). Also triggered by orders.order.placed. Used by: checkout. */
   commitRedemption(reservationId: string, orderId: string, orderItemIds: Record<string, string>): Promise<Redemption[]>;
@@ -2076,7 +2076,7 @@ export interface PromotionsPublicApi {
   isCampaignActive(campaignId: string): Promise<{ active: boolean, reason?: string }>;
   /** Flash deals for the homepage Deals section. campaignId limits the result to one campaign (content SourceRule.campaignId: a section or collection fed by one promotion). Used by: content, graphql. */
   liveDeals(opts: { limit: number, campaignId?: string }): Promise<FlashSaleBlock[]>;
-  /** Honest 'was' price: delegates to offers.lowestPrice(offerId, referencePriceDays, campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions. Used by: offers, wishlist. */
+  /** Honest 'was' price: delegates to offers.lowestPrice(offerId, offers.wasPriceLookbackDays (read with ctx.settings.read; offers owns the window, decision O5), campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions. Used by: offers, wishlist. */
   referencePrice(offerId: string): Promise<common.Money | null>;
   /** Deals page data in one call: tab counts, live flash sales, clippable coupons (clipped state for the customer), the first clearance batch, upcoming events with reminder state, the combination rules and serverTime for countdowns. Same data as GET /api/store/promotions/deals. Used by: graphql. */
   getDealsPage(ctx: { customerId?: string, at?: string }): Promise<DealsPage>;
@@ -2125,9 +2125,12 @@ export interface PromotionsDb {
     funding_owner: string;
     platform_share_bps: number | null;
     cost_center: string | null;
+    /** Funding.note */
+    funding_note: string | null;
     stacking: Json;
     exclusive_group: string | null;
     participation: Json | null;
+    /** DealsPlacement */
     deals: Json | null;
     terms: string | null;
     status: string;
@@ -2212,7 +2215,7 @@ export interface PromotionsDb {
   coupon_codes: {
     id: string;
     campaign_id: string;
-    /** case-insensitive */
+    /** case-insensitive: unique by upper(code) among active codes; a code frees up when its campaign ends or is cancelled */
     code: string;
     kind: 'shared' | 'unique';
     max_redemptions: number | null;
@@ -2667,13 +2670,15 @@ export const endpoints = defineEndpoints({
     permission: "promotions.discounts.manage",
     scope: "own-seller",
     summary: "Resume an own discount",
+    desc: "Back to live inside the period (scheduled before it starts); the first time it goes live also publishes promotions.campaign.started. Refused with VALIDATION_FAILED once the period is over.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     response: () => SellerDiscount,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","VALIDATION_FAILED"],
+    events: ["promotions.campaign.resumed","promotions.campaign.started"],
     screens: ["seller/marketing"],
     phase: 1,
   },
@@ -3222,6 +3227,7 @@ export const endpoints = defineEndpoints({
     permission: "promotions.campaigns.publish",
     scope: "staff",
     summary: "Resume a paused campaign",
+    desc: "Back to live inside the period (scheduled before it starts); the first time it goes live also publishes promotions.campaign.started. Refused with VALIDATION_FAILED once the period is over.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3231,9 +3237,9 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Campaign,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","VALIDATION_FAILED"],
     audited: true,
-    events: ["promotions.campaign.resumed"],
+    events: ["promotions.campaign.resumed","promotions.campaign.started"],
     screens: ["admin/promotions"],
     phase: 1,
   },
@@ -3730,7 +3736,7 @@ export const spec = defineModuleSpec({
       "orders.item.cancelled": "Reverse the item's allocations; restore usage and deal stock when cancelled before dispatch",
       "returns.refund.approved": "Partially reverse each item's allocations by its refunded quantity from the payload items ({ orderItemId, quantity }[]; a refund without items reverses nothing and is logged); count the return in campaign results",
       "orders.item.split": "Split the item's redemption_lines between the original and the new order item in proportion to the quantities, so later cancellations, refundShare and fundingSplitFor on either id find their share",
-      "payments.payment.failed": "Release reservations of the failed quote",
+      "payments.payment.failed": "Keep the declined checkout's reservations (idempotency key = checkoutSessionId) for the retry window: expiresAt is extended to at least reservationTtlMinutes after the decline, never shortened. They go back when they expire (release-expired-reservations), when checkout releases them (abandoned or expired session) or when the retry reserves a changed quote",
       "offers.offer.price_changed": "Flag participations whose seller raised the price during the campaign (the was price itself is read from offers.lowestPrice)",
       "offers.offer.status_changed": "Rebuild eligible offers; remove deactivated offers from flash sales",
       "inventory.stock.changed": "Cap remaining flash deal stock at available stock; re-check participation stock rules",
@@ -3792,15 +3798,6 @@ export const spec = defineModuleSpec({
       "type": "int",
       "min": 1,
       "approval": "second_reviewer",
-      "sellerVisible": true
-    },
-    "referencePriceDays": {
-      "default": 30,
-      "desc": "Look-back window passed to offers.lowestPrice for the was price (keep equal to offers' compare-at window)",
-      "type": "duration",
-      "min": 1,
-      "unit": "days",
-      "approval": "business_owner",
       "sellerVisible": true
     },
     "budgetWarningPct": {
@@ -3987,6 +3984,10 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "cost_center": {
+        "type": "text",
+        "nullable": true
+      },
+      "funding_note": {
         "type": "text",
         "nullable": true
       },

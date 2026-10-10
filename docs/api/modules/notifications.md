@@ -113,7 +113,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | id | `string` |
 | ref | `string?` MK-260914-48213, RT-261002-0520, CS-261005-3381, PO-261005-3381 |
 | label | `string?` Button text, e.g. Open dispatch queue |
-| screen | `string` App route / prototype screen id, e.g. account/tracking, seller/order, ops/dispatch |
+| screen | `string` App route / prototype screen id (design/prototype catalogue), the screen where the publishing module shows the record (its endpoint screens), e.g. account/tracking, seller/order, ops/dispatch. Invitation emails carry url and use accept-invitation (identity lists no screen for it) |
 | url | `url?` |
 
 ### NotifyInput
@@ -648,7 +648,7 @@ stateDiagram-v2
   open --> expired: expire
 ```
 
-Only notices with actionRequired. resolve comes from the owning module (resolve(dedupeKey)) when the work is done and sets resolvedAt; expire (purge job: the record closed without the work, or the deadline passed long ago) sets expiredAt and never resolvedAt. Read state is separate and per person.
+Only notices with actionRequired. resolve comes from the owning module (resolve(dedupeKey)) when the work is done and sets resolvedAt; expire (purge job, daily) sets expiredAt and never resolvedAt: an open action notice expires actionNoticeExpiryDays after its deadline, or, when it has no deadline, actionNoticeExpiryDays after it was created (the owning module never resolved it, so the record closed another way). Read state is separate and per person.
 
 ## Data (schema `notifications`)
 
@@ -1001,7 +1001,7 @@ Indexes: `(status, scheduled_at)`
 | `trust.appeal.decided` | trust | The appellant: customer (topic customer.trust.appeal_decided) or seller owner (topic seller.trust.appeal_decided): the appeal outcome and what changes (restriction lifted or kept) |
 | `payments.refund.destination_requested` | payments | Customer (by the payload's customerId, else the order email; topic customer.refund.destination_needed, returns_refunds group): the refund could not go back to the original payment method; choose where to receive it, with the deadline; action required |
 | `customers.closure.delayed` | customers | Customer (topic customer.account.closure_delayed, account group): the account closure is waiting because new obligations appeared (blockers listed), and when it is checked again |
-| `offers.offer.missing_items_stale` | offers | Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role) |
+| `offers.offer.missing_items_stale` | offers | Ask the seller to review the offer's missing-items list after the product's box contents changed (topic seller.offer.missing_items_review, members with offers.offers.manage); Official Store offers go to staff (topic staff.offer.missing_items_review, Catalog Manager role). Information notices, not action notices: offers publishes nothing when the seller confirms the list unchanged, so an action could never be resolved |
 | `inventory.stock.low_digest` | inventory | Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock |
 | `sellers.application.information_reminder` | sellers | Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request |
 | `workqueues.day_end.completed` | workqueues | Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices |
@@ -1057,12 +1057,13 @@ Indexes: `(status, scheduled_at)`
 | `notifications.send-scheduled` | every minute | Send scheduled notices due now (dispatch deadline reminders 4 h before, drop-off reminders, approval due reminders) |
 | `notifications.send-broadcasts` | every minute | Start scheduled broadcasts, resolve consenting recipients, respect quiet hours for SMS and push, publish notifications.broadcast.sent |
 | `notifications.staff-digest` | daily 08:00 market time | Email the daily digest to staff who chose it (08:00 is the start of business hours; on closed days it waits for the next open day) |
-| `notifications.purge` | daily | Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices whose records closed as expired (expired_at, not resolved_at) |
+| `notifications.purge` | daily | Delete notices older than noticeRetentionMonths and delivery rows older than deliveryLogRetentionDays; mark unresolved action notices expired (expired_at, not resolved_at) actionNoticeExpiryDays after their deadline, or after they were created when they have no deadline |
 
 ## Settings
 
 | Key | Default | Rules | Meaning |
 |---|---|---|---|
+| actionNoticeExpiryDays | `30` | duration, days, 1–365 | An unresolved action notice is marked expired (No longer needed) this many days after its deadline, or after it was created when it has no deadline |
 | noticeRetentionMonths | `12` | duration, months, 1–… | Notices are kept for 12 months (seller inbox copy) |
 | deliveryLogRetentionDays | `180` | duration, days, 30–… | Delivery log retention |
 | maxDeliveryAttempts | `6` | int, 1–20 | Attempts before a delivery fails |
@@ -1087,6 +1088,7 @@ Indexes: `(status, scheduled_at)`
 - Seller routing: seller topics are addressed to the seller workspace and fanned out to members who hold the topic's seller permission (from sellers.getMemberAccess) and have the group on; owner-only groups (payouts and holds) reach only the owner; essential groups always reach the owner by email.
 - Every notice links to its record (NoticeLink.screen + id); templates must include the link variable (validation). Notices say what happened and what to do next with the deadline; they never claim more than the event says (e.g. 'refund approved' never says the money has arrived; 'dispatched' never says 'in transit' before a carrier scan).
 - Guests: notices for guest orders go by email only (recipient kind guest_email) and include the guest order link minted by customers.
+- Default templates: install seeds version 1 of every topic and channel from the built-in defaults. A template nobody edited (every version written by the system) follows the defaults: when a default changes (e.g. the purchase order email gained the Deliver to line), the boot seed publishes a new system version (note Default template updated) and supersedes the old one. A template with any staff version is never touched.
 - Sensitive events (codes, reset links, invitation links) are rendered and sent without storing the secret: the delivery row keeps the template version and a redacted subject; such deliveries are not retryable from the log.
 - Android: push arrives in phase 3; until then the app polls GET /inbox/summary on resume. Push payloads carry only the title, a short body and the NoticeLink, never personal details beyond the order reference.
 

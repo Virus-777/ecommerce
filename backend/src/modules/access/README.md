@@ -552,7 +552,7 @@ stateDiagram-v2
   active --> ended: end
 ```
 
-Periods with delegateApprovals start in pending_approval (Business Owner approves the delegation: granting access is not financial authority). start and end run from the job at from/to; end can also be called early. Coverage only re-routes work and notices; covering people use their own limits unless delegation was approved, and then never more than the away person's limits.
+Periods with delegateApprovals start in pending_approval (Business Owner approves the delegation: granting access is not financial authority). start and end run from the job at from/to; end can also be called early. Coverage only re-routes work and notices; covering people use their own permissions and limits unless delegation was approved. With an approved delegation they also get the covered roles' permissions and may approve with the away person's limits (never more; decisions record viaDelegationFrom). Both are read at request time from now in [from, to) for scheduled and active periods, so they start and end on time even when the job is late, and only while the away person still holds the role. A delegation waiting for approval lends nothing.
 
 ## Data (schema `access`)
 

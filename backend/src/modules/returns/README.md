@@ -416,7 +416,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 |---|---|
 | orderId | `uuid` |
 | items | `ReturnItemInput[]` |
-| reason | `enum(defective|damaged|wrong_item|not_as_described|missing_parts|changed_mind|better_price|no_longer_needed|wrong_size|other)` |
+| reason | `enum(defective|damaged|wrong_item|not_as_described|missing_parts|changed_mind|better_price|no_longer_needed|wrong_size|other)` Grouped for the rules: defective, damaged, wrong_item, not_as_described and missing_parts are fault reasons (fault window, the seller pays return shipping); changed_mind, better_price, no_longer_needed, wrong_size and other are change of mind (change-of-mind window, return shipping per the terms). other counts as change of mind; when the customer's description shows a fault, the seller or Marketly can still decide it as one |
 | details | `text` |
 | mediaIds | `uuid[]?` |
 | remedy | `enum(refund|replacement|exchange|store_credit)` |
@@ -977,7 +977,7 @@ stateDiagram-v2
   declined --> cancelled: cancel
 ```
 
-Plan ch. 13 refund statuses. requested = estimate shown at request time. Seller-issued refunds for the seller's own return go requested→approved (the seller is the approver). Official Store, platform-decided, case and exception refunds go through under_review and Finance approval (returns.refunds.approve); above the approver's limit approve returns APPROVAL_REQUIRED and an access approval request. handOver happens in the same transaction as approval by calling payments; confirmSent and fail mirror payments.refund.sent / payments.refund.failed. Retry is executed by payments (it checks the provider first so a refund is never sent twice). Approved never means money arrived; only sent does.
+Plan ch. 13 refund statuses. requested = estimate shown at request time. Seller-issued refunds for the seller's own return go requested→approved (the seller is the approver). Official Store, platform-decided, case and exception refunds go through under_review and Finance approval (returns.refunds.approve); above the approver's limit the request stays under review with an access approval request (`approval` in the response, FORMAT.md Approval responses) and is approved when access decides it. handOver follows the approval right after it is committed: returns calls payments.startRefund (idempotent per refund request) and moves to processing; if payments cannot be reached the request stays approved and the returns.inspection-deadlines job retries the hand-over (requests approved more than 5 minutes ago without a payments refund). Store credit is handed to wallet instead: wallet.creditRefund adds the credit at once, so approved → processing → sent happen in the same call (handOver then confirmSent) and the return completes. confirmSent and fail mirror payments.refund.sent / payments.refund.failed. Retry is executed by payments (it checks the provider first so a refund is never sent twice). Approved never means money arrived; only sent does.
 
 ### Replacement (`Replacement.status`)
 
@@ -1124,6 +1124,7 @@ Indexes: `(seller_id, effective_from desc)`
 | inspector | jsonb? |
 | inspection_started_at | timestamptz? |
 | requested_at | timestamptz |
+| received_at | timestamptz? (when the parcel reached the destination: the receipt time staff or the warehouse recorded) |
 | completed_at | timestamptz? |
 | updated_at | timestamptz |
 
@@ -1220,7 +1221,7 @@ Indexes: `(return_id, added_at)`
 
 Indexes: `(return_id)`
 
-**refund_requests**: Customer refund decisions waiting for or past Finance approval. Money movement is in payments.
+**refund_requests**: Customer refund decisions waiting for or past Finance approval. Money movement is in payments. Items are in refund_request_items, the history in refund_request_events
 
 | Column | Type |
 |---|---|
@@ -1230,15 +1231,24 @@ Indexes: `(return_id)`
 | return_id | uuid? → returns |
 | case_id | uuid? |
 | order_id | uuid |
-| order_item_ids | jsonb |
 | owner_type | text (official|seller) |
 | seller_id | uuid? |
+| customer_id | uuid? (the order customer; null for guests) |
+| contact_email | text? (order contact email, so customer-facing events reach guests) |
+| customer_name | text? |
+| seller_name | text? |
+| order_ref | text? |
 | status | text |
 | item_amount | bigint |
 | discount_share | bigint |
 | shipping_refund | bigint |
 | return_shipping_deduction | bigint |
-| deductions | jsonb |
+| deductions | jsonb (RefundDeduction[]: the itemised deductions with reasons) |
+| tax_refund | bigint? (sales tax included in total) |
+| max_refundable | bigint (what payments said could still be refunded when the request was made) |
+| destination | text (original_method|store_credit) |
+| destination_label | text |
+| remedy_kind | text (full_refund, partial_refund, store_credit, exception, case) |
 | total | bigint |
 | currency | text |
 | funded_by | text |
@@ -1250,14 +1260,44 @@ Indexes: `(return_id)`
 | approval_request_id | uuid? |
 | proposed_by | text |
 | approved_by | text? |
+| approved_at | timestamptz? |
 | decline_reason | text? |
 | payment_refund_id | uuid? |
 | failed_reason | text? |
+| sent_at | timestamptz? |
+| note | text? |
 | idempotency_key | text unique? |
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(status, created_at)`, `(order_id)`, `(return_id)`, `(case_id)`
+Indexes: `(status, created_at)`, `(order_id)`, `(return_id)`, `(case_id)`, `(customer_id, created_at)`
+
+**refund_request_items**: The order items a refund request covers, in order, with the amount refunded on each and the refunded quantity (null: the returned units)
+
+| Column | Type |
+|---|---|
+| refund_request_id | uuid → refund_requests |
+| order_item_id | uuid |
+| position | int |
+| quantity | int? |
+| amount | bigint |
+
+Indexes: `pk (refund_request_id, order_item_id)`, `(order_item_id)`
+
+**refund_request_events**: History of a refund request (RefundRequest.history): proposed, approved, handed over, sent, failed, declined, revised, cancelled
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| refund_request_id | uuid → refund_requests |
+| at | timestamptz |
+| label | text |
+| detail | text? |
+| actor_kind | text? |
+| actor_id | text? |
+| actor_name | text? |
+
+Indexes: `(refund_request_id, at)`
 
 **replacements**: Replacement or exchange units with their own shipment; the original order is not changed. return_id is null for replacements decided on a support case without a return (case_id set)
 
@@ -1321,7 +1361,7 @@ Indexes: `(return_id, at)`
 | `returns.exception.proposed` | Refund-without-return proposed by staff | `{ returnId: uuid, reasonCode: string }` | - |
 | `returns.exception.approved` | Refund-without-return approved (seller or Finance) | `{ returnId: uuid, reasonCode: string, approvedBy: Actor }` | - |
 | `returns.replacement.created` | A replacement or exchange is created and its stock allocated (from a return, or from a support case without a return) | `{ replacementId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, customerId: uuid?, contactEmail: email?, orderItemId: uuid, ownerType: enum(official|seller), sellerId: uuid?, variantId: uuid, offerId: uuid, quantity: int, kind: string }` | notifications, orders, shipping, support |
-| `returns.replacement.cancelled` | A replacement or exchange not shipped yet is cancelled (no stock, or by the seller or staff); its stock allocation is released | `{ replacementId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, orderItemId: uuid, ownerType: enum(official|seller), sellerId: uuid?, reason: text, by: Actor }` | - |
+| `returns.replacement.cancelled` | A replacement or exchange not shipped yet is cancelled (no stock, or by the seller or staff); its stock allocation is released | `{ replacementId: uuid, returnId: uuid?, caseId: uuid?, orderId: uuid, orderItemId: uuid, ownerType: enum(official|seller), sellerId: uuid?, reason: text, by: Actor }` | support |
 | `returns.seller_terms.changed` | A seller changes return terms or return address | `{ sellerId: uuid, version: int }` | - |
 | `returns.policy.proposed` | Baseline or category exception change proposed | `{ policyVersionId: uuid?, categoryExceptionId: uuid?, effectiveFrom: datetime }` | - |
 | `returns.policy.changed` | A baseline or category exception becomes active | `{ policyVersionId: uuid?, categoryId: uuid?, effectiveFrom: datetime }` | - |
@@ -1372,6 +1412,7 @@ Indexes: `(return_id, at)`
 | getReturn | `(returnId: uuid) => ReturnCase | null`<br>Any return by id, staff view (same as getReturnAdmin by ref) | warehouse |
 | cancelRefundsForCase | `(caseId: uuid, reason: string, actor: Actor) => { cancelled: RefundRequest[], notCancellable: RefundRequest[] }`<br>When an appeal overturns a case decision: cancel the case's refund requests still requested, under review or declined. Approved, processing or sent ones are returned in notCancellable (money already moving). Each cancellation is recorded in the request history and the audit log as the actor (the staff member deciding the appeal) and publishes returns.refund.cancelled. | support |
 | countOpenReturnsForProducts | `(productIds: uuid[]) => map<int>`<br>Open return requests per product (not closed, refunded or rejected). Catalog publication-impact preview. | catalog |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>Customer data export hook (FORMAT.md): the customer's returns (reference, order, items, reason and their own description, remedy, status, dates) and refunds (reference, amount, destination, status, approved and sent dates) as plain records, with the photos they uploaded as attachments. Staff notes, inspection details and internal reasons are left out. Called by customers when it builds a data export | customers |
 
 ## Permissions
 

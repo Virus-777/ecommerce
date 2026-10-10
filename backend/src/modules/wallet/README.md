@@ -41,7 +41,7 @@ Customer store credit with an auditable ledger (refunds to credit, goodwill cred
 | POST | `/api/admin/wallet/goodwill` | Grant goodwill credit with a reason _(idempotent, audited)_ | staff<br>`wallet.goodwill.grant` | `GoodwillInput` → `GoodwillGrant` |
 | GET | `/api/admin/wallet/goodwill` | Goodwill grants for review | staff<br>`wallet.credit.view` | Page<GoodwillGrant> |
 | POST | `/api/admin/wallet/goodwill/{id}/reverse` | Reverse an unused goodwill grant _(idempotent, audited)_ | staff<br>`wallet.credit.correct` | `{ reason: text }` → `GoodwillGrant` |
-| POST | `/api/admin/wallet/customers/{customerId}/corrections` | Correct a balance (positive or negative) with a reason _(idempotent, audited)_ | staff<br>`wallet.credit.correct` | `{ amount: Money, reason: text, reference: string? }` → `LedgerEntry` |
+| POST | `/api/admin/wallet/customers/{customerId}/corrections` | Correct a balance (positive or negative) with a reason _(idempotent, audited)_ | staff<br>`wallet.credit.correct` | `{ amount: Money, reason: text, reference: string? }` → `CreditCorrection` |
 | POST | `/api/admin/wallet/gift-cards` | Issue a batch of gift cards _(idempotent, audited)_ | staff<br>`wallet.gift_cards.manage` | `GiftCardBatchInput` → `{ batchId: uuid, count: int, total: Money, status: enum(issued|pending_approval), codesFileId: uuid?, codesAvailableUntil: datetime? }` |
 | GET | `/api/admin/wallet/gift-cards/batches/{id}/codes` | Download a batch's gift card codes once _(audited)_ | staff<br>`wallet.gift_cards.manage` | `{ batchId: uuid, codes: string[], count: int, deliveredAt: datetime }` |
 | GET | `/api/admin/wallet/gift-cards` | Gift cards | staff<br>`wallet.gift_cards.manage` | Page<GiftCard> |
@@ -190,6 +190,25 @@ Customer store credit with an auditable ledger (refunds to credit, goodwill cred
 | goodwillLast30Days | `Money` |
 | goodwillLimitPerCustomer | `Money` |
 | pendingGrants | `GoodwillGrant[]` |
+| pendingCorrections | `CreditCorrection[]` Corrections waiting for a second reviewer |
+
+### CreditCorrection
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| customerId | `uuid` |
+| amount | `Money` Signed: positive adds credit, negative takes it away |
+| reason | `text` |
+| reference | `string?` |
+| state | `enum(pending_approval|applied|rejected|failed)` |
+| approval | `ApprovalInfo?` |
+| entry | `LedgerEntry?` The ledger entry once applied |
+| failure | `string?` Why an approved correction could not be applied (e.g. the customer no longer has the credit to take away) |
+| requestedBy | `Actor` |
+| decidedBy | `Actor?` |
+| createdAt | `datetime` |
+| decidedAt | `datetime?` |
 
 ### LoyaltyAccount
 
@@ -202,6 +221,18 @@ Customer store credit with an auditable ledger (refunds to credit, goodwill cred
 | programTerms | `string?` |
 
 ## Status flows
+
+### Credit correction (`CreditCorrection.state`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> pending_approval
+  pending_approval --> applied: apply
+  pending_approval --> rejected: reject
+  pending_approval --> failed: fail
+```
+
+Within the caller's adjustment limit a correction is applied in the same call (pending_approval → applied). Above it the access approval decides: approved applies it (fail when a negative correction finds less credit than it takes), rejected or expired ends it rejected.
 
 ### Credit hold (`CreditHold.state`)
 
@@ -373,6 +404,28 @@ Indexes: `(state, created_at)`, `(customer_id, created_at)`
 | created_by | text |
 | created_at | timestamptz |
 
+**credit_corrections**: Staff balance corrections. One within the caller's adjustment limit is applied at once (state applied); one above it is saved pending_approval with its access approval request and applied (or rejected, or failed when the credit is no longer there) on access.approval.decided
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| customer_id | uuid |
+| amount | bigint (signed) |
+| currency | text |
+| reason | text |
+| reference | text? |
+| state | text (pending_approval|applied|rejected|failed) |
+| approval_request_id | uuid? |
+| requested_by | text |
+| decided_by | text? |
+| decided_at | timestamptz? |
+| ledger_entry_id | uuid? |
+| failure | text? |
+| idempotency_key | text unique |
+| created_at | timestamptz |
+
+Indexes: `(customer_id, state, created_at)`, `(approval_request_id) where approval_request_id is not null`
+
 **loyalty_entries**: Phase 4 experiment: points earned and spent
 
 | Column | Type |
@@ -418,6 +471,7 @@ Indexes: `(state, created_at)`, `(customer_id, created_at)`
 | creditRefund | `(input: { customerId: uuid, refundId: uuid, orderId: uuid, amount: Money, reason: string }, idempotencyKey: string) => LedgerEntry`<br>Refund to store credit (customer's choice) or return the credit part of a refunded order. Called by returns for return refunds to store credit and by payments for the refunds it executes (other origins with destination store_credit, and the credit part of a mixed tender). Idempotent per refundId; the payment tender split decides how much goes back to credit. | payments, returns |
 | grantGoodwill | `(input: GoodwillInput, actor: Actor, idempotencyKey: string) => GoodwillGrant`<br>Goodwill credit from a support case or order; above the actor's limit it becomes pending approval. | support |
 | getCustomerWallet | `(customerId: uuid) => CustomerWalletAdmin`<br>Staff view of a customer's credit: balance, lots, goodwill in the last 30 days against the per-customer limit, and pending grants (GET /admin/wallet/customers/{customerId}). | graphql |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>Customer data export hook (FORMAT.md): the customer's store credit lots (source, amounts, expiry) and ledger entries (what was added, used, returned, expired, corrected) as plain records. Staff names and internal reasons are left out. Called by customers when it builds a data export | customers |
 
 ## Permissions
 

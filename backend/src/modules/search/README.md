@@ -67,6 +67,64 @@ Finding products: a product index built from catalog, offers, inventory and revi
 
 ## Types
 
+### SearchFilters
+
+| Field | Type |
+|---|---|
+| categoryIds | `uuid[]?` Category ids (GraphQL); REST category is a slug resolved to its id |
+| categorySlug | `string?` REST category |
+| priceMin | `int?` Minor units |
+| priceMax | `int?` Minor units |
+| brandIds | `uuid[]?` |
+| brandSlugs | `string[]?` REST brand: brand slugs (ids are accepted too) |
+| sellerIds | `uuid[]?` |
+| sellerSlugs | `string[]?` REST seller: seller slugs; 'official' is the Official Store |
+| official | `bool?` Official Store offers only |
+| minRating | `int?` 'N stars and up', 1–5 |
+| conditions | `enum(new|used|refurbished)[]?` |
+| inStockOnly | `bool?` Default from the setting excludeOutOfStockByDefault (true): in stock now |
+| freeDelivery | `bool?` |
+| shipsToday | `bool?` |
+| arrivesBy | `date?` |
+| onSale | `bool?` |
+| listedWithinDays | `int?` New arrivals |
+| attributes | `AttributeFilter[]?` Category attribute filters, e.g. noise_cancelling = [active] |
+
+### AttributeFilter
+
+| Field | Type |
+|---|---|
+| key | `string` |
+| values | `string[]` |
+
+### SearchQuery
+
+| Field | Type |
+|---|---|
+| q | `string?` Free text; without it this is a listing (category, brand, seller, collection) |
+| filters | `SearchFilters?` Same meaning as the REST query parameters of GET /products and GraphQL SearchFilterInput |
+| sort | `enum(recommended|price_asc|price_desc|newest|rating|best_selling)?` |
+
+### SearchMatch
+
+| Field | Type |
+|---|---|
+| position | `int` 1-based position among organic results |
+| variantId | `uuid?` The variant the card shows for the active filters |
+| variantCue | `string?` e.g. 'Black · 2 more colors' |
+| offerId | `uuid?` The offer whose price the card shows (the seller's offer under a seller filter) |
+| priceIsFrom | `bool` True when the price is the lowest of several ('From $…') |
+| badges | `string[]` |
+
+### SponsoredSlot
+
+| Field | Type |
+|---|---|
+| placement | `string` Advertising placement key: search_top_row, category_inline, category_banner |
+| kind | `enum(top_row|inline|banner)` |
+| positions | `int[]` Inline only: 1-based grid positions where a labelled sponsored card may be inserted |
+| maxItems | `int` |
+
 ### ProductCard
 
 | Field | Type |

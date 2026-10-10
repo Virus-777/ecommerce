@@ -8,7 +8,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 - **Depends on:** [orders](../orders/README.md), [access](../access/README.md) · **Optional:** [returns](../returns/README.md), [payments](../payments/README.md), [shipping](../shipping/README.md), [sellers](../sellers/README.md), [messaging](../messaging/README.md), [media](../media/README.md), [finance](../finance/README.md), [trust](../trust/README.md), [wallet](../wallet/README.md), [workqueues](../workqueues/README.md), [notifications](../notifications/README.md), [settings](../settings/README.md), [audit](../audit/README.md), [content](../content/README.md), [customers](../customers/README.md), [identity](../identity/README.md), [promotions](../promotions/README.md), [reports](../reports/README.md), [warehouse](../warehouse/README.md)
 
 ## Owns
-- Cases (CS- references) of four kinds: customer help, order problem, dispute, seller support request
+- Cases (CS-YYMMDD-NNNN references) of four kinds: customer help, order problem, dispute, seller support request
 - Case categories with default priority, owning team and response/resolution targets (SLA)
 - Owner, team, assignment and bulk assignment; escalation to Returns, Finance, Trust and Risk or the Seller Manager
 - Who handles a case first (seller, Official Store, Marketly support), the next action, who must act and the expected response, shown to the customer
@@ -251,7 +251,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| ref | `string` CS-NNNNNN |
+| ref | `string` CS-YYMMDD-NNNN (running number per market day) |
 | kind | `enum(customer_help|order_problem|dispute|seller_request)` |
 | subject | `string` |
 | category | `CaseCategory` |
@@ -456,6 +456,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | deadlines | `NamedDeadline[]` |
 | holds | `string[]` Finance holds linked to this case, e.g. Seller hold $1,240.00 · review Oct 15 |
 | decisionDraft | `DecisionDraft?` Saved unpublished decision, staff only |
+| pendingApproval | `ApprovalInfo?` A decision or appeal decision above the decider's limit, saved and waiting for support.remedies.approve (cases.approval_request_id). decideCase and decideAppeal answer 200 with it set; access.approval.decided publishes the decision (approved) or hands it back to the owner as a draft (rejected or returned) |
 | history | `TimelineEvent[]` |
 
 ### CaseCustomer
@@ -617,6 +618,7 @@ stateDiagram-v2
   waiting_on_seller --> waiting_on_customer: requestInfo
   waiting_on_customer --> waiting_on_seller: sendToSeller
   open --> escalated: escalate
+  escalated --> escalated: escalate
   waiting_on_seller --> escalated: escalate
   waiting_on_customer --> escalated: escalate
   escalated --> waiting_on_customer: requestInfo
@@ -638,7 +640,7 @@ stateDiagram-v2
   reopened --> resolved: resolve
 ```
 
-Order problems about seller items start with sendToSeller (seller handles first, support follows). The job escalates automatically when the seller misses its reply deadline; a customer can escalate when they disagree, a promised refund is late, or the seller misses its deadline. escalate turns an order problem into a dispute (kind = dispute). resolve is refused with REMEDY_PENDING while any remedy is pending_approval, approved or in_progress (plan ch. 17: do not close while a promised refund or replacement is unresolved). close runs automatically autoCloseAfterDays after resolve. reopen is allowed within reopenWindowDays of resolution. appeal is allowed until appealDeadline; decideAppeal must be done by a different staff member than the original decider and makes the decision final.
+Order problems about seller items start with sendToSeller (seller handles first, support follows). The job escalates automatically when the seller misses its reply deadline; a customer can escalate when they disagree, a promised refund is late, or the seller misses its deadline. escalate turns an order problem into a dispute (kind = dispute); an escalated case can be escalated again to another team (escalated → escalated: team, owner and deadlines change, the customer cannot ask twice). resolve is refused with REMEDY_PENDING while any remedy is pending_approval, approved or in_progress (plan ch. 17: do not close while a promised refund or replacement is unresolved). close runs automatically autoCloseAfterDays after resolve. reopen is allowed within reopenWindowDays of resolution. appeal is allowed until appealDeadline; decideAppeal must be done by a different staff member than the original decider and makes the decision final.
 
 ### Remedy (`Remedy.status`)
 
@@ -660,7 +662,7 @@ stateDiagram-v2
   in_progress --> cancelled: cancel
 ```
 
-Refund remedies mirror the returns refund request and payments: approve on returns.refund.approved, start on handover, complete on payments.refund.sent, fail on payments.refund.failed, cancel on returns.refund.declined (the case goes back to the owner's queue). Goodwill credit remedies follow the wallet grant (wallet.goodwill.decided). Replacement remedies complete on delivery of the replacement shipment. Ship-by-deadline remedies complete on shipping.shipment.dispatched when the items ship by the date and otherwise fall back to a refund. settle (and cancel from in_progress) is a staff action (POST …/remedies/{remedyId}/settle) for remedies nothing in the system can finish: refunds recorded for Finance while returns is off, goodwill or refunds of guests without a refund path; it is refused (REMEDY_NOT_SETTLEABLE) while a returns refund request, a wallet grant or a replacement still drives the remedy.
+Refund remedies mirror the returns refund request and payments: approve on returns.refund.approved, start on handover, complete on payments.refund.sent, fail on payments.refund.failed, cancel on returns.refund.declined (the case goes back to the owner's queue). Goodwill credit remedies follow the wallet grant (case_remedies.goodwill_grant_id; wallet.goodwill.decided is matched on its grantId). Replacement remedies complete on delivery of the replacement shipment; a replacement cancelled before it ships (returns.replacement.cancelled) cancels its remedy and puts the case back in the owner's queue to choose another remedy. Ship-by-deadline remedies complete on shipping.shipment.dispatched when the items ship by the date and otherwise fall back to a refund. settle (and cancel from in_progress) is a staff action (POST …/remedies/{remedyId}/settle) for remedies nothing in the system can finish: refunds recorded for Finance while returns is off, goodwill or refunds of guests without a refund path; it is refused (REMEDY_NOT_SETTLEABLE) while a returns refund request, a wallet grant or a replacement still drives the remedy.
 
 ### Case offer (`CaseOffer.status`)
 
@@ -744,8 +746,38 @@ Reviewer must differ from the original decider (SAME_DECIDER).
 | resolved_at | timestamptz? |
 | closed_at | timestamptz? |
 | updated_at | timestamptz |
+| order_ref | text? (order reference kept for search and lists) |
+| placed_at | timestamptz? |
+| return_ref | text? |
+| customer_name | text? (order contact or customer display name when opened) |
+| contact_email | text? (order contact email, for guests) |
+| city | text? |
+| seller_name | text? |
+| owner_type | text? (official|seller) |
+| reference | text? (seller request reference: MK-, RT-, PO-, RS- or a SKU) |
+| trust_report_id | uuid? (Trust and Risk report the case acts on) |
+| problem_type | text? (missing_item|damaged|wrong_item|not_arrived|other) |
+| desired_remedy | text? (refund|keep_waiting|replacement|other) |
+| callback_phone | text? |
+| info_request_from | text? (customer|seller) |
+| info_request_question | text? |
+| info_request_due_at | timestamptz? |
+| info_requested_at | timestamptz? |
+| info_requested_by | text? (actor) |
+| escalated_at | timestamptz? (last escalation) |
+| escalated_by | text? (actor) |
+| escalation_reason | text? |
+| escalated_to | text? |
+| escalation_note | text? |
+| seller_replied_at | timestamptz? (first seller reply on a customer case) |
+| dispatch_overdue_due_at | timestamptz? (shipping.dispatch.overdue noted on the case) |
+| dispatch_overdue_noted_at | timestamptz? |
+| overdue_notified_for | timestamptz? (the response deadline support.case.overdue was published for) |
+| appeal_window_closed | bool (the auto-close job recorded the end of the appeal window) |
+| approval_request_id | uuid? (access approval request of a decision waiting for support.remedies.approve) |
+| pending_decision | jsonb? ({ kind: decision|appeal, ref, decision | appeal, requestedBy, principal, requestedAt }: the decision published when the request is approved) |
 
-Indexes: `(status, next_response_due_at)`, `(owner_staff_id, status)`, `(customer_id, opened_at desc)`, `(seller_id, status)`, `(order_id)`, `(kind, status)`
+Indexes: `(status, next_response_due_at)`, `(owner_staff_id, status)`, `(customer_id, opened_at desc)`, `(seller_id, status)`, `(order_id)`, `(kind, status)`, `(approval_request_id) where approval_request_id is not null`, `(trust_report_id) where trust_report_id is not null`
 
 **case_items**
 
@@ -822,13 +854,14 @@ Indexes: `(case_id)`, `(status, respond_by)`
 | status | text |
 | refund_request_id | uuid? |
 | replacement_id | uuid? |
+| goodwill_grant_id | uuid? (wallet goodwill grant behind a goodwill credit remedy; wallet.goodwill.decided is matched on it) |
 | due_at | timestamptz? |
 | note | text? |
 | created_by | text |
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(case_id)`, `(refund_request_id)`, `(status)`
+Indexes: `(case_id)`, `(refund_request_id)`, `(status)`, `(replacement_id)`, `(goodwill_grant_id)`
 
 **case_appeals**
 
@@ -886,9 +919,10 @@ Indexes: `(case_id, at)`
 | `returns.refund.approved` | returns | Move the matching refund remedy to approved/in progress |
 | `returns.refund.declined` | returns | Cancel the refund remedy behind the declined refund request (Finance's reason in the case history) and put the case back in the owner's queue so they decide again |
 | `payments.refund.sent` | payments | Complete the refund remedy; the case can now be resolved |
-| `wallet.goodwill.decided` | wallet | For a case's goodwill credit remedy waiting for approval: mark it granted (done) or rejected and put the case back in the owner's queue |
+| `wallet.goodwill.decided` | wallet | For a case's goodwill credit remedy waiting for approval (matched on case_remedies.goodwill_grant_id = grantId): mark it granted (done) or rejected and put the case back in the owner's queue |
 | `payments.refund.failed` | payments | Mark the refund remedy failed and put the case back in the owner's queue |
 | `returns.replacement.created` | returns | Link the replacement to its remedy |
+| `returns.replacement.cancelled` | returns | A replacement cancelled before it shipped (no stock, seller or staff), with or without a return: cancel the remedy it drives (reason in the case history) and put the case back in the owner's queue to choose another remedy |
 | `shipping.shipment.delivered` | shipping | Complete replacement remedies when their shipment is delivered |
 | `shipping.shipment.dispatched` | shipping | Complete ship-by-deadline remedies whose items shipped by the promised date (lines, shippedAt); a later dispatch leaves the remedy to fall back to a refund |
 | `shipping.dispatch.overdue` | shipping | Add the overdue dispatch to open cases for the item and expose the customer escalation route |
@@ -896,7 +930,7 @@ Indexes: `(case_id, at)`
 | `notifications.email_reply.received` | notifications | module support: add the reply to the case thread (refId = case id) as a customer message when fromEmail is the case's customer or order contact; other senders are dropped with a log line. Attachments come as media assets |
 | `orders.item.cancelled` | orders | Note cancellations on linked cases (e.g. ship-by remedy fell back to cancellation) |
 | `sellers.seller.restricted` | sellers | Keep cases open; route seller-handled cases of a suspended seller to Marketly support |
-| `access.approval.decided` | access | Finish approval-required remedies |
+| `access.approval.decided` | access | support.remedies.approve: publish the decision saved pending on the case (approval_request_id), or hand it back to the owner as a draft when rejected or returned |
 
 ## In-process API (for other modules)
 
@@ -912,11 +946,12 @@ Indexes: `(case_id, at)`
 | listCasesForCustomer | `(customerId: uuid, filter: { open?: bool }, page: PageInput) => Page<CaseSummary>`<br>A customer's cases, most recently updated first (store list, admin customer 360) | graphql |
 | getCaseForSeller | `(sellerId: uuid, ref: string) => CaseView | null`<br>A case about this seller's orders or the seller's own support request (no internal notes) | graphql |
 | getCaseAdmin | `(ref: string) => AdminCaseDetail | null`<br>Dispute review with parties, purchase terms, shipment evidence, files, internal notes, deadlines and history | graphql |
-| listCasesForOrder | `(orderId: uuid, viewer: { area: 'store' | 'seller' | 'admin', customerId?: uuid, sellerId?: uuid }) => CaseView[]`<br>Open and recent cases on one order with linked items, filtered to what the viewer may see. Batched per order (Order.cases). | graphql |
+| listCasesForOrder | `(orderId: uuid, viewer: { area: 'store' | 'seller' | 'admin', customerId?: uuid, guestSessionId?: uuid, sellerId?: uuid }) => CaseView[]`<br>Open and recent cases on one order with linked items, filtered to what the viewer may see: a customer their own cases, a guest session the cases it opened or of guest orders identity granted it, a seller the cases about its items. A store viewer with neither id sees none. Batched per order (Order.cases). | graphql |
 | listCasesForSeller | `(sellerId: uuid, filter: { open?: bool }, page: PageInput) => Page<SellerCaseRow>`<br>Cases and disputes about a seller's orders (admin seller 360) | graphql |
 | getCasesForReturns | `(returnIds: uuid[], viewer: { area: 'store' | 'seller' | 'admin', customerId?: uuid, guestSessionId?: uuid, sellerId?: uuid }) => map<CaseView | AdminCaseDetail | null>`<br>The case opened about each return (escalation or report), as the viewer may see it | returns, graphql |
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset support.admin.cases (support cases) | reports |
 | countOpenCasesForProducts | `(productIds: uuid[]) => map<int>`<br>Open customer cases per product (cases linked to an order item of the product, not resolved or closed). Catalog publication-impact preview. | catalog |
+| exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>Customer data export hook: one section (key support-cases) with the customer's cases (reference, topic, order, status, what they asked for, decision and remedies) and the messages they can see on each (no internal notes, no seller-only or staff-only messages, staff shown as Marketly support). attachmentIds are the files the customer attached. | customers |
 
 ## Permissions
 
@@ -951,7 +986,7 @@ Checked through the access module (limits per role, second reviewer).
 | `OFFER_EXPIRED` | 409 | The offer expired or was withdrawn. |
 | `ESCALATION_NOT_AVAILABLE` | 409 | The seller is still within its reply deadline. details.availableFrom. |
 | `GOODWILL_UNAVAILABLE` | 422 | Goodwill credit needs the wallet module, which is off; choose a refund or partial refund instead. |
-| `REPLACEMENT_NEEDS_RETURN` | 422 | A replacement can only be promised on a case with a return (returns creates the replacement from it); ask for a return or choose a refund. |
+| `REPLACEMENT_NEEDS_RETURN` | 422 | A replacement needs the returns module, which creates and ships it (with the case's return or without one); it is off, so choose a refund instead. |
 | `REMEDY_NOT_SETTLEABLE` | 409 | The remedy is still driven by a refund request, wallet grant or replacement, or is already finished. details.status. |
 
 ## Background jobs
@@ -995,6 +1030,8 @@ Checked through the access module (limits per role, second reviewer).
 - Seller support requests (seller/help) are cases of kind seller_request handled by the Seller Manager team with their own categories (Account health, Fees and payouts, Listing rules, Shipping, Returns and disputes, Advertising).
 - Business-hour deadlines use the market time zone and business hours from settings (optional dependency; defaults Mon–Sat 8 AM–8 PM PT).
 - Dependency note: returns, payments, shipping, sellers, messaging and media are optional; without returns a refund remedy is recorded as a request to Finance outside the system and settled by staff (settleRemedy).
+- Case replacements: returns.requestReplacement attaches the replacement to the case's open return when that return covers the item (the return completes when it ships); otherwise it is a replacement without a return (caseId set, returnId null). Either way the remedy links on returns.replacement.created, completes on delivery and is cancelled on returns.replacement.cancelled.
+- Case facts live in columns of cases (order and return references, names, what the customer asked for, the open information request, the last escalation, the first seller reply, the dispatch warning, job markers); next_action keeps only the stored next action.
 - openCase with a returnId (return escalation) copies the return's evidence into the case at opening through returns.listEvidence, each item marked as from the return with its original author and time. Later additions on the return are not synced; the case is the record from then on. Without returns enabled no evidence is copied.
 
 ## GraphQL (read layer)
@@ -1014,7 +1051,7 @@ evidence files, deadlines and history (dispute review).
 """
 type Case {
   id: UUID!
-  "CS-NNNNNN"
+  "CS-YYMMDD-NNNN"
   ref: String!
   kind: CaseKind!
   subject: String!
@@ -1076,6 +1113,8 @@ type Case {
   reopened: Boolean! @areas(in: [ADMIN])
   "Saved, unpublished decision (Save decision draft); never shown to the parties"
   decisionDraft: CaseDecisionDraft @areas(in: [ADMIN])
+  "A decision above the decider's limit waiting for approval (support.remedies.approve); published once approved"
+  pendingApproval: ApprovalInfo @areas(in: [ADMIN])
 }
 
 "An unpublished decision draft saved by staff"

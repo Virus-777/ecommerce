@@ -1563,7 +1563,7 @@ export const SuspensionImpact: z.ZodType<SuspensionImpact> = z.object({
 
 export interface Appeal {
   id: string;
-  /** e.g. AP-261004-021 */
+  /** SAP-YYMMDD-NNN, e.g. SAP-261004-021 (SA- is the seller application and AP- the access approval request; appeals filed before pass 4 keep their AP- reference) */
   ref: string;
   sellerId: string;
   storeName: string;
@@ -1586,7 +1586,7 @@ export interface Appeal {
 
 export const Appeal: z.ZodType<Appeal> = z.object({
   id: z.uuid(),
-  ref: z.string().describe("e.g. AP-261004-021"),
+  ref: z.string().describe("SAP-YYMMDD-NNN, e.g. SAP-261004-021 (SA- is the seller application and AP- the access approval request; appeals filed before pass 4 keep their AP- reference)"),
   sellerId: z.uuid(),
   storeName: z.string(),
   subject: z.enum(["restriction", "suspension", "application_rejection", "warning"]),
@@ -2421,6 +2421,8 @@ export interface SellersDb {
     launch_review: Json;
     payout_readiness: string;
     payout_destination_label: string | null;
+    /** reasons shown to the seller while payout readiness is blocked; empty otherwise */
+    payout_blocked_reasons: Json;
     account_manager_id: string | null;
     application_id: string | null;
     approved_at: Date | null;
@@ -2663,6 +2665,8 @@ export interface SellersDb {
   /** Suspension decisions (pending second review, active, ended) */
   suspensions: {
     id: string;
+    /** SU-YYMMDD-NNNN; suspensions created before pass 4 keep SU- and the last 8 characters of their id */
+    ref: string;
     seller_id: string;
     state: 'pending_approval' | 'active' | 'ended' | 'cancelled';
     reason_code: string;
@@ -2678,6 +2682,40 @@ export interface SellersDb {
     started_at: Date | null;
     ended_at: Date | null;
     end_reason: string | null;
+  };
+  /** Payout destinations handed to finance for verification: the initial one at approval and each change by the owner (tokenised; raw numbers never stored) */
+  payout_changes: {
+    /** changeId in sellers.payout_account.changed */
+    id: string;
+    seller_id: string;
+    kind: 'initial' | 'change';
+    account_holder_name: string;
+    account_type: string;
+    label: string;
+    provider_destination_id: string;
+    previous_label: string | null;
+    state: 'pending' | 'verified' | 'rejected' | 'replaced';
+    rejection_reason: string | null;
+    /** finance destination review id */
+    review_id: string | null;
+    requested_by: Json;
+    requested_at: Date;
+    decided_at: Date | null;
+  };
+  /** Staff changes waiting for a second reviewer (seller closure, restriction change, performance targets); applied or dropped on access.approval.decided */
+  pending_changes: {
+    id: string;
+    kind: 'closure' | 'restriction_change' | 'performance_targets';
+    seller_id: string | null;
+    /** restriction id for restriction_change */
+    target_id: string | null;
+    approval_request_id: string;
+    payload: Json;
+    reason: string;
+    requested_by: Json;
+    state: 'pending' | 'applied' | 'declined';
+    requested_at: Date;
+    decided_at: Date | null;
   };
   appeals: {
     id: string;
@@ -3805,7 +3843,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.accounts.restrict",
     scope: "staff",
     summary: "Restrict a seller (reason, affected activity, scope, appeal route, review date)",
-    desc: "Above the caller's authority (access: Recommend only / Permitted with second review) the restriction is pending_approval and returns APPROVAL_REQUIRED with details.approvalRequestId. Active restrictions publish sellers.seller.restricted; offers, promotions and advertising stop only the affected activity. Existing orders, returns, cases and messages keep working.",
+    desc: "Above the caller's authority (access: Recommend only / Permitted with second review) the restriction is saved as pending_approval with an access approval request and the call answers 201 with the Restriction and its approval (ApprovalInfo); it becomes active on access.approval.decided (approved). It never answers APPROVAL_REQUIRED. Active restrictions publish sellers.seller.restricted; offers, promotions and advertising stop only the affected activity. Existing orders, returns, cases and messages keep working.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3813,7 +3851,7 @@ export const endpoints = defineEndpoints({
     body: () => RestrictionInput,
     response: () => Restriction,
     status: 201,
-    errors: ["VALIDATION_FAILED","ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["VALIDATION_FAILED","ILLEGAL_TRANSITION"],
     audited: true,
     approval: "Approval action sellers.sellers.restrict. Second reviewer when the caller's role is 'Permitted with second review' for seller restrictions",
     events: ["sellers.seller.restricted"],
@@ -3828,6 +3866,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.accounts.restrict",
     scope: "staff",
     summary: "Edit an active restriction (scope, reason, resolution steps, review date)",
+    desc: "Audited and republished as sellers.restriction.updated. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3954,7 +3993,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.accounts.close",
     scope: "staff",
     summary: "Close a seller account",
-    desc: "New sales stop; open obligations stay accessible until settled; finance issues the final statement.",
+    desc: "New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -4245,7 +4284,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.applications.decide",
     scope: "staff",
     summary: "Approve the application",
-    desc: "Blocked while checks are failed or need attention without an accepted note (CHECKS_UNRESOLVED). Optional conditions create restrictions at approval (e.g. a category excluded until certificates are checked). Publishes sellers.seller.approved (finance opens the ledger and applies the new-seller hold; returns stores the return address; identity grants the owner seller context). Approval does not publish products or enable payouts.",
+    desc: "Blocked while checks are failed or need attention without an accepted note (CHECKS_UNRESOLVED). Optional conditions create restrictions at approval (e.g. a category excluded until certificates are checked). Publishes sellers.seller.approved (finance opens the ledger and applies the new-seller hold; returns stores the return address; sellers itself grants the owner seller context with identity.grantSellerContext; identity does not consume this event). Approval does not publish products or enable payouts.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -4469,7 +4508,7 @@ export const endpoints = defineEndpoints({
     permission: "sellers.performance.manage",
     scope: "staff",
     summary: "Change targets with an effective date",
-    desc: "Changes state their effective date; metrics already computed are not re-graded.",
+    desc: "Changes state their effective date; metrics already computed are not re-graded. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.",
     body: () => z.object({
       get targets() {
         return z.array(PerformanceTarget);
@@ -5304,7 +5343,7 @@ export const spec = defineModuleSpec({
     },
     "sellers.restriction-reviews": {
       "schedule": "daily 07:00 market time",
-      "does": "Expire restrictions past endsAt; raise workqueue items for restrictions and suspensions reaching their review date"
+      "does": "Expire restrictions past endsAt; expire approved public claims past expiresAt (approved → expired, publishes sellers.storefront.updated with fields [claims]); raise workqueue items for restrictions and suspensions reaching their review date"
     },
     "sellers.appeal-deadlines": {
       "schedule": "hourly",
@@ -5661,6 +5700,10 @@ export const spec = defineModuleSpec({
       "payout_destination_label": {
         "type": "text",
         "nullable": true
+      },
+      "payout_blocked_reasons": {
+        "type": "jsonb",
+        "nullable": false
       },
       "account_manager_id": {
         "type": "uuid",
@@ -6496,6 +6539,10 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": false
       },
+      "ref": {
+        "type": "text",
+        "nullable": false
+      },
       "seller_id": {
         "type": "uuid",
         "nullable": false
@@ -6554,6 +6601,110 @@ export const spec = defineModuleSpec({
       },
       "end_reason": {
         "type": "text",
+        "nullable": true
+      }
+    },
+    "payout_changes": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "seller_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "account_holder_name": {
+        "type": "text",
+        "nullable": false
+      },
+      "account_type": {
+        "type": "text",
+        "nullable": false
+      },
+      "label": {
+        "type": "text",
+        "nullable": false
+      },
+      "provider_destination_id": {
+        "type": "text",
+        "nullable": false
+      },
+      "previous_label": {
+        "type": "text",
+        "nullable": true
+      },
+      "state": {
+        "type": "text",
+        "nullable": false
+      },
+      "rejection_reason": {
+        "type": "text",
+        "nullable": true
+      },
+      "review_id": {
+        "type": "text",
+        "nullable": true
+      },
+      "requested_by": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "requested_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "decided_at": {
+        "type": "timestamptz",
+        "nullable": true
+      }
+    },
+    "pending_changes": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "seller_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "target_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "approval_request_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "payload": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "reason": {
+        "type": "text",
+        "nullable": false
+      },
+      "requested_by": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "state": {
+        "type": "text",
+        "nullable": false
+      },
+      "requested_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "decided_at": {
+        "type": "timestamptz",
         "nullable": true
       }
     },
@@ -6775,6 +6926,9 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     },
     "suspensions": {
+      "seller": "seller_id"
+    },
+    "payout_changes": {
       "seller": "seller_id"
     },
     "appeals": {

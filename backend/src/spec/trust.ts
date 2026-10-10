@@ -272,12 +272,18 @@ export interface Recommendation {
   params?: unknown;
   rationale: string;
   state: "pending" | "sent_to_owner" | "completed" | "declined" | "withdrawn";
+  /** Who drafted it (Trust and Risk); never the one who decides it (SEPARATE_DUTIES) */
+  createdBy?: StaffRef | null;
   routedAt?: string | null;
+  /** Who last sent it to the owner team; never the one who decides it */
+  routedBy?: StaffRef | null;
   decidedAt?: string | null;
   decidedBy?: StaffRef | null;
   /** Reason recorded by the owner, e.g. 'Brand registry mismatch on 4 units' */
   decisionReason?: string | null;
   enforcementId?: string | null;
+  /** An accept above the owner's limit waiting for approval (access); the recommendation stays sent_to_owner and is accepted when the request is approved */
+  approvalRequestId?: string | null;
 }
 
 export const Recommendation: z.ZodType<Recommendation> = z.object({
@@ -296,13 +302,20 @@ export const Recommendation: z.ZodType<Recommendation> = z.object({
   params: z.unknown().describe("Action parameters the owner reviews, completed with defaults when the recommendation is accepted: RestrictSellerParams (restrict_seller), WarnSellerParams (warn_seller), SuspendSellerParams (suspend_seller), SuspendOfferParams (suspend_offer), CustomerRestrictionParams (restrict_customer_messaging, restrict_customer_account), HoldPayoutParams (hold_payout), RefundBuyersParams (refund_buyers); {} for the other actions"),
   rationale: z.string(),
   state: z.enum(["pending", "sent_to_owner", "completed", "declined", "withdrawn"]),
+  get createdBy() {
+    return StaffRef.nullish();
+  },
   routedAt: z.iso.datetime({ offset: true }).nullish(),
+  get routedBy() {
+    return StaffRef.nullish();
+  },
   decidedAt: z.iso.datetime({ offset: true }).nullish(),
   get decidedBy() {
     return StaffRef.nullish();
   },
   decisionReason: z.string().describe("Reason recorded by the owner, e.g. 'Brand registry mismatch on 4 units'").nullish(),
   enforcementId: z.uuid().nullish(),
+  approvalRequestId: z.uuid().describe("An accept above the owner's limit waiting for approval (access); the recommendation stays sent_to_owner and is accepted when the request is approved").nullish(),
 }).register(common.apiTypes, { id: "trust.Recommendation" });
 
 export interface RecommendationInput {
@@ -358,6 +371,10 @@ export interface Enforcement {
   appealDeadline?: string | null;
   reversedAt?: string | null;
   reversalReason?: string | null;
+  /** A reversal waiting for approval (trust.enforcements.reverse); the enforcement stays in place until it is approved */
+  reversalRequestId?: string | null;
+  /** Set on the reverseEnforcement answer when the reversal was sent for approval */
+  approval?: common.ApprovalInfo | null;
 }
 
 export const Enforcement: z.ZodType<Enforcement> = z.object({
@@ -386,6 +403,10 @@ export const Enforcement: z.ZodType<Enforcement> = z.object({
   appealDeadline: z.iso.datetime({ offset: true }).nullish(),
   reversedAt: z.iso.datetime({ offset: true }).nullish(),
   reversalReason: z.string().nullish(),
+  reversalRequestId: z.uuid().describe("A reversal waiting for approval (trust.enforcements.reverse); the enforcement stays in place until it is approved").nullish(),
+  get approval() {
+    return common.ApprovalInfo.nullish();
+  },
 }).register(common.apiTypes, { id: "trust.Enforcement" });
 
 export interface TrustAppeal {
@@ -450,7 +471,7 @@ export interface TrustReport {
   title: string;
   description: string;
   source: "customer" | "seller" | "staff" | "automated" | "brand_owner" | "referral";
-  /** { actor: Actor, name?, contactEmail? } — staff only; never shown to subjects */
+  /** { actor: Actor, name?, organization?, contactEmail? } — staff only; never shown to subjects. organization is the brand or rights owner a rights-owner contact reports for */
   reporter?: unknown;
   /** Merged duplicate reports, e.g. brand owner and 3 customers */
   reporterCount: number;
@@ -473,7 +494,7 @@ export interface TrustReport {
   /** { id, body, author, at } internal */
   notes: unknown[];
   timeline: common.TimelineEvent[];
-  /** { outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred, summary, decidedBy, decidedAt } */
+  /** { outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred|dismissed, summary, decidedBy, decidedAt }: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment */
   resolution?: unknown | null;
   /** Text the reporter sees */
   reporterOutcome?: string | null;
@@ -490,7 +511,7 @@ export const TrustReport: z.ZodType<TrustReport> = z.object({
   title: z.string(),
   description: z.string(),
   source: z.enum(["customer", "seller", "staff", "automated", "brand_owner", "referral"]),
-  reporter: z.unknown().describe("{ actor: Actor, name?, contactEmail? } — staff only; never shown to subjects"),
+  reporter: z.unknown().describe("{ actor: Actor, name?, organization?, contactEmail? } — staff only; never shown to subjects. organization is the brand or rights owner a rights-owner contact reports for"),
   reporterCount: z.number().int().describe("Merged duplicate reports, e.g. brand owner and 3 customers"),
   detector: z.string().nullish(),
   get subjects() {
@@ -527,7 +548,7 @@ export const TrustReport: z.ZodType<TrustReport> = z.object({
   get timeline() {
     return z.array(common.TimelineEvent);
   },
-  resolution: z.unknown().describe("{ outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred, summary, decidedBy, decidedAt }").nullish(),
+  resolution: z.unknown().describe("{ outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred|dismissed, summary, decidedBy, decidedAt }: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment").nullish(),
   reporterOutcome: z.string().describe("Text the reporter sees").nullish(),
   assessment: z.unknown().describe("For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? }").nullish(),
   createdAt: z.iso.datetime({ offset: true }),
@@ -739,6 +760,7 @@ export const TrustReportEscalatedEvent: z.ZodType<TrustReportEscalatedEvent> = z
 export interface TrustReportResolvedEvent {
   reportId: string;
   ref: string;
+  /** TrustReport.resolution.outcome: action_taken, no_violation, insufficient_evidence, duplicate (merged), referred or dismissed */
   outcome: string;
   reporterOutcome?: string | null;
   /** Reporters to tell (customers, sellers, rights owners; not staff or detectors) */
@@ -748,7 +770,7 @@ export interface TrustReportResolvedEvent {
 export const TrustReportResolvedEvent: z.ZodType<TrustReportResolvedEvent> = z.object({
   reportId: z.uuid(),
   ref: z.string(),
-  outcome: z.string(),
+  outcome: z.string().describe("TrustReport.resolution.outcome: action_taken, no_violation, insufficient_evidence, duplicate (merged), referred or dismissed"),
   reporterOutcome: z.string().nullish(),
   get reporters() {
     return z.array(ReportReporter);
@@ -814,33 +836,35 @@ export const TrustEvidenceReceivedEvent: z.ZodType<TrustEvidenceReceivedEvent> =
 export interface TrustRecommendationRoutedEvent {
   recommendationId: string;
   reportId: string;
-  action: string;
-  ownerTeam: string;
+  action: "suspend_offer" | "suspend_product" | "remove_reviews" | "keep_reviews" | "restrict_seller" | "suspend_seller" | "warn_seller" | "revoke_claim" | "hold_payout" | "hold_dispatch" | "review_payments" | "refund_buyers" | "inform_customers" | "request_identity_confirmation" | "restrict_customer_messaging" | "restrict_customer_account" | "lock_conversation" | "other";
+  ownerTeam: "catalog" | "sellers" | "support" | "finance" | "orders" | "reviews" | "customers" | "messaging";
   ownerRole: string;
-  targets: unknown[];
+  targets: TrustSubject[];
 }
 
 export const TrustRecommendationRoutedEvent: z.ZodType<TrustRecommendationRoutedEvent> = z.object({
   recommendationId: z.uuid(),
   reportId: z.uuid(),
-  action: z.string(),
-  ownerTeam: z.string(),
+  action: z.enum(["suspend_offer", "suspend_product", "remove_reviews", "keep_reviews", "restrict_seller", "suspend_seller", "warn_seller", "revoke_claim", "hold_payout", "hold_dispatch", "review_payments", "refund_buyers", "inform_customers", "request_identity_confirmation", "restrict_customer_messaging", "restrict_customer_account", "lock_conversation", "other"]),
+  ownerTeam: z.enum(["catalog", "sellers", "support", "finance", "orders", "reviews", "customers", "messaging"]),
   ownerRole: z.string(),
-  targets: z.array(z.unknown()),
+  get targets() {
+    return z.array(TrustSubject);
+  },
 });
 
 /** trust.recommendation.decided: The owner team accepts or declines, or Trust withdraws it */
 export interface TrustRecommendationDecidedEvent {
   recommendationId: string;
   reportId: string;
-  state: string;
+  state: "completed" | "declined" | "withdrawn";
   reason: string;
 }
 
 export const TrustRecommendationDecidedEvent: z.ZodType<TrustRecommendationDecidedEvent> = z.object({
   recommendationId: z.uuid(),
   reportId: z.uuid(),
-  state: z.string(),
+  state: z.enum(["completed", "declined", "withdrawn"]),
   reason: z.string(),
 });
 
@@ -1009,7 +1033,10 @@ export interface TrustDb {
     source: string;
     reporter_kind: string;
     reporter_id: string | null;
+    /** the reporter or, for rights owners, the contact person */
     reporter_name: string | null;
+    /** rights owner's brand or organisation */
+    reporter_org: string | null;
     reporter_contact: string | null;
     reporter_count: number;
     detector: string | null;
@@ -1071,11 +1098,17 @@ export interface TrustDb {
     params: Json;
     rationale: string;
     state: string;
+    /** staff id who drafted it */
+    created_by: string | null;
     routed_at: Date | null;
+    /** staff id who last routed it */
+    routed_by: string | null;
     decided_at: Date | null;
     decided_by: string | null;
     decision_reason: string | null;
     enforcement_id: string | null;
+    /** pending access approval to accept it */
+    approval_request_id: string | null;
   };
   enforcements: {
     id: string;
@@ -1098,6 +1131,8 @@ export interface TrustDb {
     appeal_deadline: Date | null;
     reversed_at: Date | null;
     reversal_reason: string | null;
+    /** pending access approval to reverse it */
+    reversal_request_id: string | null;
   };
   /** Lookup of active enforcement by target */
   enforcement_targets: {
@@ -1790,7 +1825,7 @@ export const endpoints = defineEndpoints({
     permission: "trust.recommendations.decide",
     scope: "staff",
     summary: "Owner team accepts (records enforcement) or declines with a reason",
-    desc: "Accept checks the owner's own permission for the action through access (e.g. catalog.products.publish, sellers.accounts.restrict, customers.accounts.act, finance.holds.place) and its approval limit; above the limit it returns APPROVAL_REQUIRED. Accept records an Enforcement and publishes trust.enforcement.recorded, which the owning module executes. Actions no module executes (hold_payout, hold_dispatch, review_payments, refund_buyers, inform_customers, revoke_claim, request_identity_confirmation, other) are done in the owning module's screen first (e.g. Finance places the hold in admin/finance with the trustReportId) and accepted with externalRef; without it the accept is refused with EXTERNAL_REF_REQUIRED (alreadyApplied=true in the event so nobody executes it twice). Their enforcement is applied when the owning module's confirming event arrives (see the Enforcement execution machine) or at once when nothing can confirm it.",
+    desc: "Accept checks the owner's own permission for the action through access (e.g. catalog.products.publish, sellers.accounts.restrict, customers.accounts.act, finance.holds.place) and its approval limit; above the limit the accept is sent for approval: the recommendation stays sent_to_owner with approvalRequestId and the call answers 200 with `approval` (ApprovalInfo); access.approval.decided (approved) accepts it as the requester. Accept records an Enforcement and publishes trust.enforcement.recorded, which the owning module executes. Actions no module executes (hold_payout, hold_dispatch, review_payments, refund_buyers, inform_customers, revoke_claim, request_identity_confirmation, other) are done in the owning module's screen first (e.g. Finance places the hold in admin/finance with the trustReportId) and accepted with externalRef; without it the accept is refused with EXTERNAL_REF_REQUIRED (alreadyApplied=true in the event so nobody executes it twice). Their enforcement is applied when the owning module's confirming event arrives (see the Enforcement execution machine) or at once when nothing can confirm it.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1808,9 +1843,12 @@ export const endpoints = defineEndpoints({
       get enforcement() {
         return Enforcement.nullish();
       },
+      get approval() {
+        return common.ApprovalInfo.nullish();
+      },
     }),
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","FORBIDDEN","APPROVAL_REQUIRED","SEPARATE_DUTIES","EXTERNAL_REF_REQUIRED","VALIDATION_FAILED"],
+    errors: ["ILLEGAL_TRANSITION","FORBIDDEN","SEPARATE_DUTIES","EXTERNAL_REF_REQUIRED","VALIDATION_FAILED"],
     audited: true,
     events: ["trust.recommendation.decided","trust.enforcement.recorded"],
     screens: ["admin/trust","admin/catalog","admin/seller","admin/cases","admin/finance"],
@@ -1963,7 +2001,7 @@ export const endpoints = defineEndpoints({
     permission: "trust.enforcements.reverse",
     scope: "staff",
     summary: "Reverse an enforcement (overturned appeal or error)",
-    desc: "Publishes trust.enforcement.reversed (the executing module undoes the action) and raises a enforcement_reversal work item in the owner team's queue (workqueues, optional) so the owner checks the undo, especially for actions done in its own screen (holds, cancellations, outreach).",
+    desc: "Publishes trust.enforcement.reversed (the executing module undoes the action) and raises a enforcement_reversal work item in the owner team's queue (workqueues, optional) so the owner checks the undo, especially for actions done in its own screen (holds, cancellations, outreach). Above the caller's authority the reversal is sent for approval: the enforcement stays in place with reversalRequestId and the call answers 200 with Enforcement.approval; access.approval.decided (approved) reverses it.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1973,7 +2011,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Enforcement,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION"],
     audited: true,
     approval: "Approval action trust.enforcements.reverse. Per role authority (Trust and Risk Manager; second reviewer when Permitted with second review)",
     events: ["trust.enforcement.reversed"],
@@ -2587,6 +2625,10 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       },
+      "reporter_org": {
+        "type": "text",
+        "nullable": true
+      },
       "reporter_contact": {
         "type": "text",
         "nullable": true
@@ -2807,8 +2849,16 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": false
       },
+      "created_by": {
+        "type": "text",
+        "nullable": true
+      },
       "routed_at": {
         "type": "timestamptz",
+        "nullable": true
+      },
+      "routed_by": {
+        "type": "text",
         "nullable": true
       },
       "decided_at": {
@@ -2824,6 +2874,10 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "enforcement_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "approval_request_id": {
         "type": "uuid",
         "nullable": true
       }
@@ -2907,6 +2961,10 @@ export const spec = defineModuleSpec({
       },
       "reversal_reason": {
         "type": "text",
+        "nullable": true
+      },
+      "reversal_request_id": {
+        "type": "uuid",
         "nullable": true
       }
     },

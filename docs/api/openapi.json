@@ -870,7 +870,7 @@
           "Admin API · Access and approvals"
         ],
         "summary": "Replace the permissions of a role",
-        "description": "Removing permissions applies at once. Adding sensitive permissions, or changing a role the caller holds, returns 202 with APPROVAL_REQUIRED semantics: the change waits for a second reviewer (access.roles.sensitive-grant) and RoleDetail.pendingPermissionApproval tracks it. Permissions never include approval limits; those are set with POST /limit-changes.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Approval:** Approval action access.roles.sensitive-grant. Sensitive permissions or the caller's own role need a second reviewer\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`, `access.approval.requested`\n\n**Screens:** admin/staff",
+        "description": "Removing permissions and adding ones that are not sensitive apply at once. Adding sensitive permissions (sensitivePermissionPrefixes), or adding any permission to a role the caller holds or to the Business Owner role, is saved pending approval (access.roles.sensitive-grant; the Business Owner decides for the caller's own role and the Business Owner role): the answer is the normal 200 with RoleDetail.pendingPermissionApproval (FORMAT.md, Approval responses), and the permissions are added when the request is approved. A newer proposal for the same role cancels the waiting one. Permissions never include approval limits; those are set with POST /limit-changes.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Approval:** Approval action access.roles.sensitive-grant. Sensitive permissions need a second reviewer; the caller's own role and the Business Owner role need the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`, `access.approval.requested`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -973,7 +973,7 @@
             }
           },
           "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "CONFLICT: Concurrent change; reload and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1462,7 +1462,7 @@
           "Admin API · Access and approvals"
         ],
         "summary": "Invite a staff member with roles",
-        "description": "Calls identity.inviteStaff (7-day link, 2-step set-up on accept) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`\n\n**Screens:** admin/staff",
+        "description": "Calls identity.inviteStaff (7-day link, 2-step set-up on accept) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -1531,7 +1531,7 @@
             }
           },
           "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "CONFLICT: Concurrent change; reload and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1566,7 +1566,7 @@
           "Admin API · Access and approvals"
         ],
         "summary": "Give a staff member a role",
-        "description": "**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Approval:** Approval action access.roles.sensitive-grant. Roles with sensitive permissions, the Business Owner role, or any role for yourself need a second reviewer\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`, `access.approval.requested`\n\n**Screens:** admin/staff",
+        "description": "A role that carries sensitive permissions, the Business Owner role, or any role for yourself is saved as a pending_approval assignment: the normal 201 with RoleAssignment.approval (FORMAT.md, Approval responses); it becomes active (or pending_acceptance for an invited person) when approved. CONFLICT when the person already holds or awaits the role.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Approval:** Approval action access.roles.sensitive-grant. Roles with sensitive permissions need a second reviewer; the Business Owner role or any role for yourself needs the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`, `access.approval.requested`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -1660,7 +1660,7 @@
             }
           },
           "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).\nCONFLICT: Concurrent change; reload and retry.",
+            "description": "CONFLICT: Concurrent change; reload and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3702,7 +3702,7 @@
           "Admin API · Access and approvals"
         ],
         "summary": "Plan time away and who covers each role",
-        "description": "Anyone may plan their own; others need access.away.manage. Every role the person leads must be covered by someone holding that role (or Business Owner). delegateApprovals sends the delegation to the Business Owner.\n\n**Also needs:** `access.away.manage` when body.accountId is not the caller's own (self)\n\n**Approval:** Approval action access.delegations.approve. Delegating approval authority needs Business Owner approval\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.approval.requested`\n\n**Screens:** admin/staff, admin/inbox",
+        "description": "Anyone may plan their own; others need access.away.manage. Every role the person leads must be covered by someone holding that role (or Business Owner). With delegateApprovals the period is saved as pending_approval and the delegation goes to the Business Owner (201 with AwayPeriod.approval); rejecting it rejects the whole period, cover included. Cover alone re-routes work and notices; an approved delegation also lends the covering people the covered roles' permissions and the away person's approval limits (never above them) while the period is in force.\n\n**Also needs:** `access.away.manage` when body.accountId is not the caller's own (self)\n\n**Approval:** Approval action access.delegations.approve. Delegating approval authority needs Business Owner approval\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.approval.requested`\n\n**Screens:** admin/staff, admin/inbox",
         "security": [
           {
             "bearer": []
@@ -6881,7 +6881,7 @@
           "Admin API · Advertising"
         ],
         "summary": "Change global rules (Business Owner approval)",
-        "description": "Always becomes an approval request; the new version takes effect at effectiveAt after approval.\n\n**Permission:** `advertising.rules.manage`\n\n**Approval:** Approval action advertising.rules.change. Always needs Business Owner approval\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/ad-placements, admin/settings",
+        "description": "Always becomes an approval request (access.requestApproval, action advertising.rules.change: Business Owner, second person always; no access.check because nobody may apply it alone): the pending version is saved and the answer is 202 with approval (ApprovalInfo), never 409 APPROVAL_REQUIRED. The new version takes effect at effectiveAt after approval.\n\n**Permission:** `advertising.rules.manage`\n\n**Approval:** Approval action advertising.rules.change. Always needs Business Owner approval\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/ad-placements, admin/settings",
         "security": [
           {
             "bearer": []
@@ -6930,16 +6930,6 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
             "content": {
               "application/json": {
                 "schema": {
@@ -10716,7 +10706,7 @@
           "Admin API · Action history"
         ],
         "summary": "Change how long history is kept",
-        "description": "Lengthening applies now (200). Shortening returns 202 with pendingChange until the Business Owner approves.\n\n**Permission:** `audit.retention.manage`\n\n**Approval:** Approval action audit.retention.change. Shortening retention needs Business Owner approval\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `audit.retention.changed`\n\n**Screens:** admin/audit, admin/settings",
+        "description": "Lengthening applies now. Shortening is saved as pendingChange and sent to the Business Owner (approval action audit.retention.change): the normal 200 with pendingChange.approval (FORMAT.md, Approval responses); it applies when approved and is dropped when rejected, cancelled or expired. When access answers allowed for the caller, it applies at once. APPROVAL_REQUIRED (409, nothing saved) only while the access module is disabled, so no approval can be requested; FORBIDDEN when the caller may not even propose it. While a shortening waits, no other retention change is accepted (ILLEGAL_TRANSITION).\n\n**Permission:** `audit.retention.manage`\n\n**Approval:** Approval action audit.retention.change. Shortening retention needs Business Owner approval\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `audit.retention.changed`\n\n**Screens:** admin/audit, admin/settings",
         "security": [
           {
             "bearer": []
@@ -10786,7 +10776,7 @@
             }
           },
           "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -12108,7 +12098,7 @@
           "Store API · Cart"
         ],
         "summary": "Merge the guest cart into the customer cart after sign-in",
-        "description": "Send with the customer session and the X-Guest-Session header of the guest cart. Same offer: quantities combine up to the limit. Different offer for the same variant: both lines kept. Unavailable guest lines are dropped with a note. The guest's saved-for-later items move to the customer in the same transaction (owner_kind customer, customer_id set, guest_session_id cleared; when the customer already saved that offer the customer's row is kept and the guest row deleted). Idempotent by guest cart: a second call returns the same report.\n\n**Publishes:** `cart.cart.merged`\n\n**Screens:** auth/sign-in, store/cart, store/checkout",
+        "description": "Send with the customer session and the guest session id in the body. Proof of ownership: the account must have claimed that guest session at sign-in or registration (identity.guest_session.claimed, recorded by cart's consumer); knowing the id is not enough, and an unclaimed or unknown session answers NOT_FOUND. Normally the merge has already happened through that event; this call returns its report (or merges now if the event has not arrived yet). Same offer: quantities combine up to the limit. Different offer for the same variant: both lines kept. Unavailable guest lines are dropped with a note; guest lines beyond maxLines are dropped too (outcome dropped_unavailable, note 'Your cart is full'). The guest's saved-for-later items move to the customer in the same transaction (owner_kind customer, customer_id set, guest_session_id cleared; when the customer already saved that offer the customer's row is kept and the guest row deleted). Idempotent by guest cart: a second call returns the same report.\n\n**Publishes:** `cart.cart.merged`\n\n**Screens:** auth/sign-in, store/cart, store/checkout",
         "security": [
           {
             "bearer": []
@@ -14523,9 +14513,10 @@
               ],
               "enum": [
                 "new",
-                "correction",
+                "content_change",
                 "resubmitted"
-              ]
+              ],
+              "description": "Submission kind (Submission.kind): content_change is an approved product reopened by an edit or an accepted correction"
             }
           },
           {
@@ -15029,7 +15020,7 @@
           "Admin API · Catalog"
         ],
         "summary": "Export the filtered product list",
-        "description": "Creates an authorized, logged export job through reports.requestExport (dataset catalog.admin.products, registered at boot with reports.registerDataset; rows from exportRows). Filters use the same keys as GET /products.\n\n**Permission:** `catalog.products.export`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/catalog",
+        "description": "Creates an authorized, logged export job through reports.requestExport (dataset catalog.admin.products, registered at boot with reports.registerDataset; rows from exportRows). Filters use the same keys as GET /products. 503 SERVICE_UNAVAILABLE while the reports module is off; 409 DATASET_UNAVAILABLE when reports refuses the dataset (not in the export registry, or catalog exports switched off).\n\n**Permission:** `catalog.products.export`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/catalog",
         "security": [
           {
             "bearer": []
@@ -15094,6 +15085,26 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "DATASET_UNAVAILABLE: reports refused the export dataset: it is not in the export registry or catalog exports are switched off (raised by reports.requestExport)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "SERVICE_UNAVAILABLE: A service needed to authorize the request is unavailable; retry later.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19584,7 +19595,7 @@
           "Store API · Checkout"
         ],
         "summary": "Place the order and pay",
-        "description": "Requires an Idempotency-Key; the same key returns the first result, and while a session is placing, pending or completed any further call returns the current result without a new charge. Steps: lock; check quoteVersion and expectedTotal; revalidate (changes → changes_required, nothing charged); hold stock (inventory.hold); reserve promotions; read content.currentPolicyVersions(['returns', 'shipping', 'purchase_terms']) (the versions accepted with this order); authorize (payments.authorize); then accepted → order created and accepted (confirmation); pending → order created with payment checking (payment-result page, no second payment); failed → no order, cart and choices kept, holds kept until retryUntil; requires_action → bank challenge. Before authorizing, the session's attempt count is checked against maxPaymentAttempts (PAYMENT_ATTEMPTS_EXCEEDED); editing the checkout never resets it, so edit → place cannot bypass the limit. createOrder gets the real authorize result as paymentState (accepted creates the order open in one step) and the session's attemptNo. A new card's providerToken is used for this authorize only and cleared from payment_selection afterwards, whatever the outcome.\n\n**Idempotent:** send an Idempotency-Key.\n\n**Publishes:** `checkout.session.completed`, `checkout.changes.detected`\n\n**Screens:** store/checkout, store/payment-result, store/confirmation, store/checkout-review-changes",
+        "description": "Requires an Idempotency-Key; the same key returns the first result, and while a session is placing, pending or completed any further call returns the current result without a new charge. Steps: lock; check quoteVersion and expectedTotal; revalidate (changes → changes_required, nothing charged); hold stock (inventory.hold); reserve promotions; hold store credit (wallet.holdCredit; INSUFFICIENT_CREDIT when the balance dropped below the amount applied); read content.currentPolicyVersions(['returns', 'shipping', 'purchase_terms']) (the versions accepted with this order); authorize (payments.authorize); then accepted → order created and accepted (confirmation); pending → order created with payment checking (payment-result page, no second payment); failed → no order, cart and choices kept, holds kept until retryUntil; requires_action → bank challenge. Before authorizing, the session's attempt count is checked against maxPaymentAttempts (PAYMENT_ATTEMPTS_EXCEEDED); editing the checkout never resets it, so edit → place cannot bypass the limit. createOrder gets the real authorize result as paymentState (accepted creates the order open in one step) and the session's attemptNo. A new card's providerToken is used for this authorize only and cleared from payment_selection afterwards, whatever the outcome.\n\n**Idempotent:** send an Idempotency-Key.\n\n**Publishes:** `checkout.session.completed`, `checkout.changes.detected`\n\n**Screens:** store/checkout, store/payment-result, store/confirmation, store/checkout-review-changes",
         "security": [
           {
             "bearer": []
@@ -19672,7 +19683,7 @@
             }
           },
           "409": {
-            "description": "QUOTE_OUTDATED: quoteVersion or expectedTotal differs from the current quote; reload the checkout and show the new total.\nPAYMENT_ATTEMPTS_EXCEEDED: This checkout reached maxPaymentAttempts; start again from the cart (nothing was charged). details.max.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "QUOTE_OUTDATED: quoteVersion or expectedTotal differs from the current quote; reload the checkout and show the new total.\nPAYMENT_ATTEMPTS_EXCEEDED: This checkout reached maxPaymentAttempts; start again from the cart (nothing was charged). details.max.\nINSUFFICIENT_CREDIT: Store credit is lower than the amount requested.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -19951,7 +19962,7 @@
             }
           },
           "409": {
-            "description": "RETRY_WINDOW_EXPIRED: The hold after the failed payment ended; start checkout again from the cart.\nQUOTE_OUTDATED: quoteVersion or expectedTotal differs from the current quote; reload the checkout and show the new total.\nPAYMENT_ATTEMPTS_EXCEEDED: This checkout reached maxPaymentAttempts; start again from the cart (nothing was charged). details.max.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "RETRY_WINDOW_EXPIRED: The hold after the failed payment ended; start checkout again from the cart.\nQUOTE_OUTDATED: quoteVersion or expectedTotal differs from the current quote; reload the checkout and show the new total.\nPAYMENT_ATTEMPTS_EXCEEDED: This checkout reached maxPaymentAttempts; start again from the cart (nothing was charged). details.max.\nINSUFFICIENT_CREDIT: Store credit is lower than the amount requested.\nILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -23344,7 +23355,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/content.PageInput"
+                "$ref": "#/components/schemas/content.PageDraftInput"
               }
             }
           }
@@ -23525,7 +23536,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/content.PageInput"
+                "$ref": "#/components/schemas/content.PageDraftInput"
               }
             }
           }
@@ -26138,7 +26149,25 @@
                 "type": "object",
                 "properties": {
                   "key": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "URL slug: lowercase letters, digits, - and _ (2–60 characters); unique (CONFLICT when taken)"
+                  },
+                  "kind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "returns",
+                      "shipping",
+                      "privacy",
+                      "purchase_terms",
+                      "seller_rules",
+                      "advertising",
+                      "cookies",
+                      "other"
+                    ],
+                    "description": "Default: the key when it is one of the kinds, else other"
                   },
                   "title": {
                     "type": "string"
@@ -26206,6 +26235,16 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27168,7 +27207,7 @@
           "Admin API · Content"
         ],
         "summary": "Replace header and footer links",
-        "description": "**Permission:** `content.pages.publish`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/content",
+        "description": "Saves the links and the service strip. The answer carries checks: the strip text is compared with the Official Store free-shipping threshold (shipping.getOfficialFreeShipping) and the baseline return window (returns.defaultWindowDays) when those modules are on; a mismatch is a warn check, never a refusal.\n\n**Permission:** `content.pages.publish`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/content",
         "security": [
           {
             "bearer": []
@@ -29548,7 +29587,7 @@
           "Admin API · Customers"
         ],
         "summary": "Customer detail: profile, orders, cases, messages, notes, abuse reports, restrictions",
-        "description": "Aggregates in-process: identity (sign-in summary), orders (count, spend, recent), support (open cases), messaging (conversation summary), trust (reports filed by and against). Missing sources are listed in `unavailable`. Viewing is logged in the action history.\n\n**Permission:** `customers.accounts.view`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/customers",
+        "description": "Aggregates in-process: identity (sign-in summary), orders (count, spend, recent), support (open cases), messaging (conversation summary), trust (reports filed by and against). Missing sources are listed in `unavailable`. Each view writes an audit entry (customers.customer.view, shown in the audit log); it is not an AccountActionRecord: recentActions lists only actions that change the account.\n\n**Permission:** `customers.accounts.view`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/customers",
         "security": [
           {
             "bearer": []
@@ -33712,16 +33751,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
           }
         },
         "x-module": "finance",
@@ -33854,7 +33883,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -34113,7 +34142,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -34373,16 +34402,6 @@
                 }
               }
             }
-          },
-          "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
           }
         },
         "x-module": "finance",
@@ -34571,7 +34590,7 @@
           "Admin API · Finance"
         ],
         "summary": "Record payment received or write off an amount owed",
-        "description": "**Permission:** `finance.adjustments.record`\n\n**Approval:** Approval action finance.writeoffs.approve. Write-offs need a second Finance reviewer\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/seller",
+        "description": "seller_paid and offset are recorded at once. A write-off within the caller's finance.writeoffs.approve limit is recorded at once; above it the write-off is saved on the amount owed (pendingWriteOff) and the response is still 200, with the approval request in `approval` (FORMAT.md, Approval responses); it is applied when approved. CONFLICT while another write-off of the same amount owed waits for approval.\n\n**Permission:** `finance.adjustments.record`\n\n**Approval:** Approval action finance.writeoffs.approve. Write-offs need a second Finance reviewer\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/seller",
         "security": [
           {
             "bearer": []
@@ -34680,7 +34699,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nCONFLICT: Concurrent change; reload and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -35692,7 +35711,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_APPROVER: The second approval must come from a different person than the first approver or the requester.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nSAME_APPROVER: The second approval must come from a different person than the first approver or the requester.",
             "content": {
               "application/json": {
                 "schema": {
@@ -37278,7 +37297,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -44368,7 +44387,7 @@
           "Store API · Identity"
         ],
         "summary": "Confirm it's you before a sensitive action",
-        "description": "Returns a single-use re-auth token valid 5 minutes for the requested purpose, required by account closure (customers). Seller Center uses POST /api/seller/identity/reauth for payout account and business changes.\n\n**Screens:** account/profile, account/security",
+        "description": "Returns a single-use re-auth token valid reauthTokenMinutes for the requested purpose, bound to the account and session: account-closure (customers), email-change, two-step-removal and recovery-codes. Seller Center uses POST /api/seller/identity/reauth for payout-account, business-change and seller-closure.\n\n**Screens:** account/profile, account/security",
         "security": [
           {
             "bearer": []
@@ -44453,7 +44472,7 @@
           "Seller API · Identity"
         ],
         "summary": "Confirm it is you before a sensitive Seller Center action",
-        "description": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, the purpose and the current seller context (if one is chosen); required by payout account changes, business change requests and account close (sellers).\n\n**Seller context:** optional (works before a seller is chosen).\n\n**Audited:** recorded in the action history.\n\n**Screens:** seller/finance, seller/store",
+        "description": "Same check as the store re-auth (password or 2-step code) on the seller session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, the purpose and the current seller context (if one is chosen); purposes payout-account, business-change and seller-closure (sellers). A token taken before a seller is chosen does not work once one is.\n\n**Seller context:** optional (works before a seller is chosen).\n\n**Audited:** recorded in the action history.\n\n**Screens:** seller/finance, seller/store",
         "security": [
           {
             "bearer": []
@@ -44540,7 +44559,7 @@
           "Admin API · Identity"
         ],
         "summary": "Confirm it is you before a sensitive Admin Center action",
-        "description": "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose.\n\n**Audited:** recorded in the action history.",
+        "description": "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose (two-step-removal and recovery-codes for the staff member's own 2-step settings).\n\n**Audited:** recorded in the action history.",
         "security": [
           {
             "bearer": []
@@ -54799,7 +54818,7 @@
           "Admin API · Media"
         ],
         "summary": "Take a file down (policy, rights, privacy) with a reason",
-        "description": "Works even when in use. Using modules receive media.asset.removed and flag the record (e.g. product needs a new image).\n\n**Permission:** `media.assets.moderate`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `media.asset.removed`\n\n**Screens:** admin/trust, admin/product-review, admin/reviews, admin/ad-assets",
+        "description": "Works even when in use. Using modules receive media.asset.removed and flag the record (e.g. product needs a new image). The asset keeps removedAt, removedReason and showPlaceholder; with showPlaceholder false, MediaRef lookups (refs) leave the file out instead of returning the placeholder.\n\n**Permission:** `media.assets.moderate`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `media.asset.removed`\n\n**Screens:** admin/trust, admin/product-review, admin/reviews, admin/ad-assets",
         "security": [
           {
             "bearer": []
@@ -54912,7 +54931,7 @@
           "Admin API · Media"
         ],
         "summary": "Restore a removed file",
-        "description": "**Permission:** `media.assets.moderate`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `media.asset.restored`\n\n**Screens:** admin/trust",
+        "description": "Brings the public renditions back and clears removedAt, removedReason and showPlaceholder.\n\n**Permission:** `media.assets.moderate`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `media.asset.restored`\n\n**Screens:** admin/trust",
         "security": [
           {
             "bearer": []
@@ -55875,7 +55894,7 @@
             }
           },
           "409": {
-            "description": "CONVERSATION_LOCKED: The conversation is locked or archived for new messages. details.reason.",
+            "description": "CONVERSATION_LOCKED: The conversation takes no new messages: locked by Marketly (details.reason = the lock reason) or archived (details.reason = archived; starting a conversation on the same subject reopens an archived one, replying inside it does not).",
             "content": {
               "application/json": {
                 "schema": {
@@ -56804,7 +56823,7 @@
             }
           },
           "409": {
-            "description": "CONVERSATION_LOCKED: The conversation is locked or archived for new messages. details.reason.",
+            "description": "CONVERSATION_LOCKED: The conversation takes no new messages: locked by Marketly (details.reason = the lock reason) or archived (details.reason = archived; starting a conversation on the same subject reopens an archived one, replying inside it does not).",
             "content": {
               "application/json": {
                 "schema": {
@@ -58016,7 +58035,7 @@
             }
           },
           "409": {
-            "description": "CONVERSATION_LOCKED: The conversation is locked or archived for new messages. details.reason.",
+            "description": "CONVERSATION_LOCKED: The conversation takes no new messages: locked by Marketly (details.reason = the lock reason) or archived (details.reason = archived; starting a conversation on the same subject reopens an archived one, replying inside it does not).",
             "content": {
               "application/json": {
                 "schema": {
@@ -58428,7 +58447,7 @@
           "Admin API · Messaging"
         ],
         "summary": "Action or dismiss a report",
-        "description": "**Permission:** `messaging.conversations.moderate`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `messaging.conversation.locked`\n\n**Screens:** admin/trust",
+        "description": "refer_to_trust raises a Trust and Risk signal (trust.raiseSignal); while the trust module is off it is refused with TRUST_UNAVAILABLE (hide the message or lock the conversation instead).\n\n**Permission:** `messaging.conversations.moderate`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `messaging.conversation.locked`\n\n**Screens:** admin/trust",
         "security": [
           {
             "bearer": []
@@ -58526,6 +58545,16 @@
           },
           "409": {
             "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "TRUST_UNAVAILABLE: refer_to_trust needs the Trust and Risk module, which is off; hide the message or lock the conversation instead.",
             "content": {
               "application/json": {
                 "schema": {
@@ -79019,7 +79048,7 @@
           "Seller API · Promotions"
         ],
         "summary": "Resume an own discount",
-        "description": "**Permission:** `promotions.discounts.manage`\n\n**Screens:** seller/marketing",
+        "description": "Back to live inside the period (scheduled before it starts); the first time it goes live also publishes promotions.campaign.started. Refused with VALIDATION_FAILED once the period is over.\n\n**Permission:** `promotions.discounts.manage`\n\n**Publishes:** `promotions.campaign.resumed`, `promotions.campaign.started`\n\n**Screens:** seller/marketing",
         "security": [
           {
             "bearer": []
@@ -79104,6 +79133,10 @@
         "x-permission": "promotions.discounts.manage",
         "x-screens": [
           "seller/marketing"
+        ],
+        "x-events": [
+          "promotions.campaign.resumed",
+          "promotions.campaign.started"
         ],
         "x-phase": 1
       }
@@ -82145,7 +82178,7 @@
           "Admin API · Promotions"
         ],
         "summary": "Resume a paused campaign",
-        "description": "**Permission:** `promotions.campaigns.publish`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `promotions.campaign.resumed`\n\n**Screens:** admin/promotions",
+        "description": "Back to live inside the period (scheduled before it starts); the first time it goes live also publishes promotions.campaign.started. Refused with VALIDATION_FAILED once the period is over.\n\n**Permission:** `promotions.campaigns.publish`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `promotions.campaign.resumed`, `promotions.campaign.started`\n\n**Screens:** admin/promotions",
         "security": [
           {
             "bearer": []
@@ -82250,7 +82283,8 @@
           "admin/promotions"
         ],
         "x-events": [
-          "promotions.campaign.resumed"
+          "promotions.campaign.resumed",
+          "promotions.campaign.started"
         ],
         "x-audited": true,
         "x-phase": 1
@@ -86242,7 +86276,7 @@
           "Admin API · Purchasing"
         ],
         "summary": "Discard a receiving record started by mistake",
-        "description": "**Permission:** `purchasing.receipts.record`\n\n**Audited:** recorded in the action history.\n\n**Screens:** ops/receiving",
+        "description": "The receipt is cancelled; when no other receiving record is open for the delivery, the delivery goes back from Receiving to Arrived (reopen), so receiving can start again from the dock.\n\n**Permission:** `purchasing.receipts.record`\n\n**Audited:** recorded in the action history.\n\n**Screens:** ops/receiving",
         "security": [
           {
             "bearer": []
@@ -87256,8 +87290,10 @@
               "enum": [
                 "today",
                 "last_7_days",
+                "last_14_days",
                 "last_30_days"
-              ]
+              ],
+              "description": "Default last_7_days"
             }
           }
         ],
@@ -87562,12 +87598,20 @@
                       "items": {
                         "$ref": "#/components/schemas/reports.MetricSuggestion"
                       }
+                    },
+                    "ownerChanges": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/reports.MetricOwnerChange"
+                      },
+                      "description": "Owner history, newest first"
                     }
                   },
                   "required": [
                     "metric",
                     "versions",
-                    "suggestions"
+                    "suggestions",
+                    "ownerChanges"
                   ]
                 }
               }
@@ -88739,16 +88783,6 @@
           },
           "409": {
             "description": "DATASET_UNAVAILABLE: The dataset is not in the export registry or its owner module is disabled",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "EXPORT_TOO_LARGE: More than maxExportRows rows; narrow the filters",
             "content": {
               "application/json": {
                 "schema": {
@@ -95851,7 +95885,7 @@
           "Admin API · Returns"
         ],
         "summary": "Issue a refund from the order page (exception refund request)",
-        "description": "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception that goes through Finance approval like any other; within the caller's limit it is approved in the same call and handed to payments. Optional trustReportId links it to a trust recommendation.\n\n**Permission:** `returns.exceptions.propose`\n\n**Approval:** Approval action returns.refunds.approve. Within the caller's refund limit it is approved at once; above it a Finance member whose limit covers it, and a second reviewer above that limit's threshold, approve through access\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`, `returns.refund.approved`\n\n**Screens:** admin/order",
+        "description": "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception that goes through Finance approval like any other; within the caller's limit it is approved in the same call and handed to payments. Optional trustReportId links it to a trust recommendation. Above the caller's limit it is saved under review and the response (201) carries `approval` (FORMAT.md, Approval responses). VALIDATION_FAILED also when the items belong to more than one seller group; NOT_FOUND for an unknown order; REMEDY_NOT_AVAILABLE for store credit while wallet is off or for a guest order.\n\n**Permission:** `returns.exceptions.propose`\n\n**Approval:** Approval action returns.refunds.approve. Within the caller's refund limit it is approved at once; above it a Finance member whose limit covers it, and a second reviewer above that limit's threshold, approve through access\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`, `returns.refund.approved`\n\n**Screens:** admin/order",
         "security": [
           {
             "bearer": []
@@ -95919,8 +95953,18 @@
               }
             }
           },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).\nDUPLICATE_REFUND: A refund request still in progress (requested, under review, approved or processing) already covers these items. Sent, failed, declined and cancelled requests do not block a second refund; the remaining refundable amount from payments caps it. details.refundRequestId.",
+            "description": "DUPLICATE_REFUND: A refund request still in progress (requested, under review, approved or processing) already covers these items. Sent, failed, declined and cancelled requests do not block a second refund; the remaining refundable amount from payments caps it. details.refundRequestId.",
             "content": {
               "application/json": {
                 "schema": {
@@ -95930,7 +95974,7 @@
             }
           },
           "422": {
-            "description": "REFUND_EXCEEDS_REFUNDABLE: Amount is above the remaining refundable amount. details.maxRefundable.",
+            "description": "REFUND_EXCEEDS_REFUNDABLE: Amount is above the remaining refundable amount. details.maxRefundable.\nREMEDY_NOT_AVAILABLE: The chosen remedy is not offered (e.g. no stock for a replacement, store credit off).",
             "content": {
               "application/json": {
                 "schema": {
@@ -101448,7 +101492,7 @@
           "Admin API · Reviews"
         ],
         "summary": "Send to Trust and Risk (suspected fake or paid reviews, payment offers)",
-        "description": "**Permission:** `reviews.moderation.decide`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `reviews.content.referred`\n\n**Screens:** admin/reviews",
+        "description": "Recorded in referrals (shown in the item's history) and announced with reviews.content.referred; the moderation item stays open for a decision.\n\n**Permission:** `reviews.moderation.decide`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `reviews.content.referred`\n\n**Screens:** admin/reviews",
         "security": [
           {
             "bearer": []
@@ -102806,7 +102850,7 @@
           "Store API · Search"
         ],
         "summary": "Search results or category listing (product cards with sponsored slots marked)",
-        "description": "Without q this is a category, brand, seller or collection listing. Out-of-stock products are excluded unless availability=include_out_of_stock. Seller and condition filters show the matching seller's offer price. Sponsored hits come from advertising.sponsoredForResults on the first page only and always carry a visible label; when advertising is off there are none.\n\n**Screens:** store/search, store/category, store/home, store/official, store/seller, store/brand, store/collection, store/deals",
+        "description": "Without q this is a category, brand, seller or collection listing. Out-of-stock products are excluded unless availability=include_out_of_stock. Seller and condition filters show the matching seller's offer price. Sponsored hits come from advertising.sponsoredForResults on the first page only and always carry a visible label; when advertising is off there are none. Ad personalization: personalizationAllowed is true only for a signed-in customer whose marketing preferences allow personalized recommendations (customers.getMarketingConsent), with their customerId; visitors always get false (visitor sessions carry no privacy choice), so their ads use page context only (query, category).\n\n**Screens:** store/search, store/category, store/home, store/official, store/seller, store/brand, store/collection, store/deals",
         "security": [
           {
             "bearer": []
@@ -104241,7 +104285,7 @@
           "Seller API · Search"
         ],
         "summary": "Seller Center top-bar search across own orders, offers/SKUs and returns",
-        "description": "Fan-out over enabled modules' public APIs with the seller from the session: orders.listOrdersForSeller (order ref, buyer name, product), offers.searchOwnOffers (title, seller SKU, GTIN) and returns.listForSeller with q (return ref, order ref). Groups the member's role cannot see are left out (e.g. orders without orders.fulfillment.view). Nothing is indexed here; each group comes from its owning module.\n\n**Screens:** seller/dashboard",
+        "description": "Fan-out over enabled modules' public APIs with the seller from the session: orders.listOrdersForSeller (order ref, buyer name, product), offers.searchOwnOffers (title, seller SKU, GTIN) and returns.listForSeller with q (return ref, order ref). Each group only when the member may see it (owners see every group): Orders when the member holds any orders.fulfillment.* permission; Offers and SKUs with any offers.* permission (e.g. offers.offers.manage, offers.prices.manage, offers.bulk.update, offers.offers.export); Returns with any returns.* permission (e.g. returns.requests.respond, returns.refunds.issue). A disabled module's group disappears. Nothing is indexed here; each group comes from its owning module.\n\n**Screens:** seller/dashboard",
         "security": [
           {
             "bearer": []
@@ -104327,7 +104371,7 @@
           "Admin API · Search"
         ],
         "summary": "Back-office top-bar quick search across orders, sellers, products and customers",
-        "description": "Matches by reference, name, email, SKU or GTIN. Fan-out over enabled modules' public APIs, each group only when the caller holds that module's view permission: orders.listOrdersAdmin (orders.orders.view), sellers.searchSellers (sellers.accounts.view), customers.searchCustomers (customers.accounts.view; email masked without contact permission), products from this module's index plus offers.listOffersAdmin for seller SKUs (offers.offers.view). The lookup itself is not audited; opening a record is.\n\n**Screens:** admin/dashboard",
+        "description": "Matches by reference, name, email, SKU or GTIN. Fan-out over enabled modules' public APIs, each group only when the caller holds its permission: Orders through orders.listOrdersAdmin (orders.orders.view); Sellers through sellers.searchSellers (sellers.accounts.view); Customers through customers.searchCustomers (customers.accounts.view; the email is masked without orders.customers.view-contact); Offers and SKUs through offers.listOffersAdmin (offers.offers.view); Products from this module's index (listed products, also by GTIN) for every staff member, no permission needed (it is the public catalog). The lookup itself is not audited; opening a record is.\n\n**Screens:** admin/dashboard",
         "security": [
           {
             "bearer": []
@@ -111157,7 +111201,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Restrict a seller (reason, affected activity, scope, appeal route, review date)",
-        "description": "Above the caller's authority (access: Recommend only / Permitted with second review) the restriction is pending_approval and returns APPROVAL_REQUIRED with details.approvalRequestId. Active restrictions publish sellers.seller.restricted; offers, promotions and advertising stop only the affected activity. Existing orders, returns, cases and messages keep working.\n\n**Permission:** `sellers.accounts.restrict`\n\n**Approval:** Approval action sellers.sellers.restrict. Second reviewer when the caller's role is 'Permitted with second review' for seller restrictions\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.restricted`\n\n**Screens:** admin/seller, admin/trust",
+        "description": "Above the caller's authority (access: Recommend only / Permitted with second review) the restriction is saved as pending_approval with an access approval request and the call answers 201 with the Restriction and its approval (ApprovalInfo); it becomes active on access.approval.decided (approved). It never answers APPROVAL_REQUIRED. Active restrictions publish sellers.seller.restricted; offers, promotions and advertising stop only the affected activity. Existing orders, returns, cases and messages keep working.\n\n**Permission:** `sellers.accounts.restrict`\n\n**Approval:** Approval action sellers.sellers.restrict. Second reviewer when the caller's role is 'Permitted with second review' for seller restrictions\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.restricted`\n\n**Screens:** admin/seller, admin/trust",
         "security": [
           {
             "bearer": []
@@ -111236,7 +111280,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -111268,7 +111312,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Edit an active restriction (scope, reason, resolution steps, review date)",
-        "description": "**Permission:** `sellers.accounts.restrict`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.restriction.updated`\n\n**Screens:** admin/seller",
+        "description": "Audited and republished as sellers.restriction.updated. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.\n\n**Permission:** `sellers.accounts.restrict`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.restriction.updated`\n\n**Screens:** admin/seller",
         "security": [
           {
             "bearer": []
@@ -111902,7 +111946,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Close a seller account",
-        "description": "New sales stop; open obligations stay accessible until settled; finance issues the final statement.\n\n**Permission:** `sellers.accounts.close`\n\n**Approval:** Approval action sellers.sellers.close. Second reviewer unless the seller requested closure\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.closed`\n\n**Screens:** admin/seller",
+        "description": "New sales stop; open obligations stay accessible until settled; finance issues the final statement. A closure for another reason than the seller's request always needs a second reviewer: the closure is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.\n\n**Permission:** `sellers.accounts.close`\n\n**Approval:** Approval action sellers.sellers.close. Second reviewer unless the seller requested closure\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.seller.closed`\n\n**Screens:** admin/seller",
         "security": [
           {
             "bearer": []
@@ -113487,7 +113531,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Approve the application",
-        "description": "Blocked while checks are failed or need attention without an accepted note (CHECKS_UNRESOLVED). Optional conditions create restrictions at approval (e.g. a category excluded until certificates are checked). Publishes sellers.seller.approved (finance opens the ledger and applies the new-seller hold; returns stores the return address; identity grants the owner seller context). Approval does not publish products or enable payouts.\n\n**Permission:** `sellers.applications.decide`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.application.decided`, `sellers.seller.approved`, `sellers.seller.restricted`\n\n**Screens:** admin/seller-application",
+        "description": "Blocked while checks are failed or need attention without an accepted note (CHECKS_UNRESOLVED). Optional conditions create restrictions at approval (e.g. a category excluded until certificates are checked). Publishes sellers.seller.approved (finance opens the ledger and applies the new-seller hold; returns stores the return address; sellers itself grants the owner seller context with identity.grantSellerContext; identity does not consume this event). Approval does not publish products or enable payouts.\n\n**Permission:** `sellers.applications.decide`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `sellers.application.decided`, `sellers.seller.approved`, `sellers.seller.restricted`\n\n**Screens:** admin/seller-application",
         "security": [
           {
             "bearer": []
@@ -114810,7 +114854,7 @@
           "Admin API · Sellers"
         ],
         "summary": "Change targets with an effective date",
-        "description": "Changes state their effective date; metrics already computed are not re-graded.\n\n**Permission:** `sellers.performance.manage`\n\n**Approval:** Approval action sellers.performance.targets. Per role authority; Permitted with second review needs the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/settings",
+        "description": "Changes state their effective date; metrics already computed are not re-graded. Above the caller's authority the change is kept in pending_changes with an access approval request and the call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; access.approval.decided (approved) applies it, so the caller does not send it again.\n\n**Permission:** `sellers.performance.manage`\n\n**Approval:** Approval action sellers.performance.targets. Per role authority; Permitted with second review needs the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/settings",
         "security": [
           {
             "bearer": []
@@ -128289,7 +128333,7 @@
           "Admin API · Support"
         ],
         "summary": "Record the decision and remedy, publish the appeal deadline to both parties",
-        "description": "Refund remedies create a refund request in returns (Finance approves within limits; approved is not sent). Goodwill credit needs the wallet module (GOODWILL_UNAVAILABLE while it is off, decision D-RT3); goodwill above the decider's limit needs approval through wallet and access. A guest has no wallet: their goodwill becomes a platform-funded partial refund through returns. Remedies left without items (goodwill, refunds) default to the case's items. A replacement needs a return on the case (REPLACEMENT_NEEDS_RETURN, decision D-S5) until returns can create replacements without one. notifyParties=false still records and shows the decision but sends no email (notified=false).\n\n**Permission:** `support.disputes.decide`\n\n**Approval:** Approval action support.remedies.approve. Goodwill or platform-funded remedies above the decider's limit (e.g. $50) go to Finance through access\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `support.case.decided`\n\n**Screens:** admin/case",
+        "description": "Refund remedies create a refund request in returns (Finance approves within limits; approved is not sent). Goodwill credit needs the wallet module (GOODWILL_UNAVAILABLE while it is off, decision D-RT3); goodwill above the decider's limit needs approval through wallet and access. A guest has no wallet: their goodwill becomes a platform-funded partial refund through returns. Remedies left without items (goodwill, refunds) default to the case's items. A replacement is created by returns (returns.requestReplacement): it attaches to the case's open return when that return covers the item, otherwise it is a replacement without a return; REPLACEMENT_NEEDS_RETURN while the returns module is off. notifyParties=false still records and shows the decision but sends no email (notified=false). Platform-funded remedies above the decider's limit: the decision is saved pending (cases.approval_request_id) and the call answers 200 with AdminCaseDetail.pendingApproval; nothing is published until access.approval.decided. APPROVAL_REQUIRED (409, nothing saved) only while an earlier decision on the case still waits for approval.\n\n**Permission:** `support.disputes.decide`\n\n**Approval:** Approval action support.remedies.approve. Platform-funded remedies above the decider's limit (e.g. $50) are saved pending and go to Finance through access (200 with pendingApproval); goodwill credit is checked by wallet.goodwill.grant\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `support.case.decided`\n\n**Screens:** admin/case",
         "security": [
           {
             "bearer": []
@@ -128387,7 +128431,7 @@
             }
           },
           "422": {
-            "description": "GOODWILL_UNAVAILABLE: Goodwill credit needs the wallet module, which is off; choose a refund or partial refund instead.\nREPLACEMENT_NEEDS_RETURN: A replacement can only be promised on a case with a return (returns creates the replacement from it); ask for a return or choose a refund.",
+            "description": "GOODWILL_UNAVAILABLE: Goodwill credit needs the wallet module, which is off; choose a refund or partial refund instead.\nREPLACEMENT_NEEDS_RETURN: A replacement needs the returns module, which creates and ships it (with the case's return or without one); it is off, so choose a refund instead.",
             "content": {
               "application/json": {
                 "schema": {
@@ -128839,7 +128883,7 @@
           "Admin API · Support"
         ],
         "summary": "Decide an appeal (reviewer must differ from the original decider)",
-        "description": "**Permission:** `support.appeals.decide`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `support.case.appeal_decided`, `support.case.decided`\n\n**Screens:** admin/case, admin/cases",
+        "description": "Overturning cancels the earlier decision's refund requests that can still be cancelled and records the new remedies. New platform-funded remedies above the reviewer's limit are saved pending (200 with AdminCaseDetail.pendingApproval) and published on access.approval.decided; APPROVAL_REQUIRED only while an earlier decision still waits for approval.\n\n**Permission:** `support.appeals.decide`\n\n**Approval:** Approval action support.remedies.approve (new platform-funded remedies above the reviewer's limit)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `support.case.appeal_decided`, `support.case.decided`\n\n**Screens:** admin/case, admin/cases",
         "security": [
           {
             "bearer": []
@@ -128958,7 +129002,7 @@
             }
           },
           "422": {
-            "description": "GOODWILL_UNAVAILABLE: Goodwill credit needs the wallet module, which is off; choose a refund or partial refund instead.\nREPLACEMENT_NEEDS_RETURN: A replacement can only be promised on a case with a return (returns creates the replacement from it); ask for a return or choose a refund.",
+            "description": "GOODWILL_UNAVAILABLE: Goodwill credit needs the wallet module, which is off; choose a refund or partial refund instead.\nREPLACEMENT_NEEDS_RETURN: A replacement needs the returns module, which creates and ships it (with the case's return or without one); it is off, so choose a refund instead.",
             "content": {
               "application/json": {
                 "schema": {
@@ -132808,7 +132852,7 @@
           "Admin API · Trust and risk"
         ],
         "summary": "Owner team accepts (records enforcement) or declines with a reason",
-        "description": "Accept checks the owner's own permission for the action through access (e.g. catalog.products.publish, sellers.accounts.restrict, customers.accounts.act, finance.holds.place) and its approval limit; above the limit it returns APPROVAL_REQUIRED. Accept records an Enforcement and publishes trust.enforcement.recorded, which the owning module executes. Actions no module executes (hold_payout, hold_dispatch, review_payments, refund_buyers, inform_customers, revoke_claim, request_identity_confirmation, other) are done in the owning module's screen first (e.g. Finance places the hold in admin/finance with the trustReportId) and accepted with externalRef; without it the accept is refused with EXTERNAL_REF_REQUIRED (alreadyApplied=true in the event so nobody executes it twice). Their enforcement is applied when the owning module's confirming event arrives (see the Enforcement execution machine) or at once when nothing can confirm it.\n\n**Permission:** `trust.recommendations.decide`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `trust.recommendation.decided`, `trust.enforcement.recorded`\n\n**Screens:** admin/trust, admin/catalog, admin/seller, admin/cases, admin/finance",
+        "description": "Accept checks the owner's own permission for the action through access (e.g. catalog.products.publish, sellers.accounts.restrict, customers.accounts.act, finance.holds.place) and its approval limit; above the limit the accept is sent for approval: the recommendation stays sent_to_owner with approvalRequestId and the call answers 200 with `approval` (ApprovalInfo); access.approval.decided (approved) accepts it as the requester. Accept records an Enforcement and publishes trust.enforcement.recorded, which the owning module executes. Actions no module executes (hold_payout, hold_dispatch, review_payments, refund_buyers, inform_customers, revoke_claim, request_identity_confirmation, other) are done in the owning module's screen first (e.g. Finance places the hold in admin/finance with the trustReportId) and accepted with externalRef; without it the accept is refused with EXTERNAL_REF_REQUIRED (alreadyApplied=true in the event so nobody executes it twice). Their enforcement is applied when the owning module's confirming event arrives (see the Enforcement execution machine) or at once when nothing can confirm it.\n\n**Permission:** `trust.recommendations.decide`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `trust.recommendation.decided`, `trust.enforcement.recorded`\n\n**Screens:** admin/trust, admin/catalog, admin/seller, admin/cases, admin/finance",
         "security": [
           {
             "bearer": []
@@ -132877,6 +132921,17 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "approval": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/ApprovalInfo"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Set when the accept was sent for approval (no enforcement yet)"
                     }
                   },
                   "required": [
@@ -132927,7 +132982,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -133776,7 +133831,7 @@
           "Admin API · Trust and risk"
         ],
         "summary": "Reverse an enforcement (overturned appeal or error)",
-        "description": "Publishes trust.enforcement.reversed (the executing module undoes the action) and raises a enforcement_reversal work item in the owner team's queue (workqueues, optional) so the owner checks the undo, especially for actions done in its own screen (holds, cancellations, outreach).\n\n**Permission:** `trust.enforcements.reverse`\n\n**Approval:** Approval action trust.enforcements.reverse. Per role authority (Trust and Risk Manager; second reviewer when Permitted with second review)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `trust.enforcement.reversed`\n\n**Screens:** admin/trust",
+        "description": "Publishes trust.enforcement.reversed (the executing module undoes the action) and raises a enforcement_reversal work item in the owner team's queue (workqueues, optional) so the owner checks the undo, especially for actions done in its own screen (holds, cancellations, outreach). Above the caller's authority the reversal is sent for approval: the enforcement stays in place with reversalRequestId and the call answers 200 with Enforcement.approval; access.approval.decided (approved) reverses it.\n\n**Permission:** `trust.enforcements.reverse`\n\n**Approval:** Approval action trust.enforcements.reverse. Per role authority (Trust and Risk Manager; second reviewer when Permitted with second review)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `trust.enforcement.reversed`\n\n**Screens:** admin/trust",
         "security": [
           {
             "bearer": []
@@ -133863,7 +133918,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
             "content": {
               "application/json": {
                 "schema": {
@@ -135359,7 +135414,7 @@
           "Admin API · Wallet"
         ],
         "summary": "Grant goodwill credit with a reason",
-        "description": "Within the staff member's goodwill limit (from access) it is granted now; above it, the grant waits for approval and the response is 202 with the approval request. Per-customer 30-day limit applies.\n\n**Permission:** `wallet.goodwill.grant`\n\n**Approval:** Approval action wallet.goodwill.grant. Above the staff member's goodwill limit (e.g. Support $50) it goes to a Finance member whose limit covers it\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `wallet.credit.granted`\n\n**Screens:** admin/case, admin/customers, admin/order\n\n**Launch phase:** 3",
+        "description": "Within the staff member's goodwill limit (from access) it is granted now; above it, the grant is saved with state pending_approval and the response is still 201, with the approval request in `approval` (FORMAT.md, Approval responses); it is credited or rejected when the approval is decided. Per-customer 30-day limit applies.\n\n**Permission:** `wallet.goodwill.grant`\n\n**Approval:** Approval action wallet.goodwill.grant. Above the staff member's goodwill limit (e.g. Support $50) it goes to a Finance member whose limit covers it\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `wallet.credit.granted`\n\n**Screens:** admin/case, admin/customers, admin/order\n\n**Launch phase:** 3",
         "security": [
           {
             "bearer": []
@@ -135428,7 +135483,7 @@
             }
           },
           "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).\nGOODWILL_LIMIT_EXCEEDED: The customer's 30-day goodwill limit would be exceeded.",
+            "description": "GOODWILL_LIMIT_EXCEEDED: The customer's 30-day goodwill limit would be exceeded.",
             "content": {
               "application/json": {
                 "schema": {
@@ -135776,7 +135831,7 @@
           "Admin API · Wallet"
         ],
         "summary": "Correct a balance (positive or negative) with a reason",
-        "description": "**Permission:** `wallet.credit.correct`\n\n**Approval:** Approval action wallet.credit.correct. Corrections above the caller's adjustment limit need a second Finance reviewer\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `wallet.credit.corrected`\n\n**Screens:** admin/customers, ops/finance-checks\n\n**Launch phase:** 3",
+        "description": "Within the caller's adjustment limit (from access) the correction is applied now (state applied, with its ledger entry). Above it, the correction is saved with state pending_approval and the response is still 201, with the approval request in `approval` (FORMAT.md, Approval responses); it is applied when approved (or ends rejected, or failed when a negative correction no longer finds the credit). Retrying with the same Idempotency-Key answers the same correction.\n\n**Permission:** `wallet.credit.correct`\n\n**Approval:** Approval action wallet.credit.correct. Corrections above the caller's adjustment limit need a second Finance reviewer\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `wallet.credit.corrected`\n\n**Screens:** admin/customers, ops/finance-checks\n\n**Launch phase:** 3",
         "security": [
           {
             "bearer": []
@@ -135837,7 +135892,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/wallet.LedgerEntry"
+                  "$ref": "#/components/schemas/wallet.CreditCorrection"
                 }
               }
             }
@@ -135883,7 +135938,7 @@
             }
           },
           "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).\nINSUFFICIENT_CREDIT: Available credit is lower than requested.",
+            "description": "INSUFFICIENT_CREDIT: Available credit is lower than requested.",
             "content": {
               "application/json": {
                 "schema": {
@@ -136016,16 +136071,6 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
             "content": {
               "application/json": {
                 "schema": {
@@ -140707,7 +140752,7 @@
             }
           },
           "409": {
-            "description": "LIST_LIMIT_REACHED: Too many lists or items in the list.",
+            "description": "LIST_LIMIT_REACHED: Too many lists or items in the list.\nALERT_LIMIT_REACHED: Too many active alerts.",
             "content": {
               "application/json": {
                 "schema": {
@@ -141151,6 +141196,16 @@
           },
           "404": {
             "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ALERT_LIMIT_REACHED: Too many active alerts.",
             "content": {
               "application/json": {
                 "schema": {
@@ -142034,7 +142089,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nALERT_LIMIT_REACHED: Too many active alerts.",
             "content": {
               "application/json": {
                 "schema": {
@@ -142506,7 +142561,7 @@
           "Admin API · Work queues"
         ],
         "summary": "Create a queue (lead, backup and escalation route required)",
-        "description": "**Permission:** `workqueues.queues.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/staff",
+        "description": "The key is QueueInput.key when given, else derived from the area and name (see QueueInput.key).\n\n**Permission:** `workqueues.queues.manage`\n\n**Audited:** recorded in the action history.\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -142555,6 +142610,16 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "CONFLICT: Concurrent change; reload and retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -148166,37 +148231,6 @@
           "summary"
         ]
       },
-      "advertising.PageType": {
-        "type": "object",
-        "properties": {
-          "page": {
-            "type": "string",
-            "enum": [
-              "home",
-              "category",
-              "search",
-              "product",
-              "campaign",
-              "collection",
-              "deals",
-              "brand",
-              "seller_store",
-              "official_store",
-              "cart",
-              "checkout",
-              "payment_result",
-              "order_tracking",
-              "returns",
-              "account",
-              "help"
-            ],
-            "description": "Page types used for eligibility and blocking"
-          }
-        },
-        "required": [
-          "page"
-        ]
-      },
       "advertising.CreativeFormat": {
         "type": "object",
         "properties": {
@@ -148435,7 +148469,7 @@
             "items": {
               "type": "string"
             },
-            "description": "PageType values, e.g. home, category, campaign"
+            "description": "Page types (see notes), e.g. home, category, campaign"
           },
           "pagesLabel": {
             "type": "string"
@@ -148915,7 +148949,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Spending limit per market day: midnight to midnight in the market time zone (kernel config), whatever the campaign's publication timeZone; charges accrue per market day (ad_charges.day)"
           },
           "totalLimit": {
             "anyOf": [
@@ -149060,7 +149095,7 @@
             "items": {
               "type": "string"
             },
-            "description": "PageType values within the placement's eligible pages"
+            "description": "Page types (see notes) within the placement's eligible pages"
           },
           "pageCategoryIds": {
             "type": [
@@ -149604,6 +149639,29 @@
                 "type": "null"
               }
             ]
+          },
+          "pauseCause": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "promotion",
+              "offer",
+              "stock",
+              "product",
+              "availability",
+              "seller",
+              "trust"
+            ],
+            "description": "Set when the system paused the campaign automatically (the matching event or sweep resumes promotion, offer, stock, product and availability pauses; seller and trust pauses stay for staff); null for a staff or seller pause"
+          },
+          "rejectedReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the campaign was rejected (status rejected)"
           },
           "finishedReason": {
             "type": [
@@ -150430,7 +150488,7 @@
         "properties": {
           "page": {
             "type": "string",
-            "description": "PageType value"
+            "description": "Page type (see notes); an unknown or blocked page gets an empty decision"
           },
           "context": {
             "$ref": "#/components/schemas/advertising.ServeContext"
@@ -150620,8 +150678,12 @@
             ]
           },
           "at": {
-            "type": "string",
-            "format": "date-time"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Client time, informational only: the server records its own time for frequency, attribution and charges"
           },
           "visibleMs": {
             "type": [
@@ -150632,8 +150694,7 @@
         },
         "required": [
           "impressionToken",
-          "kind",
-          "at"
+          "kind"
         ]
       },
       "advertising.DailyAdPoint": {
@@ -152334,7 +152395,7 @@
           },
           "maxQuantity": {
             "type": "integer",
-            "description": "min(offer purchase limit, available stock, platform line maximum)"
+            "description": "min(offer purchase limit, deal purchase limit from promotions, available stock, maxQuantityPerLine setting)"
           },
           "purchaseLimit": {
             "type": [
@@ -152757,8 +152818,12 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The cart's id; null when the owner has no cart yet (GET /cart creates nothing and answers an empty view)"
           },
           "owner": {
             "type": "string",
@@ -152839,7 +152904,6 @@
           }
         },
         "required": [
-          "id",
           "owner",
           "currency",
           "itemCount",
@@ -154704,6 +154768,14 @@
             ],
             "description": "Internal review target that orders the queue (setting reviewTargetBusinessDays)"
           },
+          "pausedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Set while a restriction or suspension of the seller pauses the review: the submission is left out of the review queue until the seller is reinstated"
+          },
           "assignee": {
             "anyOf": [
               {
@@ -154852,6 +154924,14 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "dismissedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Duplicate candidates: when a reviewer marked this matched product not a duplicate (check_dismissals)"
           }
         },
         "required": [
@@ -158611,7 +158691,7 @@
           "state"
         ]
       },
-      "content.PageInput": {
+      "content.PageDraftInput": {
         "type": "object",
         "properties": {
           "kind": {
@@ -158848,7 +158928,7 @@
           "draft": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/content.PageInput"
+                "$ref": "#/components/schemas/content.PageDraftInput"
               },
               {
                 "type": "null"
@@ -158858,7 +158938,7 @@
           "live": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/content.PageInput"
+                "$ref": "#/components/schemas/content.PageDraftInput"
               },
               {
                 "type": "null"
@@ -159807,6 +159887,10 @@
           },
           "key": {
             "type": "string",
+            "description": "Slug in the policy URL (/policies/{key}), unique, lowercase letters, digits, - and _, e.g. returns, gift-cards"
+          },
+          "kind": {
+            "type": "string",
             "enum": [
               "returns",
               "shipping",
@@ -159816,7 +159900,8 @@
               "advertising",
               "cookies",
               "other"
-            ]
+            ],
+            "description": "What the policy governs; several policies may share other"
           },
           "title": {
             "type": "string"
@@ -159868,6 +159953,7 @@
         "required": [
           "id",
           "key",
+          "kind",
           "title",
           "owner"
         ]
@@ -160221,7 +160307,22 @@
             }
           },
           "companyLine": {
-            "type": "string"
+            "type": "string",
+            "description": "settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly'"
+          },
+          "legalName": {
+            "type": "string",
+            "description": "settings.storeInfo market.legalName; 'Marketly' when settings is off"
+          },
+          "checks": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/content.Check"
+            },
+            "description": "Admin only (PUT /navigation answer; null on store reads): warnings when the service strip text disagrees with the facts in force, e.g. a free-shipping amount other than shipping.getOfficialFreeShipping or a return window other than returns.defaultWindowDays. Warnings never block saving (decision: warn only)"
           },
           "serviceStrip": {
             "anyOf": [
@@ -160239,7 +160340,8 @@
           "header",
           "footer",
           "contact",
-          "companyLine"
+          "companyLine",
+          "legalName"
         ]
       },
       "content.ServiceStrip": {
@@ -160751,8 +160853,10 @@
               "sms",
               "push",
               "wishlist",
-              "personalization"
-            ]
+              "personalization",
+              "recent_searches"
+            ],
+            "description": "personalization is personalizedRecommendations, recent_searches is recentSearches; the others are the promotional channels"
           },
           "granted": {
             "type": "boolean"
@@ -161972,7 +162076,16 @@
             "type": [
               "integer",
               "null"
-            ]
+            ],
+            "description": "Extra days after delivery before earnings become available while the seller is in its new-seller period (seller_accounts.new_seller_extra_days); null after the period"
+          },
+          "newSellerUntil": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "Last day of the seller's new-seller period; null when it has ended or never applied"
           },
           "refundAfterPayout": {
             "type": "string",
@@ -163988,6 +164101,28 @@
               "string",
               "null"
             ]
+          },
+          "pendingWriteOff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A write-off waiting for a second Finance reviewer (finance.writeoffs.approve); applied when approved"
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The approval request of the pending write-off"
           }
         },
         "required": [
@@ -164754,10 +164889,23 @@
             "type": "string"
           },
           "expected": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "payments_vs_orders: the order (or package) total less items cancelled before they were charged"
           },
           "actual": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "payments_vs_orders: the card amount captured (what the provider deposits)"
+          },
+          "credit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Store credit applied with a captured payment (payments_vs_orders, unexplained_amount); difference = actual + credit − expected. Null for other checks"
           },
           "difference": {
             "$ref": "#/components/schemas/Money"
@@ -167724,7 +167872,16 @@
         "properties": {
           "purpose": {
             "type": "string",
-            "description": "Step-up purpose of the endpoint that will consume the token, e.g. payout-account"
+            "enum": [
+              "account-closure",
+              "email-change",
+              "two-step-removal",
+              "recovery-codes",
+              "business-change",
+              "payout-account",
+              "seller-closure"
+            ],
+            "description": "The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token."
           },
           "password": {
             "type": [
@@ -167892,7 +168049,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The variant's first image, else the product's (read from catalog.getProducts; null while catalog is off)"
           },
           "quantities": {
             "$ref": "#/components/schemas/inventory.StockQuantities"
@@ -168937,7 +169095,16 @@
           },
           "key": {
             "type": "string",
-            "description": "Checkout session key (idempotency)"
+            "description": "Idempotency key within its source: the checkout session key (holds), order:<orderId> (an order re-allocated after its hold expired), or the caller's key for allocateForOrder"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "checkout",
+              "replacement",
+              "exchange"
+            ],
+            "description": "checkout: a checkout hold and the order's own allocation; replacement or exchange: allocateForOrder for a replacement or exchange shipment (no expiry; releaseHold may release it)"
           },
           "state": {
             "type": "string",
@@ -168990,6 +169157,7 @@
         "required": [
           "id",
           "key",
+          "source",
           "state",
           "lines",
           "createdAt"
@@ -169691,7 +169859,15 @@
             "format": "uuid"
           },
           "ref": {
-            "type": "string"
+            "type": "string",
+            "description": "TRF-YYMMDD-NNNN (numbered per market day)"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Planner's note from createTransfer"
           },
           "fromLocationId": {
             "type": "string",
@@ -170169,6 +170345,28 @@
             ],
             "format": "date-time",
             "description": "Evidence files cannot be deleted before this"
+          },
+          "removedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Taken down by staff (status removed); null otherwise"
+          },
+          "removedReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The takedown reason given by staff (status removed)"
+          },
+          "showPlaceholder": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Taken-down public files: true when url and the old rendition URLs serve the neutral placeholder, false when they stop serving (no url). Null unless removed"
           },
           "createdAt": {
             "type": "string",
@@ -171025,7 +171223,8 @@
             "enum": [
               "text",
               "system"
-            ]
+            ],
+            "description": "system: a note from Marketly (e.g. support joined from a case): unread for every participant, no author, no reply-state change and no messaging.message.sent (no notice is sent)"
           },
           "author": {
             "anyOf": [
@@ -171656,7 +171855,7 @@
           },
           "screen": {
             "type": "string",
-            "description": "App route / prototype screen id, e.g. account/tracking, seller/order, ops/dispatch"
+            "description": "App route / prototype screen id (design/prototype catalogue), the screen where the publishing module shows the record (its endpoint screens), e.g. account/tracking, seller/order, ops/dispatch. Invitation emails carry url and use accept-invitation (identity lists no screen for it)"
           },
           "url": {
             "type": [
@@ -173782,7 +173981,7 @@
           },
           "shipsFrom": {
             "type": "string",
-            "description": "City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), refreshed when that location changes; seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config)."
+            "description": "City and region, e.g. 'Reno, NV'. Official Store offers: the inventory default location (inventory.getDefaultLocation), set at save and refreshed by the hourly offers.reevaluate-eligibility job when that location changes (inventory publishes no location event; the refresh does not bump termsVersion); seller offers: the seller's ships-from address from shipping seller settings. Never empty: falls back to the market default location label (kernel config)."
           },
           "label": {
             "type": "string",
@@ -173817,19 +174016,18 @@
               "string",
               "null"
             ],
-            "description": "Category exception text shown before purchase (from returns)"
+            "description": "Category exception text shown before purchase: returns' summary when resolveTerms answered source category_exception at save (column return_category_exception); null otherwise"
           },
           "summary": {
             "type": "string",
             "description": "e.g. '30-day returns. You pay return shipping unless the item is faulty.'"
           },
-          "policyId": {
+          "policyVersion": {
             "type": [
               "string",
               "null"
             ],
-            "format": "uuid",
-            "description": "returns module policy version the terms were validated against"
+            "description": "returns policy version (EffectiveTerms.policyVersion, e.g. '1.0') the terms were validated against at save; null when returns was off"
           }
         },
         "required": [
@@ -176435,19 +176633,44 @@
               "terms",
               "removed",
               "seller_restricted"
-            ]
+            ],
+            "description": "One change per line, checked in this order: removed, seller_restricted, availability, delivery, price, terms (terms only when the price did not change)"
           },
           "before": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Display text of the old value: price '$94.99', availability the quantity asked for ('3'), terms 'v2'; null for delivery, removed and seller_restricted. Read previous for the typed value."
           },
           "after": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Display text of the new value: price '$99.99', availability the units that can be bought now ('1', '0'), delivery the location label that is not served, terms 'v3'; null for removed and seller_restricted. Read current for the typed value."
+          },
+          "previous": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/offers.OfferChangeValues"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Typed old value, by kind: price → price (the line's price), availability → quantity (asked for), terms → termsVersion (the line's). Null for delivery, removed and seller_restricted"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/offers.OfferChangeValues"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Typed new value, by kind: price → price (now), availability → quantity (units that can be bought now, 0 when the offer is not active), delivery → postalCode (the location not served), terms → termsVersion (now). Null for removed and seller_restricted"
           },
           "message": {
             "type": "string",
@@ -176467,6 +176690,39 @@
           "message",
           "alternatives"
         ]
+      },
+      "offers.OfferChangeValues": {
+        "type": "object",
+        "properties": {
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "termsVersion": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "postalCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "offers.OfferSnapshot": {
         "type": "object",
@@ -176519,7 +176775,8 @@
             }
           },
           "price": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "Offer (regular) price at purchase. Campaign markdowns, flash prices, coupons and automatic discounts are not in it: the price the customer paid per unit comes from checkout (promotions evaluation) on the order item."
           },
           "compareAt": {
             "anyOf": [
@@ -176633,7 +176890,7 @@
           },
           "email": {
             "type": "string",
-            "format": "email"
+            "description": "Contact email (a valid address on createOrder). Order reads for staff without orders.customers.view-contact show it masked (a***@example.com), so it is a plain string; sellers never see it"
           },
           "phone": {
             "type": [
@@ -180076,7 +180333,8 @@
             "format": "email"
           },
           "amount": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "The whole order total, store-credit share included. The card is authorized for amount − creditAmount"
           },
           "method": {
             "$ref": "#/components/schemas/payments.MethodSelection"
@@ -180086,7 +180344,8 @@
               "string",
               "null"
             ],
-            "format": "uuid"
+            "format": "uuid",
+            "description": "wallet hold of the store-credit share (checkout holds it before authorizing)"
           },
           "creditAmount": {
             "anyOf": [
@@ -180096,7 +180355,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Store-credit share of amount (the wallet hold); null or absent when no credit is used. Must not exceed amount; when it equals amount nothing is authorized on the card"
           },
           "description": {
             "type": "string"
@@ -180973,7 +181233,7 @@
           },
           "inFlight": {
             "$ref": "#/components/schemas/Money",
-            "description": "Requested or processing refunds"
+            "description": "Requested, processing and failed refunds: a failed refund keeps reserving its amount (it may still be retried or sent to a new destination) until it is sent or cancelled, so no second refund can take the same money"
           },
           "remaining": {
             "$ref": "#/components/schemas/Money"
@@ -181011,10 +181271,12 @@
             "$ref": "#/components/schemas/Money"
           },
           "inFlight": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "Requested, processing and failed refunds (a failed refund reserves its amount until sent or cancelled)"
           },
           "remaining": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "Captured less refunded and in flight"
           },
           "items": {
             "type": "array",
@@ -181077,7 +181339,13 @@
           },
           "orderId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "The order refunded; for an orphan payment refund (money without an order) the checkout session id, as on the refund events (refunds.order_id is null then)"
+          },
+          "checkoutSessionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Checkout session of the payment refunded"
           },
           "orderRef": {
             "type": "string"
@@ -181224,6 +181492,7 @@
           "id",
           "ref",
           "orderId",
+          "checkoutSessionId",
           "orderRef",
           "paymentIntentId",
           "customerName",
@@ -181579,7 +181848,7 @@
           },
           "sellerBalanceEffect": {
             "type": "string",
-            "description": "From finance, e.g. 'Held $480.00' or 'Company sale. A loss is recorded in company trading.'"
+            "description": "What the dispute does to the seller balance, worded by payments from the dispute status and the group owner (finance applies it on payments.chargeback.opened and decided; payments does not read finance): seller group open 'Held $480.00', won 'Hold of $480.00 released', lost '$480.00 deducted from the seller balance'; Official Store 'Company sale. A loss is recorded in company trading.'; no single group 'Not linked to one seller. Finance decides who carries the loss.'"
           },
           "evidence": {
             "$ref": "#/components/schemas/payments.DisputeEvidence"
@@ -181954,7 +182223,7 @@
               "integer",
               "null"
             ],
-            "description": "Coupons of this campaign per order"
+            "description": "Codes of this campaign per order: empty or 1. A campaign applies at most once per order (a second code of the same campaign is rejected with per_order_limit); a value above 1 is refused with VALIDATION_FAILED"
           },
           "perCustomerUnits": {
             "type": [
@@ -181994,7 +182263,7 @@
               "string",
               "null"
             ],
-            "description": "Official Store items: the discount is a company cost shown in company trading margin"
+            "description": "Funding note for Finance (column campaigns.funding_note), e.g. Official Store items: the discount is a company cost shown in company trading margin"
           }
         },
         "required": [
@@ -184128,7 +184397,7 @@
                 "type": "null"
               }
             ],
-            "description": "Per-unit discount the customer gets without doing anything (autoApply campaigns with no minimum spend, e.g. an automatic 10% off), on top of price. Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none"
+            "description": "Per-unit discount the customer gets without doing anything (running autoApply coupon campaigns for everyone, or every signed-in customer when signed in, e.g. an automatic 10% off), on top of price. A minimum spend counts when one unit at price reaches it; category and brand scopes are matched from catalog (getProducts). Offers subtracts it in comparable totals for the featured-offer rule (Total price = item + shipping − automatic discounts). Null when none"
           },
           "automaticDiscountLabel": {
             "type": [
@@ -185216,6 +185485,10 @@
           "openPurchaseOrders": {
             "type": "integer"
           },
+          "returnAuthorizationRequired": {
+            "type": "boolean",
+            "description": "The supplier needs a return authorization (RMA) before units are sent back (getPreferredSupplier tells inventory and returns)"
+          },
           "active": {
             "type": "boolean"
           },
@@ -185237,6 +185510,7 @@
           "paymentTerms",
           "leadTimeDays",
           "openPurchaseOrders",
+          "returnAuthorizationRequired",
           "active",
           "createdAt"
         ]
@@ -185287,6 +185561,13 @@
               "integer",
               "null"
             ]
+          },
+          "returnAuthorizationRequired": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Default false"
           },
           "notes": {
             "type": [
@@ -186757,6 +187038,13 @@
               }
             ]
           },
+          "supplierReference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The supplier's own reference for the claim, given when it is sent (submitClaim)"
+          },
           "owner": {
             "$ref": "#/components/schemas/Actor"
           },
@@ -187110,6 +187398,40 @@
           "defaultDateBasis",
           "audience",
           "changeNote"
+        ]
+      },
+      "reports.MetricOwnerChange": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/reports.StaffRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to": {
+            "$ref": "#/components/schemas/reports.StaffRef"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "changedBy": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "changedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "to",
+          "reason",
+          "changedBy",
+          "changedAt"
         ]
       },
       "reports.MetricSuggestion": {
@@ -187883,7 +188205,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Why a failed job failed, e.g. More than 100,000 rows matched; narrow the filters (EXPORT_TOO_LARGE)"
           },
           "createdAt": {
             "type": "string",
@@ -187957,6 +188280,7 @@
             "enum": [
               "today",
               "last_7_days",
+              "last_14_days",
               "last_30_days"
             ]
           },
@@ -189469,7 +189793,8 @@
               "no_longer_needed",
               "wrong_size",
               "other"
-            ]
+            ],
+            "description": "Grouped for the rules: defective, damaged, wrong_item, not_as_described and missing_parts are fault reasons (fault window, the seller pays return shipping); changed_mind, better_price, no_longer_needed, wrong_size and other are change of mind (change-of-mind window, return shipping per the terms). other counts as change of mind; when the customer's description shows a fault, the seller or Marketly can still decide it as one"
           },
           "details": {
             "type": "string"
@@ -192580,12 +192905,9 @@
         "type": "object",
         "properties": {
           "sellerId": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "format": "uuid",
-            "description": "Null for the Official Store"
+            "description": "OFFICIAL_STORE_ID for the Official Store (official = true)"
           },
           "official": {
             "type": "boolean"
@@ -192652,6 +192974,7 @@
           }
         },
         "required": [
+          "sellerId",
           "official",
           "periodMonths",
           "count",
@@ -192955,12 +193278,9 @@
             ]
           },
           "sellerId": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "format": "uuid",
-            "description": "Null for the Official Store"
+            "description": "OFFICIAL_STORE_ID for the Official Store"
           },
           "sellerName": {
             "type": "string"
@@ -192990,6 +193310,7 @@
           "orderId",
           "orderRef",
           "ownerType",
+          "sellerId",
           "sellerName",
           "packageLabel",
           "eligible"
@@ -193077,12 +193398,9 @@
                 ]
               },
               "id": {
-                "type": [
-                  "string",
-                  "null"
-                ],
+                "type": "string",
                 "format": "uuid",
-                "description": "Null for the Official Store"
+                "description": "OFFICIAL_STORE_ID for the Official Store"
               },
               "name": {
                 "type": "string"
@@ -193090,6 +193408,7 @@
             },
             "required": [
               "ownerType",
+              "id",
               "name"
             ]
           },
@@ -194206,6 +194525,295 @@
           "targetType",
           "needsResponse",
           "canRespond"
+        ]
+      },
+      "search.SearchFilters": {
+        "type": "object",
+        "properties": {
+          "categoryIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Category ids (GraphQL); REST category is a slug resolved to its id"
+          },
+          "categorySlug": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "REST category"
+          },
+          "priceMin": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Minor units"
+          },
+          "priceMax": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Minor units"
+          },
+          "brandIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "brandSlugs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "REST brand: brand slugs (ids are accepted too)"
+          },
+          "sellerIds": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "sellerSlugs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "REST seller: seller slugs; 'official' is the Official Store"
+          },
+          "official": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Official Store offers only"
+          },
+          "minRating": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "'N stars and up', 1–5"
+          },
+          "conditions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "enum": [
+                "new",
+                "used",
+                "refurbished"
+              ]
+            }
+          },
+          "inStockOnly": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Default from the setting excludeOutOfStockByDefault (true): in stock now"
+          },
+          "freeDelivery": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "shipsToday": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "arrivesBy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "onSale": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "listedWithinDays": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "New arrivals"
+          },
+          "attributes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/search.AttributeFilter"
+            },
+            "description": "Category attribute filters, e.g. noise_cancelling = [active]"
+          }
+        }
+      },
+      "search.AttributeFilter": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "values"
+        ]
+      },
+      "search.SearchQuery": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free text; without it this is a listing (category, brand, seller, collection)"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/search.SearchFilters"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Same meaning as the REST query parameters of GET /products and GraphQL SearchFilterInput"
+          },
+          "sort": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "recommended",
+              "price_asc",
+              "price_desc",
+              "newest",
+              "rating",
+              "best_selling"
+            ]
+          }
+        }
+      },
+      "search.SearchMatch": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "integer",
+            "description": "1-based position among organic results"
+          },
+          "variantId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The variant the card shows for the active filters"
+          },
+          "variantCue": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "e.g. 'Black · 2 more colors'"
+          },
+          "offerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The offer whose price the card shows (the seller's offer under a seller filter)"
+          },
+          "priceIsFrom": {
+            "type": "boolean",
+            "description": "True when the price is the lowest of several ('From $…')"
+          },
+          "badges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "position",
+          "priceIsFrom",
+          "badges"
+        ]
+      },
+      "search.SponsoredSlot": {
+        "type": "object",
+        "properties": {
+          "placement": {
+            "type": "string",
+            "description": "Advertising placement key: search_top_row, category_inline, category_banner"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "top_row",
+              "inline",
+              "banner"
+            ]
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Inline only: 1-based grid positions where a labelled sponsored card may be inserted"
+          },
+          "maxItems": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "placement",
+          "kind",
+          "positions",
+          "maxItems"
         ]
       },
       "search.ProductCard": {
@@ -199245,7 +199853,7 @@
           },
           "ref": {
             "type": "string",
-            "description": "e.g. AP-261004-021"
+            "description": "SAP-YYMMDD-NNN, e.g. SAP-261004-021 (SA- is the seller application and AP- the access approval request; appeals filed before pass 4 keep their AP- reference)"
           },
           "sellerId": {
             "type": "string",
@@ -202800,6 +203408,13 @@
               }
             ]
           },
+          "active": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "false switches the rule off (status inactive) without ending its window; true switches it back on (scheduled, active or ended by its window). Omitted: a new rule starts on, a change keeps the current state"
+          },
           "reason": {
             "type": "string"
           }
@@ -204354,6 +204969,14 @@
           "itemsSummary": {
             "type": "string"
           },
+          "orderItemIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The order items the exception is about (empty when it covers the whole group)"
+          },
           "situation": {
             "type": "string",
             "description": "e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"
@@ -204474,6 +205097,7 @@
           "ownerType",
           "sellerName",
           "itemsSummary",
+          "orderItemIds",
           "situation",
           "requiredResponse",
           "nextStep",
@@ -205717,7 +206341,7 @@
           },
           "ref": {
             "type": "string",
-            "description": "CS-NNNNNN"
+            "description": "CS-YYMMDD-NNNN (running number per market day)"
           },
           "kind": {
             "type": "string",
@@ -206653,6 +207277,17 @@
               }
             ],
             "description": "Saved unpublished decision, staff only"
+          },
+          "pendingApproval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A decision or appeal decision above the decider's limit, saved and waiting for support.remedies.approve (cases.approval_request_id). decideCase and decideAppeal answer 200 with it set; access.approval.decided publishes the decision (approved) or hands it back to the owner as a draft (rejected or returned)"
           },
           "history": {
             "type": "array",
@@ -207963,12 +208598,34 @@
               "withdrawn"
             ]
           },
+          "createdBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/trust.StaffRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who drafted it (Trust and Risk); never the one who decides it (SEPARATE_DUTIES)"
+          },
           "routedAt": {
             "type": [
               "string",
               "null"
             ],
             "format": "date-time"
+          },
+          "routedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/trust.StaffRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who last sent it to the owner team; never the one who decides it"
           },
           "decidedAt": {
             "type": [
@@ -208000,6 +208657,14 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "approvalRequestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "An accept above the owner's limit waiting for approval (access); the recommendation stays sent_to_owner and is accepted when the request is approved"
           }
         },
         "required": [
@@ -208233,6 +208898,25 @@
               "string",
               "null"
             ]
+          },
+          "reversalRequestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A reversal waiting for approval (trust.enforcements.reverse); the enforcement stays in place until it is approved"
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set on the reverseEnforcement answer when the reversal was sent for approval"
           }
         },
         "required": [
@@ -208408,7 +209092,7 @@
             ]
           },
           "reporter": {
-            "description": "{ actor: Actor, name?, contactEmail? } — staff only; never shown to subjects"
+            "description": "{ actor: Actor, name?, organization?, contactEmail? } — staff only; never shown to subjects. organization is the brand or rights owner a rights-owner contact reports for"
           },
           "reporterCount": {
             "type": "integer",
@@ -208526,7 +209210,7 @@
             }
           },
           "resolution": {
-            "description": "{ outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred, summary, decidedBy, decidedAt }"
+            "description": "{ outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred|dismissed, summary, decidedBy, decidedAt }: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment"
           },
           "reporterOutcome": {
             "type": [
@@ -209530,6 +210214,13 @@
             "items": {
               "$ref": "#/components/schemas/wallet.GoodwillGrant"
             }
+          },
+          "pendingCorrections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/wallet.CreditCorrection"
+            },
+            "description": "Corrections waiting for a second reviewer"
           }
         },
         "required": [
@@ -209537,7 +210228,104 @@
           "lots",
           "goodwillLast30Days",
           "goodwillLimitPerCustomer",
-          "pendingGrants"
+          "pendingGrants",
+          "pendingCorrections"
+        ]
+      },
+      "wallet.CreditCorrection": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Signed: positive adds credit, negative takes it away"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending_approval",
+              "applied",
+              "rejected",
+              "failed"
+            ]
+          },
+          "approval": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApprovalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/wallet.LedgerEntry"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ledger entry once applied"
+          },
+          "failure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why an approved correction could not be applied (e.g. the customer no longer has the credit to take away)"
+          },
+          "requestedBy": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "decidedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decidedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "customerId",
+          "amount",
+          "reason",
+          "state",
+          "requestedBy",
+          "createdAt"
         ]
       },
       "wallet.LoyaltyAccount": {
@@ -209911,6 +210699,14 @@
               "null"
             ],
             "description": "e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.'"
+          },
+          "dispatchOverdueAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When shipping reported the dispatch deadline missed (shipping.dispatch.overdue); the order then leads the pick list"
           },
           "mixedOrderNote": {
             "type": [
@@ -210427,6 +211223,14 @@
               "string",
               "null"
             ]
+          },
+          "carrierServiceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Shipping carrier service chosen at packing (PackageUpdate.serviceCode); the label is bought with it"
           },
           "trackingNumber": {
             "type": [
@@ -211366,6 +212170,14 @@
               "null"
             ]
           },
+          "armedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Back-in-stock alerts: when the item was seen unavailable, so a restock can fire the alert. Null while the item has stayed in stock since the alert was switched on. Price-drop alerts: the creation time"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -211646,6 +212458,13 @@
       "workqueues.QueueInput": {
         "type": "object",
         "properties": {
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Create only (ignored on update: a queue's key never changes). Lowercase letters, numbers and underscores in two dot-separated parts, e.g. inventory.cycle_counts; 409 CONFLICT when taken. Omitted: derived as <area>.<name slug> (name lowercased, every run of other characters becomes _, at most 48 characters), with _2, _3… appended while that key is taken"
+          },
           "name": {
             "type": "string"
           },

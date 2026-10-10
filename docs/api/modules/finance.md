@@ -122,7 +122,8 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 | schedule | `string` e.g. Weekly, Friday |
 | availableAfterDeliveryDays | `int` |
 | minimumPayout | `Money` |
-| newSellerHoldDays | `int?` |
+| newSellerHoldDays | `int?` Extra days after delivery before earnings become available while the seller is in its new-seller period (seller_accounts.new_seller_extra_days); null after the period |
+| newSellerUntil | `date?` Last day of the seller's new-seller period; null when it has ended or never applied |
 | refundAfterPayout | `string` Deducted from later earnings; if none, the balance shows the amount owed |
 | text | `string` |
 
@@ -575,6 +576,8 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 | status | `enum(open|settled|written_off)` |
 | origin | `Reference[]` |
 | note | `text?` |
+| pendingWriteOff | `Money?` A write-off waiting for a second Finance reviewer (finance.writeoffs.approve); applied when approved |
+| approval | `ApprovalInfo?` The approval request of the pending write-off |
 
 ### SellerFinanceRow
 
@@ -759,8 +762,9 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 | reference | `Reference?` |
 | subject | `string` Seller name, payment method or deposit |
 | description | `string` |
-| expected | `Money` |
-| actual | `Money` |
+| expected | `Money` payments_vs_orders: the order (or package) total less items cancelled before they were charged |
+| actual | `Money` payments_vs_orders: the card amount captured (what the provider deposits) |
+| credit | `Money?` Store credit applied with a captured payment (payments_vs_orders, unexplained_amount); difference = actual + credit − expected. Null for other checks |
 | difference | `Money` |
 | detectedAt | `datetime` |
 | ageDays | `int` |
@@ -981,7 +985,7 @@ stateDiagram-v2
   open --> written_off: writeOff
 ```
 
-Created when a negative balance is not covered within negativeBalanceOwedAfterDays. New earnings offset it first. Write-off needs a reason and approval.
+Created when a negative balance is not covered within negativeBalanceOwedAfterDays. New earnings offset it first. Write-off needs a reason and, above the caller's limit, a second Finance reviewer: the pending write-off is kept on the record (pendingWriteOff, approval) until decided.
 
 ### Statement (`Statement.status`)
 
@@ -991,7 +995,7 @@ stateDiagram-v2
   open --> issued: issue
 ```
 
-Issued at the payout cutoff; immutable afterwards.
+The open statement of a period exists from the seller's approval (or the previous statement's issue); issued at the payout cutoff and immutable afterwards.
 
 ## Data (schema `finance`)
 
@@ -1007,6 +1011,8 @@ Issued at the payout cutoff; immutable afterwards.
 | negative_since | timestamptz? |
 | payouts_blocked_reason | text? |
 | fee_override_set_id | uuid? |
+| new_seller_until | date? (last market day of the new-seller period, set when sellers.seller.approved is consumed) |
+| new_seller_extra_days | int? (extra days after delivery before earnings become available during the period) |
 | updated_at | timestamptz |
 
 **ledger_entries**: Append-only seller ledger. Corrections are new entries, never edits.
@@ -1077,6 +1083,7 @@ Indexes: `(status, effective_from)`
 |---|---|
 | rule_set_id | uuid → fee_rule_sets |
 | category_id | uuid |
+| category_name | text (as named when the rule set was proposed) |
 | rate_bps | int |
 
 Indexes: `(rule_set_id, category_id) unique`
@@ -1193,6 +1200,9 @@ Indexes: `(seller_id, created_at desc)`, `(status)`
 | status | text |
 | origin | jsonb |
 | note | text? |
+| write_off_amount | bigint? (a write-off waiting for approval) |
+| write_off_reason | text? |
+| approval_request_id | uuid? (the pending write-off's access approval request) |
 
 Indexes: `(seller_id, status)`
 
@@ -1303,7 +1313,7 @@ Indexes: `(seller_id, requested_on desc)`, `(run_id, status)`, `(status)`
 
 Indexes: `(seller_id, period_to desc)`
 
-**trading_entries**: Company trading facts for the Official Store (never part of seller payouts)
+**trading_entries**: Company trading facts for the Official Store (never part of seller payouts). Marketplace (platform) facts live in captures, discount_funding, platform_costs and store_credit_liability, never here
 
 | Column | Type |
 |---|---|
@@ -1362,6 +1372,7 @@ Indexes: `(period, category_id) unique`
 | description | text |
 | expected | bigint |
 | actual | bigint |
+| credit | bigint (store credit applied with a captured payment; 0 otherwise) |
 | difference | bigint |
 | currency | text |
 | detected_at | timestamptz |
@@ -1372,6 +1383,69 @@ Indexes: `(period, category_id) unique`
 | approval_request_id | uuid? |
 
 Indexes: `(date, check)`, `(status, detected_at)`
+
+**captures**: Payments captured (payments.payment.captured): the card amount the provider deposits and the store credit applied with it. The provider_deposit check adds up card_amount per market day of captured_at; each capture also has its payments_vs_orders (or unexplained_amount) item in recon_items
+
+| Column | Type |
+|---|---|
+| id | uuid pk (payments capture id) |
+| intent_id | uuid? (null for captures recorded before pass 4) |
+| order_id | uuid? (null when no matching order was found, or recorded before pass 4) |
+| group_id | uuid? |
+| card_amount | bigint |
+| credit_amount | bigint |
+| currency | text |
+| provider_ref | text? |
+| captured_at | timestamptz |
+| recon_item_id | uuid? |
+
+Indexes: `(captured_at)`, `(order_id)`
+
+**discount_funding**: Coupon discount funding per redemption (promotions.coupon.redeemed, promotions.redemption.reversed): the platform part is a marketplace cost, the seller part is funded by the seller. Reversals are negative rows
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| at | timestamptz |
+| redemption_id | uuid |
+| funded_by | text (platform|seller) |
+| kind | text (redeemed|reversed) |
+| amount | bigint (signed) |
+| currency | text |
+| order_id | uuid? |
+| order_item_id | uuid? |
+
+Indexes: `(at)`, `(redemption_id)`
+
+**platform_costs**: Marketplace (platform) costs and recoveries that are not Official Store trading: labels and refund shares the platform pays on seller orders, carrier claims paid to the platform, platform-funded goodwill store credit, store credit corrections and breakage, written-off seller debts. amount is a cost (positive) or a recovery (negative)
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| at | timestamptz |
+| kind | text (label|refund|carrier_claim|goodwill_credit|credit_correction|credit_breakage|write_off) |
+| amount | bigint (signed) |
+| currency | text |
+| order_id | uuid? |
+| order_item_id | uuid? |
+| ref_kind | text? (label|refund|claim|wallet_entry|amount_owed) |
+| ref_id | text? |
+
+Indexes: `(at)`, `(kind, at)`
+
+**store_credit_liability**: Finance's store credit liability, one row per wallet event: granted adds, used, reversed and expired reduce, corrected adds or reduces. The daily store_credit check compares the sum up to a day with wallet.getLiabilityTotal
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| at | timestamptz |
+| kind | text (granted|used|reversed|expired|corrected) |
+| amount | bigint (signed) |
+| currency | text |
+| wallet_entry_id | uuid? (the wallet ledger entry; null for uses, keyed by order) |
+| order_id | uuid? |
+
+Indexes: `(at)`
 
 ## Events
 
@@ -1505,7 +1579,7 @@ Checked through the access module (limits per role, second reviewer).
 | Job | Schedule | Does |
 |---|---|---|
 | `finance.release-pending` | hourly | Move earnings lots to available once delivered + availableAfterDeliveryDays have passed |
-| `finance.payout-run.create` | every 15 min | Checks the payoutSchedule cutoff itself (e.g. Thu 23:59 market time before a Friday payout): once the latest cutoff has passed and no run exists for it, issue statements for the period and create the draft payout run. Idempotent per cutoff (RUN_ALREADY_EXISTS-safe), so a late or repeated run, or a restart after the cutoff, creates exactly one run |
+| `finance.payout-run.create` | every 15 min | Checks the payoutSchedule cutoff itself (e.g. Thu 23:59 market time before a Friday payout): once the latest cutoff has passed and no run exists for it, issue statements for the period and create the draft payout run. Idempotent per cutoff (RUN_ALREADY_EXISTS-safe), so a late or repeated run, or a restart after the cutoff, creates exactly one run. Also opens the current period's statement for seller accounts that have none (statements are never created on read) |
 | `finance.payout-run.release` | every 5 min | Release approved runs at their scheduled time |
 | `finance.payout-status.poll` | every 30 min | Ask the provider about processing payouts without a webhook result |
 | `finance.reconcile.daily` | daily 06:00 PT | Build the day check: payments vs orders (card captures plus store credit used against the order total less cancelled items), seller amounts vs statements, provider deposit, store credit (finance's store-credit liability vs wallet.getLiabilityTotal when wallet is enabled, plus differences wallet reported with recordExternalDifference), unexplained amounts, failed payouts; publish mismatches, and finance.reconciliation.item_closed for items that now match |
@@ -1540,8 +1614,11 @@ Checked through the access module (limits per role, second reviewer).
 - Fee example (illustration only): an eligible $100 item sale with a 10% fee creates $10 of fee income and $90 of seller earnings before other adjustments. Default rules: commission on item price after seller-funded discounts, shipping excluded, platform-funded discounts do not lower seller proceeds. Category rates are examples (Electronics 8%, Computers 7%, Home & Kitchen 12%, Fashion 15%, Sports 10%, Beauty 12%).
 - Refund after payout: the refund is deducted from later earnings (refund_after_payout entry); if the balance stays negative for negativeBalanceOwedAfterDays it becomes an amount owed. Statements show the deduction with the original payout reference (acceptance scenario 6).
 - Ad charges are separate ledger entries and a separate statement section, never part of commission.
-- Approvals (decision F-D1: limits come from access only): holds, adjustments, corrections, write-offs, payout runs and fee rule changes check the caller's limit through access (seller credits from creditSeller use creditSecondReviewerThreshold, since the caller is a module); above it they return APPROVAL_REQUIRED with details.approvalRequestId and finish on access.approval.decided. The former runSecondReviewerThreshold, adjustmentSecondReviewerThreshold and correctionSecondReviewerThreshold settings are removed (a migration deletes their stored values); the example amounts live in the access limits seed. Staff access to finance screens is not financial authority: approve endpoints need finance.payouts.approve and a limit.
-- Store credit liability (phase 3): finance keeps the liability from wallet events: granted adds, used, reversed and expired reduce, corrected adds or reduces (each keyed by the wallet entry id). A reversed seller-charged goodwill grant credits the seller back the charge posted for it. The daily store_credit check compares the liability with wallet.getLiabilityTotal and lists per-account differences wallet reports through recordExternalDifference.
+- Approvals (decision F-D1: limits come from access only): holds, adjustments, corrections, write-offs, payout runs and fee rule changes check the caller's limit through access (seller credits from creditSeller use creditSecondReviewerThreshold, since the caller is a module); above it the record is saved pending and the endpoint answers its normal status with `approval` in the body (FORMAT.md, Approval responses), finishing on access.approval.decided. The former runSecondReviewerThreshold, adjustmentSecondReviewerThreshold and correctionSecondReviewerThreshold settings are removed (their stored values are deleted by the settings module); the example amounts live in the access limits seed. Staff access to finance screens is not financial authority: approve endpoints need finance.payouts.approve and a limit.
+- Marketplace facts have their own tables, never trading_entries: captures (payments captured, card and store credit), discount_funding (coupon platform and seller parts), platform_costs (labels, refund shares, carrier claims, goodwill credit, credit corrections and breakage, written-off seller debts) and store_credit_liability. trading_entries holds Official Store trading only.
+- Store credit liability (phase 3): finance keeps the liability (store_credit_liability) from wallet events: granted adds, used, reversed and expired reduce, corrected adds or reduces (each keyed by the wallet entry id). A reversed seller-charged goodwill grant credits the seller back the charge posted for it. The daily store_credit check compares the liability with wallet.getLiabilityTotal and lists per-account differences wallet reports through recordExternalDifference.
+- New-seller period: when sellers.seller.approved is consumed the seller account gets new_seller_until (today + newSellerPeriodDays) and new_seller_extra_days (recommendedHoldDays, else newSellerHoldDays). Items delivered up to that day become available that many extra days later. It is shown in SettlementRules, not as a hold.
+- Statements: a seller's open statement is created when the seller is approved and, for the next period, when a statement is issued (finance.payout-run.create also opens one for any seller account that has none); reading statements never creates one.
 - Trust holds: a hold placed for a trust recommendation (HoldInput.trustReportId) keeps holds.trust_report_id through an approval, so finance.hold.placed carries trustReportId when the approved hold is finally placed and trust can confirm the hold_payout action.
 - Payout destination details belong to sellers (owner-only changes); finance stores only a label, provider destination id and verification state, and never pays an unverified destination.
 - Chargeback cases themselves are in payments; finance holds the seller amount and applies or releases it when payments reports the outcome.
@@ -1618,7 +1695,10 @@ type FinanceSettlementRules @areas(in: [SELLER, ADMIN]) {
   schedule: String!
   availableAfterDeliveryDays: Int!
   minimumPayout: Money!
+  "Extra days before earnings become available while in the new-seller period; null after it"
   newSellerHoldDays: Int
+  "Last day of the new-seller period"
+  newSellerUntil: Date
   "Deducted from later earnings; if none, the balance shows the amount owed"
   refundAfterPayout: String!
   text: String!
@@ -1908,6 +1988,10 @@ type FinanceAmountOwed @areas(in: [SELLER, ADMIN]) {
   status: FinanceAmountOwedStatus!
   origin: [FinanceReference!]!
   note: String
+  "A write-off waiting for a second Finance reviewer"
+  pendingWriteOff: Money
+  "Approval request of the pending write-off"
+  approval: ApprovalInfo @areas(in: [ADMIN])
 }
 
 enum FinanceAmountOwedStatus @areas(in: [SELLER, ADMIN]) {

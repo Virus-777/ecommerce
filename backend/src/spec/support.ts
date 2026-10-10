@@ -335,7 +335,7 @@ export const Appeal: z.ZodType<Appeal> = z.object({
 
 export interface CaseView {
   id: string;
-  /** CS-NNNNNN */
+  /** CS-YYMMDD-NNNN (running number per market day) */
   ref: string;
   kind: "customer_help" | "order_problem" | "dispute" | "seller_request";
   subject: string;
@@ -369,7 +369,7 @@ export interface CaseView {
 
 export const CaseView: z.ZodType<CaseView> = z.object({
   id: z.uuid(),
-  ref: z.string().describe("CS-NNNNNN"),
+  ref: z.string().describe("CS-YYMMDD-NNNN (running number per market day)"),
   kind: z.enum(["customer_help", "order_problem", "dispute", "seller_request"]),
   subject: z.string(),
   get category() {
@@ -747,6 +747,8 @@ export interface AdminCaseDetail {
   holds: string[];
   /** Saved unpublished decision, staff only */
   decisionDraft?: DecisionDraft | null;
+  /** A decision or appeal decision above the decider's limit, saved and waiting for support.remedies.approve (cases.approval_request_id). decideCase and decideAppeal answer 200 with it set; access.approval.decided publishes the decision (approved) or hands it back to the owner as a draft (rejected or returned) */
+  pendingApproval?: common.ApprovalInfo | null;
   history: common.TimelineEvent[];
 }
 
@@ -782,6 +784,9 @@ export const AdminCaseDetail: z.ZodType<AdminCaseDetail> = z.object({
   holds: z.array(z.string()).describe("Finance holds linked to this case, e.g. Seller hold $1,240.00 · review Oct 15"),
   get decisionDraft() {
     return DecisionDraft.nullish();
+  },
+  get pendingApproval() {
+    return common.ApprovalInfo.nullish();
   },
   get history() {
     return z.array(common.TimelineEvent);
@@ -1079,6 +1084,7 @@ export interface SupportCaseOpenedEvent {
   sellerId?: string | null;
   orderId?: string | null;
   orderItemIds: string[];
+  /** Who handles the case first, one of Handler.kind: seller, official_store or marketplace_support; not a staff id (ownerStaffId is the staff owner) */
   handler: string;
   /** Staff owner when one is assigned at opening (messaging adds them to the order conversation) */
   ownerStaffId?: string | null;
@@ -1098,7 +1104,7 @@ export const SupportCaseOpenedEvent: z.ZodType<SupportCaseOpenedEvent> = z.objec
   sellerId: z.uuid().nullish(),
   orderId: z.uuid().nullish(),
   orderItemIds: z.array(z.uuid()),
-  handler: z.string(),
+  handler: z.string().describe("Who handles the case first, one of Handler.kind: seller, official_store or marketplace_support; not a staff id (ownerStaffId is the staff owner)"),
   ownerStaffId: z.uuid().describe("Staff owner when one is assigned at opening (messaging adds them to the order conversation)").nullish(),
   trustReportId: z.uuid().describe("Trust and Risk report the case acts on (inform_customers outreach)").nullish(),
   nextResponseDueAt: z.iso.datetime({ offset: true }).nullish(),
@@ -1311,8 +1317,8 @@ export interface SupportPublicApi {
   getCaseForSeller(sellerId: string, ref: string): Promise<CaseView | null>;
   /** Dispute review with parties, purchase terms, shipment evidence, files, internal notes, deadlines and history Used by: graphql. */
   getCaseAdmin(ref: string): Promise<AdminCaseDetail | null>;
-  /** Open and recent cases on one order with linked items, filtered to what the viewer may see. Batched per order (Order.cases). Used by: graphql. */
-  listCasesForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin', customerId?: string, sellerId?: string }): Promise<CaseView[]>;
+  /** Open and recent cases on one order with linked items, filtered to what the viewer may see: a customer their own cases, a guest session the cases it opened or of guest orders identity granted it, a seller the cases about its items. A store viewer with neither id sees none. Batched per order (Order.cases). Used by: graphql. */
+  listCasesForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin', customerId?: string, guestSessionId?: string, sellerId?: string }): Promise<CaseView[]>;
   /** Cases and disputes about a seller's orders (admin seller 360) Used by: graphql. */
   listCasesForSeller(sellerId: string, filter: { open?: boolean }, page: common.PageInput): Promise<common.Page<SellerCaseRow>>;
   /** The case opened about each return (escalation or report), as the viewer may see it Used by: returns, graphql. */
@@ -1321,6 +1327,8 @@ export interface SupportPublicApi {
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
   /** Open customer cases per product (cases linked to an order item of the product, not resolved or closed). Catalog publication-impact preview. Used by: catalog. */
   countOpenCasesForProducts(productIds: string[]): Promise<Record<string, number>>;
+  /** Customer data export hook: one section (key support-cases) with the customer's cases (reference, topic, order, status, what they asked for, decision and remedies) and the messages they can see on each (no internal notes, no seller-only or staff-only messages, staff shown as Marketly support). attachmentIds are the files the customer attached. Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -1377,6 +1385,50 @@ export interface SupportDb {
     resolved_at: Date | null;
     closed_at: Date | null;
     updated_at: Date;
+    /** order reference kept for search and lists */
+    order_ref: string | null;
+    placed_at: Date | null;
+    return_ref: string | null;
+    /** order contact or customer display name when opened */
+    customer_name: string | null;
+    /** order contact email, for guests */
+    contact_email: string | null;
+    city: string | null;
+    seller_name: string | null;
+    owner_type: 'official' | 'seller' | null;
+    /** seller request reference: MK-, RT-, PO-, RS- or a SKU */
+    reference: string | null;
+    /** Trust and Risk report the case acts on */
+    trust_report_id: string | null;
+    problem_type: 'missing_item' | 'damaged' | 'wrong_item' | 'not_arrived' | 'other' | null;
+    desired_remedy: 'refund' | 'keep_waiting' | 'replacement' | 'other' | null;
+    callback_phone: string | null;
+    info_request_from: 'customer' | 'seller' | null;
+    info_request_question: string | null;
+    info_request_due_at: Date | null;
+    info_requested_at: Date | null;
+    /** actor */
+    info_requested_by: string | null;
+    /** last escalation */
+    escalated_at: Date | null;
+    /** actor */
+    escalated_by: string | null;
+    escalation_reason: string | null;
+    escalated_to: string | null;
+    escalation_note: string | null;
+    /** first seller reply on a customer case */
+    seller_replied_at: Date | null;
+    /** shipping.dispatch.overdue noted on the case */
+    dispatch_overdue_due_at: Date | null;
+    dispatch_overdue_noted_at: Date | null;
+    /** the response deadline support.case.overdue was published for */
+    overdue_notified_for: Date | null;
+    /** the auto-close job recorded the end of the appeal window */
+    appeal_window_closed: boolean;
+    /** access approval request of a decision waiting for support.remedies.approve */
+    approval_request_id: string | null;
+    /** { kind: decision|appeal, ref, decision | appeal, requestedBy, principal, requestedAt }: the decision published when the request is approved */
+    pending_decision: Json | null;
   };
   case_items: {
     case_id: string;
@@ -1432,6 +1484,8 @@ export interface SupportDb {
     status: string;
     refund_request_id: string | null;
     replacement_id: string | null;
+    /** wallet goodwill grant behind a goodwill credit remedy; wallet.goodwill.decided is matched on it */
+    goodwill_grant_id: string | null;
     due_at: Date | null;
     note: string | null;
     created_by: string;
@@ -2080,7 +2134,7 @@ export const endpoints = defineEndpoints({
     permission: "support.disputes.decide",
     scope: "staff",
     summary: "Record the decision and remedy, publish the appeal deadline to both parties",
-    desc: "Refund remedies create a refund request in returns (Finance approves within limits; approved is not sent). Goodwill credit needs the wallet module (GOODWILL_UNAVAILABLE while it is off, decision D-RT3); goodwill above the decider's limit needs approval through wallet and access. A guest has no wallet: their goodwill becomes a platform-funded partial refund through returns. Remedies left without items (goodwill, refunds) default to the case's items. A replacement needs a return on the case (REPLACEMENT_NEEDS_RETURN, decision D-S5) until returns can create replacements without one. notifyParties=false still records and shows the decision but sends no email (notified=false).",
+    desc: "Refund remedies create a refund request in returns (Finance approves within limits; approved is not sent). Goodwill credit needs the wallet module (GOODWILL_UNAVAILABLE while it is off, decision D-RT3); goodwill above the decider's limit needs approval through wallet and access. A guest has no wallet: their goodwill becomes a platform-funded partial refund through returns. Remedies left without items (goodwill, refunds) default to the case's items. A replacement is created by returns (returns.requestReplacement): it attaches to the case's open return when that return covers the item, otherwise it is a replacement without a return; REPLACEMENT_NEEDS_RETURN while the returns module is off. notifyParties=false still records and shows the decision but sends no email (notified=false). Platform-funded remedies above the decider's limit: the decision is saved pending (cases.approval_request_id) and the call answers 200 with AdminCaseDetail.pendingApproval; nothing is published until access.approval.decided. APPROVAL_REQUIRED (409, nothing saved) only while an earlier decision on the case still waits for approval.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2091,7 +2145,7 @@ export const endpoints = defineEndpoints({
     errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED","GOODWILL_UNAVAILABLE","REPLACEMENT_NEEDS_RETURN","VALIDATION_FAILED"],
     idempotent: true,
     audited: true,
-    approval: "Approval action support.remedies.approve. Goodwill or platform-funded remedies above the decider's limit (e.g. $50) go to Finance through access",
+    approval: "Approval action support.remedies.approve. Platform-funded remedies above the decider's limit (e.g. $50) are saved pending and go to Finance through access (200 with pendingApproval); goodwill credit is checked by wallet.goodwill.grant",
     events: ["support.case.decided"],
     screens: ["admin/case"],
     phase: 1,
@@ -2188,6 +2242,7 @@ export const endpoints = defineEndpoints({
     permission: "support.appeals.decide",
     scope: "staff",
     summary: "Decide an appeal (reviewer must differ from the original decider)",
+    desc: "Overturning cancels the earlier decision's refund requests that can still be cancelled and records the new remedies. New platform-funded remedies above the reviewer's limit are saved pending (200 with AdminCaseDetail.pendingApproval) and published on access.approval.decided; APPROVAL_REQUIRED only while an earlier decision still waits for approval.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2204,6 +2259,7 @@ export const endpoints = defineEndpoints({
     errors: ["ILLEGAL_TRANSITION","SAME_DECIDER","APPROVAL_REQUIRED","GOODWILL_UNAVAILABLE","REPLACEMENT_NEEDS_RETURN"],
     idempotent: true,
     audited: true,
+    approval: "Approval action support.remedies.approve (new platform-funded remedies above the reviewer's limit)",
     events: ["support.case.appeal_decided","support.case.decided"],
     screens: ["admin/case","admin/cases"],
     phase: 1,
@@ -2280,7 +2336,7 @@ export const spec = defineModuleSpec({
   summary: "Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules.",
   dependsOn: ["orders","access"],
   optionalDeps: ["returns","payments","shipping","sellers","messaging","media","finance","trust","wallet","workqueues","notifications","settings","audit","content","customers","identity","promotions","reports","warehouse"],
-  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts"],
+  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts","exportCustomerData"],
   permissions: [
     {
       "key": "support.cases.view",
@@ -2369,6 +2425,11 @@ export const spec = defineModuleSpec({
         ],
         [
           "open",
+          "escalate",
+          "escalated"
+        ],
+        [
+          "escalated",
           "escalate",
           "escalated"
         ],
@@ -2606,9 +2667,10 @@ export const spec = defineModuleSpec({
       "returns.refund.approved": "Move the matching refund remedy to approved/in progress",
       "returns.refund.declined": "Cancel the refund remedy behind the declined refund request (Finance's reason in the case history) and put the case back in the owner's queue so they decide again",
       "payments.refund.sent": "Complete the refund remedy; the case can now be resolved",
-      "wallet.goodwill.decided": "For a case's goodwill credit remedy waiting for approval: mark it granted (done) or rejected and put the case back in the owner's queue",
+      "wallet.goodwill.decided": "For a case's goodwill credit remedy waiting for approval (matched on case_remedies.goodwill_grant_id = grantId): mark it granted (done) or rejected and put the case back in the owner's queue",
       "payments.refund.failed": "Mark the refund remedy failed and put the case back in the owner's queue",
       "returns.replacement.created": "Link the replacement to its remedy",
+      "returns.replacement.cancelled": "A replacement cancelled before it shipped (no stock, seller or staff), with or without a return: cancel the remedy it drives (reason in the case history) and put the case back in the owner's queue to choose another remedy",
       "shipping.shipment.delivered": "Complete replacement remedies when their shipment is delivered",
       "shipping.shipment.dispatched": "Complete ship-by-deadline remedies whose items shipped by the promised date (lines, shippedAt); a later dispatch leaves the remedy to fall back to a refund",
       "shipping.dispatch.overdue": "Add the overdue dispatch to open cases for the item and expose the customer escalation route",
@@ -2616,7 +2678,7 @@ export const spec = defineModuleSpec({
       "notifications.email_reply.received": "module support: add the reply to the case thread (refId = case id) as a customer message when fromEmail is the case's customer or order contact; other senders are dropped with a log line. Attachments come as media assets",
       "orders.item.cancelled": "Note cancellations on linked cases (e.g. ship-by remedy fell back to cancellation)",
       "sellers.seller.restricted": "Keep cases open; route seller-handled cases of a suspended seller to Marketly support",
-      "access.approval.decided": "Finish approval-required remedies"
+      "access.approval.decided": "support.remedies.approve: publish the decision saved pending on the case (approval_request_id), or hand it back to the owner as a draft when rejected or returned"
     },
   },
   jobs: {
@@ -2760,7 +2822,7 @@ export const spec = defineModuleSpec({
     },
     "REPLACEMENT_NEEDS_RETURN": {
       "status": 422,
-      "meaning": "A replacement can only be promised on a case with a return (returns creates the replacement from it); ask for a return or choose a refund."
+      "meaning": "A replacement needs the returns module, which creates and ships it (with the case's return or without one); it is off, so choose a refund instead."
     },
     "REMEDY_NOT_SETTLEABLE": {
       "status": 409,
@@ -2954,6 +3016,126 @@ export const spec = defineModuleSpec({
       "updated_at": {
         "type": "timestamptz",
         "nullable": false
+      },
+      "order_ref": {
+        "type": "text",
+        "nullable": true
+      },
+      "placed_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "return_ref": {
+        "type": "text",
+        "nullable": true
+      },
+      "customer_name": {
+        "type": "text",
+        "nullable": true
+      },
+      "contact_email": {
+        "type": "text",
+        "nullable": true
+      },
+      "city": {
+        "type": "text",
+        "nullable": true
+      },
+      "seller_name": {
+        "type": "text",
+        "nullable": true
+      },
+      "owner_type": {
+        "type": "text",
+        "nullable": true
+      },
+      "reference": {
+        "type": "text",
+        "nullable": true
+      },
+      "trust_report_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "problem_type": {
+        "type": "text",
+        "nullable": true
+      },
+      "desired_remedy": {
+        "type": "text",
+        "nullable": true
+      },
+      "callback_phone": {
+        "type": "text",
+        "nullable": true
+      },
+      "info_request_from": {
+        "type": "text",
+        "nullable": true
+      },
+      "info_request_question": {
+        "type": "text",
+        "nullable": true
+      },
+      "info_request_due_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "info_requested_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "info_requested_by": {
+        "type": "text",
+        "nullable": true
+      },
+      "escalated_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "escalated_by": {
+        "type": "text",
+        "nullable": true
+      },
+      "escalation_reason": {
+        "type": "text",
+        "nullable": true
+      },
+      "escalated_to": {
+        "type": "text",
+        "nullable": true
+      },
+      "escalation_note": {
+        "type": "text",
+        "nullable": true
+      },
+      "seller_replied_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "dispatch_overdue_due_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "dispatch_overdue_noted_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "overdue_notified_for": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "appeal_window_closed": {
+        "type": "bool",
+        "nullable": false
+      },
+      "approval_request_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "pending_decision": {
+        "type": "jsonb",
+        "nullable": true
       }
     },
     "case_items": {
@@ -3134,6 +3316,10 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "replacement_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "goodwill_grant_id": {
         "type": "uuid",
         "nullable": true
       },

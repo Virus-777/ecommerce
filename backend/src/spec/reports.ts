@@ -119,6 +119,28 @@ export const MetricInput: z.ZodType<MetricInput> = z.object({
   changeNote: z.string(),
 }).register(common.apiTypes, { id: "reports.MetricInput" });
 
+export interface MetricOwnerChange {
+  from?: StaffRef | null;
+  to: StaffRef;
+  reason: string;
+  changedBy: common.Actor;
+  changedAt: string;
+}
+
+export const MetricOwnerChange: z.ZodType<MetricOwnerChange> = z.object({
+  get from() {
+    return StaffRef.nullish();
+  },
+  get to() {
+    return StaffRef;
+  },
+  reason: z.string(),
+  get changedBy() {
+    return common.Actor;
+  },
+  changedAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "reports.MetricOwnerChange" });
+
 export interface MetricSuggestion {
   id: string;
   metricKey: string;
@@ -443,6 +465,7 @@ export interface ExportJob {
   /** Signed, single-user link while ready */
   downloadUrl?: string | null;
   expiresAt?: string | null;
+  /** Why a failed job failed, e.g. More than 100,000 rows matched; narrow the filters (EXPORT_TOO_LARGE) */
   error?: string | null;
   createdAt: string;
   finishedAt?: string | null;
@@ -466,7 +489,7 @@ export const ExportJob: z.ZodType<ExportJob> = z.object({
   sha256: z.string().describe("Checksum of the finished file, so a downloaded export (e.g. audit entries) can be checked for changes").nullish(),
   downloadUrl: z.url().describe("Signed, single-user link while ready").nullish(),
   expiresAt: z.iso.datetime({ offset: true }).nullish(),
-  error: z.string().nullish(),
+  error: z.string().describe("Why a failed job failed, e.g. More than 100,000 rows matched; narrow the filters (EXPORT_TOO_LARGE)").nullish(),
   createdAt: z.iso.datetime({ offset: true }),
   finishedAt: z.iso.datetime({ offset: true }).nullish(),
 }).register(common.apiTypes, { id: "reports.ExportJob" });
@@ -491,7 +514,7 @@ export const ExportInput: z.ZodType<ExportInput> = z.object({
 }).register(common.apiTypes, { id: "reports.ExportInput" });
 
 export interface AdminDashboard {
-  period: "today" | "last_7_days" | "last_30_days";
+  period: "today" | "last_7_days" | "last_14_days" | "last_30_days";
   range: common.DateRange;
   asOf: string;
   /** Gross sales by order placement date */
@@ -505,7 +528,7 @@ export interface AdminDashboard {
 }
 
 export const AdminDashboard: z.ZodType<AdminDashboard> = z.object({
-  period: z.enum(["today", "last_7_days", "last_30_days"]),
+  period: z.enum(["today", "last_7_days", "last_14_days", "last_30_days"]),
   get range() {
     return common.DateRange;
   },
@@ -677,7 +700,7 @@ export const ReportsScheduledReportReadyEvent: z.ZodType<ReportsScheduledReportR
 export interface ReportsPublicApi {
   /** Owner modules register the columns of their datasets at boot. Only keys in the export dataset registry (ExportDatasetKey, setting exportDatasets) are accepted. Rows are read page by page through the owner's own publicApi function exportRows(dataset, filters, principal, cursor); reports runs the job, filters columns by permission and stores the file. Used by: catalog, offers, inventory, purchasing, shipping, returns, support, finance, promotions, workqueues, orders, customers, sellers, audit, trust. */
   registerDataset(dataset: ExportDataset): Promise<void>;
-  /** Used by other modules' export endpoints; same rules as POST /exports (jsonl only for audit.admin.entries). Their status endpoints read the job back with getExport. Used by: catalog, offers, inventory, returns, orders, customers, sellers, workqueues, audit, trust, finance. */
+  /** Used by other modules' export endpoints; same rules as POST /exports, including the dataset's own permission for the principal (jsonl only for audit.admin.entries). Their status endpoints read the job back with getExport. Used by: catalog, offers, inventory, returns, orders, customers, sellers, workqueues, audit, trust, finance. */
   requestExport(input: { dataset: string, filters: unknown, format: 'csv' | 'xlsx' | 'jsonl', principal: identity.Principal, sellerId?: string }): Promise<ExportJob>;
   /** Discovery signals that are not events (anonymous counts only) Used by: catalog, search, customers. */
   recordSignal(signal: { kind: 'product_view' | 'search_no_result' | 'cart_add', productId?: string, offerId?: string, query?: string, sessionKey?: string, at: string }): Promise<void>;
@@ -719,6 +742,18 @@ export interface ReportsDb {
     version: number;
     effective_from: string;
     reviewed_at: string | null;
+    /** what the current draft changes, or the published version's note */
+    change_note: string | null;
+  };
+  /** Who owned a metric when: every PUT /metrics/{key}/owner (not a new version) */
+  metric_owner_changes: {
+    id: string;
+    metric_key: string;
+    from_staff_id: string | null;
+    to_staff_id: string;
+    reason: string;
+    changed_by: string;
+    changed_at: Date;
   };
   /** Every published version of a definition; reports state which version they used */
   metric_versions: {
@@ -851,6 +886,10 @@ export interface ReportsDb {
     last_refund_at: Date | null;
     /** Official Store, from inventory.getUnitCost */
     buying_cost_minor: number | null;
+    /** order acceptance; rows recorded before pass 4 hold the placement time */
+    accepted_at: Date | null;
+    /** seller group of the order; payments.payment.captured is matched on it */
+    group_id: string | null;
   };
   /** One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order */
   fact_refunds: {
@@ -902,6 +941,7 @@ export interface ReportsDb {
     seller_cancellations: number;
     delivery_exceptions: number;
     messages_received: number;
+    /** median first reply minutes of the day from messaging.sellerResponseStats, its average when no median; a range shows the average of the daily medians */
     first_reply_minutes_p50: number | null;
     cases_opened: number;
     cases_open_eod: number;
@@ -943,6 +983,19 @@ export interface ReportsDb {
     dismissals: number;
     spend_minor: number;
     attributed_purchases: number;
+  };
+  /** Out-of-stock intervals still open per stock item (inventory.stock.changed); closing one adds its minutes to fact_discovery_daily */
+  open_stockouts: {
+    stock_item_id: string;
+    product_id: string;
+    since: Date;
+  };
+  /** Campaign behind a coupon redemption or ad charge, for the reversal or credit that names only the redemption or charge */
+  campaign_refs: {
+    kind: 'redemption' | 'charge';
+    ref_id: string;
+    campaign_id: string;
+    created_at: Date;
   };
   read_model_checkpoints: {
     key: string;
@@ -1026,7 +1079,7 @@ export const endpoints = defineEndpoints({
     desc: "Queue tiles come from workqueues (GET /api/admin/workqueues/summary), ads from advertising and the payout run from finance.",
     query: () =>
       z.object({
-        period: z.enum(["today", "last_7_days", "last_30_days"]).optional(),
+        period: z.enum(["today", "last_7_days", "last_14_days", "last_30_days"]).describe("Default last_7_days").optional(),
       }),
     response: () => AdminDashboard,
     status: 200,
@@ -1073,6 +1126,9 @@ export const endpoints = defineEndpoints({
       },
       get suggestions() {
         return z.array(MetricSuggestion);
+      },
+      get ownerChanges() {
+        return z.array(MetricOwnerChange);
       },
     }),
     status: 200,
@@ -1326,7 +1382,7 @@ export const endpoints = defineEndpoints({
     body: () => ExportInput,
     response: () => ExportJob,
     status: 202,
-    errors: ["FORBIDDEN","VALIDATION_FAILED","RATE_LIMITED","EXPORT_TOO_LARGE","DATASET_UNAVAILABLE"],
+    errors: ["FORBIDDEN","VALIDATION_FAILED","RATE_LIMITED","DATASET_UNAVAILABLE"],
     audited: true,
     events: ["reports.export.requested"],
     screens: ["admin/reports","admin/dashboard","admin/customers","admin/sellers","admin/trust","admin/catalog","admin/orders","admin/returns","admin/cases","admin/finance","admin/payouts","admin/promotions","ops/queues","ops/inventory","ops/receiving","ops/dispatch","ops/return-inspection","ops/finance-checks"],
@@ -1379,7 +1435,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => ExportJob,
     status: 200,
-    errors: ["FORBIDDEN"],
+    errors: ["NOT_FOUND"],
     screens: ["admin/reports"],
     phase: 1,
   },
@@ -1564,6 +1620,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => ExportJob,
     status: 200,
+    errors: ["NOT_FOUND"],
     screens: ["seller/reports"],
     phase: 2,
   },
@@ -2135,7 +2192,7 @@ export const spec = defineModuleSpec({
     },
     "EXPORT_TOO_LARGE": {
       "status": 422,
-      "meaning": "More than maxExportRows rows; narrow the filters"
+      "meaning": "The export matched more than maxExportRows rows. Known only while the job runs (no request answers it): the job fails with this message in ExportJob.error (details.maxRows, details.matchedRows = rows read before stopping); narrow the filters and export again."
     },
     "OWNER_REQUIRED": {
       "status": 422,
@@ -2239,6 +2296,40 @@ export const spec = defineModuleSpec({
       "reviewed_at": {
         "type": "date",
         "nullable": true
+      },
+      "change_note": {
+        "type": "text",
+        "nullable": true
+      }
+    },
+    "metric_owner_changes": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "metric_key": {
+        "type": "text",
+        "nullable": false
+      },
+      "from_staff_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "to_staff_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "reason": {
+        "type": "text",
+        "nullable": false
+      },
+      "changed_by": {
+        "type": "text",
+        "nullable": false
+      },
+      "changed_at": {
+        "type": "timestamptz",
+        "nullable": false
       }
     },
     "metric_versions": {
@@ -2677,6 +2768,14 @@ export const spec = defineModuleSpec({
       "buying_cost_minor": {
         "type": "bigint",
         "nullable": true
+      },
+      "accepted_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "group_id": {
+        "type": "uuid",
+        "nullable": true
       }
     },
     "fact_refunds": {
@@ -2968,6 +3067,38 @@ export const spec = defineModuleSpec({
       },
       "attributed_purchases": {
         "type": "int",
+        "nullable": false
+      }
+    },
+    "open_stockouts": {
+      "stock_item_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "product_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "since": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
+    "campaign_refs": {
+      "kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "ref_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "campaign_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "created_at": {
+        "type": "timestamptz",
         "nullable": false
       }
     },

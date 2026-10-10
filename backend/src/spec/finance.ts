@@ -29,7 +29,10 @@ export interface SettlementRules {
   schedule: string;
   availableAfterDeliveryDays: number;
   minimumPayout: common.Money;
+  /** Extra days after delivery before earnings become available while the seller is in its new-seller period (seller_accounts.new_seller_extra_days); null after the period */
   newSellerHoldDays?: number | null;
+  /** Last day of the seller's new-seller period; null when it has ended or never applied */
+  newSellerUntil?: string | null;
   /** Deducted from later earnings; if none, the balance shows the amount owed */
   refundAfterPayout: string;
   text: string;
@@ -41,7 +44,8 @@ export const SettlementRules: z.ZodType<SettlementRules> = z.object({
   get minimumPayout() {
     return common.Money;
   },
-  newSellerHoldDays: z.number().int().nullish(),
+  newSellerHoldDays: z.number().int().describe("Extra days after delivery before earnings become available while the seller is in its new-seller period (seller_accounts.new_seller_extra_days); null after the period").nullish(),
+  newSellerUntil: z.iso.date().describe("Last day of the seller's new-seller period; null when it has ended or never applied").nullish(),
   refundAfterPayout: z.string().describe("Deducted from later earnings; if none, the balance shows the amount owed"),
   text: z.string(),
 }).register(common.apiTypes, { id: "finance.SettlementRules" });
@@ -1044,6 +1048,10 @@ export interface AmountOwed {
   status: "open" | "settled" | "written_off";
   origin: Reference[];
   note?: string | null;
+  /** A write-off waiting for a second Finance reviewer (finance.writeoffs.approve); applied when approved */
+  pendingWriteOff?: common.Money | null;
+  /** The approval request of the pending write-off */
+  approval?: common.ApprovalInfo | null;
 }
 
 export const AmountOwed: z.ZodType<AmountOwed> = z.object({
@@ -1063,6 +1071,12 @@ export const AmountOwed: z.ZodType<AmountOwed> = z.object({
     return z.array(Reference);
   },
   note: z.string().nullish(),
+  get pendingWriteOff() {
+    return common.Money.nullish();
+  },
+  get approval() {
+    return common.ApprovalInfo.nullish();
+  },
 }).register(common.apiTypes, { id: "finance.AmountOwed" });
 
 export interface SellerFinanceRow {
@@ -1529,8 +1543,12 @@ export interface ReconItem {
   /** Seller name, payment method or deposit */
   subject: string;
   description: string;
+  /** payments_vs_orders: the order (or package) total less items cancelled before they were charged */
   expected: common.Money;
+  /** payments_vs_orders: the card amount captured (what the provider deposits) */
   actual: common.Money;
+  /** Store credit applied with a captured payment (payments_vs_orders, unexplained_amount); difference = actual + credit − expected. Null for other checks */
+  credit?: common.Money | null;
   difference: common.Money;
   detectedAt: string;
   ageDays: number;
@@ -1556,6 +1574,9 @@ export const ReconItem: z.ZodType<ReconItem> = z.object({
   },
   get actual() {
     return common.Money;
+  },
+  get credit() {
+    return common.Money.nullish();
   },
   get difference() {
     return common.Money;
@@ -2106,6 +2127,10 @@ export interface FinanceDb {
     negative_since: Date | null;
     payouts_blocked_reason: string | null;
     fee_override_set_id: string | null;
+    /** last market day of the new-seller period, set when sellers.seller.approved is consumed */
+    new_seller_until: string | null;
+    /** extra days after delivery before earnings become available during the period */
+    new_seller_extra_days: number | null;
     updated_at: Date;
   };
   /** Append-only seller ledger. Corrections are new entries, never edits. */
@@ -2160,6 +2185,8 @@ export interface FinanceDb {
   fee_category_rates: {
     rule_set_id: string;
     category_id: string;
+    /** as named when the rule set was proposed */
+    category_name: string;
     rate_bps: number;
   };
   /** Fee computed per order item at sale with the rule version used */
@@ -2254,6 +2281,11 @@ export interface FinanceDb {
     status: string;
     origin: Json;
     note: string | null;
+    /** a write-off waiting for approval */
+    write_off_amount: number | null;
+    write_off_reason: string | null;
+    /** the pending write-off's access approval request */
+    approval_request_id: string | null;
   };
   /** Verification state of the seller's payout account (details stay in sellers) */
   payout_destinations: {
@@ -2339,7 +2371,7 @@ export interface FinanceDb {
     pdf_media_id: string | null;
     csv_media_id: string | null;
   };
-  /** Company trading facts for the Official Store (never part of seller payouts) */
+  /** Company trading facts for the Official Store (never part of seller payouts). Marketplace (platform) facts live in captures, discount_funding, platform_costs and store_credit_liability, never here */
   trading_entries: {
     id: string;
     at: Date;
@@ -2384,6 +2416,8 @@ export interface FinanceDb {
     description: string;
     expected: number;
     actual: number;
+    /** store credit applied with a captured payment; 0 otherwise */
+    credit: number;
     difference: number;
     currency: string;
     detected_at: Date;
@@ -2392,6 +2426,60 @@ export interface FinanceDb {
     owner_staff_id: string | null;
     correction: Json | null;
     approval_request_id: string | null;
+  };
+  /** Payments captured (payments.payment.captured): the card amount the provider deposits and the store credit applied with it. The provider_deposit check adds up card_amount per market day of captured_at; each capture also has its payments_vs_orders (or unexplained_amount) item in recon_items */
+  captures: {
+    /** payments capture id */
+    id: string;
+    /** null for captures recorded before pass 4 */
+    intent_id: string | null;
+    /** null when no matching order was found, or recorded before pass 4 */
+    order_id: string | null;
+    group_id: string | null;
+    card_amount: number;
+    credit_amount: number;
+    currency: string;
+    provider_ref: string | null;
+    captured_at: Date;
+    recon_item_id: string | null;
+  };
+  /** Coupon discount funding per redemption (promotions.coupon.redeemed, promotions.redemption.reversed): the platform part is a marketplace cost, the seller part is funded by the seller. Reversals are negative rows */
+  discount_funding: {
+    id: string;
+    at: Date;
+    redemption_id: string;
+    funded_by: 'platform' | 'seller';
+    kind: 'redeemed' | 'reversed';
+    /** signed */
+    amount: number;
+    currency: string;
+    order_id: string | null;
+    order_item_id: string | null;
+  };
+  /** Marketplace (platform) costs and recoveries that are not Official Store trading: labels and refund shares the platform pays on seller orders, carrier claims paid to the platform, platform-funded goodwill store credit, store credit corrections and breakage, written-off seller debts. amount is a cost (positive) or a recovery (negative) */
+  platform_costs: {
+    id: string;
+    at: Date;
+    kind: 'label' | 'refund' | 'carrier_claim' | 'goodwill_credit' | 'credit_correction' | 'credit_breakage' | 'write_off';
+    /** signed */
+    amount: number;
+    currency: string;
+    order_id: string | null;
+    order_item_id: string | null;
+    ref_kind: 'label' | 'refund' | 'claim' | 'wallet_entry' | 'amount_owed' | null;
+    ref_id: string | null;
+  };
+  /** Finance's store credit liability, one row per wallet event: granted adds, used, reversed and expired reduce, corrected adds or reduces. The daily store_credit check compares the sum up to a day with wallet.getLiabilityTotal */
+  store_credit_liability: {
+    id: string;
+    at: Date;
+    kind: 'granted' | 'used' | 'reversed' | 'expired' | 'corrected';
+    /** signed */
+    amount: number;
+    currency: string;
+    /** the wallet ledger entry; null for uses, keyed by order */
+    wallet_entry_id: string | null;
+    order_id: string | null;
   };
 }
 
@@ -2929,7 +3017,6 @@ export const endpoints = defineEndpoints({
     body: () => HoldInput,
     response: () => Hold,
     status: 201,
-    errors: ["APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
     approval: "Approval action finance.holds.place. Above the staff member's hold limit an access approval request is created",
@@ -2957,7 +3044,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Hold,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION"],
     idempotent: true,
     audited: true,
     approval: "Approval action finance.holds.release. Above the staff member's hold limit an access approval request is created",
@@ -3008,7 +3095,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Hold,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION"],
     idempotent: true,
     audited: true,
     events: ["finance.adjustment.recorded"],
@@ -3045,7 +3132,6 @@ export const endpoints = defineEndpoints({
     body: () => AdjustmentInput,
     response: () => Adjustment,
     status: 201,
-    errors: ["APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
     approval: "Approval action finance.adjustments.record. Above the caller's adjustment limit (access, e.g. $500) a second Finance reviewer approves through access",
@@ -3080,6 +3166,7 @@ export const endpoints = defineEndpoints({
     permission: "finance.adjustments.record",
     scope: "staff",
     summary: "Record payment received or write off an amount owed",
+    desc: "seller_paid and offset are recorded at once. A write-off within the caller's finance.writeoffs.approve limit is recorded at once; above it the write-off is saved on the amount owed (pendingWriteOff) and the response is still 200, with the approval request in `approval` (FORMAT.md, Approval responses); it is applied when approved. CONFLICT while another write-off of the same amount owed waits for approval.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3093,7 +3180,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => AmountOwed,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION","CONFLICT"],
     idempotent: true,
     audited: true,
     approval: "Approval action finance.writeoffs.approve. Write-offs need a second Finance reviewer",
@@ -3258,7 +3345,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => PayoutRun,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","SAME_APPROVER","APPROVAL_REQUIRED","STEP_UP_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION","SAME_APPROVER","STEP_UP_REQUIRED"],
     idempotent: true,
     audited: true,
     approval: "Approval action finance.payouts.release. Runs over the first approver's payout limit (access, e.g. $50,000) need a second Finance reviewer through access; platform administrators without payout authority cannot approve",
@@ -3522,7 +3609,7 @@ export const endpoints = defineEndpoints({
     body: () => CorrectionInput,
     response: () => ReconItem,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION"],
     idempotent: true,
     audited: true,
     approval: "Approval action finance.reconciliation.correct. Corrections above the caller's correction limit (access) need a second Finance reviewer",
@@ -4088,7 +4175,7 @@ export const spec = defineModuleSpec({
     },
     "finance.payout-run.create": {
       "schedule": "every 15 min",
-      "does": "Checks the payoutSchedule cutoff itself (e.g. Thu 23:59 market time before a Friday payout): once the latest cutoff has passed and no run exists for it, issue statements for the period and create the draft payout run. Idempotent per cutoff (RUN_ALREADY_EXISTS-safe), so a late or repeated run, or a restart after the cutoff, creates exactly one run"
+      "does": "Checks the payoutSchedule cutoff itself (e.g. Thu 23:59 market time before a Friday payout): once the latest cutoff has passed and no run exists for it, issue statements for the period and create the draft payout run. Idempotent per cutoff (RUN_ALREADY_EXISTS-safe), so a late or repeated run, or a restart after the cutoff, creates exactly one run. Also opens the current period's statement for seller accounts that have none (statements are never created on read)"
     },
     "finance.payout-run.release": {
       "schedule": "every 5 min",
@@ -4292,6 +4379,14 @@ export const spec = defineModuleSpec({
         "type": "uuid",
         "nullable": true
       },
+      "new_seller_until": {
+        "type": "date",
+        "nullable": true
+      },
+      "new_seller_extra_days": {
+        "type": "int",
+        "nullable": true
+      },
       "updated_at": {
         "type": "timestamptz",
         "nullable": false
@@ -4474,6 +4569,10 @@ export const spec = defineModuleSpec({
       },
       "category_id": {
         "type": "uuid",
+        "nullable": false
+      },
+      "category_name": {
+        "type": "text",
         "nullable": false
       },
       "rate_bps": {
@@ -4798,6 +4897,18 @@ export const spec = defineModuleSpec({
       },
       "note": {
         "type": "text",
+        "nullable": true
+      },
+      "write_off_amount": {
+        "type": "bigint",
+        "nullable": true
+      },
+      "write_off_reason": {
+        "type": "text",
+        "nullable": true
+      },
+      "approval_request_id": {
+        "type": "uuid",
         "nullable": true
       }
     },
@@ -5250,6 +5361,10 @@ export const spec = defineModuleSpec({
         "type": "bigint",
         "nullable": false
       },
+      "credit": {
+        "type": "bigint",
+        "nullable": false
+      },
       "difference": {
         "type": "bigint",
         "nullable": false
@@ -5279,6 +5394,154 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "approval_request_id": {
+        "type": "uuid",
+        "nullable": true
+      }
+    },
+    "captures": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "intent_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "order_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "group_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "card_amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "credit_amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "currency": {
+        "type": "text",
+        "nullable": false
+      },
+      "provider_ref": {
+        "type": "text",
+        "nullable": true
+      },
+      "captured_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "recon_item_id": {
+        "type": "uuid",
+        "nullable": true
+      }
+    },
+    "discount_funding": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "redemption_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "funded_by": {
+        "type": "text",
+        "nullable": false
+      },
+      "kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "currency": {
+        "type": "text",
+        "nullable": false
+      },
+      "order_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "order_item_id": {
+        "type": "uuid",
+        "nullable": true
+      }
+    },
+    "platform_costs": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "currency": {
+        "type": "text",
+        "nullable": false
+      },
+      "order_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "order_item_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "ref_kind": {
+        "type": "text",
+        "nullable": true
+      },
+      "ref_id": {
+        "type": "text",
+        "nullable": true
+      }
+    },
+    "store_credit_liability": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "amount": {
+        "type": "bigint",
+        "nullable": false
+      },
+      "currency": {
+        "type": "text",
+        "nullable": false
+      },
+      "wallet_entry_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "order_id": {
         "type": "uuid",
         "nullable": true
       }

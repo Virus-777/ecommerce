@@ -143,7 +143,7 @@ export interface CartItem {
   sku?: string | null;
   image?: common.MediaRef | null;
   quantity: number;
-  /** min(offer purchase limit, available stock, platform line maximum) */
+  /** min(offer purchase limit, deal purchase limit from promotions, available stock, maxQuantityPerLine setting) */
   maxQuantity: number;
   /** Offer limit per customer, shown as 'Limit 3 per customer' */
   purchaseLimit?: number | null;
@@ -183,7 +183,7 @@ export const CartItem: z.ZodType<CartItem> = z.object({
     return common.MediaRef.nullish();
   },
   quantity: z.number().int(),
-  maxQuantity: z.number().int().describe("min(offer purchase limit, available stock, platform line maximum)"),
+  maxQuantity: z.number().int().describe("min(offer purchase limit, deal purchase limit from promotions, available stock, maxQuantityPerLine setting)"),
   purchaseLimit: z.number().int().describe("Offer limit per customer, shown as 'Limit 3 per customer'").nullish(),
   availableQuantity: z.number().int().describe("Only shown when low or below the requested quantity").nullish(),
   get unitPrice() {
@@ -406,7 +406,8 @@ export const PackageShippingLine: z.ZodType<PackageShippingLine> = z.object({
 }).register(common.apiTypes, { id: "cart.PackageShippingLine" });
 
 export interface CartView {
-  id: string;
+  /** The cart's id; null when the owner has no cart yet (GET /cart creates nothing and answers an empty view) */
+  id?: string | null;
   owner: "customer" | "guest";
   currency: string;
   itemCount: number;
@@ -429,7 +430,7 @@ export interface CartView {
 }
 
 export const CartView: z.ZodType<CartView> = z.object({
-  id: z.uuid(),
+  id: z.uuid().describe("The cart's id; null when the owner has no cart yet (GET /cart creates nothing and answers an empty view)").nullish(),
   owner: z.enum(["customer", "guest"]),
   currency: z.string(),
   itemCount: z.number().int(),
@@ -825,6 +826,8 @@ export interface CartDb {
     variant_id: string;
     stock_item_id: string;
     ships_from: string;
+    /** offer condition at add; null only for lines added before it was kept, until their next check */
+    condition: 'new' | 'used_like_new' | 'used_good' | 'used_acceptable' | 'refurbished' | null;
     quantity: number;
     /** minor units */
     price_at_add: number;
@@ -1084,7 +1087,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Merge the guest cart into the customer cart after sign-in",
-    desc: "Send with the customer session and the X-Guest-Session header of the guest cart. Same offer: quantities combine up to the limit. Different offer for the same variant: both lines kept. Unavailable guest lines are dropped with a note. The guest's saved-for-later items move to the customer in the same transaction (owner_kind customer, customer_id set, guest_session_id cleared; when the customer already saved that offer the customer's row is kept and the guest row deleted). Idempotent by guest cart: a second call returns the same report.",
+    desc: "Send with the customer session and the guest session id in the body. Proof of ownership: the account must have claimed that guest session at sign-in or registration (identity.guest_session.claimed, recorded by cart's consumer); knowing the id is not enough, and an unclaimed or unknown session answers NOT_FOUND. Normally the merge has already happened through that event; this call returns its report (or merges now if the event has not arrived yet). Same offer: quantities combine up to the limit. Different offer for the same variant: both lines kept. Unavailable guest lines are dropped with a note; guest lines beyond maxLines are dropped too (outcome dropped_unavailable, note 'Your cart is full'). The guest's saved-for-later items move to the customer in the same transaction (owner_kind customer, customer_id set, guest_session_id cleared; when the customer already saved that offer the customer's row is kept and the guest row deleted). Idempotent by guest cart: a second call returns the same report.",
     body: () => z.object({
       guestSessionId: z.uuid(),
     }),
@@ -1341,13 +1344,13 @@ export const spec = defineModuleSpec({
     },
     "maxLines": {
       "default": 50,
-      "desc": "Distinct lines per cart (CART_FULL above)",
+      "desc": "Distinct lines (offers) per cart. Adding a new offer to a full cart is CART_FULL (more of an offer already in the cart is still allowed); at sign-in merge, guest lines that would go beyond it are dropped and listed in the report",
       "type": "int",
       "min": 1
     },
     "maxQuantityPerLine": {
       "default": 10,
-      "desc": "Upper bound when an offer has no purchase limit",
+      "desc": "Platform line maximum: no line holds more units than this, whatever the offer's purchase limit and stock (the line maximum is the smallest of the offer limit, the deal limit, available stock and this)",
       "type": "int",
       "min": 1
     },
@@ -1472,6 +1475,10 @@ export const spec = defineModuleSpec({
       "ships_from": {
         "type": "text",
         "nullable": false
+      },
+      "condition": {
+        "type": "text",
+        "nullable": true
       },
       "quantity": {
         "type": "int",

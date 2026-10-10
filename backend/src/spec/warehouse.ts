@@ -143,6 +143,8 @@ export interface Fulfillment {
   packages: Package[];
   /** e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.' */
   holdReason?: string | null;
+  /** When shipping reported the dispatch deadline missed (shipping.dispatch.overdue); the order then leads the pick list */
+  dispatchOverdueAt?: string | null;
   /** e.g. 'This order also has Package 2 of 2 from Pixel & Port. They ship it separately.' */
   mixedOrderNote?: string | null;
   totalPackagesInOrder: number;
@@ -172,6 +174,7 @@ export const Fulfillment: z.ZodType<Fulfillment> = z.object({
     return z.array(Package);
   },
   holdReason: z.string().describe("e.g. 'Shortage reported: bin F-12-3 empty. Inventory is checking.'").nullish(),
+  dispatchOverdueAt: z.iso.datetime({ offset: true }).describe("When shipping reported the dispatch deadline missed (shipping.dispatch.overdue); the order then leads the pick list").nullish(),
   mixedOrderNote: z.string().describe("e.g. 'This order also has Package 2 of 2 from Pixel & Port. They ship it separately.'").nullish(),
   totalPackagesInOrder: z.number().int(),
   createdAt: z.iso.datetime({ offset: true }),
@@ -395,6 +398,8 @@ export interface Package {
   handlingNote?: string | null;
   carrier?: string | null;
   service?: string | null;
+  /** Shipping carrier service chosen at packing (PackageUpdate.serviceCode); the label is bought with it */
+  carrierServiceId?: string | null;
   trackingNumber?: string | null;
   labelUrl?: string | null;
   packedBy?: common.Actor | null;
@@ -426,6 +431,7 @@ export const Package: z.ZodType<Package> = z.object({
   handlingNote: z.string().nullish(),
   carrier: z.string().nullish(),
   service: z.string().nullish(),
+  carrierServiceId: z.uuid().describe("Shipping carrier service chosen at packing (PackageUpdate.serviceCode); the label is bought with it").nullish(),
   trackingNumber: z.string().nullish(),
   labelUrl: z.url().nullish(),
   get packedBy() {
@@ -868,6 +874,8 @@ export interface WarehouseDb {
     ship_to: Json;
     wave_id: string | null;
     hold_reason: string | null;
+    /** shipping.dispatch.overdue: the dispatch deadline was missed */
+    dispatch_overdue_at: Date | null;
     discrepancy_ids: Json;
     total_packages_in_order: number;
     created_at: Date;
@@ -930,6 +938,8 @@ export interface WarehouseDb {
     handling_note: string | null;
     carrier: string | null;
     service: string | null;
+    /** shipping carrier service chosen at packing */
+    carrier_service_id: string | null;
     tracking_number: string | null;
     label_media_id: string | null;
     label_idempotency_key: string | null;
@@ -2071,6 +2081,10 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": true
       },
+      "dispatch_overdue_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
       "discrepancy_ids": {
         "type": "jsonb",
         "nullable": false
@@ -2283,6 +2297,10 @@ export const spec = defineModuleSpec({
       },
       "service": {
         "type": "text",
+        "nullable": true
+      },
+      "carrier_service_id": {
+        "type": "uuid",
         "nullable": true
       },
       "tracking_number": {

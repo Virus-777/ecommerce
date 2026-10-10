@@ -37,6 +37,7 @@ export interface Contact {
   kind: "customer" | "guest";
   customerId?: string | null;
   name: string;
+  /** Contact email (a valid address on createOrder). Order reads for staff without orders.customers.view-contact show it masked (a***@example.com), so it is a plain string; sellers never see it */
   email: string;
   phone?: string | null;
 }
@@ -45,7 +46,7 @@ export const Contact: z.ZodType<Contact> = z.object({
   kind: z.enum(["customer", "guest"]),
   customerId: z.uuid().nullish(),
   name: z.string(),
-  email: z.email(),
+  email: z.string().describe("Contact email (a valid address on createOrder). Order reads for staff without orders.customers.view-contact show it masked (a***@example.com), so it is a plain string; sellers never see it"),
   phone: z.string().nullish(),
 }).register(common.apiTypes, { id: "orders.Contact" });
 
@@ -2129,8 +2130,8 @@ export interface OrdersPublicApi {
   listOrdersForSeller(sellerId: string, filter: { tab?: string, tabs?: string[], q?: string, placedFrom?: string, placedTo?: string, overdueOnly?: boolean, sort?: string }, page: common.PageInput): Promise<common.Page<{ order: OrderDetail, groups: SellerOrderDetail[] }>>;
   /** Seller tab counts plus overdue and due today Used by: graphql. */
   countSellerOrders(sellerId: string): Promise<SellerOrderCounts>;
-  /** Order 360 across sellers for staff: groups, items, money by seller, after-sales, flags, notes and staff history. Contact details masked unless orders.customers.view-contact. Used by: graphql. */
-  getOrderAdmin(ref: string): Promise<AdminOrderDetail | null>;
+  /** Order 360 across sellers for staff: groups, items, money by seller, after-sales, flags, notes and staff history. Contact details masked unless the principal holds orders.customers.view-contact (masked when no principal is given). Used by: graphql. */
+  getOrderAdmin(ref: string, principal?: identity.Principal): Promise<AdminOrderDetail | null>;
   /** Staff order list (same filters as admin GET /orders plus customerId) for the customer and seller 360 views Used by: graphql, search. */
   listOrdersAdmin(filter: { q?: string, sellerType?: string, sellerId?: string, customerId?: string, fulfillmentStatus?: string, paymentState?: string, placedFrom?: string, placedTo?: string, flag?: string, savedFilterId?: string }, page: common.PageInput): Promise<common.Page<AdminOrderDetail>>;
   /** Batched order lookup for order fields on other modules' records (Case.order, Return.order, RefundRequest.order). Same visibility as order / sellerOrder / orderAdmin: store → only orders of the signed-in customer or a guest session with access; seller → only the caller's own groups and seller-safe fields (null when the order has no group of this seller); admin → order 360 (contact masked unless orders.customers.view-contact). Not visible → null (never an error that reveals the order exists). Used by: graphql. */
@@ -2147,6 +2148,8 @@ export interface OrdersPublicApi {
   listDeliveredItems(customerId: string, since?: string): Promise<OrderItemInfo[]>;
   /** Orders placed before the date with at least one item in the category (snapshot category, subcategories included) that is not yet delivered, cancelled or refunded. Returns category-exception preview. Used by: returns. */
   countOpenOrdersInCategory(categoryId: string, placedBefore: string): Promise<{ orders: number, items: number }>;
+  /** The customer's orders for the personal data export: one record per order with its ref, dates, status, contact and delivery details they gave, items (title, options, seller, quantity, price paid, state, refunds), totals, the payment method label and the customer-visible timeline. No staff notes, staff-only timeline entries or seller internals. Export hook called by customers.build-data-exports Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -2169,7 +2172,8 @@ export interface OrdersDb {
     channel: string;
     lifecycle: 'payment_pending' | 'open' | 'completed' | 'cancelled';
     display_status: string;
-    flags: Json;
+    /** OrderFlag kinds in force, recomputed on every change and by orders.refresh-flags */
+    flag_kinds: string[];
     currency: string;
     items_total: number;
     discount_total: number;
@@ -2190,6 +2194,31 @@ export interface OrdersDb {
     placed_at: Date;
     accepted_at: Date | null;
     completed_at: Date | null;
+  };
+  /** Event-fed facts about an order, one row per source record: payment captures, chargebacks, support cases, refunds sent, approved return refunds not sent yet, delivery exceptions, seller restrictions and resent confirmations. The flags, alerts, expected refunds and case references are derived from them */
+  order_facts: {
+    id: string;
+    order_id: string;
+    kind: 'capture' | 'chargeback' | 'case' | 'refund_sent' | 'refund_approval' | 'delivery_issue' | 'seller_restricted' | 'confirmation_resent';
+    /** the capture, dispute, case, refund, refund request, exception or seller group id; a new id for a resent confirmation */
+    source_id: string;
+    group_id: string | null;
+    shipment_id: string | null;
+    /** case ref, return ref, dispute ref */
+    ref: string | null;
+    /** case: open|resolved|closed…; refund_approval: approved|sent */
+    status: string | null;
+    /** dispute kind, exception kind */
+    subkind: string | null;
+    /** delivery issue: what the customer is asked to do */
+    customer_action: string | null;
+    /** capture, approved refund */
+    amount: number | null;
+    /** case and approved refund items */
+    item_ids: string[] | null;
+    /** delivery issue due, case next update */
+    due_at: Date | null;
+    at: Date;
   };
   /** One per seller package; the seller's fulfillment task */
   seller_groups: {
@@ -2400,6 +2429,7 @@ export const endpoints = defineEndpoints({
     path: "/orders/{id}",
     auth: "shopper",
     scope: "own-customer",
+    sensitive: [{"path":["contact","email"],"permission":"orders.customers.view-contact","mask":"email"}],
     summary: "Order detail by seller group, with item states and separate payment, delivery and returns progress",
     desc: "Customers see their own orders. Guest sessions see an order when identity.hasGuestOrderAccess is true (granted to the session that placed it and by the guest lookup in customers). Others get NOT_FOUND. Payment-pending orders show the checking state.",
     params: () =>
@@ -2858,7 +2888,7 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "orders.orders.view",
     scope: "staff",
-    sensitive: [{"path":["customer","email"],"permission":"orders.customers.view-contact","mask":"email"}],
+    sensitive: [{"path":["order","contact","email"],"permission":"orders.customers.view-contact","mask":"email"},{"path":["customer","email"],"permission":"orders.customers.view-contact","mask":"email"}],
     summary: "Order with item states per seller group, money by seller, after-sales per item, payment, notes and history",
     params: () =>
       z.object({
@@ -2980,7 +3010,7 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "orders.orders.manage",
     scope: "staff",
-    sensitive: [{"path":["customer","email"],"permission":"orders.customers.view-contact","mask":"email"}],
+    sensitive: [{"path":["order","contact","email"],"permission":"orders.customers.view-contact","mask":"email"},{"path":["customer","email"],"permission":"orders.customers.view-contact","mask":"email"}],
     summary: "Set a final dispatch date for an overdue group",
     desc: "The customer sees the new estimate and the escalation route. The original deadline stays on record for seller performance.",
     params: () =>
@@ -3124,7 +3154,7 @@ export const spec = defineModuleSpec({
   summary: "The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents.",
   dependsOn: ["catalog","offers"],
   optionalDeps: ["identity","finance","support","returns","promotions","messaging","content","audit","customers","fulfillment-service","inventory","media","notifications","payments","reports","sellers","settings","trust","warehouse","workqueues"],
-  publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","hasPlacedOrder","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","getOrderItem","listDeliveredItems","countOpenOrdersInCategory"],
+  publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","hasPlacedOrder","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","getOrderItem","listDeliveredItems","countOpenOrdersInCategory","exportCustomerData"],
   permissions: [
     {
       "key": "orders.orders.view",
@@ -3556,8 +3586,8 @@ export const spec = defineModuleSpec({
         "type": "text",
         "nullable": false
       },
-      "flags": {
-        "type": "jsonb",
+      "flag_kinds": {
+        "type": "text[]",
         "nullable": false
       },
       "currency": {
@@ -3635,6 +3665,64 @@ export const spec = defineModuleSpec({
       "completed_at": {
         "type": "timestamptz",
         "nullable": true
+      }
+    },
+    "order_facts": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "order_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "kind": {
+        "type": "text",
+        "nullable": false
+      },
+      "source_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "group_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "shipment_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "ref": {
+        "type": "text",
+        "nullable": true
+      },
+      "status": {
+        "type": "text",
+        "nullable": true
+      },
+      "subkind": {
+        "type": "text",
+        "nullable": true
+      },
+      "customer_action": {
+        "type": "text",
+        "nullable": true
+      },
+      "amount": {
+        "type": "int",
+        "nullable": true
+      },
+      "item_ids": {
+        "type": "uuid[]",
+        "nullable": true
+      },
+      "due_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
+      "at": {
+        "type": "timestamptz",
+        "nullable": false
       }
     },
     "seller_groups": {

@@ -69,7 +69,7 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | POST | `/api/admin/trust/reports/{id}/recommendations` | Draft an enforcement recommendation for an owner team _(audited)_ | staff<br>`trust.reports.investigate` | `RecommendationInput` → `Recommendation` |
 | POST | `/api/admin/trust/recommendations/{id}/route` | Send a recommendation to its owner team _(audited)_ | staff<br>`trust.reports.decide` | `Recommendation` |
 | GET | `/api/admin/trust/recommendations` | Recommendations waiting for my team | staff<br>`trust.recommendations.decide` | Page<Recommendation> |
-| POST | `/api/admin/trust/recommendations/{id}/decide` | Owner team accepts (records enforcement) or declines with a reason _(audited)_ | staff<br>`trust.recommendations.decide` | `{ accept: bool, reason: text, params: json?, externalRef: string? }` → `{ recommendation: Recommendation, enforcement: Enforcement? }` |
+| POST | `/api/admin/trust/recommendations/{id}/decide` | Owner team accepts (records enforcement) or declines with a reason _(audited)_ | staff<br>`trust.recommendations.decide` | `{ accept: bool, reason: text, params: json?, externalRef: string? }` → `{ recommendation: Recommendation, enforcement: Enforcement?, approval: ApprovalInfo? }` |
 | POST | `/api/admin/trust/recommendations/{id}/withdraw` | Withdraw a recommendation _(audited)_ | staff<br>`trust.reports.decide` | `{ reason: text }` → `Recommendation` |
 | POST | `/api/admin/trust/reports/{id}/resolve` | Resolve with an outcome and what the reporter is told _(audited)_ | staff<br>`trust.reports.decide` | `{ outcome: enum(action_taken|no_violation|insufficient_evidence|referred), summary: text, reporterOutcome: text }` → `TrustReport` |
 | POST | `/api/admin/trust/reports/{id}/dismiss` | Dismiss with a reason _(audited)_ | staff<br>`trust.reports.decide` | `{ reason: text, reporterOutcome: text }` → `TrustReport` |
@@ -246,11 +246,14 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | params | `json` Action parameters the owner reviews, completed with defaults when the recommendation is accepted: RestrictSellerParams (restrict_seller), WarnSellerParams (warn_seller), SuspendSellerParams (suspend_seller), SuspendOfferParams (suspend_offer), CustomerRestrictionParams (restrict_customer_messaging, restrict_customer_account), HoldPayoutParams (hold_payout), RefundBuyersParams (refund_buyers); {} for the other actions |
 | rationale | `text` |
 | state | `enum(pending|sent_to_owner|completed|declined|withdrawn)` |
+| createdBy | `StaffRef?` Who drafted it (Trust and Risk); never the one who decides it (SEPARATE_DUTIES) |
 | routedAt | `datetime?` |
+| routedBy | `StaffRef?` Who last sent it to the owner team; never the one who decides it |
 | decidedAt | `datetime?` |
 | decidedBy | `StaffRef?` |
 | decisionReason | `text?` Reason recorded by the owner, e.g. 'Brand registry mismatch on 4 units' |
 | enforcementId | `uuid?` |
+| approvalRequestId | `uuid?` An accept above the owner's limit waiting for approval (access); the recommendation stays sent_to_owner and is accepted when the request is approved |
 
 ### RecommendationInput
 
@@ -290,6 +293,8 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | appealDeadline | `datetime?` |
 | reversedAt | `datetime?` |
 | reversalReason | `text?` |
+| reversalRequestId | `uuid?` A reversal waiting for approval (trust.enforcements.reverse); the enforcement stays in place until it is approved |
+| approval | `ApprovalInfo?` Set on the reverseEnforcement answer when the reversal was sent for approval |
 
 ### TrustAppeal
 
@@ -324,7 +329,7 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | title | `string` |
 | description | `text` |
 | source | `enum(customer|seller|staff|automated|brand_owner|referral)` |
-| reporter | `json` { actor: Actor, name?, contactEmail? } — staff only; never shown to subjects |
+| reporter | `json` { actor: Actor, name?, organization?, contactEmail? } — staff only; never shown to subjects. organization is the brand or rights owner a rights-owner contact reports for |
 | reporterCount | `int` Merged duplicate reports, e.g. brand owner and 3 customers |
 | detector | `string?` |
 | subjects | `TrustSubject[]` |
@@ -343,7 +348,7 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | mergedReportIds | `uuid[]` |
 | notes | `json[]` { id, body, author, at } internal |
 | timeline | `TimelineEvent[]` |
-| resolution | `json?` { outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred, summary, decidedBy, decidedAt } |
+| resolution | `json?` { outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred|dismissed, summary, decidedBy, decidedAt }: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment |
 | reporterOutcome | `text?` Text the reporter sees |
 | assessment | `json?` For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? } |
 | createdAt | `datetime` |
@@ -528,7 +533,8 @@ The reviewer must differ from the person who recommended and the person who acce
 | source | text |
 | reporter_kind | text |
 | reporter_id | text? |
-| reporter_name | text? |
+| reporter_name | text? (the reporter or, for rights owners, the contact person) |
+| reporter_org | text? (rights owner's brand or organisation) |
 | reporter_contact | text? |
 | reporter_count | int |
 | detector | text? |
@@ -610,13 +616,16 @@ Indexes: `(to_type, to_id, state)`, `(state, due_at)`
 | params | jsonb |
 | rationale | text |
 | state | text |
+| created_by | text? (staff id who drafted it) |
 | routed_at | timestamptz? |
+| routed_by | text? (staff id who last routed it) |
 | decided_at | timestamptz? |
 | decided_by | text? |
 | decision_reason | text? |
 | enforcement_id | uuid? |
+| approval_request_id | uuid? (pending access approval to accept it) |
 
-Indexes: `(owner_team, state)`, `(report_id)`
+Indexes: `(owner_team, state)`, `(report_id)`, `(approval_request_id) where approval_request_id is not null`
 
 **enforcements**
 
@@ -642,8 +651,9 @@ Indexes: `(owner_team, state)`, `(report_id)`
 | appeal_deadline | timestamptz? |
 | reversed_at | timestamptz? |
 | reversal_reason | text? |
+| reversal_request_id | uuid? (pending access approval to reverse it) |
 
-Indexes: `(execution_state)`, `(owner_team, recorded_at desc)`
+Indexes: `(execution_state)`, `(owner_team, recorded_at desc)`, `(reversal_request_id) where reversal_request_id is not null`
 
 **enforcement_targets**: Lookup of active enforcement by target
 
@@ -742,8 +752,8 @@ Indexes: `(kind, at)`, `(subject_type, subject_id, at)`
 | `trust.rights_report.received` | A rights owner submits a report through the public form | `{ reportId: uuid, ref: string, brandName: string, contactName: string, contactEmail: email }` | notifications |
 | `trust.evidence.requested` | Proof is requested from a seller or customer (notifications tells them) | `{ requestId: uuid, reportId: uuid, reportRef: string, toType: string, toId: uuid, customerId: uuid?, sellerId: uuid?, question: text, dueAt: datetime }` | notifications |
 | `trust.evidence.received` | The reported party sends proof | `{ requestId: uuid, reportId: uuid }` | - |
-| `trust.recommendation.routed` | A recommendation is sent to its owner team | `{ recommendationId: uuid, reportId: uuid, action: string, ownerTeam: string, ownerRole: string, targets: json[] }` | workqueues |
-| `trust.recommendation.decided` | The owner team accepts or declines, or Trust withdraws it | `{ recommendationId: uuid, reportId: uuid, state: string, reason: text }` | workqueues |
+| `trust.recommendation.routed` | A recommendation is sent to its owner team | `{ recommendationId: uuid, reportId: uuid, action: enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other), ownerTeam: enum(catalog|sellers|support|finance|orders|reviews|customers|messaging), ownerRole: string, targets: TrustSubject[] }` | workqueues |
+| `trust.recommendation.decided` | The owner team accepts or declines, or Trust withdraws it | `{ recommendationId: uuid, reportId: uuid, state: enum(completed|declined|withdrawn), reason: text }` | workqueues |
 | `trust.enforcement.recorded` | An owner accepts a recommendation; the owning module executes it | `{ enforcementId: uuid, reportId: uuid, action: enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other), ownerTeam: enum(catalog|sellers|support|finance|orders|reviews|customers|messaging), targets: TrustSubject[], reason: text, params: json, appealDeadline: datetime?, alreadyApplied: bool }` | advertising, catalog, customers, messaging, offers, reviews, sellers |
 | `trust.enforcement.reversed` | An enforcement is reversed (appeal overturned or error); the executing module undoes it and the owner team gets a enforcement_reversal work item | `{ enforcementId: uuid, ref: string, reportId: uuid, reportRef: string, action: enum(suspend_offer|suspend_product|remove_reviews|keep_reviews|restrict_seller|suspend_seller|warn_seller|revoke_claim|hold_payout|hold_dispatch|review_payments|refund_buyers|inform_customers|request_identity_confirmation|restrict_customer_messaging|restrict_customer_account|lock_conversation|other), ownerTeam: enum(catalog|sellers|support|finance|orders|reviews|customers|messaging), targets: TrustSubject[], params: json, appliedRef: string?, executionState: enum(pending|applied|failed), reason: text, appealId: uuid?, reversedBy: Actor, reversedAt: datetime }` | advertising, catalog, customers, messaging, offers, reviews, sellers |
 | `trust.appeal.submitted` | A customer or seller appeals a trust enforcement | `{ appealId: uuid, enforcementId: uuid, decideBy: datetime }` | - |
@@ -989,7 +999,7 @@ type TrustEnforcement @areas(in: [ADMIN]) {
 }
 
 type TrustReportResolution @areas(in: [ADMIN]) {
-  "action_taken, no_violation, insufficient_evidence, duplicate or referred"
+  "action_taken, no_violation, insufficient_evidence, duplicate (merged), referred or dismissed"
   outcome: String!
   summary: String!
   decidedBy: Actor!

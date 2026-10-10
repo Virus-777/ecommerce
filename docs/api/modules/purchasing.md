@@ -74,6 +74,7 @@ Buying stock for the Official Store: suppliers and their price lists, purchase o
 | actualLeadTimeDays | `number?` Average over the last 90 days |
 | onTimePct | `number?` Deliveries arriving within the window, last 90 days |
 | openPurchaseOrders | `int` |
+| returnAuthorizationRequired | `bool` The supplier needs a return authorization (RMA) before units are sent back (getPreferredSupplier tells inventory and returns) |
 | active | `bool` |
 | notes | `text?` |
 | createdAt | `datetime` |
@@ -89,6 +90,7 @@ Buying stock for the Official Store: suppliers and their price lists, purchase o
 | address | `Address?` |
 | paymentTerms | `string?` |
 | leadTimeDays | `int?` |
+| returnAuthorizationRequired | `bool?` Default false |
 | notes | `text?` |
 | active | `bool?` |
 
@@ -439,6 +441,7 @@ Buying stock for the Official Store: suppliers and their price lists, purchase o
 | status | `enum(open|submitted|settled|rejected|withdrawn)` |
 | settlement | `enum(credit_note|refund|replacement)?` |
 | settledAmount | `Money?` |
+| supplierReference | `string?` The supplier's own reference for the claim, given when it is sent (submitClaim) |
 | owner | `Actor` |
 | notes | `text?` |
 | createdAt | `datetime` |
@@ -484,13 +487,14 @@ stateDiagram-v2
   expected --> arrived: arrive
   delayed --> arrived: arrive
   arrived --> receiving: startReceiving
+  receiving --> arrived: reopen
   receiving --> received: complete
   receiving --> received_with_issues: completeWithIssues
   expected --> cancelled: cancel
   delayed --> cancelled: cancel
 ```
 
-delay is set by the buyer or by the late-delivery job when the window passes without arrival. completeWithIssues when the submitted receipt has shortages, damage or over-receipt.
+delay is set by the buyer or by the late-delivery job when the window passes without arrival. completeWithIssues when the submitted receipt has shortages, damage or over-receipt. reopen when the only receiving record of the delivery is discarded (cancelReceipt): back to Arrived.
 
 ### Receipt (`Receipt.status`)
 
@@ -532,6 +536,7 @@ Damaged units stay in Damaged or held (inventory) until the claim is settled; se
 | address | jsonb? |
 | payment_terms | text |
 | lead_time_days | int |
+| return_authorization_required | bool |
 | active | bool |
 | notes | text? |
 | created_at | timestamptz |
@@ -694,6 +699,7 @@ Indexes: `pk (receipt_id, purchase_order_line_id)`
 | status | text |
 | settlement | text? |
 | settled_amount | bigint? |
+| supplier_reference | text? |
 | owner_id | text |
 | notes | text? |
 | created_at | timestamptz |

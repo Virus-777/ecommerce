@@ -3,7 +3,7 @@
 Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.
 
 - **Group:** Growth · **Launch phase:** 1 · **Plan chapters:** 19, 15, 4, 3, 17
-- **Depends on:** [media](media.md), [access](access.md) · **Optional:** [catalog](catalog.md), [offers](offers.md), [inventory](inventory.md), [promotions](promotions.md), [advertising](advertising.md), [sellers](sellers.md), [search](search.md), [reports](reports.md), [notifications](notifications.md), [audit](audit.md), [settings](settings.md), [shipping](shipping.md), [wishlist](wishlist.md), [support](support.md)
+- **Depends on:** [media](media.md), [access](access.md) · **Optional:** [catalog](catalog.md), [offers](offers.md), [inventory](inventory.md), [promotions](promotions.md), [advertising](advertising.md), [sellers](sellers.md), [search](search.md), [reports](reports.md), [notifications](notifications.md), [audit](audit.md), [settings](settings.md), [shipping](shipping.md), [wishlist](wishlist.md), [support](support.md), [returns](returns.md)
 
 ## Owns
 - Homepage sections: order, owner, schedule (show from / remove at with time zone), status, preview on desktop and phone, published layout versions
@@ -61,9 +61,9 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | GET | `/api/admin/content/homepage/versions` | Homepage version history | staff<br>`content.homepage.manage` | Page<Version> |
 | POST | `/api/admin/content/homepage/versions/{number}/restore` | Restore an earlier layout (creates a new version; nothing is overwritten) _(audited)_ | staff<br>`content.homepage.publish` | `{ reason: text, publish: bool }` → `HomepageAdmin` |
 | GET | `/api/admin/content/pages` | Campaign pages and collections with publish and removal times | staff<br>`content.pages.manage` | Page<PageSummary> |
-| POST | `/api/admin/content/pages` | Create a page or collection draft _(audited)_ | staff<br>`content.pages.manage` | `PageInput` → `PageAdmin` |
+| POST | `/api/admin/content/pages` | Create a page or collection draft _(audited)_ | staff<br>`content.pages.manage` | `PageDraftInput` → `PageAdmin` |
 | GET | `/api/admin/content/pages/{id}` | Page with draft and live versions, checks and linked promotion | staff<br>`content.pages.manage` | `PageAdmin` |
-| PATCH | `/api/admin/content/pages/{id}` | Edit the page draft (creates or updates the draft version) _(audited)_ | staff<br>`content.pages.manage` | `PageInput` → `PageAdmin` |
+| PATCH | `/api/admin/content/pages/{id}` | Edit the page draft (creates or updates the draft version) _(audited)_ | staff<br>`content.pages.manage` | `PageDraftInput` → `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/preview` | Preview the draft as customers will see it | staff<br>`content.pages.manage` | `PreviewRequest` → `StorePage` |
 | POST | `/api/admin/content/pages/{id}/submit` | Send for review _(audited)_ | staff<br>`content.pages.manage` | `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/approve` | Approve or request changes _(audited)_ | staff<br>`content.pages.publish` | `{ approve: bool, reason: text? }` → `PageAdmin` |
@@ -86,7 +86,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | GET | `/api/admin/content/help/articles/{id}/versions` | Article version history | staff<br>`content.help.manage` | Page<Version> |
 | POST | `/api/admin/content/help/articles/{id}/versions/{number}/restore` | Restore an earlier article version as a new draft _(audited)_ | staff<br>`content.help.manage` | `{ reason: text }` → `HelpArticleAdmin` |
 | GET | `/api/admin/content/policies` | Policies with current, scheduled and draft versions | staff<br>`content.policies.edit` | `PolicySummary[]` |
-| POST | `/api/admin/content/policies` | Create a new policy with its business owner _(audited)_ | staff<br>`content.policies.manage` | `{ key: string, title: string, ownerStaffId: uuid, editorStaffId: uuid?, audience: enum(customer|seller|both) }` → `PolicySummary` |
+| POST | `/api/admin/content/policies` | Create a new policy with its business owner _(audited)_ | staff<br>`content.policies.manage` | `{ key: string, kind: enum(returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)?, title: string, ownerStaffId: uuid, editorStaffId: uuid?, audience: enum(customer|seller|both) }` → `PolicySummary` |
 | GET | `/api/admin/content/policies/{id}/versions` | All versions of a policy with effective date, summary and approver | staff<br>`content.policies.edit` | `PolicyVersion[]` |
 | POST | `/api/admin/content/policies/{id}/versions` | Start a new version draft (copies the current text) _(audited)_ | staff<br>`content.policies.edit` | `{ version: string? }` → `PolicyVersion` |
 | GET | `/api/admin/content/policy-versions/{id}` | A policy version with approvals | staff<br>`content.policies.edit` | `PolicyVersion` |
@@ -363,7 +363,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | reviewedAt | `datetime?` |
 | note | `text?` |
 
-### PageInput
+### PageDraftInput
 
 | Field | Type |
 |---|---|
@@ -415,8 +415,8 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | Field | Type |
 |---|---|
 | summary | `PageSummary` |
-| draft | `PageInput?` |
-| live | `PageInput?` |
+| draft | `PageDraftInput?` |
+| live | `PageDraftInput?` |
 | linkedPromotion | `LinkedPromotion?` |
 | checks | `Check[]` e.g. unavailable products hidden, campaign starts at the same time as the page, missing images |
 | removal | `RemovalInfo?` |
@@ -649,7 +649,8 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| key | `enum(returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)` |
+| key | `string` Slug in the policy URL (/policies/{key}), unique, lowercase letters, digits, - and _, e.g. returns, gift-cards |
+| kind | `enum(returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)` What the policy governs; several policies may share other |
 | title | `string` |
 | owner | `OwnerRef` |
 | editor | `OwnerRef?` |
@@ -736,7 +737,9 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | header | `LinkRef[]` |
 | footer | `FooterGroup[]` |
 | contact | `ContactChannel[]` |
-| companyLine | `string` |
+| companyLine | `string` settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly' |
+| legalName | `string` settings.storeInfo market.legalName; 'Marketly' when settings is off |
+| checks | `Check[]?` Admin only (PUT /navigation answer; null on store reads): warnings when the service strip text disagrees with the facts in force, e.g. a free-shipping amount other than shipping.getOfficialFreeShipping or a return window other than returns.defaultWindowDays. Warnings never block saving (decision: warn only) |
 | serviceStrip | `ServiceStrip?` Service message above the store header; null when none is active |
 
 ### ServiceStrip
@@ -780,6 +783,8 @@ stateDiagram-v2
   scheduled --> published: publish
   scheduled --> draft: cancelSchedule
   published --> unpublished: unpublish
+  draft --> removed: remove
+  scheduled --> removed: remove
   published --> removed: remove
   unpublished --> scheduled: schedule
   unpublished --> published: publish
@@ -787,7 +792,7 @@ stateDiagram-v2
   removed --> draft: restore
 ```
 
-Applies to pages, collections, homepage sections and help articles. Review is optional for pages and sections (content.reviewRequired setting) and required for help articles. scheduled → publish runs from the schedule job at publishAt; unpublish also runs at unpublishAt ('Removed Sep 16'). remove is the correction or removal action for content that must come down now: it requires a reason, records who and why, and leaves a correction note where configured. Editing a published item creates a new draft version; the live version stays until the draft is published.
+Applies to pages, collections, homepage sections and help articles. Review is optional for pages and sections (content.reviewRequired setting) and required for help articles. scheduled → publish runs from the schedule job at publishAt; unpublish also runs at unpublishAt ('Removed Sep 16'). remove is the correction or removal action for content that must come down now (also a draft or a scheduled item that must never go live; a scheduled one loses its schedule): it requires a reason, records who and why, and leaves a correction note where configured. Editing a published item creates a new draft version; the live version stays until the draft is published.
 
 ### Policy version (`PolicyVersion.state`)
 
@@ -943,7 +948,8 @@ Indexes: `unique (article_id, visitor_key)`
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| key | text unique |
+| key | text unique (URL slug) |
+| kind | text (returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other) |
 | title | text |
 | owner_staff_id | uuid |
 | editor_staff_id | uuid? |

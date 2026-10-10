@@ -89,9 +89,12 @@ export interface AuthorizeInput {
   attemptNo: number;
   customerId?: string | null;
   guestEmail?: string | null;
+  /** The whole order total, store-credit share included. The card is authorized for amount − creditAmount */
   amount: common.Money;
   method: MethodSelection;
+  /** wallet hold of the store-credit share (checkout holds it before authorizing) */
   creditHoldId?: string | null;
+  /** Store-credit share of amount (the wallet hold); null or absent when no credit is used. Must not exceed amount; when it equals amount nothing is authorized on the card */
   creditAmount?: common.Money | null;
   description: string;
   /** Where the provider sends the customer back after a bank challenge */
@@ -109,7 +112,7 @@ export const AuthorizeInput: z.ZodType<AuthorizeInput> = z.object({
   get method() {
     return MethodSelection;
   },
-  creditHoldId: z.uuid().nullish(),
+  creditHoldId: z.uuid().describe("wallet hold of the store-credit share (checkout holds it before authorizing)").nullish(),
   get creditAmount() {
     return common.Money.nullish();
   },
@@ -514,7 +517,7 @@ export interface RefundableItem {
   sellerName: string;
   paid: common.Money;
   refunded: common.Money;
-  /** Requested or processing refunds */
+  /** Requested, processing and failed refunds: a failed refund keeps reserving its amount (it may still be retried or sent to a new destination) until it is sent or cancelled, so no second refund can take the same money */
   inFlight: common.Money;
   remaining: common.Money;
   /** e.g. 'In transit: refund after delivery or a confirmed loss' */
@@ -545,7 +548,9 @@ export interface RefundableSummary {
   orderId: string;
   captured: common.Money;
   refunded: common.Money;
+  /** Requested, processing and failed refunds (a failed refund reserves its amount until sent or cancelled) */
   inFlight: common.Money;
+  /** Captured less refunded and in flight */
   remaining: common.Money;
   items: RefundableItem[];
 }
@@ -591,7 +596,10 @@ export interface Refund {
   id: string;
   /** RF-YYMMDD-NNNN (the returns request reference when handed over by returns) */
   ref: string;
+  /** The order refunded; for an orphan payment refund (money without an order) the checkout session id, as on the refund events (refunds.order_id is null then) */
   orderId: string;
+  /** Checkout session of the payment refunded */
+  checkoutSessionId: string;
   orderRef: string;
   paymentIntentId: string;
   /** Customer on the payment (customers profile name, or the guest email for guest orders); shown in the admin failing-refunds table */
@@ -630,7 +638,8 @@ export interface Refund {
 export const Refund: z.ZodType<Refund> = z.object({
   id: z.uuid(),
   ref: z.string().describe("RF-YYMMDD-NNNN (the returns request reference when handed over by returns)"),
-  orderId: z.uuid(),
+  orderId: z.uuid().describe("The order refunded; for an orphan payment refund (money without an order) the checkout session id, as on the refund events (refunds.order_id is null then)"),
+  checkoutSessionId: z.uuid().describe("Checkout session of the payment refunded"),
   orderRef: z.string(),
   paymentIntentId: z.uuid(),
   customerName: z.string().describe("Customer on the payment (customers profile name, or the guest email for guest orders); shown in the admin failing-refunds table"),
@@ -801,7 +810,7 @@ export interface Dispute {
   evidenceDue?: common.Deadline | null;
   status: "opened" | "under_review" | "won" | "lost";
   statusLabel: string;
-  /** From finance, e.g. 'Held $480.00' or 'Company sale. A loss is recorded in company trading.' */
+  /** What the dispute does to the seller balance, worded by payments from the dispute status and the group owner (finance applies it on payments.chargeback.opened and decided; payments does not read finance): seller group open 'Held $480.00', won 'Hold of $480.00 released', lost '$480.00 deducted from the seller balance'; Official Store 'Company sale. A loss is recorded in company trading.'; no single group 'Not linked to one seller. Finance decides who carries the loss.' */
   sellerBalanceEffect: string;
   evidence: DisputeEvidence;
   owner?: string | null;
@@ -834,7 +843,7 @@ export const Dispute: z.ZodType<Dispute> = z.object({
   },
   status: z.enum(["opened", "under_review", "won", "lost"]),
   statusLabel: z.string(),
-  sellerBalanceEffect: z.string().describe("From finance, e.g. 'Held $480.00' or 'Company sale. A loss is recorded in company trading.'"),
+  sellerBalanceEffect: z.string().describe("What the dispute does to the seller balance, worded by payments from the dispute status and the group owner (finance applies it on payments.chargeback.opened and decided; payments does not read finance): seller group open 'Held $480.00', won 'Hold of $480.00 released', lost '$480.00 deducted from the seller balance'; Official Store 'Company sale. A loss is recorded in company trading.'; no single group 'Not linked to one seller. Finance decides who carries the loss.'"),
   get evidence() {
     return DisputeEvidence;
   },
@@ -1227,7 +1236,7 @@ export interface PaymentsPublicApi {
   getIntentStatus(intentId: string, refresh?: boolean): Promise<PaymentStatusView>;
   /** Release an authorization (abandoned checkout, order cancelled before capture) Used by: checkout. */
   voidIntent(intentId: string, reason: string): Promise<void>;
-  /** Per item: paid, refunded, in flight and remaining. The cap for every refund. Used by: returns, orders, support, finance. */
+  /** Per item: paid, refunded, in flight (requested, processing and failed refunds) and remaining. The cap for every refund. Used by: returns, orders, support, finance. */
   remainingRefundable(orderId: string, orderItemIds?: string[]): Promise<RefundableSummary>;
   /** Hand over an approved refund for execution. Fails with REFUND_EXCEEDS_REFUNDABLE or DUPLICATE_REFUND. Returns the existing refund for the same key or origin. Used by: returns, finance, support. */
   startRefund(input: StartRefundInput, idempotencyKey: string): Promise<Refund>;
@@ -1243,6 +1252,8 @@ export interface PaymentsPublicApi {
   listDisputesForOrder(orderId: string): Promise<Dispute[]>;
   /** The customer's saved cards and wallets, default first Used by: graphql. */
   listSavedMethods(customerId: string): Promise<SavedPaymentMethod[]>;
+  /** The customer's payment data for the personal data export: saved payment methods masked (brand, last 4, expiry, label, billing city and postal code; never a provider token), payments (reference, order, amount, method label, status, dates; declines with their plain reason) and refunds (reference, order, amount, destination label, status, dates). No provider references, card fingerprints or staff notes. Export hook called by customers.build-data-exports Used by: customers. */
+  exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -1267,6 +1278,8 @@ export interface PaymentsDb {
     provider_ref: string | null;
     status: string;
     decline: Json | null;
+    /** NextAction: the bank challenge waiting for the customer while the intent is requires_action; cleared when it ends */
+    next_action: Json | null;
     authorized_amount: number;
     captured_amount: number;
     refunded_amount: number;
@@ -1317,7 +1330,10 @@ export interface PaymentsDb {
   refunds: {
     id: string;
     ref: string;
-    order_id: string;
+    /** null for an orphan payment refund: money without an order */
+    order_id: string | null;
+    /** checkout session of the payment; what an orphan payment refund is found by */
+    checkout_session_id: string;
     intent_id: string;
     origin: string;
     origin_id: string | null;
@@ -1377,11 +1393,28 @@ export interface PaymentsDb {
     amount: number;
     currency: string;
     evidence_due_at: Date | null;
+    /** when payments.dispute-deadlines flagged the evidence due within 48 h; once per dispute */
+    due_soon_flagged_at: Date | null;
     status: string;
+    /** DisputeEvidence: text, file ids and refs, submitted at and by */
     evidence: Json;
+    /** a concession waiting for approval: the access approval request; cleared when decided */
+    approval_request_id: string | null;
+    /** reason given with the concession waiting for approval */
+    concession_reason: string | null;
     owner_staff_id: string | null;
     opened_at: Date;
     decided_at: Date | null;
+  };
+  /** Dispute history: opened, owner set, evidence saved and submitted, concession asked and decided, deadlines, outcome (Dispute.history) */
+  dispute_log: {
+    id: string;
+    dispute_id: string;
+    label: string;
+    detail: string | null;
+    /** Actor */
+    actor: Json;
+    at: Date;
   };
   /** Provider tokens only: brand, last 4, expiry, label */
   saved_methods: {
@@ -1407,6 +1440,10 @@ export interface PaymentsDb {
     external_id: string;
     type: string;
     payload: Json;
+    /** the payment the event was applied to */
+    intent_id: string | null;
+    /** the refund the event was applied to */
+    refund_id: string | null;
     received_at: Date;
     processed_at: Date | null;
     outcome: string | null;
@@ -2082,7 +2119,7 @@ export const spec = defineModuleSpec({
   summary: "Charging customers through provider adapters (card, digital wallet): payment intents per checkout attempt, authorization and capture per order and seller group, declines with retry, uncertain results resolved by a status-check job, refund execution (Requested → Processing → Sent / Failed) capped at the remaining refundable amount, chargebacks and payment disputes, saved payment methods and provider webhooks.",
   dependsOn: ["orders"],
   optionalDeps: ["access","customers","media","wallet","audit","checkout","inventory","promotions","support","trust"],
-  publicApi: ["listOptions","authorize","linkOrder","completeAction","getIntentStatus","voidIntent","remainingRefundable","startRefund","getRefund","methodLabel","getPaymentForOrder","listRefundsForOrder","listDisputesForOrder","listSavedMethods"],
+  publicApi: ["listOptions","authorize","linkOrder","completeAction","getIntentStatus","voidIntent","remainingRefundable","startRefund","getRefund","methodLabel","getPaymentForOrder","listRefundsForOrder","listDisputesForOrder","listSavedMethods","exportCustomerData"],
   permissions: [
     {
       "key": "payments.payments.view",
@@ -2527,6 +2564,10 @@ export const spec = defineModuleSpec({
         "type": "jsonb",
         "nullable": true
       },
+      "next_action": {
+        "type": "jsonb",
+        "nullable": true
+      },
       "authorized_amount": {
         "type": "int",
         "nullable": false
@@ -2688,6 +2729,10 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "order_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "checkout_session_id": {
         "type": "uuid",
         "nullable": false
       },
@@ -2897,6 +2942,10 @@ export const spec = defineModuleSpec({
         "type": "timestamptz",
         "nullable": true
       },
+      "due_soon_flagged_at": {
+        "type": "timestamptz",
+        "nullable": true
+      },
       "status": {
         "type": "text",
         "nullable": false
@@ -2904,6 +2953,14 @@ export const spec = defineModuleSpec({
       "evidence": {
         "type": "jsonb",
         "nullable": false
+      },
+      "approval_request_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "concession_reason": {
+        "type": "text",
+        "nullable": true
       },
       "owner_staff_id": {
         "type": "uuid",
@@ -2916,6 +2973,32 @@ export const spec = defineModuleSpec({
       "decided_at": {
         "type": "timestamptz",
         "nullable": true
+      }
+    },
+    "dispute_log": {
+      "id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "dispute_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "label": {
+        "type": "text",
+        "nullable": false
+      },
+      "detail": {
+        "type": "text",
+        "nullable": true
+      },
+      "actor": {
+        "type": "jsonb",
+        "nullable": false
+      },
+      "at": {
+        "type": "timestamptz",
+        "nullable": false
       }
     },
     "saved_methods": {
@@ -2996,6 +3079,14 @@ export const spec = defineModuleSpec({
       "payload": {
         "type": "jsonb",
         "nullable": false
+      },
+      "intent_id": {
+        "type": "uuid",
+        "nullable": true
+      },
+      "refund_id": {
+        "type": "uuid",
+        "nullable": true
       },
       "received_at": {
         "type": "timestamptz",

@@ -907,7 +907,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| ref | `string` e.g. AP-261004-021 |
+| ref | `string` SAP-YYMMDD-NNN, e.g. SAP-261004-021 (SA- is the seller application and AP- the access approval request; appeals filed before pass 4 keep their AP- reference) |
 | sellerId | `uuid` |
 | storeName | `string` |
 | subject | `enum(restriction|suspension|application_rejection|warning)` |
@@ -1238,6 +1238,7 @@ Granted when identity, business registration, payout account and return address 
 | launch_review | jsonb |
 | payout_readiness | text |
 | payout_destination_label | text? |
+| payout_blocked_reasons | jsonb (reasons shown to the seller while payout readiness is blocked; empty otherwise) |
 | account_manager_id | uuid? |
 | application_id | uuid? |
 | approved_at | timestamptz? |
@@ -1553,6 +1554,7 @@ Indexes: `(seller_id, state)`, `(state, review_date)`
 | Column | Type |
 |---|---|
 | id | uuid pk |
+| ref | text unique (SU-YYMMDD-NNNN; suspensions created before pass 4 keep SU- and the last 8 characters of their id) |
 | seller_id | uuid → sellers |
 | state | text (pending_approval|active|ended|cancelled) |
 | reason_code | text |
@@ -1570,6 +1572,45 @@ Indexes: `(seller_id, state)`, `(state, review_date)`
 | end_reason | text? |
 
 Indexes: `(seller_id, state)`
+
+**payout_changes**: Payout destinations handed to finance for verification: the initial one at approval and each change by the owner (tokenised; raw numbers never stored)
+
+| Column | Type |
+|---|---|
+| id | uuid pk (changeId in sellers.payout_account.changed) |
+| seller_id | uuid → sellers |
+| kind | text (initial|change) |
+| account_holder_name | text |
+| account_type | text |
+| label | text |
+| provider_destination_id | text |
+| previous_label | text? |
+| state | text (pending|verified|rejected|replaced) |
+| rejection_reason | text? |
+| review_id | text? (finance destination review id) |
+| requested_by | jsonb |
+| requested_at | timestamptz |
+| decided_at | timestamptz? |
+
+Indexes: `(seller_id, requested_at desc)`, `unique (seller_id) where state = 'pending'`, `unique (seller_id) where state = 'verified'`
+
+**pending_changes**: Staff changes waiting for a second reviewer (seller closure, restriction change, performance targets); applied or dropped on access.approval.decided
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| kind | text (closure|restriction_change|performance_targets) |
+| seller_id | uuid? |
+| target_id | uuid? (restriction id for restriction_change) |
+| approval_request_id | uuid unique |
+| payload | jsonb |
+| reason | text |
+| requested_by | jsonb |
+| state | text (pending|applied|declined) |
+| requested_at | timestamptz |
+| decided_at | timestamptz? |
+
+Indexes: `(kind, state)`, `(seller_id, state)`
 
 **appeals**
 
@@ -1787,7 +1828,7 @@ Checked through the access module (limits per role, second reviewer).
 | `sellers.run-verification-checks` | every 5 min | Send pending identity, registration, tax id, payout-name match and return-address checks to providers and retry ones without a result; refer automatically to trust for riskReviewCategories. submitApplication also runs it once right after submit |
 | `sellers.application-deadlines` | hourly | Publish sellers.application.information_reminder infoReminderDaysBefore before an information deadline (once per request, reminder three_days_before only); expire applications past due; raise workqueue items for applications past the decision target |
 | `sellers.compute-performance` | daily 06:00 market time | Recompute 30-day (and 90-day for violations) metrics from performance_events against effective targets; publish sellers.performance.below_target for new misses |
-| `sellers.restriction-reviews` | daily 07:00 market time | Expire restrictions past endsAt; raise workqueue items for restrictions and suspensions reaching their review date |
+| `sellers.restriction-reviews` | daily 07:00 market time | Expire restrictions past endsAt; expire approved public claims past expiresAt (approved → expired, publishes sellers.storefront.updated with fields [claims]); raise workqueue items for restrictions and suspensions reaching their review date |
 | `sellers.appeal-deadlines` | hourly | Raise workqueue items for appeals near or past decideBy |
 | `sellers.verification-lapse` | daily 05:30 market time | Lapse Verified labels past expiresAt (granted + verifiedLabelValidDays) or whose checked documents expired; publish sellers.verification.changed so the seller is told what to renew |
 | `sellers.expire-invitations` | hourly | Expire member invitations and seller invitations past their expiry |
@@ -1823,6 +1864,9 @@ Checked through the access module (limits per role, second reviewer).
 - **Address verification**: Street address and PO box check for return addresses
 
 ## Notes
+- Principals from actors: access.check and access.requestApproval take an identity.Principal. Endpoints pass the caller's principal; event consumers and jobs that act for a staff member (e.g. trust.enforcement.recorded carrying the Seller Manager who accepted the recommendation) build one from the event's Actor: kind staff, audience admin, accountId = actor.id, sessionId sellers:<actor kind>. Its permissions are what access holds for that account, so authority is checked against the person, never widened.
+- Payout account changes: every destination handed to finance (the initial one at approval and each owner change) is a payout_changes row (id = changeId in sellers.payout_account.changed): pending until finance.destination.verified (verified: it becomes the current destination and the one it replaces becomes replaced) or finance.destination.rejected (rejected with the reason; payouts keep going to the current destination). At most one row per seller is pending and one is verified (the current destination). Blocked reasons live in sellers.payout_blocked_reasons.
+- Pending staff changes: a seller closure (sellers.sellers.close), a change to an active restriction and a performance target change that need a second reviewer are kept in pending_changes with the access approval request id; access.approval.decided applies (approved) or drops them. The call answers 409 APPROVAL_REQUIRED with details.approvalRequestId and details.pendingChangeId; the change is applied on approval and is not sent again.
 - Seller-area endpoints act on the seller in the caller's identity seller context; no seller id appears in seller paths. The kernel guard checks the member's permissions with getMemberAccess on every request.
 - Seller permissions for other areas (catalog.products.submit, orders, returns, finance view and so on) are declared by their owning modules with audience seller; sellers only assigns them through role templates. sellers.staff.manage, sellers.payout-account.manage, sellers.business.change, sellers.agreements.accept and sellers.account.close are owner-only; payout changes are never delegable (plan ch. 11).
 - Phase: seller staff invitations and permission edits are phase 2 ('staff access' in plan ch. 20 phase 2); at launch each seller has its owner only. Automatic performance warnings (sellers.auto-warnings) are phase 2 'performance controls'; the metrics, targets, manual warnings, restrictions and appeals are phase 1 because scenario 7 needs them.
@@ -2292,7 +2336,7 @@ type SellerAppealDecision @areas(in: [SELLER, ADMIN]) {
 "A seller's appeal. Decided by someone other than the original decider; level 2 goes to the next reviewer."
 type SellerAppeal @areas(in: [SELLER, ADMIN]) {
   id: UUID!
-  "e.g. AP-261004-021"
+  "e.g. SAP-261004-021 (appeals filed before pass 4 keep their AP- reference)"
   ref: String!
   subject: SellerAppealSubject!
   subjectId: UUID!

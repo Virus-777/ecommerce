@@ -175,6 +175,7 @@ export const ConversationSummary: z.ZodType<ConversationSummary> = z.object({
 export interface Message {
   id: string;
   conversationId: string;
+  /** system: a note from Marketly (e.g. support joined from a case): unread for every participant, no author, no reply-state change and no messaging.message.sent (no notice is sent) */
   kind: "text" | "system";
   author?: common.Actor | null;
   /** e.g. Marisol, Casa Verde Home / You */
@@ -193,7 +194,7 @@ export interface Message {
 export const Message: z.ZodType<Message> = z.object({
   id: z.uuid(),
   conversationId: z.uuid(),
-  kind: z.enum(["text", "system"]),
+  kind: z.enum(["text", "system"]).describe("system: a note from Marketly (e.g. support joined from a case): unread for every participant, no author, no reply-state change and no messaging.message.sent (no notice is sent)"),
   get author() {
     return common.Actor.nullish();
   },
@@ -561,7 +562,7 @@ export const MessagingConversationUnlockedEvent: z.ZodType<MessagingConversation
 export interface MessagingPublicApi {
   /** One conversation per customer, seller and subject; reused when it exists. sellerId is OFFICIAL_STORE_ID for the Official Store Used by: orders, returns. */
   findOrStartForOrder(input: { orderId: string, sellerId: string, orderItemId?: string, returnId?: string }): Promise<Conversation>;
-  /** e.g. Marketly Support joined from case CS-261005-3381 Used by: support, returns. */
+  /** A system note (Message.kind system), e.g. Marketly Support joined from case CS-261005-3381: unread for every participant, no reply-state change, no messaging.message.sent (nobody is notified) Used by: support, returns. */
   postSystemNote(conversationId: string, text: string): Promise<Message>;
   /** Support joins an order conversation when a case is opened Used by: support. */
   addStaffParticipant(conversationId: string, staff: common.Actor, caseId: string): Promise<Conversation>;
@@ -678,6 +679,20 @@ export interface MessagingDb {
     reason: string;
     case_id: string | null;
     at: Date;
+  };
+  /** 30-day reply figures per seller, rolled up by messaging.response-stats (behind 'Usually replies within …' on conversations and Seller.replyStats); computed on first use for a seller without a row */
+  seller_reply_stats: {
+    seller_id: string;
+    period_from: string;
+    period_to: string;
+    average_reply_minutes: number | null;
+    median_reply_minutes: number | null;
+    /** reply rounds answered */
+    replied: number;
+    replied_within_target: number;
+    /** rounds answered or past the reply target */
+    decided: number;
+    computed_at: Date;
   };
 }
 
@@ -1217,6 +1232,7 @@ export const endpoints = defineEndpoints({
     permission: "messaging.conversations.moderate",
     scope: "staff",
     summary: "Action or dismiss a report",
+    desc: "refer_to_trust raises a Trust and Risk signal (trust.raiseSignal); while the trust module is off it is refused with TRUST_UNAVAILABLE (hide the message or lock the conversation instead).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1227,7 +1243,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => MessageReport,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","TRUST_UNAVAILABLE"],
     audited: true,
     events: ["messaging.conversation.locked"],
     screens: ["admin/trust"],
@@ -1396,7 +1412,7 @@ export const spec = defineModuleSpec({
     },
     "messaging.response-stats": {
       "schedule": "hourly",
-      "does": "Roll up seller reply times for performance and Seller Center"
+      "does": "Roll up 30-day seller reply times into seller_reply_stats for sellers with messages in the last 2 hours and rows older than a day (bounded batches)"
     }
   },
   settings: {
@@ -1446,7 +1462,11 @@ export const spec = defineModuleSpec({
   errorCodes: {
     "CONVERSATION_LOCKED": {
       "status": 409,
-      "meaning": "The conversation is locked or archived for new messages. details.reason."
+      "meaning": "The conversation takes no new messages: locked by Marketly (details.reason = the lock reason) or archived (details.reason = archived; starting a conversation on the same subject reopens an archived one, replying inside it does not)."
+    },
+    "TRUST_UNAVAILABLE": {
+      "status": 422,
+      "meaning": "refer_to_trust needs the Trust and Risk module, which is off; hide the message or lock the conversation instead."
     },
     "MESSAGING_RESTRICTED": {
       "status": 403,
@@ -1748,6 +1768,44 @@ export const spec = defineModuleSpec({
         "nullable": true
       },
       "at": {
+        "type": "timestamptz",
+        "nullable": false
+      }
+    },
+    "seller_reply_stats": {
+      "seller_id": {
+        "type": "uuid",
+        "nullable": false
+      },
+      "period_from": {
+        "type": "date",
+        "nullable": false
+      },
+      "period_to": {
+        "type": "date",
+        "nullable": false
+      },
+      "average_reply_minutes": {
+        "type": "int",
+        "nullable": true
+      },
+      "median_reply_minutes": {
+        "type": "int",
+        "nullable": true
+      },
+      "replied": {
+        "type": "int",
+        "nullable": false
+      },
+      "replied_within_target": {
+        "type": "int",
+        "nullable": false
+      },
+      "decided": {
+        "type": "int",
+        "nullable": false
+      },
+      "computed_at": {
         "type": "timestamptz",
         "nullable": false
       }
