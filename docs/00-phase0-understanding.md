@@ -93,7 +93,7 @@ Orders are **item-level**: an order can be partly delivered, partly cancelled, p
 3. **Customer growth** — wishlist, advanced campaigns, recommendations, paid seller ads, more ad formats, loyalty.
 4. **Operational expansion** — multi-warehouse, seller fulfillment service, advanced returns.
 
-Our MVP = document's Phase 1, with Phase 2–4 items designed as pluggable modules (off by default).
+Our MVP = document's Phase 1, with Phase 2–4 items designed as pluggable modules (off by default). *Since then:* the launch configuration runs phases 1–2 (`LAUNCH_PHASE=2`); the phase 3–4 modules (wallet, wishlist, fulfillment-service) are built and stay off until their phase.
 
 ## 7. Acceptance scenarios (use as MVP test cases)
 

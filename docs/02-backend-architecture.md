@@ -1,6 +1,6 @@
 # Phase 2: Backend architecture and module plan
 
-Status: **design**. This document defines the backend's structure; the API design for every module (endpoints, request and response types, tables, status flows, events, permissions, jobs) lives in [`docs/api/`](api/README.md) and is published as OpenAPI 3.1 ([`docs/api/openapi.json`](api/openapi.json)). The structure is built in [`backend/`](../backend/README.md): kernel and all 33 modules, generated from and checked against the API design. Module business logic is not built yet (endpoints answer 501 NOT_IMPLEMENTED).
+Status: **design**. This document defines the backend's structure; the API design for every module (endpoints, request and response types, tables, status flows, events, permissions, jobs) lives in [`docs/api/`](api/README.md) and is published as OpenAPI 3.1 ([`docs/api/openapi.json`](api/openapi.json)). The structure is built in [`backend/`](../backend/README.md): kernel and all 33 modules, generated from and checked against the API design. Module business logic is built: every endpoint has a handler (`npm run modules`), and the phase 3–4 modules are built and off at launch.
 
 ## 1. Stack
 
@@ -15,28 +15,33 @@ Status: **design**. This document defines the backend's structure; the API desig
 | Product search | **OpenSearch** in production (`@opensearch-project/opensearch`); PostgreSQL full-text + `pg_trgm` in development and tests (`SEARCH_ENGINE`, §9) | Relevance, typo tolerance and facets at catalogue scale, off the primary database |
 | Jobs / schedules | Kernel `JobScheduler` interface: **pg-boss** queue in PostgreSQL in production (each scheduled run happens once across server instances, failed runs retried with backoff); in-process timers on PGlite (development, tests) | Payout runs, ad schedules, SLA timers |
 | Events | Kernel in-process typed event bus; outbox table later | Modules talk through events, not each other's tables |
-| Tests | Vitest + `app.inject()` + PGlite | Each module boots alone in a test |
+| Tests | Vitest + `app.inject()` + PGlite | Each module boots with only its dependencies in a test |
 
 ## 2. Shape of the backend
 
-Planned code layout:
+Code layout ([backend/README.md](../backend/README.md) has the details):
 
 ```
 backend/
   src/
     modules.config.ts      Which modules are on. Add / remove a module here.
-    main.ts                Starts the server
+    main.ts                Starts the server and the internal health port
     app.ts                 buildApp(): kernel + enabled modules
+    spec/                  GENERATED from docs/api/spec by npm run gen
     kernel/                Shared plumbing. Small, stable, no business rules.
-      config/  logger/  db/  migrations/  events/  jobs/  http/  auth/  errors/
-      module-system/       defineModule(), dependency graph, loader, registry
-      lib/                 money, ids (UUIDv7), refs, pagination (cursor + page), state machines, clock
+      config/  db/  migrations/  events/  jobs/  http/  auth/  errors/  graphql/  spec/
+      module-system/       defineModule(), dependency graph, loader, boot
+      lib/                 money, ids (UUIDv7), refs, pagination (cursor + page), state machines, clock, secrets
     modules/
       <module>/            One folder per business capability (see section 4)
+    integration/           Whole flows across real modules
+    testing/               buildTestApp(), dev-token callers, flows, the module contract suite
   tools/
+    generate.ts            npm run gen
     new-module.ts          npm run module:new <name>
     modules.ts             npm run modules (list, dependency graph, checks)
     check-boundaries.ts    npm run check:boundaries
+    check-api.ts  test-http.ts  migrate.ts  token.ts  bootstrap-owner.ts
 ```
 
 ### API surfaces
@@ -45,35 +50,34 @@ backend/
 |---|---|---|
 | `/api/store/*` | Customers and guests (website + Android app) | Visitor token (guests) or customer token; the self-service `account` endpoints under `/api/store/identity` take any app's signed-in token |
 | `/api/seller/*` | Seller owners and seller staff (Seller Center, website + app) | Seller member session; seller-level permissions |
-| `/api/admin/*` | Internal staff (Admin Center + Operations) | Staff session; role permissions + approval limits |
+| `/api/admin/*` | Internal staff (Admin Center + Operations) | Staff session with 2-step; role permissions + approval limits |
+| `/api/public/*` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token: on the website the cookie of the app named by `audience` in the body, on Android `refreshToken` in the body. The bootstrap endpoint (`POST /api/public/identity/app-sessions`) takes an app proof |
 | `/webhooks/*` | Payment and carrier providers | Provider signatures |
 | `/files/*` | Anyone holding a link the API issued (`<img src>`, downloads) | The link's own signature (HMAC, expiring for private files, permanent for public renditions), verified by the auth middleware |
 | `/graphql/store`, `/graphql/seller`, `/graphql/admin` | Same audiences as the REST areas | Read-only GraphQL for complex screens; persisted queries in production (see [api/graphql/README.md](api/graphql/README.md)) |
 | `/docs` | Developers | OpenAPI generated from module schemas; only with `DOCS_ENABLED` (default: development; refused in production), then without a token |
+| `/health` | Load balancer | Internal port only (`HEALTH_PORT`, default `PORT`+1); not served on the public port |
 
 Each module registers routes into these scopes. The module name is the next path segment: `/api/store/catalog/products`, `/api/admin/finance/payouts`.
 
 ## 3. Module system (how add / update / remove works)
 
-A module is a folder with a manifest:
+A module is a folder with a manifest (`src/modules/catalog/module.ts`):
 
 ```ts
 export default defineModule({
-  name: 'catalog',
-  version: '0.1.0',
-  launchPhase: 1,                     // plan ch. 20: 1 controlled launch … 4 operational expansion
-  dependsOn: ['media'],               // must be enabled, loaded first
-  optionalDeps: ['search'],           // used when present
-  permissions: catalogPermissions,    // registered with the access module
-  migrations: catalogMigrations,      // owned tables, schema "catalog"
-  async register(ctx) {
-    const repo = createCatalogRepository(ctx.data);   // picks the Postgres (or later Mongo) adapter
-    const service = new CatalogService(repo, ctx.events, ctx.clock);
-    ctx.provide<CatalogApi>(service);                 // public API for other modules
-    ctx.http.store(storeRoutes(service));
-    ctx.http.seller(sellerRoutes(service));
-    ctx.http.admin(adminRoutes(service));
-    ctx.events.on('sellers.seller.restricted', (e) => service.hideOffersOfSeller(e.sellerId));
+  spec,                               // generated from docs/api/spec/modules/catalog.json: name, launch phase,
+                                      //   dependsOn, optionalDeps, permissions, events, jobs, settings, endpoints
+  version: '1.2.0',                   // bump on every change (npm run modules shows it)
+  migrations,                         // owned tables, schema "catalog"
+  graphql: typeDefs,                  // the module's GraphQL fragment (generated)
+  register(ctx) {
+    const service = new CatalogService({ repo: createPostgresCatalogRepository(ctx.db, ctx.inbox), ctx });
+    ctx.provide(service);                                   // public API for other modules
+    ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
+    ctx.graphql.resolvers(resolvers(service));
+    ctx.events.on('sellers.seller.restricted', (e) => service.onSellerRestrictedFromSellers(e.payload));
+    ctx.jobs.handle('catalog.refresh-counts', () => service.refreshCounts());
   },
 });
 ```
@@ -81,7 +85,7 @@ export default defineModule({
 **Rules that keep modules removable**
 1. **Own your data.** Each module owns a PostgreSQL schema (`catalog.*`, `orders.*`). No foreign keys across schemas. Other modules' records are referenced by ID.
 2. **Public surface only.** Another module may import only `modules/<x>/contract.ts`: types, the service interface and event payloads. `npm run check:boundaries` fails the build otherwise.
-3. **Talk through the kernel.** Synchronous calls use `ctx.use<Api>('x')` (or `ctx.tryUse` for optional dependencies). Reactions use events (`ctx.events.on('orders.order.placed', …)`).
+3. **Talk through the kernel.** Synchronous calls use `ctx.use('x')` for a `dependsOn` module (or `ctx.tryUse('x')` for an optional one; undefined when it is off), typed from that module's spec `publicApi`. Reactions use events (`ctx.events.on('orders.order.placed', …)`).
 4. **Declare dependencies.** The loader sorts modules by `dependsOn`, refuses to start if one is missing or if there is a cycle, and explains which module needs which.
 
 | Task | Steps |
@@ -100,16 +104,16 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 |---|---|---|---|---|---|---|
 | [access](api/modules/access.md) | 2, 18 | What staff may do and how much they may approve: staff roles, the permission registry, role assignments, leads and backups per work area, approval limits per role, approval requests with a second reviewer, and cover while someone is away. Granting access never grants financial authority. | identity | 33 | yes | 1 |
 | [audit](api/modules/audit.md) | 2, 18 | The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting. | - | 11 | yes | 1 |
-| [identity](api/modules/identity.md) | 6, 7, 10, 18 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 46 | yes | 1 |
-| [media](api/modules/media.md) | 5, 8, 13, 16, 17 | Every uploaded or generated file: images, video and documents. Signed direct uploads, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). | - | 26 | - | 1 |
+| [identity](api/modules/identity.md) | 6, 7, 10, 18 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 47 | yes | 1 |
+| [media](api/modules/media.md) | 5, 8, 13, 16, 17 | Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). | - | 29 | - | 1 |
 | [notifications](api/modules/notifications.md) | 7, 11, 15, 19 | Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3). | identity | 45 | yes | 1 |
-| [reports](api/modules/reports.md) | 1, 11, 14, 15, 16, 18, 19 | Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables. | - | 31 | yes | 1 |
+| [reports](api/modules/reports.md) | 1, 11, 14, 15, 16, 18, 19 | Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables. | - | 33 | yes | 1 |
 | [settings](api/modules/settings.md) | 18, 21 | Market-level platform settings: country and service region, currency, time zone, business hours, support contacts, guest checkout, Android app versions and feature flags, plus the effective-dated change process (impact preview, approval, schedule, apply) for every runtime setting a module declares. It also assembles the Admin Center settings page from sections owned by other modules. | access | 16 | yes | 1 |
 | [workqueues](api/modules/workqueues.md) | 2, 12, 17, 18, 21 | The Operations Center's shared to-do system: queue definitions with an owner role, a named lead, a backup and an escalation route, and work items raised from other modules' events (overdue dispatch, low stock, waiting approvals, cases past target, failed payouts, mismatches) with deadlines, assignment and automatic escalation. Also the My work queues view, the dashboard's needs-attention tiles, the day-end review, the daily routine and saved filters. | access | 36 | yes | 1 |
 | [customers](api/modules/customers.md) | 3, 4, 6, 7, 17, 18, 19 | The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity. | identity | 33 | yes | 1 |
-| [sellers](api/modules/sellers.md) | 2, 10, 11, 17, 18, 21 | Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals. | identity, access, media | 89 | yes | 1 |
-| [catalog](api/modules/catalog.md) | 5, 8 | What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers. | media | 43 | yes | 1 |
-| [inventory](api/modules/inventory.md) | 9, 11, 12, 13 | How many units exist and in which stock group: stock items per offer/SKU with Available, Reserved, Incoming, Damaged or held and Returned quantities per location, checkout holds and order allocations, an append-only movement ledger, reasoned adjustments with second review, low-stock alerts, receipt confirmation and return stock outcomes. | - | 39 | yes | 1 |
+| [sellers](api/modules/sellers.md) | 2, 10, 11, 17, 18, 21 | Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals. | identity, access, media | 90 | yes | 1 |
+| [catalog](api/modules/catalog.md) | 5, 8 | What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers. | media | 44 | yes | 1 |
+| [inventory](api/modules/inventory.md) | 9, 11, 12, 13 | How many units exist and in which stock group: stock items per offer/SKU with Available, Reserved, Incoming, Damaged or held and Returned quantities per location, checkout holds and order allocations, an append-only movement ledger, reasoned adjustments with second review, low-stock alerts, receipt confirmation and return stock outcomes. | - | 40 | yes | 1 |
 | [offers](api/modules/offers.md) | 5, 8, 9, 2 | How one seller (or the Official Store) sells one variant in one condition: price and authentic was-price, purchase limit, seller SKU, dispatch, shipping profile, return and warranty terms, offer status, and the published featured-offer rule that picks the main offer for a delivery location. | catalog, sellers, inventory | 49 | yes | 1 |
 | [purchasing](api/modules/purchasing.md) | 9, 2 | Buying stock for the Official Store: suppliers and their price lists, purchase orders (Draft, Sent, Partly received, Received, Cancelled) with buying costs and expected deliveries, receiving records (expected vs received, shortages, damage) that feed inventory, and supplier claims. | inventory | 31 | - | 1 |
 | [search](api/modules/search.md) | 4, 3, 19 | Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results. | catalog, offers | 23 | yes | 1 |
@@ -121,15 +125,15 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | [shipping](api/modules/shipping.md) | 5, 6, 11, 12, 18 | How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims. | orders | 72 | yes | 1 |
 | [finance](api/modules/finance.md) | 14, 9, 18, 19 | Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income. | orders, payments, sellers, access | 58 | yes | 1 |
 | [messaging](api/modules/messaging.md) | 7, 11, 17 | Private service conversations linked to an order, item, return or case: customer with seller (or the Official Store), which Marketly support can join from a case, with attachments, read state, seller reply targets and overdue flags, and staff moderation. No promotional messages. | orders | 29 | yes | 1 |
-| [returns](api/modules/returns.md) | 13, 9, 2 | Return policies (platform baseline, seller terms, category exceptions, who pays return shipping), per-item eligibility, return requests and decisions, return shipments, receipt and inspection, remedies (refund, replacement, exchange) and the refund request that Finance approves before payments sends the money. | orders, shipping, payments, inventory | 59 | yes | 1 |
-| [reviews](api/modules/reviews.md) | 17, 5 | Product reviews (Verified Purchase), seller feedback kept separate from product reviews, public seller responses under rules, product questions and answers labelled by who answered, reports of inappropriate content, moderation with outcomes visible to reporter and author, appeals, and rating summaries for products and sellers. | orders, catalog, sellers | 43 | yes | 1 |
-| [support](api/modules/support.md) | 7, 13, 17 | Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules. | orders, access | 38 | yes | 1 |
-| [trust](api/modules/trust.md) | 2, 10, 17, 18 | Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fake reviews and abuse from customers, sellers, staff, brand owners and automated signals, with evidence, a risk score, an investigation workflow, enforcement recommendations routed to the team that owns the action, recorded enforcement with reasons, and appeals decided by someone other than the original decider. Trust recommends; Catalog, Seller Manager, Support, Finance and the other owners act. | access | 44 | yes | 1 |
+| [returns](api/modules/returns.md) | 13, 9, 2 | Return policies (platform baseline, seller terms, category exceptions, who pays return shipping), per-item eligibility, return requests and decisions, return shipments, receipt and inspection, remedies (refund, replacement, exchange) and the refund request that Finance approves before payments sends the money. | orders, shipping, payments, inventory | 61 | yes | 1 |
+| [reviews](api/modules/reviews.md) | 17, 5 | Product reviews (Verified Purchase), seller feedback kept separate from product reviews, public seller responses under rules, product questions and answers labelled by who answered, reports of inappropriate content, moderation with outcomes visible to reporter and author, appeals, and rating summaries for products and sellers. | orders, catalog, sellers | 48 | yes | 1 |
+| [support](api/modules/support.md) | 7, 13, 17 | Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules. | orders, access | 39 | yes | 1 |
+| [trust](api/modules/trust.md) | 2, 10, 17, 18 | Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fake reviews and abuse from customers, sellers, staff, brand owners and automated signals, with evidence, a risk score, an investigation workflow, enforcement recommendations routed to the team that owns the action, recorded enforcement with reasons, and appeals decided by someone other than the original decider. Trust recommends; Catalog, Seller Manager, Support, Finance and the other owners act. | access | 46 | yes | 1 |
 | [advertising](api/modules/advertising.md) | 16, 3, 4, 15 | Ad placements and their rules, ad campaigns through the full lifecycle, creatives and their review, audiences, schedules, frequency caps and dismissal suppression, rotation and priority, the serving decision for each page view, display/click/dismissal tracking with attribution, and seller sponsored campaigns with spending limits and ad charges kept separate from commission. | media, access | 48 | yes | 1 |
-| [content](api/modules/content.md) | 19, 15, 4, 3, 17 | Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action. | media, access | 61 | yes | 1 |
+| [content](api/modules/content.md) | 19, 15, 4, 3, 17 | Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action. | media, access | 64 | yes | 1 |
 | [promotions](api/modules/promotions.md) | 15, 14, 6, 5 | Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-spend and free-shipping offers, flash sales, seller discounts and platform campaigns with seller consent. Owns eligibility, stacking, budgets and caps, the funding owner of every discount, coupon clipping and redemption, the Deals page data and campaign results. | catalog, offers | 55 | yes | 1 |
-| [fulfillment-service](api/modules/fulfillment-service.md) | 1, 12, 9, 14 | Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility. | inventory, warehouse, finance | 39 | - | 4 (off) |
-| [wallet](api/modules/wallet.md) | 15, 7, 13, 6 | Customer store credit with an auditable ledger (refunds to credit, goodwill credit within approval limits, price adjustments, use at checkout, expiry), gift cards, and a placeholder for loyalty rewards. Checkout and payments use the balance through the in-process public API. | customers, payments | 14 | yes | 3 (off) |
+| [fulfillment-service](api/modules/fulfillment-service.md) | 1, 12, 9, 14 | Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility. | inventory, warehouse, finance | 41 | - | 4 (off) |
+| [wallet](api/modules/wallet.md) | 15, 7, 13, 6 | Customer store credit with an auditable ledger (refunds to credit, goodwill credit within approval limits, price adjustments, use at checkout, expiry), gift cards, and a placeholder for loyalty rewards. Checkout and payments use the balance through the in-process public API. | customers, payments | 15 | yes | 3 (off) |
 | [wishlist](api/modules/wishlist.md) | 3, 7, 19 | Saved shopping for customers: saved items in one or more lists, price-drop and back-in-stock alerts, and shareable lists. Alerts are delivered through notifications under the customer's promotional preferences. | catalog, offers, customers | 19 | yes | 3 (off) |
 
 ## 5. Cross-cutting rules
@@ -139,10 +143,10 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | **IDs** | UUIDv7 strings generated in the app (sortable, database-independent). Human references are separate fields: `MK-YYMMDD-NNNNN` orders, `RT-` returns, `CS-` cases, `PO-` payouts, `PUR-` purchase orders |
 | **Money** | Integer minor units + currency (`{ amount: 18900, currency: 'USD' }`). Never floats |
 | **Time** | Stored in UTC; market time zone (America/Los_Angeles) applied at the edges; deadlines are absolute timestamps |
-| **Pagination** | Every list supports **cursor** paging (`?cursor=&limit=`, for the Android app's infinite scroll) and **page** paging (`?page=&limit=`, for the website's numbered pages). Responses: `{ items, nextCursor, page?, totalPages? }` |
+| **Pagination** | Every list supports **cursor** paging (`?cursor=&limit=`, for the Android app's infinite scroll) and **page** paging (`?page=&limit=`, for the website's numbered pages). Responses: `{ items, nextCursor, page?, totalPages?, total? }` |
 | **State machines** | Statuses from the plan (product review, seller account, order item, refund, payout, return, case, ad campaign) are explicit transition tables in each module's `domain/`; illegal moves return `409` |
-| **Idempotency** | Writes that move money or create orders require an `Idempotency-Key` header (plan scenario 3: no duplicate orders or charges) |
-| **Audit** | Material changes publish an audit record: actor, role, action, target, reason, before/after, approvals (plan ch. 2, 18) |
+| **Idempotency** | Writes that move money or create orders require an `Idempotency-Key` header (plan scenario 3: no duplicate orders or charges). The kernel stores the first response per operation, caller and key for 24 hours (`kernel.idempotency_keys`) and replays it; a failed request, or a refused step-up proof, frees the key for the retry |
+| **Audit** | Material changes write an audit entry through the audit module's `record()` (an optional dependency, called after the commit): actor, role, action, target, reason, before/after, approvals (plan ch. 2, 18). Entries are append-only and hash-chained, kept in month partitions (below) |
 | **Approvals** | Limits per role (refunds, payouts, holds, restrictions, price changes). Above the limit the action becomes an approval request; some actions always need a second reviewer. Granting access never grants financial authority |
 | **Purchase snapshots** | Orders copy the product description, variation, condition, price, seller and terms accepted at purchase (plan ch. 8) |
 | **Errors** | `{ error: { code, message, details } }` with stable codes (`OFFER_CHANGED`, `ILLEGAL_TRANSITION`, `APPROVAL_REQUIRED` …) |
@@ -156,7 +160,7 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | `MEDIA_STORAGE` | `local`; `memory` when `NODE_ENV=test` | `local`: files on disk under `MEDIA_STORAGE_DIR` (`infra/storage/local.ts`). `memory`: kept in the process and lost on restart (`infra/storage/memory.ts`; refused in production). Both pass the same contract tests (`infra/storage/storage.test.ts`) |
 | `MEDIA_STORAGE_DIR` | `.data/media` (relative to the working directory) | `<dir>/<bucket>/<key>` holds the bytes (buckets `marketly-public`, `marketly-private` are folders), `<dir>/.meta/` content type, ETag and checksum per file, `<dir>/.tmp/` writes in progress (temp file, flushed, then renamed: atomic). Back it up with the database; with more than one API server it must be a shared volume |
 | `API_URL` | `http://localhost:<PORT>` | The API's public address: file links (`<API_URL>/files/…`) point here. Required in production |
-| `APP_SECRET` | dev value outside production | File links are signed with `secretFor(config, 'media.files')`, derived from it; rotating it invalidates links already handed out, including stored public image URLs |
+| `APP_SECRET` | dev value while `DEV_TOKENS` is on; required in production | File links are signed with `secretFor(config, 'media.files')`, derived from it; rotating it invalidates links already handed out, including stored public image URLs |
 
 Limits: an upload is refused above the ticket's `maxBytes` while it streams (nothing is kept); public renditions are served `Cache-Control: public, max-age=3600`, private files `private` (attachments `no-store`); file requests have their own IP rate limit (3,000/min). Processing still reads each upload into memory once (scan, probe, renditions), as before.
 
@@ -164,7 +168,7 @@ Limits: an upload is refused above the ticket's `maxBytes` while it streams (not
 
 Shared state lives in PostgreSQL only (no Redis), so any number of server instances can run on one database.
 
-**Jobs** (`kernel/jobs/`). Every job in a module spec is a [pg-boss](https://github.com/timgit/pg-boss) queue of the same name (pg-boss keeps its tables in the `pgboss` schema and migrates them itself when it starts):
+**Jobs** (`kernel/jobs/`). Every job in a module spec is a [pg-boss](https://github.com/timgit/pg-boss) queue of the same name (pg-boss keeps its tables in the `pgboss` schema and migrates them itself when it starts; `npm run migrate` also installs them ahead):
 
 | Schedule phrase | Runs as |
 |---|---|
@@ -188,6 +192,17 @@ A queue holds at most one waiting and one running job (policy `stately`), so a j
 | `RATE_LIMIT_STORE` | `postgres` with `DATABASE_URL`, else `memory` | `memory` counts per process (development and tests) |
 | `RATE_LIMITS` | `true` | Off only for contract and load tests (refused in production); modules' business limits apply either way |
 
+### Audit history partitions
+
+`audit.entries` and `audit.entry_targets` are partitioned by range on `at`, one partition per market month (`MARKET_TIME_ZONE`), in the schema `audit_partitions` (`entries_<name>`, `entry_targets_<name>`). `audit.entry_partitions` lists them (migration `0004_monthly_partitions`; PostgreSQL 13 or later).
+
+| Job | Schedule | Does |
+|---|---|---|
+| `audit.prepare-partitions` | daily 02:30 market time | Creates the partitions for the current market month and the next 3 (idempotent). `record()` also creates a missing month on demand (backdated entries) |
+| `audit.purge-expired` | monthly | Writes a signed checkpoint, then drops whole months older than the retention cut-off; entries before the cut-off in a month that also holds kept entries are deleted row by row. The purge is recorded as an entry, so the chain still verifies |
+
+The append-only triggers stay on every partition. An event trigger refuses dropping an entries table outside a purge, where the migration role may create event triggers; elsewhere a dropped month is caught by `audit.verify-chain`.
+
 ## 6. Plan scenarios → modules (plan ch. 21)
 
 | Scenario | Modules involved |
@@ -201,23 +216,25 @@ A queue holds at most one waiting and one running job (policy `stately`), so a j
 | 7 Seller restriction | sellers → offers (hide new sales) while orders, returns, support stay open |
 | 8 Opening advertisement | advertising (serve, frequency cap, pause, expiry) → content / store UI |
 
-## 7. Inside a module (planned layout)
+## 7. Inside a module
 
-Every module has the same shape, so any developer can find their way around any module.
+Every module has the same shape, so any developer can find their way around any module. How to build one: [backend/docs/BUILDING-MODULES.md](../backend/docs/BUILDING-MODULES.md).
 
 ```
 src/modules/<module>/
-  module.ts              Manifest: name, version, launch phase, dependencies, permissions, migrations, wiring
+  module.ts              Manifest: the generated spec, version, migrations, GraphQL fragment, wiring (routes, consumers, jobs, resolvers)
   contract.ts            The ONLY file other modules may import: public API interface, shared types, event payloads
   README.md              Generated from the module's API spec (docs/api/modules/<module>.md)
-  domain/                Entities, status machines and pure business rules (no framework, no database)
-  service.ts             Use cases; depends only on ports.ts, the event bus and the clock
-  ports.ts               Repository interfaces (database-agnostic) and what this module needs from others
+  domain/                State machines and pure business rules (no framework, no database)
+  service.ts             Use cases; implements the public API, event consumers and jobs, through ports.ts and ctx
+  ports.ts               Repository interfaces (database-agnostic) and provider ports
   infra/postgres/        Postgres repository + migrations (infra/mongo/ added only if the database changes)
-  http/                  Routes per API area (store, seller, admin, public, webhooks) + request/response schemas
+  infra/<provider>/      Provider adapters behind ports (storage, scanning, search engine …), with a dev adapter
+  http/<area>.ts         One typed handler per spec endpoint of that area (store, seller, admin, public, webhooks); request and response schemas are generated in src/spec
   graphql/               This module's schema fragment + resolvers (read-only; fields it owns, incl. fields on other modules' types)
   permissions.ts         Permission keys this module declares
-  <module>.test.ts       Boots this module alone against an in-memory PostgreSQL
+  <module>.test.ts       The contract suite: boots the module with its dependencies against an in-memory PostgreSQL
+  test/                  Behaviour tests (helpers.ts boots the module for them)
 ```
 
 ## 8. API documentation

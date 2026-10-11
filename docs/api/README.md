@@ -30,7 +30,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 | Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 260 |
 | Admin API | `staff` | Staff member with 2-step; optional `permission` narrows it | 745 |
 | Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 19 |
-| Public API | `refresh` | Refresh token only (cookie on the website, body on Android) | 2 |
+| Public API | `refresh` | Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body) | 2 |
 | Public API | `bootstrap` | No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions | 1 |
 | Webhooks | `provider` | Webhook signature, verified per provider | 9 |
 
@@ -204,14 +204,18 @@ List endpoints take `cursor` (the Android app's infinite scroll) or `page` (the 
 
 ### Idempotency
 
-Endpoints marked idempotent need `Idempotency-Key` (1–255 characters; missing → 400 `VALIDATION_FAILED`). Keys are kept 24 hours per operation and caller. The same key with the same request (path parameters, query and body) answers the first response again, same status and body, with `Idempotent-Replayed: true`; with a different request → 422 `IDEMPOTENCY_KEY_REUSED`; while the first request still runs → 409 `CONFLICT`. When the handler fails, the key is freed and a retry runs again. Use one key per user action and reuse it on retries.
+Endpoints marked idempotent need `Idempotency-Key` (1–255 characters; missing → 400 `VALIDATION_FAILED`). Keys are kept 24 hours per operation and caller. The same key with the same request (path parameters, query and body) answers the first response again, same status and body, with `Idempotent-Replayed: true`; with a different request → 422 `IDEMPOTENCY_KEY_REUSED`; while the first request still runs → 409 `CONFLICT`. When the handler fails, the key is freed and a retry runs again. A refused step-up proof frees the key too, so the retry with a fresh proof reuses it. Use one key per user action and reuse it on retries.
+
+### Step-up
+
+Endpoints with a step-up need a fresh proof: `reauthToken` in the body (kind `reauth`, from identity's re-auth endpoint) or the current 2-step code in `X-Step-Up-Code` (kind `code`). A missing or refused proof → 403 `STEP_UP_REQUIRED` with `details.kind` and `details.purpose`, never 400. A re-auth token works once: it is claimed before the request runs and given back if the request fails, so the person can retry without confirming again. A replayed idempotent request does not spend it.
 
 ### Sessions
 
 - **Start:** `POST /api/public/identity/app-sessions` with `X-App-Proof` returns a visitor access token (15 minutes) and a refresh token. Signing in claims the visitor session.
 - **Where the refresh token lives:** the website gets it in its own app's cookie, `__Secure-mk_refresh_store`, `__Secure-mk_refresh_seller` or `__Secure-mk_refresh_admin` (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions), and `refreshToken` is `""` in the body; Android gets it in the body. With one cookie per app, signing into Seller Center or Admin Center doesn't end the store session in the same browser.
 - **Refresh** `POST /api/public/identity/sessions/refresh`, **sign out** `POST /api/public/identity/sessions/sign-out` (204). The website names its app in the body, `{ "audience": "store" }` (or `seller`, `admin`); the server reads that app's cookie first, then `refreshToken` in the body. Without `audience` no cookie is read (401 `token_missing`). Sign-out clears only that app's cookie. With the cookie, the request needs an allowed `Origin` and `X-Requested-With`, else 403. At most 30 refreshes an hour per session. Each refresh returns a new pair; the previous token sent again within 20 s returns the same new pair (two tabs refreshing at once), and later it ends the session.
-- **Refused:** no refresh token → 401 `token_missing`; an unknown, expired, revoked or reused one → 401 `token_invalid` (sign-out with such a token too). Refresh can also answer `REFRESH_TOKEN_INVALID`, `ACCOUNT_DISABLED` or `ACCOUNT_LOCKED`. In every case, sign in again.
+- **Refused:** no refresh token → 401 `token_missing`; an unknown, expired, revoked or reused one → 401 `token_invalid` (sign-out with such a token too), as is an app's cookie holding another app's session. Refresh can also answer `REFRESH_TOKEN_INVALID`, `ACCOUNT_DISABLED` or `ACCOUNT_LOCKED`. In every case, sign in again.
 - **When to refresh:** only on 401 `UNAUTHORIZED` whose `details.reason` starts with `token_`. Never on `session_idle` (sign in again), other 401 reasons, `FORBIDDEN`, `WRONG_AUDIENCE` or a GraphQL field refusal.
 
 ### Browsers (CORS)

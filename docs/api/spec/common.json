@@ -53,7 +53,7 @@
     "account": "Any signed-in account, any realm (self-service security endpoints)",
     "seller": "Seller member acting for the seller in the token; optional `permission` narrows it",
     "staff": "Staff member with 2-step; optional `permission` narrows it",
-    "refresh": "Refresh token only (cookie on the website, body on Android)",
+    "refresh": "Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body)",
     "provider": "Webhook signature, verified per provider",
     "bootstrap": "No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions"
   },

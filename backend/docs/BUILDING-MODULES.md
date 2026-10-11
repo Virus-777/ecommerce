@@ -1,7 +1,8 @@
 # Building a module's business logic
 
-How to turn a scaffolded module (every endpoint answers 501) into a working one. Every module
-follows the same patterns, so read this once and any module reads the same.
+How to turn a scaffolded module (`npm run module:new`: every endpoint answers 501) into a working one,
+and how to change a built one. Every module follows the same patterns, so read this once and any module
+reads the same.
 
 ## 1. Sources of truth (read before writing code)
 
@@ -31,19 +32,31 @@ infra/postgres/     Kysely repository on ctx.db (already scoped to the module's 
 infra/<provider>/   provider adapters (email, payments, carriers, storage) behind ports, with a dev adapter.
 ```
 
-- Handlers receive `{ params, query, body, page, principal, sellerId, sellerAccess, scope, can, actor, requestId, idempotencyKey }` (`src/kernel/http/index.ts`). Pass what the service needs; don't pass `request`/`reply` into services.
+- Handlers receive `{ params, query, body, page, principal, sellerId, sellerAccess, scope, can, actor, requestId, idempotencyKey, operationId, request, reply }` (`src/kernel/http/index.ts`). Pass what the service needs; don't pass `request`/`reply` into services.
 - The service implements the spec's `PublicApi` interface (already declared on the class). Public API methods are called by other modules in-process; keep them free of HTTP concerns.
 - Map DB rows (snake_case) to API types (camelCase) in the repository or a `mappers.ts`; keep the mapping in one place per type.
 - Time comes from `ctx.clock.now()`, never `new Date()` in services (tests move the clock). IDs from `newId()` (`kernel/lib/ids`). Human references from `ctx.refs` (`MK-…`, `RT-…`). Money from `kernel/lib/money` (integer minor units, never floats).
 - Runtime settings: `await ctx.settings.get('key')` (spec `settings`; the settings module overrides the default). Another module's setting, read-only: `await ctx.settings.read('reports.maxExportRows')` (its value in force, else its spec default) — never duplicate a setting to keep two equal.
-- Business rate limits (wrong codes, attempts per hour): `await ctx.rateLimit(key, { limit, windowMs })` → `{ allowed, retryAfterMs }`, counted in the kernel's shared windows (every server instance counts together; `peek: true` only looks). Never keep counters in memory: production runs several instances. Refuse with `RATE_LIMITED` and `retryAfterSeconds`.
+- Business rate limits (wrong codes, attempts per hour): `await ctx.rateLimit(key, { limit, windowMs })` → `{ allowed, retryAfterMs }`, counted in the kernel's shared windows (the key is scoped to your module; every server instance counts together; a refused attempt is not counted; `peek: true` only looks). Never keep counters in memory: production runs several instances. Refuse with `RATE_LIMITED` and `retryAfterSeconds`.
 - The Official Store's display name is `OFFICIAL_STORE_NAME` and its seller id `OFFICIAL_STORE_ID` (`src/spec/common.ts`); never hardcode either.
 
 ## 3. What the middleware already did (don't repeat it)
 
 Before a handler runs: the token is verified; the caller kind, app (audience), seller context and member
 access, endpoint `permission`, `permissionWhen`, staff 2-step, step-up proofs, rate limits, launch phase
-and Idempotency-Key replay are all checked (`docs/03-auth-middleware.md`). The service still owns:
+and Idempotency-Key replay are all checked (`docs/03-auth-middleware.md`). In particular:
+
+- **Step-up** (spec `stepUp`): the proof is verified before the handler, after the idempotency replay (a replay
+  never spends a proof). A re-auth token is claimed once for the request (`identity.consumeReauthToken`) and given
+  back if the request fails (any status 400 or above, a handler error included), so the person can retry without
+  confirming again. A refused proof also frees the Idempotency-Key. Handlers never read, verify or consume the proof.
+- **Idempotency** (spec `idempotent`): the kernel stores the response (status and body) per operation, caller and
+  key, and replays it for 24 hours. A handler that throws frees the key, so the retry runs again.
+- **Masking** (spec type fields with `permission` and `mask`): on admin and seller endpoints the kernel masks those
+  fields in the response for callers without the permission (`kernel/auth/masking.ts`). Return the full value; never
+  mask in the handler. GraphQL fields marked `@sensitive(permission, mask)` get the same masks in the seller and admin schemas.
+
+The service still owns:
 
 - **Record scope.** A customer, seller or visitor must only reach their own records. Read tenant tables
   through `scoped(ctx.db, input.scope, spec.tenantTables)` (`kernel/auth/scope.ts`) or add the owner
@@ -85,7 +98,7 @@ async approveThing(id: string, input: { actor: Actor; reason?: string; requestId
   connection, and on PGlite (development and tests: one connection) a call inside a transaction waits forever.
 - **Transactions:** `ctx.db.transaction().execute(async (trx) => …)`; give the repository a `transaction(fn)` that hands `fn` a repository bound to `trx`. Use `forUpdate()` when a decision depends on the row you're changing (stock, balances, states).
 - **Events** are published **after** the commit (delivery is asynchronous; subscribers never fail the publisher). Payloads must match the spec (validated outside production). Publish exactly the events the spec lists for the action.
-- **Audit:** endpoints marked `audited` (and material changes the spec describes) write one entry via the audit module, which every module has as an optional dependency:
+- **Audit:** endpoints marked `audited` (and material changes the spec describes) write one entry via the audit module, which every module but cart, checkout and wishlist has as an optional dependency:
   ```ts
   protected async audit(entry: Omit<audit.RecordInput, 'actor' | 'module' | 'requestId'>, by: { actor: Actor; requestId?: string }) {
     await this.deps.ctx.tryUse('audit')?.record({ ...entry, actor: by.actor, module: this.deps.ctx.name, requestId: by.requestId });
@@ -125,7 +138,7 @@ Granting a permission never grants financial authority: `check` is the only sour
 
 - `ctx.use('x')` for `dependsOn`, `ctx.tryUse('x')` for `optionalDeps` (undefined when that module is off: degrade as the spec describes). Only functions in that module's spec `publicApi` exist; types come from `src/spec/<x>.ts` (import `type` only, or from `modules/<x>/contract.ts`).
 - Never read another module's tables. React to other modules through the events your spec `consumes`.
-- A dependency may still be unbuilt (it answers NOT_IMPLEMENTED). Don't swallow that in business paths; in tests, stub it (§10).
+- Every module is built, so a dependency answers for real. A NOT_IMPLEMENTED from one is a bug: don't swallow it in business paths. In tests, boot real dependencies and stub only to control an answer (§10).
 
 ## 9. Providers, jobs, webhooks, GraphQL
 
@@ -141,6 +154,13 @@ Granting a permission never grants financial authority: `check` is the only sour
 - **Webhooks:** register `ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name))`
   (`kernel/http/webhooks.ts`) unless the provider has its own scheme. The middleware rejects bad signatures
   and marks replays; handlers process `body` idempotently by provider event id.
+- **Session cookies** (identity only): `ctx.http.sessionCookie(...operationIds)` declares the endpoints whose
+  responses set or clear the website's refresh cookie, so they get credentialed CORS for their app's origins
+  (refresh-kind endpoints have it already). There is one cookie per app (`__Secure-mk_refresh_store`, `_seller`,
+  `_admin`); refresh and sign-out read only the cookie of the app named by the body's `audience`
+  (`refreshCookieOf` in `kernel/auth/chain.ts`).
+- **Served files** (media only): `ctx.http.files(route)` serves `GET /files/{bucket}/{key}` by signed links
+  (`secretFor(config, '<module>.files')`), verified by the middleware before `serve()` runs.
 - **GraphQL:** implement every field listed in `graphql/resolvers.ts` by calling service read methods.
   The resolver context has `principal`, `auth` and `scope`-relevant data; apply the same record scope as REST.
 - **Work items:** `workqueues.raise({ …, sourceModule: ctx.name })`: the kind must be one of the spec's work item kinds (typed) and the queue one that workqueues seeds.
@@ -157,8 +177,7 @@ Granting a permission never grants financial authority: `check` is the only sour
 Built and merged: tranche 1 **identity, access, settings, audit, media, notifications**; tranche 2 **customers, catalog, inventory, sellers, purchasing, workqueues**; tranche 3 **offers, cart, orders, search, promotions, content**; tranche 4 **checkout, payments, shipping, finance, returns, messaging, reviews**; tranche 5 **support, trust, advertising, reports, warehouse** (all 30 launch modules). The phase 3–4 modules (wishlist, wallet, fulfillment-service) are built and off in `modules.config.ts`; tests enable them with `only: [...]`, and `MODULES=…,fulfillment-service` boots Fulfilled by Marketly like any other module (no guard: set its `serviceLocationId` / `serviceShippingProfileId` settings or rely on the defaults first). `src/integration/fulfilled-by-marketly.test.ts` shows the whole service (enrollment, inbound, Marketly-fulfilled order, warehouse shipping, fees, return, reconciliation, suspension) with real modules. `flows.liveListing()` sets up a seller with a live offer; `src/integration/order-lifecycle.test.ts` shows a whole order (checkout, payment, shipment, delivery, return, refund) with real modules. Real end-to-end flows for tests (staff with roles, customers, seller sign-in) are in `src/testing/flows.ts`; see `src/integration/*.test.ts`. Call their
 public APIs for real; in tests boot them (`only: [...]` pulls dependencies) rather than stubbing, unless
 you need to control an answer. Notifications already consumes the events your spec publishes and turns
-them into notices, so publish exactly the spec's events and payloads. Stub only modules that are not
-built yet.
+them into notices, so publish exactly the spec's events and payloads.
 
 ## 10. Tests
 
@@ -171,7 +190,7 @@ let app: FastifyInstance;
 beforeAll(async () => {
   app = await buildTestApp({
     only: ['mymodule'],
-    // dependencies built in other tranches, or ones you need to control:
+    // only dependencies whose answers you need to control:
     apiStubs: { identity: { getAccounts: async (ids) => ids.map((id) => ({ id, name: 'Ana', … })) } },
   });
 });
@@ -192,8 +211,14 @@ await app.kernel.events.drain();   // wait for event consumers
 - Clocks: `movingClock()` (real time you can move ahead; dev tokens stay valid) is the easy default.
   Apps on a fixed clock: set `tokenClock.now = () => clock.now()` (from `testing/app.ts`), and a larger
   `tokenClock.ttlSeconds` if the test moves the clock far ahead, so `callers.*` tokens stay valid at the app's time.
-- Callers: `callers.visitor()`, `callers.customer({ accountId })`, `callers.seller({ sellerId, permissions })`,
+- Dates: `marketDate(at, days?)` (from `testing/app.ts`) is the market's calendar date (YYYY-MM-DD) `days` after `at`,
+  which is what modules mean by "today". Compare module dates with it, never with `toISOString().slice(0, 10)`.
+- Callers: `callers.visitor({ audience })`, `callers.customer({ accountId })`, `callers.seller({ sellerId, permissions })`,
   `callers.staff(['perm'])` (default all permissions). These are dev tokens; their permissions stand in for access/sellers.
+- A module with many test files keeps a `test/helpers.ts` whose `boot()` builds the app once with its clock, stubs
+  and callers, and returns a kit (`app`, `clock`, `call()` …) for every file.
+- Real flows (`flows(app, clock)` from `testing/flows.ts`): staff with roles, customers, seller sign-in, uploads and
+  `liveListing()`, all through real tokens from identity (no dev tokens). Use them where a test needs the real chain.
 - Run: `npx vitest run src/modules/<module>` while working; before finishing: `npx tsc --noEmit`,
   `npm run check:boundaries`, `npx vitest run src/modules/<module>` and `npm run test:http -- --only <module>`
   (every endpoint over HTTP: handlers must not answer 401/403 for the right caller, 500, or 400 for valid input).
@@ -203,4 +228,4 @@ await app.kernel.events.drain();   // wait for event consumers
 - No `notImplemented` left in the module: every endpoint, public API function, event consumer, job and GraphQL field works.
 - Behaviour matches the spec text; deviations are listed as spec gaps.
 - Typecheck, boundaries, the module's tests and `test:http --only <module>` pass.
-- Bump `version` in `module.ts` to `1.0.0`.
+- Bump `version` in `module.ts`: `1.0.0` when first built, then on every change (`npm run modules` shows it).
