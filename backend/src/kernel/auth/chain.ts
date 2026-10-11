@@ -12,6 +12,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { sql, type Kysely } from 'kysely';
 import type { Config } from '../config/index.js';
 import { AppError } from '../errors/index.js';
+import { appOrigins } from '../http/security.js';
 import type { Clock } from '../lib/clock.js';
 import type { Area, AuthKind, EndpointDef } from '../spec/define.js';
 import type { AppProofVerifier } from './app-proof.js';
@@ -334,11 +335,29 @@ export class AuthChain {
 
   async #verifyRefresh(request: FastifyRequest) {
     const fromBody = (request.body as { refreshToken?: unknown } | undefined)?.refreshToken;
-    const token = cookie(request.headers.cookie, REFRESH_COOKIE) ?? (typeof fromBody === 'string' ? fromBody : undefined);
+    const fromCookie = cookie(request.headers.cookie, REFRESH_COOKIE);
+    const token = fromCookie ?? (typeof fromBody === 'string' ? fromBody : undefined);
     if (!token) throw tokenRejected('missing');
+    // the website's cookie is sent by the browser on its own: only a Marketly app's page may use it (docs/03 §5)
+    if (fromCookie) this.#assertAppPage(request);
     const session = await this.k.authorities.verifyRefreshToken(token);
     if (!session) throw tokenRejected('invalid');
     request.auth = { via: 'refresh', principal: null, refreshSession: session };
+  }
+
+  /**
+   * Cookie refresh and sign-out: an allowed Origin (an app's, or this API's own when the website is served
+   * through it) and the custom X-Requested-With header, which a cross-site form or link can't send.
+   * Android sends its refresh token in the body, never a cookie, so it is not asked for either.
+   */
+  #assertAppPage(request: FastifyRequest) {
+    const origin = request.headers.origin;
+    if (!origin || !(appOrigins(this.k.config).includes(origin) || origin === new URL(this.k.config.apiUrl).origin)) {
+      throw new AppError('FORBIDDEN', 'Refresh the session from a Marketly app', { reason: 'origin_not_allowed' });
+    }
+    if (!request.headers['x-requested-with']) {
+      throw new AppError('FORBIDDEN', 'Refresh the session from a Marketly app', { reason: 'x_requested_with_required' });
+    }
   }
 
   async #verifyWebhook(module: string, request: FastifyRequest) {

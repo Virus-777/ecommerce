@@ -33,6 +33,8 @@ export interface HttpKernel {
   config: Config;
   auth: AuthChain;
   idempotency: IdempotencyStore;
+  /** Operations (`module.id`) whose responses set or clear the website's refresh cookie (ctx.http.sessionCookie) */
+  sessionCookie?: ReadonlySet<string>;
 }
 
 declare module 'fastify' {
@@ -141,6 +143,13 @@ export function buildRouteSchema(r: EndpointRegistration) {
 
 /** Registers the spec routes in their own scope, which validates and serializes with Zod. */
 export function registerEndpoints(app: FastifyInstance, regs: EndpointRegistration[], k: HttpKernel) {
+  // CORS beyond the area default (security.ts): browsers send the refresh cookie, and accept a new one,
+  // only on credentialed routes; the self-service account endpoints are called from every app
+  for (const r of regs) {
+    const credentials = r.def.auth === 'refresh' || Boolean(k.sessionCookie?.has(`${r.module}.${r.id}`));
+    const anyApp = r.def.auth === 'account';
+    if (credentials || anyApp) app.corsRoutes?.add(routeUrlOf(r.module, r.def), { credentials, anyApp });
+  }
   void app.register(async (scope) => {
     scope.setValidatorCompiler(validatorCompiler);
     if (k.config.responseValidation) scope.setSerializerCompiler(serializerCompiler);

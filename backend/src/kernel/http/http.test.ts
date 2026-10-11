@@ -42,6 +42,8 @@ const endpoints = defineEndpoints({
   mine: { area: 'seller', method: 'GET', path: '/mine', auth: 'seller', scope: 'own-seller', summary: 'Seller scope', response: () => z.object({ sellerId: z.string() }), status: 200, phase: 1 },
   payouts: { area: 'seller', method: 'POST', path: '/payout-account', auth: 'seller', scope: 'own-seller', permission: 'demo.payouts.manage', stepUp: { kind: 'reauth', purpose: 'payout-account' }, summary: 'Owner only, fresh proof', body: () => z.object({ reauthToken: z.string().optional() }), response: null, status: 204, phase: 1 },
   hook: { area: 'webhooks', method: 'POST', path: '/provider', auth: 'provider', scope: 'public', summary: 'Provider callback', body: () => z.unknown(), response: null, status: 204, phase: 1 },
+  security: { area: 'store', method: 'GET', path: '/security/{id}', auth: 'account', scope: 'public', summary: 'Any signed-in account', params: () => z.object({ id: z.string() }), response: () => z.object({ ok: z.boolean() }), status: 200, phase: 1 },
+  sendCode: { area: 'public', method: 'POST', path: '/codes', auth: 'visitor', scope: 'public', rateLimit: 'code', summary: 'Rate-limited class', response: null, status: 204, phase: 1 },
 });
 
 /** A second module whose webhooks are verified and answer a body */
@@ -54,6 +56,7 @@ let placed = 0;
 const item = (id: string) => ({ id, name: 'Trail runner', price: { amount: 18900, currency: 'USD' } });
 const sets = [
   routes(endpoints, 'store', {
+    security: async () => ({ ok: true }),
     getItem: async ({ params }) => item(params.id),
     listItems: async ({ page }) => ({ items: [item(newId())], nextCursor: null, ...(page.mode === 'page' ? { page: page.page, totalPages: 1, total: 1 } : {}) }),
     placeOrder: async ({ body, scope }) => ({ orderId: `MK-${++placed}`, n: body.quantity, scope: scope.kind }),
@@ -71,6 +74,7 @@ const sets = [
   routes(endpoints, 'public', {
     publicInfo: async () => ({ ok: true }),
     start: async () => ({ ok: true }),
+    sendCode: async () => undefined,
     refresh: async ({ request }) => ({ sessionId: request.auth!.refreshSession!.sessionId }),
   }),
   routes(endpoints, 'admin', { approve: async () => undefined, reports: async ({ query }) => ({ view: query.view ?? 'mine' }) }),
@@ -80,12 +84,14 @@ const sets = [
 const ackSets = [routes(ackEndpoints, 'webhooks', { ack: async () => (acked++, { received: true }) })];
 
 const REFRESH = 'refresh-token-ok';
+const STORE_ORIGIN = 'https://store.example';
+const SELLER_ORIGIN = 'https://seller.example';
 const FILES_SECRET = 'demo-files-secret';
 let app: FastifyInstance;
 let db: Database;
 
 beforeAll(async () => {
-  const config = loadConfig({ NODE_ENV: 'test' }, { launchPhase: 2, devSigning: { file: '', jwk: TEST_JWK } });
+  const config = loadConfig({ NODE_ENV: 'test' }, { launchPhase: 2, devSigning: { file: '', jwk: TEST_JWK }, cors: { store: [STORE_ORIGIN], seller: [SELLER_ORIGIN], admin: [] } });
   db = await createDatabase();
   await migrate(db, []);
   app = createServer(config);
@@ -101,7 +107,12 @@ beforeAll(async () => {
     fileLinks: { secret: FILES_SECRET, permanentBuckets: new Set(['pub']) },
   });
   chain.install(app);
-  registerEndpoints(app, [...registrationsOf('demo', 'Demo', sets), ...registrationsOf('acks', 'Acks', ackSets)], { config, auth: chain, idempotency: postgresIdempotencyStore(db.kysely) });
+  registerEndpoints(app, [...registrationsOf('demo', 'Demo', sets), ...registrationsOf('acks', 'Acks', ackSets)], {
+    config,
+    auth: chain,
+    idempotency: postgresIdempotencyStore(db.kysely),
+    sessionCookie: new Set(['demo.start']),
+  });
   // the file the verified link names, as the serving module receives it
   registerFileRoute(app, { module: 'demo', permanentBuckets: ['pub'], serve: async (file, request, reply) => reply.send({ ...file, method: request.method, via: request.auth?.via }) });
   await app.ready();
@@ -285,7 +296,27 @@ describe('tokens other than bearer', () => {
     expect((await app.inject({ method: 'POST', url, payload: {} })).json().error.details.reason).toBe('token_missing');
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: 'wrong' } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).json()).toEqual({ sessionId: 'session-1' });
-    expect((await app.inject({ method: 'POST', url, headers: { cookie: `__Secure-mk_refresh=${REFRESH}` }, payload: {} })).statusCode).toBe(200);
+    const page = { origin: STORE_ORIGIN, 'x-requested-with': 'fetch' };
+    expect((await app.inject({ method: 'POST', url, headers: { ...page, cookie: `__Secure-mk_refresh=${REFRESH}` }, payload: {} })).statusCode).toBe(200);
+  });
+
+  it('takes the website cookie only from an app page: allowed Origin and X-Requested-With (Android’s body token needs neither)', async () => {
+    const url = '/api/public/demo/sessions/refresh';
+    const cookie = `__Secure-mk_refresh=${REFRESH}`;
+    for (const [headers, reason] of [
+      [{ cookie, 'x-requested-with': 'fetch' }, 'origin_not_allowed'],
+      [{ cookie, origin: 'https://evil.example', 'x-requested-with': 'fetch' }, 'origin_not_allowed'],
+      [{ cookie, origin: SELLER_ORIGIN }, 'x_requested_with_required'],
+    ] as const) {
+      const res = await app.inject({ method: 'POST', url, headers, payload: {} });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toMatchObject({ code: 'FORBIDDEN', details: { reason } });
+    }
+    // every app's origin, and the API's own (a website served through it)
+    for (const origin of [SELLER_ORIGIN, 'http://localhost:4000']) {
+      expect((await app.inject({ method: 'POST', url, headers: { cookie, origin, 'x-requested-with': 'fetch' }, payload: {} })).statusCode, origin).toBe(200);
+    }
+    expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).statusCode).toBe(200);
   });
 
   it('processes a signed webhook once and acknowledges replays without running the handler', async () => {
@@ -305,6 +336,54 @@ describe('tokens other than bearer', () => {
   it('refuses webhooks until the module verifies signatures', async () => {
     const res = await app.inject({ method: 'POST', url: '/webhooks/demo/provider', payload: {} });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('browsers (CORS) and response headers', () => {
+  const preflight = (url: string, origin: string, method = 'POST') =>
+    app.inject({ method: 'OPTIONS', url, headers: { origin, 'access-control-request-method': method, 'access-control-request-headers': 'authorization, x-requested-with' } });
+
+  it('allows credentials on the routes that set or read the refresh cookie, and only there', async () => {
+    for (const url of ['/api/public/demo/app-sessions', '/api/public/demo/sessions/refresh', '/api/public/demo/sessions/refresh/']) {
+      const res = await preflight(url, STORE_ORIGIN);
+      expect(res.statusCode, url).toBe(204);
+      expect(res.headers['access-control-allow-origin'], url).toBe(STORE_ORIGIN);
+      expect(res.headers['access-control-allow-credentials'], url).toBe('true');
+      expect(String(res.headers['access-control-allow-headers'])).toContain('x-requested-with');
+    }
+    const plain = await preflight('/api/public/demo/info', STORE_ORIGIN, 'GET');
+    expect(plain.headers['access-control-allow-origin']).toBe(STORE_ORIGIN);
+    expect(plain.headers['access-control-allow-credentials']).toBeUndefined();
+    // the real response carries the same answer as its preflight
+    const started = await app.inject({ method: 'POST', url: '/api/public/demo/app-sessions', headers: { origin: STORE_ORIGIN, 'x-app-proof': 'dev' } });
+    expect(started.headers['access-control-allow-credentials']).toBe('true');
+    expect((await preflight('/api/public/demo/app-sessions', 'https://evil.example')).headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('lets every app call the self-service account endpoints, and only its own app’s other endpoints', async () => {
+    const res = await preflight(`/api/store/demo/security/${newId()}`, SELLER_ORIGIN, 'GET');
+    expect(res.headers['access-control-allow-origin']).toBe(SELLER_ORIGIN);
+    const get = await app.inject({ url: `/api/store/demo/security/x`, headers: { ...auth(callers.seller()), origin: SELLER_ORIGIN } });
+    expect(get.statusCode).toBe(200);
+    expect(get.headers['access-control-allow-origin']).toBe(SELLER_ORIGIN);
+    expect((await preflight('/api/store/demo/orders', SELLER_ORIGIN)).headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('exposes the headers apps read across origins', async () => {
+    const res = await app.inject({ url: '/api/store/demo/items', headers: { origin: STORE_ORIGIN } });
+    expect(res.statusCode).toBe(401);
+    const exposed = String(res.headers['access-control-expose-headers']).toLowerCase().split(/,\s*/);
+    expect(exposed).toEqual(expect.arrayContaining(['www-authenticate', 'x-request-id', 'idempotent-replayed', 'retry-after']));
+  });
+
+  it('says when to retry a refused request (Retry-After)', async () => {
+    const h = auth(callers.visitor({ audience: 'seller' }));
+    let res;
+    for (let i = 0; i < 31 && res?.statusCode !== 429; i++) res = await app.inject({ method: 'POST', url: '/api/public/demo/codes', headers: h });
+    expect(res!.statusCode).toBe(429);
+    const seconds = res!.json().error.details.retryAfterSeconds;
+    expect(seconds).toBeGreaterThan(0);
+    expect(res!.headers['retry-after']).toBe(String(seconds));
   });
 });
 

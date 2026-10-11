@@ -107,6 +107,12 @@ export interface ModuleContext<N extends ModuleName> {
      * by the auth middleware before serve() runs.
      */
     files(route: FileRoute): void;
+    /**
+     * Endpoints whose responses set or clear the website's refresh cookie (identity: sign-in, refresh,
+     * sign-out, session switches). Browsers call them with credentials, so they get credentialed CORS
+     * for their app's origins (kernel/http/security.ts); refresh-kind endpoints have it already.
+     */
+    sessionCookie(...operationIds: string[]): void;
   };
   readonly graphql: {
     resolvers(resolvers: ModuleResolvers): void;

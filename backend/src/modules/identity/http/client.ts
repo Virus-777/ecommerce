@@ -15,6 +15,25 @@ import { clientInfo, type Caller, type WithCookie } from '../service.js';
  * sign-out). Responses that start, rotate or end a session set or clear it.
  */
 export { REFRESH_COOKIE, REFRESH_COOKIE_PATH };
+
+/**
+ * Every endpoint whose handler calls send() below, i.e. may set or clear the cookie. Browsers call them
+ * with credentials (`credentials: 'include'`), so the kernel answers them with credentialed CORS for the
+ * app's origins; without it a cross-origin website never receives its refresh cookie.
+ */
+export const SESSION_COOKIE_ENDPOINTS = [
+  'startAppSession',
+  'signIn',
+  'verifySecondFactor',
+  'externalSignIn',
+  'confirmVerification',
+  'acceptInvitation',
+  'confirmInvitationTwoStep',
+  'refreshSession',
+  'signOut',
+  'switchSellerContext',
+] as const;
+
 const COOKIE_ATTRS = `Path=${REFRESH_COOKIE_PATH}; HttpOnly; Secure; SameSite=Strict`;
 
 export function caller(input: { principal: Principal | null; actor: Actor; requestId: string; request: FastifyRequest }): Caller {

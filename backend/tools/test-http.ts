@@ -44,6 +44,7 @@ const external = values.url?.replace(/\/$/, '');
 const REFRESH = 'http-test-refresh-token';
 const WEBHOOK_SECRET = 'dev-webhook-secret';
 const ORIGIN = 'http://localhost:3000';
+const SELLER_ORIGIN = 'http://localhost:3001';
 // modules whose endpoints are tested; the server also runs their dependencies
 const modules = only ?? Object.keys(allSpecs);
 const booted = only ? withDependencies(only) : modules;
@@ -69,7 +70,7 @@ if (external) {
   const app = await buildApp({
     env: { NODE_ENV: 'test' },
     modules: booted,
-    config: { launchPhase: 4, rateLimits: false, devTokens: true, devSigning: { file: '', jwk }, migrateOnStart: true, responseValidation: true, cors: { store: [ORIGIN], seller: [], admin: [] } },
+    config: { launchPhase: 4, rateLimits: false, devTokens: true, devSigning: { file: '', jwk }, migrateOnStart: true, responseValidation: true, cors: { store: [ORIGIN], seller: [SELLER_ORIGIN], admin: [] } },
     authorities: (a) => ({ ...a, verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'http-test-session', accountId: null, audience: 'store', kind: 'customer' } : a.verifyRefreshToken(t)) }),
     webhookVerifiers: verifiers,
   });
@@ -108,7 +109,7 @@ function rightToken(d: EndpointDef): Record<string, string> {
     case 'staff':
       return bearer(tok('staff'));
     case 'refresh':
-      return { cookie: `__Secure-mk_refresh=${REFRESH}` };
+      return { cookie: `__Secure-mk_refresh=${REFRESH}`, origin: ORIGIN, 'x-requested-with': 'fetch' }; // the website's cookie, from an app page
     case 'provider':
       return { 'x-event-id': crypto.randomUUID() }; // signed per request in send()
     case 'bootstrap':
@@ -204,7 +205,7 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
     account: bearer(signAccessToken(devSigner({ jwk: newDevJwk() }), devClaims('customer'), { issuer })),
     seller: bearer(`${tok('seller').slice(0, -8)}AAAAAAAA`),
     staff: bearer(sign(devClaims('staff'), 60, new Date(Date.now() - 3_600_000))),
-    refresh: { cookie: '__Secure-mk_refresh=not-a-refresh-token' },
+    refresh: { cookie: '__Secure-mk_refresh=not-a-refresh-token', origin: ORIGIN, 'x-requested-with': 'fetch' },
     provider: { 'x-signature': 'sha256=forged', 'x-timestamp': String(Math.floor(Date.now() / 1000)) },
     bootstrap: { 'x-app-proof': 'forged' },
   };
@@ -294,6 +295,37 @@ async function testServer() {
   record(op, 'CORS preflight answered without a token', r.status === 204 ? (external || r.headers.get('access-control-allow-origin') === ORIGIN ? null : 'origin not allowed') : brief(r));
   r = await send('OPTIONS', '/api/store/catalog/categories', { origin: 'https://evil.example', 'access-control-request-method': 'GET' });
   record(op, 'CORS refuses unknown origins', r.headers.get('access-control-allow-origin') ? 'allowed an unknown origin' : null);
+  r = await send('GET', '/api/store/catalog/categories', { origin: ORIGIN });
+  const exposed = (r.headers.get('access-control-expose-headers') ?? '').toLowerCase();
+  record(op, 'CORS exposes WWW-Authenticate, X-Request-Id, Idempotent-Replayed, Retry-After', ['www-authenticate', 'x-request-id', 'idempotent-replayed', 'retry-after'].every((h) => exposed.includes(h)) ? null : `exposes "${exposed}"`);
+
+  if (booted.includes('identity')) {
+    // the website signs in across origins: every response that sets the refresh cookie allows credentials
+    const credentialed: [string, string][] = [
+      ['/api/public/identity/sessions', ORIGIN],
+      ['/api/public/identity/app-sessions', ORIGIN],
+      ['/api/public/identity/sign-in-challenges/x/verify', ORIGIN],
+      ['/api/public/identity/sessions/refresh', ORIGIN],
+      ['/api/seller/identity/session/seller-context', SELLER_ORIGIN],
+    ];
+    for (const [url, origin] of credentialed) {
+      r = await send('OPTIONS', url, { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization, content-type, x-requested-with' });
+      const ok = r.headers.get('access-control-allow-origin') === origin && r.headers.get('access-control-allow-credentials') === 'true' && /x-requested-with/.test(r.headers.get('access-control-allow-headers') ?? '');
+      record(op, `credentialed CORS on ${url}`, external || ok ? null : `allow-origin ${r.headers.get('access-control-allow-origin')}, credentials ${r.headers.get('access-control-allow-credentials')}`);
+    }
+    r = await send('OPTIONS', '/api/public/identity/password-policy', { origin: ORIGIN, 'access-control-request-method': 'GET' });
+    record(op, 'no credentials where no cookie is set', r.headers.get('access-control-allow-credentials') ? 'credentials allowed' : null);
+    // account endpoints live under /api/store/identity but serve every app
+    r = await send('OPTIONS', '/api/store/identity/security', { origin: SELLER_ORIGIN, 'access-control-request-method': 'GET' });
+    record(op, 'account endpoints allow Seller Center', external || r.headers.get('access-control-allow-origin') === SELLER_ORIGIN ? null : 'seller origin refused');
+    r = await send('OPTIONS', '/api/store/catalog/categories', { origin: SELLER_ORIGIN, 'access-control-request-method': 'GET' });
+    record(op, 'other store endpoints refuse Seller Center', r.headers.get('access-control-allow-origin') ? 'seller origin allowed' : null);
+    // the website's cookie works only from an app page
+    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh=${REFRESH}` }, {});
+    record(op, 'cookie refresh without Origin → 403', expectStatus(r, 403, ['FORBIDDEN']));
+    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh=${REFRESH}`, origin: ORIGIN }, {});
+    record(op, 'cookie refresh without X-Requested-With → 403', expectStatus(r, 403, ['FORBIDDEN']));
+  }
 
   const ping = { query: '{ ping }' };
   const gql: [string, Record<string, string> | undefined, number][] = [

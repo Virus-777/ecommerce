@@ -51,6 +51,8 @@ export function createServer(config: Config): FastifyInstance {
   app.setErrorHandler((err: FastifyError, request, reply) => {
     if (err instanceof AppError) {
       if (err.status >= 500 && !isNotImplemented(err)) request.log.error({ err }, err.message);
+      const retryAfter = err.status === 429 ? retryAfterSeconds(err.details) : undefined;
+      if (retryAfter) reply.header('retry-after', String(retryAfter));
       return reply.code(err.status).send(err.toBody());
     }
     if (hasZodFastifySchemaValidationErrors(err)) {
@@ -74,4 +76,18 @@ export function createServer(config: Config): FastifyInstance {
     reply.code(404).send(new AppError('NOT_FOUND', `No route ${request.method} ${request.url.split('?')[0]}`).toBody());
   });
   return app;
+}
+
+/**
+ * Retry-After (seconds) for a 429: the middleware's and modules' `details.retryAfterSeconds`, or a
+ * lock's `details.lockedUntil`. Nothing when the refusal doesn't say when to retry.
+ */
+function retryAfterSeconds(details: unknown): number | undefined {
+  const d = details as { retryAfterSeconds?: unknown; lockedUntil?: unknown } | undefined;
+  if (typeof d?.retryAfterSeconds === 'number' && d.retryAfterSeconds > 0) return Math.ceil(d.retryAfterSeconds);
+  if (typeof d?.lockedUntil === 'string') {
+    const s = Math.ceil((Date.parse(d.lockedUntil) - Date.now()) / 1000);
+    if (s > 0) return s;
+  }
+  return undefined;
 }
