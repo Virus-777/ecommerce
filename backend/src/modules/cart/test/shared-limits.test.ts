@@ -4,19 +4,23 @@
  */
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createDatabase, type Database } from '../../../kernel/db/index.js';
+import { movingClock } from '../../../testing/app.js';
 import { pgliteServer, type PgServer } from '../../../testing/pg-server.js';
 import { boot, STORE, type Kit } from './helpers.js';
 
 let server: PgServer;
 const dbs: Database[] = [];
 const kits: Kit[] = [];
+// windows are clock hours: both instances run at half past an hour, so the 31 attempts never straddle two windows
+const clock = movingClock();
+clock.set(new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000 + 30 * 60_000));
 
 beforeAll(async () => {
   server = await pgliteServer({ migrated: true });
   for (let i = 0; i < 2; i++) {
     const database = await createDatabase({ url: server.url });
     dbs.push(database);
-    kits.push(await boot({ database, config: { rateLimitStore: 'postgres' } }));
+    kits.push(await boot({ database, clock, config: { rateLimitStore: 'postgres' } }));
   }
 });
 
