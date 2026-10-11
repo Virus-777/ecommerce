@@ -43,13 +43,13 @@ backend/
 
 | Prefix | Who | Auth |
 |---|---|---|
-| `/api/store/*` | Customers and guests (website + Android app) | Guest session or customer session |
+| `/api/store/*` | Customers and guests (website + Android app) | Visitor token (guests) or customer token; the self-service `account` endpoints under `/api/store/identity` take any app's signed-in token |
 | `/api/seller/*` | Seller owners and seller staff (Seller Center, website + app) | Seller member session; seller-level permissions |
 | `/api/admin/*` | Internal staff (Admin Center + Operations) | Staff session; role permissions + approval limits |
 | `/webhooks/*` | Payment and carrier providers | Provider signatures |
 | `/files/*` | Anyone holding a link the API issued (`<img src>`, downloads) | The link's own signature (HMAC, expiring for private files, permanent for public renditions), verified by the auth middleware |
 | `/graphql/store`, `/graphql/seller`, `/graphql/admin` | Same audiences as the REST areas | Read-only GraphQL for complex screens; persisted queries in production (see [api/graphql/README.md](api/graphql/README.md)) |
-| `/docs` | Developers | OpenAPI generated from module schemas |
+| `/docs` | Developers | OpenAPI generated from module schemas; only with `DOCS_ENABLED` (default: development), then without a token |
 
 Each module registers routes into these scopes. The module name is the next path segment: `/api/store/catalog/products`, `/api/admin/finance/payouts`.
 
