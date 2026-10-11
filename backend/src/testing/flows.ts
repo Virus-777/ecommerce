@@ -112,9 +112,11 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
     return v.body.accessToken as string;
   };
   const code = (s: Staff) => {
-    const c = totp(s.key, clock.now());
-    clock.advance(30_000); // one code per 30-second step
-    return c;
+    // A fresh 30-second step for every code (the server refuses a step already used), and the code is made for the
+    // clock time the request is checked at: made before advancing, a code from the end of a step was two steps
+    // behind by the time it was checked and was refused now and then (flows.test.ts).
+    clock.advance(30_000);
+    return totp(s.key, clock.now());
   };
 
   const self: Flows = {
