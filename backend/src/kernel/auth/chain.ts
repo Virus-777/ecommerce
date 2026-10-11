@@ -29,7 +29,7 @@ import {
   type RequestAuth,
   type SellerMemberAccess,
 } from './index.js';
-import { CALLER_LIMITS, CLASS_LIMITS, enforce, FILES_IP_LIMIT, IP_LIMIT, type RateLimitStore } from './rate-limit.js';
+import { CALLER_LIMITS, callerKey, CLASS_LIMITS, enforce, FILES_IP_LIMIT, IP_LIMIT, rateLimitClassOf, REFRESH_LIMIT, WEBHOOK_LIMIT, type RateLimitStore } from './rate-limit.js';
 import type { RevocationList } from './revocation.js';
 import { TokenError, verifyAccessToken, type AccessClaims, type KeyRing } from './tokens.js';
 
@@ -201,10 +201,12 @@ export class AuthChain {
     if (auth?.via !== 'token' || !auth.principal) return; // refresh, provider and bootstrap are checked elsewhere
     const p = auth.principal;
     const limits = CALLER_LIMITS[p.kind];
-    const who = `${p.kind}:${p.accountId ?? p.sessionId}`;
     if (limits) {
+      const who = callerKey(p, request.ip);
       await enforce(this.k.limits, `caller:${who}`, limits.all);
-      if (limits.writes && request.method !== 'GET') await enforce(this.k.limits, `writes:${who}`, limits.writes);
+      // GraphQL is the read layer (no mutations): its POSTs are reads
+      const write = request.method !== 'GET' && request.method !== 'HEAD' && !request.url.startsWith('/graphql/');
+      if (limits.writes && write) await enforce(this.k.limits, `writes:${who}`, limits.writes);
     }
     checkAudience(d.area, d.auth, p);
     checkCallerKind(d.auth, p);
@@ -271,6 +273,9 @@ export class AuthChain {
   /** Hooks for one spec endpoint, in Fastify order. */
   endpointHooks(module: string, operationId: string, d: EndpointDef) {
     const k = this.k;
+    const rateClass = rateLimitClassOf(d);
+    const rules = CLASS_LIMITS[rateClass ?? ''] ?? [];
+    if (rateClass && !CLASS_LIMITS[rateClass]) throw new Error(`${operationId}: unknown rate-limit class ${rateClass}`);
     const onRequest = async (request: FastifyRequest) => {
       if (d.phase > k.config.launchPhase) {
         throw new AppError('NOT_IMPLEMENTED', `Planned for launch phase ${d.phase}.`, { operation: operationId, reason: 'later_phase', phase: d.phase });
@@ -281,9 +286,9 @@ export class AuthChain {
     const preValidation = async (request: FastifyRequest) => {
       if (d.auth === 'refresh') await this.#verifyRefresh(request);
       if (d.auth === 'provider') await this.#verifyWebhook(module, request);
-      for (const rule of CLASS_LIMITS[d.rateLimit ?? ''] ?? []) {
-        const key = rule.key({ ip: request.ip, body: request.body });
-        if (key) await enforce(k.limits, `${d.rateLimit}:${key}`, rule.limit);
+      for (const rule of rules) {
+        const key = rule.key({ ip: request.ip, body: request.body, principal: request.auth?.principal });
+        if (key) await enforce(k.limits, `${rateClass}:${key}`, rule.limit);
       }
       // a missing step-up proof is a step-up problem (403), not a validation one: checked before the schema
       if (d.stepUp && !stepUpProof(d.stepUp.kind, request)) throw stepUpRequired(d.stepUp);
@@ -342,6 +347,7 @@ export class AuthChain {
     if (fromCookie) this.#assertAppPage(request);
     const session = await this.k.authorities.verifyRefreshToken(token);
     if (!session) throw tokenRejected('invalid');
+    await enforce(this.k.limits, `refresh:${session.sessionId}`, REFRESH_LIMIT);
     request.auth = { via: 'refresh', principal: null, refreshSession: session };
   }
 
@@ -370,6 +376,7 @@ export class AuthChain {
     if (info.timestamp && Math.abs(this.k.clock.now().getTime() - info.timestamp.getTime()) > WEBHOOK_WINDOW_MS) {
       throw new AppError('UNAUTHORIZED', 'Webhook timestamp outside the allowed window', { reason: 'signature_expired' });
     }
+    await enforce(this.k.limits, `webhook:${info.provider}`, WEBHOOK_LIMIT);
     request.auth = { via: 'provider', principal: null, provider: { name: info.provider, eventId: info.eventId } };
     if (info.eventId) {
       const seen = await sql<{ n: number }>`select 1 as n from kernel.webhook_events where provider = ${info.provider} and event_id = ${info.eventId}`.execute(this.k.db);
