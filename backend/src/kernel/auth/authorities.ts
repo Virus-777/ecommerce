@@ -25,9 +25,11 @@ export interface Authorities {
   customerIdOf(accountId: string): Promise<string | null>;
   /** Admin requests: whether the staff session is live (and record the activity); null when identity can't answer */
   touchStaffSession(sessionId: string): Promise<{ live: boolean; reason?: string } | null>;
+  /** The oldest Android version code still served (settings apps.android.*); null when settings can't answer */
+  androidMinimum(): Promise<{ minVersionCode: number; updateUrl: string | null } | null>;
 }
 
-type Modules = 'identity' | 'access' | 'sellers' | 'customers';
+type Modules = 'identity' | 'access' | 'sellers' | 'customers' | 'settings';
 /** A module's public API if the module is enabled. */
 export type Lookup = <M extends Modules>(module: M) => PublicApiMap[M] | undefined;
 
@@ -56,6 +58,17 @@ export function moduleAuthorities(lookup: Lookup): Authorities {
       }),
     customerIdOf: (accountId) => ask(null, async () => (await lookup('customers')?.getCustomerByUserId(accountId))?.id),
     touchStaffSession: (sessionId) => ask(null, () => lookup('identity')?.touchStaffSession(sessionId)),
+    // version gating is not authorization: any failure means "don't gate", never a refused request
+    androidMinimum: async () => {
+      const settings = lookup('settings');
+      if (!settings) return null;
+      try {
+        const [min, updateUrl] = await Promise.all([settings.get<number>('apps.android.minVersionCode'), settings.get<string | null>('apps.android.updateUrl')]);
+        return typeof min === 'number' ? { minVersionCode: min, updateUrl: updateUrl ?? null } : null;
+      } catch {
+        return null;
+      }
+    },
   };
 }
 

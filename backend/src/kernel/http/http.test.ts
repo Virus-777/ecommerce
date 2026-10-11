@@ -114,6 +114,7 @@ beforeAll(async () => {
     // REFRESH is session-1; "refresh-session-<x>" is its own session x
     wrap: (a) => ({
       ...a,
+      androidMinimum: async () => ({ minVersionCode: 140, updateUrl: 'https://play.example/marketly' }),
       verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'session-1', audience: 'store', kind: 'customer' } : t.startsWith('refresh-session-') ? { sessionId: t, audience: 'store', kind: 'customer' } : null),
     }),
     webhookVerifiers: new Map([['acks', hmacWebhookVerifier(config, 'acks')]]),
@@ -168,6 +169,19 @@ describe('token on every request', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['x-request-id']).toBe('req-123');
     expect(res.headers['cache-control']).toBe('private, no-store');
+  });
+
+  it('asks Android apps older than the minimum version code to update (426), after the token check', async () => {
+    const url = `/api/store/demo/items/${newId()}`;
+    for (const client of ['android/139', 'android/1.3.9+139', 'ANDROID/7']) {
+      const res = await app.inject({ url, headers: { ...visitor, 'x-client': client } });
+      expect(res.statusCode, client).toBe(426);
+      expect(res.json().error).toMatchObject({ code: 'UPGRADE_REQUIRED', details: { minVersionCode: 140, updateUrl: 'https://play.example/marketly' } });
+    }
+    for (const client of ['android/140', 'android/1.4.2+151', 'web', 'android/1.4.2']) {
+      expect((await app.inject({ url, headers: { ...visitor, 'x-client': client } })).statusCode, client).toBe(200);
+    }
+    expect((await app.inject({ url, headers: { 'x-client': 'android/1' } })).statusCode).toBe(401);
   });
 
   it('takes any app’s token on public endpoints', async () => {

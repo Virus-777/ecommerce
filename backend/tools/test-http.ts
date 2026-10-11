@@ -299,6 +299,13 @@ async function testServer() {
   if (!external) record(op, '/docs off outside development', expectStatus(r, 401, []));
   r = await send('GET', '/api/store/catalog/categories', { ...bearer(tok('visitor')), authorization: 'Basic dXNlcjpwYXNz' });
   record(op, 'non-Bearer Authorization → 401', expectStatus(r, 401, ['UNAUTHORIZED']));
+  if (booted.includes('settings')) {
+    // apps.android.minVersionCode is at least 1: version code 0 is always too old
+    r = await send('GET', '/api/public/settings/app-config', { ...bearer(tok('visitor')), 'x-client': 'android/0' });
+    record(op, 'outdated Android app (X-Client) → 426', expectStatus(r, 426, ['UPGRADE_REQUIRED']));
+    r = await send('GET', '/api/public/settings/app-config', { ...bearer(tok('visitor')), 'x-client': 'android/1.0.0+999999' });
+    record(op, 'current Android app (X-Client) → 200', expectStatus(r, 200, []));
+  }
 
   r = await send('OPTIONS', '/api/store/catalog/categories', { origin: ORIGIN, 'access-control-request-method': 'GET', 'access-control-request-headers': 'authorization' });
   record(op, 'CORS preflight answered without a token', r.status === 204 ? (external || r.headers.get('access-control-allow-origin') === ORIGIN ? null : 'origin not allowed') : brief(r));

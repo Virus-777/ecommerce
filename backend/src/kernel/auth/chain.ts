@@ -119,12 +119,15 @@ export class AuthChain {
   readonly customers: TtlCache<string | null>;
   /** Staff session liveness (identity.touchStaffSession), 5 s per session; null = identity did not answer */
   readonly staffSessions: TtlCache<StaffSessionState | null>;
+  /** The Android minimum version (settings), 60 s */
+  readonly androidMinimum: TtlCache<Awaited<ReturnType<Authorities['androidMinimum']>>>;
 
   constructor(readonly k: AuthKernel) {
     this.permissions = new TtlCache(k.clock);
     this.members = new TtlCache(k.clock);
     this.customers = new TtlCache(k.clock, false); // a customer created after the first request must be in scope at once
     this.staffSessions = new TtlCache(k.clock, false, STAFF_SESSION_CACHE_MS);
+    this.androidMinimum = new TtlCache(k.clock);
   }
 
   /* ---------------------------------------------------------------- every URL */
@@ -138,7 +141,28 @@ export class AuthChain {
       if (kind === 'file-link') await enforce(this.k.limits, `files-ip:${request.ip}`, FILES_IP_LIMIT);
       else await enforce(this.k.limits, `ip:${request.ip}`, IP_LIMIT);
       await this.authenticate(request, kind);
+      await this.#checkClientVersion(request);
     });
+  }
+
+  /**
+   * M1 version gate: an Android app older than settings apps.android.minVersionCode gets 426
+   * UPGRADE_REQUIRED (after authentication, so the version policy isn't served without a token).
+   * X-Client is `web` or `android/<versionCode>` (optionally `android/<versionName>+<versionCode>`, e.g.
+   * android/1.4.2+142); it is never trusted for anything but this and analytics. Without a version code
+   * there is nothing to compare, so the request goes on.
+   */
+  async #checkClientVersion(request: FastifyRequest) {
+    const header = request.headers['x-client'];
+    const code = typeof header === 'string' ? /^android\/(?:[\w.-]+\+)?(\d{1,10})$/i.exec(header.trim())?.[1] : undefined;
+    if (!code) return;
+    const min = await this.androidMinimum.get('android', () => this.k.authorities.androidMinimum());
+    if (min && Number(code) < min.minVersionCode) {
+      throw new AppError('UPGRADE_REQUIRED', 'This version of the Marketly app is no longer supported; update it to continue', {
+        minVersionCode: min.minVersionCode,
+        ...(min.updateUrl ? { updateUrl: min.updateUrl } : {}),
+      });
+    }
   }
 
   /** Development only: /docs (Swagger UI) is served without a token so a browser can open it. */
