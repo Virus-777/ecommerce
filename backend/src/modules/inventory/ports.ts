@@ -53,9 +53,11 @@ export interface MovementFilter {
   sku?: string;
   reasonCode?: string;
   referenceKind?: string;
-  /** inclusive, YYYY-MM-DD in UTC */
+  /** inclusive market days, YYYY-MM-DD */
   from?: string;
   to?: string;
+  /** the market time zone the days are in (default UTC) */
+  timeZone?: string;
 }
 
 /** Persistence for this module's own tables: inventory.locations, inventory.stock_items, inventory.stock_levels, inventory.stock_movements, inventory.incoming_expectations, inventory.reservations, inventory.reservation_lines, inventory.adjustments, inventory.held_stock, inventory.inbound_receipts, inventory.inbound_lines, inventory.return_outcomes, inventory.discrepancies, inventory.transfers, inventory.transfer_lines, inventory.stock_counts, inventory.count_lines, inventory.valuation_snapshots. */

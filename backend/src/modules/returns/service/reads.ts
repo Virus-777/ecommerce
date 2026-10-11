@@ -3,6 +3,7 @@
  * their own returns, staff everything): lists with tabs and filters, queue tiles and KPIs, the inspection
  * queue, refund request lists, exports through reports and the per-item eligibility for order views.
  */
+import { zonedDayRange } from '../../../kernel/lib/clock.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
@@ -190,8 +191,7 @@ export class Reads {
   }
 
   async sellerReturnStats(sellerId: string, range: common.DateRange): Promise<{ requests: number; returnRatePct: number; respondedOnTimePct: number; unresolved: number }> {
-    const from = new Date(`${range.from}T00:00:00Z`);
-    const to = new Date(new Date(`${range.to}T00:00:00Z`).getTime() + DAY);
+    const { start: from, end: to } = zonedDayRange(range, this.core.tz) as { start: Date; end: Date };
     const rows = (await this.core.repo.find('returns', { seller_id: sellerId, requested_at: { op: '>=', value: from } })).filter((r) => r.requested_at.getTime() < to.getTime());
     const decided = rows.filter((r) => r.decision);
     const onTime = decided.filter((r) => !r.response_due_at || new Date(r.decision!.decidedAt).getTime() <= r.response_due_at.getTime());

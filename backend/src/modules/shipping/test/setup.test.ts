@@ -1,3 +1,4 @@
+import { marketDate } from '../../../testing/app.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { harness, tokens, type Harness } from './helpers.js';
@@ -13,7 +14,7 @@ afterAll(async () => {
 const ADMIN = '/api/admin/shipping';
 const SELLER = '/api/seller/shipping';
 const STORE = '/api/store/shipping';
-const day = (d: number) => new Date(h.clock.now().getTime() + d * 86_400_000).toISOString().slice(0, 10);
+const day = (d: number) => marketDate(h.clock.now(), d);
 
 describe('carriers, methods and zones', () => {
   it('starts with the market reference data and keeps carrier contacts from sellers', async () => {

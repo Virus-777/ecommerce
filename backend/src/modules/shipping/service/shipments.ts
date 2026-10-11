@@ -3,6 +3,7 @@
  * from carrier webhooks and polling through one status model, corrected with history, and the failed-delivery
  * choice. Missing tracking never implies delivery; deliver only comes from a carrier event or a staff record with proof.
  */
+import { zonedDayRange } from '../../../kernel/lib/clock.js';
 import type { Principal } from '../../../kernel/auth/index.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -1173,8 +1174,7 @@ export class Shipments {
   }
 
   async dispatchMetrics(sellerId: string | null, range: common.DateRange): Promise<DispatchMetrics> {
-    const from = new Date(`${range.from}T00:00:00Z`);
-    const to = new Date(new Date(`${range.to}T00:00:00Z`).getTime() + DAY_MS);
+    const { start: from, end: to } = zonedDayRange(range, this.core.tz) as { start: Date; end: Date };
     // a seller's figures leave out Fulfilled by Marketly packages: Marketly dispatched them
     const rows = await this.repo.find('shipments', {
       owner_type: sellerId ? 'seller' : 'official',

@@ -1,3 +1,4 @@
+import { marketDate } from '../../../testing/app.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { harness, offer, tokens, USD, type Harness } from './helpers.js';
@@ -278,8 +279,8 @@ describe('pass 3: profile owners, exact in-use counts, ships from, Official Stor
 
   it('getOfficialFreeShipping answers the default Official Store profile threshold, else an active official free-shipping rule', async () => {
     expect(await h.service.getOfficialFreeShipping()).toEqual({ threshold: USD(3500), methodCode: 'standard', active: true, label: 'Free Standard shipping on Official Store orders over $35' });
-    const today = new Date(h.clock.now().getTime()).toISOString().slice(0, 10);
-    const later = new Date(h.clock.now().getTime() + 20 * 86_400_000).toISOString().slice(0, 10);
+    const today = marketDate(h.clock.now());
+    const later = marketDate(h.clock.now(), 20);
     const rule = await h.call('POST', `${ADMIN}/free-shipping-rules`, tokens.staff(), { name: 'Spring free shipping', scope: 'official_store', minOrderValue: USD(2500), methodCode: 'standard', fundedBy: 'company', window: { from: today, to: later }, reason: 'Campaign' });
     expect(rule.status, JSON.stringify(rule.body)).toBe(201);
     expect(await h.service.getOfficialFreeShipping()).toEqual({ threshold: USD(2500), methodCode: 'standard', active: true, label: 'Free Standard shipping on Official Store orders over $25' });

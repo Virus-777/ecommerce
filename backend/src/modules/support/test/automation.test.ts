@@ -2,6 +2,7 @@
  * Jobs (seller deadline, SLA timers, offer expiry, auto-close), consumers of other modules' events, the public
  * API other modules call and the GraphQL read layer.
  */
+import { marketDate } from '../../../testing/app.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { DAY, harness, reportProblem, sellerOrder, tokens, USD, type Harness } from './helpers.js';
@@ -88,7 +89,7 @@ describe('jobs', () => {
 
   it('an agreed ship-by date that passes unshipped falls back to a refund', async () => {
     const c = await sellerCase({ deliver: false });
-    const shipBy = new Date(h.clock.now().getTime() + 2 * DAY).toISOString().slice(0, 10);
+    const shipBy = marketDate(h.clock.now(), 2);
     const reply = await h.call('POST', `/api/seller/support/cases/${c.caseId}/messages`, tokens.seller(c.sellerId), { body: 'It ships soon', offer: { kind: 'ship_by_date', shipBy } });
     expect(reply.status, JSON.stringify(reply.body)).toBe(200);
     const accepted = await h.call('POST', `/api/store/support/cases/${c.caseId}/offers/${reply.body.offers[0].id}/respond`, tokens.customer(c.customerId), { accept: true });
@@ -109,7 +110,7 @@ describe('jobs', () => {
 describe('consumers', () => {
   it('a ship-by remedy completes when the item is delivered', async () => {
     const c = await sellerCase({ deliver: false });
-    const shipBy = new Date(h.clock.now().getTime() + 3 * DAY).toISOString().slice(0, 10);
+    const shipBy = marketDate(h.clock.now(), 3);
     const reply = await h.call('POST', `/api/seller/support/cases/${c.caseId}/messages`, tokens.seller(c.sellerId), { body: 'Shipping Friday', offer: { kind: 'ship_by_date', shipBy } });
     await h.call('POST', `/api/store/support/cases/${c.caseId}/offers/${reply.body.offers[0].id}/respond`, tokens.customer(c.customerId), { accept: true });
     const lines = [{ orderItemId: c.itemId, quantity: 1, title: 'Linen Throw', variantLabel: '' }];
@@ -201,7 +202,7 @@ describe('consumers', () => {
 describe('public API and GraphQL', () => {
   it('answers the in-process reads other modules use', async () => {
     const c = await sellerCase();
-    const today = h.clock.now().toISOString().slice(0, 10);
+    const today = marketDate(h.clock.now());
     const stats = await h.service.sellerCaseStats(c.sellerId, { from: today, to: today });
     expect(stats).toMatchObject({ open: 1, unresolved: 1, decidedAgainstSeller: 0 });
     const other = newId();

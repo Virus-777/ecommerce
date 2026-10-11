@@ -5,6 +5,7 @@
  * exceptions are staff-owned, the seller's dispatch metrics leave the packages out, and migration 0004 backfills.
  * fulfillment-service.getServiceLocation is stubbed (h.serviceLocation): FS is built in parallel.
  */
+import { marketDate } from '../../../testing/app.js';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
@@ -136,8 +137,8 @@ describe('dispatch watch (G3)', () => {
     const sellerId = newId();
     const token = tokens.seller(sellerId);
     // the seller is closed for a month: its own schedule would push the deadline past it
-    const from = new Date(h.clock.now().getTime() - 2 * 24 * HOUR).toISOString().slice(0, 10);
-    const to = new Date(h.clock.now().getTime() + 30 * 24 * HOUR).toISOString().slice(0, 10);
+    const from = marketDate(h.clock.now(), -2);
+    const to = marketDate(h.clock.now(), 30);
     expect((await h.call('POST', `${SELLER}/closures`, token, { name: 'Away', from, to })).status).toBe(201);
     const a = product(h, { title: 'Kettle', price: 4000, sellerId });
     const input = checkout([group(h, [line(a, 1)], { sellerId, fulfilledBy: 'marketly_service' })], { customerId: newId(), pending: true });
@@ -149,7 +150,7 @@ describe('dispatch watch (G3)', () => {
     const watch = (await h.service.core.repo.get('dispatch_watch', placed.groups[0]!.id))!;
     expect(watch.fulfilled_by).toBe('marketly_service');
     expect(watch.due_at.getTime()).toBeGreaterThan(new Date(placed.groups[0]!.delivery.dispatchBy).getTime());
-    expect(watch.due_at.toISOString().slice(0, 10) <= to).toBe(true);
+    expect(marketDate(watch.due_at) <= to).toBe(true);
     expect(watch.due_at.getTime()).toBeLessThan(h.clock.now().getTime() + 10 * 24 * HOUR);
   });
 });

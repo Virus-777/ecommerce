@@ -3,6 +3,7 @@
  * (orders for purchases, catalog for product titles, sellers for names, customers for display names,
  * media for photos) and the product and seller summaries. The use cases live in the part classes.
  */
+import { zonedDayRange } from '../../../kernel/lib/clock.js';
 import { AppError, isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventMap } from '../../../kernel/events/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
@@ -333,7 +334,7 @@ export class Core {
         sellerName: g.seller.ownerType === 'official' ? OFFICIAL_STORE_NAME : g.seller.name,
         status: g.status,
         deliveredAt: delivered.length ? new Date(Math.min(...delivered.map((d) => d.getTime()))) : null,
-        arrivalTo: to ? new Date(`${to}T23:59:59.999Z`) : null,
+        arrivalTo: to ? new Date(zonedDayRange({ to }, this.ctx.config.market.timeZone).end!.getTime() - 1) : null,
         itemTitles: g.items.filter((i) => i.state !== 'cancelled').map((i) => i.title),
         itemIds: g.items.map((i) => i.id),
       };

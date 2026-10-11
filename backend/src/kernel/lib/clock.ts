@@ -28,6 +28,19 @@ export function dateInZone(at: Date, timeZone: string): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+/**
+ * The instants a range of calendar days covers in a time zone: from the start of `from` up to (not including) the
+ * start of the day after `to`. Use it for date filters ("orders from 2026-10-01 to 2026-10-07"): reading such
+ * dates as UTC days shifts every range by the market's offset.
+ */
+export function zonedDayRange(range: { from?: string | null; to?: string | null }, timeZone: string): { start?: Date; end?: Date } {
+  const nextDay = (d: string) => new Date(Date.parse(`${d}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  return {
+    ...(range.from ? { start: zonedTimeToUtc(range.from, '00:00', timeZone) } : {}),
+    ...(range.to ? { end: zonedTimeToUtc(nextDay(range.to), '00:00', timeZone) } : {}),
+  };
+}
+
 /** The UTC instant of a wall-clock time in a time zone, e.g. 23:59 market time on a date. */
 export function zonedTimeToUtc(date: string, time: string, timeZone: string): Date {
   const [y, mo, d] = date.split('-').map(Number) as [number, number, number];

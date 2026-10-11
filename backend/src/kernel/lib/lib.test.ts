@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AppError } from '../errors/index.js';
 import { parseSchedule } from '../jobs/index.js';
-import { dateInZone, zonedTimeToUtc } from './clock.js';
+import { dateInZone, zonedDayRange, zonedTimeToUtc } from './clock.js';
 import { isUuid, newId } from './ids.js';
 import { allocate, format, money, multiply } from './money.js';
 import { decodeCursor, encodeCursor, pageOf, toPageRequest } from './pagination.js';
@@ -69,6 +69,19 @@ describe('market time', () => {
     expect(zonedTimeToUtc('2026-01-15', '23:59', 'America/Los_Angeles').toISOString()).toBe('2026-01-16T07:59:00.000Z');
     expect(zonedTimeToUtc('2026-07-15', '02:00', 'America/Los_Angeles').toISOString()).toBe('2026-07-15T09:00:00.000Z');
     expect(dateInZone(new Date('2026-03-01T05:00:00Z'), 'America/Los_Angeles')).toBe('2026-02-28');
+  });
+
+  it('turns a range of market days into instants (a filter "today" includes the market evening, not UTC midnight)', () => {
+    const tz = 'America/Los_Angeles';
+    const today = zonedDayRange({ from: '2026-10-10', to: '2026-10-10' }, tz);
+    expect(today.start!.toISOString()).toBe('2026-10-10T07:00:00.000Z');
+    expect(today.end!.toISOString()).toBe('2026-10-11T07:00:00.000Z');
+    const evening = new Date('2026-10-11T05:09:00Z'); // 22:09 on the 10th in Los Angeles, already the 11th in UTC
+    expect(evening >= today.start! && evening < today.end!).toBe(true);
+    // the day the clocks go back is 25 hours long
+    const fallBack = zonedDayRange({ from: '2026-11-01', to: '2026-11-01' }, tz);
+    expect(fallBack.end!.getTime() - fallBack.start!.getTime()).toBe(25 * 3_600_000);
+    expect(zonedDayRange({}, tz)).toEqual({});
   });
 });
 

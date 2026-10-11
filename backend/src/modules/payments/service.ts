@@ -227,7 +227,7 @@ export class PaymentsService implements PaymentsPublicApi {
         .catch(() => null);
       if (order) orderIds = [order.order.id];
     }
-    const res = await this.core.repo.listIntents({ ...q, q: term, orderIds }, page);
+    const res = await this.core.repo.listIntents({ ...q, q: term, orderIds, timeZone: this.core.ctx.config.market.timeZone }, page);
     return { ...res, items: await this.views.paymentRows(res.items, this.core.lookup()) };
   }
 

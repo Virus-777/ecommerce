@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import { zonedDayRange } from '../../../../kernel/lib/clock.js';
 import { paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type { PaymentsDb } from '../../../../spec/payments.js';
 import type { PaymentsRepository, Recs, Table, WebhookRec } from '../../ports.js';
@@ -160,8 +161,9 @@ export function createPostgresPaymentsRepository(db: Kysely<PaymentsDb>): Paymen
     async listIntents(f, page: PageRequest) {
       let q = d.selectFrom('intents').selectAll();
       if (f.status) q = q.where('status', '=', f.status);
-      if (f.from) q = q.where('created_at', '>=', new Date(`${f.from}T00:00:00Z`));
-      if (f.to) q = q.where('created_at', '<', new Date(new Date(`${f.to}T00:00:00Z`).getTime() + 86_400_000));
+      const days = zonedDayRange(f, f.timeZone ?? 'UTC');
+      if (days.start) q = q.where('created_at', '>=', days.start);
+      if (days.end) q = q.where('created_at', '<', days.end);
       if (f.q?.trim() || f.orderIds?.length) {
         const term = like(f.q ?? '');
         const ids = f.orderIds ?? [];

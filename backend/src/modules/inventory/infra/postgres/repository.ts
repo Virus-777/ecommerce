@@ -1,4 +1,5 @@
 import { sql, type Kysely } from 'kysely';
+import { zonedDayRange } from '../../../../kernel/lib/clock.js';
 import { paginate, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type { Inbox } from '../../../../kernel/events/inbox.js';
 import type { InventoryDb } from '../../../../spec/inventory.js';
@@ -186,8 +187,9 @@ export function createPostgresInventoryRepository(db: Kysely<InventoryDb>, inbox
       if (f.sku) q = q.where('i.sku', '=', f.sku);
       if (f.reasonCode) q = q.where('m.reason_code', '=', f.reasonCode);
       if (f.referenceKind) q = q.where('m.ref_kind', '=', f.referenceKind);
-      if (f.from) q = q.where('m.at', '>=', new Date(`${f.from}T00:00:00Z`));
-      if (f.to) q = q.where('m.at', '<', new Date(new Date(`${f.to}T00:00:00Z`).getTime() + 86_400_000));
+      const days = zonedDayRange(f, f.timeZone ?? 'UTC');
+      if (days.start) q = q.where('m.at', '>=', days.start);
+      if (days.end) q = q.where('m.at', '<', days.end);
       return paginate(q, page, { column: 'm.at', direction: 'desc', id: 'm.id' }) as never;
     },
     async recentMovements(itemIds, limit) {

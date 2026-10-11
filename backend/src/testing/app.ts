@@ -9,6 +9,7 @@ import { buildApp, type BuildOptions } from '../app.js';
 import { devClaims, type DevClaims, type DevOptions } from '../kernel/auth/dev.js';
 import { devSigner, newDevJwk, signAccessToken } from '../kernel/auth/tokens.js';
 import { createDatabase, type Database } from '../kernel/db/index.js';
+import { dateInZone } from '../kernel/lib/clock.js';
 import { withDependencies } from '../kernel/module-system/loader.js';
 
 /** One dev key per test process */
@@ -43,6 +44,12 @@ export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}
  * A clock that follows real time and can be moved ahead (deadlines, expiry jobs) while dev tokens,
  * signed at real time, stay valid. Pass it as `clock` to buildTestApp.
  */
+/**
+ * The market's calendar date `days` from `at` (YYYY-MM-DD), which is what modules mean by "today". A UTC date
+ * (`toISOString().slice(0, 10)`) is a day off for part of every day, so tests comparing with module dates use this.
+ */
+export const marketDate = (at: Date, days = 0, timeZone = 'America/Los_Angeles') => dateInZone(new Date(at.getTime() + days * 86_400_000), timeZone);
+
 export function movingClock(): { now(): Date; advance(ms: number): void; set(at: Date | string): void } {
   let offset = 0;
   return {

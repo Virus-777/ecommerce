@@ -108,8 +108,11 @@ export interface PaymentListFilter {
   orderIds?: string[];
   status?: string;
   flag?: string;
+  /** inclusive market days, YYYY-MM-DD */
   from?: string;
   to?: string;
+  /** the market time zone the days are in (default UTC) */
+  timeZone?: string;
 }
 export interface RefundListFilter {
   status?: string;

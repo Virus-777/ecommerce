@@ -26,7 +26,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as notifications from '../../../spec/notifications.js';
 import type * as offers from '../../../spec/offers.js';
 import type { OrderCreateInput, OrderDetail, OrderGroupInput, OrderItemInput } from '../../../spec/orders.js';
-import { auth, buildTestApp, callers, movingClock, signWebhook, tokenClock } from '../../../testing/app.js';
+import { auth, buildTestApp, callers, movingClock, signWebhook, tokenClock, marketDate } from '../../../testing/app.js';
 import type { ShippingService } from '../service.js';
 
 export const USD = (amount: number) => ({ amount, currency: 'USD' });
@@ -264,7 +264,7 @@ export function group(h: Harness, items: OrderItemInput[], o: { ownerType?: 'off
   const ownerType = o.ownerType ?? 'seller';
   const total = items.reduce((s, i) => s + i.unitPrice.amount * i.quantity, 0);
   const now = h.clock.now();
-  const day = (d: number) => new Date(now.getTime() + d * 86_400_000).toISOString().slice(0, 10);
+  const day = (d: number) => marketDate(now, d);
   if (o.fulfilledBy === 'marketly_service') for (const i of items) h.serviceOffers.add(i.offerId);
   return {
     key: newId(),

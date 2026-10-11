@@ -1879,7 +1879,7 @@ export class InventoryService implements InventoryPublicApi {
   }
 
   async listOwnMovements(sellerId: string, query: { stockItemId?: string; reasonCode?: string; from?: string; to?: string }, page: PageRequest): Promise<common.Page<Movement>> {
-    const p = await this.repo.pageMovements({ ownerType: 'seller', sellerId, ...(query.stockItemId ? { stockItemIds: [query.stockItemId] } : {}), reasonCode: query.reasonCode, from: query.from, to: query.to }, page);
+    const p = await this.repo.pageMovements({ ownerType: 'seller', sellerId, ...(query.stockItemId ? { stockItemIds: [query.stockItemId] } : {}), reasonCode: query.reasonCode, from: query.from, to: query.to, timeZone: this.ctx.config.market.timeZone }, page);
     return { ...p, items: await this.#movementsApi(p.items) };
   }
 
@@ -2175,7 +2175,7 @@ export class InventoryService implements InventoryPublicApi {
   }
 
   async listMovements(query: { stockItemId?: string; sku?: string; reasonCode?: string; referenceKind?: string; from?: string; to?: string }, page: PageRequest): Promise<common.Page<Movement>> {
-    const p = await this.repo.pageMovements({ ...(query.stockItemId ? { stockItemIds: [query.stockItemId] } : {}), sku: query.sku, reasonCode: query.reasonCode, referenceKind: query.referenceKind, from: query.from, to: query.to }, page);
+    const p = await this.repo.pageMovements({ ...(query.stockItemId ? { stockItemIds: [query.stockItemId] } : {}), sku: query.sku, reasonCode: query.reasonCode, referenceKind: query.referenceKind, from: query.from, to: query.to, timeZone: this.ctx.config.market.timeZone }, page);
     return { ...p, items: await this.#movementsApi(p.items) };
   }
 

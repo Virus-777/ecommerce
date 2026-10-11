@@ -1,4 +1,5 @@
 import { SYSTEM_ACTOR } from '../../kernel/auth/index.js';
+import { zonedDayRange } from '../../kernel/lib/clock.js';
 import { AppError, isNotImplemented } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
@@ -1236,8 +1237,8 @@ export class AccessService implements AccessPublicApi {
       {
         ...(query.accountId ? { accountId: query.accountId } : {}),
         ...(query.status ? { statuses: [query.status] } : !query.from && !query.to ? { statuses: ['pending_approval', 'scheduled', 'active'], endsAfter: now } : {}),
-        ...(query.from ? { from: new Date(`${query.from}T00:00:00Z`) } : {}),
-        ...(query.to ? { to: new Date(new Date(`${query.to}T00:00:00Z`).getTime() + 86_400_000) } : {}),
+        ...(query.from ? { from: zonedDayRange(query, this.ctx.config.market.timeZone).start } : {}),
+        ...(query.to ? { to: zonedDayRange(query, this.ctx.config.market.timeZone).end } : {}),
       },
       page,
     );
