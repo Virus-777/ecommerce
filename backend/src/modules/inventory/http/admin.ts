@@ -68,6 +68,6 @@ export const adminRoutes = (service: InventoryService) =>
     recordCountLines: async ({ params, body }) => service.recordCountLines(params.id, body.lines),
     /** POST /counts/{id}/submit: Submit a count; differences become count-correction adjustments */
     submitCount: async ({ params, principal, actor, requestId }) => service.submitCount(params.id, { principal, actor, requestId }),
-    /** POST /stock-items/{id}/merge: Merge this company SKU into another one (e.g. after a catalog variant merge) (TODO pass 3: implement) */
+    /** POST /stock-items/{id}/merge: Merge this company SKU into another one (e.g. after a catalog variant merge) */
     mergeStockItem: async ({ params, body, principal, actor, requestId }) => service.mergeStockItemAsStaff(params.id, body, { principal, actor, requestId }),
   });
