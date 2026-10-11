@@ -45,6 +45,8 @@ describe('development tokens guard', () => {
     expect(c.host).toBe('0.0.0.0');
     expect(c.devTokens).toBe(false);
     expect(() => loadConfig(prod, { devTokens: true })).toThrow(/production/);
+    expect(c.docsEnabled).toBe(false);
+    expect(() => loadConfig({ ...prod, DOCS_ENABLED: 'true' })).toThrow(/DOCS_ENABLED/);
   });
 
   it('knows loopback hosts and local databases', () => {

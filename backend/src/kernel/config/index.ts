@@ -191,6 +191,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     ...overrides,
   };
   if (prod && config.devTokens) throw new Error('DEV_TOKENS cannot be enabled in production');
+  if (prod && config.docsEnabled) throw new Error('DOCS_ENABLED cannot be enabled in production (/docs is served without a token)');
   // development tokens, the dev key and the default secrets are for this machine only (docs/03 §16)
   if (config.devTokens && !isLoopbackHost(config.host)) {
     throw new Error(`DEV_TOKENS are only served on a loopback HOST (got ${config.host}); use HOST=127.0.0.1, or DEV_TOKENS=false with AUTH_SIGNING_JWK, AUTH_JWKS and APP_SECRET`);

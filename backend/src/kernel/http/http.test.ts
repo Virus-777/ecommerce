@@ -17,6 +17,7 @@ import { createAuthChain } from '../auth/setup.js';
 import { devSigner, newDevJwk, signAccessToken } from '../auth/tokens.js';
 import { loadConfig } from '../config/index.js';
 import { createDatabase, type Database } from '../db/index.js';
+import { AppError } from '../errors/index.js';
 import { newId } from '../lib/ids.js';
 import { migrate } from '../migrations/index.js';
 import { defineEndpoints } from '../spec/define.js';
@@ -46,6 +47,7 @@ const endpoints = defineEndpoints({
   payouts: { area: 'seller', method: 'POST', path: '/payout-account', auth: 'seller', scope: 'own-seller', permission: 'demo.payouts.manage', stepUp: { kind: 'reauth', purpose: 'payout-account' }, summary: 'Owner only, fresh proof', body: () => z.object({ reauthToken: z.string().optional() }), response: null, status: 204, phase: 1 },
   hook: { area: 'webhooks', method: 'POST', path: '/provider', auth: 'provider', scope: 'public', summary: 'Provider callback', body: () => z.unknown(), response: null, status: 204, phase: 1 },
   security: { area: 'store', method: 'GET', path: '/security/{id}', auth: 'account', scope: 'public', summary: 'Any signed-in account', params: () => z.object({ id: z.string() }), response: () => z.object({ ok: z.boolean() }), status: 200, phase: 1 },
+  changeBank: { area: 'seller', method: 'POST', path: '/bank-account', auth: 'seller', scope: 'own-seller', stepUp: { kind: 'reauth', purpose: 'payout-account' }, idempotent: true, summary: 'Idempotent, fresh proof', body: () => z.object({ reauthToken: z.string().optional(), fail: z.boolean().optional() }), response: null, status: 204, phase: 1 },
   closeShop: { area: 'seller', method: 'POST', path: '/closure', auth: 'seller', scope: 'own-seller', stepUp: { kind: 'reauth', purpose: 'seller-closure' }, summary: 'Proof required by the body schema', body: () => z.object({ reauthToken: z.string(), reason: z.string() }), response: null, status: 204, phase: 1 },
   release: { area: 'admin', method: 'POST', path: '/payouts/{id}/release', auth: 'staff', scope: 'staff', stepUp: { kind: 'code', purpose: 'payout-release' }, summary: 'Fresh 2-step code', params: () => z.object({ id: z.uuid() }), response: null, status: 204, phase: 1 },
   exportItems: { area: 'admin', method: 'POST', path: '/items/exports', auth: 'staff', scope: 'staff', summary: 'Create an export', response: null, status: 202, phase: 1 },
@@ -84,7 +86,13 @@ const sets = [
     refresh: async ({ request }) => ({ sessionId: request.auth!.refreshSession!.sessionId }),
   }),
   routes(endpoints, 'admin', { approve: async () => undefined, reports: async ({ query }) => ({ view: query.view ?? 'mine' }), release: async () => undefined, exportItems: async () => undefined }),
-  routes(endpoints, 'seller', { mine: async ({ sellerId }) => ({ sellerId: sellerId! }), payouts: async () => undefined, closeShop: async () => undefined }),
+  routes(endpoints, 'seller', { mine: async ({ sellerId }) => ({ sellerId: sellerId! }), payouts: async () => undefined,
+    closeShop: async () => undefined,
+    changeBank: async ({ body }) => {
+      await new Promise((r) => setTimeout(r, 20)); // long enough for a parallel request with the same token to arrive
+      if (body.fail) throw new AppError('CONFLICT', 'The bank refused the account');
+    },
+  }),
   routes(endpoints, 'webhooks', { hook: async () => undefined }),
 ];
 const ackSets = [routes(ackEndpoints, 'webhooks', { ack: async () => (acked++, { received: true }) })];
@@ -98,6 +106,7 @@ let db: Database;
 let chain: AuthChain;
 /** The middleware's counters (rate limits are on in this app) */
 const limits = memoryRateLimitStore({ now: () => new Date() });
+const usedReauth = new Set<string>();
 
 beforeAll(async () => {
   const config = loadConfig({ NODE_ENV: 'test' }, { launchPhase: 2, devSigning: { file: '', jwk: TEST_JWK }, cors: { store: [STORE_ORIGIN], seller: [SELLER_ORIGIN], admin: [] } });
@@ -115,6 +124,10 @@ beforeAll(async () => {
     wrap: (a) => ({
       ...a,
       androidMinimum: async () => ({ minVersionCode: 140, updateUrl: 'https://play.example/marketly' }),
+      // "reauth-<x>" are single-use re-auth tokens for payout-account, kept here the way identity keeps them
+      verifyReauthToken: async (p, t, purpose) => (t.startsWith('reauth-') ? purpose === 'payout-account' && !usedReauth.has(t) : a.verifyReauthToken(p, t, purpose)),
+      consumeReauthToken: async (t) => (t.startsWith('reauth-') ? !usedReauth.has(t) && Boolean(usedReauth.add(t)) : a.consumeReauthToken(t)),
+      releaseReauthToken: async (t) => void (t.startsWith('reauth-') ? usedReauth.delete(t) : await a.releaseReauthToken(t)),
       verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'session-1', audience: 'store', kind: 'customer' } : t.startsWith('refresh-session-') ? { sessionId: t, audience: 'store', kind: 'customer' } : null),
     }),
     webhookVerifiers: new Map([['acks', hmacWebhookVerifier(config, 'acks')]]),
@@ -250,6 +263,29 @@ describe('caller checks', () => {
     expect(stale.json().error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'payout-account' } });
     expect((await app.inject({ method: 'POST', url, headers: owner, payload: { reauthToken: 'dev-reauth.other' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url, headers: owner, payload: { reauthToken: 'dev-reauth.payout-account' } })).statusCode).toBe(204);
+  });
+
+  it('uses a re-auth token once, even for parallel requests, and gives it back when the request fails', async () => {
+    const url = '/api/seller/demo/bank-account';
+    const send = (reauthToken: string, key = newId(), fail = false) =>
+      app.inject({ method: 'POST', url, headers: { ...auth(callers.seller()), 'idempotency-key': key }, payload: { reauthToken, fail } });
+    const both = await Promise.all([send('reauth-a'), send('reauth-a')]);
+    expect(both.map((r) => r.statusCode).sort()).toEqual([204, 403]);
+    expect((await send('reauth-a')).statusCode).toBe(403);
+    // the handler failed: the token is not spent
+    expect((await send('reauth-b', newId(), true)).json().error.code).toBe('CONFLICT');
+    expect((await send('reauth-b')).statusCode).toBe(204);
+  });
+
+  it('frees the Idempotency-Key when the step-up proof is refused, so the retry with a fresh proof can use it', async () => {
+    const key = newId();
+    const send = (reauthToken: string) =>
+      app.inject({ method: 'POST', url: '/api/seller/demo/bank-account', headers: { ...auth(callers.seller()), 'idempotency-key': key }, payload: { reauthToken } });
+    usedReauth.add('reauth-spent');
+    expect((await send('reauth-spent')).statusCode).toBe(403);
+    const retry = await send('reauth-c');
+    expect(retry.statusCode).toBe(204);
+    expect(retry.headers['idempotent-replayed']).toBeUndefined();
   });
 
   it('answers a missing step-up proof with 403 STEP_UP_REQUIRED, not a validation error', async () => {

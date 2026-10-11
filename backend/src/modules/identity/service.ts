@@ -2098,10 +2098,16 @@ export class IdentityService implements IdentityPublicApi {
     );
   }
 
-  /** Public API (kernel, after the request succeeded) */
-  async consumeReauthToken(token: string): Promise<void> {
+  /** Public API (kernel, before the handler): claims the token for one request; false when another request already has */
+  async consumeReauthToken(token: string): Promise<boolean> {
+    if (typeof token !== 'string') return false;
+    return this.repo.markReauthUsed(tokenHash(token), this.now());
+  }
+
+  /** Public API (kernel): the request that claimed the token failed, so it can be used again */
+  async releaseReauthToken(token: string): Promise<void> {
     if (typeof token !== 'string') return;
-    await this.repo.markReauthUsed(tokenHash(token), this.now());
+    await this.repo.clearReauthUsed(tokenHash(token));
   }
 
   /** Public API: password or 2-step code check before a sensitive action */
@@ -2290,7 +2296,7 @@ export class IdentityService implements IdentityPublicApi {
       const access = await repo.getSellerAccess(a.id, sellerId);
       if (!access || access.revoked_at) throw new AppError('NO_SELLER_ACCESS', 'You cannot act for that seller');
       // new refresh token; the old one simply stops working (it is not kept as "previous", so a
-      // stale copy in another tab answers REFRESH_TOKEN_INVALID instead of ending the session)
+      // stale copy in another tab is refused (the middleware answers 401 UNAUTHORIZED token_invalid) instead of ending the session)
       const refreshToken = randomToken('s.');
       const patch = {
         seller_id: access.seller_id,

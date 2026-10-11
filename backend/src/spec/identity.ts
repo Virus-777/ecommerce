@@ -1099,8 +1099,10 @@ export interface IdentityPublicApi {
   verifyReauthToken(principal: Principal, token: string, purpose: string): Promise<boolean>;
   /** Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). Used by: graphql. */
   accountSecurityOf(accountIds: string[], opts?: { activityLimit?: number }): Promise<Map<string, unknown>>;
-  /** Marks a verified re-auth token used; called by the kernel after the request succeeded. Used by: kernel. */
-  consumeReauthToken(token: string): Promise<void>;
+  /** Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs. Used by: kernel. */
+  consumeReauthToken(token: string): Promise<boolean>;
+  /** Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel. Used by: kernel. */
+  releaseReauthToken(token: string): Promise<void>;
   /** Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. Used by: kernel. */
   revocationsSince(cursor?: string): Promise<{ sessions: { sessionId: string, at: string }[], accounts: { accountId: string, validAfter: string }[], cursor: string }>;
   /** Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused. Used by: kernel. */
@@ -2245,7 +2247,7 @@ export const spec = defineModuleSpec({
   summary: "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   dependsOn: [],
   optionalDeps: ["audit","sellers","customers"],
-  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","revocationsSince","verifyRefreshToken","touchStaffSession"],
+  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","releaseReauthToken","revocationsSince","verifyRefreshToken","touchStaffSession"],
   permissions: [
     {
       "key": "identity.accounts.view",

@@ -472,7 +472,11 @@ export function createPostgresIdentityRepository(db: Kysely<IdentityDb>): Identi
       return db.selectFrom('reauth_tokens').selectAll().where('token_hash', '=', hash).executeTakeFirst();
     },
     async markReauthUsed(hash, at) {
-      await db.updateTable('reauth_tokens').set({ used_at: at }).where('token_hash', '=', hash).where('used_at', 'is', null).execute();
+      const r = await db.updateTable('reauth_tokens').set({ used_at: at }).where('token_hash', '=', hash).where('used_at', 'is', null).executeTakeFirst();
+      return r.numUpdatedRows > 0n;
+    },
+    async clearReauthUsed(hash) {
+      await db.updateTable('reauth_tokens').set({ used_at: null }).where('token_hash', '=', hash).execute();
     },
 
     /* ---------------------------------------------------------------- revocation feed */

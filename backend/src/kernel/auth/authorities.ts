@@ -19,7 +19,10 @@ export interface Authorities {
   getMemberAccess(sellerId: string, accountId: string): Promise<SellerMemberAccess | null>;
   verifyRefreshToken(token: string): Promise<{ sessionId: string; accountId?: string | null; audience: string; kind: string } | null>;
   verifyReauthToken(p: Principal, token: string, purpose: string): Promise<boolean>;
-  consumeReauthToken(token: string): Promise<void>;
+  /** Claims a verified re-auth token for this request; false when another request already used it */
+  consumeReauthToken(token: string): Promise<boolean>;
+  /** The claiming request failed: the token can be used again */
+  releaseReauthToken(token: string): Promise<void>;
   verifyStepUpCode(p: Principal, code: string): Promise<boolean>;
   revocationsSince(cursor?: string): Promise<Revocations | null>;
   customerIdOf(accountId: string): Promise<string | null>;
@@ -49,7 +52,8 @@ export function moduleAuthorities(lookup: Lookup): Authorities {
     getMemberAccess: (sellerId, accountId) => ask(null, () => lookup('sellers')?.getMemberAccess(sellerId, accountId)),
     verifyRefreshToken: (token) => ask(null, () => lookup('identity')?.verifyRefreshToken(token)),
     verifyReauthToken: (p, token, purpose) => ask(false, () => lookup('identity')?.verifyReauthToken(p as never, token, purpose)),
-    consumeReauthToken: (token) => ask(undefined, () => lookup('identity')?.consumeReauthToken(token)),
+    consumeReauthToken: (token) => ask(false, () => lookup('identity')?.consumeReauthToken(token)),
+    releaseReauthToken: (token) => ask(undefined, () => lookup('identity')?.releaseReauthToken(token)),
     verifyStepUpCode: (p, code) => ask(false, () => (p.accountId ? lookup('identity')?.verifyStepUp(p.accountId, { code }) : undefined)),
     revocationsSince: (cursor) =>
       ask(null, async () => {
@@ -87,7 +91,10 @@ export function devAuthorities(next: Authorities, claimsOf: (p: Principal) => Ac
       return (claimsOf(p)?.dev !== undefined && token === `dev-reauth.${purpose}`) || next.verifyReauthToken(p, token, purpose); // dev-key tokens only
     },
     async consumeReauthToken(token) {
-      if (!token.startsWith('dev-reauth.')) await next.consumeReauthToken(token);
+      return token.startsWith('dev-reauth.') || next.consumeReauthToken(token);
+    },
+    async releaseReauthToken(token) {
+      if (!token.startsWith('dev-reauth.')) await next.releaseReauthToken(token);
     },
     async verifyStepUpCode(p, code) {
       return (claimsOf(p)?.dev !== undefined && code === '000000') || next.verifyStepUpCode(p, code); // dev-key tokens only

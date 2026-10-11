@@ -186,6 +186,15 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
         request.idempotency = { scope, key };
       }
     : undefined;
+  // a refused step-up must not leave the Idempotency-Key in progress: the retry with a fresh proof reuses the key
+  const stepUp: preHandlerHookHandler = async (request) => {
+    try {
+      await hooks.preHandlerAfter(request);
+    } catch (err) {
+      if (request.idempotency) await idempotency.release(request.idempotency.scope, request.idempotency.key).catch(() => {});
+      throw err;
+    }
+  };
 
   app.route({
     method: d.method,
@@ -195,7 +204,7 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
     onRequest: hooks.onRequest,
     preValidation: hooks.preValidation,
     // conditional permissions → Idempotency-Key replay → step-up (a replay never spends a re-auth token)
-    preHandler: [hooks.preHandlerBefore, ...(idempotent ? [idempotent] : []), hooks.preHandlerAfter],
+    preHandler: [hooks.preHandlerBefore, ...(idempotent ? [idempotent, stepUp] : [hooks.preHandlerAfter])],
     onResponse: hooks.onResponse,
     async handler(request, reply) {
       if (request.webhookDuplicate) {

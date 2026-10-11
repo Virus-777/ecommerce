@@ -83,7 +83,7 @@ GET /files/marketly-public/renditions/<uuid>/medium.webp?sig=<base64url HMAC>
 | Entry | Rule |
 |---|---|
 | `/health` | served on a separate internal port for the load balancer, not on the public listener |
-| `/docs` (Swagger UI and OpenAPI) | only with `DOCS_ENABLED` (default: on in development, off elsewhere). When on, `/docs` and `/docs/*` are served without a token, so a browser can open them; when off, `/docs` is an unknown URL (401 without a token) |
+| `/docs` (Swagger UI and OpenAPI) | only with `DOCS_ENABLED` (default: on in development, off elsewhere; production refuses to start with it). When on, `/docs` and `/docs/*` are served without a token, so a browser can open them; when off, `/docs` is an unknown URL (401 without a token) |
 | CORS preflight | `OPTIONS` with `Access-Control-Request-Method` is answered before authentication: 204, with the CORS headers for an allowed origin (§5). An `OPTIONS` without that header skips authentication too and gets 404 (no route answers `OPTIONS`) |
 | Email and SMS links (password reset, invitation, order link, unsubscribe) | the link opens an app page, which first gets a visitor token, then sends the link's one-time token in the request body |
 | Search engines and link previews | they can't call the API without a token. If the website is server-rendered for search engines, the render server uses its own **service token** (decision 9) |
@@ -162,11 +162,12 @@ request
   │ preHandler
   ├─ M9  permissionWhen      conditional permissions (§13)
   ├─ M13 idempotency         replay first
-  ├─ M14 stepUp (verify)     VERIFY the re-auth token (bound to account, session, audience, seller, purpose) or the 2-step code
+  ├─ M14 stepUp (verify)     VERIFY the re-auth token (bound to account, session, audience, seller, purpose) and claim it, or the 2-step code;
+  │                          refused → the Idempotency-Key is freed for the retry
   ▼ handler
       record scope (§7) · authority (access.check)
       response → central field masking (§9) → serializer
-  │ onResponse (success only): consume the re-auth token · record the webhook event id
+  │ onResponse: failed → put the claimed re-auth token back · success → record the webhook event id
 ```
 
 Every hook below is built (`kernel/auth/chain.ts`, `kernel/http/security.ts`, `kernel/http/server.ts`, `kernel/http/register.ts`).
@@ -186,7 +187,7 @@ Every hook below is built (`kernel/auth/chain.ts`, `kernel/http/security.ts`, `k
 | M11 webhookSignature | preValidation | Runs over the raw body. Verifiers are registered **per provider** and return `{provider, eventId, timestamp}`; the kernel enforces a window of at most 5 minutes, then the per-provider limit (§11). A replayed event id is acknowledged without running the handler | 401 (`signature_invalid`, `signature_expired`); 429 |
 | M12 classRateLimit | preValidation | Named classes (spec `rateLimit`, or `export` for any POST whose path ends in `/exports`), counted in `kernel.rate_limits` (§11). An unknown class fails startup | 429 |
 | M13 idempotency | preHandler | Runs **before** M14's verification, so a retried request replays instead of burning a re-auth token | 422 / 409 |
-| M14 stepUp | preValidation (present) and preHandler (verify) | **preValidation, before the schema:** a missing proof (`reauthToken` in the body for kind `reauth`, `X-Step-Up-Code` for kind `code`) is refused, never answered as a validation error. **preHandler, after the idempotency replay:** the proof is verified. A re-auth token is consumed in onResponse, after a successful response | 403 `STEP_UP_REQUIRED` `details { kind, purpose }` |
+| M14 stepUp | preValidation (present) and preHandler (verify) | **preValidation, before the schema:** a missing proof (`reauthToken` in the body for kind `reauth`, `X-Step-Up-Code` for kind `code`) is refused, never answered as a validation error. **preHandler, after the idempotency replay:** the proof is verified, and a re-auth token is claimed for this request (`identity.consumeReauthToken` marks it used only if it is still unused), so a parallel request with the same token is refused. If the request then fails (status 400 or above), onResponse puts the token back (`releaseReauthToken`) and the person can retry without confirming again. A refused proof also frees the request's Idempotency-Key, so the retry with a fresh proof can reuse the key | 403 `STEP_UP_REQUIRED` `details { kind, purpose }` |
 
 Two things stay out of middleware on purpose:
 - **The 2-step code for large approvals** depends on the amount, so `access.decide` checks it: the approval endpoints take it as `stepUpCode` in the body, not as `X-Step-Up-Code` (§10).
@@ -296,7 +297,7 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 | Proof | Used for | Binding | Lifetime |
 |---|---|---|---|
 | Staff 2-step at sign-in | every admin session | session | until idle or absolute limit |
-| Re-auth token (password or 2-step code), `reauthToken` in the body (spec `stepUp: { kind: 'reauth' }`) | customer account closure, email change, 2-step removal, recovery-code regeneration; seller payout account change, business change, seller closure | account + session + audience + seller + **purpose** (one per action: the request names the purpose and `verifyReauthToken` refuses a token issued for another) | single use, 5 minutes (`reauthTokenMinutes`), consumed after a successful response |
+| Re-auth token (password or 2-step code), `reauthToken` in the body (spec `stepUp: { kind: 'reauth' }`) | customer account closure, email change, 2-step removal, recovery-code regeneration; seller payout account change, business change, seller closure | account + session + audience + seller + **purpose** (one per action: the request names the purpose and `verifyReauthToken` refuses a token issued for another) | single use, 5 minutes (`reauthTokenMinutes`); claimed before the handler runs and given back if the request fails |
 | Approval 2-step code, **`stepUpCode` in the body** | money approvals above `stepUpAbove` ($10,000): `POST /api/admin/access/approval-requests/{id}/approve`, `POST /api/admin/finance/payout-runs/{id}/approve` and `POST /api/admin/returns/refunds/{id}/approve`, all through `access.decide` | request + amount; missing or wrong → 403 `STEP_UP_REQUIRED` `{ kind: 'code', purpose: 'approval' }` from access | single use |
 | *(decision 5)* Fresh 2-step for sensitive staff actions, `X-Step-Up-Code` header (spec `stepUp: { kind: 'code' }`) | role grants (`role-grant`: set role permissions, invite staff, assign a role), staff account actions (`staff-account`: disable, enable, resend or revoke an invitation), payout destination reviews (`payout-destination`: approve, reject) | action | single use |
 
@@ -442,7 +443,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | Webhooks | signature checked in middleware | unchanged: the provider signature is the provider's token |
 | Unknown URLs | 404 for anyone | 401 without a valid token, 404 only with one |
 | Token verification | route hook, optional on 69 endpoints | app-level middleware, mandatory, before any module code |
-| `/health`, `/docs` | public | internal port; `/docs` only with `DOCS_ENABLED` (default: development), then served without a token |
+| `/health`, `/docs` | public | internal port; `/docs` only with `DOCS_ENABLED` (default: development; refused in production), then served without a token |
 
 **v1 → v2:**
 
@@ -454,7 +455,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | Token format | "signed" | EdDSA JWT, alg allowlist, `kid`, `iss`, `aud`, `typ`, `iat`, `jti`, 60 s leeway, key rotation |
 | Web tokens | undefined | HttpOnly refresh cookie, in-memory access token, Origin check, CORS allowlist, CSP |
 | Guest | session id is the secret | separate 256-bit token, verified on attach, ends on claim |
-| Step-up | account-bound token, consumed before idempotency | bound to session, seller and purpose; verified before, consumed after; shared failure counter; more endpoints |
+| Step-up | account-bound token, consumed before idempotency | bound to session, seller and purpose; verified and claimed after the idempotency replay, given back if the request fails; shared failure counter; more endpoints |
 | Field data | per handler | central masking from spec metadata; `viewer` on public APIs; GraphQL admin default-deny |
 | Actors | anonymous = system | `anonymous`, `provider`, branded `system` |
 | Secrets in URLs | not addressed | moved to bodies, redacted in logs |
@@ -481,7 +482,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 **Over real HTTP** (`npm run test:http`, part of `npm run check`): every endpoint is called on a listening server with spec-generated input: no token → 401, invalid token / refresh token / signature / app proof → 401, another app's token → 403, wrong caller → 401, missing permission → 403, missing or wrong step-up proof → 403 (never 400), right token → reaches the handler. Server checks: unknown URL → 401 (plain `WWW-Authenticate: Bearer`) and 404 with a token, no public `/health`, `/docs` off outside development, non-Bearer `Authorization` → 401, outdated Android `X-Client` → 426 and a current one → 200, CORS preflight without a token, unknown origins refused, exposed headers, credentialed CORS on the cookie routes (sign-in, app sessions, 2-step verify, refresh, seller context) and none elsewhere, `account` endpoints open to Seller Center while other store endpoints refuse it, cookie refresh without `Origin` or without `X-Requested-With` → 403, GraphQL per area and caller, and the internal health port.
 
 **Tests built:** for every one of the 1,294 endpoints: no token → 401 (bootstrap → APP_PROOF_INVALID), another app's token → 403 WRONG_AUDIENCE, missing permission → 403 FORBIDDEN or OWNER_ONLY, right token → reaches the handler. Kernel tests:
-- `kernel/http/http.test.ts`: expired / foreign-key / tampered / malformed tokens, visitor vs customer, 426 after the token check, 2-step, `permissionWhen`, seller context, owner-only + re-auth, missing step-up → 403, guest scope, file links, app proof, refresh from cookie and body and the cookie guard, webhooks (replay, no verifier), CORS credentials and origins, exposed headers, `Retry-After`, Idempotency-Key, and the rate-limit buckets (visitor per session and IP, seller per account and seller, GraphQL as reads, refresh, exports, webhooks);
+- `kernel/http/http.test.ts`: expired / foreign-key / tampered / malformed tokens, visitor vs customer, 426 after the token check, 2-step, `permissionWhen`, seller context, owner-only + re-auth, a re-auth token used once even by parallel requests and given back when the request fails, a refused step-up freeing the Idempotency-Key, missing step-up → 403, guest scope, file links, app proof, refresh from cookie and body and the cookie guard, webhooks (replay, no verifier), CORS credentials and origins, exposed headers, `Retry-After`, Idempotency-Key, and the rate-limit buckets (visitor per session and IP, seller per account and seller, GraphQL as reads, refresh, exports, webhooks);
 - `kernel/auth/revocation.test.ts` (fail closed in production), `kernel/auth/rate-limit.test.ts` (windows, two instances on one database), `kernel/config/config.test.ts` (development-token guard);
 - `modules/identity/test/admin.test.ts`: the staff idle timeout on every admin request.
 
@@ -502,7 +503,7 @@ backend/src/kernel/auth/
   guards.ts        audience, caller kind, staff session (pure, shared with GraphQL @auth)
   seller.ts        seller context, memberId match, member-access cache
   permissions.ts   exact-key match, effective staff set with read-time cover, ownerOnly, permissionWhen
-  reauth.ts        verify in preHandler, consume in the handler transaction
+  reauth.ts        verify and claim in preHandler, give back if the request fails
   rate-limit.ts    IP, principal and body stages; TRUST_PROXY; pluggable store
   scope.ts         Scope type, scoped(db, scope) wrapper for tenant tables
   masking.ts       field masking from spec metadata (REST serializer + GraphQL wrapper)

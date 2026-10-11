@@ -211,8 +211,16 @@
     },
     {
       "name": "consumeReauthToken",
+      "signature": "(token: string) => bool",
+      "desc": "Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs.",
+      "usedBy": [
+        "kernel"
+      ]
+    },
+    {
+      "name": "releaseReauthToken",
       "signature": "(token: string) => void",
-      "desc": "Marks a verified re-auth token used; called by the kernel after the request succeeded.",
+      "desc": "Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel.",
       "usedBy": [
         "kernel"
       ]

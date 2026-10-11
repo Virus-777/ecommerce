@@ -357,16 +357,20 @@ export class AuthChain {
       const proof = stepUpProof(d.stepUp.kind, request);
       if (!p || !proof) throw stepUpRequired(d.stepUp);
       if (d.stepUp.kind === 'reauth') {
+        // single use: claimed here, so a second request with the same token is refused even while this one runs
         if (!(await k.authorities.verifyReauthToken(p, proof, d.stepUp.purpose))) throw stepUpRequired(d.stepUp);
-        request.reauthToken = proof; // consumed after the request succeeds
+        if (!(await k.authorities.consumeReauthToken(proof))) throw stepUpRequired(d.stepUp);
+        request.reauthToken = proof; // put back if the request fails
       } else if (!(await k.authorities.verifyStepUpCode(p, proof))) {
         throw stepUpRequired(d.stepUp);
       }
     };
 
     const onResponse = async (request: FastifyRequest, reply: { statusCode: number }) => {
-      if (reply.statusCode >= 400) return;
-      if (request.reauthToken) await k.authorities.consumeReauthToken(request.reauthToken).catch(() => {});
+      if (reply.statusCode >= 400) {
+        if (request.reauthToken) await k.authorities.releaseReauthToken(request.reauthToken).catch(() => {});
+        return;
+      }
       const ev = request.auth?.provider;
       if (ev?.eventId && !request.webhookDuplicate) {
         await sql`insert into kernel.webhook_events (provider, event_id) values (${ev.name}, ${ev.eventId}) on conflict do nothing`.execute(k.db).catch(() => {});

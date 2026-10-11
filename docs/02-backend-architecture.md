@@ -49,7 +49,7 @@ backend/
 | `/webhooks/*` | Payment and carrier providers | Provider signatures |
 | `/files/*` | Anyone holding a link the API issued (`<img src>`, downloads) | The link's own signature (HMAC, expiring for private files, permanent for public renditions), verified by the auth middleware |
 | `/graphql/store`, `/graphql/seller`, `/graphql/admin` | Same audiences as the REST areas | Read-only GraphQL for complex screens; persisted queries in production (see [api/graphql/README.md](api/graphql/README.md)) |
-| `/docs` | Developers | OpenAPI generated from module schemas; only with `DOCS_ENABLED` (default: development), then without a token |
+| `/docs` | Developers | OpenAPI generated from module schemas; only with `DOCS_ENABLED` (default: development; refused in production), then without a token |
 
 Each module registers routes into these scopes. The module name is the next path segment: `/api/store/catalog/products`, `/api/admin/finance/payouts`.
 

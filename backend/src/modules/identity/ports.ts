@@ -190,7 +190,9 @@ export interface IdentityRepository {
   /* re-auth tokens */
   insertReauthToken(row: ReauthTokenRow): Promise<void>;
   getReauthToken(hash: string): Promise<ReauthTokenRow | undefined>;
-  markReauthUsed(hash: string, at: Date): Promise<void>;
+  /** true when this call marked it (it was unused) */
+  markReauthUsed(hash: string, at: Date): Promise<boolean>;
+  clearReauthUsed(hash: string): Promise<void>;
 
   /* revocation feed */
   revokedSessionsSince(since: Date): Promise<{ id: string; at: Date }[]>;
