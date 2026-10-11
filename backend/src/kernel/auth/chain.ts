@@ -285,6 +285,8 @@ export class AuthChain {
         const key = rule.key({ ip: request.ip, body: request.body });
         if (key) await enforce(k.limits, `${d.rateLimit}:${key}`, rule.limit);
       }
+      // a missing step-up proof is a step-up problem (403), not a validation one: checked before the schema
+      if (d.stepUp && !stepUpProof(d.stepUp.kind, request)) throw stepUpRequired(d.stepUp);
     };
 
     const preHandlerBefore = async (request: FastifyRequest) => {
@@ -298,15 +300,13 @@ export class AuthChain {
     const preHandlerAfter = async (request: FastifyRequest) => {
       if (!d.stepUp) return;
       const p = request.auth?.principal;
-      const refuse = () => new AppError('STEP_UP_REQUIRED', undefined, { kind: d.stepUp!.kind, purpose: d.stepUp!.purpose });
-      if (!p) throw refuse();
+      const proof = stepUpProof(d.stepUp.kind, request);
+      if (!p || !proof) throw stepUpRequired(d.stepUp);
       if (d.stepUp.kind === 'reauth') {
-        const token = (request.body as { reauthToken?: unknown } | undefined)?.reauthToken;
-        if (typeof token !== 'string' || !(await k.authorities.verifyReauthToken(p, token, d.stepUp.purpose))) throw refuse();
-        request.reauthToken = token; // consumed after the request succeeds
-      } else {
-        const code = request.headers['x-step-up-code'];
-        if (typeof code !== 'string' || !(await k.authorities.verifyStepUpCode(p, code))) throw refuse();
+        if (!(await k.authorities.verifyReauthToken(p, proof, d.stepUp.purpose))) throw stepUpRequired(d.stepUp);
+        request.reauthToken = proof; // consumed after the request succeeds
+      } else if (!(await k.authorities.verifyStepUpCode(p, proof))) {
+        throw stepUpRequired(d.stepUp);
       }
     };
 
@@ -382,6 +382,14 @@ export class AuthChain {
     this[kind].clear();
   }
 }
+
+/** The step-up proof a request carries: reauthToken in the body, or the X-Step-Up-Code header */
+function stepUpProof(kind: 'reauth' | 'code', request: FastifyRequest): string | undefined {
+  const v = kind === 'reauth' ? (request.body as { reauthToken?: unknown } | undefined)?.reauthToken : request.headers['x-step-up-code'];
+  return typeof v === 'string' && v ? v : undefined;
+}
+
+const stepUpRequired = (s: { kind: string; purpose: string }) => new AppError('STEP_UP_REQUIRED', undefined, { kind: s.kind, purpose: s.purpose });
 
 function cookie(header: string | undefined, name: string): string | undefined {
   for (const part of header?.split(';') ?? []) {

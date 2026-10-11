@@ -15,7 +15,7 @@
  *   another app's token     → 403 WRONG_AUDIENCE
  *   wrong kind of caller    → 401 (visitor on customer/account endpoints, seller without a seller account)
  *   missing permission      → 403 FORBIDDEN or OWNER_ONLY
- *   missing step-up proof   → 403 STEP_UP_REQUIRED
+ *   missing or wrong step-up proof → 403 STEP_UP_REQUIRED (kind, purpose), never 400
  *   the right token         → passes the middleware and validation and reaches the handler
  * Plus: unknown URLs, CORS preflight, GraphQL per area, /docs, and the internal health port.
  */
@@ -245,8 +245,17 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
   if (d.stepUp) {
     const headers = { ...extra, ...rightToken(d), ...(d.stepUp.kind === 'code' ? { 'x-step-up-code': '999999' } : {}) };
     const r = await send(d.method, url, headers, payload(d.stepUp.kind === 'reauth' ? { reauthToken: 'not-a-reauth-token' } : {}));
-    if (later(r)) record(op, 'no step-up', null, 'later launch phase');
-    else record(op, 'no step-up', expectStatus(r, 403, ['STEP_UP_REQUIRED']) ?? headerProblems(r, url));
+    if (later(r)) record(op, 'wrong step-up', null, 'later launch phase');
+    else record(op, 'wrong step-up', expectStatus(r, 403, ['STEP_UP_REQUIRED']) ?? headerProblems(r, url));
+    // no proof at all: still a step-up refusal (403), never a validation error
+    const { 'x-step-up-code': _code, ...withoutCode } = { ...extra, ...rightToken(d) };
+    const missing = await send(d.method, url, withoutCode, payload(d.stepUp.kind === 'reauth' ? { reauthToken: undefined } : {}));
+    if (later(missing)) record(op, 'no step-up', null, 'later launch phase');
+    else {
+      const details = missing.body?.error?.details;
+      const named = details?.kind === d.stepUp.kind && details?.purpose === d.stepUp.purpose ? null : `details ${JSON.stringify(details)}`;
+      record(op, 'no step-up', expectStatus(missing, 403, ['STEP_UP_REQUIRED']) ?? named ?? headerProblems(missing, url));
+    }
   }
 
   // 7. the right token: the request reaches the handler
