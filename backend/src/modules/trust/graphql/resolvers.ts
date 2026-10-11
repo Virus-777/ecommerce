@@ -1,4 +1,4 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import type * as common from '../../../spec/common.js';
 import type { Enforcement, TrustReport } from '../../../spec/trust.js';
 import type { TrustService } from '../service.js';
@@ -11,8 +11,7 @@ import type { TrustService } from '../service.js';
 
 const upper = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/-/g, '_') : null);
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
-const ACTOR_KIND: Record<string, string> = { customer: 'CUSTOMER', visitor: 'GUEST', anonymous: 'GUEST', seller: 'SELLER', staff: 'STAFF' };
-const actor = (a: common.Actor | null | undefined) => (a ? { kind: ACTOR_KIND[a.kind] ?? 'SYSTEM', id: a.id ?? null, name: a.name ?? null } : null);
+const actor = gqlActor;
 const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
 const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
 

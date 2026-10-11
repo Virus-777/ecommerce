@@ -1,4 +1,4 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
@@ -18,8 +18,6 @@ import type { CustomersService } from '../service.js';
  * GraphQL enums are upper case; REST values are lower case.
  */
 const upper = <T extends string | null | undefined>(s: T) => (s ? s.toUpperCase() : s);
-const ACTOR_KIND: Record<string, string> = { customer: 'CUSTOMER', visitor: 'GUEST', seller: 'SELLER', staff: 'STAFF' };
-const gqlActor = (a: common.Actor) => ({ kind: ACTOR_KIND[a.kind] ?? 'SYSTEM', id: a.id ?? null, name: a.name ?? null });
 const gqlMoney = (m: common.Money) => ({ ...m, formatted: formatMoney(m) });
 
 const gqlRestriction = (r: AccountRestriction) => ({ ...r, scope: upper(r.scope), reasonCode: upper(r.reasonCode), state: upper(r.state), setBy: gqlActor(r.setBy) });

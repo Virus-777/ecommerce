@@ -3,12 +3,16 @@
  * time budget), field-level @auth refusals and the error codes clients see.
  */
 import Fastify, { type FastifyInstance } from 'fastify';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Actor } from '../../spec/common.js';
 import { baseTypeDefs } from '../../spec/graphql.js';
 import type { AuthChain } from '../auth/chain.js';
 import type { Principal, RequestAuth } from '../auth/index.js';
 import { loadConfig, type Config } from '../config/index.js';
-import { LIMITS, registerGraphQL, type GraphQLKernelOptions, type ModuleResolvers } from './index.js';
+import { ACTOR_KIND, gqlActor, LIMITS, registerGraphQL, type GraphQLKernelOptions, type ModuleResolvers } from './index.js';
 
 const fragment = /* GraphQL */ `
   type DemoItem {
@@ -210,6 +214,26 @@ describe('GraphQL kernel', () => {
       expect(itemOf(await post(app, 'admin', q, 'staff', 'demo.contact.view'))).toEqual(plain);
       expect(itemOf(await post(app, 'seller', q, 'seller', 'demo.contact.view'))).toEqual(plain);
       expect(itemOf(await post(app, 'store', q, 'customer'))).toEqual(plain);
+    });
+  });
+
+  describe('Actor', () => {
+    it('maps every REST actor kind the same way for every module (visitor and anonymous → GUEST, provider and system → SYSTEM)', () => {
+      const kinds: Actor['kind'][] = ['customer', 'visitor', 'anonymous', 'seller', 'staff', 'provider', 'system'];
+      expect(Object.keys(ACTOR_KIND).sort()).toEqual([...kinds].sort());
+      expect(Actor.safeParse({ kind: 'robot' }).success).toBe(false); // the REST enum has exactly these kinds
+      expect(kinds.map((k) => gqlActor({ kind: k, id: 'x' })?.kind)).toEqual(kinds.map((k) => ({ customer: 'CUSTOMER', visitor: 'GUEST', anonymous: 'GUEST', seller: 'SELLER', staff: 'STAFF', provider: 'SYSTEM', system: 'SYSTEM' })[k]));
+      expect(gqlActor({ kind: 'provider', name: 'stripe' })).toEqual({ kind: 'SYSTEM', id: null, name: 'stripe' });
+      expect(gqlActor(null)).toBeNull();
+      for (const k of kinds) expect(Actor.safeParse({ kind: k }).success).toBe(true);
+    });
+
+    it('is the only mapping: module resolvers use it instead of their own', () => {
+      const modules = join(dirname(fileURLToPath(import.meta.url)), '../../modules');
+      const own = readdirSync(modules, { recursive: true, encoding: 'utf8' })
+        .filter((f) => /graphql[\\/][^\\/]+\.ts$/.test(f))
+        .filter((f) => /\b(ACTOR_KIND|ActorKind)\b.*[:=]\s*(Record<|\{)|'GUEST'/.test(readFileSync(join(modules, f), 'utf8')));
+      expect(own).toEqual([]);
     });
   });
 

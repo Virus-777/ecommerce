@@ -44,6 +44,7 @@ import { AREAS, composeSchema, directiveArg, parseFragments, type Fragment, type
 import { costLimitRule } from './cost.js';
 
 export type { GraphQLArea, Fragment };
+export { ACTOR_KIND, actorKind, gqlActor } from './shapes.js';
 
 export interface GraphQLContext {
   area: GraphQLArea;

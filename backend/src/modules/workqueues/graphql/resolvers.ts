@@ -1,4 +1,4 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
@@ -11,8 +11,7 @@ import type { WorkqueuesService } from '../service.js';
 
 const up = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
 const low = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
-const ACTOR_KIND: Record<string, string> = { customer: 'CUSTOMER', visitor: 'GUEST', seller: 'SELLER', staff: 'STAFF', system: 'SYSTEM', provider: 'SYSTEM', anonymous: 'GUEST' };
-const actor = (a: common.Actor | null | undefined) => (a ? { kind: ACTOR_KIND[a.kind] ?? 'SYSTEM', id: a.id ?? null, name: a.name ?? null } : null);
+const actor = gqlActor;
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
 const staff = (s: StaffRef | null | undefined) => (s ? { staffId: s.staffId, name: s.name, role: s.role ?? null } : null);
 const subject = (s: WorkItem['subject']) => ({ ...s, type: up(s.type) });

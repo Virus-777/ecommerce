@@ -1,6 +1,5 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { format } from '../../../kernel/lib/money.js';
-import type { Actor } from '../../../spec/common.js';
 import type { CreditBalance, GoodwillGrant, LedgerEntry } from '../../../spec/wallet.js';
 import type { WalletService } from '../service.js';
 
@@ -18,9 +17,7 @@ function gql<T>(v: T): T {
   return out as T;
 }
 
-/** common ActorKind in GraphQL: CUSTOMER GUEST SELLER STAFF SYSTEM */
-const ACTOR_KIND: Record<Actor['kind'], string> = { customer: 'CUSTOMER', visitor: 'GUEST', anonymous: 'GUEST', seller: 'SELLER', staff: 'STAFF', provider: 'SYSTEM', system: 'SYSTEM' };
-const actor = (a: Actor | null | undefined) => (a ? { ...a, kind: ACTOR_KIND[a.kind] ?? 'SYSTEM' } : null);
+const actor = gqlActor;
 
 const entry = (e: LedgerEntry) => ({ ...e, kind: up(e.kind), actor: actor(e.actor) });
 const grant = (g: GoodwillGrant) => ({ ...g, state: up(g.state), chargedTo: up(g.chargedTo), requestedBy: actor(g.requestedBy), decidedBy: actor(g.decidedBy) });

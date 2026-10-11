@@ -1,7 +1,7 @@
 import { GraphQLError } from 'graphql';
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
-import type { Actor, Money } from '../../../spec/common.js';
+import type { Money } from '../../../spec/common.js';
 import type { Movement, StockItem } from '../../../spec/inventory.js';
 import type { InventoryService } from '../service.js';
 
@@ -9,8 +9,7 @@ import type { InventoryService } from '../service.js';
 
 const up = (s: string) => s.toUpperCase();
 const money = (m: Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
-const ACTOR_KIND: Record<Actor['kind'], string> = { customer: 'CUSTOMER', visitor: 'GUEST', anonymous: 'GUEST', seller: 'SELLER', staff: 'STAFF', provider: 'SYSTEM', system: 'SYSTEM' };
-const actorOut = (a: Actor | null | undefined) => (a ? { ...a, kind: ACTOR_KIND[a.kind] ?? 'SYSTEM' } : null);
+const actorOut = gqlActor;
 
 const movementOut = (m: Movement) => ({
   id: m.id,
