@@ -40,7 +40,7 @@ const endpoints = defineEndpoints({
   later: { area: 'store', method: 'GET', path: '/later', auth: 'visitor', scope: 'public', summary: 'Phase 3', response: () => Item, status: 200, phase: 3 },
   publicInfo: { area: 'public', method: 'GET', path: '/info', auth: 'visitor', scope: 'public', summary: 'Any app', response: () => z.object({ ok: z.boolean() }), status: 200, phase: 1 },
   start: { area: 'public', method: 'POST', path: '/app-sessions', auth: 'bootstrap', scope: 'public', summary: 'Visitor token', response: () => z.object({ ok: z.boolean() }), status: 201, phase: 1 },
-  refresh: { area: 'public', method: 'POST', path: '/sessions/refresh', auth: 'refresh', scope: 'public', summary: 'Refresh', body: () => z.object({ refreshToken: z.string().optional() }), response: () => z.object({ sessionId: z.string() }), status: 200, phase: 1 },
+  refresh: { area: 'public', method: 'POST', path: '/sessions/refresh', auth: 'refresh', scope: 'public', summary: 'Refresh', body: () => z.object({ audience: z.enum(['store', 'seller', 'admin']).optional(), refreshToken: z.string().optional() }), response: () => z.object({ sessionId: z.string() }), status: 200, phase: 1 },
   approve: { area: 'admin', method: 'POST', path: '/items/{id}/approve', auth: 'staff', scope: 'staff', permission: 'demo.items.review', summary: 'Approve', params: () => z.object({ id: z.uuid() }), response: null, status: 204, phase: 1 },
   reports: { area: 'admin', method: 'GET', path: '/reports', auth: 'staff', scope: 'staff', summary: 'Reports', query: () => z.object({ view: z.string().optional() }), permissionWhen: [{ if: { 'query.view': 'all' }, permission: 'demo.reports.all' }], response: () => z.object({ view: z.string() }), status: 200, phase: 1 },
   mine: { area: 'seller', method: 'GET', path: '/mine', auth: 'seller', scope: 'own-seller', summary: 'Seller scope', response: () => z.object({ sellerId: z.string() }), status: 200, phase: 1 },
@@ -377,24 +377,24 @@ describe('tokens other than bearer', () => {
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: 'wrong' } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).json()).toEqual({ sessionId: 'session-1' });
     const page = { origin: STORE_ORIGIN, 'x-requested-with': 'fetch' };
-    expect((await app.inject({ method: 'POST', url, headers: { ...page, cookie: `__Secure-mk_refresh=${REFRESH}` }, payload: {} })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url, headers: { ...page, cookie: `__Secure-mk_refresh_store=${REFRESH}` }, payload: { audience: 'store' } })).statusCode).toBe(200);
   });
 
   it('takes the website cookie only from an app page: allowed Origin and X-Requested-With (Android’s body token needs neither)', async () => {
     const url = '/api/public/demo/sessions/refresh';
-    const cookie = `__Secure-mk_refresh=${REFRESH}`;
+    const cookie = `__Secure-mk_refresh_store=${REFRESH}`;
     for (const [headers, reason] of [
       [{ cookie, 'x-requested-with': 'fetch' }, 'origin_not_allowed'],
       [{ cookie, origin: 'https://evil.example', 'x-requested-with': 'fetch' }, 'origin_not_allowed'],
       [{ cookie, origin: SELLER_ORIGIN }, 'x_requested_with_required'],
     ] as const) {
-      const res = await app.inject({ method: 'POST', url, headers, payload: {} });
+      const res = await app.inject({ method: 'POST', url, headers, payload: { audience: 'store' } });
       expect(res.statusCode).toBe(403);
       expect(res.json().error).toMatchObject({ code: 'FORBIDDEN', details: { reason } });
     }
     // every app's origin, and the API's own (a website served through it)
     for (const origin of [SELLER_ORIGIN, 'http://localhost:4000']) {
-      expect((await app.inject({ method: 'POST', url, headers: { cookie, origin, 'x-requested-with': 'fetch' }, payload: {} })).statusCode, origin).toBe(200);
+      expect((await app.inject({ method: 'POST', url, headers: { cookie, origin, 'x-requested-with': 'fetch' }, payload: { audience: 'store' } })).statusCode, origin).toBe(200);
     }
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).statusCode).toBe(200);
   });

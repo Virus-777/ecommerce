@@ -31,7 +31,7 @@ export const publicRoutes = (service: IdentityService) =>
     /** POST /sessions/sign-out: Sign out this device */
     signOut: async (input) => {
       const presented = refreshTokenOf(input.request, input.body);
-      if (presented) send(input.reply, await service.signOut(presented.token, presented.via, caller(input)));
+      if (presented) send(input.reply, await service.signOut(presented.token, presented.via, caller(input)), presented.via === 'cookie' ? presented.audience : undefined);
     },
     /** POST /password-resets: Email a password reset link */
     requestPasswordReset: async (input) => service.requestPasswordReset(input.body.email, caller(input)),

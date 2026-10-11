@@ -223,10 +223,10 @@ Two things stay out of middleware on purpose:
 
 | Client | Where the refresh token lives | Protection |
 |---|---|---|
-| Website (store, Seller Center, Admin Center) | `__Secure-mk_refresh` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions` (sent only to refresh and sign-out; a `__Host-` cookie would have to use `Path=/`). The body's `refreshToken` is then `""`. The access token stays in memory only | **Refresh guard:** refresh and sign-out with the cookie need an allowed `Origin` (any app's `CORS_*_ORIGINS`, or the API's own `API_URL`) and the `X-Requested-With` header (any value), which a cross-site form or link can't send; otherwise 403 `FORBIDDEN`, `details.reason` `origin_not_allowed` / `x_requested_with_required`. Credentialed CORS only on the cookie routes (below); Content-Security-Policy on Admin Center and Seller Center |
+| Website (store, Seller Center, Admin Center) | One cookie per app, `__Secure-mk_refresh_store`, `__Secure-mk_refresh_seller` and `__Secure-mk_refresh_admin`, so signing into one app doesn't replace another's session in the same browser: `HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions` (sent only to refresh and sign-out; a `__Host-` cookie would have to use `Path=/`). The body's `refreshToken` is then `""`. The access token stays in memory only | **Refresh guard:** refresh and sign-out with the cookie need an allowed `Origin` (any app's `CORS_*_ORIGINS`, or the API's own `API_URL`) and the `X-Requested-With` header (any value), which a cross-site form or link can't send; otherwise 403 `FORBIDDEN`, `details.reason` `origin_not_allowed` / `x_requested_with_required`. Credentialed CORS only on the cookie routes (below); Content-Security-Policy on Admin Center and Seller Center |
 | Android app | Response body; stored with Android Keystore / EncryptedSharedPreferences. Refresh and sign-out send `refreshToken` in the body, and need neither `Origin` nor `X-Requested-With` | Verified App Links for order and reset links |
 
-**Which token is read.** On refresh and sign-out the middleware reads the cookie first, then the body's `refreshToken`. A missing token is 401 `token_missing`; an unknown, expired, revoked or reused one is 401 `token_invalid`, so signing out with an unknown token (or twice) is also a 401. Responses that issue tokens set the cookie for web devices (`device.kind: web`); a refresh sets it when the token came in the cookie, and sign-out then clears it.
+**Which token is read.** The browser sends every app's cookie to refresh and sign-out, so the website names its app in the body: `{ "audience": "store" }` (`seller`, `admin`). The middleware reads that app's cookie first, then the body's `refreshToken`; without `audience` it reads no cookie. A missing token is 401 `token_missing`; an unknown, expired, revoked or reused one is 401 `token_invalid`, as is an app's cookie holding another app's session; so signing out with an unknown token (or twice) is also a 401. Responses that issue tokens set the cookie of the session's app for web devices (`device.kind: web`); a refresh sets it when the token came in the cookie, and sign-out then clears only that app's cookie.
 
 **CORS and credentials.** Each area takes its own app's origins (`CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS`); public endpoints, signed file links and the `account` endpoints under `/api/store/identity` take every app's origins, so Seller Center and Admin Center can call them. `Access-Control-Allow-Credentials: true` is sent, for allowed origins only, on every route that sets, clears or reads the refresh cookie:
 - refresh and sign-out (auth kind `refresh`);
@@ -239,9 +239,6 @@ Browsers call these with `credentials: 'include'`. A module declares its cookie 
 - **When clients refresh.** Only on 401 `UNAUTHORIZED` whose `details.reason` starts with `token_` (`WWW-Authenticate: Bearer error="invalid_token"`, or plain `Bearer` for a missing token). Never on `session_idle` (sign in again), `sign_in_required`, `seller_context_required`, `FORBIDDEN`, `WRONG_AUDIENCE`, or a GraphQL field refusal (`FORBIDDEN` inside a 200 response). A 401 from refresh itself means sign in again (visitors: start a new app session).
 - **Staff sessions:** idle timeout 30 minutes, absolute limit 12 hours, an alert on sign-in from a new device, and at most 3 concurrent staff sessions (proposal).
 - **Impersonation ("act as customer") is not supported.** No endpoint mints a token for another account. Support uses the read-only customer view.
-
-**Open (not decided by the owner):** there is one refresh cookie per API host, with one path. Signing into Seller Center or Admin Center in a browser therefore replaces the store session's cookie in that browser: the store's next refresh sends the Seller Center session's token and gets that session's tokens back, which store endpoints refuse (`WRONG_AUDIENCE`).
-
 ## 6. Revocation and caches
 
 | What | Source of truth | How servers learn it | Rule |
@@ -526,9 +523,7 @@ backend/src/kernel/http/
 
 ## 18. Decisions
 
-**Decisions taken** (recommended options): 1 all spec changes accepted; 2 seed sets kept as proposals until access is built; 3 "any active member" for seller reads; 4 rate limits as proposed; 5 fresh 2-step for sensitive staff actions; 6 deputy owner built as a standing second Business Owner at bootstrap, break-glass not built (§12); 7 HttpOnly refresh cookie on the website; 8 provider signature as the webhook token; 9 no service token (pure browser app); 10 Play Integrity + Turnstile; 11 unsubscribe through the link in the message.
-
-**Open:** one refresh cookie per API host (§5, end).
+**Decisions taken** (recommended options): 1 all spec changes accepted; 2 seed sets kept as proposals until access is built; 3 "any active member" for seller reads; 4 rate limits as proposed; 5 fresh 2-step for sensitive staff actions; 6 deputy owner built as a standing second Business Owner at bootstrap, break-glass not built (§12); 7 HttpOnly refresh cookie on the website; 8 provider signature as the webhook token; 9 no service token (pure browser app); 10 Play Integrity + Turnstile; 11 unsubscribe through the link in the message; 12 one refresh cookie per app (store, Seller Center, Admin Center), named by `audience` on refresh and sign-out (§5).
 
 The questions as asked:
 

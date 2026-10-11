@@ -43343,7 +43343,13 @@
         "description": "Rotates the refresh token. Presenting an already-rotated token revokes the session (theft signal) and returns REFRESH_TOKEN_INVALID. The Android app calls this when an access token expires.",
         "security": [
           {
-            "refreshCookie": []
+            "refreshCookieStore": []
+          },
+          {
+            "refreshCookieSeller": []
+          },
+          {
+            "refreshCookieAdmin": []
           },
           {}
         ],
@@ -43354,12 +43360,24 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "audience": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "store",
+                      "seller",
+                      "admin"
+                    ],
+                    "description": "Website: the app calling, whose refresh cookie (__Secure-mk_refresh_<audience>) is used. Each app has its own cookie, so signing into one app doesn't replace another's session in the same browser. Android leaves it out"
+                  },
                   "refreshToken": {
                     "type": [
                       "string",
                       "null"
                     ],
-                    "description": "Android; the website sends the __Secure-mk_refresh cookie instead"
+                    "description": "Android; the website sends its app's refresh cookie and audience instead"
                   }
                 }
               }
@@ -43434,7 +43452,13 @@
         "description": "Works for every audience; the refresh token identifies the session. Idempotent.",
         "security": [
           {
-            "refreshCookie": []
+            "refreshCookieStore": []
+          },
+          {
+            "refreshCookieSeller": []
+          },
+          {
+            "refreshCookieAdmin": []
           },
           {}
         ],
@@ -43445,12 +43469,24 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "audience": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "enum": [
+                      "store",
+                      "seller",
+                      "admin"
+                    ],
+                    "description": "Website: the app calling, whose refresh cookie (__Secure-mk_refresh_<audience>) is used. Each app has its own cookie, so signing into one app doesn't replace another's session in the same browser. Android leaves it out"
+                  },
                   "refreshToken": {
                     "type": [
                       "string",
                       "null"
                     ],
-                    "description": "Android; the website sends the __Secure-mk_refresh cookie instead"
+                    "description": "Android; the website sends its app's refresh cookie and audience instead"
                   }
                 }
               }
@@ -215020,11 +215056,23 @@
         "scheme": "bearer",
         "description": "Bearer <token> on every request: visitor token before sign-in, access token after (customer, seller member or staff)"
       },
-      "refreshCookie": {
+      "refreshCookieStore": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "__Secure-mk_refresh",
-        "description": "Website refresh token (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions, sent only to refresh and sign-out). Android sends refreshToken in the body instead."
+        "name": "__Secure-mk_refresh_store",
+        "description": "The store website's refresh token (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions, sent only to refresh and sign-out, which name the app in the body's audience). Android sends refreshToken in the body instead."
+      },
+      "refreshCookieSeller": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Secure-mk_refresh_seller",
+        "description": "The seller website's refresh token (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions, sent only to refresh and sign-out, which name the app in the body's audience). Android sends refreshToken in the body instead."
+      },
+      "refreshCookieAdmin": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Secure-mk_refresh_admin",
+        "description": "The admin website's refresh token (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions, sent only to refresh and sign-out, which name the app in the body's audience). Android sends refreshToken in the body instead."
       },
       "appProof": {
         "type": "apiKey",

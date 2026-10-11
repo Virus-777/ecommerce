@@ -209,8 +209,8 @@ Endpoints marked idempotent need `Idempotency-Key` (1–255 characters; missing 
 ### Sessions
 
 - **Start:** `POST /api/public/identity/app-sessions` with `X-App-Proof` returns a visitor access token (15 minutes) and a refresh token. Signing in claims the visitor session.
-- **Where the refresh token lives:** the website gets it in the `__Secure-mk_refresh` cookie (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions) and `refreshToken` is `""` in the body; Android gets it in the body.
-- **Refresh** `POST /api/public/identity/sessions/refresh`, **sign out** `POST /api/public/identity/sessions/sign-out` (204). The server reads the cookie first, then `refreshToken` in the body. With the cookie, the request needs an allowed `Origin` and `X-Requested-With`, else 403. At most 30 refreshes an hour per session. Each refresh returns a new pair; the previous token sent again within 20 s returns the same new pair (two tabs refreshing at once), and later it ends the session.
+- **Where the refresh token lives:** the website gets it in its own app's cookie, `__Secure-mk_refresh_store`, `__Secure-mk_refresh_seller` or `__Secure-mk_refresh_admin` (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions), and `refreshToken` is `""` in the body; Android gets it in the body. With one cookie per app, signing into Seller Center or Admin Center doesn't end the store session in the same browser.
+- **Refresh** `POST /api/public/identity/sessions/refresh`, **sign out** `POST /api/public/identity/sessions/sign-out` (204). The website names its app in the body, `{ "audience": "store" }` (or `seller`, `admin`); the server reads that app's cookie first, then `refreshToken` in the body. Without `audience` no cookie is read (401 `token_missing`). Sign-out clears only that app's cookie. With the cookie, the request needs an allowed `Origin` and `X-Requested-With`, else 403. At most 30 refreshes an hour per session. Each refresh returns a new pair; the previous token sent again within 20 s returns the same new pair (two tabs refreshing at once), and later it ends the session.
 - **Refused:** no refresh token → 401 `token_missing`; an unknown, expired, revoked or reused one → 401 `token_invalid` (sign-out with such a token too). Refresh can also answer `REFRESH_TOKEN_INVALID`, `ACCOUNT_DISABLED` or `ACCOUNT_LOCKED`. In every case, sign in again.
 - **When to refresh:** only on 401 `UNAUTHORIZED` whose `details.reason` starts with `token_`. Never on `session_idle` (sign in again), other 401 reasons, `FORBIDDEN`, `WRONG_AUDIENCE` or a GraphQL field refusal.
 
@@ -221,7 +221,7 @@ Each area allows its own app's origins (`CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGI
 ### For frontend developers
 
 1. Start an app session once, keep the access token in memory, and send `Authorization: Bearer` on every request, GraphQL included. Send `X-Client` (`web`, or `android/<versionName>+<versionCode>`).
-2. Website: call the cookie routes above with `credentials: 'include'`, and add `X-Requested-With` (any value) and a JSON body (`{}`) on refresh and sign-out.
+2. Website: call the cookie routes above with `credentials: 'include'`, and on refresh and sign-out add `X-Requested-With` (any value) and a JSON body naming the app, `{ "audience": "store" }` (`seller`, `admin`).
 3. Refresh one request at a time, only on 401 with `details.reason` `token_*`, then retry the request once. If the refresh itself is refused, sign in again (visitors: start a new app session).
 4. 426 `UPGRADE_REQUIRED`: show the update screen (`details.updateUrl`). 429: wait `Retry-After` seconds. 503: retry with backoff.
 5. Send one `Idempotency-Key` per user action on idempotent endpoints, the same on every retry.
