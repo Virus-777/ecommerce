@@ -536,7 +536,7 @@ export function createPostgresIdentityRepository(db: Kysely<IdentityDb>): Identi
         .select('id')
         .where('revoked_at', 'is', null)
         .where((eb) =>
-          eb.or([eb('expires_at', '<=', now), eb('absolute_expires_at', '<=', now), eb.and([eb('audience', '=', 'admin'), eb('last_refreshed_at', '<', staffIdleBefore)])]),
+          eb.or([eb('expires_at', '<=', now), eb('absolute_expires_at', '<=', now), eb.and([eb('audience', '=', 'admin'), eb('last_active_at', '<', staffIdleBefore)])]),
         )
         .limit(limit);
       const r = await db

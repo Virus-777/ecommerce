@@ -1105,6 +1105,8 @@ export interface IdentityPublicApi {
   revocationsSince(cursor?: string): Promise<{ sessions: { sessionId: string, at: string }[], accounts: { accountId: string, validAfter: string }[], cursor: string }>;
   /** Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused. Used by: kernel. */
   verifyRefreshToken(refreshToken: string): Promise<{ sessionId: string, accountId?: string, audience: string, kind: string } | null>;
+  /** Middleware check on every admin request (each server caches the answer 5 s per session): whether the staff session is still live (not revoked, not past its expiry or absolute limit, and active within staffIdleMinutes), recording the activity (sessions.last_active_at, at most once a minute) that keeps it from going idle. Used by: kernel. */
+  touchStaffSession(sessionId: string): Promise<{ live: boolean, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }>;
 }
 
 /* ------------------------------------------------------------------ tables (Kysely row types) */
@@ -1222,6 +1224,7 @@ export interface IdentityDb {
     two_step_verified_at: Date | null;
     created_at: Date;
     last_refreshed_at: Date;
+    last_active_at: Date;
     expires_at: Date;
     absolute_expires_at: Date;
     revoked_at: Date | null;
@@ -2242,7 +2245,7 @@ export const spec = defineModuleSpec({
   summary: "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   dependsOn: [],
   optionalDeps: ["audit","sellers","customers"],
-  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","revocationsSince","verifyRefreshToken"],
+  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","revocationsSince","verifyRefreshToken","touchStaffSession"],
   permissions: [
     {
       "key": "identity.accounts.view",
@@ -3145,6 +3148,10 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "last_refreshed_at": {
+        "type": "timestamptz",
+        "nullable": false
+      },
+      "last_active_at": {
         "type": "timestamptz",
         "nullable": false
       },

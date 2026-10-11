@@ -232,6 +232,14 @@
       "usedBy": [
         "kernel"
       ]
+    },
+    {
+      "name": "touchStaffSession",
+      "signature": "(sessionId: uuid) => { live: bool, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }",
+      "desc": "Middleware check on every admin request (each server caches the answer 5 s per session): whether the staff session is still live (not revoked, not past its expiry or absolute limit, and active within staffIdleMinutes), recording the activity (sessions.last_active_at, at most once a minute) that keeps it from going idle.",
+      "usedBy": [
+        "kernel"
+      ]
     }
   ],
   "types": {
@@ -826,6 +834,7 @@
         "two_step_verified_at": "timestamptz?",
         "created_at": "timestamptz",
         "last_refreshed_at": "timestamptz",
+        "last_active_at": "timestamptz",
         "expires_at": "timestamptz",
         "absolute_expires_at": "timestamptz",
         "revoked_at": "timestamptz?",

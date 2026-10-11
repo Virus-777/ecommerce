@@ -23,6 +23,8 @@ export interface Authorities {
   verifyStepUpCode(p: Principal, code: string): Promise<boolean>;
   revocationsSince(cursor?: string): Promise<Revocations | null>;
   customerIdOf(accountId: string): Promise<string | null>;
+  /** Admin requests: whether the staff session is live (and record the activity); null when identity can't answer */
+  touchStaffSession(sessionId: string): Promise<{ live: boolean; reason?: string } | null>;
 }
 
 type Modules = 'identity' | 'access' | 'sellers' | 'customers';
@@ -53,6 +55,7 @@ export function moduleAuthorities(lookup: Lookup): Authorities {
         return r && { sessions: r.sessions, accounts: r.accounts, cursor: r.cursor };
       }),
     customerIdOf: (accountId) => ask(null, async () => (await lookup('customers')?.getCustomerByUserId(accountId))?.id),
+    touchStaffSession: (sessionId) => ask(null, () => lookup('identity')?.touchStaffSession(sessionId)),
   };
 }
 

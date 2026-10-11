@@ -529,6 +529,7 @@ export class IdentityService implements IdentityPublicApi {
       two_step_verified_at: o.twoStepVerified ? now : null,
       created_at: now,
       last_refreshed_at: now,
+      last_active_at: now,
       expires_at: expires,
       absolute_expires_at: staff ? new Date(now.getTime() + s.staffSessionMaxHours * HOUR) : expires,
       revoked_at: null,
@@ -1292,9 +1293,30 @@ export class IdentityService implements IdentityPublicApi {
   }
 
   private sessionLive(x: SessionRow, s: { staffIdleMinutes: number }, now: Date) {
-    if (x.revoked_at || x.expires_at <= now || x.absolute_expires_at <= now) return false;
-    if (x.audience === 'admin' && now.getTime() - x.last_refreshed_at.getTime() > s.staffIdleMinutes * MIN) return false;
-    return true;
+    return this.sessionState(x, s, now) === 'live';
+  }
+
+  /** Staff sessions go idle after staffIdleMinutes without a request (last_active_at, kept by touchStaffSession) */
+  private sessionState(x: SessionRow, s: { staffIdleMinutes: number }, now: Date): 'live' | 'revoked' | 'expired' | 'idle' {
+    if (x.revoked_at) return 'revoked';
+    if (x.expires_at <= now || x.absolute_expires_at <= now) return 'expired';
+    if (x.audience === 'admin' && now.getTime() - x.last_active_at.getTime() > s.staffIdleMinutes * MIN) return 'idle';
+    return 'live';
+  }
+
+  /**
+   * Middleware check on every admin request (kernel/auth/chain.ts, cached 5 s per server): the session is
+   * live, and the request is activity that keeps it from going idle. The write happens at most once a
+   * minute per session, so a busy staff member costs one indexed read per few seconds.
+   */
+  async touchStaffSession(sessionId: string): Promise<{ live: boolean; reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }> {
+    const session = await this.repo.getSession(sessionId);
+    if (!session || session.audience !== 'admin') return { live: false, reason: 'unknown' };
+    const now = this.now();
+    const state = this.sessionState(session, { staffIdleMinutes: await this.ctx.settings.get('staffIdleMinutes') }, now);
+    if (state !== 'live') return { live: false, reason: state };
+    if (now.getTime() - session.last_active_at.getTime() >= MIN) await this.repo.updateSession(session.id, { last_active_at: now });
+    return { live: true };
   }
 
   /** A rotated refresh token came back after the grace window: theft signal (docs/03 §5: no account lock) */
@@ -1353,7 +1375,7 @@ export class IdentityService implements IdentityPublicApi {
       }
       let row = session;
       if (current) {
-        const patch = { refresh_token_hash: tokenHash(next), previous_token_hash: hash, last_refreshed_at: now };
+        const patch = { refresh_token_hash: tokenHash(next), previous_token_hash: hash, last_refreshed_at: now, last_active_at: now };
         await repo.updateSession(session.id, patch);
         row = { ...session, ...patch };
         await repo.updateDevice(session.device_id, { last_active_at: now, last_ip: caller.client.ip });

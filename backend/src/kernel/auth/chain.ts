@@ -83,6 +83,8 @@ declare module 'fastify' {
 
 const WEBHOOK_WINDOW_MS = 5 * 60_000;
 const CACHE_MS = 60_000;
+const STAFF_SESSION_CACHE_MS = 5_000;
+type StaffSessionState = Awaited<ReturnType<Authorities['touchStaffSession']>>;
 /** Website refresh cookie: HttpOnly; Secure; SameSite=Strict; Path=REFRESH_COOKIE_PATH (sent only to refresh and sign-out) */
 export const REFRESH_COOKIE = '__Secure-mk_refresh';
 export const REFRESH_COOKIE_PATH = '/api/public/identity/sessions';
@@ -94,11 +96,12 @@ class TtlCache<V> {
   constructor(
     private readonly clock: Clock,
     private readonly keepMissing = true,
+    private readonly ttlMs = CACHE_MS,
   ) {}
   async get(key: string, load: () => Promise<V>): Promise<V> {
     const now = this.clock.now().getTime();
     const hit = this.#m.get(key);
-    if (hit && now - hit.at < CACHE_MS) return hit.v;
+    if (hit && now - hit.at < this.ttlMs) return hit.v;
     const v = await load();
     if (v === null && !this.keepMissing) return v;
     if (this.#m.size > 50_000) this.#m.clear();
@@ -114,11 +117,14 @@ export class AuthChain {
   readonly permissions: TtlCache<boolean>;
   readonly members: TtlCache<SellerMemberAccess | null>;
   readonly customers: TtlCache<string | null>;
+  /** Staff session liveness (identity.touchStaffSession), 5 s per session; null = identity did not answer */
+  readonly staffSessions: TtlCache<StaffSessionState | null>;
 
   constructor(readonly k: AuthKernel) {
     this.permissions = new TtlCache(k.clock);
     this.members = new TtlCache(k.clock);
     this.customers = new TtlCache(k.clock, false); // a customer created after the first request must be in scope at once
+    this.staffSessions = new TtlCache(k.clock, false, STAFF_SESSION_CACHE_MS);
   }
 
   /* ---------------------------------------------------------------- every URL */
@@ -188,10 +194,27 @@ export class AuthChain {
       throw err;
     }
     if (this.k.revocations.isRevoked(claims)) throw tokenRejected('revoked');
-    if (claims.aud === 'admin') this.k.revocations.assertFresh();
+    if (claims.aud === 'admin') {
+      this.k.revocations.assertFresh();
+      if (claims.kind === 'staff') await this.#assertStaffSessionLive(claims); // Admin Center's visitor tokens hold no staff session
+    }
     const principal = principalOf(claims);
     this.k.claimsOf.set(principal, claims);
     request.auth = { via: 'token', principal, claims };
+  }
+
+  /**
+   * M10 on every admin request: the staff session is still live and not idle (identity owns the rule and
+   * the staffIdleMinutes setting; the request counts as activity). Answers are cached 5 s per session.
+   * Dev-key tokens with dev claims have no session row and skip it; no answer from identity is a 503.
+   */
+  async #assertStaffSessionLive(claims: AccessClaims) {
+    if (claims.dev) return;
+    const state = await this.staffSessions.get(claims.sid, () => this.k.authorities.touchStaffSession(claims.sid));
+    if (!state) throw new AppError('SERVICE_UNAVAILABLE', 'Staff sessions cannot be checked right now; retry shortly', { reason: 'sessions_unavailable' });
+    if (state.live) return;
+    if (state.reason === 'idle') throw new AppError('UNAUTHORIZED', 'Signed out after a period without activity; sign in again', { reason: 'session_idle' });
+    throw tokenRejected('revoked');
   }
 
   /* ---------------------------------------------------------------- caller checks (REST endpoints and GraphQL) */

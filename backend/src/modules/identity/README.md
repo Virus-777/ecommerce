@@ -708,6 +708,7 @@ Indexes: `(account_id, last_active_at desc)`, `unique (account_id, installation_
 | two_step_verified_at | timestamptz? |
 | created_at | timestamptz |
 | last_refreshed_at | timestamptz |
+| last_active_at | timestamptz |
 | expires_at | timestamptz |
 | absolute_expires_at | timestamptz |
 | revoked_at | timestamptz? |
@@ -897,6 +898,7 @@ Indexes: `(expires_at)`
 | consumeReauthToken | `(token: string) => void`<br>Marks a verified re-auth token used; called by the kernel after the request succeeded. | kernel |
 | revocationsSince | `(cursor?: string) => { sessions: { sessionId: uuid, at: datetime }[], accounts: { accountId: uuid, validAfter: datetime }[], cursor: string }`<br>Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. | kernel |
 | verifyRefreshToken | `(refreshToken: string) => { sessionId: uuid, accountId?: uuid, audience: string, kind: string } | null`<br>Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused. | kernel |
+| touchStaffSession | `(sessionId: uuid) => { live: bool, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }`<br>Middleware check on every admin request (each server caches the answer 5 s per session): whether the staff session is still live (not revoked, not past its expiry or absolute limit, and active within staffIdleMinutes), recording the activity (sessions.last_active_at, at most once a minute) that keeps it from going idle. | kernel |
 
 ## Permissions
 

@@ -3,6 +3,7 @@
  * endpoints), and the staff account tools (lock, unlock, force reset, reset 2-step, sign out, disable).
  * access and audit are other tranches: access.hasPermission and audit.record are stubbed.
  */
+import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type * as audit from '../../../spec/audit.js';
 import type { IdentityPublicApi } from '../../../spec/identity.js';
@@ -196,6 +197,53 @@ describe('staff invitations', () => {
     expect(again.status).toBe(200);
     expect(again.body.status).toBe('revoked');
     expect((await kit.call('POST', `${ADMIN}/invitations/${'01900000-0000-7000-8000-00000000abcd'}/resend`, { token: staffToken(), headers: code })).status).toBe(404);
+  });
+});
+
+describe('staff session idle timeout (checked on every admin request)', () => {
+  const db = () => kit.app.kernel.database.kysely;
+  const activeAt = async (sessionId: string) =>
+    (await sql<{ at: Date }>`select last_active_at as at from identity.sessions where id = ${sessionId}`.execute(db())).rows[0]!.at.getTime();
+  const lastActive = (sessionId: string, msAgo: number) =>
+    sql`update identity.sessions set last_active_at = ${new Date(kit.clock.now().getTime() - msAgo)} where id = ${sessionId}`.execute(db());
+  /** past the kernel's 5 s liveness cache */
+  const later = () => kit.clock.advance(6_000);
+
+  it('keeps an active staff session, records the activity at most once a minute, and ends an idle one with 401', async () => {
+    const s = await staffMember('Ida Idle');
+    const t = s.tokens;
+    const url = `${ADMIN}/accounts/${s.accountId}`;
+    expect((await kit.call('GET', url, { token: t.accessToken })).status).toBe(200);
+
+    // 29 minutes without a request: still live, and this request is new activity
+    await lastActive(t.sessionId, 29 * 60_000);
+    later();
+    expect((await kit.call('GET', url, { token: t.accessToken })).status).toBe(200);
+    expect(await activeAt(t.sessionId)).toBe(kit.clock.now().getTime());
+    // the next request within the minute writes nothing
+    later();
+    expect((await kit.call('GET', url, { token: t.accessToken })).status).toBe(200);
+    expect(await activeAt(t.sessionId)).toBe(kit.clock.now().getTime() - 6_000);
+
+    // 31 minutes without a request: idle, though the access token is still valid
+    await lastActive(t.sessionId, 31 * 60_000);
+    later();
+    const idle = await kit.call('GET', url, { token: t.accessToken });
+    expect(idle.status).toBe(401);
+    expect(idle.body.error).toMatchObject({ code: 'UNAUTHORIZED', details: { reason: 'session_idle' } });
+    expect(idle.headers['www-authenticate']).toBe('Bearer'); // a refresh can't help: sign in again
+    expect((await kit.call('POST', `${PUBLIC}/sessions/refresh`, { body: { refreshToken: t.refreshToken } })).status).toBe(401);
+  });
+
+  it('refuses a session ended between revocation polls', async () => {
+    const s = await staffMember('Rex Revoked');
+    const url = `${ADMIN}/accounts/${s.accountId}`;
+    expect((await kit.call('GET', url, { token: s.tokens.accessToken })).status).toBe(200);
+    await sql`update identity.sessions set revoked_at = ${kit.clock.now()}, revoke_reason = 'test' where id = ${s.tokens.sessionId}`.execute(db());
+    later();
+    const res = await kit.call('GET', url, { token: s.tokens.accessToken });
+    expect(res.status).toBe(401);
+    expect(res.body.error.details.reason).toBe('token_revoked');
   });
 });
 
