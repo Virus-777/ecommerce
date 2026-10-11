@@ -89,8 +89,9 @@ GraphQL answers `{ data, errors }`; every error carries `extensions.code` (and `
 
 | Code | HTTP status | When |
 |---|---|---|
-| `UNAUTHORIZED` | 401 | Before GraphQL runs: token missing, invalid or expired (`details.reason: token_*`, the only case where a client refreshes), or a session of the wrong kind for the endpoint (`sign_in_required`) |
-| `WRONG_AUDIENCE`, `NO_SELLER_ACCESS` … | 403 | Before GraphQL runs: the same caller checks and codes as REST for the area (another app's token, no seller account chosen …) |
+| `UNAUTHORIZED` | 401 | Before GraphQL runs: token missing, invalid or expired (`details.reason: token_*`, the only case where a client refreshes), a session of the wrong kind for the endpoint (`sign_in_required`, `seller_context_required`), or an idle staff session (`session_idle`: sign in again) |
+| `WRONG_AUDIENCE`, `NO_SELLER_ACCESS`, `STEP_UP_REQUIRED` … | 403 | Before GraphQL runs: the same caller checks and codes as REST for the area (another app's token, no longer a member of the seller, staff without 2-step …) |
+| `UPGRADE_REQUIRED`, `RATE_LIMITED`, `SERVICE_UNAVAILABLE` | 426, 429, 503 | Before GraphQL runs, as in REST: an outdated Android app, too many requests (`Retry-After`), staff sessions or revocations that can't be checked |
 | `VALIDATION_FAILED` | 400 | Syntax error, unknown field, wrong variable type, a mutation |
 | `QUERY_TOO_COMPLEX` | 400 | Above the depth or cost limit |
 | `PERSISTED_QUERY_NOT_FOUND`, `PERSISTED_QUERY_NOT_SUPPORTED` | 400 | See above |

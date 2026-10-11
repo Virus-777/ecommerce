@@ -166,11 +166,11 @@
     },
     "UNAUTHORIZED": {
       "status": 401,
-      "meaning": "No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error=\"invalid_token\")."
+      "meaning": "No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_."
     },
     "FORBIDDEN": {
       "status": 403,
-      "meaning": "Signed in, but the role or seller permission does not allow this. details.permission names it."
+      "meaning": "Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason."
     },
     "NOT_FOUND": {
       "status": 404,
@@ -190,15 +190,23 @@
     },
     "IDEMPOTENCY_KEY_REUSED": {
       "status": 422,
-      "meaning": "The Idempotency-Key was used with a different request body."
+      "meaning": "The Idempotency-Key was used with a different request (path, query or body)."
     },
     "RATE_LIMITED": {
       "status": 429,
-      "meaning": "Too many requests; retry after the Retry-After header."
+      "meaning": "Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds)."
     },
     "NOT_IMPLEMENTED": {
       "status": 501,
-      "meaning": "Planned for a later launch phase."
+      "meaning": "Designed but not built yet, or planned for a later launch phase (details.reason not_built or later_phase)."
+    },
+    "INTERNAL_ERROR": {
+      "status": 500,
+      "meaning": "Something went wrong on the server, or a response did not match the spec. Include the X-Request-Id when reporting it."
+    },
+    "RANGE_NOT_SATISFIABLE": {
+      "status": 416,
+      "meaning": "File downloads (GET /files/…): the requested Range is outside the file. details.sizeBytes."
     },
     "WRONG_AUDIENCE": {
       "status": 403,
@@ -218,7 +226,7 @@
     },
     "UPGRADE_REQUIRED": {
       "status": 426,
-      "meaning": "This app version is no longer supported; update the app."
+      "meaning": "This Android app version is no longer supported; update the app. details.minVersionCode, details.updateUrl."
     },
     "SERVICE_UNAVAILABLE": {
       "status": 503,
@@ -227,12 +235,13 @@
   },
   "headers": {
     "Authorization": "Bearer <token> on every request: visitor token before sign-in, access token after (customer, seller member or staff)",
-    "Idempotency-Key": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same body returns the first result.",
-    "Accept-Language": "en-US (only locale at launch)",
-    "X-Request-Id": "Echoed back; include it when reporting problems",
-    "X-App-Proof": "Bootstrap only: Play Integrity token (Android) or bot-challenge token (website)",
-    "X-Step-Up-Code": "Current 2-step code for endpoints with stepUp kind \"code\"",
-    "X-Client": "web|android/<version>: analytics and minimum-version checks only, never trusted for authorization"
+    "Idempotency-Key": "Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same request returns the first result (with Idempotent-Replayed: true).",
+    "Accept-Language": "Ignored: every response is en-US (the only locale at launch)",
+    "X-Request-Id": "Optional. A value of 1–100 letters, digits, _ or - becomes the request id; otherwise the server makes one. Every response carries it; include it when reporting problems",
+    "X-App-Proof": "Bootstrap only: turnstile:<token> (website bot challenge) or play:<token> (Android Play Integrity); dev in development and tests",
+    "X-Step-Up-Code": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
+    "X-Client": "web, android/<versionCode> or android/<versionName>+<versionCode> (e.g. android/1.4.2+142): analytics and the minimum-version check (426) only, never trusted for authorization",
+    "X-Requested-With": "Any value. Required with the website's refresh cookie on refresh and sign-out, together with an allowed Origin (else 403)"
   },
   "constants": {
     "OFFICIAL_STORE_ID": {

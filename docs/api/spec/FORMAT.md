@@ -68,7 +68,7 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
 | `enum(a\|b\|c)` | one of the values |
 | `map<T>` | object with string keys and `T` values |
 | `{ "type": "int", "desc": "…" }` | any of the above with a description |
-| `{ "type": "string", "permission": "orders.customers.view-contact", "mask": "email" }` | a sensitive field: masked (email, phone, name) or hidden (hide) for staff and sellers without the permission |
+| `{ "type": "string", "permission": "orders.customers.view-contact", "mask": "email" }` | a sensitive field: masked (`email` → `a***@example.com`, `phone` → `***12`, `name` → `A.`) or hidden (`hide` → null) in seller and admin responses for callers without the permission, centrally after the handler. The GraphQL field that returns it carries `@sensitive(permission, mask)` with the same values; `graphql.mjs` checks they match |
 | `{ "field": "type", … }` (nested object) | inline object. An object is a descriptor (rows above) only when all its keys are among `type`, `desc`, `permission`, `mask`; `{ "type": "enum(a\|b)", "note": "text" }` is an object with a field named `type` |
 
 ## Endpoints
@@ -81,28 +81,33 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "path": "/products/{id}/approve",        // relative to the area prefix: /api/admin/catalog/products/{id}/approve
   "summary": "Approve a submitted product",
   "desc": "Optional longer explanation: rules, side effects.",
-  "auth": "staff",                         // every endpoint needs a token (docs/03-auth-middleware.md):
-                                           //   visitor | shopper | customer | account (store, public)
-                                           //   seller (seller) | staff (admin) | refresh | bootstrap (public) | provider (webhooks)
+  "auth": "staff",                         // every endpoint needs a token (docs/03-auth-middleware.md); per area:
+                                           //   store: visitor | shopper | customer | account (any signed-in realm; every app's origin)
+                                           //   public: visitor | refresh (refresh token, cookie or body) | bootstrap (app proof, one endpoint)
+                                           //   seller: seller · admin: staff · webhooks: provider
   "permission": "catalog.products.review", // optional; must be declared by some module
   "permissionWhen": [                      // optional: an extra permission when the request is about someone else
     { "if": { "query.view": "all" }, "permission": "access.approvals.view-all" }   // value, or "!self" / "!self-member"
   ],
   "stepUp": { "kind": "reauth", "purpose": "payout-account" },  // optional: reauth = reauthToken in the body; code = X-Step-Up-Code header.
-                                           //   A reauth purpose must be listed in identity ReauthRequest.purpose (the build checks it)
+                                           //   A reauth purpose must be listed in identity ReauthRequest.purpose (the build checks it);
+                                           //   errors must list STEP_UP_REQUIRED. A missing proof is 403 STEP_UP_REQUIRED, never 400.
+                                           //   Money approvals don't use stepUp: they take "stepUpCode" in the body, checked by access.decide
   "sellerContext": "optional",             // seller area only: works before a seller is chosen
   "scope": "own-member",                   // optional override of the derived record scope:
                                            //   public | own-customer | own-seller | own-member | guest-order | staff
-  "rateLimit": "sign-in",                  // optional named rate-limit class
+  "rateLimit": "sign-in",                  // optional rate-limit class (docs/03 §11): sign-in | registration | password-reset | code |
+                                           //   bootstrap | export; an unknown class fails startup. A POST whose path ends in /exports
+                                           //   counts as export without it
   "params": { "id": "uuid" },              // must match {placeholders} in path
   "query": { "q": "string?" },
-  "paging": true,                          // adds cursor/page/limit and wraps response in Page<…>
+  "paging": true,                          // adds cursor/page/limit (1–100, default 24) and wraps response in Page<…>
   "body": { "note": "string?" },           // type name, inline object, "binary" (raw bytes, any content type; the handler
                                            //   gets the request stream, never buffered, and enforces its own limit), or omitted
   "response": "Product",                   // type, "Product[]", inline object, or null for no body (204 unless status says otherwise, e.g. 202)
   "status": 200,                           // success status (default 200; 201 create; 202 accepted; 204 no content)
   "errors": ["ILLEGAL_TRANSITION"],        // codes from common.json or module-specific UPPER_SNAKE
-  "idempotent": false,                     // true → Idempotency-Key header required
+  "idempotent": false,                     // true → Idempotency-Key header required (rules in docs/api/README.md, Idempotency)
   "audited": true,                         // writes to the action history
   "approval": "Above $2,000 needs a second Finance reviewer",   // optional approval rule
   "events": ["catalog.product.approved"],  // events this call publishes

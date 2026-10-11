@@ -431,9 +431,16 @@ for (const m of modules) {
 
 /* Index */
 const idx = [];
-idx.push('# Marketly API design', '', `Generated from \`docs/api/spec/\` by \`node docs/api/tools/build.mjs\`. ${modules.length} modules, ${endpointCount} endpoints.`, '');
+idx.push('# Marketly API design', '', `Generated from \`docs/api/spec/\` by \`node docs/api/tools/build.mjs\`. ${modules.length} modules, ${endpointCount.toLocaleString('en-US')} endpoints.`, '');
 idx.push('- **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`', '- **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)', '- **Architecture:** [../02-backend-architecture.md](../02-backend-architecture.md)', '- **Spec format:** [spec/FORMAT.md](spec/FORMAT.md)', '');
-idx.push('## API areas', '', '| Area | Prefix | Who | Auth |', '|---|---|---|---|', ...Object.values(common.areas).map((a) => `| ${a.title} | \`${a.prefix}\` | ${a.audience} | ${a.auth} |`));
+const allEndpoints = modules.flatMap((m) => m.endpoints);
+const countWhere = (f) => allEndpoints.filter(f).length;
+idx.push('## API areas', '', '| Area | Prefix | Who | Auth | Endpoints |', '|---|---|---|---|---|', ...Object.entries(common.areas).map(([k, a]) => `| ${a.title} | \`${a.prefix}\` | ${a.audience} | ${a.auth} | ${countWhere((e) => e.area === k)} |`));
+idx.push('', '### Endpoints by auth kind', '', 'Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.md) §0). The `account` endpoints live under `/api/store/identity` but take a signed-in token of any app, and every app\'s origin may call them.', '', '| Area | Auth kind | Who | Endpoints |', '|---|---|---|---|');
+for (const area of AREAS) for (const auth of AUTHS) {
+  const n = countWhere((e) => e.area === area && e.auth === auth);
+  if (n) idx.push(`| ${common.areas[area].title} | \`${auth}\` | ${common.auth[auth]} | ${n} |`);
+}
 for (const g of GROUPS) {
   const ms = modules.filter((m) => m.group === g);
   if (!ms.length) continue;
@@ -445,8 +452,79 @@ modules.forEach((m) => lv(m.name));
 const layers = [];
 for (const m of modules) (layers[level[m.name]] ??= []).push(m.name);
 idx.push('', '## Dependency layers', '', 'Each module needs only modules in earlier layers (required dependencies; optional ones are listed on each module page).', '', '| Layer | Modules |', '|---|---|', ...layers.map((ms, i) => `| ${i} | ${ms.sort().map((n) => `[${n}](modules/${n}.md)`).join(', ')} |`));
-idx.push('', '## Errors', '', '| Code | Status | Meaning |', '|---|---|---|', ...Object.entries(common.errors).map(([c, d]) => `| \`${c}\` | ${d.status} | ${d.meaning} |`));
+idx.push('', '## Errors', '', 'Every REST error is `{ "error": { "code", "message", "details"? } }` with the status below. Module codes are listed on each module page.', '', '| Code | Status | Meaning |', '|---|---|---|', ...Object.entries(common.errors).map(([c, d]) => `| \`${c}\` | ${d.status} | ${d.meaning} |`));
+const identityCodes = byName.get('identity')?.errorCodes ?? {};
+const SESSION_CODES = ['APP_PROOF_INVALID', 'REFRESH_TOKEN_INVALID', 'ACCOUNT_LOCKED', 'ACCOUNT_DISABLED'].filter((c) => identityCodes[c]);
+if (SESSION_CODES.length) idx.push('', 'Sign-in and session codes from [identity](modules/identity.md) that every app meets:', '', '| Code | Status | Meaning |', '|---|---|---|', ...SESSION_CODES.map((c) => `| \`${c}\` | ${identityCodes[c].status} | ${identityCodes[c].meaning} |`));
+idx.push(
+  '',
+  'Requests the server can\'t read keep their HTTP status with code `VALIDATION_FAILED` and no `details`: 400 (unreadable JSON), 413 (a JSON body over 2 MB) and 415 (an unsupported content type).',
+  '',
+  'GraphQL answers `{ data, errors }` with `errors[].extensions.code` instead of the `{ error }` envelope, and has four codes of its own: `QUERY_TOO_COMPLEX`, `QUERY_TIMEOUT`, `PERSISTED_QUERY_NOT_FOUND` and `PERSISTED_QUERY_NOT_SUPPORTED`. See [graphql/README.md](graphql/README.md#errors).',
+  '',
+  '### Refusal details',
+  '',
+  '| Code | `details` |',
+  '|---|---|',
+  '| `VALIDATION_FAILED` | `issues: [{ path, message }]`, the path naming the part and field (`body.email`, `querystring.limit`) |',
+  '| `UNAUTHORIZED` | `reason`: `token_missing`, `token_expired`, `token_revoked`, `token_malformed`, `token_bad_signature`, `token_unknown_key`, `token_wrong_type`, `token_wrong_issuer`, `token_not_yet_valid`, `token_invalid` (refresh token); `sign_in_required`, `seller_context_required`, `session_idle`; `signature_invalid`, `signature_expired` (webhooks); `link_missing`, `link_invalid` (file links) |',
+  '| `FORBIDDEN` | `permission` for a missing permission; otherwise `reason`: `origin_not_allowed`, `x_requested_with_required` (cookie refresh and sign-out), `link_expired` (file links) |',
+  '| `WRONG_AUDIENCE` | `tokenAudience`, `area` |',
+  '| `STEP_UP_REQUIRED` | `kind` (`reauth`, `code`, `two-step-sign-in`), `purpose` |',
+  '| `ILLEGAL_TRANSITION` | `machine`, `from`, `event`, `allowed` |',
+  '| `APPROVAL_REQUIRED` | `approvalRequestId` |',
+  '| `RATE_LIMITED` | `retryAfterSeconds` (also the `Retry-After` header) |',
+  '| `UPGRADE_REQUIRED` | `minVersionCode`, `updateUrl` |',
+  '| `NOT_IMPLEMENTED` | `operation`, `reason` (`not_built`, `later_phase`), `phase` |',
+  '| `SERVICE_UNAVAILABLE` | `reason`: `sessions_unavailable`, `revocations_stale`, `revocations_unavailable` (admin requests); none when an app proof can\'t be checked |',
+  '| `ACCOUNT_LOCKED` | `lockedUntil` (null = until staff unlock), `cause` |',
+);
 idx.push('', '## Headers', '', '| Header | Use |', '|---|---|', ...Object.entries(common.headers).map(([h, d]) => `| \`${h}\` | ${d} |`));
+idx.push('', 'Response headers: `X-Request-Id` (always), `Retry-After` (429), `Idempotent-Replayed: true` (a replayed idempotent request), `WWW-Authenticate` (401 `UNAUTHORIZED`: `Bearer error="invalid_token"` for a bad token, plain `Bearer` otherwise). Browsers can read all four across origins.');
+const refreshGrace = byName.get('identity')?.settings?.find((s) => s.key === 'refreshReuseGraceSeconds')?.default;
+const pageLimit = common.pagination.query.limit.desc.replace(/^Items per batch, /, '');
+idx.push(
+  '',
+  '## Client rules',
+  '',
+  'The full design is [../03-auth-middleware.md](../03-auth-middleware.md); these are the rules an app needs.',
+  '',
+  '### Responses and URLs',
+  '',
+  '- Success uses the status the endpoint declares (200, 201, 202). An endpoint without a response body answers 204, or 202 where it says so, with an empty body.',
+  '- Trailing slashes are ignored: `/api/store/cart/` is `/api/store/cart`.',
+  '- `Accept-Language` is ignored; texts are en-US.',
+  '- Every `/api`, `/graphql` and `/webhooks` response is `Cache-Control: private, no-store`.',
+  '',
+  '### Paging',
+  '',
+  `List endpoints take \`cursor\` (the Android app's infinite scroll) or \`page\` (the website's numbered pages), never both, and \`limit\` (${pageLimit}). The answer is \`{ items, nextCursor, page?, totalPages?, total? }\`; \`nextCursor\` is null at the end. Both \`cursor\` and \`page\`, a \`limit\` out of range, or a cursor the server can't read → 400 \`VALIDATION_FAILED\`. (GraphQL clamps the limit instead.)`,
+  '',
+  '### Idempotency',
+  '',
+  'Endpoints marked idempotent need `Idempotency-Key` (1–255 characters; missing → 400 `VALIDATION_FAILED`). Keys are kept 24 hours per operation and caller. The same key with the same request (path parameters, query and body) answers the first response again, same status and body, with `Idempotent-Replayed: true`; with a different request → 422 `IDEMPOTENCY_KEY_REUSED`; while the first request still runs → 409 `CONFLICT`. When the handler fails, the key is freed and a retry runs again. Use one key per user action and reuse it on retries.',
+  '',
+  '### Sessions',
+  '',
+  '- **Start:** `POST /api/public/identity/app-sessions` with `X-App-Proof` returns a visitor access token (15 minutes) and a refresh token. Signing in claims the visitor session.',
+  '- **Where the refresh token lives:** the website gets it in the `__Secure-mk_refresh` cookie (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions) and `refreshToken` is `""` in the body; Android gets it in the body.',
+  `- **Refresh** \`POST /api/public/identity/sessions/refresh\`, **sign out** \`POST /api/public/identity/sessions/sign-out\` (204). The server reads the cookie first, then \`refreshToken\` in the body. With the cookie, the request needs an allowed \`Origin\` and \`X-Requested-With\`, else 403. At most 30 refreshes an hour per session. Each refresh returns a new pair; the previous token sent again within ${refreshGrace ?? 20} s returns the same new pair (two tabs refreshing at once), and later it ends the session.`,
+  '- **Refused:** no refresh token → 401 `token_missing`; an unknown, expired, revoked or reused one → 401 `token_invalid` (sign-out with such a token too). Refresh can also answer `REFRESH_TOKEN_INVALID`, `ACCOUNT_DISABLED` or `ACCOUNT_LOCKED`. In every case, sign in again.',
+  '- **When to refresh:** only on 401 `UNAUTHORIZED` whose `details.reason` starts with `token_`. Never on `session_idle` (sign in again), other 401 reasons, `FORBIDDEN`, `WRONG_AUDIENCE` or a GraphQL field refusal.',
+  '',
+  '### Browsers (CORS)',
+  '',
+  'Each area allows its own app\'s origins (`CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS`); public endpoints, file links and the `account` endpoints allow every app\'s. Credentials (`Access-Control-Allow-Credentials: true`) are allowed only on the routes that set, clear or read the refresh cookie: refresh and sign-out, `POST /api/public/identity/app-sessions`, `/sessions`, `/sign-in-challenges/{id}/verify`, `/external-sign-ins`, `/verifications/{id}/confirm`, `/invitations/accept`, `/invitations/two-step`, and `POST /api/seller/identity/session/seller-context`.',
+  '',
+  '### For frontend developers',
+  '',
+  '1. Start an app session once, keep the access token in memory, and send `Authorization: Bearer` on every request, GraphQL included. Send `X-Client` (`web`, or `android/<versionName>+<versionCode>`).',
+  '2. Website: call the cookie routes above with `credentials: \'include\'`, and add `X-Requested-With` (any value) and a JSON body (`{}`) on refresh and sign-out.',
+  '3. Refresh one request at a time, only on 401 with `details.reason` `token_*`, then retry the request once. If the refresh itself is refused, sign in again (visitors: start a new app session).',
+  '4. 426 `UPGRADE_REQUIRED`: show the update screen (`details.updateUrl`). 429: wait `Retry-After` seconds. 503: retry with backoff.',
+  '5. Send one `Idempotency-Key` per user action on idempotent endpoints, the same on every retry.',
+  '6. Show or log the `X-Request-Id` of a failed response when reporting a problem.',
+);
 if (Object.keys(common.constants ?? {}).length) idx.push('', '## Constants', '', 'Reserved values every module may use (exported from `backend/src/spec/common.ts`).', '', '| Name | Value | Meaning |', '|---|---|---|', ...Object.entries(common.constants).map(([n, c]) => `| \`${n}\` | \`${JSON.stringify(c.value)}\` | ${c.desc} |`));
 writeFileSync(join(apiDir, 'README.md'), `${idx.join('\n')}\n`);
 
