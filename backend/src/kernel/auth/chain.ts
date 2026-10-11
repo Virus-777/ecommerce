@@ -2,10 +2,12 @@
  * The authorization middleware (docs/03-auth-middleware.md §3). Token verification is mandatory and
  * happens here, before any module code: handlers only ever see a verified `principal`.
  *
- *   every URL (app onRequest)   IP rate limit → authenticate (token / app proof / file-link signature / defer for refresh and webhooks)
+ *   every URL (app onRequest)   IP rate limit → authenticate (token + revocation, and for staff: fresh revocations and session
+ *                               liveness / idle timeout; app proof; file-link signature; defer for refresh and webhooks) → X-Client version gate
  *   each endpoint (onRequest)   launch phase → caller rate limit → audience → caller kind → seller context → permission → staff 2-step
- *   (preValidation)             refresh token · webhook signature + replay check · rate-limit classes keyed by body
- *   (preHandler)                conditional permissions → [idempotency, in register.ts] → step-up
+ *   (preValidation)             refresh token (+ Origin and X-Requested-With for the cookie) and its per-session limit · webhook
+ *                               signature + replay check + per-provider limit · rate-limit classes · step-up proof present
+ *   (preHandler)                conditional permissions → [idempotency, in register.ts] → step-up proof verified
  *   (onResponse)                consume the re-auth token · record the webhook event
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
