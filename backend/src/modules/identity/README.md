@@ -87,8 +87,8 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | POST | `/api/public/identity/sessions` | Sign in with email and password | visitor | `SignInRequest` → `SignInResult` |
 | POST | `/api/public/identity/sign-in-challenges/{id}/verify` | Complete sign-in with a 2-step code or recovery code | visitor | `SecondFactorRequest` → `SignInResult` |
 | POST | `/api/public/identity/sign-in-challenges/{id}/send-sms` | Text the 2-step code to the saved phone _(phase 2)_ | visitor | `SignInChallenge` |
-| POST | `/api/public/identity/sessions/refresh` | Exchange a refresh token for new tokens | refresh | `{ refreshToken: string? }` → `SessionTokens` |
-| POST | `/api/public/identity/sessions/sign-out` | Sign out this device | refresh | `{ refreshToken: string? }` → 204 No content |
+| POST | `/api/public/identity/sessions/refresh` | Exchange a refresh token for new tokens | refresh | `{ audience: enum(store|seller|admin)?, refreshToken: string? }` → `SessionTokens` |
+| POST | `/api/public/identity/sessions/sign-out` | Sign out this device | refresh | `{ audience: enum(store|seller|admin)?, refreshToken: string? }` → 204 No content |
 | POST | `/api/public/identity/password-resets` | Email a password reset link | visitor | `{ email: email }` → `{ emailMasked: string, expiresInMinutes: int, resendAvailableAt: datetime }` |
 | POST | `/api/public/identity/password-resets/lookups` | Check a reset link before showing the new-password form | visitor | `{ token: string }` → `PasswordResetStatus` |
 | POST | `/api/public/identity/password-resets/complete` | Set a new password from a reset link | visitor | `CompleteResetRequest` → 204 No content |

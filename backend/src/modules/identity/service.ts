@@ -112,7 +112,8 @@ export interface Caller {
 /** A result plus what to do with the website's refresh cookie (the http layer sets it) */
 export interface WithCookie<T> {
   result: T;
-  cookie?: { token: string; maxAgeSeconds: number } | 'clear';
+  /** set: the cookie of the session's app (`audience`); clear: the cookie the request used */
+  cookie?: { audience: Audience; token: string; maxAgeSeconds: number } | 'clear';
 }
 
 /** Account security for the staff customer 360 (GraphQL AccountSecurity) */
@@ -438,7 +439,7 @@ export class IdentityService implements IdentityPublicApi {
     const t = result.tokens;
     if (!t || !web) return { result };
     const maxAgeSeconds = Math.max(0, Math.floor((Date.parse(t.refreshTokenExpiresAt) - now.getTime()) / 1000));
-    return { result: { ...result, tokens: { ...t, refreshToken: '' } }, cookie: { token: t.refreshToken, maxAgeSeconds } };
+    return { result: { ...result, tokens: { ...t, refreshToken: '' } }, cookie: { audience: t.audience, token: t.refreshToken, maxAgeSeconds } };
   }
 
   /** Finds or records the device a sign-in comes from */

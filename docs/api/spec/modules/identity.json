@@ -1358,9 +1358,13 @@
       "desc": "Rotates the refresh token. Presenting an already-rotated token revokes the session (theft signal) and returns REFRESH_TOKEN_INVALID. The Android app calls this when an access token expires.",
       "auth": "refresh",
       "body": {
+        "audience": {
+          "type": "enum(store|seller|admin)?",
+          "desc": "Website: the app calling, whose refresh cookie (__Secure-mk_refresh_<audience>) is used. Each app has its own cookie, so signing into one app doesn't replace another's session in the same browser. Android leaves it out"
+        },
         "refreshToken": {
           "type": "string?",
-          "desc": "Android; the website sends the __Secure-mk_refresh cookie instead"
+          "desc": "Android; the website sends its app's refresh cookie and audience instead"
         }
       },
       "response": "SessionTokens",
@@ -1379,9 +1383,13 @@
       "desc": "Works for every audience; the refresh token identifies the session. Idempotent.",
       "auth": "refresh",
       "body": {
+        "audience": {
+          "type": "enum(store|seller|admin)?",
+          "desc": "Website: the app calling, whose refresh cookie (__Secure-mk_refresh_<audience>) is used. Each app has its own cookie, so signing into one app doesn't replace another's session in the same browser. Android leaves it out"
+        },
         "refreshToken": {
           "type": "string?",
-          "desc": "Android; the website sends the __Secure-mk_refresh cookie instead"
+          "desc": "Android; the website sends its app's refresh cookie and audience instead"
         }
       },
       "response": null

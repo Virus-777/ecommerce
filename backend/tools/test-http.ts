@@ -109,7 +109,7 @@ function rightToken(d: EndpointDef): Record<string, string> {
     case 'staff':
       return bearer(tok('staff'));
     case 'refresh':
-      return { cookie: `__Secure-mk_refresh=${REFRESH}`, origin: ORIGIN, 'x-requested-with': 'fetch' }; // the website's cookie, from an app page
+      return { cookie: `__Secure-mk_refresh_store=${REFRESH}`, origin: ORIGIN, 'x-requested-with': 'fetch' }; // the website's cookie, from an app page
     case 'provider':
       return { 'x-event-id': crypto.randomUUID() }; // signed per request in send()
     case 'bootstrap':
@@ -173,7 +173,9 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
   const url = path + sampleQuery(d.query?.() as z.ZodType | undefined);
   const body = validSample(d.body?.());
   const isObject = body.value !== null && typeof body.value === 'object' && !Array.isArray(body.value);
-  const payload = (over: Record<string, unknown> = {}) => (d.body ? (isObject ? { ...(body.value as object), ...over } : body.value) : undefined);
+  // refresh and sign-out name the app whose cookie they use (the test session is a store one)
+  const appCookie = d.auth === 'refresh' ? { audience: 'store' } : {};
+  const payload = (over: Record<string, unknown> = {}) => (d.body ? (isObject ? { ...(body.value as object), ...appCookie, ...over } : body.value) : undefined);
   const extra: Record<string, string> = {};
   if (d.idempotent) extra['idempotency-key'] = crypto.randomUUID();
   if (d.stepUp?.kind === 'code') extra['x-step-up-code'] = '000000';
@@ -205,7 +207,7 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
     account: bearer(signAccessToken(devSigner({ jwk: newDevJwk() }), devClaims('customer'), { issuer })),
     seller: bearer(`${tok('seller').slice(0, -8)}AAAAAAAA`),
     staff: bearer(sign(devClaims('staff'), 60, new Date(Date.now() - 3_600_000))),
-    refresh: { cookie: '__Secure-mk_refresh=not-a-refresh-token', origin: ORIGIN, 'x-requested-with': 'fetch' },
+    refresh: { cookie: '__Secure-mk_refresh_store=not-a-refresh-token', origin: ORIGIN, 'x-requested-with': 'fetch' },
     provider: { 'x-signature': 'sha256=forged', 'x-timestamp': String(Math.floor(Date.now() / 1000)) },
     bootstrap: { 'x-app-proof': 'forged' },
   };
@@ -337,10 +339,15 @@ async function testServer() {
     r = await send('OPTIONS', '/api/store/catalog/categories', { origin: SELLER_ORIGIN, 'access-control-request-method': 'GET' });
     record(op, 'other store endpoints refuse Seller Center', r.headers.get('access-control-allow-origin') ? 'seller origin allowed' : null);
     // the website's cookie works only from an app page
-    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh=${REFRESH}` }, {});
+    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh_store=${REFRESH}` }, { audience: 'store' });
     record(op, 'cookie refresh without Origin → 403', expectStatus(r, 403, ['FORBIDDEN']));
-    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh=${REFRESH}`, origin: ORIGIN }, {});
+    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh_store=${REFRESH}`, origin: ORIGIN }, { audience: 'store' });
     record(op, 'cookie refresh without X-Requested-With → 403', expectStatus(r, 403, ['FORBIDDEN']));
+    // one cookie per app: the body's audience names it, and without it no cookie is read
+    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh_store=${REFRESH}`, origin: ORIGIN, 'x-requested-with': 'fetch' }, {});
+    record(op, 'cookie refresh without audience → 401', expectStatus(r, 401, ['UNAUTHORIZED']));
+    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh_seller=${REFRESH}`, origin: ORIGIN, 'x-requested-with': 'fetch' }, { audience: 'seller' });
+    record(op, "another app's session in an app's cookie → 401", expectStatus(r, 401, ['UNAUTHORIZED']));
   }
 
   const ping = { query: '{ ping }' };

@@ -8,7 +8,7 @@ import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import * as common from '../../spec/common.js';
-import type { AuthChain } from '../auth/chain.js';
+import { REFRESH_COOKIE_AUDIENCES, refreshCookieScheme, type AuthChain } from '../auth/chain.js';
 import { actorOf } from '../auth/index.js';
 import { maskResponse } from '../auth/masking.js';
 import { scopeFor } from '../auth/scope.js';
@@ -61,7 +61,7 @@ const SECURITY: Record<AuthKind, Record<string, string[]>[]> = {
   account: [{ bearer: [] }],
   seller: [{ bearer: [] }],
   staff: [{ bearer: [] }],
-  refresh: [{ refreshCookie: [] }, {}],
+  refresh: [...REFRESH_COOKIE_AUDIENCES.map((a) => ({ [refreshCookieScheme(a)]: [] })), {}],
   provider: [{ webhookSignature: [] }],
   bootstrap: [{ appProof: [] }],
 };

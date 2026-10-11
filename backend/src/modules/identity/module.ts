@@ -20,7 +20,7 @@ import { IdentityService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.4.0',
+  version: '1.5.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {

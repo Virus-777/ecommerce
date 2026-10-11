@@ -87,9 +87,27 @@ const WEBHOOK_WINDOW_MS = 5 * 60_000;
 const CACHE_MS = 60_000;
 const STAFF_SESSION_CACHE_MS = 5_000;
 type StaffSessionState = Awaited<ReturnType<Authorities['touchStaffSession']>>;
-/** Website refresh cookie: HttpOnly; Secure; SameSite=Strict; Path=REFRESH_COOKIE_PATH (sent only to refresh and sign-out) */
-export const REFRESH_COOKIE = '__Secure-mk_refresh';
+/**
+ * Website refresh cookies, one per app so that signing into one app doesn't replace another's session in the
+ * same browser: HttpOnly; Secure; SameSite=Strict; Path=REFRESH_COOKIE_PATH (sent only to refresh and sign-out).
+ * Refresh and sign-out name the app in the body's `audience`; the kernel reads only that app's cookie.
+ */
+export const REFRESH_COOKIE_AUDIENCES = ['store', 'seller', 'admin'] as const;
+export type RefreshCookieAudience = (typeof REFRESH_COOKIE_AUDIENCES)[number];
+export const refreshCookieName = (audience: RefreshCookieAudience) => `__Secure-mk_refresh_${audience}`;
 export const REFRESH_COOKIE_PATH = '/api/public/identity/sessions';
+/** OpenAPI security scheme per app cookie (docs/api/tools/build.mjs writes the same) */
+export const refreshCookieScheme = (audience: RefreshCookieAudience) => `refreshCookie${audience[0]!.toUpperCase()}${audience.slice(1)}`;
+export const refreshCookieText = (audience: RefreshCookieAudience) =>
+  `The ${audience} website's refresh token (HttpOnly; Secure; SameSite=Strict; Path=${REFRESH_COOKIE_PATH}, sent only to refresh and sign-out, which name the app in the body's audience). Android sends refreshToken in the body instead.`;
+
+/** The refresh cookie of the app the body names (`audience`), if the browser sent one */
+export function refreshCookieOf(request: FastifyRequest): { audience: RefreshCookieAudience; token: string } | undefined {
+  const audience = (request.body as { audience?: unknown } | undefined)?.audience;
+  if (!REFRESH_COOKIE_AUDIENCES.includes(audience as RefreshCookieAudience)) return undefined;
+  const token = cookie(request.headers.cookie, refreshCookieName(audience as RefreshCookieAudience));
+  return token ? { audience: audience as RefreshCookieAudience, token } : undefined;
+}
 
 /** Small TTL cache for answers from access, sellers and customers */
 class TtlCache<V> {
@@ -393,13 +411,14 @@ export class AuthChain {
 
   async #verifyRefresh(request: FastifyRequest) {
     const fromBody = (request.body as { refreshToken?: unknown } | undefined)?.refreshToken;
-    const fromCookie = cookie(request.headers.cookie, REFRESH_COOKIE);
-    const token = fromCookie ?? (typeof fromBody === 'string' ? fromBody : undefined);
+    const fromCookie = refreshCookieOf(request);
+    const token = fromCookie?.token ?? (typeof fromBody === 'string' ? fromBody : undefined);
     if (!token) throw tokenRejected('missing');
     // the website's cookie is sent by the browser on its own: only a Marketly app's page may use it (docs/03 §5)
     if (fromCookie) this.#assertAppPage(request);
     const session = await this.k.authorities.verifyRefreshToken(token);
-    if (!session) throw tokenRejected('invalid');
+    // an app's cookie only ever holds that app's session
+    if (!session || (fromCookie && session.audience !== fromCookie.audience)) throw tokenRejected('invalid');
     await enforce(this.k.limits, `refresh:${session.sessionId}`, REFRESH_LIMIT);
     request.auth = { via: 'refresh', principal: null, refreshSession: session };
   }

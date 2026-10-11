@@ -1457,7 +1457,8 @@ export const endpoints = defineEndpoints({
     summary: "Exchange a refresh token for new tokens",
     desc: "Rotates the refresh token. Presenting an already-rotated token revokes the session (theft signal) and returns REFRESH_TOKEN_INVALID. The Android app calls this when an access token expires.",
     body: () => z.object({
-      refreshToken: z.string().describe("Android; the website sends the __Secure-mk_refresh cookie instead").nullish(),
+      audience: z.enum(["store", "seller", "admin"]).describe("Website: the app calling, whose refresh cookie (__Secure-mk_refresh_<audience>) is used. Each app has its own cookie, so signing into one app doesn't replace another's session in the same browser. Android leaves it out").nullish(),
+      refreshToken: z.string().describe("Android; the website sends its app's refresh cookie and audience instead").nullish(),
     }),
     response: () => SessionTokens,
     status: 200,
@@ -1473,7 +1474,8 @@ export const endpoints = defineEndpoints({
     summary: "Sign out this device",
     desc: "Works for every audience; the refresh token identifies the session. Idempotent.",
     body: () => z.object({
-      refreshToken: z.string().describe("Android; the website sends the __Secure-mk_refresh cookie instead").nullish(),
+      audience: z.enum(["store", "seller", "admin"]).describe("Website: the app calling, whose refresh cookie (__Secure-mk_refresh_<audience>) is used. Each app has its own cookie, so signing into one app doesn't replace another's session in the same browser. Android leaves it out").nullish(),
+      refreshToken: z.string().describe("Android; the website sends its app's refresh cookie and audience instead").nullish(),
     }),
     response: null,
     status: 204,

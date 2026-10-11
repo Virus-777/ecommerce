@@ -134,5 +134,6 @@ export async function enableTotp(kit: TestKit, token: string, password: string) 
 export const cookieOf = (headers: Record<string, any>) => {
   const raw = headers['set-cookie'];
   const line = (Array.isArray(raw) ? raw[0] : raw) as string | undefined;
-  return line ? { line, value: /^__Secure-mk_refresh=([^;]*)/.exec(line)?.[1] ?? '' } : null;
+  const m = line && /^__Secure-mk_refresh_(store|seller|admin)=([^;]*)/.exec(line);
+  return line ? { line, app: m ? m[1] : undefined, value: m ? m[2]! : '' } : null;
 };

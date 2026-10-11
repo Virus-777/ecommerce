@@ -40,16 +40,40 @@ describe('app sessions (visitor tokens)', () => {
     expect(c.line).toMatch(/HttpOnly/);
     expect(c.line).toMatch(/Secure/);
     expect(c.line).toMatch(/SameSite=Strict/);
-    expect(c.line).toMatch(/^__Secure-mk_refresh=/);
+    expect(c.line).toMatch(/^__Secure-mk_refresh_store=/);
     expect(c.line).toMatch(/Path=\/api\/public\/identity\/sessions(;|$)/);
     expect(c.line).not.toMatch(/Domain=/);
 
     // the cookie refreshes the visitor session and rotates
-    const r = await kit.call('POST', `${PUBLIC}/sessions/refresh`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh=${c.value}` }, body: {} });
+    const r = await kit.call('POST', `${PUBLIC}/sessions/refresh`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh_store=${c.value}` }, body: { audience: 'store' } });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.sessionId).toBe(res.body.sessionId);
     expect(r.body.refreshToken).toBe('');
     expect(cookieOf(r.headers)!.value).not.toBe(c.value);
+  });
+
+  it('keeps one cookie per app, so the store and Seller Center sessions live side by side in one browser', async () => {
+    const start = (audience: string) => kit.call('POST', `${PUBLIC}/app-sessions`, { headers: { 'x-app-proof': 'dev' }, body: { audience, device: web } });
+    const [store, seller] = [await start('store'), await start('seller')];
+    expect([cookieOf(store.headers)!.app, cookieOf(seller.headers)!.app]).toEqual(['store', 'seller']);
+    // the browser sends both cookies; the body's audience picks the app's own
+    const jar = `__Secure-mk_refresh_store=${cookieOf(store.headers)!.value}; __Secure-mk_refresh_seller=${cookieOf(seller.headers)!.value}`;
+    const refresh = (audience?: string) => kit.call('POST', `${PUBLIC}/sessions/refresh`, { headers: { ...fromPage, cookie: jar }, body: audience ? { audience } : {} });
+    const r = await refresh('store');
+    expect(r.body).toMatchObject({ sessionId: store.body.sessionId, audience: 'store' });
+    expect(cookieOf(r.headers)!.app).toBe('store');
+    const out = await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { ...fromPage, cookie: jar }, body: { audience: 'seller' } });
+    expect(out.status).toBe(204);
+    expect(cookieOf(out.headers)!.line).toMatch(/^__Secure-mk_refresh_seller=; Max-Age=0/);
+    // without audience no cookie is read
+    expect((await refresh()).body.error.details.reason).toBe('token_missing');
+    // an app's cookie holding another app's session is refused
+    const swapped = await kit.call('POST', `${PUBLIC}/sessions/refresh`, {
+      headers: { ...fromPage, cookie: `__Secure-mk_refresh_admin=${cookieOf(r.headers)!.value}` },
+      body: { audience: 'admin' },
+    });
+    expect(swapped.status).toBe(401);
+    expect(swapped.body.error.details.reason).toBe('token_invalid');
   });
 
   it('rotates visitor refresh tokens (Android, body)', async () => {
@@ -278,7 +302,7 @@ describe('refresh and sign-out', () => {
     const s = await signIn(kit, { email: c.email, password: c.password, device: web });
     expect(s.body.tokens.refreshToken).toBe('');
     const cookie = cookieOf(s.headers)!.value;
-    const out = await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh=${cookie}` }, body: {} });
+    const out = await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh_store=${cookie}` }, body: { audience: 'store' } });
     expect(out.status).toBe(204);
     expect(cookieOf(out.headers)!.line).toMatch(/Max-Age=0/);
     // cleared with the same Path it was set with, or the browser keeps it
@@ -286,7 +310,7 @@ describe('refresh and sign-out', () => {
     await kit.syncRevocations();
     expect((await kit.call('GET', `${STORE}/security`, { token: s.body.tokens.accessToken })).status).toBe(401);
     // the refresh token no longer works, so the middleware refuses a second sign-out
-    expect((await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh=${cookie}` }, body: {} })).status).toBe(401);
+    expect((await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh_store=${cookie}` }, body: { audience: 'store' } })).status).toBe(401);
   });
 
   it('keep me signed in gives a 30-day refresh token, otherwise 24 hours', async () => {
