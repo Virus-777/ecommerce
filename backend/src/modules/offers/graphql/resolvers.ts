@@ -1,5 +1,5 @@
 import { isAppError } from '../../../kernel/errors/index.js';
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
@@ -10,11 +10,10 @@ import type { OffersService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const ACTOR_KIND: Record<string, string> = { customer: 'CUSTOMER', visitor: 'GUEST', seller: 'SELLER', staff: 'STAFF', provider: 'SYSTEM', anonymous: 'SYSTEM', system: 'SYSTEM' };
 const up = <T extends string | null | undefined>(s: T) => (s ? s.toUpperCase().replace(/-/g, '_') : s);
 const low = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
-const actor = (a: common.Actor | null | undefined) => (a ? { kind: ACTOR_KIND[a.kind] ?? 'SYSTEM', id: a.id ?? null, name: a.name ?? null } : null);
+const actor = gqlActor;
 const pairs = (m: Record<string, string> | null | undefined) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
 const reasons = (list: readonly IneligibilityReason[]) => list.map((r) => ({ ...r, code: up(r.code) }));
 const statusReason = (s: StatusReason | null | undefined) => (s ? { ...s, code: up(s.code), actor: actor(s.actor) } : null);

@@ -190,7 +190,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   for (const name of ['access.role.changed', 'access.coverage.changed', 'access.away.started', 'access.away.ended']) events.subscribe('kernel', name, () => auth.invalidate('permissions'));
   for (const name of ['sellers.member.permissions_changed', 'sellers.member.removed', 'sellers.seller.closed']) events.subscribe('kernel', name, () => auth.invalidate('members'));
 
-  registerEndpoints(app, boot.endpoints, { config, auth, idempotency: postgresIdempotencyStore(database.kysely, clock) });
+  registerEndpoints(app, boot.endpoints, { config, auth, idempotency: postgresIdempotencyStore(database.kysely, clock), sessionCookie: boot.sessionCookie });
   if (fileRoute) registerFileRoute(app, fileRoute);
   const graphql = await registerGraphQL(app, {
     config,

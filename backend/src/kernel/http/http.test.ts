@@ -10,10 +10,14 @@ import { auth, callers, ISSUER, TEST_JWK, token } from '../../testing/app.js';
 import { devClaims } from '../auth/dev.js';
 import { moduleAuthorities } from '../auth/authorities.js';
 import { signFileLink } from '../auth/file-links.js';
+import type { AuthChain } from '../auth/chain.js';
+import { principalOf } from '../auth/index.js';
+import { CALLER_LIMITS, memoryRateLimitStore, REFRESH_LIMIT, WEBHOOK_LIMIT } from '../auth/rate-limit.js';
 import { createAuthChain } from '../auth/setup.js';
 import { devSigner, newDevJwk, signAccessToken } from '../auth/tokens.js';
 import { loadConfig } from '../config/index.js';
 import { createDatabase, type Database } from '../db/index.js';
+import { AppError } from '../errors/index.js';
 import { newId } from '../lib/ids.js';
 import { migrate } from '../migrations/index.js';
 import { defineEndpoints } from '../spec/define.js';
@@ -42,6 +46,12 @@ const endpoints = defineEndpoints({
   mine: { area: 'seller', method: 'GET', path: '/mine', auth: 'seller', scope: 'own-seller', summary: 'Seller scope', response: () => z.object({ sellerId: z.string() }), status: 200, phase: 1 },
   payouts: { area: 'seller', method: 'POST', path: '/payout-account', auth: 'seller', scope: 'own-seller', permission: 'demo.payouts.manage', stepUp: { kind: 'reauth', purpose: 'payout-account' }, summary: 'Owner only, fresh proof', body: () => z.object({ reauthToken: z.string().optional() }), response: null, status: 204, phase: 1 },
   hook: { area: 'webhooks', method: 'POST', path: '/provider', auth: 'provider', scope: 'public', summary: 'Provider callback', body: () => z.unknown(), response: null, status: 204, phase: 1 },
+  security: { area: 'store', method: 'GET', path: '/security/{id}', auth: 'account', scope: 'public', summary: 'Any signed-in account', params: () => z.object({ id: z.string() }), response: () => z.object({ ok: z.boolean() }), status: 200, phase: 1 },
+  changeBank: { area: 'seller', method: 'POST', path: '/bank-account', auth: 'seller', scope: 'own-seller', stepUp: { kind: 'reauth', purpose: 'payout-account' }, idempotent: true, summary: 'Idempotent, fresh proof', body: () => z.object({ reauthToken: z.string().optional(), fail: z.boolean().optional() }), response: null, status: 204, phase: 1 },
+  closeShop: { area: 'seller', method: 'POST', path: '/closure', auth: 'seller', scope: 'own-seller', stepUp: { kind: 'reauth', purpose: 'seller-closure' }, summary: 'Proof required by the body schema', body: () => z.object({ reauthToken: z.string(), reason: z.string() }), response: null, status: 204, phase: 1 },
+  release: { area: 'admin', method: 'POST', path: '/payouts/{id}/release', auth: 'staff', scope: 'staff', stepUp: { kind: 'code', purpose: 'payout-release' }, summary: 'Fresh 2-step code', params: () => z.object({ id: z.uuid() }), response: null, status: 204, phase: 1 },
+  exportItems: { area: 'admin', method: 'POST', path: '/items/exports', auth: 'staff', scope: 'staff', summary: 'Create an export', response: null, status: 202, phase: 1 },
+  sendCode: { area: 'public', method: 'POST', path: '/codes', auth: 'visitor', scope: 'public', rateLimit: 'code', summary: 'Rate-limited class', response: null, status: 204, phase: 1 },
 });
 
 /** A second module whose webhooks are verified and answer a body */
@@ -54,6 +64,7 @@ let placed = 0;
 const item = (id: string) => ({ id, name: 'Trail runner', price: { amount: 18900, currency: 'USD' } });
 const sets = [
   routes(endpoints, 'store', {
+    security: async () => ({ ok: true }),
     getItem: async ({ params }) => item(params.id),
     listItems: async ({ page }) => ({ items: [item(newId())], nextCursor: null, ...(page.mode === 'page' ? { page: page.page, totalPages: 1, total: 1 } : {}) }),
     placeOrder: async ({ body, scope }) => ({ orderId: `MK-${++placed}`, n: body.quantity, scope: scope.kind }),
@@ -71,37 +82,65 @@ const sets = [
   routes(endpoints, 'public', {
     publicInfo: async () => ({ ok: true }),
     start: async () => ({ ok: true }),
+    sendCode: async () => undefined,
     refresh: async ({ request }) => ({ sessionId: request.auth!.refreshSession!.sessionId }),
   }),
-  routes(endpoints, 'admin', { approve: async () => undefined, reports: async ({ query }) => ({ view: query.view ?? 'mine' }) }),
-  routes(endpoints, 'seller', { mine: async ({ sellerId }) => ({ sellerId: sellerId! }), payouts: async () => undefined }),
+  routes(endpoints, 'admin', { approve: async () => undefined, reports: async ({ query }) => ({ view: query.view ?? 'mine' }), release: async () => undefined, exportItems: async () => undefined }),
+  routes(endpoints, 'seller', { mine: async ({ sellerId }) => ({ sellerId: sellerId! }), payouts: async () => undefined,
+    closeShop: async () => undefined,
+    changeBank: async ({ body }) => {
+      await new Promise((r) => setTimeout(r, 20)); // long enough for a parallel request with the same token to arrive
+      if (body.fail) throw new AppError('CONFLICT', 'The bank refused the account');
+    },
+  }),
   routes(endpoints, 'webhooks', { hook: async () => undefined }),
 ];
 const ackSets = [routes(ackEndpoints, 'webhooks', { ack: async () => (acked++, { received: true }) })];
 
 const REFRESH = 'refresh-token-ok';
+const STORE_ORIGIN = 'https://store.example';
+const SELLER_ORIGIN = 'https://seller.example';
 const FILES_SECRET = 'demo-files-secret';
 let app: FastifyInstance;
 let db: Database;
+let chain: AuthChain;
+/** The middleware's counters (rate limits are on in this app) */
+const limits = memoryRateLimitStore({ now: () => new Date() });
+const usedReauth = new Set<string>();
 
 beforeAll(async () => {
-  const config = loadConfig({ NODE_ENV: 'test' }, { launchPhase: 2, devSigning: { file: '', jwk: TEST_JWK } });
+  const config = loadConfig({ NODE_ENV: 'test' }, { launchPhase: 2, devSigning: { file: '', jwk: TEST_JWK }, cors: { store: [STORE_ORIGIN], seller: [SELLER_ORIGIN], admin: [] } });
   db = await createDatabase();
   await migrate(db, []);
   app = createServer(config);
-  const { auth: chain } = await createAuthChain({
+  ({ auth: chain } = await createAuthChain({
     config,
     clock: { now: () => new Date() },
     log: app.log,
     db: db.kysely,
+    limits,
     authorities: moduleAuthorities(() => undefined),
-    wrap: (a) => ({ ...a, verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'session-1', audience: 'store', kind: 'customer' } : null) }),
+    // REFRESH is session-1; "refresh-session-<x>" is its own session x
+    wrap: (a) => ({
+      ...a,
+      androidMinimum: async () => ({ minVersionCode: 140, updateUrl: 'https://play.example/marketly' }),
+      // "reauth-<x>" are single-use re-auth tokens for payout-account, kept here the way identity keeps them
+      verifyReauthToken: async (p, t, purpose) => (t.startsWith('reauth-') ? purpose === 'payout-account' && !usedReauth.has(t) : a.verifyReauthToken(p, t, purpose)),
+      consumeReauthToken: async (t) => (t.startsWith('reauth-') ? !usedReauth.has(t) && Boolean(usedReauth.add(t)) : a.consumeReauthToken(t)),
+      releaseReauthToken: async (t) => void (t.startsWith('reauth-') ? usedReauth.delete(t) : await a.releaseReauthToken(t)),
+      verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'session-1', audience: 'store', kind: 'customer' } : t.startsWith('refresh-session-') ? { sessionId: t, audience: 'store', kind: 'customer' } : null),
+    }),
     webhookVerifiers: new Map([['acks', hmacWebhookVerifier(config, 'acks')]]),
     ownerOnly: new Set(['demo.payouts.manage']),
     fileLinks: { secret: FILES_SECRET, permanentBuckets: new Set(['pub']) },
-  });
+  }));
   chain.install(app);
-  registerEndpoints(app, [...registrationsOf('demo', 'Demo', sets), ...registrationsOf('acks', 'Acks', ackSets)], { config, auth: chain, idempotency: postgresIdempotencyStore(db.kysely) });
+  registerEndpoints(app, [...registrationsOf('demo', 'Demo', sets), ...registrationsOf('acks', 'Acks', ackSets)], {
+    config,
+    auth: chain,
+    idempotency: postgresIdempotencyStore(db.kysely),
+    sessionCookie: new Set(['demo.start']),
+  });
   // the file the verified link names, as the serving module receives it
   registerFileRoute(app, { module: 'demo', permanentBuckets: ['pub'], serve: async (file, request, reply) => reply.send({ ...file, method: request.method, via: request.auth?.via }) });
   await app.ready();
@@ -143,6 +182,19 @@ describe('token on every request', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['x-request-id']).toBe('req-123');
     expect(res.headers['cache-control']).toBe('private, no-store');
+  });
+
+  it('asks Android apps older than the minimum version code to update (426), after the token check', async () => {
+    const url = `/api/store/demo/items/${newId()}`;
+    for (const client of ['android/139', 'android/1.3.9+139', 'ANDROID/7']) {
+      const res = await app.inject({ url, headers: { ...visitor, 'x-client': client } });
+      expect(res.statusCode, client).toBe(426);
+      expect(res.json().error).toMatchObject({ code: 'UPGRADE_REQUIRED', details: { minVersionCode: 140, updateUrl: 'https://play.example/marketly' } });
+    }
+    for (const client of ['android/140', 'android/1.4.2+151', 'web', 'android/1.4.2']) {
+      expect((await app.inject({ url, headers: { ...visitor, 'x-client': client } })).statusCode, client).toBe(200);
+    }
+    expect((await app.inject({ url, headers: { 'x-client': 'android/1' } })).statusCode).toBe(401);
   });
 
   it('takes any app’s token on public endpoints', async () => {
@@ -211,6 +263,45 @@ describe('caller checks', () => {
     expect(stale.json().error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'payout-account' } });
     expect((await app.inject({ method: 'POST', url, headers: owner, payload: { reauthToken: 'dev-reauth.other' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url, headers: owner, payload: { reauthToken: 'dev-reauth.payout-account' } })).statusCode).toBe(204);
+  });
+
+  it('uses a re-auth token once, even for parallel requests, and gives it back when the request fails', async () => {
+    const url = '/api/seller/demo/bank-account';
+    const send = (reauthToken: string, key = newId(), fail = false) =>
+      app.inject({ method: 'POST', url, headers: { ...auth(callers.seller()), 'idempotency-key': key }, payload: { reauthToken, fail } });
+    const both = await Promise.all([send('reauth-a'), send('reauth-a')]);
+    expect(both.map((r) => r.statusCode).sort()).toEqual([204, 403]);
+    expect((await send('reauth-a')).statusCode).toBe(403);
+    // the handler failed: the token is not spent
+    expect((await send('reauth-b', newId(), true)).json().error.code).toBe('CONFLICT');
+    expect((await send('reauth-b')).statusCode).toBe(204);
+  });
+
+  it('frees the Idempotency-Key when the step-up proof is refused, so the retry with a fresh proof can use it', async () => {
+    const key = newId();
+    const send = (reauthToken: string) =>
+      app.inject({ method: 'POST', url: '/api/seller/demo/bank-account', headers: { ...auth(callers.seller()), 'idempotency-key': key }, payload: { reauthToken } });
+    usedReauth.add('reauth-spent');
+    expect((await send('reauth-spent')).statusCode).toBe(403);
+    const retry = await send('reauth-c');
+    expect(retry.statusCode).toBe(204);
+    expect(retry.headers['idempotent-replayed']).toBeUndefined();
+  });
+
+  it('answers a missing step-up proof with 403 STEP_UP_REQUIRED, not a validation error', async () => {
+    const closure = await app.inject({ method: 'POST', url: '/api/seller/demo/closure', headers: auth(callers.seller()), payload: { reason: 'Retiring' } });
+    expect(closure.statusCode).toBe(403);
+    expect(closure.json().error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'seller-closure' } });
+    const ok = await app.inject({ method: 'POST', url: '/api/seller/demo/closure', headers: auth(callers.seller()), payload: { reason: 'Retiring', reauthToken: 'dev-reauth.seller-closure' } });
+    expect(ok.statusCode).toBe(204);
+
+    const url = `/api/admin/demo/payouts/${newId()}/release`;
+    for (const code of [undefined, '', '999999']) {
+      const res = await app.inject({ method: 'POST', url, headers: { ...auth(callers.staff()), ...(code === undefined ? {} : { 'x-step-up-code': code }) } });
+      expect(res.statusCode, String(code)).toBe(403);
+      expect(res.json().error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'code', purpose: 'payout-release' } });
+    }
+    expect((await app.inject({ method: 'POST', url, headers: { ...auth(callers.staff()), 'x-step-up-code': '000000' } })).statusCode).toBe(204);
   });
 
   it('lets a visitor shop as a guest, scoped to the visitor session', async () => {
@@ -285,7 +376,27 @@ describe('tokens other than bearer', () => {
     expect((await app.inject({ method: 'POST', url, payload: {} })).json().error.details.reason).toBe('token_missing');
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: 'wrong' } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).json()).toEqual({ sessionId: 'session-1' });
-    expect((await app.inject({ method: 'POST', url, headers: { cookie: `__Secure-mk_refresh=${REFRESH}` }, payload: {} })).statusCode).toBe(200);
+    const page = { origin: STORE_ORIGIN, 'x-requested-with': 'fetch' };
+    expect((await app.inject({ method: 'POST', url, headers: { ...page, cookie: `__Secure-mk_refresh=${REFRESH}` }, payload: {} })).statusCode).toBe(200);
+  });
+
+  it('takes the website cookie only from an app page: allowed Origin and X-Requested-With (Android’s body token needs neither)', async () => {
+    const url = '/api/public/demo/sessions/refresh';
+    const cookie = `__Secure-mk_refresh=${REFRESH}`;
+    for (const [headers, reason] of [
+      [{ cookie, 'x-requested-with': 'fetch' }, 'origin_not_allowed'],
+      [{ cookie, origin: 'https://evil.example', 'x-requested-with': 'fetch' }, 'origin_not_allowed'],
+      [{ cookie, origin: SELLER_ORIGIN }, 'x_requested_with_required'],
+    ] as const) {
+      const res = await app.inject({ method: 'POST', url, headers, payload: {} });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error).toMatchObject({ code: 'FORBIDDEN', details: { reason } });
+    }
+    // every app's origin, and the API's own (a website served through it)
+    for (const origin of [SELLER_ORIGIN, 'http://localhost:4000']) {
+      expect((await app.inject({ method: 'POST', url, headers: { cookie, origin, 'x-requested-with': 'fetch' }, payload: {} })).statusCode, origin).toBe(200);
+    }
+    expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).statusCode).toBe(200);
   });
 
   it('processes a signed webhook once and acknowledges replays without running the handler', async () => {
@@ -305,6 +416,54 @@ describe('tokens other than bearer', () => {
   it('refuses webhooks until the module verifies signatures', async () => {
     const res = await app.inject({ method: 'POST', url: '/webhooks/demo/provider', payload: {} });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('browsers (CORS) and response headers', () => {
+  const preflight = (url: string, origin: string, method = 'POST') =>
+    app.inject({ method: 'OPTIONS', url, headers: { origin, 'access-control-request-method': method, 'access-control-request-headers': 'authorization, x-requested-with' } });
+
+  it('allows credentials on the routes that set or read the refresh cookie, and only there', async () => {
+    for (const url of ['/api/public/demo/app-sessions', '/api/public/demo/sessions/refresh', '/api/public/demo/sessions/refresh/']) {
+      const res = await preflight(url, STORE_ORIGIN);
+      expect(res.statusCode, url).toBe(204);
+      expect(res.headers['access-control-allow-origin'], url).toBe(STORE_ORIGIN);
+      expect(res.headers['access-control-allow-credentials'], url).toBe('true');
+      expect(String(res.headers['access-control-allow-headers'])).toContain('x-requested-with');
+    }
+    const plain = await preflight('/api/public/demo/info', STORE_ORIGIN, 'GET');
+    expect(plain.headers['access-control-allow-origin']).toBe(STORE_ORIGIN);
+    expect(plain.headers['access-control-allow-credentials']).toBeUndefined();
+    // the real response carries the same answer as its preflight
+    const started = await app.inject({ method: 'POST', url: '/api/public/demo/app-sessions', headers: { origin: STORE_ORIGIN, 'x-app-proof': 'dev' } });
+    expect(started.headers['access-control-allow-credentials']).toBe('true');
+    expect((await preflight('/api/public/demo/app-sessions', 'https://evil.example')).headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('lets every app call the self-service account endpoints, and only its own app’s other endpoints', async () => {
+    const res = await preflight(`/api/store/demo/security/${newId()}`, SELLER_ORIGIN, 'GET');
+    expect(res.headers['access-control-allow-origin']).toBe(SELLER_ORIGIN);
+    const get = await app.inject({ url: `/api/store/demo/security/x`, headers: { ...auth(callers.seller()), origin: SELLER_ORIGIN } });
+    expect(get.statusCode).toBe(200);
+    expect(get.headers['access-control-allow-origin']).toBe(SELLER_ORIGIN);
+    expect((await preflight('/api/store/demo/orders', SELLER_ORIGIN)).headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('exposes the headers apps read across origins', async () => {
+    const res = await app.inject({ url: '/api/store/demo/items', headers: { origin: STORE_ORIGIN } });
+    expect(res.statusCode).toBe(401);
+    const exposed = String(res.headers['access-control-expose-headers']).toLowerCase().split(/,\s*/);
+    expect(exposed).toEqual(expect.arrayContaining(['www-authenticate', 'x-request-id', 'idempotent-replayed', 'retry-after']));
+  });
+
+  it('says when to retry a refused request (Retry-After)', async () => {
+    const h = auth(callers.visitor({ audience: 'seller' }));
+    let res;
+    for (let i = 0; i < 31 && res?.statusCode !== 429; i++) res = await app.inject({ method: 'POST', url: '/api/public/demo/codes', headers: h });
+    expect(res!.statusCode).toBe(429);
+    const seconds = res!.json().error.details.retryAfterSeconds;
+    expect(seconds).toBeGreaterThan(0);
+    expect(res!.headers['retry-after']).toBe(String(seconds));
   });
 });
 
@@ -371,5 +530,67 @@ describe('Idempotency-Key', () => {
     const res = await app.inject({ method: 'POST', url: '/api/store/demo/orders', headers: { ...h, 'idempotency-key': key }, payload: { ...body, quantity: 3 } });
     expect(res.statusCode).toBe(422);
     expect(res.json().error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+});
+
+describe('rate-limit buckets (docs/03 §11)', () => {
+  /** Uses up a middleware bucket, as earlier requests would have */
+  const fill = async (key: string, l: { limit: number; windowMs: number }) => {
+    for (let i = 0; i < l.limit; i++) await limits.hit('http', key, l);
+  };
+
+  it('counts a visitor per session and IP', async () => {
+    const claims = devClaims('visitor');
+    const h = auth(token(claims));
+    await fill(`caller:visitor:${claims.sid}@127.0.0.1`, CALLER_LIMITS.visitor!.all);
+    const res = await app.inject({ url: `/api/store/demo/items/${newId()}`, headers: h });
+    expect(res.statusCode).toBe(429);
+    expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+    expect((await app.inject({ url: `/api/store/demo/items/${newId()}`, headers: h, remoteAddress: '10.0.0.9' })).statusCode).toBe(200);
+  });
+
+  it('counts a seller member per account and seller', async () => {
+    const accountId = newId();
+    const [a, b] = [newId(), newId()];
+    await fill(`caller:seller:${accountId}:${a}`, CALLER_LIMITS.seller!.all);
+    expect((await app.inject({ url: '/api/seller/demo/mine', headers: auth(callers.seller({ accountId, sellerId: a })) })).statusCode).toBe(429);
+    expect((await app.inject({ url: '/api/seller/demo/mine', headers: auth(callers.seller({ accountId, sellerId: b })) })).statusCode).toBe(200);
+  });
+
+  it('counts GraphQL requests as reads, not writes', async () => {
+    const claims = devClaims('visitor');
+    await fill(`writes:visitor:${claims.sid}@127.0.0.1`, CALLER_LIMITS.visitor!.writes!);
+    const res = await app.inject({ method: 'POST', url: '/api/store/demo/orders', headers: { ...auth(token(claims)), 'idempotency-key': newId() }, payload: { itemId: newId(), quantity: 1 } });
+    expect(res.statusCode).toBe(429);
+    const principal = principalOf({ ...claims, iat: 0, exp: 0, iss: ISSUER, jti: 'x' } as never);
+    const graphql = { auth: { via: 'token', principal, claims }, method: 'POST', url: '/graphql/store', ip: '127.0.0.1' };
+    await expect(chain.checkCaller(graphql as never, { area: 'store', auth: 'visitor' })).resolves.toBeUndefined();
+  });
+
+  it('limits refreshes per session (30 an hour)', async () => {
+    const url = '/api/public/demo/sessions/refresh';
+    await fill('refresh:refresh-session-a', REFRESH_LIMIT);
+    const res = await app.inject({ method: 'POST', url, payload: { refreshToken: 'refresh-session-a' } });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers['retry-after']).toBeDefined();
+    expect((await app.inject({ method: 'POST', url, payload: { refreshToken: 'refresh-session-b' } })).statusCode).toBe(200);
+  });
+
+  it('limits exports per account (10 an hour), whichever endpoint creates them', async () => {
+    const h = auth(callers.staff(undefined, { sub: newId() }));
+    const statuses = [];
+    for (let i = 0; i < 11; i++) statuses.push((await app.inject({ method: 'POST', url: '/api/admin/demo/items/exports', headers: h })).statusCode);
+    expect(statuses).toEqual([...Array(10).fill(202), 429]);
+    expect((await app.inject({ method: 'POST', url: '/api/admin/demo/items/exports', headers: auth(callers.staff()) })).statusCode).toBe(202);
+  });
+
+  it('limits webhooks per provider (1,000 a minute), counting only verified ones', async () => {
+    await fill('webhook:acks', WEBHOOK_LIMIT);
+    const body = JSON.stringify({ id: 'evt_limit' });
+    const res = await app.inject({ method: 'POST', url: '/webhooks/acks/events', headers: { 'content-type': 'application/json', ...signWebhook('dev-webhook-secret', body) }, payload: body });
+    expect(res.statusCode).toBe(429);
+    // a forged call is refused for its signature, never counted against the provider
+    const forged = await app.inject({ method: 'POST', url: '/webhooks/acks/events', headers: { 'content-type': 'application/json', 'x-signature': 'sha256=00', 'x-timestamp': '1' }, payload: body });
+    expect(forged.statusCode).toBe(401);
   });
 });

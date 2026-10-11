@@ -2,16 +2,19 @@
  * The authorization middleware (docs/03-auth-middleware.md §3). Token verification is mandatory and
  * happens here, before any module code: handlers only ever see a verified `principal`.
  *
- *   every URL (app onRequest)   IP rate limit → authenticate (token / app proof / file-link signature / defer for refresh and webhooks)
+ *   every URL (app onRequest)   IP rate limit → authenticate (token + revocation, and for staff: fresh revocations and session
+ *                               liveness / idle timeout; app proof; file-link signature; defer for refresh and webhooks) → X-Client version gate
  *   each endpoint (onRequest)   launch phase → caller rate limit → audience → caller kind → seller context → permission → staff 2-step
- *   (preValidation)             refresh token · webhook signature + replay check · rate-limit classes keyed by body
- *   (preHandler)                conditional permissions → [idempotency, in register.ts] → step-up
+ *   (preValidation)             refresh token (+ Origin and X-Requested-With for the cookie) and its per-session limit · webhook
+ *                               signature + replay check + per-provider limit · rate-limit classes · step-up proof present
+ *   (preHandler)                conditional permissions → [idempotency, in register.ts] → step-up proof verified
  *   (onResponse)                consume the re-auth token · record the webhook event
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { sql, type Kysely } from 'kysely';
 import type { Config } from '../config/index.js';
 import { AppError } from '../errors/index.js';
+import { appOrigins } from '../http/security.js';
 import type { Clock } from '../lib/clock.js';
 import type { Area, AuthKind, EndpointDef } from '../spec/define.js';
 import type { AppProofVerifier } from './app-proof.js';
@@ -28,7 +31,7 @@ import {
   type RequestAuth,
   type SellerMemberAccess,
 } from './index.js';
-import { CALLER_LIMITS, CLASS_LIMITS, enforce, FILES_IP_LIMIT, IP_LIMIT, type RateLimitStore } from './rate-limit.js';
+import { CALLER_LIMITS, callerKey, CLASS_LIMITS, enforce, FILES_IP_LIMIT, IP_LIMIT, rateLimitClassOf, REFRESH_LIMIT, WEBHOOK_LIMIT, type RateLimitStore } from './rate-limit.js';
 import type { RevocationList } from './revocation.js';
 import { TokenError, verifyAccessToken, type AccessClaims, type KeyRing } from './tokens.js';
 
@@ -82,6 +85,8 @@ declare module 'fastify' {
 
 const WEBHOOK_WINDOW_MS = 5 * 60_000;
 const CACHE_MS = 60_000;
+const STAFF_SESSION_CACHE_MS = 5_000;
+type StaffSessionState = Awaited<ReturnType<Authorities['touchStaffSession']>>;
 /** Website refresh cookie: HttpOnly; Secure; SameSite=Strict; Path=REFRESH_COOKIE_PATH (sent only to refresh and sign-out) */
 export const REFRESH_COOKIE = '__Secure-mk_refresh';
 export const REFRESH_COOKIE_PATH = '/api/public/identity/sessions';
@@ -93,11 +98,12 @@ class TtlCache<V> {
   constructor(
     private readonly clock: Clock,
     private readonly keepMissing = true,
+    private readonly ttlMs = CACHE_MS,
   ) {}
   async get(key: string, load: () => Promise<V>): Promise<V> {
     const now = this.clock.now().getTime();
     const hit = this.#m.get(key);
-    if (hit && now - hit.at < CACHE_MS) return hit.v;
+    if (hit && now - hit.at < this.ttlMs) return hit.v;
     const v = await load();
     if (v === null && !this.keepMissing) return v;
     if (this.#m.size > 50_000) this.#m.clear();
@@ -113,11 +119,17 @@ export class AuthChain {
   readonly permissions: TtlCache<boolean>;
   readonly members: TtlCache<SellerMemberAccess | null>;
   readonly customers: TtlCache<string | null>;
+  /** Staff session liveness (identity.touchStaffSession), 5 s per session; null = identity did not answer */
+  readonly staffSessions: TtlCache<StaffSessionState | null>;
+  /** The Android minimum version (settings), 60 s */
+  readonly androidMinimum: TtlCache<Awaited<ReturnType<Authorities['androidMinimum']>>>;
 
   constructor(readonly k: AuthKernel) {
     this.permissions = new TtlCache(k.clock);
     this.members = new TtlCache(k.clock);
     this.customers = new TtlCache(k.clock, false); // a customer created after the first request must be in scope at once
+    this.staffSessions = new TtlCache(k.clock, false, STAFF_SESSION_CACHE_MS);
+    this.androidMinimum = new TtlCache(k.clock);
   }
 
   /* ---------------------------------------------------------------- every URL */
@@ -131,7 +143,28 @@ export class AuthChain {
       if (kind === 'file-link') await enforce(this.k.limits, `files-ip:${request.ip}`, FILES_IP_LIMIT);
       else await enforce(this.k.limits, `ip:${request.ip}`, IP_LIMIT);
       await this.authenticate(request, kind);
+      await this.#checkClientVersion(request);
     });
+  }
+
+  /**
+   * M1 version gate: an Android app older than settings apps.android.minVersionCode gets 426
+   * UPGRADE_REQUIRED (after authentication, so the version policy isn't served without a token).
+   * X-Client is `web` or `android/<versionCode>` (optionally `android/<versionName>+<versionCode>`, e.g.
+   * android/1.4.2+142); it is never trusted for anything but this and analytics. Without a version code
+   * there is nothing to compare, so the request goes on.
+   */
+  async #checkClientVersion(request: FastifyRequest) {
+    const header = request.headers['x-client'];
+    const code = typeof header === 'string' ? /^android\/(?:[\w.-]+\+)?(\d{1,10})$/i.exec(header.trim())?.[1] : undefined;
+    if (!code) return;
+    const min = await this.androidMinimum.get('android', () => this.k.authorities.androidMinimum());
+    if (min && Number(code) < min.minVersionCode) {
+      throw new AppError('UPGRADE_REQUIRED', 'This version of the Marketly app is no longer supported; update it to continue', {
+        minVersionCode: min.minVersionCode,
+        ...(min.updateUrl ? { updateUrl: min.updateUrl } : {}),
+      });
+    }
   }
 
   /** Development only: /docs (Swagger UI) is served without a token so a browser can open it. */
@@ -187,10 +220,27 @@ export class AuthChain {
       throw err;
     }
     if (this.k.revocations.isRevoked(claims)) throw tokenRejected('revoked');
-    if (claims.aud === 'admin') this.k.revocations.assertFresh();
+    if (claims.aud === 'admin') {
+      this.k.revocations.assertFresh();
+      if (claims.kind === 'staff') await this.#assertStaffSessionLive(claims); // Admin Center's visitor tokens hold no staff session
+    }
     const principal = principalOf(claims);
     this.k.claimsOf.set(principal, claims);
     request.auth = { via: 'token', principal, claims };
+  }
+
+  /**
+   * M10 on every admin request: the staff session is still live and not idle (identity owns the rule and
+   * the staffIdleMinutes setting; the request counts as activity). Answers are cached 5 s per session.
+   * Dev-key tokens with dev claims have no session row and skip it; no answer from identity is a 503.
+   */
+  async #assertStaffSessionLive(claims: AccessClaims) {
+    if (claims.dev) return;
+    const state = await this.staffSessions.get(claims.sid, () => this.k.authorities.touchStaffSession(claims.sid));
+    if (!state) throw new AppError('SERVICE_UNAVAILABLE', 'Staff sessions cannot be checked right now; retry shortly', { reason: 'sessions_unavailable' });
+    if (state.live) return;
+    if (state.reason === 'idle') throw new AppError('UNAUTHORIZED', 'Signed out after a period without activity; sign in again', { reason: 'session_idle' });
+    throw tokenRejected('revoked');
   }
 
   /* ---------------------------------------------------------------- caller checks (REST endpoints and GraphQL) */
@@ -200,10 +250,12 @@ export class AuthChain {
     if (auth?.via !== 'token' || !auth.principal) return; // refresh, provider and bootstrap are checked elsewhere
     const p = auth.principal;
     const limits = CALLER_LIMITS[p.kind];
-    const who = `${p.kind}:${p.accountId ?? p.sessionId}`;
     if (limits) {
+      const who = callerKey(p, request.ip);
       await enforce(this.k.limits, `caller:${who}`, limits.all);
-      if (limits.writes && request.method !== 'GET') await enforce(this.k.limits, `writes:${who}`, limits.writes);
+      // GraphQL is the read layer (no mutations): its POSTs are reads
+      const write = request.method !== 'GET' && request.method !== 'HEAD' && !request.url.startsWith('/graphql/');
+      if (limits.writes && write) await enforce(this.k.limits, `writes:${who}`, limits.writes);
     }
     checkAudience(d.area, d.auth, p);
     checkCallerKind(d.auth, p);
@@ -270,6 +322,9 @@ export class AuthChain {
   /** Hooks for one spec endpoint, in Fastify order. */
   endpointHooks(module: string, operationId: string, d: EndpointDef) {
     const k = this.k;
+    const rateClass = rateLimitClassOf(d);
+    const rules = CLASS_LIMITS[rateClass ?? ''] ?? [];
+    if (rateClass && !CLASS_LIMITS[rateClass]) throw new Error(`${operationId}: unknown rate-limit class ${rateClass}`);
     const onRequest = async (request: FastifyRequest) => {
       if (d.phase > k.config.launchPhase) {
         throw new AppError('NOT_IMPLEMENTED', `Planned for launch phase ${d.phase}.`, { operation: operationId, reason: 'later_phase', phase: d.phase });
@@ -280,10 +335,12 @@ export class AuthChain {
     const preValidation = async (request: FastifyRequest) => {
       if (d.auth === 'refresh') await this.#verifyRefresh(request);
       if (d.auth === 'provider') await this.#verifyWebhook(module, request);
-      for (const rule of CLASS_LIMITS[d.rateLimit ?? ''] ?? []) {
-        const key = rule.key({ ip: request.ip, body: request.body });
-        if (key) await enforce(k.limits, `${d.rateLimit}:${key}`, rule.limit);
+      for (const rule of rules) {
+        const key = rule.key({ ip: request.ip, body: request.body, principal: request.auth?.principal });
+        if (key) await enforce(k.limits, `${rateClass}:${key}`, rule.limit);
       }
+      // a missing step-up proof is a step-up problem (403), not a validation one: checked before the schema
+      if (d.stepUp && !stepUpProof(d.stepUp.kind, request)) throw stepUpRequired(d.stepUp);
     };
 
     const preHandlerBefore = async (request: FastifyRequest) => {
@@ -297,21 +354,23 @@ export class AuthChain {
     const preHandlerAfter = async (request: FastifyRequest) => {
       if (!d.stepUp) return;
       const p = request.auth?.principal;
-      const refuse = () => new AppError('STEP_UP_REQUIRED', undefined, { kind: d.stepUp!.kind, purpose: d.stepUp!.purpose });
-      if (!p) throw refuse();
+      const proof = stepUpProof(d.stepUp.kind, request);
+      if (!p || !proof) throw stepUpRequired(d.stepUp);
       if (d.stepUp.kind === 'reauth') {
-        const token = (request.body as { reauthToken?: unknown } | undefined)?.reauthToken;
-        if (typeof token !== 'string' || !(await k.authorities.verifyReauthToken(p, token, d.stepUp.purpose))) throw refuse();
-        request.reauthToken = token; // consumed after the request succeeds
-      } else {
-        const code = request.headers['x-step-up-code'];
-        if (typeof code !== 'string' || !(await k.authorities.verifyStepUpCode(p, code))) throw refuse();
+        // single use: claimed here, so a second request with the same token is refused even while this one runs
+        if (!(await k.authorities.verifyReauthToken(p, proof, d.stepUp.purpose))) throw stepUpRequired(d.stepUp);
+        if (!(await k.authorities.consumeReauthToken(proof))) throw stepUpRequired(d.stepUp);
+        request.reauthToken = proof; // put back if the request fails
+      } else if (!(await k.authorities.verifyStepUpCode(p, proof))) {
+        throw stepUpRequired(d.stepUp);
       }
     };
 
     const onResponse = async (request: FastifyRequest, reply: { statusCode: number }) => {
-      if (reply.statusCode >= 400) return;
-      if (request.reauthToken) await k.authorities.consumeReauthToken(request.reauthToken).catch(() => {});
+      if (reply.statusCode >= 400) {
+        if (request.reauthToken) await k.authorities.releaseReauthToken(request.reauthToken).catch(() => {});
+        return;
+      }
       const ev = request.auth?.provider;
       if (ev?.eventId && !request.webhookDuplicate) {
         await sql`insert into kernel.webhook_events (provider, event_id) values (${ev.name}, ${ev.eventId}) on conflict do nothing`.execute(k.db).catch(() => {});
@@ -334,11 +393,30 @@ export class AuthChain {
 
   async #verifyRefresh(request: FastifyRequest) {
     const fromBody = (request.body as { refreshToken?: unknown } | undefined)?.refreshToken;
-    const token = cookie(request.headers.cookie, REFRESH_COOKIE) ?? (typeof fromBody === 'string' ? fromBody : undefined);
+    const fromCookie = cookie(request.headers.cookie, REFRESH_COOKIE);
+    const token = fromCookie ?? (typeof fromBody === 'string' ? fromBody : undefined);
     if (!token) throw tokenRejected('missing');
+    // the website's cookie is sent by the browser on its own: only a Marketly app's page may use it (docs/03 §5)
+    if (fromCookie) this.#assertAppPage(request);
     const session = await this.k.authorities.verifyRefreshToken(token);
     if (!session) throw tokenRejected('invalid');
+    await enforce(this.k.limits, `refresh:${session.sessionId}`, REFRESH_LIMIT);
     request.auth = { via: 'refresh', principal: null, refreshSession: session };
+  }
+
+  /**
+   * Cookie refresh and sign-out: an allowed Origin (an app's, or this API's own when the website is served
+   * through it) and the custom X-Requested-With header, which a cross-site form or link can't send.
+   * Android sends its refresh token in the body, never a cookie, so it is not asked for either.
+   */
+  #assertAppPage(request: FastifyRequest) {
+    const origin = request.headers.origin;
+    if (!origin || !(appOrigins(this.k.config).includes(origin) || origin === new URL(this.k.config.apiUrl).origin)) {
+      throw new AppError('FORBIDDEN', 'Refresh the session from a Marketly app', { reason: 'origin_not_allowed' });
+    }
+    if (!request.headers['x-requested-with']) {
+      throw new AppError('FORBIDDEN', 'Refresh the session from a Marketly app', { reason: 'x_requested_with_required' });
+    }
   }
 
   async #verifyWebhook(module: string, request: FastifyRequest) {
@@ -351,6 +429,7 @@ export class AuthChain {
     if (info.timestamp && Math.abs(this.k.clock.now().getTime() - info.timestamp.getTime()) > WEBHOOK_WINDOW_MS) {
       throw new AppError('UNAUTHORIZED', 'Webhook timestamp outside the allowed window', { reason: 'signature_expired' });
     }
+    await enforce(this.k.limits, `webhook:${info.provider}`, WEBHOOK_LIMIT);
     request.auth = { via: 'provider', principal: null, provider: { name: info.provider, eventId: info.eventId } };
     if (info.eventId) {
       const seen = await sql<{ n: number }>`select 1 as n from kernel.webhook_events where provider = ${info.provider} and event_id = ${info.eventId}`.execute(this.k.db);
@@ -363,6 +442,14 @@ export class AuthChain {
     this[kind].clear();
   }
 }
+
+/** The step-up proof a request carries: reauthToken in the body, or the X-Step-Up-Code header */
+function stepUpProof(kind: 'reauth' | 'code', request: FastifyRequest): string | undefined {
+  const v = kind === 'reauth' ? (request.body as { reauthToken?: unknown } | undefined)?.reauthToken : request.headers['x-step-up-code'];
+  return typeof v === 'string' && v ? v : undefined;
+}
+
+const stepUpRequired = (s: { kind: string; purpose: string }) => new AppError('STEP_UP_REQUIRED', undefined, { kind: s.kind, purpose: s.purpose });
 
 function cookie(header: string | undefined, name: string): string | undefined {
   for (const part of header?.split(';') ?? []) {

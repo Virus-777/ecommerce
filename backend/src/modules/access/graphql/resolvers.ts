@@ -1,5 +1,5 @@
 import { AppError } from '../../../kernel/errors/index.js';
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import type { ApprovalRequest, MyActionLimit, RoleCoverage, StaffRef } from '../../../spec/access.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
@@ -8,10 +8,9 @@ import type { AccessService } from '../service.js';
 
 /* ---------------------------------------------------------------- REST shapes → GraphQL shapes (enums in capitals, Money.formatted) */
 
-const ACTOR_KIND: Record<string, string> = { customer: 'CUSTOMER', visitor: 'GUEST', seller: 'SELLER', staff: 'STAFF', provider: 'SYSTEM', anonymous: 'SYSTEM', system: 'SYSTEM' };
 const upper = (s: string) => s.toUpperCase().replace(/-/g, '_');
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
-const actor = (a: common.Actor | null | undefined) => (a ? { kind: ACTOR_KIND[a.kind] ?? 'SYSTEM', id: a.id ?? null, name: a.name ?? null } : null);
+const actor = gqlActor;
 const staff = (s: StaffRef | null | undefined) => (s ? { accountId: s.accountId, name: s.name, away: s.away } : null);
 const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
 

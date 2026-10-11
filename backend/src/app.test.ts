@@ -70,6 +70,19 @@ describe('the launch configuration', () => {
       expect(res.json().data).toBeDefined();
     });
 
+    it('runs persisted screen queries sent the Apollo way (Apollo Kotlin), by POST and GET; responses stay private', async () => {
+      const [id] = Object.entries(persistedQueries.store).find(([, q]) => q.name === 'OrderList')!;
+      const extensions = { persistedQuery: { version: 1, sha256Hash: id } };
+      const post = await app.inject({ method: 'POST', url: '/graphql/store', payload: { extensions, variables: {} }, headers: auth(callers.customer()) });
+      expect(post.json().errors, post.body).toBeUndefined();
+      expect(post.json().data).toBeDefined();
+      const get = await app.inject({ url: `/graphql/store?operationName=OrderList&variables=%7B%7D&extensions=${encodeURIComponent(JSON.stringify(extensions))}`, headers: auth(callers.customer()) });
+      expect(get.statusCode, get.body).toBe(200);
+      expect(get.json().data).toEqual(post.json().data);
+      expect(get.headers['cache-control']).toBe('private, no-store');
+      expect((await app.inject({ url: `/graphql/store?extensions=${encodeURIComponent(JSON.stringify(extensions))}` })).statusCode).toBe(401);
+    });
+
     it('reports screen queries that need a module that is off at launch', () => {
       // Product.saved (wishlist, phase 3) and Customer.wallet / walletAdmin (wallet, phase 3): see the design note in README
       const names = app.kernel.unusableQueries.map((q) => `${q.area}/${q.name}`).sort();

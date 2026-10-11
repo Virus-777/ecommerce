@@ -1,15 +1,14 @@
 import { isAppError } from '../../../kernel/errors/index.js';
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { format } from '../../../kernel/lib/money.js';
 import { toPageRequest } from '../../../kernel/lib/pagination.js';
-import type { Actor, Money, PageInput } from '../../../spec/common.js';
+import type { Money, PageInput } from '../../../spec/common.js';
 import type { Attribute, Category, Product, ProductAdmin, ProductCheck } from '../../../spec/catalog.js';
 import type { CatalogService } from '../service.js';
 
 /** GraphQL enums are the upper-case names of the REST values (changes_requested ↔ CHANGES_REQUESTED). */
 const up = (s: string | null | undefined) => (s ? s.toUpperCase() : null);
-const ACTOR_KIND: Record<Actor['kind'], string> = { customer: 'CUSTOMER', visitor: 'GUEST', anonymous: 'GUEST', seller: 'SELLER', staff: 'STAFF', provider: 'SYSTEM', system: 'SYSTEM' };
-const actorOut = (a: Actor | null | undefined) => (a ? { id: a.id ?? null, name: a.name ?? null, kind: ACTOR_KIND[a.kind] ?? 'SYSTEM' } : null);
+const actorOut = gqlActor;
 const pairs = (m: Record<string, string> | null | undefined) => Object.entries(m ?? {}).map(([name, value]) => ({ name, value }));
 const money = (m: Money | null | undefined) => (m ? { ...m, formatted: format(m) } : null);
 const nullOnNotFound = async <T>(p: Promise<T>): Promise<T | null> => {

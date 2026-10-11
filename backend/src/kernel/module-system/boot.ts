@@ -45,6 +45,8 @@ export interface BootResult {
   webhookVerifiers: Map<string, WebhookVerifier>;
   /** Modules serving files at GET /files/… (at most one) */
   fileRoutes: ModuleFileRoute[];
+  /** Operations (`module.id`) whose responses set or clear the website's refresh cookie: credentialed CORS */
+  sessionCookie: Set<string>;
   /** Public APIs provided by enabled modules */
   apis: Map<string, object>;
   warnings: string[];
@@ -99,7 +101,7 @@ function checkRoutes(spec: ModuleSpecDef, sets: readonly RouteSet[]) {
 export async function bootModules(defs: ModuleDefinition[], k: KernelServices): Promise<BootResult> {
   const enabled = new Set(defs.map((d) => d.spec.name));
   const stubbed = new Set(k.stubbed ?? []);
-  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), fileRoutes: [], apis: new Map(), warnings: [], runAfterBoot: async () => {} };
+  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), fileRoutes: [], sessionCookie: new Set(), apis: new Map(), warnings: [], runAfterBoot: async () => {} };
   const { apis, resolvers, webhookVerifiers, warnings } = result;
   const proxies = new Map<string, object>();
   const afterBoot: { module: string; fn: () => unknown }[] = [];
@@ -188,6 +190,12 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
           const other = result.fileRoutes.find((r) => r.module !== name);
           if (other) throw new Error(`${name} serves /files, which ${other.module} already serves`);
           result.fileRoutes = [{ ...route, module: name }];
+        },
+        sessionCookie: (...ids: string[]) => {
+          for (const id of ids) {
+            if (!spec.endpoints[id]) throw new Error(`${name}: sessionCookie names ${id}, which is not an endpoint of its spec`);
+            result.sessionCookie.add(`${name}.${id}`);
+          }
         },
       },
       graphql: {

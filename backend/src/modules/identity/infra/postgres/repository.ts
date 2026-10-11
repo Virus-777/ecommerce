@@ -472,7 +472,11 @@ export function createPostgresIdentityRepository(db: Kysely<IdentityDb>): Identi
       return db.selectFrom('reauth_tokens').selectAll().where('token_hash', '=', hash).executeTakeFirst();
     },
     async markReauthUsed(hash, at) {
-      await db.updateTable('reauth_tokens').set({ used_at: at }).where('token_hash', '=', hash).where('used_at', 'is', null).execute();
+      const r = await db.updateTable('reauth_tokens').set({ used_at: at }).where('token_hash', '=', hash).where('used_at', 'is', null).executeTakeFirst();
+      return r.numUpdatedRows > 0n;
+    },
+    async clearReauthUsed(hash) {
+      await db.updateTable('reauth_tokens').set({ used_at: null }).where('token_hash', '=', hash).execute();
     },
 
     /* ---------------------------------------------------------------- revocation feed */
@@ -536,7 +540,7 @@ export function createPostgresIdentityRepository(db: Kysely<IdentityDb>): Identi
         .select('id')
         .where('revoked_at', 'is', null)
         .where((eb) =>
-          eb.or([eb('expires_at', '<=', now), eb('absolute_expires_at', '<=', now), eb.and([eb('audience', '=', 'admin'), eb('last_refreshed_at', '<', staffIdleBefore)])]),
+          eb.or([eb('expires_at', '<=', now), eb('absolute_expires_at', '<=', now), eb.and([eb('audience', '=', 'admin'), eb('last_active_at', '<', staffIdleBefore)])]),
         )
         .limit(limit);
       const r = await db

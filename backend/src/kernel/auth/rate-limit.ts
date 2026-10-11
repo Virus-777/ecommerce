@@ -103,7 +103,7 @@ export const PURGE_RATE_LIMITS_JOB = {
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 
-/** Per-caller limits after authentication */
+/** Per-caller limits after authentication; GraphQL requests are reads (the read layer has no mutations) */
 export const CALLER_LIMITS: Record<string, { all: Limit; writes?: Limit }> = {
   visitor: { all: { limit: 300, windowMs: MIN }, writes: { limit: 30, windowMs: MIN } },
   customer: { all: { limit: 120, windowMs: MIN }, writes: { limit: 30, windowMs: MIN } },
@@ -111,12 +111,40 @@ export const CALLER_LIMITS: Record<string, { all: Limit; writes?: Limit }> = {
   staff: { all: { limit: 600, windowMs: MIN } },
 };
 
+/** The caller bucket: a visitor per session and IP, a seller member per account and seller, others per account */
+export function callerKey(p: { kind: string; accountId?: string | null; sessionId: string; sellerId?: string | null }, ip: string): string {
+  if (p.kind === 'visitor' || !p.accountId) return `${p.kind}:${p.sessionId}@${ip}`;
+  if (p.kind === 'seller') return `seller:${p.accountId}:${p.sellerId ?? '-'}`;
+  return `${p.kind}:${p.accountId}`;
+}
+
 export const IP_LIMIT: Limit = { limit: 600, windowMs: MIN };
 /** Signed file links (GET /files/…): images on a page come many at a time, so they don't spend the API budget */
 export const FILES_IP_LIMIT: Limit = { limit: 3000, windowMs: MIN };
+/** Refresh and sign-out, per session (after the refresh token is verified) */
+export const REFRESH_LIMIT: Limit = { limit: 30, windowMs: HOUR };
+/** Webhooks, per provider (after the signature is verified, so forged calls never spend a provider's budget) */
+export const WEBHOOK_LIMIT: Limit = { limit: 1000, windowMs: MIN };
+
+/** What a class key is computed from */
+export interface ClassKeyInput {
+  ip: string;
+  body: any;
+  /** The verified caller (absent on refresh, webhook and bootstrap calls) */
+  principal?: { accountId?: string | null; sessionId: string } | null;
+}
+
+/**
+ * The class an endpoint counts in: its spec `rateLimit`, else `export` for a POST that creates an export
+ * (a path ending in /exports: every module names them so).
+ */
+export function rateLimitClassOf(d: { rateLimit?: string; method: string; path: string }): string | undefined {
+  if (d.rateLimit) return d.rateLimit;
+  return d.method === 'POST' && /\/exports$/.test(d.path) ? 'export' : undefined;
+}
 
 /** Named classes (spec `rateLimit`), keyed by request fields */
-export const CLASS_LIMITS: Record<string, { key: (r: { ip: string; body: any }) => string | undefined; limit: Limit }[]> = {
+export const CLASS_LIMITS: Record<string, { key: (r: ClassKeyInput) => string | undefined; limit: Limit }[]> = {
   'sign-in': [
     { key: (r) => `ip:${r.ip}`, limit: { limit: 10, windowMs: MIN } },
     { key: (r) => (r.body?.email ? `email:${String(r.body.email).toLowerCase()}` : undefined), limit: { limit: 5, windowMs: 15 * MIN } },
@@ -134,6 +162,8 @@ export const CLASS_LIMITS: Record<string, { key: (r: { ip: string; body: any }) 
     { key: (r) => `ip:${r.ip}`, limit: { limit: 300, windowMs: HOUR } },
     { key: (r) => (r.body?.device?.installationId ? `install:${r.body.device.installationId}` : undefined), limit: { limit: 30, windowMs: HOUR } },
   ],
+  /** Creating exports (reports, registers, data exports): per account, whichever module */
+  export: [{ key: (r) => (r.principal ? `account:${r.principal.accountId ?? r.principal.sessionId}` : undefined), limit: { limit: 10, windowMs: HOUR } }],
 };
 
 /** RATE_LIMITED with retryAfterSeconds when the window is full */

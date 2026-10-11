@@ -33,6 +33,8 @@ export interface HttpKernel {
   config: Config;
   auth: AuthChain;
   idempotency: IdempotencyStore;
+  /** Operations (`module.id`) whose responses set or clear the website's refresh cookie (ctx.http.sessionCookie) */
+  sessionCookie?: ReadonlySet<string>;
 }
 
 declare module 'fastify' {
@@ -141,6 +143,13 @@ export function buildRouteSchema(r: EndpointRegistration) {
 
 /** Registers the spec routes in their own scope, which validates and serializes with Zod. */
 export function registerEndpoints(app: FastifyInstance, regs: EndpointRegistration[], k: HttpKernel) {
+  // CORS beyond the area default (security.ts): browsers send the refresh cookie, and accept a new one,
+  // only on credentialed routes; the self-service account endpoints are called from every app
+  for (const r of regs) {
+    const credentials = r.def.auth === 'refresh' || Boolean(k.sessionCookie?.has(`${r.module}.${r.id}`));
+    const anyApp = r.def.auth === 'account';
+    if (credentials || anyApp) app.corsRoutes?.add(routeUrlOf(r.module, r.def), { credentials, anyApp });
+  }
   void app.register(async (scope) => {
     scope.setValidatorCompiler(validatorCompiler);
     if (k.config.responseValidation) scope.setSerializerCompiler(serializerCompiler);
@@ -177,6 +186,15 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
         request.idempotency = { scope, key };
       }
     : undefined;
+  // a refused step-up must not leave the Idempotency-Key in progress: the retry with a fresh proof reuses the key
+  const stepUp: preHandlerHookHandler = async (request) => {
+    try {
+      await hooks.preHandlerAfter(request);
+    } catch (err) {
+      if (request.idempotency) await idempotency.release(request.idempotency.scope, request.idempotency.key).catch(() => {});
+      throw err;
+    }
+  };
 
   app.route({
     method: d.method,
@@ -186,7 +204,7 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
     onRequest: hooks.onRequest,
     preValidation: hooks.preValidation,
     // conditional permissions → Idempotency-Key replay → step-up (a replay never spends a re-auth token)
-    preHandler: [hooks.preHandlerBefore, ...(idempotent ? [idempotent] : []), hooks.preHandlerAfter],
+    preHandler: [hooks.preHandlerBefore, ...(idempotent ? [idempotent, stepUp] : [hooks.preHandlerAfter])],
     onResponse: hooks.onResponse,
     async handler(request, reply) {
       if (request.webhookDuplicate) {

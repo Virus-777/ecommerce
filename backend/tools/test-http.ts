@@ -15,7 +15,7 @@
  *   another app's token     → 403 WRONG_AUDIENCE
  *   wrong kind of caller    → 401 (visitor on customer/account endpoints, seller without a seller account)
  *   missing permission      → 403 FORBIDDEN or OWNER_ONLY
- *   missing step-up proof   → 403 STEP_UP_REQUIRED
+ *   missing or wrong step-up proof → 403 STEP_UP_REQUIRED (kind, purpose), never 400
  *   the right token         → passes the middleware and validation and reaches the handler
  * Plus: unknown URLs, CORS preflight, GraphQL per area, /docs, and the internal health port.
  */
@@ -44,6 +44,7 @@ const external = values.url?.replace(/\/$/, '');
 const REFRESH = 'http-test-refresh-token';
 const WEBHOOK_SECRET = 'dev-webhook-secret';
 const ORIGIN = 'http://localhost:3000';
+const SELLER_ORIGIN = 'http://localhost:3001';
 // modules whose endpoints are tested; the server also runs their dependencies
 const modules = only ?? Object.keys(allSpecs);
 const booted = only ? withDependencies(only) : modules;
@@ -69,7 +70,7 @@ if (external) {
   const app = await buildApp({
     env: { NODE_ENV: 'test' },
     modules: booted,
-    config: { launchPhase: 4, rateLimits: false, devTokens: true, devSigning: { file: '', jwk }, migrateOnStart: true, responseValidation: true, cors: { store: [ORIGIN], seller: [], admin: [] } },
+    config: { launchPhase: 4, rateLimits: false, devTokens: true, devSigning: { file: '', jwk }, migrateOnStart: true, responseValidation: true, cors: { store: [ORIGIN], seller: [SELLER_ORIGIN], admin: [] } },
     authorities: (a) => ({ ...a, verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'http-test-session', accountId: null, audience: 'store', kind: 'customer' } : a.verifyRefreshToken(t)) }),
     webhookVerifiers: verifiers,
   });
@@ -108,7 +109,7 @@ function rightToken(d: EndpointDef): Record<string, string> {
     case 'staff':
       return bearer(tok('staff'));
     case 'refresh':
-      return { cookie: `__Secure-mk_refresh=${REFRESH}` };
+      return { cookie: `__Secure-mk_refresh=${REFRESH}`, origin: ORIGIN, 'x-requested-with': 'fetch' }; // the website's cookie, from an app page
     case 'provider':
       return { 'x-event-id': crypto.randomUUID() }; // signed per request in send()
     case 'bootstrap':
@@ -204,7 +205,7 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
     account: bearer(signAccessToken(devSigner({ jwk: newDevJwk() }), devClaims('customer'), { issuer })),
     seller: bearer(`${tok('seller').slice(0, -8)}AAAAAAAA`),
     staff: bearer(sign(devClaims('staff'), 60, new Date(Date.now() - 3_600_000))),
-    refresh: { cookie: '__Secure-mk_refresh=not-a-refresh-token' },
+    refresh: { cookie: '__Secure-mk_refresh=not-a-refresh-token', origin: ORIGIN, 'x-requested-with': 'fetch' },
     provider: { 'x-signature': 'sha256=forged', 'x-timestamp': String(Math.floor(Date.now() / 1000)) },
     bootstrap: { 'x-app-proof': 'forged' },
   };
@@ -244,8 +245,17 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
   if (d.stepUp) {
     const headers = { ...extra, ...rightToken(d), ...(d.stepUp.kind === 'code' ? { 'x-step-up-code': '999999' } : {}) };
     const r = await send(d.method, url, headers, payload(d.stepUp.kind === 'reauth' ? { reauthToken: 'not-a-reauth-token' } : {}));
-    if (later(r)) record(op, 'no step-up', null, 'later launch phase');
-    else record(op, 'no step-up', expectStatus(r, 403, ['STEP_UP_REQUIRED']) ?? headerProblems(r, url));
+    if (later(r)) record(op, 'wrong step-up', null, 'later launch phase');
+    else record(op, 'wrong step-up', expectStatus(r, 403, ['STEP_UP_REQUIRED']) ?? headerProblems(r, url));
+    // no proof at all: still a step-up refusal (403), never a validation error
+    const { 'x-step-up-code': _code, ...withoutCode } = { ...extra, ...rightToken(d) };
+    const missing = await send(d.method, url, withoutCode, payload(d.stepUp.kind === 'reauth' ? { reauthToken: undefined } : {}));
+    if (later(missing)) record(op, 'no step-up', null, 'later launch phase');
+    else {
+      const details = missing.body?.error?.details;
+      const named = details?.kind === d.stepUp.kind && details?.purpose === d.stepUp.purpose ? null : `details ${JSON.stringify(details)}`;
+      record(op, 'no step-up', expectStatus(missing, 403, ['STEP_UP_REQUIRED']) ?? named ?? headerProblems(missing, url));
+    }
   }
 
   // 7. the right token: the request reaches the handler
@@ -289,11 +299,49 @@ async function testServer() {
   if (!external) record(op, '/docs off outside development', expectStatus(r, 401, []));
   r = await send('GET', '/api/store/catalog/categories', { ...bearer(tok('visitor')), authorization: 'Basic dXNlcjpwYXNz' });
   record(op, 'non-Bearer Authorization → 401', expectStatus(r, 401, ['UNAUTHORIZED']));
+  if (booted.includes('settings')) {
+    // apps.android.minVersionCode is at least 1: version code 0 is always too old
+    r = await send('GET', '/api/public/settings/app-config', { ...bearer(tok('visitor')), 'x-client': 'android/0' });
+    record(op, 'outdated Android app (X-Client) → 426', expectStatus(r, 426, ['UPGRADE_REQUIRED']));
+    r = await send('GET', '/api/public/settings/app-config', { ...bearer(tok('visitor')), 'x-client': 'android/1.0.0+999999' });
+    record(op, 'current Android app (X-Client) → 200', expectStatus(r, 200, []));
+  }
 
   r = await send('OPTIONS', '/api/store/catalog/categories', { origin: ORIGIN, 'access-control-request-method': 'GET', 'access-control-request-headers': 'authorization' });
   record(op, 'CORS preflight answered without a token', r.status === 204 ? (external || r.headers.get('access-control-allow-origin') === ORIGIN ? null : 'origin not allowed') : brief(r));
   r = await send('OPTIONS', '/api/store/catalog/categories', { origin: 'https://evil.example', 'access-control-request-method': 'GET' });
   record(op, 'CORS refuses unknown origins', r.headers.get('access-control-allow-origin') ? 'allowed an unknown origin' : null);
+  r = await send('GET', '/api/store/catalog/categories', { origin: ORIGIN });
+  const exposed = (r.headers.get('access-control-expose-headers') ?? '').toLowerCase();
+  record(op, 'CORS exposes WWW-Authenticate, X-Request-Id, Idempotent-Replayed, Retry-After', ['www-authenticate', 'x-request-id', 'idempotent-replayed', 'retry-after'].every((h) => exposed.includes(h)) ? null : `exposes "${exposed}"`);
+
+  if (booted.includes('identity')) {
+    // the website signs in across origins: every response that sets the refresh cookie allows credentials
+    const credentialed: [string, string][] = [
+      ['/api/public/identity/sessions', ORIGIN],
+      ['/api/public/identity/app-sessions', ORIGIN],
+      ['/api/public/identity/sign-in-challenges/x/verify', ORIGIN],
+      ['/api/public/identity/sessions/refresh', ORIGIN],
+      ['/api/seller/identity/session/seller-context', SELLER_ORIGIN],
+    ];
+    for (const [url, origin] of credentialed) {
+      r = await send('OPTIONS', url, { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization, content-type, x-requested-with' });
+      const ok = r.headers.get('access-control-allow-origin') === origin && r.headers.get('access-control-allow-credentials') === 'true' && /x-requested-with/.test(r.headers.get('access-control-allow-headers') ?? '');
+      record(op, `credentialed CORS on ${url}`, external || ok ? null : `allow-origin ${r.headers.get('access-control-allow-origin')}, credentials ${r.headers.get('access-control-allow-credentials')}`);
+    }
+    r = await send('OPTIONS', '/api/public/identity/password-policy', { origin: ORIGIN, 'access-control-request-method': 'GET' });
+    record(op, 'no credentials where no cookie is set', r.headers.get('access-control-allow-credentials') ? 'credentials allowed' : null);
+    // account endpoints live under /api/store/identity but serve every app
+    r = await send('OPTIONS', '/api/store/identity/security', { origin: SELLER_ORIGIN, 'access-control-request-method': 'GET' });
+    record(op, 'account endpoints allow Seller Center', external || r.headers.get('access-control-allow-origin') === SELLER_ORIGIN ? null : 'seller origin refused');
+    r = await send('OPTIONS', '/api/store/catalog/categories', { origin: SELLER_ORIGIN, 'access-control-request-method': 'GET' });
+    record(op, 'other store endpoints refuse Seller Center', r.headers.get('access-control-allow-origin') ? 'seller origin allowed' : null);
+    // the website's cookie works only from an app page
+    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh=${REFRESH}` }, {});
+    record(op, 'cookie refresh without Origin → 403', expectStatus(r, 403, ['FORBIDDEN']));
+    r = await send('POST', '/api/public/identity/sessions/refresh', { cookie: `__Secure-mk_refresh=${REFRESH}`, origin: ORIGIN }, {});
+    record(op, 'cookie refresh without X-Requested-With → 403', expectStatus(r, 403, ['FORBIDDEN']));
+  }
 
   const ping = { query: '{ ping }' };
   const gql: [string, Record<string, string> | undefined, number][] = [

@@ -1,4 +1,4 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
@@ -10,8 +10,7 @@ import type { PaymentsService } from '../service.js';
 
 const upper = (s: string | null | undefined) => (s ? s.toUpperCase() : (s ?? null));
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
-const ACTOR_KIND: Record<string, string> = { customer: 'CUSTOMER', visitor: 'GUEST', anonymous: 'GUEST', seller: 'SELLER', staff: 'STAFF' };
-const actor = (a: common.Actor | null | undefined) => (a ? { kind: ACTOR_KIND[a.kind] ?? 'SYSTEM', id: a.id ?? null, name: a.name ?? null } : null);
+const actor = gqlActor;
 const timeline = (list: readonly common.TimelineEvent[]) => list.map((t) => ({ ...t, detail: t.detail ?? null, actor: actor(t.actor) }));
 const deadline = (d: common.Deadline | null | undefined) => (d ? { dueAt: d.dueAt, state: upper(d.state) } : null);
 const lazy = <T>(f: () => Promise<T>) => {

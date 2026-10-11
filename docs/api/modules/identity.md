@@ -706,6 +706,7 @@ Indexes: `(account_id, last_active_at desc)`, `unique (account_id, installation_
 | two_step_verified_at | timestamptz? |
 | created_at | timestamptz |
 | last_refreshed_at | timestamptz |
+| last_active_at | timestamptz |
 | expires_at | timestamptz |
 | absolute_expires_at | timestamptz |
 | revoked_at | timestamptz? |
@@ -892,9 +893,11 @@ Indexes: `(expires_at)`
 | startPhoneVerification | `(accountId: uuid, phone: string) => VerificationChallenge`<br>Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. | customers |
 | verifyReauthToken | `(principal: Principal, token: string, purpose: string) => bool`<br>True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. | customers, sellers, finance |
 | accountSecurityOf | `(accountIds: uuid[], opts?: { activityLimit?: int }) => Map<uuid, AccountSecurity>`<br>Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). | graphql |
-| consumeReauthToken | `(token: string) => void`<br>Marks a verified re-auth token used; called by the kernel after the request succeeded. | kernel |
+| consumeReauthToken | `(token: string) => bool`<br>Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs. | kernel |
+| releaseReauthToken | `(token: string) => void`<br>Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel. | kernel |
 | revocationsSince | `(cursor?: string) => { sessions: { sessionId: uuid, at: datetime }[], accounts: { accountId: uuid, validAfter: datetime }[], cursor: string }`<br>Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. | kernel |
 | verifyRefreshToken | `(refreshToken: string) => { sessionId: uuid, accountId?: uuid, audience: string, kind: string } | null`<br>Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused. | kernel |
+| touchStaffSession | `(sessionId: uuid) => { live: bool, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }`<br>Middleware check on every admin request (each server caches the answer 5 s per session): whether the staff session is still live (not revoked, not past its expiry or absolute limit, and active within staffIdleMinutes), recording the activity (sessions.last_active_at, at most once a minute) that keeps it from going idle. | kernel |
 
 ## Permissions
 

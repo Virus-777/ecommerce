@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1294 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1,294 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -9,13 +9,30 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 
 
 ## API areas
 
-| Area | Prefix | Who | Auth |
+| Area | Prefix | Who | Auth | Endpoints |
+|---|---|---|---|---|
+| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 258 |
+| Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 260 |
+| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 745 |
+| Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 22 |
+| Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider | 9 |
+
+### Endpoints by auth kind
+
+Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.md) §0). The `account` endpoints live under `/api/store/identity` but take a signed-in token of any app, and every app's origin may call them.
+
+| Area | Auth kind | Who | Endpoints |
 |---|---|---|---|
-| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. |
-| Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. |
-| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. |
-| Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. |
-| Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider |
+| Store API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 47 |
+| Store API | `shopper` | A store token that can hold a cart: visitor (guest) or customer | 103 |
+| Store API | `customer` | Signed-in customer | 97 |
+| Store API | `account` | Any signed-in account, any realm (self-service security endpoints) | 11 |
+| Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 260 |
+| Admin API | `staff` | Staff member with 2-step; optional `permission` narrows it | 745 |
+| Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 19 |
+| Public API | `refresh` | Refresh token only (cookie on the website, body on Android) | 2 |
+| Public API | `bootstrap` | No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions | 1 |
+| Webhooks | `provider` | Webhook signature, verified per provider | 9 |
 
 ## Platform
 
@@ -102,36 +119,113 @@ Each module needs only modules in earlier layers (required dependencies; optiona
 
 ## Errors
 
+Every REST error is `{ "error": { "code", "message", "details"? } }` with the status below. Module codes are listed on each module page.
+
 | Code | Status | Meaning |
 |---|---|---|
 | `VALIDATION_FAILED` | 400 | Fields are missing or invalid. details.issues lists each field. |
-| `UNAUTHORIZED` | 401 | No token, or the token is invalid, expired or revoked. Only this error should trigger a token refresh (WWW-Authenticate: Bearer error="invalid_token"). |
-| `FORBIDDEN` | 403 | Signed in, but the role or seller permission does not allow this. details.permission names it. |
+| `UNAUTHORIZED` | 401 | No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. |
+| `FORBIDDEN` | 403 | Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason. |
 | `NOT_FOUND` | 404 | The record does not exist or is not visible to this caller. |
 | `ILLEGAL_TRANSITION` | 409 | The status does not allow this action (e.g. approving a rejected product). details.from, details.event. |
 | `APPROVAL_REQUIRED` | 409 | Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses). |
 | `CONFLICT` | 409 | Concurrent change; reload and retry. |
-| `IDEMPOTENCY_KEY_REUSED` | 422 | The Idempotency-Key was used with a different request body. |
-| `RATE_LIMITED` | 429 | Too many requests; retry after the Retry-After header. |
-| `NOT_IMPLEMENTED` | 501 | Planned for a later launch phase. |
+| `IDEMPOTENCY_KEY_REUSED` | 422 | The Idempotency-Key was used with a different request (path, query or body). |
+| `RATE_LIMITED` | 429 | Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds). |
+| `NOT_IMPLEMENTED` | 501 | Designed but not built yet, or planned for a later launch phase (details.reason not_built or later_phase). |
+| `INTERNAL_ERROR` | 500 | Something went wrong on the server, or a response did not match the spec. Include the X-Request-Id when reporting it. |
+| `RANGE_NOT_SATISFIABLE` | 416 | File downloads (GET /files/…): the requested Range is outside the file. details.sizeBytes. |
 | `WRONG_AUDIENCE` | 403 | The token is for another app (store, Seller Center or Admin Center). |
 | `STEP_UP_REQUIRED` | 403 | A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose. |
 | `OWNER_ONLY` | 403 | Only the seller owner can do this. |
 | `NO_SELLER_ACCESS` | 403 | This account cannot act for that seller (or for any seller). |
-| `UPGRADE_REQUIRED` | 426 | This app version is no longer supported; update the app. |
+| `UPGRADE_REQUIRED` | 426 | This Android app version is no longer supported; update the app. details.minVersionCode, details.updateUrl. |
 | `SERVICE_UNAVAILABLE` | 503 | A service needed to authorize the request is unavailable; retry later. |
+
+Sign-in and session codes from [identity](modules/identity.md) that every app meets:
+
+| Code | Status | Meaning |
+|---|---|---|
+| `APP_PROOF_INVALID` | 401 | The app proof (Play Integrity or bot challenge) is missing or failed. |
+| `REFRESH_TOKEN_INVALID` | 401 | Refresh token unknown, expired, revoked or reused; sign in again. |
+| `ACCOUNT_LOCKED` | 423 | Sign-in is paused. details.lockedUntil (null = until staff unlock) and details.cause. |
+| `ACCOUNT_DISABLED` | 403 | The account is disabled or closed. |
+
+Requests the server can't read keep their HTTP status with code `VALIDATION_FAILED` and no `details`: 400 (unreadable JSON), 413 (a JSON body over 2 MB) and 415 (an unsupported content type).
+
+GraphQL answers `{ data, errors }` with `errors[].extensions.code` instead of the `{ error }` envelope, and has four codes of its own: `QUERY_TOO_COMPLEX`, `QUERY_TIMEOUT`, `PERSISTED_QUERY_NOT_FOUND` and `PERSISTED_QUERY_NOT_SUPPORTED`. See [graphql/README.md](graphql/README.md#errors).
+
+### Refusal details
+
+| Code | `details` |
+|---|---|
+| `VALIDATION_FAILED` | `issues: [{ path, message }]`, the path naming the part and field (`body.email`, `querystring.limit`) |
+| `UNAUTHORIZED` | `reason`: `token_missing`, `token_expired`, `token_revoked`, `token_malformed`, `token_bad_signature`, `token_unknown_key`, `token_wrong_type`, `token_wrong_issuer`, `token_not_yet_valid`, `token_invalid` (refresh token); `sign_in_required`, `seller_context_required`, `session_idle`; `signature_invalid`, `signature_expired` (webhooks); `link_missing`, `link_invalid` (file links) |
+| `FORBIDDEN` | `permission` for a missing permission; otherwise `reason`: `origin_not_allowed`, `x_requested_with_required` (cookie refresh and sign-out), `link_expired` (file links) |
+| `WRONG_AUDIENCE` | `tokenAudience`, `area` |
+| `STEP_UP_REQUIRED` | `kind` (`reauth`, `code`, `two-step-sign-in`), `purpose` |
+| `ILLEGAL_TRANSITION` | `machine`, `from`, `event`, `allowed` |
+| `APPROVAL_REQUIRED` | `approvalRequestId` |
+| `RATE_LIMITED` | `retryAfterSeconds` (also the `Retry-After` header) |
+| `UPGRADE_REQUIRED` | `minVersionCode`, `updateUrl` |
+| `NOT_IMPLEMENTED` | `operation`, `reason` (`not_built`, `later_phase`), `phase` |
+| `SERVICE_UNAVAILABLE` | `reason`: `sessions_unavailable`, `revocations_stale`, `revocations_unavailable` (admin requests); none when an app proof can't be checked |
+| `ACCOUNT_LOCKED` | `lockedUntil` (null = until staff unlock), `cause` |
 
 ## Headers
 
 | Header | Use |
 |---|---|
 | `Authorization` | Bearer <token> on every request: visitor token before sign-in, access token after (customer, seller member or staff) |
-| `Idempotency-Key` | Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same body returns the first result. |
-| `Accept-Language` | en-US (only locale at launch) |
-| `X-Request-Id` | Echoed back; include it when reporting problems |
-| `X-App-Proof` | Bootstrap only: Play Integrity token (Android) or bot-challenge token (website) |
-| `X-Step-Up-Code` | Current 2-step code for endpoints with stepUp kind "code" |
-| `X-Client` | web|android/<version>: analytics and minimum-version checks only, never trusted for authorization |
+| `Idempotency-Key` | Required on endpoints marked idempotent (orders, payments, refunds, payouts). Same key + same request returns the first result (with Idempotent-Replayed: true). |
+| `Accept-Language` | Ignored: every response is en-US (the only locale at launch) |
+| `X-Request-Id` | Optional. A value of 1–100 letters, digits, _ or - becomes the request id; otherwise the server makes one. Every response carries it; include it when reporting problems |
+| `X-App-Proof` | Bootstrap only: turnstile:<token> (website bot challenge) or play:<token> (Android Play Integrity); dev in development and tests |
+| `X-Step-Up-Code` | Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED |
+| `X-Client` | web, android/<versionCode> or android/<versionName>+<versionCode> (e.g. android/1.4.2+142): analytics and the minimum-version check (426) only, never trusted for authorization |
+| `X-Requested-With` | Any value. Required with the website's refresh cookie on refresh and sign-out, together with an allowed Origin (else 403) |
+
+Response headers: `X-Request-Id` (always), `Retry-After` (429), `Idempotent-Replayed: true` (a replayed idempotent request), `WWW-Authenticate` (401 `UNAUTHORIZED`: `Bearer error="invalid_token"` for a bad token, plain `Bearer` otherwise). Browsers can read all four across origins.
+
+## Client rules
+
+The full design is [../03-auth-middleware.md](../03-auth-middleware.md); these are the rules an app needs.
+
+### Responses and URLs
+
+- Success uses the status the endpoint declares (200, 201, 202). An endpoint without a response body answers 204, or 202 where it says so, with an empty body.
+- Trailing slashes are ignored: `/api/store/cart/` is `/api/store/cart`.
+- `Accept-Language` is ignored; texts are en-US.
+- Every `/api`, `/graphql` and `/webhooks` response is `Cache-Control: private, no-store`.
+
+### Paging
+
+List endpoints take `cursor` (the Android app's infinite scroll) or `page` (the website's numbered pages), never both, and `limit` (1–100, default 24). The answer is `{ items, nextCursor, page?, totalPages?, total? }`; `nextCursor` is null at the end. Both `cursor` and `page`, a `limit` out of range, or a cursor the server can't read → 400 `VALIDATION_FAILED`. (GraphQL clamps the limit instead.)
+
+### Idempotency
+
+Endpoints marked idempotent need `Idempotency-Key` (1–255 characters; missing → 400 `VALIDATION_FAILED`). Keys are kept 24 hours per operation and caller. The same key with the same request (path parameters, query and body) answers the first response again, same status and body, with `Idempotent-Replayed: true`; with a different request → 422 `IDEMPOTENCY_KEY_REUSED`; while the first request still runs → 409 `CONFLICT`. When the handler fails, the key is freed and a retry runs again. Use one key per user action and reuse it on retries.
+
+### Sessions
+
+- **Start:** `POST /api/public/identity/app-sessions` with `X-App-Proof` returns a visitor access token (15 minutes) and a refresh token. Signing in claims the visitor session.
+- **Where the refresh token lives:** the website gets it in the `__Secure-mk_refresh` cookie (HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions) and `refreshToken` is `""` in the body; Android gets it in the body.
+- **Refresh** `POST /api/public/identity/sessions/refresh`, **sign out** `POST /api/public/identity/sessions/sign-out` (204). The server reads the cookie first, then `refreshToken` in the body. With the cookie, the request needs an allowed `Origin` and `X-Requested-With`, else 403. At most 30 refreshes an hour per session. Each refresh returns a new pair; the previous token sent again within 20 s returns the same new pair (two tabs refreshing at once), and later it ends the session.
+- **Refused:** no refresh token → 401 `token_missing`; an unknown, expired, revoked or reused one → 401 `token_invalid` (sign-out with such a token too). Refresh can also answer `REFRESH_TOKEN_INVALID`, `ACCOUNT_DISABLED` or `ACCOUNT_LOCKED`. In every case, sign in again.
+- **When to refresh:** only on 401 `UNAUTHORIZED` whose `details.reason` starts with `token_`. Never on `session_idle` (sign in again), other 401 reasons, `FORBIDDEN`, `WRONG_AUDIENCE` or a GraphQL field refusal.
+
+### Browsers (CORS)
+
+Each area allows its own app's origins (`CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS`); public endpoints, file links and the `account` endpoints allow every app's. Credentials (`Access-Control-Allow-Credentials: true`) are allowed only on the routes that set, clear or read the refresh cookie: refresh and sign-out, `POST /api/public/identity/app-sessions`, `/sessions`, `/sign-in-challenges/{id}/verify`, `/external-sign-ins`, `/verifications/{id}/confirm`, `/invitations/accept`, `/invitations/two-step`, and `POST /api/seller/identity/session/seller-context`.
+
+### For frontend developers
+
+1. Start an app session once, keep the access token in memory, and send `Authorization: Bearer` on every request, GraphQL included. Send `X-Client` (`web`, or `android/<versionName>+<versionCode>`).
+2. Website: call the cookie routes above with `credentials: 'include'`, and add `X-Requested-With` (any value) and a JSON body (`{}`) on refresh and sign-out.
+3. Refresh one request at a time, only on 401 with `details.reason` `token_*`, then retry the request once. If the refresh itself is refused, sign in again (visitors: start a new app session).
+4. 426 `UPGRADE_REQUIRED`: show the update screen (`details.updateUrl`). 429: wait `Retry-After` seconds. 503: retry with backoff.
+5. Send one `Idempotency-Key` per user action on idempotent endpoints, the same on every retry.
+6. Show or log the `X-Request-Id` of a failed response when reporting a problem.
 
 ## Constants
 

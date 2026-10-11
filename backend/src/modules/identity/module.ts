@@ -5,6 +5,7 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
+import { SESSION_COOKIE_ENDPOINTS } from './http/client.js';
 import { publicRoutes } from './http/public.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { devExternalIdentityVerifier } from './infra/external-id/dev.js';
@@ -19,7 +20,7 @@ import { IdentityService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '1.4.0',
   migrations,
   graphql: typeDefs,
   register(ctx) {
@@ -28,6 +29,8 @@ export default defineModule({
     const service = new IdentityService({ repo: createPostgresIdentityRepository(ctx.db), ctx, externalIds });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), publicRoutes(service));
+    // responses that set or clear the website's refresh cookie (http/client.ts send()): browsers call them with credentials
+    ctx.http.sessionCookie(...SESSION_COOKIE_ENDPOINTS);
     ctx.graphql.resolvers(resolvers(service));
 
     // Events this module reacts to (spec events.consumes)

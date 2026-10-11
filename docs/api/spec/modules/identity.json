@@ -211,8 +211,16 @@
     },
     {
       "name": "consumeReauthToken",
+      "signature": "(token: string) => bool",
+      "desc": "Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs.",
+      "usedBy": [
+        "kernel"
+      ]
+    },
+    {
+      "name": "releaseReauthToken",
       "signature": "(token: string) => void",
-      "desc": "Marks a verified re-auth token used; called by the kernel after the request succeeded.",
+      "desc": "Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel.",
       "usedBy": [
         "kernel"
       ]
@@ -229,6 +237,14 @@
       "name": "verifyRefreshToken",
       "signature": "(refreshToken: string) => { sessionId: uuid, accountId?: uuid, audience: string, kind: string } | null",
       "desc": "Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused.",
+      "usedBy": [
+        "kernel"
+      ]
+    },
+    {
+      "name": "touchStaffSession",
+      "signature": "(sessionId: uuid) => { live: bool, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }",
+      "desc": "Middleware check on every admin request (each server caches the answer 5 s per session): whether the staff session is still live (not revoked, not past its expiry or absolute limit, and active within staffIdleMinutes), recording the activity (sessions.last_active_at, at most once a minute) that keeps it from going idle.",
       "usedBy": [
         "kernel"
       ]
@@ -826,6 +842,7 @@
         "two_step_verified_at": "timestamptz?",
         "created_at": "timestamptz",
         "last_refreshed_at": "timestamptz",
+        "last_active_at": "timestamptz",
         "expires_at": "timestamptz",
         "absolute_expires_at": "timestamptz",
         "revoked_at": "timestamptz?",

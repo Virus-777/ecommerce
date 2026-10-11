@@ -1,6 +1,6 @@
 # Authentication and authorization middleware per role
 
-Status: **v3, implemented in the kernel** (2026-10-09). The open decisions in §18 were taken with the recommended option; see "Decisions taken".
+Status: **v3, implemented in the kernel** (2026-10-09; updated 2026-10-11 to match the API contract fixes). The open decisions in §18 were taken with the recommended option; see "Decisions taken".
 
 v3 adds your rule: **every API endpoint requires a token, and tokens are verified in middleware** (§0). v2 still let 78 endpoints run without a token.
 
@@ -13,7 +13,7 @@ v1 was reviewed twice: a fact-check against every spec, and a security review. v
 
 ## 0. Rule: every endpoint requires a token, verified in middleware
 
-**Every request to `/api/*`, `/graphql/*`, `/webhooks/*` and `/files/*` must carry a token.** Token verification is middleware (M4, §3): it runs before validation and before any module code. Handlers and services never read headers or tokens; they receive a verified `principal`. A request with no token, or with a token that fails verification, is refused with 401, including requests to URLs that don't exist (401 before 404), so the API can't be explored without a token.
+**Every request to `/api/*`, `/graphql/*`, `/webhooks/*` and `/files/*` must carry a token.** Token verification is middleware (M4, §3): it runs before validation and before any module code. Handlers and services never read headers or tokens; they receive a verified `principal`. A request with no token, or with a token that fails verification, is refused with 401, including requests to URLs that don't exist (401 before 404), so the API can't be explored without a token. The only exceptions are CORS preflights, a plain `OPTIONS`, and `/docs` when it is enabled ("Other entry points" below).
 
 ### Token kinds
 
@@ -29,27 +29,32 @@ The **visitor token replaces the guest header and guest token.** For the store, 
 
 ### Every endpoint, mapped to its token
 
-| Endpoints | Count | Today | v3 auth kind | Token required |
+| Endpoints | Count | v2 | v3 auth kind | Token required |
 |---|---|---|---|---|
 | Store browsing (product, category, search, reviews, help, policies, storefronts, delivery estimates) | 47 | `anyone`, no token | **`visitor`** | store visitor token or customer token |
-| Store cart, checkout, guest order pages | 102 | `shopper` (guest header or customer) | `shopper` | store visitor token or customer token |
-| Store account pages | 105 | `customer` | `customer` | customer access token |
-| Seller Center | 256 | `seller` | `seller` | seller access token |
-| Admin Center and Operations | 728 | `staff` | `staff` | staff access token |
+| Store cart, checkout, guest order pages | 103 | `shopper` (guest header or customer) | `shopper` | store visitor token or customer token |
+| Store account pages | 97 | `customer` | `customer` | customer access token |
+| Self-service security under `/api/store/identity` (security, password, email change, 2-step, devices, security activity) | 11 | `customer` | **`account`** | access token of any app (customer, seller or staff); every app's origin may call them (§5) |
+| Seller Center | 260 | `seller` | `seller` | seller access token |
+| Admin Center and Operations | 745 | `staff` | `staff` | staff access token |
 | Public: sign-in (password, Google/Apple, 2-step), registration, codes, password policy and reset, invitations, order links, unsubscribe, app config, fee schedule, brand-owner reports | 19 | `anyone`, no token | **`visitor`** | visitor token of any app (store, seller or admin) |
 | Public: start a guest session | 1 | `anyone` | **removed**, replaced by the bootstrap endpoint | – |
 | Public: refresh tokens, sign out | 2 | `anyone`, refresh token in the body | **`refresh`** | refresh token (cookie on the website, body on Android), verified in middleware |
 | Webhooks | 9 | `provider` | `provider` | provider signature, verified in middleware (M11) |
 | File downloads `GET`/`HEAD /files/{bucket}/{key}` (not a spec endpoint) | 1 route | – | **`file-link`** | the link's own signature, verified in middleware (M4) |
-| GraphQL store / seller / admin | 3 endpoints (not in the 1,269) | store open to anyone | same as the area | store: visitor or customer token; seller and admin: access token |
+| GraphQL store / seller / admin | 3 endpoints (not in the 1,294) | store open to anyone | same as the area | store: visitor or customer token; seller and admin: access token |
 | **Bootstrap:** `POST /api/public/identity/app-sessions` | 1 (new) | – | **`bootstrap`** | none: this endpoint issues the first token (below) |
 
 ### The one endpoint that can't require a token
 
 Something has to hand out the first token, so the **bootstrap endpoint** is the single entry point without one. Instead of a token, it requires proof that the request comes from a real Marketly app, and it can do nothing else:
 
-- **Android:** a Play Integrity verdict for the Marketly app, checked on the server.
-- **Website:** a bot challenge (e.g. Cloudflare Turnstile) solved in the browser and checked on the server.
+The proof travels in `X-App-Proof`:
+
+- **Android:** `play:<token>`, a Play Integrity verdict for the Marketly app, checked on the server. *Not wired yet:* until the deployment supplies a verifier, a `play:` proof answers 503 `SERVICE_UNAVAILABLE`.
+- **Website:** `turnstile:<token>`, a Cloudflare Turnstile challenge solved in the browser and checked with `TURNSTILE_SECRET` (503 without the secret).
+- **Development and tests:** the literal `dev` (only while development tokens are on, §16; refused at startup in production).
+- Anything else, or a failed check: 401 `APP_PROOF_INVALID`.
 - **Strict rate limits:** per IP and per device installation (§11).
 - **Narrow output:** it issues only a visitor token, which can do no more than an anonymous visitor could in v2: read public data and keep a cart.
 
@@ -78,7 +83,8 @@ GET /files/marketly-public/renditions/<uuid>/medium.webp?sig=<base64url HMAC>
 | Entry | Rule |
 |---|---|
 | `/health` | served on a separate internal port for the load balancer, not on the public listener |
-| `/docs` (Swagger UI and OpenAPI) | off in production; elsewhere it needs a staff token |
+| `/docs` (Swagger UI and OpenAPI) | only with `DOCS_ENABLED` (default: on in development, off elsewhere; production refuses to start with it). When on, `/docs` and `/docs/*` are served without a token, so a browser can open them; when off, `/docs` is an unknown URL (401 without a token) |
+| CORS preflight | `OPTIONS` with `Access-Control-Request-Method` is answered before authentication: 204, with the CORS headers for an allowed origin (§5). An `OPTIONS` without that header skips authentication too and gets 404 (no route answers `OPTIONS`) |
 | Email and SMS links (password reset, invitation, order link, unsubscribe) | the link opens an app page, which first gets a visitor token, then sends the link's one-time token in the request body |
 | Search engines and link previews | they can't call the API without a token. If the website is server-rendered for search engines, the render server uses its own **service token** (decision 9) |
 | Response caching | every request now carries a token, so public reads are cached inside the server (read models), not by a CDN keyed on the URL. Exception: `/files` responses, whose token is part of the URL; public renditions are `Cache-Control: public, max-age=3600` (File links above) |
@@ -87,7 +93,7 @@ GET /files/marketly-public/renditions/<uuid>/medium.webp?sig=<base64url HMAC>
 
 | # | Question | Answered by | Where | Failure |
 |---|---|---|---|---|
-| 1 | **Who** is calling? | A token on **every** request (§0): visitor or access token; refresh token on refresh and sign-out; provider signature on webhooks | middleware (M4) | 401 `UNAUTHORIZED` with `WWW-Authenticate: Bearer error="invalid_token"` |
+| 1 | **Who** is calling? | A token on **every** request (§0): visitor or access token; refresh token on refresh and sign-out; provider signature on webhooks | middleware (M4) | 401 `UNAUTHORIZED`, `details.reason` `token_*`, with `WWW-Authenticate: Bearer error="invalid_token"` (plain `Bearer` when the token is missing); see "When clients refresh" (§5) |
 | 2 | **Which app** is the session for? | Token audience (store / seller / admin) against the API area | middleware | 403 `WRONG_AUDIENCE` |
 | 3 | **What** may they do? | Staff: effective permissions from roles. Sellers: member permissions; owner-only keys | middleware | 403 `FORBIDDEN` (`details.permission`), 403 `OWNER_ONLY` |
 | 4 | **Is it really them, now?** | 2-step on staff sessions; re-auth token bound to session, seller and purpose for sensitive account changes | middleware | 403 `STEP_UP_REQUIRED` |
@@ -99,10 +105,10 @@ GET /files/marketly-public/renditions/<uuid>/medium.webp?sig=<base64url HMAC>
 1. **Check permissions, never role names.** Roles are data in `access`: seeded, editable, custom ones allowed, and one person can hold several. Middleware matches **exact permission keys**. Wildcards in seeds are expanded when seeding, so a key a module adds later is never granted silently.
 2. **Access is not authority.** A permission opens an action; an approval limit decides the amount. Assigning a role that carries a limit therefore needs the Business Owner (§12).
 3. **Deny by default, derived from the spec.** Each endpoint's chain is built at startup from its spec fields. An endpoint with an unknown auth kind, or an admin GraphQL root field without `@auth`, fails the build.
-4. **Scope is a property of data access, not a habit.** Tenant tables (anything with `seller_id`, `customer_id` or guest grants) can only be read through scoped queries, and a generated cross-tenant test runs for every endpoint with parameters (§7).
+4. **Scope is a property of data access, not a habit.** Tenant tables (anything with `seller_id`, `customer_id` or guest grants) are read for the caller's scope only, and a generated cross-tenant test should run for every endpoint with parameters (§7 says how much of this is built).
 5. **One source of truth for revocation.** Revoked sessions live in PostgreSQL and every server polls them. A server never relies on having received an event (§6).
 6. **Fail closed.** No endpoint takes an optional token: a missing or unverifiable token is always 401. If identity, access or sellers can't answer, the request gets 503, not access.
-7. **One chain for REST and GraphQL.** GraphQL endpoints run the same middleware and share the field-masking table (§9).
+7. **One chain for REST and GraphQL.** GraphQL endpoints run the same middleware and mask the same sensitive fields the same way (§9).
 8. **Restrictions are not sign-in blocks.** A restricted seller keeps orders, returns and support (scenario 7); services call `sellers.canSell` for the blocked activities.
 
 ## 2. Callers and actors
@@ -129,51 +135,62 @@ v1 recorded anonymous callers and webhooks as `system`. v2 gives them their own 
 ```
 request
   │ app-level onRequest (runs for every URL, including unknown routes)
-  ├─ M1  requestContext      server request id (client X-Request-Id kept as clientRequestId); client kind and version for analytics and version gating only
-  ├─ M2  ipRateLimit         per-IP bucket; client IP from TRUST_PROXY hops/CIDRs
+  ├─ M1  requestContext      request id: the client's X-Request-Id when it matches [\w-]{1,100}, else a new one; echoed on every response
+  ├─     cors                CORS headers per area (§5); a preflight is answered here (204), before authentication
+  ├─ M2  ipRateLimit         per-IP bucket (signed file links: their own bucket); client IP from TRUST_PROXY hops/CIDRs
   ├─ M4  authenticate        REQUIRED on every URL: verify the token the endpoint's kind needs (§0): JWT (alg allowlist, kid, iss,
-  │                          aud, typ, exp/iat ± 60 s) + revocation (§6), refresh-token lookup, file-link signature (/files),
-  │                          or (webhooks) defer to M11;
-  │                          unknown URL without a valid token → 401 before 404; only `bootstrap` takes an app proof instead
+  │                          aud, typ, exp/iat ± 60 s) + revocation (§6); for admin tokens also fresh revocations (production) and
+  │                          M10's session check; file-link signature (/files); app proof (bootstrap);
+  │                          refresh and webhooks are deferred to preValidation (they need the body);
+  │                          unknown URL without a valid token → 401 before 404
+  ├─ M1  clientVersion       X-Client android/<versionCode> below the minimum → 426 (after authentication)
   │ route onRequest
   ├─ M3  phaseGate           endpoint launch phase > LAUNCH_PHASE → 501
-  ├─ M5  principalRateLimit  per account / visitor / (account, seller) bucket
+  ├─ M5  principalRateLimit  per visitor session + IP / account / (account, seller) bucket; GraphQL counts as reads
   ├─ M6  audience            token audience ↔ API area; auth kind `account` takes any realm
   ├─ M7  callerKind          visitor | shopper | customer | account | seller | staff | refresh | provider | bootstrap
   ├─ M8  sellerContext       seller in token (unless sellerContext: optional); member active; token memberId = current member
   ├─ M9  permission          exact keys; staff effective set; seller member keys; ownerOnly → OWNER_ONLY
-  ├─ M10 staffSession        twoStepVerifiedAt set; idle timeout; session alive (5 s cache)
+  ├─ M10 staff 2-step        twoStepVerifiedAt set (session liveness and idle timeout run in M4)
   │ preValidation (raw body available)
-  ├─ M11 webhookSignature    provider verifier over raw bytes; timestamp window; returns {provider, eventId}
-  ├─ M12 bodyRateLimit       named classes keyed by body fields (sign-in per email, reset per email)
+  ├─ M4  refresh             refresh token, cookie first then body; the cookie also needs an allowed Origin and X-Requested-With;
+  │                          then 30 refreshes an hour per session
+  ├─ M11 webhookSignature    provider verifier over raw bytes; timestamp window; returns {provider, eventId}; then 1,000/min per provider
+  ├─ M12 classRateLimit      named classes keyed by IP, body fields or account (sign-in, registration, password-reset, code, bootstrap, export)
+  ├─ M14 stepUp (present)    the proof is there (reauthToken in the body, or X-Step-Up-Code); else 403 STEP_UP_REQUIRED, never 400
   │ validation (Zod, from the spec)
   │ preHandler
-  ├─ M13 idempotency         replay first (already built)
-  ├─ M14 reauth              VERIFY the re-auth token (bound to account, session, audience, seller, purpose)
-  ▼ handler (one transaction)
-      scoped data access (§7) · authority (access.check) · consume re-auth token · record webhook event id
+  ├─ M9  permissionWhen      conditional permissions (§13)
+  ├─ M13 idempotency         replay first
+  ├─ M14 stepUp (verify)     VERIFY the re-auth token (bound to account, session, audience, seller, purpose) and claim it, or the 2-step code;
+  │                          refused → the Idempotency-Key is freed for the retry
+  ▼ handler
+      record scope (§7) · authority (access.check)
       response → central field masking (§9) → serializer
+  │ onResponse: failed → put the claimed re-auth token back · success → record the webhook event id
 ```
 
-| Middleware | Hook | Today | Does | Failure |
-|---|---|---|---|---|
-| M1 requestContext | app onRequest | partly | The server always generates the request id. A client `X-Request-Id` is kept as `clientRequestId`, so a client can't forge correlation in audit. `X-Client: web\|android/<version>` is used for analytics and "update required" (426) only, never for trust | 426 `UPGRADE_REQUIRED` (proposed) |
-| M2 ipRateLimit | app onRequest | – | Protects token verification and guest lookups, and also covers unknown routes (404 scanning). Shared store (§11) | 429 `RATE_LIMITED` + `Retry-After` |
-| M4 authenticate | **app onRequest** (every URL) | partly (optional on `anyone` today) | **Mandatory.** Picks the verifier from the route's auth kind: JWT for visitor and access tokens (local verification, §5, plus revocation, §6); hash lookup for `refresh`; handed to M11 for `provider`; app proof (Play Integrity / bot challenge) for `bootstrap`; the link's HMAC for `file-link` (§0 "File links": 401 bad, 403 expired). Unmatched URLs need a valid visitor or access token, so 404 is only ever seen with a token | 401 + `WWW-Authenticate` |
-| M3 phaseGate | route onRequest | built | unchanged; now runs after authentication, so the roadmap isn't visible without a token | 501 |
-| M5 principalRateLimit | route onRequest | – | Buckets per §11 | 429 |
-| M6 audience | route onRequest | built (401) | Becomes 403 `WRONG_AUDIENCE`, so clients don't loop on refresh. New auth kind `account` (any realm) for self-service security endpoints | 403 `WRONG_AUDIENCE` |
-| M7 callerKind | route onRequest | built | `visitor` (any token of the app, signed in or not), `shopper`, `customer`, `account`, `seller`, `staff`, `refresh`, `provider`, `bootstrap`. `anyone` no longer exists | 401 |
-| M8 sellerContext | route onRequest | built, with the bug below | Requires `sellerId` in the token unless the endpoint has `sellerContext: optional`. **Today it blocks the two endpoints used to pick a seller.** Member must be active, and the token's `memberId` must match the current member, so a removed and re-invited member's old tokens fail | 401 `seller_context_required`, 403 `NO_SELLER_ACCESS` |
-| M9 permission | route onRequest | built | Exact-key match. Staff: effective set (§6). Seller: member keys; `ownerOnly` keys need `isOwner` even if listed. Conditional permissions (`permissionWhen`, §13) | 403 `FORBIDDEN` / `OWNER_ONLY` |
-| M10 staffSession | route onRequest | – | Staff sessions must carry `twoStepVerifiedAt`. 30-minute idle timeout. The session must still be alive (indexed lookup, 5 s cache) | 401 / 403 `STEP_UP_REQUIRED` |
-| M11 webhookSignature | preValidation | in preHandler | Moves before validation and runs over raw bytes (`parseAs: 'buffer'`). Verifiers are registered **per provider** and return `{provider, eventId, timestamp}`; the kernel enforces a window of at most 5 minutes | 401 |
-| M12 bodyRateLimit | preValidation | – | Sign-in and reset limits per email (identity notes), stored in PostgreSQL (`sign_in_attempts`) | 429 |
-| M13 idempotency | preHandler | built | Runs **before** M14, so a retried request replays instead of burning a re-auth token | 422 / 409 |
-| M14 reauth | preHandler | – | Verifies only; the token is consumed inside the handler's transaction after success | 403 `STEP_UP_REQUIRED` |
+Every hook below is built (`kernel/auth/chain.ts`, `kernel/http/security.ts`, `kernel/http/server.ts`, `kernel/http/register.ts`).
+
+| Middleware | Hook | Does | Failure |
+|---|---|---|---|
+| M1 requestContext | app onRequest | **Request id:** a client `X-Request-Id` matching `[\w-]{1,100}` becomes the request id (logs, audit `requestId`, the response header); otherwise the server makes one. It is for correlation only, never trusted. **Version gate**, after M4: `X-Client` is `web`, `android/<versionCode>` or `android/<versionName>+<versionCode>` (e.g. `android/1.4.2+142`). A version code below settings `apps.android.minVersionCode` (cached 60 s) is refused. Not gated: `web`, no header, `android/1.4.2` without a code, settings unavailable. Never used for trust | 426 `UPGRADE_REQUIRED` `details { minVersionCode, updateUrl }` |
+| M2 ipRateLimit | app onRequest | Protects token verification and guest lookups, and also covers unknown routes (404 scanning). Shared store (§11) | 429 `RATE_LIMITED` + `Retry-After` |
+| M4 authenticate | **app onRequest** (every URL); refresh in preValidation | **Mandatory.** Picks the verifier from the route's auth kind: JWT for visitor and access tokens (local verification, §5, plus revocation, §6); for admin tokens also the revocation freshness check (§6) and M10's session check; app proof for `bootstrap` (§0); the link's HMAC for `file-link` (§0 "File links": 401 bad, 403 expired). `refresh` and `provider` need the body, so their check runs in preValidation: the refresh token by hash lookup (cookie first, then body; cookie guard in §5), the signature in M11. Unmatched URLs need a valid visitor or access token, so 404 is only ever seen with a token | 401 + `WWW-Authenticate`; 403 for the cookie guard; 503 (§6) |
+| M3 phaseGate | route onRequest | Runs after authentication, so the roadmap isn't visible without a token | 501 `NOT_IMPLEMENTED` (`details.reason` `later_phase`) |
+| M5 principalRateLimit | route onRequest | Buckets per §11. GraphQL requests count as reads | 429 |
+| M6 audience | route onRequest | 403, not 401, so clients don't loop on refresh. Auth kind `account` (self-service security endpoints) takes a signed-in token of any app; a visitor token gets 401 `sign_in_required` | 403 `WRONG_AUDIENCE` |
+| M7 callerKind | route onRequest | `visitor` (any token of the app, signed in or not), `shopper`, `customer`, `account`, `seller`, `staff`, `refresh`, `provider`, `bootstrap`. `anyone` no longer exists | 401 `sign_in_required` |
+| M8 sellerContext | route onRequest | Requires `sellerId` in the token unless the endpoint has `sellerContext: optional` (the two endpoints used to pick a seller). Member must be active, and the token's `memberId` must match the current member, so a removed and re-invited member's old tokens fail | 401 `seller_context_required`, 403 `NO_SELLER_ACCESS` |
+| M9 permission | route onRequest; `permissionWhen` in preHandler | Exact-key match. Staff: effective set (§6). Seller: member keys; `ownerOnly` keys need `isOwner` even if listed. Conditional permissions (`permissionWhen`, §13) | 403 `FORBIDDEN` (`details.permission`) / `OWNER_ONLY` |
+| M10 staffSession | app onRequest (in M4) and route onRequest | **Route:** staff sessions must carry `twoStepVerifiedAt`. **Every staff-token request** (REST, `/graphql/admin`, unknown URLs): M4 calls `identity.touchStaffSession(sid)`, cached 5 s per session per server. Identity refuses revoked, expired and idle sessions; idle is measured from `sessions.last_active_at`, which this call writes at most once a minute (refresh writes it too). Not checked: Admin Center visitor tokens, dev-key tokens with dev claims | 403 `STEP_UP_REQUIRED` (`kind: two-step-sign-in`); 401 `token_revoked`; 401 `session_idle` with plain `WWW-Authenticate: Bearer` (sign in again: a refresh would fail); 503 `SERVICE_UNAVAILABLE` `sessions_unavailable` when identity doesn't answer |
+| M11 webhookSignature | preValidation | Runs over the raw body. Verifiers are registered **per provider** and return `{provider, eventId, timestamp}`; the kernel enforces a window of at most 5 minutes, then the per-provider limit (§11). A replayed event id is acknowledged without running the handler | 401 (`signature_invalid`, `signature_expired`); 429 |
+| M12 classRateLimit | preValidation | Named classes (spec `rateLimit`, or `export` for any POST whose path ends in `/exports`), counted in `kernel.rate_limits` (§11). An unknown class fails startup | 429 |
+| M13 idempotency | preHandler | Runs **before** M14's verification, so a retried request replays instead of burning a re-auth token | 422 / 409 |
+| M14 stepUp | preValidation (present) and preHandler (verify) | **preValidation, before the schema:** a missing proof (`reauthToken` in the body for kind `reauth`, `X-Step-Up-Code` for kind `code`) is refused, never answered as a validation error. **preHandler, after the idempotency replay:** the proof is verified, and a re-auth token is claimed for this request (`identity.consumeReauthToken` marks it used only if it is still unused), so a parallel request with the same token is refused. If the request then fails (status 400 or above), onResponse puts the token back (`releaseReauthToken`) and the person can retry without confirming again. A refused proof also frees the request's Idempotency-Key, so the retry with a fresh proof can reuse the key | 403 `STEP_UP_REQUIRED` `details { kind, purpose }` |
 
 Two things stay out of middleware on purpose:
-- **The 2-step code for large approvals** depends on the amount, so `access.decide` checks it, and now also for the payout-run and refund approvals that call it (§10).
+- **The 2-step code for large approvals** depends on the amount, so `access.decide` checks it: the approval endpoints take it as `stepUpCode` in the body, not as `X-Step-Up-Code` (§10).
 - **Seller restrictions** are activity checks done through `sellers.canSell`.
 
 ## 4. Chains per caller
@@ -186,7 +203,7 @@ Two things stay out of middleware on purpose:
 | Customer | access token | store; any realm for `account` | `visitor`, `customer`, `shopper`, `account` | – | – | M14: account closure, email change, 2-step removal, recovery codes | `{ customer }`. The visitor session is claimed at sign-in (§8) |
 | Seller owner | token | seller | `seller`, `account` | yes | all seller keys, owner-only included | M14: payout account change, business change, seller closure | `{ seller, member }` from the token, never the path |
 | Seller member | token | seller | `seller`, `account` | yes, memberId match | template keys; owner-only refused (`OWNER_ONLY`) | – | as owner. Endpoints about *a member* (preferences, profile) also check `own-member` |
-| Staff | token | admin | `staff`, `account` | – | effective set; conditional permissions | M10 always; M14 for sensitive staff actions if decision 5 = yes | `{ staff }`: all records; sensitive fields masked by permission (§9) |
+| Staff | token | admin | `staff`, `account` | – | effective set; conditional permissions | M10 always; M14 (2-step code) for role grants, staff account actions and payout-destination reviews (decision 5) | `{ staff }`: all records; sensitive fields masked by permission (§9) |
 | Provider | signature (M11) | – | `provider` | – | – | event-id de-duplication in the handler transaction | provider's records |
 | Holder of a file link | link signature (M4) | – | `file-link` | – | – | – | the one file the link names |
 
@@ -206,34 +223,48 @@ Two things stay out of middleware on purpose:
 
 | Client | Where the refresh token lives | Protection |
 |---|---|---|
-| Website (store, Seller Center, Admin Center) | `__Secure-mk_refresh` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions` (sent only to refresh and sign-out; a `__Host-` cookie would have to use `Path=/`). The access token stays in memory only | Refresh and sign-out require an allowed `Origin` and a custom header (`X-Requested-With`); CORS allowlist per area with credentials only on the refresh path; Content-Security-Policy on Admin Center and Seller Center |
-| Android app | Response body, as today; stored with Android Keystore / EncryptedSharedPreferences | Verified App Links for order and reset links |
+| Website (store, Seller Center, Admin Center) | `__Secure-mk_refresh` cookie: `HttpOnly; Secure; SameSite=Strict; Path=/api/public/identity/sessions` (sent only to refresh and sign-out; a `__Host-` cookie would have to use `Path=/`). The body's `refreshToken` is then `""`. The access token stays in memory only | **Refresh guard:** refresh and sign-out with the cookie need an allowed `Origin` (any app's `CORS_*_ORIGINS`, or the API's own `API_URL`) and the `X-Requested-With` header (any value), which a cross-site form or link can't send; otherwise 403 `FORBIDDEN`, `details.reason` `origin_not_allowed` / `x_requested_with_required`. Credentialed CORS only on the cookie routes (below); Content-Security-Policy on Admin Center and Seller Center |
+| Android app | Response body; stored with Android Keystore / EncryptedSharedPreferences. Refresh and sign-out send `refreshToken` in the body, and need neither `Origin` nor `X-Requested-With` | Verified App Links for order and reset links |
 
-- **Rotation:** a reused previous token within **20 s** returns the same new pair. This handles two tabs, or parallel app requests, refreshing at once. Reuse outside the window revokes the session and writes a security event, but **does not lock the account**. Clients refresh one request at a time.
+**Which token is read.** On refresh and sign-out the middleware reads the cookie first, then the body's `refreshToken`. A missing token is 401 `token_missing`; an unknown, expired, revoked or reused one is 401 `token_invalid`, so signing out with an unknown token (or twice) is also a 401. Responses that issue tokens set the cookie for web devices (`device.kind: web`); a refresh sets it when the token came in the cookie, and sign-out then clears it.
+
+**CORS and credentials.** Each area takes its own app's origins (`CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS`); public endpoints, signed file links and the `account` endpoints under `/api/store/identity` take every app's origins, so Seller Center and Admin Center can call them. `Access-Control-Allow-Credentials: true` is sent, for allowed origins only, on every route that sets, clears or reads the refresh cookie:
+- refresh and sign-out (auth kind `refresh`);
+- `POST /api/public/identity/app-sessions`, `/sessions`, `/sign-in-challenges/{id}/verify`, `/external-sign-ins`, `/verifications/{id}/confirm`, `/invitations/accept`, `/invitations/two-step`;
+- `POST /api/seller/identity/session/seller-context`.
+
+Browsers call these with `credentials: 'include'`. A module declares its cookie routes with `ctx.http.sessionCookie(...operationIds)`; the kernel matches them by path, so a preflight gets the same answer as the request. Because the cookie is `SameSite=Strict`, the apps and the API must share a site (e.g. `marketly.example` and `api.marketly.example`). Every CORS-allowed response exposes `WWW-Authenticate, X-Request-Id, Idempotent-Replayed, Retry-After`, and preflights allow the request headers `authorization, content-type, idempotency-key, x-app-proof, x-step-up-code, x-client, x-request-id, x-requested-with`.
+
+- **Rotation:** a reused previous token within **20 s** (`identity.refreshReuseGraceSeconds`) returns the same new pair. This handles two tabs, or parallel app requests, refreshing at once. Reuse outside the window revokes the session and writes a security event, but **does not lock the account** (a visitor session simply ends). Clients refresh one request at a time.
+- **When clients refresh.** Only on 401 `UNAUTHORIZED` whose `details.reason` starts with `token_` (`WWW-Authenticate: Bearer error="invalid_token"`, or plain `Bearer` for a missing token). Never on `session_idle` (sign in again), `sign_in_required`, `seller_context_required`, `FORBIDDEN`, `WRONG_AUDIENCE`, or a GraphQL field refusal (`FORBIDDEN` inside a 200 response). A 401 from refresh itself means sign in again (visitors: start a new app session).
 - **Staff sessions:** idle timeout 30 minutes, absolute limit 12 hours, an alert on sign-in from a new device, and at most 3 concurrent staff sessions (proposal).
 - **Impersonation ("act as customer") is not supported.** No endpoint mints a token for another account. Support uses the read-only customer view.
+
+**Open (not decided by the owner):** there is one refresh cookie per API host, with one path. Signing into Seller Center or Admin Center in a browser therefore replaces the store session's cookie in that browser: the store's next refresh sends the Seller Center session's token and gets that session's tokens back, which store endpoints refuse (`WRONG_AUDIENCE`).
 
 ## 6. Revocation and caches
 
 | What | Source of truth | How servers learn it | Rule |
 |---|---|---|---|
-| Revoked session | `identity.sessions.revoked_at` | Every server polls `revoked since <cursor>` every 2–5 s and loads the last 15 minutes on startup | token `sid` in the revoked set → 401 |
+| Revoked session | `identity.sessions.revoked_at` | Every server polls `revoked since <cursor>` every 2–5 s and loads the last 15 minutes on startup | token `sid` in the revoked set → 401 `token_revoked` |
 | Account-wide revocation (disable, close, forced reset, staff "sign out everywhere") | **`accounts.tokens_valid_after`** (new column) | same poll | token `iat` < `tokens_valid_after` → 401. A token issued after unlocking keeps working |
-| Admin sessions | `sessions` row | M10 checks liveness on every admin request (5 s cache) | revoked or idle → 401 |
+| Admin sessions | `sessions` row (`revoked_at`, expiry, `last_active_at`) | M4 calls `identity.touchStaffSession` on every staff-token request (5 s cache per session per server; M10 in §3) | revoked, expired or unknown → 401 `token_revoked`; idle → 401 `session_idle`; identity not answering → 503 `sessions_unavailable`. Refresh and `identity.expire-sessions` measure idle from `last_active_at` too |
 | Failed-sign-in lock | `accounts.locked_until` | – | **blocks new sign-ins only**; existing sessions continue. Otherwise anyone who knows an email could sign that person out |
 | Staff permissions | `access.permissionsOf(accountId)` | cached 60 s; flushed on `access.role.changed`, `access.coverage.changed`, `access.away.started` and `access.away.ended` | Own active role assignments. **Cover alone grants nothing**: it re-routes work and notices, and the backup acts with their own roles and limits. Only an away period whose **delegation the Business Owner approved** (`delegateApprovals`, approval action `access.delegations.approve`) lends the covering person the covered roles' permissions and the away person's approval limits (never above them; decisions record `viaDelegationFrom`); a delegation still waiting for approval lends nothing, and rejecting it rejects the whole period. Away periods are read **at request time** (`now ∈ [from, to)`, status scheduled or active) and only while the away person still holds the handed-over role. Events are only a cache hint, so cover and delegation end on time even if the job scheduler is off |
 | Seller member access | `sellers.getMemberAccess` | cached 60 s; flushed on `sellers.member.*`, `sellers.seller.closed` | `memberId` must match the token |
+
+**Stale list, fail closed.** In production an admin request (any `aud: admin` token) gets 503 `SERVICE_UNAVAILABLE` whenever no revocation sync has succeeded within 30 s: `details.reason` `revocations_stale` (the last sync answered, but too long ago) or `revocations_unavailable` (identity did not answer or the sync failed). Outside production nothing is gated. Store and seller requests use the last list they have.
 
 `identity.session.revoked` is still proposed as an event for notifications and audit. Correctness doesn't depend on it.
 
 ## 7. Record scope, enforced (Q5)
 
-v1 left scope to a helper that each handler would have to remember to call. Across about 1,000 handlers that is a data breach waiting to happen. v2 enforces it in four places:
+v1 left scope to a helper that each handler would have to remember to call. Across about 1,000 handlers that is a data breach waiting to happen. v2 designs it in four places; what is built is marked:
 
-1. **Spec field `scope`** on every endpoint and every GraphQL field that returns tenant data: `own-seller | own-customer | own-member | guest-order | staff | public`. Generated defaults: seller area → `own-seller`; store area with `customer` auth → `own-customer`; `shopper` → `own-customer` or `guest-order`.
-2. **Scoped data access.** Tenant tables are read through `scoped(ctx.db, input.scope)`, a Kysely wrapper that adds `seller_id = ?` / `customer_id = ?` / grant joins to every query on a table declared as tenant-owned in the spec (a new `tenant: seller_id` table flag). `check:boundaries` rejects plain `selectFrom('<tenant table>')` outside the module's `infra/` scoped helpers.
-3. **Generated cross-tenant tests.** For every endpoint with path parameters: create the record as tenant A, call as tenant B, expect 404. The contract suite generates these from the spec, the same way it generates the auth tests today.
-4. **GraphQL**: the context carries the same scope, and resolvers for seller and store types must read through scoped loaders. A type without `@scope` in the seller or store schema fails the build.
+1. **Spec field `scope`** on every endpoint that returns tenant data: `own-seller | own-customer | own-member | guest-order | staff | public`. Generated defaults: seller area → `own-seller`; store area with `customer` auth → `own-customer`; `shopper` → `own-customer` or `guest-order`. *Built:* every handler receives `input.scope` (seller and member from the token, never the path; the customer id of the account; the visitor session).
+2. **Scoped data access.** Tenant tables are read for that scope (`seller_id = ?` / `customer_id = ?` / the visitor session), on tables declared tenant-owned in the spec (`tenant` table flag). *Built in part:* module services and repositories filter by `input.scope` and answer 404 for another tenant's record. The kernel wrapper `scoped(ctx.db, scope, tenantTables)` exists but modules don't use it yet, and no build check rejects an unscoped read of a tenant table (`check:boundaries` checks module imports only).
+3. **Generated cross-tenant tests.** For every endpoint with path parameters: create the record as tenant A, call as tenant B, expect 404. *Not built* (§17); module tests cover some cross-tenant cases by hand.
+4. **GraphQL:** there is no `@scope` directive. Record scope comes from the area (the seller schema's resolvers read the caller's own seller account, the store's the caller's own customer or guest session) and from the scoped loaders the resolvers share with REST.
 
 `own-member` covers endpoints about one member, e.g. `PUT /api/seller/notifications/preferences/members/{memberId}`. The owner may change anyone's preferences; other members may change only their own.
 
@@ -249,44 +280,55 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 
 ## 9. Field-level data and module-to-module calls
 
-- **Sensitive fields are marked in spec types**, for example `{ type: 'email', permission: 'orders.customers.view-contact', mask: 'email' }`. One central step masks or strips them, both in the REST serializer and in the GraphQL field wrapper, from the same table. Handlers never decide.
+- **Sensitive fields are marked in spec types**, for example `{ type: 'email', permission: 'orders.customers.view-contact', mask: 'email' }`. Handlers never decide; one central step masks them (`email` → `a***@example.com`, `phone` → `***12`, `name` → `A.`, `hide` → null) in the seller and admin areas unless the caller holds the permission. The store shows the shopper's own data.
+  - **REST:** after the handler, from the field paths generated from the spec (`kernel/auth/masking.ts`).
+  - **GraphQL:** fields carry `@sensitive(permission, mask)`, mirroring the spec's sensitive fields, and the field wrapper applies the same masks. `node docs/api/tools/graphql.mjs` fails the build when a `@sensitive` field doesn't match the spec (name, permission, mask) or a sensitive spec field is unmarked.
 - **Public-API functions that return data shown to a person take `viewer: Principal`.** Aggregators (the seller 360, the customer 360) mark sections the viewer may not see as `unavailable: 'not_permitted'`. Example: `sellers.getSellerAdmin` must not show finance balances to a Seller Manager without finance permissions.
 - **GraphQL:**
-  - the admin, seller and store endpoints run M1–M10;
-  - every admin root field needs `@auth(STAFF, permission)`, or the build fails (today 139 of 199 `@source` fields carry `@auth`);
+  - the admin, seller and store endpoints run M1–M10; GraphQL requests count as reads in the caller limits (§11);
+  - every admin-only root field needs `@auth`, or the server refuses to start;
+  - a field the caller may not read answers `FORBIDDEN` inside a 200 partial response, never `UNAUTHORIZED`, so clients don't refresh (§5);
   - introspection is off in production;
-  - the `@cost` limit is built, not only the depth limit;
-  - every API response is `Cache-Control: private, no-store` (every request now carries a token), so a CDN never serves one customer's page to another; public reads are cached inside the server.
+  - limits are built: depth 9 and `@cost` 1,500 (`QUERY_TOO_COMPLEX` before anything runs), page size clamped to 1–100, 10 s per request (`QUERY_TIMEOUT`); see [api/graphql/README.md](api/graphql/README.md#limits);
+  - every API response, GraphQL `GET` included, is `Cache-Control: private, no-store` (every request now carries a token), so a CDN never serves one customer's page to another; public reads are cached inside the server.
 
 ## 10. Step-up and re-authentication
 
 | Proof | Used for | Binding | Lifetime |
 |---|---|---|---|
 | Staff 2-step at sign-in | every admin session | session | until idle or absolute limit |
-| Re-auth token (password or 2-step code) | customer account closure, email change, 2-step removal, recovery-code regeneration; seller payout account change, business change, seller closure; staff actions that need a re-auth | account + session + audience + seller + **purpose** (one per action: the request names the purpose and `verifyReauthToken` refuses a token issued for another) | single use, 5 minutes, consumed after success |
-| Approval 2-step code | money approvals above `stepUpAbove` ($10,000): `access.approveRequest`, **and** the finance payout-run approval and refund approval that call `access.decide` | request + amount | single use |
-| *(decision 5)* Fresh 2-step for sensitive staff actions | role grants (`access.*`), staff account actions (`identity.staff-accounts.*`), finance destination changes, identity exports | action | single use |
+| Re-auth token (password or 2-step code), `reauthToken` in the body (spec `stepUp: { kind: 'reauth' }`) | customer account closure, email change, 2-step removal, recovery-code regeneration; seller payout account change, business change, seller closure | account + session + audience + seller + **purpose** (one per action: the request names the purpose and `verifyReauthToken` refuses a token issued for another) | single use, 5 minutes (`reauthTokenMinutes`); claimed before the handler runs and given back if the request fails |
+| Approval 2-step code, **`stepUpCode` in the body** | money approvals above `stepUpAbove` ($10,000): `POST /api/admin/access/approval-requests/{id}/approve`, `POST /api/admin/finance/payout-runs/{id}/approve` and `POST /api/admin/returns/refunds/{id}/approve`, all through `access.decide` | request + amount; missing or wrong → 403 `STEP_UP_REQUIRED` `{ kind: 'code', purpose: 'approval' }` from access | single use |
+| *(decision 5)* Fresh 2-step for sensitive staff actions, `X-Step-Up-Code` header (spec `stepUp: { kind: 'code' }`) | role grants (`role-grant`: set role permissions, invite staff, assign a role), staff account actions (`staff-account`: disable, enable, resend or revoke an invitation), payout destination reviews (`payout-destination`: approve, reject) | action | single use |
+
+- **Missing proof.** A spec step-up endpoint without its proof (`reauthToken` in the body, or `X-Step-Up-Code`) is refused before validation with 403 `STEP_UP_REQUIRED` `{ kind, purpose }`, never 400 (§3, M14). The approval code above is checked by `access`, not the middleware.
 
 - **Shared failure counter.** Re-auth, every inline current-password check and approval codes count against one identity counter that shares lockout with sign-in: 5 wrong answers lock step-up for 15 minutes and write a security event. Otherwise a stolen session becomes a password or 2-step guessing oracle.
 - **Seller and staff re-auth.** `POST /api/seller/identity/reauth` issues tokens bound to the seller (it also works before a seller is chosen); `POST /api/admin/identity/reauth` issues them to staff. The store `/reauth` is **not** an `account` endpoint, so a seller session can't use a store re-auth token on seller actions.
 
 ## 11. Rate limits
 
-| Stage | Class | Key | Default | Store |
-|---|---|---|---|---|
-| M2 (before auth, all URLs) | IP | client IP (`TRUST_PROXY`) | 600/min | shared (PostgreSQL `kernel.rate_limits`; per process with `RATE_LIMIT_STORE=memory`) |
-| M5 (after auth) | Visitor | visitor session (and IP) | 300/min reads, writes 30/min | shared |
-| M5 | Customer | account | 120/min, writes 30/min | shared |
-| M5 | Seller member | account + seller | 300/min | shared |
-| M5 | Staff | account | 600/min | shared |
-| M5 | Exports | account | 10/hour | shared |
-| M12 (body) | Sign-in | IP / email | 10/min per IP, 5 per 15 min per email | PostgreSQL (`sign_in_attempts`) |
-| M12 | Registration, password reset | email / IP | 5/hour per email, 20/hour per IP | PostgreSQL |
-| M4 (bootstrap) | Visitor token issue (`app-sessions`) | IP + installation id | 30/hour per installation, 300/hour per IP, after a valid app proof | shared |
-| M4 | Refresh | session | 30/hour per session | shared |
-| M11 | Webhooks | provider | 1,000/min | shared |
+| Stage | Class | Key | Default |
+|---|---|---|---|
+| M2 (before auth, all URLs) | IP | client IP (`TRUST_PROXY`) | 600/min |
+| M2 | Signed file links (`/files/…`) | client IP | 3,000/min, instead of the 600 |
+| M5 (after auth) | Visitor | visitor session + client IP | 300/min, writes 30/min |
+| M5 | Customer | account | 120/min, writes 30/min |
+| M5 | Seller member | account + seller | 300/min |
+| M5 | Staff | account | 600/min |
+| M12 (preValidation) | `export`: creating an export (spec `rateLimit: "export"`, or any POST whose path ends in `/exports`) | account | 10/hour |
+| M12 | `sign-in` (password, 2-step code, Google/Apple) | IP / email | 10/min per IP, 5 per 15 min per email |
+| M12 | `registration`, `password-reset` | IP / email | 20/hour per IP, 5/hour per email |
+| M12 | `code` (confirm, resend, text a code) | IP | 30/min |
+| M12 | `bootstrap`: visitor token issue (`app-sessions`) | IP + installation id | 300/hour per IP, 30/hour per installation, after a valid app proof |
+| preValidation | Refresh and sign-out | session | 30/hour per session, after the refresh token is verified |
+| M11 | Webhooks | provider | 1,000/min per provider, after the signature is verified; the 600/min per-IP limit applies first |
 
-The identity limits come from the identity notes. The others are proposals. "Shared" is the PostgreSQL table `kernel.rate_limits`: every server instance counts in the same fixed windows (no Redis; see [02-backend-architecture.md](02-backend-architecture.md#several-server-instances-jobs-and-rate-limits)). Modules count their own business limits there too, with `ctx.rateLimit`.
+Decision 4 took these as proposed. Every stage counts in the PostgreSQL table `kernel.rate_limits`, so every server instance counts in the same fixed windows (no Redis; see [02-backend-architecture.md](02-backend-architecture.md#several-server-instances-jobs-and-rate-limits)); `RATE_LIMIT_STORE=memory` counts per process (the default without `DATABASE_URL`). Modules count their own business limits there too, with `ctx.rateLimit`. A spec `rateLimit` class the kernel doesn't know fails startup.
+
+- **Writes** are requests other than `GET` and `HEAD`; GraphQL requests count as reads (the read layer has no mutations).
+- **Retry-After.** Every 429 `RATE_LIMITED` carries `details.retryAfterSeconds` and a `Retry-After` header in seconds. Module 429s get the header too, from `details.retryAfterSeconds` or `details.lockedUntil`; a module 429 with neither has no header.
+- **Failed-sign-in lock** is separate: identity counts failed sign-ins per email in `identity.sign_in_attempts` and answers 423 `ACCOUNT_LOCKED` (`details.lockedUntil`) when the account is locked.
 
 **Enumeration.** Unknown emails get the same lockout and limit responses as real ones (identity simulates them), so `ACCOUNT_LOCKED` and the per-email 429 reveal nothing.
 
@@ -370,7 +412,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | 2 | Endpoint field **`stepUp: { kind: 'reauth', purpose }`**: `customers.requestClosure`, `sellers.changePayoutAccount`, `sellers.requestBusinessChange`, `sellers.requestSellerClosure`, `identity.requestEmailChange`, `identity.removeTwoStepMethod`, `identity.regenerateRecoveryCodes` | FORMAT.md, those modules |
 | 3 | `stepUpCode` and `STEP_UP_REQUIRED` on `finance.approvePayoutRun` and `returns.approveRefund` (they call `access.decide`) | finance, returns |
 | 4 | Re-auth token binding: `verifyReauthToken(principal, token, purpose)` | identity publicApi |
-| 5 | Common errors: `WRONG_AUDIENCE` 403, `STEP_UP_REQUIRED` **403** (now 401 in access and sellers), `OWNER_ONLY` 403, `NO_SELLER_ACCESS` 403, `UPGRADE_REQUIRED` 426, `SERVICE_UNAVAILABLE` 503 | common.json `errors` |
+| 5 | Common errors: `WRONG_AUDIENCE` 403, `STEP_UP_REQUIRED` **403** (was 401 in access and sellers), `OWNER_ONLY` 403, `NO_SELLER_ACCESS` 403, `UPGRADE_REQUIRED` 426, `SERVICE_UNAVAILABLE` 503 | common.json `errors` |
 | 6 | Endpoint field **`scope`** and table flag **`tenant`** (§7) | FORMAT.md, every module |
 | 7 | Permission flags **`ownerOnly`**, **`delegable`** | FORMAT.md, module permissions |
 | 8 | Endpoint field **`permissionWhen`** (§13) | FORMAT.md, identity, access, notifications |
@@ -401,19 +443,19 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | Webhooks | signature checked in middleware | unchanged: the provider signature is the provider's token |
 | Unknown URLs | 404 for anyone | 401 without a valid token, 404 only with one |
 | Token verification | route hook, optional on 69 endpoints | app-level middleware, mandatory, before any module code |
-| `/health`, `/docs` | public | internal port; `/docs` off in production, staff token elsewhere |
+| `/health`, `/docs` | public | internal port; `/docs` only with `DOCS_ENABLED` (default: development; refused in production), then served without a token |
 
 **v1 → v2:**
 
 | Area | v1 | v2 |
 |---|---|---|
-| Record scope | helper for services | enforced: spec `scope`, scoped data access, generated cross-tenant tests, GraphQL `@scope` |
-| Development tokens | on outside production, public default secret, `*` staff | off unless `NODE_ENV=development`; startup refuses a default secret on a non-loopback host or non-local database; warning logged; `*` only in tests |
+| Record scope | helper for services | spec `scope` → `input.scope`, scoped data access, generated cross-tenant tests (§7 says what is built); GraphQL by area and shared scoped loaders (no `@scope`) |
+| Development tokens | on outside production, public default secret, `*` staff | on only on this machine: loopback `HOST`, local database (below); warning logged |
 | Revocation | in-memory list fed by events | PostgreSQL source of truth, polled; `tokens_valid_after`; admin liveness check; failed-sign-in locks don't revoke |
 | Token format | "signed" | EdDSA JWT, alg allowlist, `kid`, `iss`, `aud`, `typ`, `iat`, `jti`, 60 s leeway, key rotation |
 | Web tokens | undefined | HttpOnly refresh cookie, in-memory access token, Origin check, CORS allowlist, CSP |
 | Guest | session id is the secret | separate 256-bit token, verified on attach, ends on claim |
-| Step-up | account-bound token, consumed before idempotency | bound to session, seller and purpose; verified before, consumed after; shared failure counter; more endpoints |
+| Step-up | account-bound token, consumed before idempotency | bound to session, seller and purpose; verified and claimed after the idempotency replay, given back if the request fails; shared failure counter; more endpoints |
 | Field data | per handler | central masking from spec metadata; `viewer` on public APIs; GraphQL admin default-deny |
 | Actors | anonymous = system | `anonymous`, `provider`, branded `system` |
 | Secrets in URLs | not addressed | moved to bodies, redacted in logs |
@@ -424,25 +466,29 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | Errors | 401 for everything | 401 only for token problems; 403 for audience, step-up, owner-only |
 | Facts | 6 errors | refund approval → Finance; `advertising.rules.change` → Business Owner; publication override is declared; Finance staff limits; seller closure needs re-auth; store `/reauth` is not exempt |
 
+**Development tokens, as built** (`kernel/config/index.ts`). `DEV_TOKENS` is on by default in development and tests and can't be turned on in production. It enables the per-machine dev signing key, dev claims (permissions, owner flag), the `dev` app proof, the `dev-reauth.<purpose>` re-auth token and the `000000` step-up code (the last two for dev-key tokens only), and default secrets. `HOST` defaults to `127.0.0.1` outside production and `0.0.0.0` in production. With `DEV_TOKENS` on, startup refuses a non-loopback `HOST` and a non-local `DATABASE_URL` (local = PGlite, `localhost`, `127.0.0.0/8`, `::1`, or a socket). Without `DEV_TOKENS`, a non-loopback `HOST` needs a real `APP_SECRET`. To serve beyond this machine: `DEV_TOKENS=false` with `AUTH_SIGNING_JWK`, `AUTH_JWKS` and `APP_SECRET`.
+
 ## 17. What is built
 
 **Built** (`backend/src/kernel/auth`, `kernel/http`), checked by `npm run check`:
-- `chain.ts`: app-level onRequest authenticates **every** URL (unknown URLs and GraphQL included: 401 before 404); per-endpoint hooks for phase gate, caller rate limit, audience, caller kind, seller context + member access, permission / OWNER_ONLY, staff 2-step, refresh token, webhook signature + replay record, rate-limit classes, `permissionWhen`, step-up;
+- `chain.ts`: app-level onRequest authenticates **every** URL (unknown URLs and GraphQL included: 401 before 404), with the staff session check (`identity.touchStaffSession`) and the `X-Client` version gate (426); per-endpoint hooks for phase gate, caller rate limit, audience, caller kind, seller context + member access, permission / OWNER_ONLY, staff 2-step, refresh token + cookie guard + per-session limit, webhook signature + per-provider limit + replay record, rate-limit classes, step-up proof present (preValidation), `permissionWhen`, step-up proof verified (preHandler);
 - `tokens.ts`: EdDSA JWT verify/sign, `AUTH_JWKS`, per-machine dev key (`kid dev-…`, `dev` claims honoured only on dev keys);
-- `revocation.ts`, `rate-limit.ts`, `app-proof.ts` (dev, Turnstile; Play Integrity pluggable), `scope.ts` (`input.scope`, `scoped()`), `masking.ts`, `authorities.ts` (answers from identity/access/sellers/customers public APIs, fail closed), `setup.ts`;
-- `http/security.ts`: CORS per area, preflight before auth, no-store, WWW-Authenticate only for token problems; health check moved to an internal port (`HEALTH_PORT`);
+- `revocation.ts` (fails closed for admin requests in production, §6), `rate-limit.ts` (§11), `app-proof.ts` (`dev`, `turnstile:`; `play:` answers 503 until a Play Integrity verifier is wired), `scope.ts` (`input.scope`, `scoped()`), `masking.ts`, `authorities.ts` (answers from the identity, access, sellers, customers and settings public APIs, fail closed), `setup.ts`;
+- `http/security.ts`: CORS per area, credentials on the cookie routes, every app's origins on `account` endpoints, exposed headers (§5); preflight before auth; no-store; `WWW-Authenticate` only on 401 `UNAUTHORIZED` (`error="invalid_token"` for a bad token, plain `Bearer` otherwise); health check moved to an internal port (`HEALTH_PORT`);
+- `http/server.ts`: `X-Request-Id` (§3, M1), `Retry-After` on every 429 (§11), one error format; `config/index.ts`: the development-token guard (§16);
 - `file-links.ts` + `http/files.ts`: signed file links for `GET`/`HEAD /files/{bucket}/{key}` (auth kind `file-link`), registered by the module that serves files (`ctx.http.files`, media) and verified in M4 with that module's key (`secretFor(config, '<module>.files')`); tested in `http/http.test.ts` (tampered, foreign key, longer life, other content type, private permanent link → 401; expired → 403) and over HTTP in `modules/media/test/files.test.ts`;
 - spec: the `auth`, `scope`, `stepUp`, `permissionWhen`, `sellerContext`, `rateLimit`, sensitive-field and tenant metadata, generated into `src/spec`.
 
-**Over real HTTP** (`npm run test:http`, part of `npm run check`): every endpoint is called on a listening server with spec-generated input, about 6,300 requests: no token → 401, invalid token / refresh token / signature / app proof → 401, another app's token → 403, wrong caller → 401, missing permission → 403, missing step-up proof → 403, right token → reaches the handler; plus unknown URLs, CORS preflight, GraphQL per area, /docs and the internal health port.
+**Over real HTTP** (`npm run test:http`, part of `npm run check`): every endpoint is called on a listening server with spec-generated input: no token → 401, invalid token / refresh token / signature / app proof → 401, another app's token → 403, wrong caller → 401, missing permission → 403, missing or wrong step-up proof → 403 (never 400), right token → reaches the handler. Server checks: unknown URL → 401 (plain `WWW-Authenticate: Bearer`) and 404 with a token, no public `/health`, `/docs` off outside development, non-Bearer `Authorization` → 401, outdated Android `X-Client` → 426 and a current one → 200, CORS preflight without a token, unknown origins refused, exposed headers, credentialed CORS on the cookie routes (sign-in, app sessions, 2-step verify, refresh, seller context) and none elsewhere, `account` endpoints open to Seller Center while other store endpoints refuse it, cookie refresh without `Origin` or without `X-Requested-With` → 403, GraphQL per area and caller, and the internal health port.
 
-**Tests built:** for every one of the 1,269 endpoints: no token → 401 (bootstrap → APP_PROOF_INVALID), another app's token → 403 WRONG_AUDIENCE, missing permission → 403 FORBIDDEN or OWNER_ONLY, right token → reaches the handler. Kernel tests: expired / foreign-key / tampered / malformed tokens, visitor vs customer, 2-step, `permissionWhen`, seller context, owner-only + re-auth, guest scope, app proof, refresh from cookie and body, webhooks without a verifier.
+**Tests built:** for every one of the 1,294 endpoints: no token → 401 (bootstrap → APP_PROOF_INVALID), another app's token → 403 WRONG_AUDIENCE, missing permission → 403 FORBIDDEN or OWNER_ONLY, right token → reaches the handler. Kernel tests:
+- `kernel/http/http.test.ts`: expired / foreign-key / tampered / malformed tokens, visitor vs customer, 426 after the token check, 2-step, `permissionWhen`, seller context, owner-only + re-auth, a re-auth token used once even by parallel requests and given back when the request fails, a refused step-up freeing the Idempotency-Key, missing step-up → 403, guest scope, file links, app proof, refresh from cookie and body and the cookie guard, webhooks (replay, no verifier), CORS credentials and origins, exposed headers, `Retry-After`, Idempotency-Key, and the rate-limit buckets (visitor per session and IP, seller per account and seller, GraphQL as reads, refresh, exports, webhooks);
+- `kernel/auth/revocation.test.ts` (fail closed in production), `kernel/auth/rate-limit.test.ts` (windows, two instances on one database), `kernel/config/config.test.ts` (development-token guard);
+- `modules/identity/test/admin.test.ts`: the staff idle timeout on every admin request.
 
-**Waits for the modules** (the middleware already calls these public APIs; until they exist it fails closed):
-- identity: issue tokens and visitor tokens, `verifyRefreshToken`, `verifyReauthToken`/`consumeReauthToken`, `verifyStepUp`, `revocationsSince`;
-- access: `hasPermission` with the seed role sets (§14); sellers: `getMemberAccess`; customers: `getCustomerByUserId`;
-- each module: webhook verifiers, `scoped()` in repositories, and cross-tenant 404 tests once handlers exist;
-- deployment: Play Integrity verifier, a shared rate-limit store for more than one server.
+**Not built yet:**
+- the Play Integrity verifier (deployment);
+- `scoped()` in module repositories, a check against unscoped tenant reads, and generated cross-tenant 404 tests (§7).
 
 ### Planned layout (v3 design, for reference)
 
@@ -457,7 +503,7 @@ backend/src/kernel/auth/
   guards.ts        audience, caller kind, staff session (pure, shared with GraphQL @auth)
   seller.ts        seller context, memberId match, member-access cache
   permissions.ts   exact-key match, effective staff set with read-time cover, ownerOnly, permissionWhen
-  reauth.ts        verify in preHandler, consume in the handler transaction
+  reauth.ts        verify and claim in preHandler, give back if the request fails
   rate-limit.ts    IP, principal and body stages; TRUST_PROXY; pluggable store
   scope.ts         Scope type, scoped(db, scope) wrapper for tenant tables
   masking.ts       field masking from spec metadata (REST serializer + GraphQL wrapper)
@@ -481,6 +527,8 @@ backend/src/kernel/http/
 ## 18. Decisions
 
 **Decisions taken** (recommended options): 1 all spec changes accepted; 2 seed sets kept as proposals until access is built; 3 "any active member" for seller reads; 4 rate limits as proposed; 5 fresh 2-step for sensitive staff actions; 6 deputy owner built as a standing second Business Owner at bootstrap, break-glass not built (§12); 7 HttpOnly refresh cookie on the website; 8 provider signature as the webhook token; 9 no service token (pure browser app); 10 Play Integrity + Turnstile; 11 unsubscribe through the link in the message.
+
+**Open:** one refresh cookie per API host (§5, end).
 
 The questions as asked:
 

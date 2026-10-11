@@ -13,7 +13,8 @@ const list = z
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  HOST: z.string().default('0.0.0.0'),
+  /** Address to listen on; default 0.0.0.0 in production, 127.0.0.1 elsewhere (development tokens are only served on loopback) */
+  HOST: z.string().optional(),
   PORT: z.coerce.number().int().default(4000),
   /** Internal port for /health (load balancer); not the public listener */
   HEALTH_PORT: z.coerce.number().int().optional(),
@@ -119,6 +120,22 @@ export interface Config {
   modules: string[] | undefined;
 }
 
+/** localhost, 127.0.0.0/8 or ::1: reachable from this machine only */
+export const isLoopbackHost = (host: string) => /^(localhost|127(\.\d{1,3}){3}|::1|\[::1\])$/i.test(host.trim());
+
+/** PGlite (no DATABASE_URL), or a PostgreSQL server on loopback or a local socket */
+export function isLocalDatabase(url: string | undefined): boolean {
+  if (!url) return true;
+  try {
+    const u = new URL(url);
+    const socket = u.searchParams.get('host');
+    if (socket) return socket.startsWith('/') || isLoopbackHost(socket);
+    return u.hostname === '' || isLoopbackHost(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 const parseTrustProxy = (v: string | undefined): Config['trustProxy'] => {
   if (!v || v === 'false') return false;
   if (v === 'true') return true;
@@ -134,7 +151,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const devTokens = !prod && (e.DEV_TOKENS ?? true);
   const config: Config = {
     env: e.NODE_ENV,
-    host: e.HOST,
+    host: e.HOST ?? (prod ? '0.0.0.0' : '127.0.0.1'),
     port: e.PORT,
     healthPort: e.HEALTH_PORT ?? e.PORT + 1,
     logLevel: e.NODE_ENV === 'test' ? 'silent' : e.LOG_LEVEL,
@@ -174,6 +191,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     ...overrides,
   };
   if (prod && config.devTokens) throw new Error('DEV_TOKENS cannot be enabled in production');
+  if (prod && config.docsEnabled) throw new Error('DOCS_ENABLED cannot be enabled in production (/docs is served without a token)');
+  // development tokens, the dev key and the default secrets are for this machine only (docs/03 §16)
+  if (config.devTokens && !isLoopbackHost(config.host)) {
+    throw new Error(`DEV_TOKENS are only served on a loopback HOST (got ${config.host}); use HOST=127.0.0.1, or DEV_TOKENS=false with AUTH_SIGNING_JWK, AUTH_JWKS and APP_SECRET`);
+  }
+  if (config.devTokens && !isLocalDatabase(config.databaseUrl)) {
+    throw new Error('DEV_TOKENS are only allowed with a local database (PGlite, or DATABASE_URL on localhost); use DEV_TOKENS=false with AUTH_SIGNING_JWK, AUTH_JWKS and APP_SECRET');
+  }
+  if (!e.APP_SECRET && !config.devTokens && !prod && !isLoopbackHost(config.host)) {
+    throw new Error(`APP_SECRET is required on a non-loopback HOST (${config.host})`);
+  }
   if (prod && config.appProof.allowDev) throw new Error('The "dev" app proof cannot be accepted in production');
   if (prod && !config.appSecret) throw new Error('APP_SECRET is required in production (signs unsubscribe, reply and download links)');
   if (prod && !(e.STORE_URL && e.SELLER_URL && e.ADMIN_URL)) throw new Error('STORE_URL, SELLER_URL and ADMIN_URL are required in production (links in emails)');

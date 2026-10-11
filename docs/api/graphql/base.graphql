@@ -37,8 +37,18 @@ Documents ownership; the resolver batches calls per request (DataLoader).
 """
 directive @source(module: String!, fn: String!) on FIELD_DEFINITION
 
-"Relative cost for query cost limits. Lists default to 10, other fields to 1."
+"""
+Relative cost for the query cost limit. Lists default to 10, other fields to 1. A query's cost is the sum over
+every selected field (each alias and each fragment spread counts); above 1,500 it is refused (QUERY_TOO_COMPLEX).
+"""
 directive @cost(weight: Int!) on FIELD_DEFINITION
+
+"""
+A sensitive field: the GraphQL side of a REST spec type field with `permission` and `mask` (same permission, same mask).
+In the SELLER and ADMIN areas the server masks it centrally unless the caller holds the permission:
+`email` → a***@example.com, `phone` → ***12, `name` → A., `hide` → null. Resolvers never decide.
+"""
+directive @sensitive(permission: String!, mask: String!) on FIELD_DEFINITION
 
 "Planned for a later launch phase (plan ch. 20). The field resolves to null until then."
 directive @phase(n: Int!) on FIELD_DEFINITION | OBJECT

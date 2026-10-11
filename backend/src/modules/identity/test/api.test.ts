@@ -94,7 +94,12 @@ describe('seller context', () => {
     expect(await identity.verifyReauthToken({ ...principal, sessionId: newId() }, reauth.body.reauthToken, 'payout-account')).toBe(false);
     // the token from before the seller was chosen does not follow the session into a seller
     expect(await identity.verifyReauthToken(principal, early.body.reauthToken, 'seller-closure')).toBe(false);
-    await identity.consumeReauthToken(reauth.body.reauthToken);
+    // single use: the first claim wins and a second is refused; a failed request puts the token back
+    expect(await identity.consumeReauthToken(reauth.body.reauthToken)).toBe(true);
+    expect(await identity.consumeReauthToken(reauth.body.reauthToken)).toBe(false);
+    await identity.releaseReauthToken(reauth.body.reauthToken);
+    expect(await identity.verifyReauthToken(principal, reauth.body.reauthToken, 'payout-account')).toBe(true);
+    expect(await identity.consumeReauthToken(reauth.body.reauthToken)).toBe(true);
     expect(await identity.verifyReauthToken(principal, reauth.body.reauthToken, 'payout-account')).toBe(false);
     const noPurpose = await kit.call('POST', `${SELLER}/reauth`, { token: pick.body.accessToken, body: { purpose: '  ', password: c.password } });
     expect(noPurpose.status).toBe(400);

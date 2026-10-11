@@ -1,5 +1,5 @@
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
-import type { Actor, Page, PageInput, TimelineEvent } from '../../../spec/common.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
+import type { Page, PageInput, TimelineEvent } from '../../../spec/common.js';
 import type { AuditEntry, AuditFilters } from '../../../spec/audit.js';
 import type { AuditService } from '../service.js';
 
@@ -7,9 +7,7 @@ import type { AuditService } from '../service.js';
 const up = (s: string) => s.toUpperCase();
 const down = <T extends string>(s: string | null | undefined) => (s ? (s.toLowerCase() as T) : undefined);
 
-/** common ActorKind in GraphQL: CUSTOMER GUEST SELLER STAFF SYSTEM */
-const ACTOR_KIND: Record<Actor['kind'], string> = { customer: 'CUSTOMER', visitor: 'GUEST', anonymous: 'GUEST', seller: 'SELLER', staff: 'STAFF', provider: 'SYSTEM', system: 'SYSTEM' };
-const actorOut = (a: Actor | null | undefined) => (a ? { ...a, kind: ACTOR_KIND[a.kind] ?? 'SYSTEM' } : null);
+const actorOut = gqlActor;
 const stepOut = (s: TimelineEvent) => ({ ...s, actor: actorOut(s.actor) });
 
 export function toGraphQL(e: AuditEntry) {

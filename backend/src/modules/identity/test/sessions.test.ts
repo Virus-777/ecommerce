@@ -5,6 +5,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { android, boot, cookieOf, customer, PUBLIC, signIn, STORE, STRONG, uniqueEmail, visitor, web, type TestKit } from './helpers.js';
 
+/** A cookie refresh comes from an app page: an allowed Origin (here the API's own, API_URL's default) and X-Requested-With */
+const fromPage = { origin: 'http://localhost:4000', 'x-requested-with': 'fetch' };
+
 let kit: TestKit;
 beforeAll(async () => {
   kit = await boot();
@@ -42,7 +45,7 @@ describe('app sessions (visitor tokens)', () => {
     expect(c.line).not.toMatch(/Domain=/);
 
     // the cookie refreshes the visitor session and rotates
-    const r = await kit.call('POST', `${PUBLIC}/sessions/refresh`, { headers: { cookie: `__Secure-mk_refresh=${c.value}` }, body: {} });
+    const r = await kit.call('POST', `${PUBLIC}/sessions/refresh`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh=${c.value}` }, body: {} });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
     expect(r.body.sessionId).toBe(res.body.sessionId);
     expect(r.body.refreshToken).toBe('');
@@ -275,7 +278,7 @@ describe('refresh and sign-out', () => {
     const s = await signIn(kit, { email: c.email, password: c.password, device: web });
     expect(s.body.tokens.refreshToken).toBe('');
     const cookie = cookieOf(s.headers)!.value;
-    const out = await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { cookie: `__Secure-mk_refresh=${cookie}` }, body: {} });
+    const out = await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh=${cookie}` }, body: {} });
     expect(out.status).toBe(204);
     expect(cookieOf(out.headers)!.line).toMatch(/Max-Age=0/);
     // cleared with the same Path it was set with, or the browser keeps it
@@ -283,7 +286,7 @@ describe('refresh and sign-out', () => {
     await kit.syncRevocations();
     expect((await kit.call('GET', `${STORE}/security`, { token: s.body.tokens.accessToken })).status).toBe(401);
     // the refresh token no longer works, so the middleware refuses a second sign-out
-    expect((await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { cookie: `__Secure-mk_refresh=${cookie}` }, body: {} })).status).toBe(401);
+    expect((await kit.call('POST', `${PUBLIC}/sessions/sign-out`, { headers: { ...fromPage, cookie: `__Secure-mk_refresh=${cookie}` }, body: {} })).status).toBe(401);
   });
 
   it('keep me signed in gives a 30-day refresh token, otherwise 24 hours', async () => {

@@ -1,5 +1,5 @@
 import { AppError } from '../../../kernel/errors/index.js';
-import type { GraphQLContext, ModuleResolvers } from '../../../kernel/graphql/index.js';
+import { gqlActor, type GraphQLContext, type ModuleResolvers } from '../../../kernel/graphql/index.js';
 import { isUuid } from '../../../kernel/lib/ids.js';
 import { format as formatMoney, money as makeMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
@@ -16,8 +16,7 @@ import type { ShippingService } from '../service.js';
 const upper = (s: string | null | undefined) => (s ? s.toUpperCase().replace(/-/g, '_') : null);
 const lower = (s: string | null | undefined) => (s ? s.toLowerCase() : undefined);
 const money = (m: common.Money | null | undefined) => (m ? { ...m, formatted: formatMoney(m) } : null);
-const ACTOR_KIND: Record<string, string> = { customer: 'CUSTOMER', visitor: 'GUEST', seller: 'SELLER', staff: 'STAFF' };
-const actor = (a: common.Actor | null | undefined) => (a ? { kind: ACTOR_KIND[a.kind] ?? 'SYSTEM', id: a.id ?? null, name: a.name ?? null } : null);
+const actor = gqlActor;
 const pageInput = (p: common.PageInput | null | undefined): common.PageInput => ({ ...(p?.cursor ? { cursor: p.cursor } : {}), ...(p?.page ? { page: p.page } : {}), ...(p?.limit ? { limit: p.limit } : {}) });
 const notice = (n: CustomerNotice) => ({ id: n.id, kind: n.kind, title: n.title, message: n.message, from: n.from, to: n.to });
 
