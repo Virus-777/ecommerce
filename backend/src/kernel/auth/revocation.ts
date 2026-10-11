@@ -70,11 +70,14 @@ export class RevocationList {
     return validAfter !== undefined && c.iat * 1000 < validAfter;
   }
 
-  /** Admin requests refuse to run on a stale list (production). */
+  /**
+   * Admin requests refuse to run on a stale list (production): fail closed. Stale means no successful
+   * sync within maxStalenessMs, whether identity answered nothing, the sync threw, or it never ran.
+   */
   assertFresh() {
-    if (!this.o.maxStalenessMs || !this.#available) return;
+    if (!this.o.maxStalenessMs) return;
     if (this.clock.now().getTime() - this.#lastSync > this.o.maxStalenessMs) {
-      throw new AppError('SERVICE_UNAVAILABLE', 'Session revocations are not current; retry shortly');
+      throw new AppError('SERVICE_UNAVAILABLE', 'Session revocations are not current; retry shortly', { reason: this.#available ? 'revocations_stale' : 'revocations_unavailable' });
     }
   }
 
