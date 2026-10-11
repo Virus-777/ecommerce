@@ -15,6 +15,9 @@ const fragment = /* GraphQL */ `
     id: ID!
     name: String!
     secret: String @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "demo.secrets.view")
+    email: String @sensitive(permission: "demo.contact.view", mask: "email")
+    phones: [String!] @sensitive(permission: "demo.contact.view", mask: "phone")
+    note: String @sensitive(permission: "demo.contact.view", mask: "hide")
   }
   type DemoItemPage {
     items: [DemoItem!]!
@@ -38,7 +41,7 @@ const seen: { paging?: unknown; limit?: unknown; previewLimit?: unknown }[] = []
 const node = (n: number): { id: string; child: unknown } => ({ id: String(n), child: n < 20 ? node(n + 1) : null });
 const resolvers: ModuleResolvers = {
   Query: {
-    demoItems: (_r, args: { paging?: unknown }) => (seen.push({ paging: args.paging }), { items: [{ id: '1', name: 'One', secret: 's' }], nextCursor: null }),
+    demoItems: (_r, args: { paging?: unknown }) => (seen.push({ paging: args.paging }), { items: [{ id: '1', name: 'One', secret: 's', email: 'ana@example.com', phones: ['+15035550123'], note: 'VIP' }], nextCursor: null }),
     demoTop: (_r, args: { limit?: unknown; previewLimit?: unknown }) => (seen.push({ limit: args.limit, previewLimit: args.previewLimit }), []),
     demoSlow: () => new Promise((resolve) => setTimeout(() => resolve('late'), 400)),
     demoHeavy: () => 'heavy',
@@ -54,6 +57,7 @@ const principals: Record<string, Principal> = {
   visitor: { kind: 'visitor', audience: 'store', sessionId: 'v1', guestSessionId: 'v1' },
   customer: { kind: 'customer', audience: 'store', accountId: 'c1', sessionId: 's1' },
   staff: { kind: 'staff', audience: 'admin', accountId: 'st1', sessionId: 's2' },
+  seller: { kind: 'seller', audience: 'seller', accountId: 'se1', sessionId: 's3', sellerId: 'seller-1' },
 };
 
 /** The kernel without the token middleware: `x-test-caller: staff` (and `x-test-permissions`) stand for a verified token */
@@ -188,6 +192,24 @@ describe('GraphQL kernel', () => {
       expect(without.json().errors[0].extensions).toEqual({ code: 'FORBIDDEN', details: { permission: 'demo.secrets.view' } });
       const withIt = await post(app, 'admin', { query: '{ demoItems { items { secret } } }' }, 'staff', 'demo.secrets.view');
       expect(withIt.json()).toEqual({ data: { demoItems: { items: [{ secret: 's' }] } } });
+    });
+  });
+
+  describe('@sensitive fields', () => {
+    const q = { query: '{ demoItems { items { email phones note } } }' };
+    const itemOf = (res: { json(): any }) => res.json().data.demoItems.items[0];
+
+    it('masks them centrally in the admin and seller areas without the permission, with the REST masks', async () => {
+      const masked = { email: 'a***@example.com', phones: ['***23'], note: null };
+      expect(itemOf(await post(app, 'admin', q, 'staff'))).toEqual(masked);
+      expect(itemOf(await post(app, 'seller', q, 'seller'))).toEqual(masked);
+    });
+
+    it('shows them to holders of the permission, and in the store (the shopper’s own data)', async () => {
+      const plain = { email: 'ana@example.com', phones: ['+15035550123'], note: 'VIP' };
+      expect(itemOf(await post(app, 'admin', q, 'staff', 'demo.contact.view'))).toEqual(plain);
+      expect(itemOf(await post(app, 'seller', q, 'seller', 'demo.contact.view'))).toEqual(plain);
+      expect(itemOf(await post(app, 'store', q, 'customer'))).toEqual(plain);
     });
   });
 

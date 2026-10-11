@@ -1658,7 +1658,7 @@ type OrderContact @areas(in: [STORE, ADMIN]) {
   customerId: UUID
   name: String!
   "Admin area: masked unless orders.customers.view-contact"
-  email: String!
+  email: String! @sensitive(permission: "orders.customers.view-contact", mask: "email")
   phone: String
 }
 
@@ -1849,7 +1849,7 @@ type OrderAdminCustomer @areas(in: [ADMIN]) {
   guest: Boolean!
   name: String!
   "Masked unless orders.customers.view-contact"
-  email: String!
+  email: String! @sensitive(permission: "orders.customers.view-contact", mask: "email")
   phone: String
   customerSince: Date
   orderCount: Int

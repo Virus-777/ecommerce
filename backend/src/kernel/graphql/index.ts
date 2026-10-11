@@ -10,7 +10,9 @@
  * Central steps every field goes through (wireResolvers), so no resolver has to remember them:
  *   - deadline: the request's time budget (LIMITS.timeoutMs) — a field still running after it answers QUERY_TIMEOUT;
  *   - paging: `paging: PageInput` limits and `limit` / `…Limit` Int arguments are clamped to 1–LIMITS.maxPageSize;
- *   - @auth: wrong caller kind or a missing permission answers FORBIDDEN for that field (partial data).
+ *   - @auth: wrong caller kind or a missing permission answers FORBIDDEN for that field (partial data);
+ *   - @sensitive: in the seller and admin areas the value is masked unless the caller holds the permission
+ *     (the same masks as REST, kernel/auth/masking.ts).
  * Before anything resolves, a query above the depth or @cost limit is refused (QUERY_TOO_COMPLEX).
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -34,6 +36,7 @@ import mercurius, { type MercuriusContext } from 'mercurius';
 import { persistedQueries } from '../../spec/graphql.js';
 import type { AuthChain } from '../auth/chain.js';
 import { forbidden, type Principal, type RequestAuth } from '../auth/index.js';
+import { maskValue } from '../auth/masking.js';
 import type { Config } from '../config/index.js';
 import { AppError, codeForStatus } from '../errors/index.js';
 import type { AuthKind } from '../spec/define.js';
@@ -162,6 +165,16 @@ function clampingPaging(inner: GraphQLFieldResolver<any, GraphQLContext>, p: { p
   };
 }
 
+/** @sensitive(permission, mask): masked in the seller and admin areas unless the caller holds the permission (REST's rule) */
+function masking(inner: GraphQLFieldResolver<any, GraphQLContext>, permission: string, mask: string): GraphQLFieldResolver<any, GraphQLContext> {
+  const apply = (v: unknown): unknown => (Array.isArray(v) ? v.map(apply) : maskValue(v, mask));
+  return async (root, args, ctx, info) => {
+    const value = await inner(root, args, ctx, info);
+    if (value == null || ctx.area === 'store' || (await ctx.can(permission))) return value;
+    return apply(value);
+  };
+}
+
 export function wireResolvers(schema: GraphQLSchema, resolvers: Map<string, ModuleResolvers>, launchPhase: number, limits: Pick<GraphQLLimits, 'maxPageSize' | 'timeoutMs'> = LIMITS) {
   const unresolved: string[] = [];
   for (const type of Object.values(schema.getTypeMap())) {
@@ -187,6 +200,8 @@ export function wireResolvers(schema: GraphQLSchema, resolvers: Map<string, Modu
           });
       }
       const resolverOf = () => field.resolve ?? (defaultFieldResolver as GraphQLFieldResolver<any, GraphQLContext>);
+      const sensitive = directiveArg(node, 'sensitive', 'permission') as string | undefined;
+      if (sensitive) field.resolve = masking(resolverOf(), sensitive, directiveArg(node, 'sensitive', 'mask') as string);
       const requires = (directiveArg(node, 'auth', 'requires') ?? directiveArg(type.astNode, 'auth', 'requires')) as string | undefined;
       if (requires) {
         const permission = (directiveArg(node, 'auth', 'permission') ?? directiveArg(type.astNode, 'auth', 'permission')) as string | undefined;

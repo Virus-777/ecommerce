@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Kind, buildASTSchema, parse, print, validate, validateSchema, visit } from 'graphql';
+import { Kind, buildASTSchema, getNamedType, isListType, isNonNullType, parse, print, validate, validateSchema, visit } from 'graphql';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const apiDir = join(here, '..');
@@ -26,6 +26,7 @@ const only = args.includes('--only') ? args[args.indexOf('--only') + 1] : null;
 const PARTIAL = args.includes('--partial') || Boolean(only);
 const AREAS = ['STORE', 'SELLER', 'ADMIN'];
 const MAX_DEPTH = 9;
+const MAX_COST = 1500;
 
 const errors = [];
 const warnings = [];
@@ -77,6 +78,23 @@ const areasOf = (node) => {
   return v?.kind === Kind.LIST ? v.values.map((x) => x.value) : null;
 };
 
+/** Sensitive fields of a module's REST spec types ({ type, permission, mask }) as "field|permission|mask" */
+const MASKS = new Set(['email', 'phone', 'name', 'hide']);
+const sensitiveCache = new Map();
+function sensitiveOf(module) {
+  if (sensitiveCache.has(module)) return sensitiveCache.get(module);
+  const out = new Set();
+  const walk = (node, key) => {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.type === 'string' && typeof node.permission === 'string') return void out.add(`${key}|${node.permission}|${node.mask ?? 'hide'}`);
+    for (const [k, v] of Object.entries(node)) walk(v, k);
+  };
+  walk(specs.get(module)?.types ?? {}, null);
+  sensitiveCache.set(module, out);
+  return out;
+}
+const markedSensitive = new Set();
+
 for (const fr of fragments) {
   if (only && fr.module !== only) continue;
   const W = `modules/${fr.module}.graphql`;
@@ -101,8 +119,21 @@ for (const fr of fragments) {
       const perm = auth && strArg(auth, 'permission');
       if (perm && !permissions.has(perm)) err(where, `@auth permission "${perm}" is not declared in any REST spec`);
       for (const a of areasOf(field) ?? []) if (!AREAS.includes(a)) err(where, `unknown area ${a}`);
+      const sens = field.directives?.find((x) => x.name.value === 'sensitive');
+      if (sens) {
+        const key = `${field.name.value}|${strArg(sens, 'permission')}|${strArg(sens, 'mask')}`;
+        if (!MASKS.has(strArg(sens, 'mask'))) err(where, `@sensitive mask must be one of ${[...MASKS].join(', ')}`);
+        if (strArg(sens, 'mask') === 'hide' && field.type.kind === Kind.NON_NULL_TYPE) err(where, '@sensitive(mask: "hide") answers null, so the field must be nullable');
+        if (!sensitiveOf(fr.module).has(key)) err(where, `@sensitive must mirror a sensitive field of ${fr.module}'s REST spec types (same field name, permission and mask); none is "${key}"`);
+        markedSensitive.add(`${fr.module}|${key}`);
+      }
     }
   }
+}
+// every sensitive spec type field is masked in GraphQL too (on at least one field of the module's fragment)
+for (const fr of fragments) {
+  if (only && fr.module !== only) continue;
+  for (const key of sensitiveOf(fr.module)) if (!markedSensitive.has(`${fr.module}|${key}`)) err(`modules/${fr.module}.graphql`, `the REST spec marks "${key}" (field|permission|mask) sensitive: add @sensitive(permission, mask) to the GraphQL field(s) showing it`);
 }
 
 /* ---------------------------------------------------------------- compose per area */
@@ -220,6 +251,29 @@ function depth(selectionSet, d, frags, seen = new Set()) {
   }
   return max;
 }
+/** Query cost as the server counts it (backend/src/kernel/graphql/cost.ts): @cost weight, else lists 10 and other fields 1, summed over every selection. */
+function cost(schema, parent, selectionSet, frags, stack = []) {
+  let total = 0;
+  for (const s of selectionSet?.selections ?? []) {
+    if (s.kind === Kind.FIELD) {
+      if (s.name.value.startsWith('__')) continue;
+      const f = parent?.getFields?.()[s.name.value];
+      if (!f) continue;
+      const w = f.astNode?.directives?.find((d) => d.name.value === 'cost')?.arguments?.[0]?.value?.value;
+      let t = f.type;
+      if (isNonNullType(t)) t = t.ofType;
+      total += w !== undefined ? Number(w) : isListType(t) ? 10 : 1;
+      total += cost(schema, getNamedType(f.type), s.selectionSet, frags, stack);
+    } else if (s.kind === Kind.INLINE_FRAGMENT) {
+      total += cost(schema, s.typeCondition ? schema.getType(s.typeCondition.name.value) : parent, s.selectionSet, frags, stack);
+    } else {
+      const fr = frags.get(s.name.value);
+      if (fr && !stack.includes(fr.name.value)) total += cost(schema, schema.getType(fr.typeCondition.name.value), fr.selectionSet, frags, [...stack, fr.name.value]);
+    }
+  }
+  return total;
+}
+
 const operations = [];
 for (const area of AREAS) {
   const dir = join(gqlDir, 'operations', area.toLowerCase());
@@ -244,6 +298,8 @@ for (const area of AREAS) {
     const frags = new Map(doc.definitions.filter((d) => d.kind === Kind.FRAGMENT_DEFINITION).map((f) => [f.name.value, f]));
     const dpt = depth(ops[0].selectionSet, 0, frags);
     if (dpt > MAX_DEPTH) err(W, `query depth ${dpt} exceeds ${MAX_DEPTH}`);
+    const qc = schema && !PARTIAL ? cost(schema, schema.getQueryType(), ops[0].selectionSet, frags) : 0;
+    if (qc > MAX_COST) err(W, `query cost ${qc} exceeds ${MAX_COST}`);
     const normalized = print(doc);
     const id = createHash('sha256').update(normalized).digest('hex');
     manifest[name] = { id, screens };
