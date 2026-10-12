@@ -247,7 +247,7 @@ describe('documents', () => {
     sales_30d: 3,
     first_listed_at: new Date('2026-09-01T00:00:00Z'),
     popularity: '3',
-    tsv: null,
+    terms: null,
     title_norm: 'nordic desk lamp',
     version: 7,
     indexed_at: new Date('2026-10-01T00:00:00Z'),
@@ -343,8 +343,8 @@ describe('scripts and their twins', () => {
 });
 
 describe('configuration', () => {
-  it('postgres by default; opensearch needs a URL; credentials are a username and password or an API key', () => {
-    expect(readSearchEngineConfig({})).toEqual({ engine: 'postgres' });
+  it('mongo by default; opensearch needs a URL; credentials are a username and password or an API key', () => {
+    expect(readSearchEngineConfig({})).toEqual({ engine: 'mongo' });
     expect(readSearchEngineConfig({ SEARCH_ENGINE: 'opensearch', OPENSEARCH_URL: 'https://a:9200, https://b:9200', OPENSEARCH_USERNAME: 'u', OPENSEARCH_PASSWORD: 'p' })).toEqual({
       engine: 'opensearch',
       opensearch: { nodes: ['https://a:9200', 'https://b:9200'], auth: { username: 'u', password: 'p' }, indexPrefix: 'marketly', shards: 1, replicas: 1, refresh: 'false', requestTimeoutMs: 10_000, bulkAttempts: 3, aliasCacheMs: 5_000 },

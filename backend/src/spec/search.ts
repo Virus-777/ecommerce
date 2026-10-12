@@ -774,7 +774,7 @@ export const ReindexJob: z.ZodType<ReindexJob> = z.object({
 }).register(common.apiTypes, { id: "search.ReindexJob" });
 
 export interface IndexStatus {
-  /** e.g. 'postgres-fts' */
+  /** e.g. 'mongo-text' */
   engine: string;
   documents: number;
   offerRows: number;
@@ -786,7 +786,7 @@ export interface IndexStatus {
 }
 
 export const IndexStatus: z.ZodType<IndexStatus> = z.object({
-  engine: z.string().describe("e.g. 'postgres-fts'"),
+  engine: z.string().describe("e.g. 'mongo-text'"),
   documents: z.number().int(),
   offerRows: z.number().int(),
   staleDocuments: z.number().int(),
@@ -1047,8 +1047,8 @@ export interface SearchDb {
     sales_30d: number;
     first_listed_at: Date;
     popularity: string;
-    /** title A, brand A, category B, attributes C, description D */
-    tsv: string | null;
+    /** development engine: stemmed words of the title and brand (weight 1), category (0.4), attributes (0.2) and description (0.1), as [{t, w}] */
+    terms: Json | null;
     /** for trigram */
     title_norm: string;
     version: number;
@@ -1951,8 +1951,8 @@ export const spec = defineModuleSpec({
         "type": "numeric",
         "nullable": false
       },
-      "tsv": {
-        "type": "tsvector",
+      "terms": {
+        "type": "jsonb",
         "nullable": true
       },
       "title_norm": {
@@ -2335,6 +2335,7 @@ export const spec = defineModuleSpec({
         "sales_30d",
         "first_listed_at",
         "popularity",
+        "terms",
         "title_norm",
         "version",
         "indexed_at",
@@ -2356,6 +2357,7 @@ export const spec = defineModuleSpec({
         "fastest_dispatch_days",
         "same_day_cutoff",
         "rating",
+        "terms",
         "best_seller_rank",
         "best_seller_category_id"
       ],
@@ -2591,6 +2593,7 @@ export const spec = defineModuleSpec({
             "popularity": {
               "bsonType": "decimal"
             },
+            "terms": {},
             "title_norm": {
               "bsonType": "string"
             },
@@ -2623,6 +2626,12 @@ export const spec = defineModuleSpec({
         }
       },
       "indexes": [
+        {
+          "name": "search_documents_terms_e6cb80",
+          "key": {
+            "terms.$**": 1
+          }
+        },
         {
           "name": "search_documents_title_norm_06d542",
           "key": {

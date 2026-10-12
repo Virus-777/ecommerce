@@ -49,6 +49,7 @@ const search_documents = new Schema(
     sales_30d: { type: Number, required: true, validate: integer },
     first_listed_at: { type: Date, required: true },
     popularity: { type: Schema.Types.Decimal128, required: true },
+    terms: { type: Schema.Types.Mixed, default: null }, // development engine: stemmed words of the title and brand (weight 1), category (0.4), attributes (0.2) and description (0.1), as [{t, w}]
     title_norm: { type: String, required: true }, // for trigram
     version: { type: Number, required: true, validate: integer },
     indexed_at: { type: Date, required: true },
@@ -59,6 +60,7 @@ const search_documents = new Schema(
   },
   collectionOptions("search.search_documents"),
 );
+search_documents.index({"terms.$**":1}, {"name":"search_documents_terms_e6cb80"});
 search_documents.index({"title_norm":1}, {"name":"search_documents_title_norm_06d542"});
 search_documents.index({"seller_ids":1}, {"name":"search_documents_seller_ids_09edd9"});
 search_documents.index({"category_path_ids":1}, {"name":"search_documents_category_path_ids_5d2ada"});

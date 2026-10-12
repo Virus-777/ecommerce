@@ -161,7 +161,7 @@ describe('cards, similar products, barcodes and clicks', () => {
     const ctx = (await k.call('GET', `${STORE}/facets?q=speaker`)).body;
     const r = await k.call('POST', `${STORE}/searches/${ctx.searchId}/clicks`, k.visitor, { productId: s.speaker.id, position: 1, sponsored: false });
     expect(r.status).toBe(204);
-    const rows = await k.app.kernel.database.kysely.selectFrom('search.click_log' as never).selectAll().where('search_id' as never, '=', ctx.searchId as never).execute();
+    const rows = await k.app.kernel.mongo.db.collection('search.click_log').find({ search_id: ctx.searchId }).toArray();
     expect(rows).toHaveLength(1);
   });
 });

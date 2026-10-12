@@ -69,7 +69,7 @@ describe('reindex jobs and index status', () => {
     expect(again.status).toBe(409);
     expect(again.body.error).toMatchObject({ code: 'REINDEX_ALREADY_RUNNING', details: { jobId: started.body.id } });
     const status = (await k.call('GET', `${ADMIN}/index`, k.staff)).body;
-    expect(status.engine).toMatch(k.engine === 'postgres' ? /^postgres-fts$/ : /^opensearch \((green|yellow), index [\w-]+-products-\d{17}\)$/);
+    expect(status.engine).toMatch(k.engine === 'mongo' ? /^mongo-text$/ : /^opensearch \((green|yellow), index [\w-]+-products-\d{17}\)$/);
     expect(status).toMatchObject({ documents: 4, offerRows: 6, runningJob: { id: started.body.id, state: 'queued' } });
     await k.job('search.process-dirty');
     const done = (await k.call('GET', `${ADMIN}/reindex-jobs/${started.body.id}`, k.staff)).body;

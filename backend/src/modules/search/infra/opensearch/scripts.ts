@@ -16,7 +16,7 @@ export interface ScriptTwin {
 
 /**
  * The card offer ("eo") of a product under the current offer filters is the matching offer with the lowest
- * card_rank (featured first, then in stock, then cheapest, then offer id: the order the Postgres engine uses).
+ * card_rank (featured first, then in stock, then cheapest, then offer id: the order the MongoDB engine uses).
  * Scored inside the nested offers query with score_mode max, this key's maximum is the card offer's key, and the
  * key carries what the ranking needs from that offer (in stock, dispatch days). Small integers: exact as floats.
  */

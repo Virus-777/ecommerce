@@ -387,14 +387,14 @@ export interface Kit {
 }
 
 /**
- * Which engine the kit boots: postgres (default), opensearch (the OpenSearch adapter on the in-memory fake) or
+ * Which engine the kit boots: mongo (default), opensearch (the OpenSearch adapter on the in-memory fake) or
  * opensearch-live (the adapter on the cluster at OPENSEARCH_URL, with throwaway indices).
  * SEARCH_TEST_ENGINE=opensearch (or opensearch-live) runs every search test file on that engine.
  */
-export type Engine = 'postgres' | 'opensearch' | 'opensearch-live';
+export type Engine = 'mongo' | 'opensearch' | 'opensearch-live';
 export const defaultEngine = (): Engine => {
   const e = process.env.SEARCH_TEST_ENGINE;
-  return e === 'opensearch' || e === 'opensearch-live' ? e : 'postgres';
+  return e === 'opensearch' || e === 'opensearch-live' ? e : 'mongo';
 };
 
 /** The cluster at OPENSEARCH_URL (credentials from OPENSEARCH_USERNAME/PASSWORD or OPENSEARCH_API_KEY), with a throwaway index prefix */
@@ -442,7 +442,7 @@ export async function boot(o: { settings?: Record<string, unknown>; engine?: Eng
     openSearchTesting.clientOptions = fakeClientOptions(fake);
     openSearchTesting.sleep = async () => {};
   } else if (live) openSearchTesting.config = { engine: 'opensearch', opensearch: live };
-  else openSearchTesting.config = { engine: 'postgres' };
+  else openSearchTesting.config = { engine: 'mongo' };
   const app = await buildTestApp({
     only: ['search', 'inventory', 'reviews', 'sellers', 'advertising', 'promotions', 'customers', 'orders', 'returns', 'audit'],
     clock,

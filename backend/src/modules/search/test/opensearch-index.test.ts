@@ -63,7 +63,7 @@ const doc = (id: string, version: number, extra: Partial<DocRow> = {}): DocRow =
     sales_30d: 0,
     first_listed_at: new Date('2026-09-01T00:00:00Z'),
     popularity: '0',
-    tsv: null,
+    terms: null,
     title_norm: `lamp ${id}`,
     version,
     indexed_at: new Date('2026-10-01T00:00:00Z'),

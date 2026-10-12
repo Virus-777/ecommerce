@@ -1,5 +1,5 @@
 /**
- * Engine contract: the same scenarios for every engine (engine-contract.test.ts: Postgres and the OpenSearch
+ * Engine contract: the same scenarios for every engine (engine-contract.test.ts: MongoDB and the OpenSearch
  * adapter on the in-memory fake; opensearch.integration.test.ts: a live cluster). They pin down what the
  * engines must agree on where the card offer ("eo") matters most: card-offer prices under offer filters and
  * price sorts, facet counts and ranges, availability, ranking factors, spelling correction, similar and

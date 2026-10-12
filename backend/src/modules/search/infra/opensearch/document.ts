@@ -11,7 +11,7 @@ export const cutoffText = (t: string | null | undefined) => {
   return m ? `${m[1]!.padStart(2, '0')}:${m[2]}:${m[3] ?? '00'}` : null;
 };
 
-/** The product's card order: featured first, then in stock, then cheapest, then offer id (the Postgres engine's order) */
+/** The product's card order: featured first, then in stock, then cheapest, then offer id (the MongoDB engine's order) */
 export function cardOrder(doc: Pick<DocRow, 'featured_offer_id'>, offers: OfferRow[]): OfferRow[] {
   return [...offers].sort(
     (a, b) =>
@@ -139,7 +139,7 @@ export function docOf(s: Record<string, any>): DocRow {
     sales_30d: s.sales_30d ?? 0,
     first_listed_at: date(s.first_listed_at)!,
     popularity: String(s.popularity ?? 0),
-    tsv: null,
+    terms: null,
     title_norm: s.title_norm ?? '',
     version: s.version ?? 0,
     indexed_at: date(s.indexed_at)!,

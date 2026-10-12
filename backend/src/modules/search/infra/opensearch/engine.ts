@@ -1,11 +1,11 @@
 /**
  * OpenSearch search engine (production): implements the SearchEngine port over the products index
  * (mapping.ts), with requests built by query.ts, and feeds the index from the read model (SearchIndexFeed,
- * products-index.ts). Suggestion terms stay in PostgreSQL (infra/postgres/terms.ts): term suggestions are
- * answered by the Postgres engine, and spelling correction combines the index's words with the terms' words.
+ * products-index.ts). Suggestion terms stay in MongoDB (infra/mongo/terms.ts): term suggestions are
+ * answered by the MongoDB engine, and spelling correction combines the index's words with the terms' words.
  *
  * Typo tolerance: misspelled words are corrected (service: "Showing results for …") from candidates the index's
- * term suggester finds within two edits (fuzziness), ranked by trigram similarity like the Postgres engine;
+ * term suggester finds within two edits (fuzziness), ranked by trigram similarity like the MongoDB engine;
  * suggestions while typing match title words with fuzziness AUTO.
  */
 import type { FastifyBaseLogger } from 'fastify';
@@ -13,7 +13,7 @@ import type { RankingFactorKey } from '../../domain/ranking.js';
 import { MIN_RATINGS_FOR_RANK } from '../../domain/ranking.js';
 import type { SortKey } from '../../domain/types.js';
 import type { EngineHit, EngineQuery, FacetCounts, SearchEngine, SearchIndexFeed, SearchRepository, TermKind, TermRow } from '../../ports.js';
-import type { TermLookup } from '../postgres/terms.js';
+import type { TermLookup } from '../mongo/terms.js';
 import type { OsApi } from './client.js';
 import { docOf } from './document.js';
 import { MAX_RESULT_WINDOW, TEXT_FIELDS } from './mapping.js';
@@ -26,11 +26,11 @@ export interface OpenSearchEngineDeps {
   os: OsApi;
   index: ProductIndex;
   log: FastifyBaseLogger;
-  /** Suggestion terms (PostgreSQL) */
+  /** Suggestion terms (MongoDB) */
   terms: TermLookup;
   /** Brand suggestion terms mark active brands (brand facet) */
   repo: Pick<SearchRepository, 'terms'>;
-  /** Term suggestions are answered by the Postgres engine (suggestion_terms) */
+  /** Term suggestions are answered by the MongoDB engine (suggestion_terms) */
   termEngine: Pick<SearchEngine, 'suggestTerms'>;
 }
 
@@ -251,7 +251,7 @@ export function createOpenSearchEngine(d: OpenSearchEngineDeps): SearchEngine & 
       const p = prefix.toLowerCase();
       const pq = prefixQuery(prefix);
       const matches: Q[] = [...(pq ? [pq] : []), { match: { title_norm: { query: p, fuzziness: 'AUTO', operator: 'and' } } }];
-      void threshold; // trigram threshold of the Postgres engine; fuzziness AUTO here
+      void threshold; // trigram threshold of the MongoDB engine; fuzziness AUTO here
       const r = await search({
         size: limit,
         query: {

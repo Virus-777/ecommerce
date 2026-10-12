@@ -1,7 +1,7 @@
 /**
  * What the search service needs from the outside world, database-agnostic.
- * The Postgres adapters live in infra/postgres/: the repository (this module's own tables, the read model of
- * the index) and the search engine (full-text + trigram queries over those tables). infra/opensearch/ is the
+ * The MongoDB adapters live in infra/mongo/: the repository (this module's own collections, the read model of
+ * the index) and the development search engine (stemmed words and prefixes over those collections). infra/opensearch/ is the
  * production engine: it keeps its own index, fed from the repository's writes (SearchIndexFeed). The engine is
  * chosen by SEARCH_ENGINE (infra/config.ts).
  */
@@ -20,7 +20,7 @@ export type ReindexJobRow = SearchDb['reindex_jobs'];
 export type PolicyRow = SearchDb['ranking_policies'];
 export type TermKind = TermRow['kind'];
 
-/** Texts the full-text vector is built from: title A, brand A, category B, attributes C, description D */
+/** Texts a document is searched by: title A, brand A, category B, attributes C, description D */
 export interface DocTexts {
   title: string;
   brand: string;
@@ -29,8 +29,8 @@ export interface DocTexts {
   description: string;
 }
 
-/** A document as the indexer writes it (tsv, version and indexed_at are set by the repository) */
-export type DocWrite = Omit<DocRow, 'tsv' | 'version' | 'indexed_at'> & { texts: DocTexts };
+/** A document as the indexer writes it (terms, version and indexed_at are set by the repository) */
+export type DocWrite = Omit<DocRow, 'terms' | 'version' | 'indexed_at'> & { texts: DocTexts };
 
 export interface SearchRepository {
   transaction<T>(fn: (tx: SearchRepository) => Promise<T>): Promise<T>;
@@ -43,7 +43,7 @@ export interface SearchRepository {
   /** Insert or replace a document; `offers` replaces its offer rows (null keeps them) */
   upsertDocument(doc: DocWrite, offers: OfferRow[] | null, at: Date): Promise<void>;
   deleteDocument(productId: string): Promise<void>;
-  updateDocument(productId: string, patch: Partial<Omit<DocRow, 'product_id' | 'tsv'>>, at: Date): Promise<void>;
+  updateDocument(productId: string, patch: Partial<Omit<DocRow, 'product_id' | 'terms'>>, at: Date): Promise<void>;
   offerRows(productIds: string[]): Promise<OfferRow[]>;
   offerRow(offerId: string): Promise<OfferRow | undefined>;
   upsertOfferRow(row: OfferRow): Promise<void>;
@@ -189,7 +189,7 @@ export interface IndexedDocument {
 
 /**
  * How an engine that keeps its own index (OpenSearch) is fed. The repository stays the read model; every write
- * to it is passed on after commit (infra/index-feed.ts). The Postgres engine reads the tables and has no feed.
+ * to it is passed on after commit (infra/index-feed.ts). The MongoDB engine reads the collections and has no feed.
  */
 export interface SearchIndexFeed {
   /** Writes and removes documents; answers the products that could not be written (they are marked dirty and rebuilt) */
@@ -203,9 +203,9 @@ export interface SearchIndexFeed {
 }
 
 export interface SearchEngine {
-  /** e.g. postgres-fts, opensearch */
+  /** e.g. mongo-text, opensearch */
   readonly name: string;
-  /** Engines with their own index are fed by the indexer; undefined for the Postgres engine */
+  /** Engines with their own index are fed by the indexer; undefined for the MongoDB engine */
   readonly feed?: SearchIndexFeed;
   /** Engine and index state for the index status screen, e.g. 'opensearch (green, index marketly-products-…)'; default: name */
   describe?(): Promise<string>;

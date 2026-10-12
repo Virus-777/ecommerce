@@ -3,17 +3,16 @@
  * sum and 90-day prune, transit days as a setting, onSale on the facets context, audit entries and the ad
  * privacy context passed to advertising.
  */
-import type { Kysely } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dateInZone } from '../../../kernel/lib/clock.js';
-import type { SearchDb } from '../../../spec/search.js';
+import { spec, type SearchDb } from '../../../spec/search.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { boot, callers, newId, STORE, ADMIN, type Kit } from './helpers.js';
 
 let k: Kit;
-let db: Kysely<SearchDb>;
+const table = <T extends keyof SearchDb & string>(name: T) => k.app.kernel.mongo.module('search', spec.collections, schemas).table<SearchDb[T]>(name);
 beforeAll(async () => {
   k = await boot();
-  db = k.app.kernel.database.kysely.withSchema('search') as Kysely<SearchDb>;
 });
 afterAll(async () => {
   await k?.close();
@@ -23,8 +22,8 @@ const today = () => dateInZone(new Date(), k.app.kernel.config.market.timeZone);
 const daysAgo = (n: number) => new Date(Date.parse(`${today()}T00:00:00Z`) - n * 86_400_000).toISOString().slice(0, 10);
 const placedEvent = (orderId: string) => ({ orderId, ref: 'MK-261010-00001', checkoutSessionId: newId(), customerId: null, guestEmail: 'g@example.com', paymentIntentId: newId(), paymentState: 'accepted', total: { amount: 1000, currency: 'USD' }, couponCodes: [], groups: [], placedAt: new Date().toISOString(), attemptNo: 1, contactName: 'Guest Shopper' });
 const cancelledEvent = (orderId: string) => ({ orderId, ref: 'MK-261010-00001', reason: 'payment_declined', checkoutSessionId: newId() });
-const dailyRows = (productId: string) => db.selectFrom('product_sales_daily').selectAll().where('product_id', '=', productId).orderBy('day').execute();
-const sales30 = async (productId: string) => (await db.selectFrom('search_documents').select('sales_30d').where('product_id', '=', productId).executeTakeFirstOrThrow()).sales_30d;
+const dailyRows = (productId: string) => table('product_sales_daily').find({ product_id: productId }, { sort: { day: 1 } });
+const sales30 = async (productId: string) => (await table('search_documents').get(productId))!.sales_30d;
 
 async function listed(title: string) {
   const cat = k.world.category(`Cat ${newId().slice(-6)}`);
@@ -62,15 +61,12 @@ describe('daily sales (product_sales_daily)', () => {
   it('search.sales-counts sums the last 30 days into sales_30d and deletes rows older than 90 days', async () => {
     const { p } = await listed('Stoneware mug');
     const at = new Date();
-    await db
-      .insertInto('product_sales_daily')
-      .values([
-        { product_id: p.id, day: daysAgo(0), units: 4, orders: 2, updated_at: at },
-        { product_id: p.id, day: daysAgo(29), units: 6, orders: 1, updated_at: at },
-        { product_id: p.id, day: daysAgo(40), units: 50, orders: 5, updated_at: at },
-        { product_id: p.id, day: daysAgo(120), units: 70, orders: 7, updated_at: at },
-      ])
-      .execute();
+    await table('product_sales_daily').insertMany([
+      { product_id: p.id, day: daysAgo(0), units: 4, orders: 2, updated_at: at },
+      { product_id: p.id, day: daysAgo(29), units: 6, orders: 1, updated_at: at },
+      { product_id: p.id, day: daysAgo(40), units: 50, orders: 5, updated_at: at },
+      { product_id: p.id, day: daysAgo(120), units: 70, orders: 7, updated_at: at },
+    ]);
     await k.job('search.sales-counts');
     expect(await sales30(p.id)).toBe(10);
     expect((await dailyRows(p.id)).map((r) => r.day)).toEqual([daysAgo(40), daysAgo(29), daysAgo(0)]);

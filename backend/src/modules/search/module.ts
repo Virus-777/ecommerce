@@ -5,7 +5,6 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
 import { createSearchAdapters } from './infra/select.js';
 import { SearchService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
@@ -18,12 +17,13 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
-    // SEARCH_ENGINE: postgres (full-text + trigram over the read model; development and tests) or opensearch (production)
+    // SEARCH_ENGINE: mongo (stemmed words and prefixes over the read model; development and tests) or opensearch (production)
     const { repo, engine } = createSearchAdapters(ctx);
     ctx.log.debug({ engine: engine.name }, 'search: engine');
     const service = new SearchService({ repo, engine, ctx });

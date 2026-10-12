@@ -2,14 +2,14 @@
  * Which search engine serves queries, from the environment (documented in backend/.env.example and
  * docs/02-backend-architecture.md §9). Read by module.ts at startup.
  *
- *   SEARCH_ENGINE=postgres     PostgreSQL full-text + trigram over the read-model tables (default: development, tests)
+ *   SEARCH_ENGINE=mongo        MongoDB: stemmed words and prefixes over the read-model collections (default: development, tests)
  *   SEARCH_ENGINE=opensearch   OpenSearch (production): its own index fed from the read model
  */
 import { z } from 'zod';
 
 const schema = z
   .object({
-    SEARCH_ENGINE: z.enum(['postgres', 'opensearch']).default('postgres'),
+    SEARCH_ENGINE: z.enum(['mongo', 'opensearch']).default('mongo'),
     /** One node or a comma-separated list: https://search.internal:9200 */
     OPENSEARCH_URL: z.string().optional(),
     OPENSEARCH_USERNAME: z.string().optional(),
@@ -50,14 +50,14 @@ export interface OpenSearchConfig {
   aliasCacheMs: number;
 }
 
-export type SearchEngineConfig = { engine: 'postgres' } | { engine: 'opensearch'; opensearch: OpenSearchConfig };
+export type SearchEngineConfig = { engine: 'mongo' } | { engine: 'opensearch'; opensearch: OpenSearchConfig };
 
 export function readSearchEngineConfig(env: Record<string, string | undefined> = process.env): SearchEngineConfig {
   // empty values count as unset (a blank line in .env)
   const parsed = schema.safeParse(Object.fromEntries(Object.entries(env).filter(([, v]) => v !== undefined && v !== '')));
   if (!parsed.success) throw new Error(`Invalid search engine configuration:\n${z.prettifyError(parsed.error)}`);
   const e = parsed.data;
-  if (e.SEARCH_ENGINE === 'postgres') return { engine: 'postgres' };
+  if (e.SEARCH_ENGINE === 'mongo') return { engine: 'mongo' };
   return {
     engine: 'opensearch',
     opensearch: {
