@@ -716,7 +716,8 @@
       "indexes": [
         "unique (realm, email_normalized)",
         "(status, id)",
-        "(realm, created_at)"
+        "(realm, created_at)",
+        "(tokens_valid_after) where tokens_valid_after is not null"
       ]
     },
     {
@@ -851,7 +852,9 @@
       "indexes": [
         "(account_id) where revoked_at is null",
         "(device_id)",
-        "(seller_id) where revoked_at is null"
+        "(seller_id) where revoked_at is null",
+        "(previous_token_hash) where previous_token_hash is not null",
+        "(revoked_at) where revoked_at is not null"
       ]
     },
     {
@@ -896,7 +899,8 @@
       },
       "indexes": [
         "(status, expires_at)",
-        "(email)"
+        "(email)",
+        "(account_id) where account_id is not null"
       ]
     },
     {
@@ -915,7 +919,9 @@
         "rotated_at": "timestamptz?"
       },
       "indexes": [
-        "(expires_at)"
+        "(expires_at)",
+        "(previous_token_hash) where previous_token_hash is not null",
+        "(claimed_at) where claimed_at is not null"
       ],
       "desc": "Visitor sessions (auth v3): one per app install before sign-in; in the store also the guest session"
     },

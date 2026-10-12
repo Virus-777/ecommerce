@@ -3725,6 +3725,17 @@ export const spec = defineModuleSpec({
             "realm": 1,
             "created_at": 1
           }
+        },
+        {
+          "name": "accounts_tokens_valid_after_808d08",
+          "key": {
+            "tokens_valid_after": 1
+          },
+          "partial": {
+            "tokens_valid_after": {
+              "$type": "date"
+            }
+          }
         }
       ],
       "unenforced": []
@@ -4586,6 +4597,28 @@ export const spec = defineModuleSpec({
               "$type": "null"
             }
           }
+        },
+        {
+          "name": "sessions_previous_token_hash_240581",
+          "key": {
+            "previous_token_hash": 1
+          },
+          "partial": {
+            "previous_token_hash": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "name": "sessions_revoked_at_7223f4",
+          "key": {
+            "revoked_at": 1
+          },
+          "partial": {
+            "revoked_at": {
+              "$type": "date"
+            }
+          }
         }
       ],
       "unenforced": []
@@ -4858,6 +4891,17 @@ export const spec = defineModuleSpec({
           "key": {
             "email": 1
           }
+        },
+        {
+          "name": "invitations_account_id_21b4bc",
+          "key": {
+            "account_id": 1
+          },
+          "partial": {
+            "account_id": {
+              "$type": "string"
+            }
+          }
         }
       ],
       "unenforced": []
@@ -4982,6 +5026,28 @@ export const spec = defineModuleSpec({
           "name": "guest_sessions_expires_at_ce8dd0",
           "key": {
             "expires_at": 1
+          }
+        },
+        {
+          "name": "guest_sessions_previous_token_hash_240581",
+          "key": {
+            "previous_token_hash": 1
+          },
+          "partial": {
+            "previous_token_hash": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "name": "guest_sessions_claimed_at_2ba7aa",
+          "key": {
+            "claimed_at": 1
+          },
+          "partial": {
+            "claimed_at": {
+              "$type": "date"
+            }
           }
         }
       ],

@@ -3,12 +3,11 @@
  * endpoints), and the staff account tools (lock, unlock, force reset, reset 2-step, sign out, disable).
  * access and audit are other tranches: access.hasPermission and audit.record are stubbed.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type * as audit from '../../../spec/audit.js';
 import type { IdentityPublicApi } from '../../../spec/identity.js';
 import { callers } from '../../../testing/app.js';
-import { ADMIN, android, boot, customer, enableTotp, PUBLIC, signIn, STORE, totp, uniqueEmail, visitor, type TestKit } from './helpers.js';
+import { ADMIN, android, boot, customer, enableTotp, identityTable, PUBLIC, signIn, STORE, totp, uniqueEmail, visitor, type TestKit } from './helpers.js';
 
 const recorded: audit.RecordInput[] = [];
 /** Staff permissions the stubbed access module grants to real (non-dev) staff tokens */
@@ -201,11 +200,9 @@ describe('staff invitations', () => {
 });
 
 describe('staff session idle timeout (checked on every admin request)', () => {
-  const db = () => kit.app.kernel.database.kysely;
-  const activeAt = async (sessionId: string) =>
-    (await sql<{ at: Date }>`select last_active_at as at from identity.sessions where id = ${sessionId}`.execute(db())).rows[0]!.at.getTime();
-  const lastActive = (sessionId: string, msAgo: number) =>
-    sql`update identity.sessions set last_active_at = ${new Date(kit.clock.now().getTime() - msAgo)} where id = ${sessionId}`.execute(db());
+  const sessions = () => identityTable(kit.app, 'sessions');
+  const activeAt = async (sessionId: string) => (await sessions().get(sessionId))!.last_active_at.getTime();
+  const lastActive = (sessionId: string, msAgo: number) => sessions().update(sessionId, { last_active_at: new Date(kit.clock.now().getTime() - msAgo) });
   /** past the kernel's 5 s liveness cache */
   const later = () => kit.clock.advance(6_000);
 
@@ -239,7 +236,7 @@ describe('staff session idle timeout (checked on every admin request)', () => {
     const s = await staffMember('Rex Revoked');
     const url = `${ADMIN}/accounts/${s.accountId}`;
     expect((await kit.call('GET', url, { token: s.tokens.accessToken })).status).toBe(200);
-    await sql`update identity.sessions set revoked_at = ${kit.clock.now()}, revoke_reason = 'test' where id = ${s.tokens.sessionId}`.execute(db());
+    await sessions().update(s.tokens.sessionId, { revoked_at: kit.clock.now(), revoke_reason: 'test' });
     later();
     const res = await kit.call('GET', url, { token: s.tokens.accessToken });
     expect(res.status).toBe(401);

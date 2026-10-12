@@ -7,11 +7,10 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { SESSION_COOKIE_ENDPOINTS } from './http/client.js';
 import { publicRoutes } from './http/public.js';
-import { migrations } from './infra/postgres/migrations/index.js';
 import { devExternalIdentityVerifier } from './infra/external-id/dev.js';
-import { createPostgresIdentityRepository } from './infra/postgres/repository.js';
-import { IdentityService } from './service.js';
+import { createMongoIdentityRepository } from './infra/mongo/repository.js';
 import { schemas } from './infra/mongo/schema.js';
+import { IdentityService } from './service.js';
 
 /**
  * Identity: Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.
@@ -21,14 +20,15 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.5.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
     // Google / Apple ID tokens: the deterministic dev verifier in development and tests; no provider is wired for production yet
     const externalIds = ctx.config.devTokens ? devExternalIdentityVerifier : undefined;
-    const service = new IdentityService({ repo: createPostgresIdentityRepository(ctx.db), ctx, externalIds });
+    const service = new IdentityService({ repo: createMongoIdentityRepository(ctx.mongo), ctx, externalIds });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), publicRoutes(service));
     // responses that set or clear the website's refresh cookie (http/client.ts send()): browsers call them with credentials

@@ -41,6 +41,7 @@ const accounts = new Schema(
 accounts.index({"realm":1,"email_normalized":1}, {"name":"accounts_realm_email_normalized_b8b41e","unique":true});
 accounts.index({"status":1,"id":1}, {"name":"accounts_status_id_a54fb9"});
 accounts.index({"realm":1,"created_at":1}, {"name":"accounts_realm_created_at_bfbcae"});
+accounts.index({"tokens_valid_after":1}, {"name":"accounts_tokens_valid_after_808d08","partialFilterExpression":{"tokens_valid_after":{"$type":"date"}}});
 
 /** Last N hashes to block reuse */
 const password_history = new Schema(
@@ -185,6 +186,8 @@ sessions.index({"refresh_token_hash":1}, {"name":"sessions_refresh_token_hash_cf
 sessions.index({"account_id":1}, {"name":"sessions_account_id_e9a213","partialFilterExpression":{"revoked_at":{"$type":"null"}}});
 sessions.index({"device_id":1}, {"name":"sessions_device_id_220b2b"});
 sessions.index({"seller_id":1}, {"name":"sessions_seller_id_effa4c","partialFilterExpression":{"revoked_at":{"$type":"null"}}});
+sessions.index({"previous_token_hash":1}, {"name":"sessions_previous_token_hash_240581","partialFilterExpression":{"previous_token_hash":{"$type":"string"}}});
+sessions.index({"revoked_at":1}, {"name":"sessions_revoked_at_7223f4","partialFilterExpression":{"revoked_at":{"$type":"date"}}});
 
 /** Sellers an account may act for. Written only by the sellers module through grantSellerContext / revokeSellerContext. */
 const seller_access = new Schema(
@@ -233,6 +236,7 @@ const invitations = new Schema(
 invitations.index({"token_hash":1}, {"name":"invitations_token_hash_ff3baa","unique":true});
 invitations.index({"status":1,"expires_at":1}, {"name":"invitations_status_expires_at_613245"});
 invitations.index({"email":1}, {"name":"invitations_email_896614"});
+invitations.index({"account_id":1}, {"name":"invitations_account_id_21b4bc","partialFilterExpression":{"account_id":{"$type":"string"}}});
 
 /** Visitor sessions (auth v3): one per app install before sign-in; in the store also the guest session */
 const guest_sessions = new Schema(
@@ -255,6 +259,8 @@ const guest_sessions = new Schema(
 );
 guest_sessions.index({"refresh_token_hash":1}, {"name":"guest_sessions_refresh_token_hash_cfae96","unique":true});
 guest_sessions.index({"expires_at":1}, {"name":"guest_sessions_expires_at_ce8dd0"});
+guest_sessions.index({"previous_token_hash":1}, {"name":"guest_sessions_previous_token_hash_240581","partialFilterExpression":{"previous_token_hash":{"$type":"string"}}});
+guest_sessions.index({"claimed_at":1}, {"name":"guest_sessions_claimed_at_2ba7aa","partialFilterExpression":{"claimed_at":{"$type":"date"}}});
 
 /** Orders a guest session may open */
 const guest_order_grants = new Schema(

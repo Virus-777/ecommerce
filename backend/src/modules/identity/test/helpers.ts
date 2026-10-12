@@ -1,6 +1,10 @@
 /** Test helpers for identity: boot, capture events, and walk the real sign-in flows over HTTP. */
 import type { FastifyInstance } from 'fastify';
+import type { Selectable } from 'kysely';
 import { expect } from 'vitest';
+import type { Table } from '../../../kernel/mongo/index.js';
+import { spec, type IdentityDb } from '../../../spec/identity.js';
+import { schemas } from '../infra/mongo/schema.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { fixedClock } from '../../../kernel/lib/clock.js';
 import type { BuildOptions } from '../../../app.js';
@@ -65,6 +69,11 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
     },
   };
   return kit;
+}
+
+/** A collection of the module as its repository reads it (rows in spec shape) */
+export function identityTable<T extends keyof IdentityDb & string>(app: FastifyInstance, name: T): Table<Selectable<IdentityDb[T]>> {
+  return app.kernel.mongo.module('identity', spec.collections, schemas).table<Selectable<IdentityDb[T]>>(name);
 }
 
 const safeJson = (s: string) => {

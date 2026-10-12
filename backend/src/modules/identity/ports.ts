@@ -1,6 +1,6 @@
 /**
  * What the identity service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  */
 import type { Insertable, Selectable } from 'kysely';
 import type { Page } from '../../spec/common.js';
@@ -75,7 +75,7 @@ export interface ExternalIdentityVerifier {
   verify(provider: 'google' | 'apple', idToken: string): Promise<ExternalIdentity | null>;
 }
 
-/** Persistence for this module's own tables (schema identity). */
+/** Persistence for this module's own collections (identity.*). */
 export interface IdentityRepository {
   /** Runs fn in one transaction with a repository bound to it */
   transaction<R>(fn: (repo: IdentityRepository) => Promise<R>): Promise<R>;

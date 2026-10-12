@@ -3,14 +3,13 @@
  * call, the consumed event, the jobs and the GraphQL resolver.
  * sellers is another tranche: sellers.getMemberAccess is stubbed from the grants made here.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { GraphQLContext } from '../../../kernel/graphql/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { IdentityPublicApi } from '../../../spec/identity.js';
 import { resolvers } from '../graphql/resolvers.js';
 import type { IdentityService } from '../service.js';
-import { android, boot, customer, PUBLIC, SELLER, signIn, STORE, STRONG, uniqueEmail, visitor, web, type TestKit } from './helpers.js';
+import { android, boot, customer, identityTable, PUBLIC, SELLER, signIn, STORE, STRONG, uniqueEmail, visitor, web, type TestKit } from './helpers.js';
 
 /** sellerId:accountId → memberId, as the sellers module would answer */
 const members = new Map<string, string>();
@@ -367,9 +366,8 @@ describe('jobs', () => {
         token: v.accessToken,
         body: { email: uniqueEmail('never'), password: STRONG, firstName: 'Nev', lastName: 'Er', marketingOptIn: false, acceptedTermsVersion: '1', device: web },
       });
-      const db = k.app.kernel.database.kysely;
-      const count = async (q: string) => Number((await sql.raw<{ n: number }>(q).execute(db)).rows[0]!.n);
-      expect(await count(`select count(*)::int as n from identity.accounts where status = 'pending_verification'`)).toBe(1);
+      const table = <T extends Parameters<typeof identityTable>[1]>(name: T) => identityTable(k.app, name);
+      expect(await table('accounts').count({ status: 'pending_verification' })).toBe(1);
 
       k.clock.advance(8 * 24 * 3600_000);
       await k.app.kernel.jobs.runNow('identity.expire-invitations');
@@ -378,19 +376,19 @@ describe('jobs', () => {
       expect(list.items.map((i) => i.id)).toContain(inv.id);
 
       await k.app.kernel.jobs.runNow('identity.expire-sessions');
-      expect(await count(`select count(*)::int as n from identity.sessions where revoked_at is null`)).toBe(0);
+      expect(await table('sessions').count({ revoked_at: null })).toBe(0);
       expect((await k.call('POST', `${PUBLIC}/sessions/refresh`, { body: { refreshToken: c.tokens.refreshToken } })).status).toBe(401);
 
       await k.app.kernel.jobs.runNow('identity.purge-expired');
-      expect(await count(`select count(*)::int as n from identity.accounts where status = 'pending_verification'`)).toBe(0);
-      expect(await count(`select count(*)::int as n from identity.challenges`)).toBe(0);
+      expect(await table('accounts').count({ status: 'pending_verification' })).toBe(0);
+      expect(await table('challenges').count()).toBe(0);
 
       k.clock.advance(401 * 24 * 3600_000);
       await k.app.kernel.jobs.runNow('identity.prune-security-events');
-      expect(await count(`select count(*)::int as n from identity.security_events`)).toBe(0);
-      expect(await count(`select count(*)::int as n from identity.sign_in_attempts`)).toBe(0);
+      expect(await table('security_events').count()).toBe(0);
+      expect(await table('sign_in_attempts').count()).toBe(0);
       await k.app.kernel.jobs.runNow('identity.expire-sessions');
-      expect(await count(`select count(*)::int as n from identity.sessions`)).toBe(0);
+      expect(await table('sessions').count()).toBe(0);
     } finally {
       await k.app.close();
     }
