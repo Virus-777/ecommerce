@@ -76,7 +76,7 @@ export interface ProductStatsCounts {
 /** Persistence for this module's own tables (schema catalog). */
 export interface CatalogRepository {
   transaction<T>(fn: (tx: CatalogRepository) => Promise<T>): Promise<T>;
-  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean>;
 
   /* categories, attributes, image standards */

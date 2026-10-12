@@ -1,13 +1,12 @@
 /**
  * Settings rows ↔ records, shared by the repositories: what a stored row means is independent of the database.
  */
-import type { Selectable } from 'kysely';
 import type { SettingsDb } from '../../../spec/settings.js';
 import type { ChangeMeta, ChangePatch, ChangeRecord, FlagRecord, ValueRecord } from '../ports.js';
 
-export type ValueRow = Selectable<SettingsDb['values']>;
-export type ChangeRow = Selectable<SettingsDb['changes']>;
-export type FlagRow = Selectable<SettingsDb['feature_flags']>;
+export type ValueRow = SettingsDb['values'];
+export type ChangeRow = SettingsDb['changes'];
+export type FlagRow = SettingsDb['feature_flags'];
 
 /** Who wrote the boot seed of market defaults */
 export const SEED_ACTOR = { kind: 'system', id: 'settings.seed' } as const;

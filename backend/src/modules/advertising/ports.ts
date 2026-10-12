@@ -76,7 +76,7 @@ export type ClickCharge = { charged: true; amount: number; exhausted: 'daily' | 
 
 export interface AdvertisingRepository {
   transaction<R>(fn: (tx: AdvertisingRepository) => Promise<R>): Promise<R>;
-  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean>;
 
   /* generic table access */

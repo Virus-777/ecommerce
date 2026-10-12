@@ -34,7 +34,7 @@ export type DocWrite = Omit<DocRow, 'terms' | 'version' | 'indexed_at'> & { text
 
 export interface SearchRepository {
   transaction<T>(fn: (tx: SearchRepository) => Promise<T>): Promise<T>;
-  /** Claims a key in the inbox (ctx.inbox) within this repository's transaction; false when it was already handled */
+  /** Claims a key in the inbox (ctx.mongo.claim) within this repository's transaction; false when it was already handled */
   claim(key: string): Promise<boolean>;
 
   /* documents and offer rows */

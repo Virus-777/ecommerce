@@ -86,7 +86,7 @@ export interface ModerationListFilter {
 
 export interface ReviewsRepository {
   transaction<R>(fn: (tx: ReviewsRepository) => Promise<R>): Promise<R>;
-  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean>;
   /** Insert unless a unique key already holds the row; true when inserted */
   insertIgnore<T extends Table>(table: T, row: Db[T]): Promise<boolean>;

@@ -14,9 +14,7 @@ import { schemas } from './infra/mongo/schema.js';
 export default defineModule({
   spec,
   version: '2.0.0',
-  store: 'mongo',
   schemas,
-  migrations: [],
   register(ctx) {
     const service = new PurchasingService({ repo: createMongoPurchasingRepository(ctx.mongo), ctx });
     ctx.provide(service);

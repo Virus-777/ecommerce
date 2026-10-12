@@ -49,12 +49,12 @@ export interface GiftCardFilter {
 export interface WalletRepository {
   /** Runs fn in one transaction (reuses the current one when already inside) */
   transaction<R>(fn: (tx: WalletRepository) => Promise<R>): Promise<R>;
-  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean>;
 
   /* accounts: every change to a customer's credit locks the account row first */
   getAccount(customerId: string): Promise<AccountRow | undefined>;
-  /** The account row locked FOR UPDATE, or undefined when the customer never had credit */
+  /** The account row, locked for the transaction (lock-by-write), or undefined when the customer never had credit */
   lockAccount(customerId: string): Promise<AccountRow | undefined>;
   /** Creates the account on first credit (lazily) and locks it */
   lockOrCreateAccount(customerId: string, currency: string, now: Date): Promise<AccountRow>;

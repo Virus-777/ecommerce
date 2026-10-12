@@ -23,9 +23,7 @@ import { schemas } from './infra/mongo/schema.js';
 export default defineModule({
   spec,
   version: '2.0.0',
-  store: 'mongo',
   schemas,
-  migrations: [],
   graphql: typeDefs,
   async register(ctx) {
     // Providers: deterministic development adapters (no network); real adapters plug in behind the same ports

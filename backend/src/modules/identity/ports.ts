@@ -2,27 +2,27 @@
  * What the identity service needs from the outside world, database-agnostic.
  * The MongoDB adapter lives in infra/mongo/.
  */
-import type { Insertable, Selectable } from 'kysely';
 import type { Page } from '../../spec/common.js';
 import type { IdentityDb } from '../../spec/identity.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 
 type T = IdentityDb;
-export type AccountRow = Selectable<T['accounts']>;
-export type TwoStepMethodRow = Selectable<T['two_step_methods']>;
-export type ChallengeRow = Selectable<T['challenges']>;
-export type PasswordResetRow = Selectable<T['password_resets']>;
-export type DeviceRow = Selectable<T['devices']>;
-export type SessionRow = Selectable<T['sessions']>;
-export type SellerAccessRow = Selectable<T['seller_access']>;
-export type InvitationRow = Selectable<T['invitations']>;
-export type GuestSessionRow = Selectable<T['guest_sessions']>;
-export type GuestGrantRow = Selectable<T['guest_order_grants']>;
-export type OrderLinkRow = Selectable<T['order_links']>;
-export type SecurityEventRow = Selectable<T['security_events']>;
-export type ReauthTokenRow = Selectable<T['reauth_tokens']>;
-export type SignInAttemptInsert = Insertable<T['sign_in_attempts']>;
-export type RecoveryCodeRow = Selectable<T['recovery_codes']>;
+export type AccountRow = T['accounts'];
+export type TwoStepMethodRow = T['two_step_methods'];
+export type ChallengeRow = T['challenges'];
+export type PasswordResetRow = T['password_resets'];
+export type DeviceRow = T['devices'];
+export type SessionRow = T['sessions'];
+export type SellerAccessRow = T['seller_access'];
+export type InvitationRow = T['invitations'];
+export type GuestSessionRow = T['guest_sessions'];
+export type GuestGrantRow = T['guest_order_grants'];
+export type OrderLinkRow = T['order_links'];
+export type SecurityEventRow = T['security_events'];
+export type ReauthTokenRow = T['reauth_tokens'];
+/** A sign-in attempt to record: the repository numbers it (identity column) */
+export type SignInAttemptInsert = Omit<T['sign_in_attempts'], 'id'>;
+export type RecoveryCodeRow = T['recovery_codes'];
 
 export type Audience = 'store' | 'seller' | 'admin';
 export type Realm = 'member' | 'staff';

@@ -4,18 +4,17 @@
  * video processing) have deterministic dev adapters in infra/<provider>/dev.ts.
  */
 import type { Readable } from 'node:stream';
-import type { Selectable } from 'kysely';
 import type { Page } from '../../spec/common.js';
 import type { ImageMeasurements, MediaDb } from '../../spec/media.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 
 /* ------------------------------------------------------------------ persistence */
 
-export type AssetRow = Selectable<MediaDb['assets']>;
-export type RenditionRow = Selectable<MediaDb['renditions']>;
-export type UploadRow = Selectable<MediaDb['uploads']>;
-export type UsageRow = Selectable<MediaDb['usages']>;
-export type ProcessingJobRow = Selectable<MediaDb['processing_jobs']>;
+export type AssetRow = MediaDb['assets'];
+export type RenditionRow = MediaDb['renditions'];
+export type UploadRow = MediaDb['uploads'];
+export type UsageRow = MediaDb['usages'];
+export type ProcessingJobRow = MediaDb['processing_jobs'];
 
 export type AssetPatch = Partial<Omit<AssetRow, 'id' | 'check_result'>> & { check_result?: unknown };
 

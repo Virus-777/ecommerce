@@ -1,6 +1,6 @@
 /**
  * What the content service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  */
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import type { ContentDb } from '../../spec/content.js';
@@ -49,7 +49,7 @@ export interface FeedbackStat {
 export interface ContentRepository {
   /** Runs fn in one transaction; fn receives a repository bound to it (nested calls reuse it) */
   transaction<T>(fn: (tx: ContentRepository) => Promise<T>): Promise<T>;
-  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean>;
 
   /* homepage sections (the draft layout) */

@@ -21,9 +21,7 @@ import { IdentityService } from './service.js';
 export default defineModule({
   spec,
   version: '2.0.0',
-  store: 'mongo',
   schemas,
-  migrations: [],
   graphql: typeDefs,
   register(ctx) {
     // Google / Apple ID tokens: the deterministic dev verifier in development and tests; no provider is wired for production yet

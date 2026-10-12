@@ -19,9 +19,7 @@ import { schemas } from './infra/mongo/schema.js';
 export default defineModule({
   spec,
   version: '2.0.0',
-  store: 'mongo',
   schemas,
-  migrations: [],
   graphql: typeDefs,
   register(ctx) {
     const service = new OffersService({ repo: createMongoOffersRepository(ctx.mongo), ctx, files: mediaBulkFileReader(ctx) });

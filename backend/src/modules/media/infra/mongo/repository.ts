@@ -1,4 +1,3 @@
-import type { Selectable } from 'kysely';
 import { decodeCursor, encodeCursor, type PageRequest } from '../../../../kernel/lib/pagination.js';
 import type { ModuleStore } from '../../../../kernel/mongo/index.js';
 import type { Filter } from '../../../../kernel/mongo/table.js';
@@ -6,7 +5,7 @@ import type { Page } from '../../../../spec/common.js';
 import type { MediaDb } from '../../../../spec/media.js';
 import type { AssetFilter, AssetPatch, AssetRow, MediaRepository, OwnerFilter, ProcessingJobRow, RenditionRow, UploadRow, UsageRow } from '../../ports.js';
 
-type CounterRow = Selectable<MediaDb['upload_counters']>;
+type CounterRow = MediaDb['upload_counters'];
 type Doc = Record<string, unknown>;
 
 /** Storage objects of an asset whose files were erased (purge-deleted): storage_bucket is set to this */
@@ -285,7 +284,7 @@ export function createMongoMediaRepository(store: ModuleStore): MediaRepository 
     },
 
     async claimProcessingJobs(now, leaseUntil, limit) {
-      // for update skip locked: each claim is one atomic update of the oldest due job, so concurrent workers never
+      // each claim is one atomic update of the oldest due job, so concurrent workers never
       // claim the same job (a claimed job's next_attempt_at is its lease, past now)
       const claimed: ProcessingJobRow[] = [];
       while (claimed.length < limit) {

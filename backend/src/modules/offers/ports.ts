@@ -52,7 +52,7 @@ export interface OfferListFilter {
 
 export interface OffersRepository {
   transaction<R>(fn: (tx: OffersRepository) => Promise<R>): Promise<R>;
-  /** Inbox (kernel ctx.inbox): true the first time this key is claimed; inside a transaction it commits with the effects */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; inside a transaction it commits with the effects */
   claim(key: string): Promise<boolean>;
 
   /* generic table access */

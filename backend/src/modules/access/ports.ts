@@ -1,6 +1,6 @@
 /**
  * What the access service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { Page } from '../../spec/common.js';

@@ -16,9 +16,7 @@ import { schemas } from './infra/mongo/schema.js';
 export default defineModule({
   spec,
   version: '2.0.0',
-  store: 'mongo',
   schemas,
-  migrations: [],
   async register(ctx) {
     const repo = createMongoFulfillmentServiceRepository(ctx.mongo);
     // the example fee schedule (domain/seed.ts)

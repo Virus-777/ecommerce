@@ -18,9 +18,7 @@ import { schemas } from './infra/mongo/schema.js';
 export default defineModule({
   spec,
   version: '2.0.0',
-  store: 'mongo',
   schemas,
-  migrations: [],
   graphql: typeDefs,
   register(ctx) {
     // SEARCH_ENGINE: mongo (stemmed words and prefixes over the read model; development and tests) or opensearch (production)

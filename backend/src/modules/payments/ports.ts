@@ -1,6 +1,6 @@
 /**
  * What the payments service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  * The payment processor is behind PaymentProvider; the deterministic dev adapter is infra/card-processor/dev.ts.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';

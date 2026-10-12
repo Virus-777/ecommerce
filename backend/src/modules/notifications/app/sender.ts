@@ -39,7 +39,7 @@ export interface SendInput {
   templateVersionId?: string | null;
   /** Only these delivery channels (broadcasts go out on their consent channel only) */
   only?: DeliveryChannel[];
-  /** Inbox key of the consumed event (ctx.inbox): claimed with the notice and deliveries, so a redelivered event sends nothing */
+  /** Inbox key of the consumed event (ctx.mongo.claim): claimed with the notice and deliveries, so a redelivered event sends nothing */
   claimKey?: string | null;
 }
 

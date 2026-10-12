@@ -1,6 +1,6 @@
 /**
  * What the finance service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  * The payout provider (bank transfers, micro-deposits, settlement reports) is a port with a
  * deterministic development adapter in infra/provider/dev.ts.
  */
@@ -79,7 +79,7 @@ export interface DailyTypeSum {
 
 export interface FinanceRepository {
   transaction<R>(fn: (tx: FinanceRepository) => Promise<R>): Promise<R>;
-  /** Inbox (kernel ctx.inbox): true the first time this key is claimed; inside a transaction it commits with the effects */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; inside a transaction it commits with the effects */
   claim(key: string): Promise<boolean>;
 
   /* generic table access */

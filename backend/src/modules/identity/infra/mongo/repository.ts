@@ -1,4 +1,3 @@
-import type { Selectable } from 'kysely';
 import type { ModuleStore } from '../../../../kernel/mongo/index.js';
 import type { Filter } from '../../../../kernel/mongo/table.js';
 import type { IdentityDb } from '../../../../spec/identity.js';
@@ -21,8 +20,8 @@ import type {
   TwoStepMethodRow,
 } from '../../ports.js';
 
-type PasswordHistoryRow = Selectable<IdentityDb['password_history']>;
-type SignInAttemptRow = Selectable<IdentityDb['sign_in_attempts']>;
+type PasswordHistoryRow = IdentityDb['password_history'];
+type SignInAttemptRow = IdentityDb['sign_in_attempts'];
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Stored bytes (bytea): a Buffer, as the PostgreSQL adapter wrote them */

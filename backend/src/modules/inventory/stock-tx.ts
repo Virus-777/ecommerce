@@ -1,6 +1,6 @@
 /**
  * One unit of stock work inside a database transaction. Every quantity change goes through move():
- * the level rows of an item are locked (SELECT … FOR UPDATE, in a fixed order), the from-group is
+ * the level rows of an item are locked (forUpdate: lock-by-write, in a fixed order), the from-group is
  * checked, the level is written with an optimistic version check and one ledger row is appended,
  * all in the same transaction. Units entering Damaged or held get a held_stock row; units leaving it
  * release the oldest holds first. After the work, finish() works out the stock.changed and

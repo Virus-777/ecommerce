@@ -1,11 +1,10 @@
 import type { ModuleStore } from '../../../../kernel/mongo/index.js';
-import type { Selectable } from 'kysely';
 import type { SettingsDb } from '../../../../spec/settings.js';
 import type { DefinitionRecord, SettingsRepository } from '../../ports.js';
 import { changeColumns, SEED_ACTOR, toChange, toFlag, toValue, type ChangeRow, type FlagRow, type ValueRow } from '../records.js';
 
-type DefinitionRow = Selectable<SettingsDb['definitions']>;
-type ChangeKeyRow = Selectable<SettingsDb['change_keys']>;
+type DefinitionRow = SettingsDb['definitions'];
+type ChangeKeyRow = SettingsDb['change_keys'];
 
 /** MongoDB adapter for SettingsRepository (docs/04-mongodb-migration.md): one collection per spec table. */
 export function createMongoSettingsRepository(store: ModuleStore): SettingsRepository {

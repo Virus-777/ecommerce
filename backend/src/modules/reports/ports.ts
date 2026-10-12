@@ -160,7 +160,7 @@ export interface ReportsRepository {
   getCheckpoint(key: string): Promise<CheckpointRow | undefined>;
   listCheckpoints(keys: string[]): Promise<CheckpointRow[]>;
   upsertCheckpoint(key: string, patch: Partial<CheckpointRow>): Promise<void>;
-  /** Claims a natural key in the inbox (ctx.inbox) within this repository's transaction; false when it was already handled */
+  /** Claims a natural key in the inbox (ctx.mongo.claim) within this repository's transaction; false when it was already handled */
   claim(key: string): Promise<boolean>;
   /** Opens an out-of-stock interval for a stock item (open_stockouts); an open one stays as it is */
   openStockout(stockItemId: string, productId: string, since: Date): Promise<boolean>;

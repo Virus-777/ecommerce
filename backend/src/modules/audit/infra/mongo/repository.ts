@@ -1,4 +1,3 @@
-import type { Selectable } from 'kysely';
 import type { ModuleStore } from '../../../../kernel/mongo/index.js';
 import type { Filter } from '../../../../kernel/mongo/table.js';
 import type { PageRequest } from '../../../../kernel/lib/pagination.js';
@@ -9,12 +8,12 @@ import { PURGE_ACTION, type ApprovalProjection } from '../../domain/rules.js';
 import type { AuditRepository, CheckpointRow, EntryQuery, IntegrityCheckRow, NewChainRow, RetentionRow } from '../../ports.js';
 import { normalizeIp, searchWords } from './text.js';
 
-type EntryRow = Selectable<AuditDb['entries']>;
-type TargetRow = Selectable<AuditDb['entry_targets']>;
-type ApprovalRow = Selectable<AuditDb['approval_states']>;
-type RetentionDbRow = Selectable<AuditDb['retention']>;
-type CheckpointDbRow = Selectable<AuditDb['checkpoints']>;
-type CheckDbRow = Selectable<AuditDb['integrity_checks']>;
+type EntryRow = AuditDb['entries'];
+type TargetRow = AuditDb['entry_targets'];
+type ApprovalRow = AuditDb['approval_states'];
+type RetentionDbRow = AuditDb['retention'];
+type CheckpointDbRow = AuditDb['checkpoints'];
+type CheckDbRow = AuditDb['integrity_checks'];
 
 /** Name of the transaction lock that serializes chain appends (kernel.locks) */
 const CHAIN_LOCK = 'chain';

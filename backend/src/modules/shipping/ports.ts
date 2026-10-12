@@ -1,6 +1,6 @@
 /**
  * What the shipping service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; carriers sit behind CarrierPort (dev adapter in infra/carriers/).
+ * The MongoDB adapter lives in infra/mongo/; carriers sit behind CarrierPort (dev adapter in infra/carriers/).
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';

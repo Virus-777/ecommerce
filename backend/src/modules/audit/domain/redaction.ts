@@ -8,7 +8,7 @@ export const REDACTED = '[redacted]';
 /** Keys whose values are account or card numbers keep their last 4 digits ("payout account numbers appear only as last 4 digits") */
 const NUMBER_KEYS = /(account|card|iban|routing)/i;
 
-/** Text columns and JSON strings cannot hold NUL in PostgreSQL. */
+/** Recorded text holds no NUL characters (they are dropped before the entry is hashed and stored). */
 export const cleanText = (s: string): string => (s.includes('\u0000') ? s.replace(/\u0000/g, '') : s);
 
 export const cleanOptionalText = (s: string | null | undefined): string | null => (s == null ? null : cleanText(s));

@@ -89,7 +89,7 @@ export interface MessageLine {
 export interface MessagingRepository {
   /** Runs fn in one transaction with a repository bound to it (nested calls reuse it) */
   transaction<T>(fn: (tx: MessagingRepository) => Promise<T>): Promise<T>;
-  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean>;
   /** The kept conversation an old (merged) id now points to */
   aliasOf(id: string): Promise<string | undefined>;

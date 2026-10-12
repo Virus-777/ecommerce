@@ -25,9 +25,7 @@ import { schemas } from './infra/mongo/schema.js';
 export default defineModule({
   spec,
   version: '2.0.0',
-  store: 'mongo',
   schemas,
-  migrations: [],
   register(ctx) {
     // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads
     // through PUT /uploads/{id}/content and serve downloads at GET /files/{bucket}/{key}, signed with

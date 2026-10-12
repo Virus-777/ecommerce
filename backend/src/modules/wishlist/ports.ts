@@ -36,7 +36,7 @@ export interface Lock {
 export interface WishlistRepository {
   /** Runs fn with a repository bound to one transaction */
   transaction<T>(fn: (tx: WishlistRepository) => Promise<T>): Promise<T>;
-  /** Inbox (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean>;
 
   /* ---------------- lists */

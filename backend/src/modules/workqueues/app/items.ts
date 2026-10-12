@@ -255,7 +255,7 @@ export class Items {
 
   /**
    * Close the active items of these kinds about these subjects, or with these dedupe keys (resolvesOn
-   * events). With a claim key (ctx.inbox) the claim commits with the closing: a redelivered event changes nothing.
+   * events). With a claim key (ctx.mongo.claim) the claim commits with the closing: a redelivered event changes nothing.
    */
   async closeMatching(kinds: Kind[], matches: Match[], note: string, by: Actor, event: string | null, opts: { dedupeKeys?: string[]; claimKey?: string } = {}): Promise<number> {
     const core = this.core;

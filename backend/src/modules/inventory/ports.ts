@@ -2,21 +2,22 @@
  * What the inventory service needs from the outside world, database-agnostic.
  * The MongoDB adapter lives in infra/mongo/.
  */
-import type { Insertable, Selectable, Updateable } from 'kysely';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { Page } from '../../spec/common.js';
 import type { InventoryDb } from '../../spec/inventory.js';
 
 export type Table = keyof InventoryDb & string;
-export type Row<T extends Table> = Selectable<InventoryDb[T]>;
-export type NewRow<T extends Table> = Insertable<InventoryDb[T]>;
-export type Patch<T extends Table> = Updateable<InventoryDb[T]>;
+export type Row<T extends Table> = InventoryDb[T];
+type NullableKeys<R> = { [K in keyof R]: null extends R[K] ? K : never }[keyof R];
+/** A row to insert: nullable columns may be left out (they are stored as null) */
+export type NewRow<T extends Table> = Omit<Row<T>, NullableKeys<Row<T>>> & Partial<Pick<Row<T>, NullableKeys<Row<T>>>>;
+export type Patch<T extends Table> = Partial<Row<T>>;
 
 /** Tables keyed by a uuid `id` column */
 export type IdTable = Exclude<Table, 'stock_levels' | 'inbound_lines' | 'transfer_lines' | 'count_lines'>;
 
 export interface Lock {
-  /** SELECT … FOR UPDATE: the decision depends on this row */
+  /** Lock the document for this transaction (lock-by-write, kernel/mongo/table.ts): the decision depends on it */
   forUpdate?: boolean;
 }
 
