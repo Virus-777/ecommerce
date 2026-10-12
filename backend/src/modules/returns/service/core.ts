@@ -223,17 +223,16 @@ export class Core {
     const ids = [...new Set(returnIds)];
     const out = new Map<string, Agg>();
     if (!ids.length) return out;
-    const [rets, items, shipments, refunds, replacements, inspections, drafts, evidence, events] = await Promise.all([
-      repo.find('returns', { id: ids }),
-      repo.find('return_items', { return_id: ids }, { orderBy: [['id', 'asc']] }),
-      repo.find('return_shipments', { return_id: ids }, { orderBy: [['created_at', 'asc']] }),
-      repo.find('refund_requests', { return_id: ids }, { orderBy: [['created_at', 'asc']] }),
-      repo.find('replacements', { return_id: ids }, { orderBy: [['created_at', 'asc']] }),
-      repo.find('inspections', { return_id: ids }, { orderBy: [['inspected_at', 'asc']] }),
-      repo.find('inspection_drafts', { return_id: ids }),
-      repo.find('return_evidence', { return_id: ids }, { orderBy: [['added_at', 'asc']] }),
-      repo.find('return_events', { return_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
-    ]);
+    // one after the other: repo may be a transaction (no concurrent operations on one session)
+    const rets = await repo.find('returns', { id: ids });
+    const items = await repo.find('return_items', { return_id: ids }, { orderBy: [['id', 'asc']] });
+    const shipments = await repo.find('return_shipments', { return_id: ids }, { orderBy: [['created_at', 'asc']] });
+    const refunds = await repo.find('refund_requests', { return_id: ids }, { orderBy: [['created_at', 'asc']] });
+    const replacements = await repo.find('replacements', { return_id: ids }, { orderBy: [['created_at', 'asc']] });
+    const inspections = await repo.find('inspections', { return_id: ids }, { orderBy: [['inspected_at', 'asc']] });
+    const drafts = await repo.find('inspection_drafts', { return_id: ids });
+    const evidence = await repo.find('return_evidence', { return_id: ids }, { orderBy: [['added_at', 'asc']] });
+    const events = await repo.find('return_events', { return_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
     for (const r of rets) out.set(r.id, { ret: r, items: [], shipments: [], refunds: [], replacements: [], inspections: [], draft: null, evidence: [], events: [] });
     for (const x of items) out.get(x.return_id)?.items.push(x);
     for (const x of shipments) out.get(x.return_id)?.shipments.push(x);
