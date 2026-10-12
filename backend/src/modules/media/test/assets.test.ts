@@ -77,6 +77,26 @@ describe('seller media library', () => {
     expect(next.json().items[0].id).not.toBe(res.json().items[0].id);
   });
 
+  it('pages the in-use filter by cursor and by page number', async () => {
+    const sellerId = newId();
+    const seller = callers.seller({ sellerId });
+    const ids: string[] = [];
+    for (const seed of ['use-1', 'use-2', 'use-3']) {
+      const { asset } = await uploadFile(t, 'seller', seller, { purpose: 'product_image', body: png(1000, 1000, { seed }) });
+      await t.media.attach(asset.id, { module: 'catalog', kind: 'product_image', refId: seed }, { kind: 'seller', id: sellerId });
+      ids.push(asset.id);
+      t.clock.advance(1000);
+    }
+    await uploadFile(t, 'seller', seller, { purpose: 'product_image', body: png(1000, 1000, { seed: 'use-none' }) });
+    const newestFirst = [...ids].reverse();
+    const first = (await get('/api/seller/media/assets?inUse=true&limit=2', seller)).json();
+    expect(first.items.map((x: { id: string }) => x.id)).toEqual(newestFirst.slice(0, 2));
+    const second = (await get(`/api/seller/media/assets?inUse=true&limit=2&cursor=${first.nextCursor}`, seller)).json();
+    expect(second).toMatchObject({ items: [expect.objectContaining({ id: newestFirst[2] })], nextCursor: null });
+    const numbered = (await get('/api/seller/media/assets?inUse=true&limit=2&page=2', seller)).json();
+    expect(numbered).toMatchObject({ items: [expect.objectContaining({ id: newestFirst[2] })], page: 2, totalPages: 2, total: 3 });
+  });
+
   it('detail shows where a file is used, whether it can be deleted, and its history', async () => {
     const sellerId = newId();
     const seller = callers.seller({ sellerId });

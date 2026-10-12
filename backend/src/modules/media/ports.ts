@@ -1,6 +1,6 @@
 /**
  * What the media service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; providers (storage, malware scanning, image and
+ * The MongoDB adapter lives in infra/mongo/; providers (storage, malware scanning, image and
  * video processing) have deterministic dev adapters in infra/<provider>/dev.ts.
  */
 import type { Readable } from 'node:stream';
@@ -38,7 +38,7 @@ export interface AssetFilter {
   q?: string;
 }
 
-/** Persistence for this module's own tables: media.assets, media.renditions, media.uploads, media.usages, media.processing_jobs, media.upload_counters. */
+/** Persistence for this module's own collections: media.assets, media.renditions, media.uploads, media.usages, media.processing_jobs, media.upload_counters. */
 export interface MediaRepository {
   /** Runs fn with a repository bound to one transaction */
   transaction<T>(fn: (tx: MediaRepository) => Promise<T>): Promise<T>;

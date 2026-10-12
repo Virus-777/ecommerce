@@ -53,7 +53,7 @@ import {
   type Uploader,
 } from './domain/rules.js';
 import { assetMachine } from './domain/state-machines.js';
-import { ERASED_BUCKET } from './infra/postgres/repository.js';
+import { ERASED_BUCKET } from './infra/mongo/repository.js';
 import { checkOf, ownerOf, toAsset, toRendition, toUsage } from './mappers.js';
 import { ObjectTooLargeError, type AssetFilter, type AssetPatch, type AssetRow, type MediaProviders, type MediaRepository, type OwnerFilter, type ProcessingJobRow, type RenditionRow, type UploadRow, type UsageRow } from './ports.js';
 

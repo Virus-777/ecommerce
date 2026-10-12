@@ -8,8 +8,7 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { fileServer } from './http/files.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresMediaRepository } from './infra/postgres/repository.js';
+import { createMongoMediaRepository } from './infra/mongo/repository.js';
 import { createDevProcessor } from './infra/processing/dev.js';
 import { createDevScanner } from './infra/scanner/dev.js';
 import { createLocalStorage } from './infra/storage/local.js';
@@ -25,9 +24,10 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   register(ctx) {
     // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads
     // through PUT /uploads/{id}/content and serve downloads at GET /files/{bucket}/{key}, signed with
@@ -40,7 +40,7 @@ export default defineModule({
         : // acceptSignedPut (tests and tools) follows an upload ticket's API URL to a signed upload URL
           createMemoryStorage({ clock: ctx.clock, links, uploadSecret: secretFor(ctx.config, 'media.storage'), resolveUploadUrl: (url) => service.signedStorageUrlFor(url) });
     const providers = { storage, scanner: createDevScanner(), processor: createDevProcessor() };
-    const service = new MediaService({ repo: createPostgresMediaRepository(ctx.db), ctx, providers });
+    const service = new MediaService({ repo: createMongoMediaRepository(ctx.mongo), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     // GET /files/{bucket}/{key}: the middleware verifies the signed link (auth kind file-link) before this streams the file

@@ -2,10 +2,9 @@
  * Gap pass 3: new usage kinds (evidence kinds keep files past the orphan sweep), readFile, storeInboundFile,
  * findSimilar, gift card code files, and staff uploads completed only by the staff member who started them.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { auth, callers, mediaApp, pdf, png, putContent, startUpload, uploadFile, type MediaTestApp } from './helpers.js';
+import { auth, callers, mediaApp, mediaTable, pdf, png, putContent, startUpload, uploadFile, type MediaTestApp } from './helpers.js';
 
 let t: MediaTestApp;
 beforeAll(async () => {
@@ -124,8 +123,7 @@ describe('findSimilar', () => {
     const nearer = await up(sellerA, 'sim-nearer');
     const far = await up(sellerB, 'sim-far');
     const evidence = await up(sellerB, 'sim-evidence', 'inspection_photo');
-    const db = t.app.kernel.database.kysely;
-    const setHash = (id: string, phash: number) => sql`update media.assets set phash = ${phash} where id = ${id}`.execute(db);
+    const setHash = (id: string, phash: number) => mediaTable(t.app, 'assets').update(id, { phash });
     await setHash(subject, 0b1111_0000);
     await setHash(nearer, 0b1111_0001); // distance 1
     await setHash(near, 0b1100_0000); // distance 2

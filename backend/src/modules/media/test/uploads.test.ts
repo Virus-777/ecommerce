@@ -4,7 +4,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { devClaims } from '../../../kernel/auth/dev.js';
 import { signWebhook, token } from '../../../testing/app.js';
 import { EICAR } from '../infra/scanner/dev.js';
-import { auth, callers, jpeg, mediaApp, mp4, pdf, png, sha256, startUpload, uploadFile, type MediaTestApp } from './helpers.js';
+import { auth, callers, jpeg, mediaApp, mediaTable, mp4, pdf, png, sha256, startUpload, uploadFile, type MediaTestApp } from './helpers.js';
 
 let t: MediaTestApp;
 beforeAll(async () => {
@@ -75,7 +75,7 @@ describe('starting an upload', () => {
     expect(res.statusCode).toBe(201);
     // 20 GB quota: pretend the seller already stores almost all of it
     const assetId = res.json().assetId;
-    await t.app.kernel.database.kysely.withSchema('media').updateTable('assets').set({ size_bytes: 20 * 1024 ** 3 - 100 }).where('id', '=', assetId).execute();
+    await mediaTable(t.app, 'assets').update(assetId, { size_bytes: 20 * 1024 ** 3 - 100 });
     const again = await startUpload(t, 'seller', seller, { purpose: 'product_image', sizeBytes: 1000 });
     expect(again.statusCode).toBe(429);
     expect(again.json().error.code).toBe('QUOTA_EXCEEDED');

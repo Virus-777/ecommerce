@@ -5,13 +5,21 @@ import { fixedClock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import type * as audit from '../../../spec/audit.js';
-import type { MediaAsset, UploadRequest, UploadTicket } from '../../../spec/media.js';
+import type { Selectable } from 'kysely';
+import type { Table } from '../../../kernel/mongo/index.js';
+import { spec, type MediaAsset, type MediaDb, type UploadRequest, type UploadTicket } from '../../../spec/media.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
 import type { DevProcessor } from '../infra/processing/dev.js';
 import type { MemoryStorage } from '../infra/storage/memory.js';
 import type { MediaService } from '../service.js';
 
 export { auth, callers };
+
+/** A collection of the module as its repository reads it (rows in spec shape) */
+export function mediaTable<T extends keyof MediaDb & string>(app: FastifyInstance, name: T): Table<Selectable<MediaDb[T]>> {
+  return app.kernel.mongo.module('media', spec.collections, schemas).table<Selectable<MediaDb[T]>>(name);
+}
 
 export interface MediaTestApp {
   app: FastifyInstance;

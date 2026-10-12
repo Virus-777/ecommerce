@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { devClaims } from '../../../kernel/auth/dev.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { token } from '../../../testing/app.js';
-import { mediaApp, pdf, png, startUpload, uploadFile, type MediaTestApp } from './helpers.js';
+import { mediaApp, mediaTable, pdf, png, startUpload, uploadFile, type MediaTestApp } from './helpers.js';
 
 let t: MediaTestApp;
 beforeEach(async () => {
@@ -116,7 +116,7 @@ describe('media.reconcile-storage', () => {
     await t.storage.put(t.storage.buckets.private, 'originals/stray.png', Buffer.from('x'), 'image/png');
     let report = await t.media.reconcileStorage();
     expect(report).toMatchObject({ orphaned: [`${t.storage.buckets.private}/originals/stray.png`], missing: [] });
-    const row = await t.app.kernel.database.kysely.withSchema('media').selectFrom('assets').select(['storage_bucket', 'storage_key']).where('id', '=', asset.id).executeTakeFirstOrThrow();
+    const row = (await mediaTable(t.app, 'assets').get(asset.id))!;
     await t.storage.delete(row.storage_bucket, row.storage_key);
     report = await t.media.reconcileStorage();
     expect(report.missing).toEqual([asset.id]);
