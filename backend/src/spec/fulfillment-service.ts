@@ -3587,7 +3587,14 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "inbound_lines_inbound_id_94c3d7",
+          "key": {
+            "inbound_id": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "inbound_receipts": {
@@ -3696,6 +3703,12 @@ export const spec = defineModuleSpec({
             "seq": 1
           },
           "unique": true
+        },
+        {
+          "name": "inbound_receipts_inventory_receipt_id_c0c715",
+          "key": {
+            "inventory_receipt_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -3787,7 +3800,14 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "discrepancies_inbound_id_94c3d7",
+          "key": {
+            "inbound_id": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "ownership_ledger": {
@@ -4027,6 +4047,19 @@ export const spec = defineModuleSpec({
             "seller_group_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "fulfillment_requests_seller_id_state_e600c9",
+          "key": {
+            "seller_id": 1,
+            "state": 1
+          }
+        },
+        {
+          "name": "fulfillment_requests_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -4142,6 +4175,13 @@ export const spec = defineModuleSpec({
             "order_item_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "service_returns_seller_id_outcome_8a256c",
+          "key": {
+            "seller_id": 1,
+            "outcome": 1
+          }
         }
       ],
       "unenforced": []
@@ -4265,6 +4305,13 @@ export const spec = defineModuleSpec({
             "ref": 1
           },
           "unique": true
+        },
+        {
+          "name": "removal_orders_seller_id_state_e600c9",
+          "key": {
+            "seller_id": 1,
+            "state": 1
+          }
         }
       ],
       "unenforced": []
@@ -4401,6 +4448,13 @@ export const spec = defineModuleSpec({
           "key": {
             "state": 1,
             "day": 1
+          }
+        },
+        {
+          "name": "stock_differences_seller_id_state_e600c9",
+          "key": {
+            "seller_id": 1,
+            "state": 1
           }
         }
       ],
@@ -4628,6 +4682,19 @@ export const spec = defineModuleSpec({
             "type": 1,
             "period": 1
           }
+        },
+        {
+          "name": "fee_charges_seller_id_period_6b612e",
+          "key": {
+            "seller_id": 1,
+            "period": 1
+          }
+        },
+        {
+          "name": "fee_charges_reference_99774b",
+          "key": {
+            "reference": 1
+          }
         }
       ],
       "unenforced": []
@@ -4704,6 +4771,13 @@ export const spec = defineModuleSpec({
             "sku_enrollment_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "storage_snapshots_seller_id_day_f1d882",
+          "key": {
+            "seller_id": 1,
+            "day": 1
+          }
         }
       ],
       "unenforced": []

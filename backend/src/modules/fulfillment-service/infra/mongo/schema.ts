@@ -97,6 +97,7 @@ const inbound_lines = new Schema(
   },
   collectionOptions("fulfillment-service.inbound_lines", { generatedId: true }),
 );
+inbound_lines.index({"inbound_id":1}, {"name":"inbound_lines_inbound_id_94c3d7"});
 
 /** One row per receiving record of an inbound shipment, submitted to inventory as a service receipt and confirmed by the Inventory Manager */
 const inbound_receipts = new Schema(
@@ -117,6 +118,7 @@ const inbound_receipts = new Schema(
   collectionOptions("fulfillment-service.inbound_receipts"),
 );
 inbound_receipts.index({"inbound_id":1,"seq":1}, {"name":"inbound_receipts_inbound_id_seq_182711","unique":true});
+inbound_receipts.index({"inventory_receipt_id":1}, {"name":"inbound_receipts_inventory_receipt_id_c0c715"});
 
 const discrepancies = new Schema(
   {
@@ -134,6 +136,7 @@ const discrepancies = new Schema(
   },
   collectionOptions("fulfillment-service.discrepancies"),
 );
+discrepancies.index({"inbound_id":1}, {"name":"discrepancies_inbound_id_94c3d7"});
 
 /** Every movement of seller-owned units in our warehouse (received, reserved, shipped, returned, unsellable, removed, disposed, adjusted) with reason; reconciles with inventory */
 const ownership_ledger = new Schema(
@@ -178,6 +181,8 @@ const fulfillment_requests = new Schema(
   collectionOptions("fulfillment-service.fulfillment_requests"),
 );
 fulfillment_requests.index({"seller_group_id":1}, {"name":"fulfillment_requests_seller_group_id_55215b","unique":true});
+fulfillment_requests.index({"seller_id":1,"state":1}, {"name":"fulfillment_requests_seller_id_state_e600c9"});
+fulfillment_requests.index({"order_id":1}, {"name":"fulfillment_requests_order_id_4c5e85"});
 
 const service_returns = new Schema(
   {
@@ -199,6 +204,7 @@ const service_returns = new Schema(
   collectionOptions("fulfillment-service.service_returns"),
 );
 service_returns.index({"return_id":1,"order_item_id":1}, {"name":"service_returns_return_id_order_item_id_1e022e","unique":true});
+service_returns.index({"seller_id":1,"outcome":1}, {"name":"service_returns_seller_id_outcome_8a256c"});
 
 const removal_orders = new Schema(
   {
@@ -221,6 +227,7 @@ const removal_orders = new Schema(
   collectionOptions("fulfillment-service.removal_orders"),
 );
 removal_orders.index({"ref":1}, {"name":"removal_orders_ref_8cef23","unique":true});
+removal_orders.index({"seller_id":1,"state":1}, {"name":"removal_orders_seller_id_state_e600c9"});
 
 /** Daily reconciliation differences between the ownership ledger and inventory at the service location, per SKU */
 const stock_differences = new Schema(
@@ -245,6 +252,7 @@ const stock_differences = new Schema(
 );
 stock_differences.index({"sku_enrollment_id":1,"day":1}, {"name":"stock_differences_sku_enrollment_id_day_8ba80f","unique":true});
 stock_differences.index({"state":1,"day":1}, {"name":"stock_differences_state_day_47a65e"});
+stock_differences.index({"seller_id":1,"state":1}, {"name":"stock_differences_seller_id_state_e600c9"});
 
 const fee_schedules = new Schema(
   {
@@ -285,6 +293,8 @@ const fee_charges = new Schema(
 fee_charges.index({"idempotency_key":1}, {"name":"fee_charges_idempotency_key_b82ef6","unique":true});
 fee_charges.index({"seller_id":1,"state":1}, {"name":"fee_charges_seller_id_state_e600c9"});
 fee_charges.index({"type":1,"period":1}, {"name":"fee_charges_type_period_d37a43"});
+fee_charges.index({"seller_id":1,"period":1}, {"name":"fee_charges_seller_id_period_6b612e"});
+fee_charges.index({"reference":1}, {"name":"fee_charges_reference_99774b"});
 
 /** Daily volume per seller and SKU for storage billing */
 const storage_snapshots = new Schema(
@@ -301,6 +311,7 @@ const storage_snapshots = new Schema(
   collectionOptions("fulfillment-service.storage_snapshots", { generatedId: true }),
 );
 storage_snapshots.index({"day":1,"sku_enrollment_id":1}, {"name":"storage_snapshots_day_sku_enrollment_id_644c3e","unique":true});
+storage_snapshots.index({"seller_id":1,"day":1}, {"name":"storage_snapshots_seller_id_day_f1d882"});
 
 /** Table name → schema */
 export const schemas = {

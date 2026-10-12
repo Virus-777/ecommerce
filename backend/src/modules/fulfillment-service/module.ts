@@ -2,8 +2,8 @@ import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/fulfillment-service.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresFulfillmentServiceRepository } from './infra/postgres/repository.js';
+import { seed } from './domain/seed.js';
+import { createMongoFulfillmentServiceRepository } from './infra/mongo/repository.js';
 import { FulfillmentServiceService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -15,11 +15,15 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
-  register(ctx) {
-    const service = new FulfillmentServiceService({ repo: createPostgresFulfillmentServiceRepository(ctx.db, ctx.inbox), ctx });
+  migrations: [],
+  async register(ctx) {
+    const repo = createMongoFulfillmentServiceRepository(ctx.mongo);
+    // the example fee schedule (domain/seed.ts)
+    await seed(repo);
+    const service = new FulfillmentServiceService({ repo, ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     // the report datasets (K16), once every module has registered

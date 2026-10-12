@@ -12,7 +12,7 @@ export const SYSTEM: common.Actor = { kind: 'system', id: null, name: 'Marketly'
 
 const usd = (amount: number): common.Money => ({ amount, currency: 'USD' });
 
-/** In force until staff publish a real schedule (seeded by migration 0002; example values) */
+/** In force until staff publish a real schedule (seeded on boot by domain/seed.ts; example values) */
 export const EXAMPLE_SCHEDULE = {
   id: '01890000-0000-7000-8000-00000000f5e1',
   version: 'FS-EXAMPLE-2026',
