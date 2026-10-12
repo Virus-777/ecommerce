@@ -108,7 +108,40 @@ export interface ModuleSpecDef {
   readonly tables: Readonly<Record<string, Readonly<Record<string, { readonly type: string; readonly nullable: boolean }>>>>;
   /** table → owner column per caller kind (seller_id, customer_id, guest_session_id) */
   readonly tenantTables: Readonly<Record<string, Readonly<{ seller?: string; customer?: string; visitor?: string }>>>;
+  /** table → its MongoDB collection: _id field, validator and indexes (tools/lib/mongo.ts, docs/04-mongodb-migration.md) */
+  readonly collections: Readonly<Record<string, CollectionDef>>;
   readonly endpoints: EndpointTable;
+}
+
+export interface MongoIndexDef {
+  readonly name: string;
+  readonly key: Readonly<Record<string, 1 | -1 | 'text'>>;
+  readonly unique?: boolean;
+  readonly partial?: Readonly<Record<string, unknown>>;
+  readonly collation?: Readonly<{ locale: string; strength: number }>;
+}
+
+/** A spec table as a MongoDB collection `<module>.<table>` */
+export interface CollectionDef {
+  /** The column stored as _id (single-column primary key), else null (generated _id) */
+  readonly idField: string | null;
+  /** Primary key columns */
+  readonly key: readonly string[];
+  /** Stored columns (tsvector columns are not) */
+  readonly columns: readonly string[];
+  readonly nullable: readonly string[];
+  /** numeric columns: Decimal128 in MongoDB, strings in JS */
+  readonly decimal: readonly string[];
+  /** bytea columns: binary in MongoDB, Uint8Array in JS */
+  readonly binary: readonly string[];
+  /** timestamptz columns */
+  readonly dates: readonly string[];
+  /** identity / bigserial column numbered from a kernel counter */
+  readonly identity: string | null;
+  readonly validator: Readonly<Record<string, unknown>>;
+  readonly indexes: readonly MongoIndexDef[];
+  /** Spec unique indexes MongoDB can't express yet: the module's repository enforces them (docs/04 §2) */
+  readonly unenforced: readonly string[];
 }
 
 export function defineModuleSpec<const S extends ModuleSpecDef>(spec: S): S {

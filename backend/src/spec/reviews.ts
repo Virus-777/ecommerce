@@ -3691,6 +3691,1601 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "product_reviews": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "product_id",
+        "variant_id",
+        "order_item_id",
+        "order_id",
+        "seller_id",
+        "customer_id",
+        "display_name",
+        "show_name",
+        "verified",
+        "rating",
+        "headline",
+        "body",
+        "media_ids",
+        "status",
+        "visible",
+        "helpful_count",
+        "created_at",
+        "published_at",
+        "edited_at"
+      ],
+      "nullable": [
+        "variant_id",
+        "published_at",
+        "edited_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "published_at",
+        "edited_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "product_id",
+            "order_item_id",
+            "order_id",
+            "seller_id",
+            "customer_id",
+            "display_name",
+            "show_name",
+            "verified",
+            "rating",
+            "headline",
+            "body",
+            "media_ids",
+            "status",
+            "visible",
+            "helpful_count",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "variant_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "order_item_id": {
+              "bsonType": "string"
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "display_name": {
+              "bsonType": "string"
+            },
+            "show_name": {
+              "bsonType": "bool"
+            },
+            "verified": {
+              "bsonType": "bool"
+            },
+            "rating": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "headline": {
+              "bsonType": "string"
+            },
+            "body": {
+              "bsonType": "string"
+            },
+            "media_ids": {},
+            "status": {
+              "bsonType": "string"
+            },
+            "visible": {
+              "bsonType": "bool"
+            },
+            "helpful_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "published_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "edited_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "product_reviews_customer_id_product_id_528806",
+          "key": {
+            "customer_id": 1,
+            "product_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "product_reviews_product_id_status_helpful_count_5308a1",
+          "key": {
+            "product_id": 1,
+            "status": 1,
+            "helpful_count": -1
+          }
+        },
+        {
+          "name": "product_reviews_product_id_status_published_at_6696c1",
+          "key": {
+            "product_id": 1,
+            "status": 1,
+            "published_at": -1
+          }
+        },
+        {
+          "name": "product_reviews_seller_id_published_at_5016ed",
+          "key": {
+            "seller_id": 1,
+            "published_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "seller_feedback": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "seller_id",
+        "order_id",
+        "customer_id",
+        "display_name",
+        "as_described",
+        "dispatch_rating",
+        "communication_rating",
+        "overall",
+        "sentiment",
+        "comment",
+        "status",
+        "visible",
+        "created_at",
+        "edited_at"
+      ],
+      "nullable": [
+        "communication_rating",
+        "comment",
+        "edited_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "edited_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "seller_id",
+            "order_id",
+            "customer_id",
+            "display_name",
+            "as_described",
+            "dispatch_rating",
+            "overall",
+            "sentiment",
+            "status",
+            "visible",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "display_name": {
+              "bsonType": "string"
+            },
+            "as_described": {
+              "bsonType": "bool"
+            },
+            "dispatch_rating": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "communication_rating": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "overall": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "sentiment": {
+              "bsonType": "string"
+            },
+            "comment": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "visible": {
+              "bsonType": "bool"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "edited_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "seller_feedback_order_id_seller_id_customer_id_64d726",
+          "key": {
+            "order_id": 1,
+            "seller_id": 1,
+            "customer_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "seller_feedback_seller_id_status_created_at_0d3492",
+          "key": {
+            "seller_id": 1,
+            "status": 1,
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "seller_responses": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "target_type",
+        "target_id",
+        "seller_id",
+        "text",
+        "status",
+        "rule_check",
+        "created_by",
+        "created_at",
+        "published_at",
+        "editable_until"
+      ],
+      "nullable": [
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "published_at",
+        "editable_until"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "target_type",
+            "target_id",
+            "seller_id",
+            "text",
+            "status",
+            "rule_check",
+            "created_by",
+            "created_at",
+            "editable_until"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "target_type": {
+              "bsonType": "string"
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "text": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "rule_check": {},
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "published_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "editable_until": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "seller_responses_target_type_target_id_dcbcf6",
+          "key": {
+            "target_type": 1,
+            "target_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "seller_responses_seller_id_status_b608db",
+          "key": {
+            "seller_id": 1,
+            "status": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "questions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "product_id",
+        "customer_id",
+        "display_name",
+        "text",
+        "status",
+        "answer_count",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "product_id",
+            "customer_id",
+            "display_name",
+            "text",
+            "status",
+            "answer_count",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "display_name": {
+              "bsonType": "string"
+            },
+            "text": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "answer_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "questions_product_id_status_created_at_b53977",
+          "key": {
+            "product_id": 1,
+            "status": 1,
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "answers": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "question_id",
+        "author_kind",
+        "author_id",
+        "seller_id",
+        "display_name",
+        "text",
+        "status",
+        "rule_check",
+        "helpful_count",
+        "created_at",
+        "published_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "published_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "question_id",
+            "author_kind",
+            "author_id",
+            "display_name",
+            "text",
+            "status",
+            "rule_check",
+            "helpful_count",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "question_id": {
+              "bsonType": "string"
+            },
+            "author_kind": {
+              "bsonType": "string"
+            },
+            "author_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "display_name": {
+              "bsonType": "string"
+            },
+            "text": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "rule_check": {},
+            "helpful_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "published_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "answers_question_id_status_7a9641",
+          "key": {
+            "question_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "answers_seller_id_b7adb7",
+          "key": {
+            "seller_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "helpful_votes": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "target_type",
+        "target_id",
+        "customer_id",
+        "helpful",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "target_type",
+            "target_id",
+            "customer_id",
+            "helpful",
+            "at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "target_type": {
+              "bsonType": "string"
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "helpful": {
+              "bsonType": "bool"
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "helpful_votes_target_type_target_id_customer_id_dfdc1e",
+          "key": {
+            "target_type": 1,
+            "target_id": 1,
+            "customer_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "reports": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "target_type",
+        "target_id",
+        "moderation_item_id",
+        "reporter_kind",
+        "reporter_id",
+        "reason",
+        "note",
+        "status",
+        "outcome_text",
+        "created_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "reporter_id",
+        "note",
+        "outcome_text",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "decided_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "target_type",
+            "target_id",
+            "moderation_item_id",
+            "reporter_kind",
+            "reason",
+            "status",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "target_type": {
+              "bsonType": "string"
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "moderation_item_id": {
+              "bsonType": "string"
+            },
+            "reporter_kind": {
+              "bsonType": "string"
+            },
+            "reporter_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "outcome_text": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "reports_reporter_kind_reporter_id_created_at_d2e805",
+          "key": {
+            "reporter_kind": 1,
+            "reporter_id": 1,
+            "created_at": -1
+          }
+        },
+        {
+          "name": "reports_moderation_item_id_f2d022",
+          "key": {
+            "moderation_item_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "moderation_items": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "content_type",
+        "content_id",
+        "queue",
+        "status",
+        "visibility",
+        "reasons",
+        "report_count",
+        "first_reported_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "first_reported_at",
+        "decided_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "content_type",
+            "content_id",
+            "queue",
+            "status",
+            "visibility",
+            "reasons",
+            "report_count",
+            "first_reported_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "content_type": {
+              "bsonType": "string"
+            },
+            "content_id": {
+              "bsonType": "string"
+            },
+            "queue": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "visibility": {
+              "bsonType": "string"
+            },
+            "reasons": {},
+            "report_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "first_reported_at": {
+              "bsonType": "date"
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "moderation_items_status_queue_first_reported_at_79e3cf",
+          "key": {
+            "status": 1,
+            "queue": 1,
+            "first_reported_at": 1
+          }
+        },
+        {
+          "name": "moderation_items_content_type_content_id_d7d875",
+          "key": {
+            "content_type": 1,
+            "content_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "moderation_decisions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "moderation_item_id",
+        "decision",
+        "reason_code",
+        "message_to_reporter",
+        "message_to_author",
+        "edit_request",
+        "moderator_id",
+        "decided_at",
+        "appeal_by",
+        "trust_enforcement_id"
+      ],
+      "nullable": [
+        "message_to_reporter",
+        "message_to_author",
+        "edit_request",
+        "appeal_by",
+        "trust_enforcement_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at",
+        "appeal_by"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "moderation_item_id",
+            "decision",
+            "reason_code",
+            "moderator_id",
+            "decided_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "moderation_item_id": {
+              "bsonType": "string"
+            },
+            "decision": {
+              "bsonType": "string"
+            },
+            "reason_code": {
+              "bsonType": "string"
+            },
+            "message_to_reporter": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "message_to_author": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "edit_request": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "moderator_id": {
+              "bsonType": "string"
+            },
+            "decided_at": {
+              "bsonType": "date"
+            },
+            "appeal_by": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "trust_enforcement_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "moderation_decisions_moderation_item_id_f2d022",
+          "key": {
+            "moderation_item_id": 1
+          }
+        },
+        {
+          "name": "moderation_decisions_trust_enforcement_id_2d16cc",
+          "key": {
+            "trust_enforcement_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "referrals": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "moderation_item_id",
+        "content_type",
+        "content_id",
+        "author_id",
+        "note",
+        "referred_by",
+        "referred_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "referred_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "moderation_item_id",
+            "content_type",
+            "content_id",
+            "author_id",
+            "note",
+            "referred_by",
+            "referred_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "moderation_item_id": {
+              "bsonType": "string"
+            },
+            "content_type": {
+              "bsonType": "string"
+            },
+            "content_id": {
+              "bsonType": "string"
+            },
+            "author_id": {
+              "bsonType": "string"
+            },
+            "note": {
+              "bsonType": "string"
+            },
+            "referred_by": {
+              "bsonType": "string"
+            },
+            "referred_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "referrals_moderation_item_id_f2d022",
+          "key": {
+            "moderation_item_id": 1
+          }
+        },
+        {
+          "name": "referrals_content_type_content_id_d7d875",
+          "key": {
+            "content_type": 1,
+            "content_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "appeals": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "decision_id",
+        "content_type",
+        "content_id",
+        "by_kind",
+        "by_id",
+        "reason",
+        "status",
+        "reviewer_id",
+        "outcome",
+        "submitted_at",
+        "decided_at"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "outcome",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "decided_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "decision_id",
+            "content_type",
+            "content_id",
+            "by_kind",
+            "by_id",
+            "reason",
+            "status",
+            "submitted_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "decision_id": {
+              "bsonType": "string"
+            },
+            "content_type": {
+              "bsonType": "string"
+            },
+            "content_id": {
+              "bsonType": "string"
+            },
+            "by_kind": {
+              "bsonType": "string"
+            },
+            "by_id": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "reviewer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "outcome": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "submitted_at": {
+              "bsonType": "date"
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "appeals_status_submitted_at_551712",
+          "key": {
+            "status": 1,
+            "submitted_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "product_rating_summaries": {
+      "idField": "product_id",
+      "key": [
+        "product_id"
+      ],
+      "columns": [
+        "product_id",
+        "rating_count",
+        "written_count",
+        "sum_ratings",
+        "distribution",
+        "with_photos",
+        "answered_questions",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "rating_count",
+            "written_count",
+            "sum_ratings",
+            "distribution",
+            "with_photos",
+            "answered_questions",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "rating_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "written_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "sum_ratings": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "distribution": {},
+            "with_photos": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "answered_questions": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "review_invites": {
+      "idField": "order_item_id",
+      "key": [
+        "order_item_id"
+      ],
+      "columns": [
+        "order_item_id",
+        "order_id",
+        "customer_id",
+        "product_id",
+        "seller_id",
+        "delivered_at",
+        "due_at",
+        "state",
+        "sent_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "sent_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "delivered_at",
+        "due_at",
+        "sent_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "customer_id",
+            "product_id",
+            "seller_id",
+            "delivered_at",
+            "due_at",
+            "state",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "delivered_at": {
+              "bsonType": "date"
+            },
+            "due_at": {
+              "bsonType": "date"
+            },
+            "state": {
+              "bsonType": "string",
+              "enum": [
+                "pending",
+                "sent",
+                "cancelled",
+                "reviewed"
+              ]
+            },
+            "sent_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "review_invites_state_due_at_c06642",
+          "key": {
+            "state": 1,
+            "due_at": 1
+          }
+        },
+        {
+          "name": "review_invites_customer_id_dc4488",
+          "key": {
+            "customer_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "seller_feedback_summaries": {
+      "idField": "seller_id",
+      "key": [
+        "seller_id"
+      ],
+      "columns": [
+        "seller_id",
+        "count",
+        "positive",
+        "neutral",
+        "negative",
+        "as_described_yes",
+        "dispatch_sum",
+        "communication_sum",
+        "communication_count",
+        "overall_sum",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "count",
+            "positive",
+            "neutral",
+            "negative",
+            "as_described_yes",
+            "dispatch_sum",
+            "communication_sum",
+            "communication_count",
+            "overall_sum",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "positive": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "neutral": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "negative": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "as_described_yes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "dispatch_sum": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "communication_sum": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "communication_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "overall_sum": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

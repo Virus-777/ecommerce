@@ -6,6 +6,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config/index.js';
 import type { Database } from '../db/index.js';
+import type { MongoStore } from '../mongo/index.js';
 import type { Principal } from '../auth/index.js';
 import { isAppError, isNotImplemented, moduleError, notImplemented } from '../errors/index.js';
 import { moduleInbox } from '../events/inbox.js';
@@ -27,6 +28,7 @@ export interface KernelServices {
   config: Config;
   log: FastifyBaseLogger;
   database: Database;
+  mongo: MongoStore;
   clock: Clock;
   events: EventBus;
   jobs: JobScheduler;
@@ -129,6 +131,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
       log: k.log.child({ module: name }),
       db: k.database.kysely.withSchema(schemaOf(name)),
       database: k.database,
+      mongo: k.mongo.module(name, spec.collections, def.schemas ?? {}),
       clock: k.clock,
       events: moduleEvents(k.events, spec),
       jobs: {

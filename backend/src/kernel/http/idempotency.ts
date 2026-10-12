@@ -6,6 +6,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { Kysely } from 'kysely';
+import type { MongoStore } from '../mongo/index.js';
 import { AppError } from '../errors/index.js';
 import { systemClock, type Clock } from '../lib/clock.js';
 
@@ -20,6 +21,47 @@ export interface IdempotencyStore {
 const TTL_MS = 24 * 3600_000;
 
 export const hashRequest = (parts: unknown) => createHash('sha256').update(JSON.stringify(parts ?? null)).digest('hex');
+
+interface KeyDoc {
+  _id: string;
+  scope: string;
+  key: string;
+  request_hash: string;
+  status: 'in_progress' | 'completed';
+  response_status?: number;
+  /** the response as JSON text, replayed exactly */
+  response_body?: string;
+  created_at: Date;
+  completed_at?: Date;
+}
+
+/** Keys in MongoDB (kernel.idempotency_keys, expired by a TTL index after 24 h) */
+export function mongoIdempotencyStore(store: MongoStore, clock: Clock = systemClock): IdempotencyStore {
+  const keys = store.kernel('idempotency_keys');
+  const idOf = (scope: string, key: string) => `${scope}|${key}`;
+  return {
+    async begin(scope, key, requestHash) {
+      const _id = idOf(scope, key);
+      const r = await keys.updateOne({ _id }, { $setOnInsert: { scope, key, request_hash: requestHash, status: 'in_progress', created_at: clock.now() } }, { upsert: true });
+      if (r.upsertedCount) return null;
+      const row = (await keys.findOne({ _id }).lean()) as KeyDoc | null;
+      if (!row) return this.begin(scope, key, requestHash);
+      if (clock.now().getTime() - row.created_at.getTime() > TTL_MS) {
+        await keys.deleteOne({ _id, created_at: row.created_at });
+        return this.begin(scope, key, requestHash);
+      }
+      if (row.request_hash !== requestHash) throw new AppError('IDEMPOTENCY_KEY_REUSED');
+      if (row.status !== 'completed') throw new AppError('CONFLICT', 'A request with this Idempotency-Key is still being processed');
+      return { status: row.response_status!, body: row.response_body === undefined ? null : JSON.parse(row.response_body) };
+    },
+    async complete(scope, key, status, body) {
+      await keys.updateOne({ _id: idOf(scope, key) }, { $set: { status: 'completed', response_status: status, response_body: JSON.stringify(body ?? null), completed_at: clock.now() } });
+    },
+    async release(scope, key) {
+      await keys.deleteOne({ _id: idOf(scope, key) });
+    },
+  };
+}
 
 export function postgresIdempotencyStore(db: Kysely<any>, clock: Clock = systemClock): IdempotencyStore {
   const table = 'kernel.idempotency_keys';

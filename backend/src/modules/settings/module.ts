@@ -5,8 +5,8 @@ import { typeDefs } from './graphql/schema.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresSettingsRepository } from './infra/postgres/repository.js';
+import { createMongoSettingsRepository } from './infra/mongo/repository.js';
+import { schemas } from './infra/mongo/schema.js';
 import { SettingsService } from './service.js';
 
 /**
@@ -17,12 +17,14 @@ import { SettingsService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.4.0',
-  migrations,
+  version: '2.0.0',
+  store: 'mongo',
+  schemas,
+  migrations: [],
   graphql: typeDefs,
   async register(ctx) {
     const service = new SettingsService({
-      repo: createPostgresSettingsRepository(ctx.db),
+      repo: createMongoSettingsRepository(ctx.mongo),
       ctx,
       // the kernel does not tell a module which modules run; this mirrors app.ts (spec gap, see report)
       enabledModules: ctx.modules,

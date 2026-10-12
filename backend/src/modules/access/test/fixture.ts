@@ -4,20 +4,25 @@
  * members in roles directly in the database.
  */
 import type { FastifyInstance } from 'fastify';
-import type { Kysely } from 'kysely';
 import type { Clock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
-import type { AccessDb } from '../../../spec/access.js';
+import type { Table } from '../../../kernel/mongo/index.js';
+import { spec, type AccessDb } from '../../../spec/access.js';
+import { schemas } from '../infra/mongo/schema.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as identity from '../../../spec/identity.js';
 import type { AccessService } from '../service.js';
+import type { Selectable } from 'kysely';
+
+type Row<T extends keyof AccessDb> = Selectable<AccessDb[T]>;
 
 export interface Fixture {
   app: FastifyInstance;
   svc: AccessService;
-  db: Kysely<AccessDb>;
+  /** A collection of the module, as its repository reads it (rows in spec shape) */
+  table<T extends keyof AccessDb & string>(name: T): Table<Row<T>>;
   clock: Clock & { advance(ms: number): void; reset(): void };
   accounts: Map<string, identity.AccountSummary>;
   invitations: { email: string; name: string }[];
@@ -92,19 +97,20 @@ export async function accessFixture(): Promise<Fixture> {
     },
   });
   const svc = app.kernel.boot.apis.get('access') as AccessService;
-  const db = app.kernel.database.kysely.withSchema('access') as Kysely<AccessDb>;
+  const store = app.kernel.mongo.module('access', spec.collections, schemas);
+  const table = <T extends keyof AccessDb & string>(name: T) => store.table<Row<T>>(name);
   const events: { name: string; payload: any }[] = [];
   for (const name of ACCESS_EVENTS) app.kernel.events.subscribe('test', name, (e) => void events.push({ name, payload: e.payload }));
 
   const roleId = async (key: string) => {
     await svc.syncRegistry();
-    return (await db.selectFrom('roles').select('id').where('key', '=', key).executeTakeFirstOrThrow()).id;
+    return (await table('roles').findOne({ key }))!.id;
   };
   let n = 0;
   const f: Fixture = {
     app,
     svc,
-    db,
+    table,
     clock,
     accounts,
     invitations,
@@ -114,10 +120,7 @@ export async function accessFixture(): Promise<Fixture> {
       const id = newId();
       accounts.set(id, { id, realm: 'staff', email: `staff${++n}.${id.slice(-6)}@marketly.test`, displayName: name, status, emailVerified: true, twoStepEnabled: true });
       for (const key of roleKeys) {
-        await db
-          .insertInto('role_assignments')
-          .values({ id: newId(), account_id: id, role_id: await roleId(key), status: 'active', granted_by_kind: 'system', granted_by_id: 'test', reason: 'test', granted_at: new Date(clock.now().getTime() - 1000), expires_at: null, revoked_at: null, revoked_by: null, revoke_reason: null, approval_request_id: null })
-          .execute();
+        await table('role_assignments').insert({ id: newId(), account_id: id, role_id: await roleId(key), status: 'active', granted_by_kind: 'system', granted_by_id: 'test', reason: 'test', granted_at: new Date(clock.now().getTime() - 1000), expires_at: null, revoked_at: null, revoked_by: null, revoke_reason: null, approval_request_id: null });
       }
       return id;
     },

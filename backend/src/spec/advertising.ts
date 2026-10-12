@@ -3972,6 +3972,1783 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "placements": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "key",
+        "name",
+        "kind",
+        "enabled",
+        "availability",
+        "eligible_pages",
+        "formats",
+        "frequency_cap",
+        "trigger",
+        "rotation",
+        "dismissal",
+        "max_per_page",
+        "positions",
+        "label",
+        "description",
+        "version",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "frequency_cap",
+        "trigger",
+        "max_per_page",
+        "positions",
+        "updated_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "key",
+            "name",
+            "kind",
+            "enabled",
+            "availability",
+            "eligible_pages",
+            "formats",
+            "rotation",
+            "dismissal",
+            "label",
+            "description",
+            "version",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "key": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "enabled": {
+              "bsonType": "bool"
+            },
+            "availability": {
+              "bsonType": "string"
+            },
+            "eligible_pages": {},
+            "formats": {},
+            "frequency_cap": {},
+            "trigger": {},
+            "rotation": {},
+            "dismissal": {},
+            "max_per_page": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "positions": {},
+            "label": {
+              "bsonType": "string"
+            },
+            "description": {
+              "bsonType": "string"
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "placements_key_f44b4e",
+          "key": {
+            "key": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "global_rules": {
+      "idField": "version",
+      "key": [
+        "version"
+      ],
+      "columns": [
+        "version",
+        "rules",
+        "effective_at",
+        "approval_request_id",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "rules",
+            "effective_at",
+            "created_by",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "rules": {},
+            "effective_at": {
+              "bsonType": "date"
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "campaigns": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "name",
+        "origin",
+        "advertiser_kind",
+        "seller_id",
+        "brand_id",
+        "goal",
+        "owner_staff_id",
+        "linked_promotion_id",
+        "placement_id",
+        "pages",
+        "page_category_ids",
+        "audience",
+        "destination",
+        "starts_at",
+        "ends_at",
+        "time_zone",
+        "frequency_cap",
+        "dismissal",
+        "priority",
+        "billing",
+        "rate",
+        "daily_limit",
+        "total_limit",
+        "delivery_cap",
+        "spent",
+        "currency",
+        "stop_with_promotion",
+        "after_approval",
+        "status",
+        "paused_reason",
+        "paused_by",
+        "paused_at",
+        "pause_cause",
+        "rejected_reason",
+        "finished_reason",
+        "note_to_reviewers",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "version"
+      ],
+      "nullable": [
+        "seller_id",
+        "brand_id",
+        "owner_staff_id",
+        "linked_promotion_id",
+        "starts_at",
+        "ends_at",
+        "rate",
+        "daily_limit",
+        "total_limit",
+        "delivery_cap",
+        "paused_reason",
+        "paused_by",
+        "paused_at",
+        "pause_cause",
+        "rejected_reason",
+        "finished_reason",
+        "note_to_reviewers"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "starts_at",
+        "ends_at",
+        "paused_at",
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "name",
+            "origin",
+            "advertiser_kind",
+            "goal",
+            "placement_id",
+            "pages",
+            "page_category_ids",
+            "audience",
+            "destination",
+            "time_zone",
+            "frequency_cap",
+            "dismissal",
+            "priority",
+            "billing",
+            "spent",
+            "currency",
+            "stop_with_promotion",
+            "after_approval",
+            "status",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "version"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "origin": {
+              "bsonType": "string",
+              "enum": [
+                "staff",
+                "seller_request"
+              ]
+            },
+            "advertiser_kind": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "brand_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "goal": {
+              "bsonType": "string"
+            },
+            "owner_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "linked_promotion_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "placement_id": {
+              "bsonType": "string"
+            },
+            "pages": {},
+            "page_category_ids": {},
+            "audience": {},
+            "destination": {},
+            "starts_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "ends_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "time_zone": {
+              "bsonType": "string"
+            },
+            "frequency_cap": {},
+            "dismissal": {},
+            "priority": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "billing": {
+              "bsonType": "string"
+            },
+            "rate": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "daily_limit": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "total_limit": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "delivery_cap": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "spent": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "stop_with_promotion": {
+              "bsonType": "bool"
+            },
+            "after_approval": {
+              "bsonType": "string",
+              "enum": [
+                "schedule",
+                "activate"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "paused_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "paused_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "paused_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "pause_cause": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "promotion",
+                "offer",
+                "stock",
+                "product",
+                "availability",
+                "seller",
+                "trust",
+                null
+              ]
+            },
+            "rejected_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "finished_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "note_to_reviewers": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "campaigns_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "campaigns_status_starts_at_8934be",
+          "key": {
+            "status": 1,
+            "starts_at": 1
+          }
+        },
+        {
+          "name": "campaigns_status_ends_at_0fb3f4",
+          "key": {
+            "status": 1,
+            "ends_at": 1
+          }
+        },
+        {
+          "name": "campaigns_placement_id_status_e12e95",
+          "key": {
+            "placement_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "campaigns_seller_id_status_b608db",
+          "key": {
+            "seller_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "campaigns_linked_promotion_id_e1f353",
+          "key": {
+            "linked_promotion_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "campaign_items": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "campaign_id",
+        "kind",
+        "target_id",
+        "label",
+        "product_id"
+      ],
+      "nullable": [
+        "label",
+        "product_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "kind",
+            "target_id"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string",
+              "enum": [
+                "offer",
+                "product",
+                "seller_store",
+                "brand"
+              ]
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "product_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "campaign_items_kind_target_id_bd69c3",
+          "key": {
+            "kind": 1,
+            "target_id": 1
+          }
+        },
+        {
+          "name": "campaign_items_product_id_6c3e3e",
+          "key": {
+            "product_id": 1
+          }
+        },
+        {
+          "name": "campaign_items_campaign_id_fe3eae",
+          "key": {
+            "campaign_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "campaign_creatives": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "campaign_id",
+        "creative_id",
+        "device"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "creative_id",
+            "device"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "creative_id": {
+              "bsonType": "string"
+            },
+            "device": {
+              "bsonType": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "campaign_creatives_campaign_id_creative_id_a68c6e",
+          "key": {
+            "campaign_id": 1,
+            "creative_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "approval_steps": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "submission",
+        "role",
+        "reviewer_id",
+        "state",
+        "note",
+        "decided_at"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "note",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "submission",
+            "role",
+            "state"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "submission": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "role": {
+              "bsonType": "string"
+            },
+            "reviewer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "creatives": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "advertiser_kind",
+        "seller_id",
+        "brand_id",
+        "kind",
+        "device",
+        "placement_key",
+        "media_id",
+        "file_name",
+        "width",
+        "height",
+        "bytes",
+        "duration_seconds",
+        "headline",
+        "body",
+        "button_text",
+        "link",
+        "status",
+        "link_check",
+        "auto_checks",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "brand_id",
+        "media_id",
+        "file_name",
+        "width",
+        "height",
+        "bytes",
+        "duration_seconds",
+        "headline",
+        "body",
+        "button_text",
+        "link"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "advertiser_kind",
+            "kind",
+            "device",
+            "placement_key",
+            "status",
+            "link_check",
+            "auto_checks",
+            "created_by",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "advertiser_kind": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "brand_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "device": {
+              "bsonType": "string"
+            },
+            "placement_key": {
+              "bsonType": "string"
+            },
+            "media_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "file_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "width": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "height": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "bytes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "duration_seconds": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "headline": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "body": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "button_text": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "link": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "link_check": {},
+            "auto_checks": {},
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "creatives_status_created_at_de0a8c",
+          "key": {
+            "status": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "creatives_seller_id_b7adb7",
+          "key": {
+            "seller_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "creative_reviews": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "creative_id",
+        "reviewer_id",
+        "role",
+        "decision",
+        "reason_code",
+        "comment",
+        "at"
+      ],
+      "nullable": [
+        "reason_code",
+        "comment"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "creative_id",
+            "reviewer_id",
+            "role",
+            "decision",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "creative_id": {
+              "bsonType": "string"
+            },
+            "reviewer_id": {
+              "bsonType": "string"
+            },
+            "role": {
+              "bsonType": "string"
+            },
+            "decision": {
+              "bsonType": "string"
+            },
+            "reason_code": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "comment": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "campaign_log": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "action",
+        "from_status",
+        "to_status",
+        "reason",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "from_status",
+        "to_status",
+        "reason",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "action",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "action": {
+              "bsonType": "string"
+            },
+            "from_status": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "to_status": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "ad_events": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "impression_id",
+        "campaign_id",
+        "creative_id",
+        "placement_key",
+        "kind",
+        "visitor_key",
+        "session_id",
+        "customer_id",
+        "page",
+        "device",
+        "at",
+        "cost"
+      ],
+      "nullable": [
+        "customer_id",
+        "cost"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "impression_id",
+            "campaign_id",
+            "creative_id",
+            "placement_key",
+            "kind",
+            "visitor_key",
+            "session_id",
+            "page",
+            "device",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "impression_id": {
+              "bsonType": "string"
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "creative_id": {
+              "bsonType": "string"
+            },
+            "placement_key": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "visitor_key": {
+              "bsonType": "string"
+            },
+            "session_id": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "page": {
+              "bsonType": "string"
+            },
+            "device": {
+              "bsonType": "string"
+            },
+            "at": {
+              "bsonType": "date"
+            },
+            "cost": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "ad_events_campaign_id_at_625292",
+          "key": {
+            "campaign_id": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "ad_events_visitor_key_campaign_id_kind_at_84749e",
+          "key": {
+            "visitor_key": 1,
+            "campaign_id": 1,
+            "kind": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "frequency_state": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "visitor_key",
+        "campaign_id",
+        "session_id",
+        "session_displays",
+        "window_displays",
+        "window_started_at",
+        "display_day",
+        "day_displays",
+        "total_displays",
+        "last_display_at",
+        "suppressed_until"
+      ],
+      "nullable": [
+        "session_id",
+        "display_day",
+        "last_display_at",
+        "suppressed_until"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "window_started_at",
+        "last_display_at",
+        "suppressed_until"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "visitor_key",
+            "campaign_id",
+            "session_displays",
+            "window_displays",
+            "window_started_at",
+            "day_displays",
+            "total_displays"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "visitor_key": {
+              "bsonType": "string"
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "session_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "session_displays": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "window_displays": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "window_started_at": {
+              "bsonType": "date"
+            },
+            "display_day": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "day_displays": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "total_displays": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "last_display_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "suppressed_until": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "frequency_state_visitor_key_campaign_id_e17dc0",
+          "key": {
+            "visitor_key": 1,
+            "campaign_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "attributions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "order_id",
+        "campaign_id",
+        "click_event_id",
+        "amount",
+        "currency",
+        "attributed_at",
+        "reversed"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "attributed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "campaign_id",
+            "click_event_id",
+            "amount",
+            "currency",
+            "attributed_at",
+            "reversed"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "click_event_id": {
+              "bsonType": "string"
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "attributed_at": {
+              "bsonType": "date"
+            },
+            "reversed": {
+              "bsonType": "bool"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "attributions_order_id_campaign_id_48ba7c",
+          "key": {
+            "order_id": 1,
+            "campaign_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "daily_stats": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "campaign_id",
+        "day",
+        "displays",
+        "clicks",
+        "dismissals",
+        "spend",
+        "attributed_orders",
+        "attributed_sales"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "day",
+            "displays",
+            "clicks",
+            "dismissals",
+            "spend",
+            "attributed_orders",
+            "attributed_sales"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "day": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "displays": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "clicks": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "dismissals": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "spend": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "attributed_orders": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "attributed_sales": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "daily_stats_campaign_id_day_efa68d",
+          "key": {
+            "campaign_id": 1,
+            "day": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "ad_charges": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "seller_id",
+        "day",
+        "basis",
+        "units",
+        "rate",
+        "amount",
+        "currency",
+        "state",
+        "posted_at",
+        "ledger_entry_id",
+        "statement_ref",
+        "reason"
+      ],
+      "nullable": [
+        "posted_at",
+        "ledger_entry_id",
+        "statement_ref",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "posted_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "seller_id",
+            "day",
+            "basis",
+            "units",
+            "rate",
+            "amount",
+            "currency",
+            "state"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "day": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "basis": {
+              "bsonType": "string"
+            },
+            "units": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "rate": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "posted_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "ledger_entry_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "statement_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "ad_charges_campaign_id_day_efa68d",
+          "key": {
+            "campaign_id": 1,
+            "day": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "ad_charges_seller_id_state_e600c9",
+          "key": {
+            "seller_id": 1,
+            "state": 1
+          }
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

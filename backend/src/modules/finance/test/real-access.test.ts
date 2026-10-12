@@ -4,7 +4,6 @@
  * the second reviewer. Orders stays stubbed for the order details finance reads.
  */
 import type { FastifyInstance } from 'fastify';
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { withDependencies } from '../../../kernel/module-system/loader.js';
@@ -41,7 +40,9 @@ beforeAll(async () => {
   specialist = await f.staffWithRoles(owner, 'sam@marketly.test', 'Sam Specialist', ['finance_staff']);
   // finance roles carry sensitive permissions: access holds them for a second Platform Administrator, whom this
   // test has not got (the bootstrap owner requested them). Stand in for that approval, as access's own fixture does.
-  await sql`update access.role_assignments set status = 'active', approval_request_id = null where status = 'pending_approval' and account_id in (${sql.join([managerA.accountId, managerB.accountId, specialist.accountId])})`.execute(app.kernel.database.kysely);
+  await app.kernel.mongo.db
+    .collection('access.role_assignments')
+    .updateMany({ status: 'pending_approval', account_id: { $in: [managerA.accountId, managerB.accountId, specialist.accountId] } }, { $set: { status: 'active', approval_request_id: null } });
   // a verified payout account and a balance above the $50,000 second-reviewer threshold
   const providerDestinationId = 'dest_real';
   app.kernel.events.publish('test', 'sellers.payout_account.changed', { sellerId: S, changeId: newId(), providerDestinationId, label: 'Pacific Coast CU •••• 6620', accountHolderName: 'Northwind LLC', accountType: 'business_checking', previousLabel: null, isInitial: true, requestedBy: { kind: 'seller', id: newId() } });

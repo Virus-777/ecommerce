@@ -23,6 +23,8 @@ import type { WebhookVerifier } from '../http/register.js';
 import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
 import type { Migration } from '../migrations/index.js';
+import type { ModuleSchemas, ModuleStore } from '../mongo/index.js';
+import type { MongoMigration } from '../mongo/schema.js';
 import type { ModuleSpecDef } from '../spec/define.js';
 import type { ModuleDbMap, PublicApiMap } from './public-apis.js';
 
@@ -53,6 +55,11 @@ export interface ModuleContext<N extends ModuleName> {
   readonly db: Kysely<DbOf<N>>;
   /** The whole database (transactions, raw SQL). Use ctx.db for queries. */
   readonly database: Database;
+  /**
+   * MongoDB (docs/04-mongodb-migration.md): this module's collections, one per spec table, for modules with
+   * `store: 'mongo'` (repositories in infra/mongo/). Transactions, locks and the inbox are on it too.
+   */
+  readonly mongo: ModuleStore;
   readonly clock: Clock;
   /** Publish this module's events, subscribe to the events its spec consumes */
   readonly events: ModuleEvents<OwnEventsOf<N>, ConsumedEventsOf<N>>;
@@ -123,7 +130,14 @@ export interface ModuleDefinition<S extends ModuleSpecDef = ModuleSpecDef> {
   readonly spec: S;
   /** Bump on every change; shown by npm run modules */
   readonly version: string;
+  /** Where the module keeps its data while modules move to MongoDB (default postgres; docs/04-mongodb-migration.md) */
+  readonly store?: 'postgres' | 'mongo';
+  /** PostgreSQL migrations (store postgres) */
   readonly migrations: Migration[];
+  /** The Mongoose schemas of the module's collections (generated: infra/mongo/schema.ts; store mongo) */
+  readonly schemas?: ModuleSchemas;
+  /** MongoDB data migrations, run once each after the schema from the spec (store mongo) */
+  readonly mongoMigrations?: readonly MongoMigration[];
   /** GraphQL fragment (graphql/schema.ts), when the module contributes to the read layer */
   readonly graphql?: string;
   register(ctx: ModuleContext<any>): void | Promise<void>;
@@ -132,7 +146,10 @@ export interface ModuleDefinition<S extends ModuleSpecDef = ModuleSpecDef> {
 export function defineModule<S extends ModuleSpecDef & { name: ModuleName }>(def: {
   spec: S;
   version: string;
+  store?: 'postgres' | 'mongo';
   migrations: Migration[];
+  schemas?: ModuleSchemas;
+  mongoMigrations?: readonly MongoMigration[];
   graphql?: string;
   register(ctx: ModuleContext<S['name']>): void | Promise<void>;
 }): ModuleDefinition<S> {

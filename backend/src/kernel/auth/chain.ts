@@ -16,6 +16,7 @@ import type { Config } from '../config/index.js';
 import { AppError } from '../errors/index.js';
 import { appOrigins } from '../http/security.js';
 import type { Clock } from '../lib/clock.js';
+import type { MongoStore } from '../mongo/index.js';
 import type { Area, AuthKind, EndpointDef } from '../spec/define.js';
 import type { AppProofVerifier } from './app-proof.js';
 import { verifyFileLink } from './file-links.js';
@@ -53,6 +54,8 @@ export interface AuthKernel {
   /** Seller permission keys only the owner may use (spec permissions with ownerOnly) */
   ownerOnly: ReadonlySet<string>;
   db: Kysely<any>;
+  /** Provider events already processed (replays are acknowledged without running the handler); default: PostgreSQL kernel.webhook_events */
+  webhookEvents?: WebhookEventLog;
   /** Claims behind each verified principal (development authorities read dev claims from it) */
   claimsOf: WeakMap<Principal, AccessClaims>;
   /** Signed file links (GET /files/…), when a module serves files */
@@ -391,7 +394,7 @@ export class AuthChain {
       }
       const ev = request.auth?.provider;
       if (ev?.eventId && !request.webhookDuplicate) {
-        await sql`insert into kernel.webhook_events (provider, event_id) values (${ev.name}, ${ev.eventId}) on conflict do nothing`.execute(k.db).catch(() => {});
+        await webhookLog(k).record(ev.name, ev.eventId).catch(() => {});
       }
     };
 
@@ -451,8 +454,7 @@ export class AuthChain {
     await enforce(this.k.limits, `webhook:${info.provider}`, WEBHOOK_LIMIT);
     request.auth = { via: 'provider', principal: null, provider: { name: info.provider, eventId: info.eventId } };
     if (info.eventId) {
-      const seen = await sql<{ n: number }>`select 1 as n from kernel.webhook_events where provider = ${info.provider} and event_id = ${info.eventId}`.execute(this.k.db);
-      request.webhookDuplicate = seen.rows.length > 0;
+      request.webhookDuplicate = await webhookLog(this.k).seen(info.provider, info.eventId);
     }
   }
 
@@ -476,4 +478,32 @@ function cookie(header: string | undefined, name: string): string | undefined {
     if (i > 0 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
   }
   return undefined;
+}
+
+/** Provider events already processed, so a replayed webhook does nothing (docs/03-auth-middleware.md) */
+export interface WebhookEventLog {
+  seen(provider: string, eventId: string): Promise<boolean>;
+  record(provider: string, eventId: string): Promise<void>;
+}
+
+/** In MongoDB (kernel.webhook_events, expired by a TTL index after 90 days) */
+export function mongoWebhookEventLog(store: MongoStore): WebhookEventLog {
+  const events = store.kernel('webhook_events');
+  return {
+    seen: async (provider, eventId) => Boolean(await events.exists({ _id: `${provider}|${eventId}` })),
+    async record(provider, eventId) {
+      await events.updateOne({ _id: `${provider}|${eventId}` }, { $setOnInsert: { provider, event_id: eventId, received_at: new Date() } }, { upsert: true });
+    },
+  };
+}
+
+function webhookLog(k: { db: Kysely<any>; webhookEvents?: WebhookEventLog }): WebhookEventLog {
+  return (
+    k.webhookEvents ?? {
+      seen: async (provider, eventId) => (await sql<{ n: number }>`select 1 as n from kernel.webhook_events where provider = ${provider} and event_id = ${eventId}`.execute(k.db)).rows.length > 0,
+      async record(provider, eventId) {
+        await sql`insert into kernel.webhook_events (provider, event_id) values (${provider}, ${eventId}) on conflict do nothing`.execute(k.db);
+      },
+    }
+  );
 }

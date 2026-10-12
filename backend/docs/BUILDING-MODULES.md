@@ -110,6 +110,40 @@ async approveThing(id: string, input: { actor: Actor; reason?: string; requestId
 - **Permissions of a caller handed to you in-process** (a principal in an export or admin read): `ctx.can(principal, permission)` gives the same answer their request got, development tokens included.
 - **Event consumers** (`onXFromY`) must be idempotent (same event twice = same result) and must not throw for records they don't know (log and ignore).
 
+## 5b. Repositories on MongoDB (docs/04-mongodb-migration.md)
+
+Modules move from PostgreSQL to MongoDB one by one (settings and access first). A module on MongoDB:
+
+```ts
+// module.ts
+import { schemas } from './infra/mongo/schema.js';              // GENERATED Mongoose schemas, one per spec table
+export default defineModule({ spec, version, store: 'mongo', schemas, migrations: [], register(ctx) {
+  const service = new ThingService({ repo: createMongoThingRepository(ctx.mongo), ctx });
+  …
+```
+
+```ts
+// infra/mongo/repository.ts: the same ports.ts interface, on ctx.mongo
+export function createMongoThingRepository(store: ModuleStore): ThingRepository {
+  const things = store.table<ThingRow>('things');               // rows keep their spec shape (id, snake_case)
+  return {
+    transaction: (fn) => store.transaction((tx) => fn(createMongoThingRepository(tx))),
+    getThing: (id, o) => things.get(id, o),                      // { forUpdate: true } locks it inside a transaction
+    listThings: (f, page) => things.page({ status: { $in: f.statuses } }, page, { column: 'created_at', direction: 'desc' }),
+    updateThing: (id, patch) => things.update(id, patch),        // a $set patch, operators ($inc, $push), or a pipeline
+  };
+}
+```
+
+- **Filters and sorts name row fields** (`id`, `seller_id`); the table translates the primary key to `_id`, and Mongoose casts values by the schema (numeric strings to Decimal128). Unknown fields throw (`strict`, `strictQuery`).
+- **Transactions are retried** when MongoDB reports a write conflict: the function runs again, so it must only read and write this module's tables (no events, provider calls or other modules; that was already the rule). Run operations inside one transaction one after another, never with `Promise.all`.
+- **`forUpdate`** locks by writing (`_lock` is incremented): a second transaction writing the same document conflicts and is retried after the first commits. Keep the lock order the module already uses (inventory: reservations, their lines, then stock levels).
+- **Never insert-and-catch a duplicate key inside a transaction**: the error aborts the whole transaction. Use `insertIfAbsent` / `insertManyIfAbsent` (on conflict do nothing) and `upsert` / `upsertMany` (on conflict do update).
+- **SQL meaning to keep by hand:** `col != x` skips nulls in SQL, so write `{ col: { $nin: [x, null] } }`; an empty `IN ()` matches nothing (`{ $in: [] }` does the same); JSON containment (`items @> [{key}]`) is a dotted filter (`{ 'items.key': key }`); a join is two reads.
+- **Inbox, locks, counters:** `store.claim(key)` inside the transaction of the effects (true the first time); `store.lock(name)` for pg_advisory_xact_lock; `store.nextValue(name)` for sequences.
+- **Seed data** lives in code (`domain/seed.ts`), applied on boot; PostgreSQL migrations that only updated existing installs are not ported (every MongoDB install starts fresh). Data changes after launch are `mongoMigrations: [{ id, up(db) }]`.
+- **Tests** read a module's collections the way its repository does: `app.kernel.mongo.module(name, spec.collections, schemas).table(t)`.
+
 ## 6. Approvals and limits (money and enforcement actions)
 
 Where the spec names an `approvalActions` key or says an action needs approval:

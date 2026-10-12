@@ -13,7 +13,7 @@ afterAll(async () => {
 
 describe('registry sync and system roles', () => {
   it('registers every staff permission of every spec, and only staff keys', async () => {
-    const rows = await f.db.selectFrom('permissions').selectAll().execute();
+    const rows = await f.table('permissions').find();
     const staffKeys = Object.values(allSpecs).flatMap((s) => s.permissions.filter((p) => p.audience === 'staff').map((p) => p.key));
     expect(rows.map((r) => r.key).sort()).toEqual([...staffKeys].sort());
     expect(rows.find((r) => r.key === 'finance.payouts.approve')!.sensitive).toBe(true);
@@ -23,7 +23,7 @@ describe('registry sync and system roles', () => {
   });
 
   it('marks permissions of modules that are off as unavailable (wallet is off at launch)', async () => {
-    const wallet = await f.db.selectFrom('permissions').selectAll().where('module', '=', 'wallet').execute();
+    const wallet = await f.table('permissions').find({ module: 'wallet' });
     expect(wallet.length).toBeGreaterThan(0);
     expect(wallet.every((p) => p.unavailable_since)).toBe(true);
     const actions = await f.call('GET', '/approval-actions', f.token('00000000-0000-7000-8000-000000000001'));
@@ -34,10 +34,10 @@ describe('registry sync and system roles', () => {
 
   it('seeds the system roles once, and syncing again changes nothing', async () => {
     const count = async () => ({
-      roles: (await f.db.selectFrom('roles').select('id').execute()).length,
-      perms: (await f.db.selectFrom('role_permissions').select('role_id').execute()).length,
-      limits: (await f.db.selectFrom('approval_limits').select('id').execute()).length,
-      registry: (await f.db.selectFrom('permissions').select('key').execute()).length,
+      roles: await f.table('roles').count(),
+      perms: await f.table('role_permissions').count(),
+      limits: await f.table('approval_limits').count(),
+      registry: await f.table('permissions').count(),
     });
     const before = await count();
     expect(before.roles).toBe(SYSTEM_ROLES.length);
@@ -48,7 +48,7 @@ describe('registry sync and system roles', () => {
 
   it('expands seed permission sets to explicit staff keys', async () => {
     const perms = async (key: string) =>
-      (await f.db.selectFrom('role_permissions').select('permission_key').where('role_id', '=', await f.roleId(key)).execute()).map((r) => r.permission_key);
+      (await f.table('role_permissions').find({ role_id: await f.roleId(key) })).map((r) => r.permission_key);
     const finance = await perms('finance_manager');
     expect(finance).toContain('finance.payouts.approve');
     expect(finance).toContain('payments.refunds.manage');
@@ -64,8 +64,8 @@ describe('registry sync and system roles', () => {
   });
 
   it('gives the Business Owner authority for every registered action, and seeds example limits', async () => {
-    const actions = await f.db.selectFrom('approval_actions').select('key').execute();
-    const bo = await f.db.selectFrom('approval_limits').selectAll().where('role_id', '=', await f.roleId('business_owner')).execute();
+    const actions = await f.table('approval_actions').find();
+    const bo = await f.table('approval_limits').find({ role_id: await f.roleId('business_owner') });
     expect(bo.length).toBe(actions.length);
     expect(bo.every((l) => l.authority === 'permitted' && l.limit_amount_minor === null)).toBe(true);
     const limits = await f.call('GET', `/limits?roleId=${await f.roleId('finance_staff')}&actionKey=returns.refunds.approve`, f.token('00000000-0000-7000-8000-000000000001'));

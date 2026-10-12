@@ -3244,6 +3244,1554 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "topics": {
+      "idField": "key",
+      "key": [
+        "key"
+      ],
+      "columns": [
+        "key",
+        "audience",
+        "category",
+        "group_key",
+        "label",
+        "description",
+        "triggers",
+        "opens",
+        "channels",
+        "action_required",
+        "staff_role_keys",
+        "seller_permission",
+        "owner_only",
+        "frequency_label",
+        "variables",
+        "phase",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_permission",
+        "frequency_label",
+        "updated_by",
+        "updated_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "audience",
+            "category",
+            "group_key",
+            "label",
+            "description",
+            "triggers",
+            "opens",
+            "channels",
+            "action_required",
+            "staff_role_keys",
+            "owner_only",
+            "variables",
+            "phase"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "audience": {
+              "bsonType": "string"
+            },
+            "category": {
+              "bsonType": "string"
+            },
+            "group_key": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "description": {
+              "bsonType": "string"
+            },
+            "triggers": {},
+            "opens": {
+              "bsonType": "string"
+            },
+            "channels": {},
+            "action_required": {
+              "bsonType": "bool"
+            },
+            "staff_role_keys": {},
+            "seller_permission": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_only": {
+              "bsonType": "bool"
+            },
+            "frequency_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "variables": {},
+            "phase": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "templates": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "topic_key",
+        "channel",
+        "language",
+        "live_version_id",
+        "updated_at"
+      ],
+      "nullable": [
+        "live_version_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "topic_key",
+            "channel",
+            "language",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "topic_key": {
+              "bsonType": "string"
+            },
+            "channel": {
+              "bsonType": "string"
+            },
+            "language": {
+              "bsonType": "string"
+            },
+            "live_version_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "templates_topic_key_channel_language_bc63e0",
+          "key": {
+            "topic_key": 1,
+            "channel": 1,
+            "language": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "template_versions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "template_id",
+        "version",
+        "status",
+        "content",
+        "note",
+        "created_by",
+        "created_at",
+        "published_by",
+        "published_at"
+      ],
+      "nullable": [
+        "note",
+        "published_by",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "published_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "template_id",
+            "version",
+            "status",
+            "content",
+            "created_by",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "template_id": {
+              "bsonType": "string"
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "content": {},
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "published_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "published_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "template_versions_template_id_version_a14fa4",
+          "key": {
+            "template_id": 1,
+            "version": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "template_versions_template_id_6a39d0",
+          "key": {
+            "template_id": 1
+          },
+          "partial": {
+            "status": "draft"
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "notices": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "topic_key",
+        "audience",
+        "address_kind",
+        "address_id",
+        "seller_id",
+        "group_key",
+        "title",
+        "body",
+        "icon",
+        "tone",
+        "link",
+        "linked_ref",
+        "action_required",
+        "deadline_at",
+        "dedupe_key",
+        "resolved_at",
+        "resolve_note",
+        "expired_at",
+        "created_at",
+        "expires_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "icon",
+        "linked_ref",
+        "deadline_at",
+        "dedupe_key",
+        "resolved_at",
+        "resolve_note",
+        "expired_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "deadline_at",
+        "resolved_at",
+        "expired_at",
+        "created_at",
+        "expires_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "topic_key",
+            "audience",
+            "address_kind",
+            "address_id",
+            "group_key",
+            "title",
+            "body",
+            "tone",
+            "link",
+            "action_required",
+            "created_at",
+            "expires_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "topic_key": {
+              "bsonType": "string"
+            },
+            "audience": {
+              "bsonType": "string"
+            },
+            "address_kind": {
+              "bsonType": "string",
+              "enum": [
+                "customer",
+                "seller",
+                "role",
+                "staff"
+              ]
+            },
+            "address_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "group_key": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "body": {
+              "bsonType": "string"
+            },
+            "icon": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "tone": {
+              "bsonType": "string"
+            },
+            "link": {},
+            "linked_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "action_required": {
+              "bsonType": "bool"
+            },
+            "deadline_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "dedupe_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "resolved_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "resolve_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "expired_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "notices_address_kind_address_id_created_at_8b8398",
+          "key": {
+            "address_kind": 1,
+            "address_id": 1,
+            "created_at": -1
+          }
+        },
+        {
+          "name": "notices_dedupe_key_46c1f9",
+          "key": {
+            "dedupe_key": 1
+          }
+        },
+        {
+          "name": "notices_expires_at_ce8dd0",
+          "key": {
+            "expires_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "notice_recipients": {
+      "idField": null,
+      "key": [
+        "notice_id",
+        "account_id"
+      ],
+      "columns": [
+        "notice_id",
+        "account_id",
+        "reason",
+        "covering_for",
+        "read_at",
+        "created_at"
+      ],
+      "nullable": [
+        "covering_for",
+        "read_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "read_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "notice_id",
+            "account_id",
+            "reason",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "notice_id": {
+              "bsonType": "string"
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "covering_for": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "read_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "notice_recipients_notice_id_account_id_a1d589",
+          "key": {
+            "notice_id": 1,
+            "account_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "notice_recipients_account_id_read_at_created_at_816216",
+          "key": {
+            "account_id": 1,
+            "read_at": 1,
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "scheduled_notifications": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "dedupe_key",
+        "send_at",
+        "input",
+        "status",
+        "created_by_module",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "send_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "dedupe_key",
+            "send_at",
+            "input",
+            "status",
+            "created_by_module",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "dedupe_key": {
+              "bsonType": "string"
+            },
+            "send_at": {
+              "bsonType": "date"
+            },
+            "input": {},
+            "status": {
+              "bsonType": "string",
+              "enum": [
+                "pending",
+                "sent",
+                "cancelled"
+              ]
+            },
+            "created_by_module": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "scheduled_notifications_status_send_at_6a12f9",
+          "key": {
+            "status": 1,
+            "send_at": 1
+          }
+        },
+        {
+          "name": "scheduled_notifications_dedupe_key_46c1f9",
+          "key": {
+            "dedupe_key": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "deliveries": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "notice_id",
+        "topic_key",
+        "channel",
+        "recipient_kind",
+        "account_id",
+        "address_hash",
+        "address_masked",
+        "status",
+        "skip_reason",
+        "attempts",
+        "last_error",
+        "provider_message_id",
+        "template_version_id",
+        "subject",
+        "linked_ref",
+        "dedupe_key",
+        "broadcast_id",
+        "created_at",
+        "sent_at",
+        "delivered_at",
+        "next_attempt_at"
+      ],
+      "nullable": [
+        "notice_id",
+        "account_id",
+        "skip_reason",
+        "last_error",
+        "provider_message_id",
+        "template_version_id",
+        "subject",
+        "linked_ref",
+        "dedupe_key",
+        "broadcast_id",
+        "sent_at",
+        "delivered_at",
+        "next_attempt_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "sent_at",
+        "delivered_at",
+        "next_attempt_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "topic_key",
+            "channel",
+            "recipient_kind",
+            "address_hash",
+            "address_masked",
+            "status",
+            "attempts",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "notice_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "topic_key": {
+              "bsonType": "string"
+            },
+            "channel": {
+              "bsonType": "string"
+            },
+            "recipient_kind": {
+              "bsonType": "string"
+            },
+            "account_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "address_hash": {
+              "bsonType": "string"
+            },
+            "address_masked": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "skip_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "attempts": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "last_error": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_message_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "template_version_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "subject": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "linked_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "dedupe_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "broadcast_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "sent_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "delivered_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "next_attempt_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "deliveries_status_next_attempt_at_0fe682",
+          "key": {
+            "status": 1,
+            "next_attempt_at": 1
+          }
+        },
+        {
+          "name": "deliveries_provider_message_id_9a7595",
+          "key": {
+            "provider_message_id": 1
+          }
+        },
+        {
+          "name": "deliveries_account_id_created_at_7c301e",
+          "key": {
+            "account_id": 1,
+            "created_at": -1
+          }
+        },
+        {
+          "name": "deliveries_address_hash_created_at_d7c486",
+          "key": {
+            "address_hash": 1,
+            "created_at": -1
+          }
+        },
+        {
+          "name": "deliveries_topic_key_created_at_682dfc",
+          "key": {
+            "topic_key": 1,
+            "created_at": -1
+          }
+        },
+        {
+          "name": "deliveries_linked_ref_483a0b",
+          "key": {
+            "linked_ref": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "delivery_events": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "delivery_id",
+        "type",
+        "provider_event_id",
+        "detail",
+        "at"
+      ],
+      "nullable": [
+        "provider_event_id",
+        "detail"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "delivery_id",
+            "type",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "delivery_id": {
+              "bsonType": "string"
+            },
+            "type": {
+              "bsonType": "string"
+            },
+            "provider_event_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "detail": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "delivery_events_provider_event_id_72f92f",
+          "key": {
+            "provider_event_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "provider_event_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "name": "delivery_events_delivery_id_at_511d79",
+          "key": {
+            "delivery_id": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "member_preferences": {
+      "idField": null,
+      "key": [
+        "seller_id",
+        "member_id"
+      ],
+      "columns": [
+        "seller_id",
+        "member_id",
+        "account_id",
+        "groups",
+        "channel",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "seller_id",
+            "member_id",
+            "account_id",
+            "groups",
+            "channel",
+            "updated_by",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "member_id": {
+              "bsonType": "string"
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "groups": {},
+            "channel": {
+              "bsonType": "string"
+            },
+            "updated_by": {
+              "bsonType": "string"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "member_preferences_seller_id_member_id_436737",
+          "key": {
+            "seller_id": 1,
+            "member_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "member_preferences_account_id_05e878",
+          "key": {
+            "account_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "staff_preferences": {
+      "idField": "account_id",
+      "key": [
+        "account_id"
+      ],
+      "columns": [
+        "account_id",
+        "email_by_area",
+        "email_for_mentions",
+        "daily_digest",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "email_by_area",
+            "email_for_mentions",
+            "daily_digest",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "email_by_area": {},
+            "email_for_mentions": {
+              "bsonType": "bool"
+            },
+            "daily_digest": {
+              "bsonType": "bool"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "push_devices": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "audience",
+        "seller_id",
+        "platform",
+        "token_encrypted",
+        "token_hash",
+        "app_version",
+        "installation_id",
+        "enabled",
+        "created_at",
+        "last_seen_at",
+        "invalidated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "installation_id",
+        "invalidated_at"
+      ],
+      "decimal": [],
+      "binary": [
+        "token_encrypted"
+      ],
+      "dates": [
+        "created_at",
+        "last_seen_at",
+        "invalidated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "audience",
+            "platform",
+            "token_encrypted",
+            "token_hash",
+            "app_version",
+            "enabled",
+            "created_at",
+            "last_seen_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "audience": {
+              "bsonType": "string",
+              "enum": [
+                "customer",
+                "seller"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "platform": {
+              "bsonType": "string"
+            },
+            "token_encrypted": {
+              "bsonType": "binData"
+            },
+            "token_hash": {
+              "bsonType": "string"
+            },
+            "app_version": {
+              "bsonType": "string"
+            },
+            "installation_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "enabled": {
+              "bsonType": "bool"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "last_seen_at": {
+              "bsonType": "date"
+            },
+            "invalidated_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "push_devices_token_hash_ff3baa",
+          "key": {
+            "token_hash": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "push_devices_account_id_907cfb",
+          "key": {
+            "account_id": 1
+          },
+          "partial": {
+            "invalidated_at": {
+              "$type": "null"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "suppressions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "channel",
+        "address_hash",
+        "address_masked",
+        "account_id",
+        "reason",
+        "source",
+        "created_at",
+        "removed_at",
+        "removed_by",
+        "remove_reason"
+      ],
+      "nullable": [
+        "account_id",
+        "removed_at",
+        "removed_by",
+        "remove_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "removed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "channel",
+            "address_hash",
+            "address_masked",
+            "reason",
+            "source",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "channel": {
+              "bsonType": "string"
+            },
+            "address_hash": {
+              "bsonType": "string"
+            },
+            "address_masked": {
+              "bsonType": "string"
+            },
+            "account_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "source": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "removed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "removed_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "remove_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "suppressions_channel_address_hash_92b7f3",
+          "key": {
+            "channel": 1,
+            "address_hash": 1
+          },
+          "unique": true,
+          "partial": {
+            "removed_at": {
+              "$type": "null"
+            }
+          }
+        },
+        {
+          "name": "suppressions_account_id_05e878",
+          "key": {
+            "account_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "broadcasts": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "name",
+        "audience",
+        "topic_key",
+        "template_version_id",
+        "segment",
+        "status",
+        "scheduled_at",
+        "sent_at",
+        "recipient_estimate",
+        "stats",
+        "campaign_id",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "scheduled_at",
+        "sent_at",
+        "campaign_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "scheduled_at",
+        "sent_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "name",
+            "audience",
+            "topic_key",
+            "template_version_id",
+            "segment",
+            "status",
+            "recipient_estimate",
+            "stats",
+            "created_by",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "audience": {
+              "bsonType": "string"
+            },
+            "topic_key": {
+              "bsonType": "string"
+            },
+            "template_version_id": {
+              "bsonType": "string"
+            },
+            "segment": {},
+            "status": {
+              "bsonType": "string"
+            },
+            "scheduled_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "sent_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "recipient_estimate": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "stats": {},
+            "campaign_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "broadcasts_status_scheduled_at_0d1e63",
+          "key": {
+            "status": 1,
+            "scheduled_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

@@ -166,7 +166,7 @@ describe('away periods', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(await f.svc.hasPermission(f.principal(coverer), 'finance.ledger.view')).toBe(false); // waits for the Business Owner
     await f.svc.decide(res.body.approval.approvalRequestId, f.principal(owner), { kind: 'approve' });
-    const row = await f.db.selectFrom('away_periods').select('status').where('id', '=', res.body.id).executeTakeFirstOrThrow();
+    const row = (await f.table('away_periods').get(res.body.id))!;
     expect(row.status).toBe('active');
     expect(await f.svc.hasPermission(f.principal(coverer), 'finance.ledger.view')).toBe(true);
     const decided = await f.svc.decide(early.id, f.principal(coverer), { kind: 'approve' });

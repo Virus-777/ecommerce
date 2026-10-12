@@ -1619,6 +1619,604 @@ export const spec = defineModuleSpec({
     }
   },
   tenantTables: {},
+  collections: {
+    "definitions": {
+      "idField": "key",
+      "key": [
+        "key"
+      ],
+      "columns": [
+        "key",
+        "module",
+        "section",
+        "label",
+        "description",
+        "value_type",
+        "schema",
+        "default_value",
+        "editable",
+        "approval",
+        "min_lead_days",
+        "apply_scopes",
+        "seller_visible",
+        "public",
+        "example_value",
+        "edit_permission",
+        "registered_at",
+        "unavailable_since"
+      ],
+      "nullable": [
+        "unavailable_since"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "registered_at",
+        "unavailable_since"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "module",
+            "section",
+            "label",
+            "description",
+            "value_type",
+            "schema",
+            "default_value",
+            "editable",
+            "approval",
+            "min_lead_days",
+            "apply_scopes",
+            "seller_visible",
+            "public",
+            "example_value",
+            "edit_permission",
+            "registered_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "module": {
+              "bsonType": "string"
+            },
+            "section": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "description": {
+              "bsonType": "string"
+            },
+            "value_type": {
+              "bsonType": "string"
+            },
+            "schema": {},
+            "default_value": {},
+            "editable": {
+              "bsonType": "bool"
+            },
+            "approval": {
+              "bsonType": "string"
+            },
+            "min_lead_days": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "apply_scopes": {},
+            "seller_visible": {
+              "bsonType": "bool"
+            },
+            "public": {
+              "bsonType": "bool"
+            },
+            "example_value": {
+              "bsonType": "bool"
+            },
+            "edit_permission": {
+              "bsonType": "string"
+            },
+            "registered_at": {
+              "bsonType": "date"
+            },
+            "unavailable_since": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "definitions_module_3bb9ed",
+          "key": {
+            "module": 1
+          }
+        },
+        {
+          "name": "definitions_section_f7e8e4",
+          "key": {
+            "section": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "values": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "key",
+        "version",
+        "value",
+        "effective_from",
+        "effective_to",
+        "apply_scope",
+        "change_id",
+        "changed_by_kind",
+        "changed_by_id",
+        "approved_by_id",
+        "reason",
+        "created_at"
+      ],
+      "nullable": [
+        "effective_to",
+        "change_id",
+        "approved_by_id",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "effective_to",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "key",
+            "version",
+            "value",
+            "effective_from",
+            "apply_scope",
+            "changed_by_kind",
+            "changed_by_id",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "key": {
+              "bsonType": "string"
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "value": {},
+            "effective_from": {
+              "bsonType": "date"
+            },
+            "effective_to": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "apply_scope": {
+              "bsonType": "string"
+            },
+            "change_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "changed_by_kind": {
+              "bsonType": "string"
+            },
+            "changed_by_id": {
+              "bsonType": "string"
+            },
+            "approved_by_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "values_key_version_906dc6",
+          "key": {
+            "key": 1,
+            "version": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "values_key_effective_from_49ff80",
+          "key": {
+            "key": 1,
+            "effective_from": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "changes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "status",
+        "items",
+        "effective_at",
+        "apply_scope",
+        "reason",
+        "impact",
+        "created_by_kind",
+        "created_by_id",
+        "created_at",
+        "submitted_at",
+        "approval_request_id",
+        "applied_at",
+        "cancel_reason",
+        "version",
+        "announced_at"
+      ],
+      "nullable": [
+        "submitted_at",
+        "approval_request_id",
+        "applied_at",
+        "cancel_reason",
+        "announced_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_at",
+        "created_at",
+        "submitted_at",
+        "applied_at",
+        "announced_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "status",
+            "items",
+            "effective_at",
+            "apply_scope",
+            "reason",
+            "impact",
+            "created_by_kind",
+            "created_by_id",
+            "created_at",
+            "version"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "items": {},
+            "effective_at": {
+              "bsonType": "date"
+            },
+            "apply_scope": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "impact": {},
+            "created_by_kind": {
+              "bsonType": "string"
+            },
+            "created_by_id": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "submitted_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "applied_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "cancel_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "announced_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "changes_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "changes_status_effective_at_21acb4",
+          "key": {
+            "status": 1,
+            "effective_at": 1
+          }
+        },
+        {
+          "name": "changes_created_at_a2a739",
+          "key": {
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "change_keys": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "change_id",
+        "key",
+        "open"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "change_id",
+            "key",
+            "open"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "change_id": {
+              "bsonType": "string"
+            },
+            "key": {
+              "bsonType": "string"
+            },
+            "open": {
+              "bsonType": "bool"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "change_keys_key_336cb9",
+          "key": {
+            "key": 1
+          },
+          "unique": true,
+          "partial": {
+            "open": true
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "feature_flags": {
+      "idField": "key",
+      "key": [
+        "key"
+      ],
+      "columns": [
+        "key",
+        "module",
+        "label",
+        "description",
+        "enabled",
+        "rollout",
+        "percentage",
+        "public",
+        "planned_phase",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "percentage",
+        "planned_phase",
+        "updated_by",
+        "updated_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "module",
+            "label",
+            "description",
+            "enabled",
+            "rollout",
+            "public"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "module": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "description": {
+              "bsonType": "string"
+            },
+            "enabled": {
+              "bsonType": "bool"
+            },
+            "rollout": {
+              "bsonType": "string"
+            },
+            "percentage": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "public": {
+              "bsonType": "bool"
+            },
+            "planned_phase": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "updated_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

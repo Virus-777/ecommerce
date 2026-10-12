@@ -3867,6 +3867,1404 @@ export const spec = defineModuleSpec({
       "customer": "customer_id"
     }
   },
+  collections: {
+    "home_sections": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "kind",
+        "heading",
+        "subheading",
+        "config",
+        "linked_promotion_id",
+        "linked_page_id",
+        "ad_placement_key",
+        "show_from",
+        "remove_at",
+        "time_zone",
+        "owner_staff_id",
+        "owner_role",
+        "status",
+        "draft_position",
+        "removed_reason",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "heading",
+        "subheading",
+        "linked_promotion_id",
+        "linked_page_id",
+        "ad_placement_key",
+        "show_from",
+        "remove_at",
+        "owner_staff_id",
+        "owner_role",
+        "removed_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "show_from",
+        "remove_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "kind",
+            "config",
+            "time_zone",
+            "status",
+            "draft_position",
+            "updated_by",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "heading": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "subheading": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "config": {},
+            "linked_promotion_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "linked_page_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "ad_placement_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "show_from": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "remove_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "time_zone": {
+              "bsonType": "string"
+            },
+            "owner_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_role": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "draft_position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "removed_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_by": {
+              "bsonType": "string"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "pages": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "kind",
+        "collection_kind",
+        "slug",
+        "title",
+        "brand_id",
+        "owner_staff_id",
+        "linked_promotion_id",
+        "status",
+        "publish_at",
+        "unpublish_at",
+        "time_zone",
+        "live_version_id",
+        "draft_version_id",
+        "removal",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "collection_kind",
+        "brand_id",
+        "owner_staff_id",
+        "linked_promotion_id",
+        "publish_at",
+        "unpublish_at",
+        "live_version_id",
+        "draft_version_id",
+        "removal"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "publish_at",
+        "unpublish_at",
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "kind",
+            "slug",
+            "title",
+            "status",
+            "time_zone",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "collection_kind": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "brand_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "linked_promotion_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "publish_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "unpublish_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "time_zone": {
+              "bsonType": "string"
+            },
+            "live_version_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "draft_version_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "removal": {},
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "pages_slug_549e08",
+          "key": {
+            "slug": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "pages_kind_status_425123",
+          "key": {
+            "kind": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "pages_brand_id_status_9a8236",
+          "key": {
+            "brand_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "pages_status_publish_at_474a73",
+          "key": {
+            "status": 1,
+            "publish_at": 1
+          }
+        },
+        {
+          "name": "pages_status_unpublish_at_c7d66c",
+          "key": {
+            "status": 1,
+            "unpublish_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "versions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "entity",
+        "entity_id",
+        "number",
+        "state",
+        "snapshot",
+        "summary",
+        "author_kind",
+        "author_id",
+        "restored_from",
+        "review_state",
+        "submitted_by",
+        "submitted_at",
+        "reviewed_by",
+        "reviewed_at",
+        "review_note",
+        "created_at",
+        "published_at"
+      ],
+      "nullable": [
+        "summary",
+        "author_id",
+        "restored_from",
+        "review_state",
+        "submitted_by",
+        "submitted_at",
+        "reviewed_by",
+        "reviewed_at",
+        "review_note",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "reviewed_at",
+        "created_at",
+        "published_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "entity",
+            "entity_id",
+            "number",
+            "state",
+            "snapshot",
+            "author_kind",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "entity": {
+              "bsonType": "string",
+              "enum": [
+                "homepage",
+                "page",
+                "article"
+              ]
+            },
+            "entity_id": {
+              "bsonType": "string"
+            },
+            "number": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "snapshot": {},
+            "summary": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "author_kind": {
+              "bsonType": "string"
+            },
+            "author_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "restored_from": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "review_state": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "not_submitted",
+                "in_review",
+                "approved",
+                "changes_requested",
+                null
+              ]
+            },
+            "submitted_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "submitted_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "reviewed_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reviewed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "review_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "published_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "versions_entity_entity_id_number_f2fb9e",
+          "key": {
+            "entity": 1,
+            "entity_id": 1,
+            "number": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "help_categories": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "slug",
+        "name",
+        "icon",
+        "description",
+        "position",
+        "visible",
+        "audience"
+      ],
+      "nullable": [
+        "icon",
+        "description"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "slug",
+            "name",
+            "position",
+            "visible",
+            "audience"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "icon": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "visible": {
+              "bsonType": "bool"
+            },
+            "audience": {
+              "bsonType": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "help_categories_slug_549e08",
+          "key": {
+            "slug": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "help_articles": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "slug",
+        "category_id",
+        "title",
+        "summary",
+        "audience",
+        "topics",
+        "related_ids",
+        "policy_keys",
+        "featured",
+        "popular_search",
+        "owner_staff_id",
+        "status",
+        "publish_at",
+        "unpublish_at",
+        "effective_at",
+        "review_due_at",
+        "live_version_id",
+        "draft_version_id",
+        "views",
+        "updated_at"
+      ],
+      "nullable": [
+        "summary",
+        "popular_search",
+        "owner_staff_id",
+        "publish_at",
+        "unpublish_at",
+        "effective_at",
+        "review_due_at",
+        "live_version_id",
+        "draft_version_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "publish_at",
+        "unpublish_at",
+        "effective_at",
+        "review_due_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "slug",
+            "category_id",
+            "title",
+            "audience",
+            "topics",
+            "related_ids",
+            "policy_keys",
+            "featured",
+            "status",
+            "views",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "category_id": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "summary": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "audience": {
+              "bsonType": "string"
+            },
+            "topics": {},
+            "related_ids": {},
+            "policy_keys": {},
+            "featured": {
+              "bsonType": "bool"
+            },
+            "popular_search": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "publish_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "unpublish_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "effective_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "review_due_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "live_version_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "draft_version_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "views": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "help_articles_slug_549e08",
+          "key": {
+            "slug": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "help_articles_category_id_status_da886b",
+          "key": {
+            "category_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "help_articles_status_review_due_at_222ae8",
+          "key": {
+            "status": 1,
+            "review_due_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "article_feedback": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "article_id",
+        "helpful",
+        "comment",
+        "visitor_key",
+        "customer_id",
+        "at"
+      ],
+      "nullable": [
+        "comment",
+        "customer_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "article_id",
+            "helpful",
+            "visitor_key",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "article_id": {
+              "bsonType": "string"
+            },
+            "helpful": {
+              "bsonType": "bool"
+            },
+            "comment": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "visitor_key": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "article_feedback_article_id_visitor_key_0b6449",
+          "key": {
+            "article_id": 1,
+            "visitor_key": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "policies": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "key",
+        "kind",
+        "title",
+        "owner_staff_id",
+        "editor_staff_id",
+        "audience"
+      ],
+      "nullable": [
+        "editor_staff_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "key",
+            "kind",
+            "title",
+            "owner_staff_id",
+            "audience"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "key": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string",
+              "enum": [
+                "returns",
+                "shipping",
+                "privacy",
+                "purchase_terms",
+                "seller_rules",
+                "advertising",
+                "cookies",
+                "other"
+              ]
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "owner_staff_id": {
+              "bsonType": "string"
+            },
+            "editor_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "audience": {
+              "bsonType": "string",
+              "enum": [
+                "customer",
+                "seller",
+                "both"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "policies_key_f44b4e",
+          "key": {
+            "key": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "policy_versions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "policy_id",
+        "version",
+        "state",
+        "title",
+        "body",
+        "tables",
+        "effective_at",
+        "change_summary",
+        "impact",
+        "notify_customers",
+        "notify_sellers",
+        "approval_request_id",
+        "created_by",
+        "created_at",
+        "published_at"
+      ],
+      "nullable": [
+        "tables",
+        "effective_at",
+        "change_summary",
+        "approval_request_id",
+        "published_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_at",
+        "created_at",
+        "published_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "policy_id",
+            "version",
+            "state",
+            "title",
+            "body",
+            "impact",
+            "notify_customers",
+            "notify_sellers",
+            "created_by",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "policy_id": {
+              "bsonType": "string"
+            },
+            "version": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "body": {
+              "bsonType": "string"
+            },
+            "tables": {},
+            "effective_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "change_summary": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "impact": {
+              "bsonType": "string"
+            },
+            "notify_customers": {
+              "bsonType": "bool"
+            },
+            "notify_sellers": {
+              "bsonType": "bool"
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "published_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "policy_versions_policy_id_version_ca9d07",
+          "key": {
+            "policy_id": 1,
+            "version": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "policy_versions_policy_id_state_effective_at_4a4d8c",
+          "key": {
+            "policy_id": 1,
+            "state": 1,
+            "effective_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "policy_approvals": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "policy_version_id",
+        "role",
+        "reviewer_id",
+        "state",
+        "note",
+        "at"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "note",
+        "at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "policy_version_id",
+            "role",
+            "state"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "policy_version_id": {
+              "bsonType": "string"
+            },
+            "role": {
+              "bsonType": "string"
+            },
+            "reviewer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "navigation": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "area",
+        "group_title",
+        "position",
+        "label",
+        "url",
+        "kind",
+        "text",
+        "active_from",
+        "active_until"
+      ],
+      "nullable": [
+        "group_title",
+        "text",
+        "active_from",
+        "active_until"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "active_from",
+        "active_until"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "area",
+            "position",
+            "label",
+            "url",
+            "kind"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "area": {
+              "bsonType": "string",
+              "enum": [
+                "header",
+                "footer",
+                "service_strip"
+              ]
+            },
+            "group_title": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "url": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "text": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "active_from": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "active_until": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "content_log": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "entity",
+        "entity_id",
+        "action",
+        "reason",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "reason",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "entity",
+            "entity_id",
+            "action",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "entity": {
+              "bsonType": "string"
+            },
+            "entity_id": {
+              "bsonType": "string"
+            },
+            "action": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

@@ -2625,6 +2625,1147 @@ export const spec = defineModuleSpec({
       "customer": "customer_id"
     }
   },
+  collections: {
+    "queues": {
+      "idField": "key",
+      "key": [
+        "key"
+      ],
+      "columns": [
+        "key",
+        "name",
+        "area",
+        "owner_role",
+        "lead_staff_id",
+        "backup_staff_id",
+        "escalation_route",
+        "escalation_label",
+        "default_deadline_minutes",
+        "business_hours_only",
+        "pause_while_waiting",
+        "screen",
+        "screen_filter",
+        "visible_to_seller",
+        "active",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "screen_filter"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "name",
+            "area",
+            "owner_role",
+            "lead_staff_id",
+            "backup_staff_id",
+            "escalation_route",
+            "escalation_label",
+            "default_deadline_minutes",
+            "business_hours_only",
+            "pause_while_waiting",
+            "screen",
+            "visible_to_seller",
+            "active",
+            "updated_by",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "area": {
+              "bsonType": "string"
+            },
+            "owner_role": {
+              "bsonType": "string"
+            },
+            "lead_staff_id": {
+              "bsonType": "string"
+            },
+            "backup_staff_id": {
+              "bsonType": "string"
+            },
+            "escalation_route": {},
+            "escalation_label": {
+              "bsonType": "string"
+            },
+            "default_deadline_minutes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "business_hours_only": {
+              "bsonType": "bool"
+            },
+            "pause_while_waiting": {
+              "bsonType": "bool"
+            },
+            "screen": {
+              "bsonType": "string"
+            },
+            "screen_filter": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "visible_to_seller": {
+              "bsonType": "bool"
+            },
+            "active": {
+              "bsonType": "bool"
+            },
+            "updated_by": {
+              "bsonType": "string"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "intake_rules": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "event",
+        "queue_key",
+        "kind",
+        "title_template",
+        "dedupe_key_template",
+        "deadline_rule",
+        "priority",
+        "resolves_on",
+        "active"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "event",
+            "queue_key",
+            "kind",
+            "title_template",
+            "dedupe_key_template",
+            "deadline_rule",
+            "priority",
+            "resolves_on",
+            "active"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "event": {
+              "bsonType": "string"
+            },
+            "queue_key": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "title_template": {
+              "bsonType": "string"
+            },
+            "dedupe_key_template": {
+              "bsonType": "string"
+            },
+            "deadline_rule": {
+              "bsonType": "string"
+            },
+            "priority": {
+              "bsonType": "string"
+            },
+            "resolves_on": {},
+            "active": {
+              "bsonType": "bool"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "intake_rules_event_611e64",
+          "key": {
+            "event": 1
+          },
+          "partial": {
+            "active": true
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "items": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "queue_key",
+        "kind",
+        "title",
+        "summary",
+        "subject_type",
+        "subject_id",
+        "subject_ref",
+        "subject_label",
+        "related_subjects",
+        "seller_id",
+        "seller_name",
+        "customer_id",
+        "amount_minor",
+        "currency",
+        "owner_role",
+        "assignee_staff_id",
+        "due_at",
+        "deadline_state",
+        "priority",
+        "state",
+        "waiting_on",
+        "waiting_since",
+        "escalation_level",
+        "escalated_to",
+        "dedupe_key",
+        "source_module",
+        "source_event",
+        "links",
+        "visible_to_seller",
+        "opened_at",
+        "updated_at",
+        "resolved_at",
+        "resolution",
+        "archived_at"
+      ],
+      "nullable": [
+        "summary",
+        "subject_ref",
+        "subject_label",
+        "seller_id",
+        "seller_name",
+        "customer_id",
+        "amount_minor",
+        "currency",
+        "assignee_staff_id",
+        "waiting_on",
+        "waiting_since",
+        "escalated_to",
+        "source_event",
+        "resolved_at",
+        "resolution",
+        "archived_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "waiting_since",
+        "opened_at",
+        "updated_at",
+        "resolved_at",
+        "archived_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "queue_key",
+            "kind",
+            "title",
+            "subject_type",
+            "subject_id",
+            "related_subjects",
+            "owner_role",
+            "due_at",
+            "deadline_state",
+            "priority",
+            "state",
+            "escalation_level",
+            "dedupe_key",
+            "source_module",
+            "links",
+            "visible_to_seller",
+            "opened_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "queue_key": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "summary": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "subject_type": {
+              "bsonType": "string"
+            },
+            "subject_id": {
+              "bsonType": "string"
+            },
+            "subject_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "subject_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "related_subjects": {},
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "seller_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "customer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "amount_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "currency": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_role": {
+              "bsonType": "string"
+            },
+            "assignee_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "due_at": {
+              "bsonType": "date"
+            },
+            "deadline_state": {
+              "bsonType": "string",
+              "enum": [
+                "on_time",
+                "due_soon",
+                "overdue"
+              ]
+            },
+            "priority": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "waiting_on": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "waiting_since": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "escalation_level": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "escalated_to": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "dedupe_key": {
+              "bsonType": "string"
+            },
+            "source_module": {
+              "bsonType": "string"
+            },
+            "source_event": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "links": {},
+            "visible_to_seller": {
+              "bsonType": "bool"
+            },
+            "opened_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            },
+            "resolved_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "resolution": {},
+            "archived_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "items_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "items_queue_key_state_due_at_d27d9e",
+          "key": {
+            "queue_key": 1,
+            "state": 1,
+            "due_at": 1
+          }
+        },
+        {
+          "name": "items_assignee_staff_id_state_473014",
+          "key": {
+            "assignee_staff_id": 1,
+            "state": 1
+          }
+        },
+        {
+          "name": "items_deadline_state_due_at_178caf",
+          "key": {
+            "deadline_state": 1,
+            "due_at": 1
+          }
+        },
+        {
+          "name": "items_seller_id_state_6ba116",
+          "key": {
+            "seller_id": 1,
+            "state": 1
+          },
+          "partial": {
+            "visible_to_seller": true
+          }
+        },
+        {
+          "name": "items_subject_type_subject_id_fb4ad6",
+          "key": {
+            "subject_type": 1,
+            "subject_id": 1
+          }
+        }
+      ],
+      "unenforced": [
+        "unique(dedupe_key) where state not in ('resolved','dismissed') (unsupported condition \"state not in ('resolved','dismissed')\")"
+      ]
+    },
+    "item_events": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "item_id",
+        "kind",
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "item_id",
+            "kind",
+            "detail",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "item_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "detail": {},
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "item_events_item_id_at_ce4f0a",
+          "key": {
+            "item_id": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "item_notes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "item_id",
+        "body",
+        "author_id",
+        "author_name",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "item_id",
+            "body",
+            "author_id",
+            "author_name",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "item_id": {
+              "bsonType": "string"
+            },
+            "body": {
+              "bsonType": "string"
+            },
+            "author_id": {
+              "bsonType": "string"
+            },
+            "author_name": {
+              "bsonType": "string"
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "saved_filters": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "owner_staff_id",
+        "name",
+        "shared",
+        "target",
+        "screen",
+        "screen_state",
+        "filters",
+        "created_at"
+      ],
+      "nullable": [
+        "screen",
+        "screen_state"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "owner_staff_id",
+            "name",
+            "shared",
+            "target",
+            "filters",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "owner_staff_id": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "shared": {
+              "bsonType": "bool"
+            },
+            "target": {
+              "bsonType": "string"
+            },
+            "screen": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "screen_state": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "filters": {},
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "saved_filters_owner_staff_id_8cdaf0",
+          "key": {
+            "owner_staff_id": 1
+          }
+        },
+        {
+          "name": "saved_filters_shared_315240",
+          "key": {
+            "shared": 1
+          },
+          "partial": {
+            "shared": true
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "day_end_reviews": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "date",
+        "due_at",
+        "state",
+        "shared_with_roles",
+        "items",
+        "completed_by",
+        "completed_at",
+        "summary_sent_to"
+      ],
+      "nullable": [
+        "completed_by",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "completed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "date",
+            "due_at",
+            "state",
+            "shared_with_roles",
+            "items",
+            "summary_sent_to"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "date": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "due_at": {
+              "bsonType": "date"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "shared_with_roles": {},
+            "items": {},
+            "completed_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "completed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "summary_sent_to": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "day_end_reviews_date_daddd8",
+          "key": {
+            "date": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "routine_templates": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "title",
+        "area_label",
+        "owner_roles",
+        "due_time",
+        "weekdays",
+        "active"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "title",
+            "area_label",
+            "owner_roles",
+            "due_time",
+            "weekdays",
+            "active"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "area_label": {
+              "bsonType": "string"
+            },
+            "owner_roles": {},
+            "due_time": {
+              "bsonType": "string"
+            },
+            "weekdays": {},
+            "active": {
+              "bsonType": "bool"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "routine_checks": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "template_id",
+        "date",
+        "owner_staff_id",
+        "due_at",
+        "state",
+        "done_at",
+        "done_by",
+        "note",
+        "check_ins"
+      ],
+      "nullable": [
+        "done_at",
+        "done_by",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "done_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "template_id",
+            "date",
+            "owner_staff_id",
+            "due_at",
+            "state",
+            "check_ins"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "template_id": {
+              "bsonType": "string"
+            },
+            "date": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "owner_staff_id": {
+              "bsonType": "string"
+            },
+            "due_at": {
+              "bsonType": "date"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "done_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "done_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "check_ins": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "routine_checks_template_id_date_3512ae",
+          "key": {
+            "template_id": 1,
+            "date": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "routine_checks_date_state_6bcd84",
+          "key": {
+            "date": 1,
+            "state": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "daily_counts": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "queue_key",
+        "date",
+        "open",
+        "overdue",
+        "opened",
+        "resolved",
+        "median_resolve_minutes"
+      ],
+      "nullable": [
+        "median_resolve_minutes"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "queue_key",
+            "date",
+            "open",
+            "overdue",
+            "opened",
+            "resolved"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "queue_key": {
+              "bsonType": "string"
+            },
+            "date": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "open": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "overdue": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "opened": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "resolved": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "median_resolve_minutes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "daily_counts_queue_key_date_a24ac4",
+          "key": {
+            "queue_key": 1,
+            "date": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

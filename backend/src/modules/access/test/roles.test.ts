@@ -142,7 +142,7 @@ describe('role assignments', () => {
     try {
       const only = await solo.staff('Only Owner', ['business_owner']);
       const pa = await solo.staff('Admin', ['platform_administrator']);
-      const assignment = await solo.db.selectFrom('role_assignments').select('id').where('account_id', '=', only).executeTakeFirstOrThrow();
+      const assignment = (await solo.table('role_assignments').findOne({ account_id: only }))!;
       const res = await solo.call('POST', `/role-assignments/${assignment.id}/revoke`, solo.token(pa), { reason: 'Leaving' });
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('LAST_BUSINESS_OWNER');
@@ -236,7 +236,7 @@ describe('role assignments', () => {
     try {
       expect(await f.svc.hasPermission(f.principal(temp), 'reports.library.view')).toBe(false); // read-time expiry
       await f.app.kernel.jobs.runNow('access.expire-assignments');
-      const row = await f.db.selectFrom('role_assignments').selectAll().where('id', '=', res.body.id).executeTakeFirstOrThrow();
+      const row = (await f.table('role_assignments').get(res.body.id))!;
       expect(row.status).toBe('expired');
     } finally {
       f.clock.reset();

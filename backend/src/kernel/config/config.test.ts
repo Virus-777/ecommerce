@@ -40,6 +40,7 @@ describe('development tokens guard', () => {
       API_URL: 'https://api.marketly.example',
       AUTH_JWKS: '{"keys":[]}',
       DATABASE_URL: 'postgres://u:p@db.internal:5432/marketly',
+      MONGODB_URI: 'mongodb://u:p@db.internal:27017/marketly?replicaSet=rs0',
     };
     const c = loadConfig(prod);
     expect(c.host).toBe('0.0.0.0');

@@ -11,6 +11,7 @@ import { devSigner, newDevJwk, signAccessToken } from '../kernel/auth/tokens.js'
 import { createDatabase, type Database } from '../kernel/db/index.js';
 import { dateInZone } from '../kernel/lib/clock.js';
 import { withDependencies } from '../kernel/module-system/loader.js';
+import { testMongo } from './mongo.js';
 
 /** One dev key per test process */
 export const TEST_JWK = newDevJwk();
@@ -25,17 +26,21 @@ export async function testDatabase(): Promise<Database> {
 
 export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}): Promise<FastifyInstance> {
   const database = opts.database ?? (await testDatabase());
+  const mongo = opts.mongo ?? (await testMongo());
   const app = await buildApp({
     env: { NODE_ENV: 'test' },
     ...opts,
     database,
+    mongo,
     modules: opts.modules ?? (opts.only ? withDependencies(opts.only) : undefined),
     config: { devTokens: true, devSigning: { file: '', jwk: TEST_JWK }, migrateOnStart: true, responseValidation: true, ...opts.config },
   }).catch(async (err) => {
     if (!opts.database) await database.close();
+    if (!opts.mongo) await mongo.close();
     throw err;
   });
   if (!opts.database) app.addHook('onClose', () => database.close());
+  if (!opts.mongo) app.addHook('onClose', () => mongo.close());
   await app.ready();
   return app;
 }

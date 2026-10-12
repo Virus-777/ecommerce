@@ -1764,6 +1764,854 @@ export const spec = defineModuleSpec({
     }
   },
   tenantTables: {},
+  collections: {
+    "assets": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "kind",
+        "purpose",
+        "status",
+        "file_name",
+        "content_type",
+        "size_bytes",
+        "sha256",
+        "phash",
+        "width",
+        "height",
+        "duration_seconds",
+        "page_count",
+        "alt",
+        "title",
+        "owner_kind",
+        "owner_id",
+        "owner_label",
+        "visibility",
+        "storage_bucket",
+        "storage_key",
+        "check_result",
+        "rejection_reason",
+        "removed_reason",
+        "removed_by",
+        "removed_at",
+        "show_placeholder",
+        "retain_until",
+        "expires_at",
+        "created_at",
+        "ready_at",
+        "deleted_at"
+      ],
+      "nullable": [
+        "sha256",
+        "phash",
+        "width",
+        "height",
+        "duration_seconds",
+        "page_count",
+        "alt",
+        "title",
+        "owner_id",
+        "owner_label",
+        "check_result",
+        "rejection_reason",
+        "removed_reason",
+        "removed_by",
+        "removed_at",
+        "show_placeholder",
+        "retain_until",
+        "expires_at",
+        "ready_at",
+        "deleted_at"
+      ],
+      "decimal": [
+        "duration_seconds"
+      ],
+      "binary": [],
+      "dates": [
+        "removed_at",
+        "retain_until",
+        "expires_at",
+        "created_at",
+        "ready_at",
+        "deleted_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "kind",
+            "purpose",
+            "status",
+            "file_name",
+            "content_type",
+            "size_bytes",
+            "owner_kind",
+            "visibility",
+            "storage_bucket",
+            "storage_key",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "purpose": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "file_name": {
+              "bsonType": "string"
+            },
+            "content_type": {
+              "bsonType": "string"
+            },
+            "size_bytes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "sha256": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "phash": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "width": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "height": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "duration_seconds": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "page_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "alt": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_kind": {
+              "bsonType": "string"
+            },
+            "owner_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "visibility": {
+              "bsonType": "string"
+            },
+            "storage_bucket": {
+              "bsonType": "string"
+            },
+            "storage_key": {
+              "bsonType": "string"
+            },
+            "check_result": {},
+            "rejection_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "removed_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "removed_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "removed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "show_placeholder": {
+              "bsonType": [
+                "bool",
+                "null"
+              ]
+            },
+            "retain_until": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "expires_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "ready_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "deleted_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "assets_owner_kind_owner_id_created_at_b0361c",
+          "key": {
+            "owner_kind": 1,
+            "owner_id": 1,
+            "created_at": -1
+          }
+        },
+        {
+          "name": "assets_status_created_at_de0a8c",
+          "key": {
+            "status": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "assets_purpose_created_at_106cdf",
+          "key": {
+            "purpose": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "assets_owner_kind_owner_id_phash_3462da",
+          "key": {
+            "owner_kind": 1,
+            "owner_id": 1,
+            "phash": 1
+          }
+        },
+        {
+          "name": "assets_retain_until_4aedba",
+          "key": {
+            "retain_until": 1
+          }
+        },
+        {
+          "name": "assets_expires_at_ce8dd0",
+          "key": {
+            "expires_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "renditions": {
+      "idField": null,
+      "key": [
+        "asset_id",
+        "size",
+        "format"
+      ],
+      "columns": [
+        "asset_id",
+        "size",
+        "storage_key",
+        "url",
+        "width",
+        "height",
+        "format",
+        "bytes"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "asset_id",
+            "size",
+            "storage_key",
+            "url",
+            "width",
+            "height",
+            "format",
+            "bytes"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "asset_id": {
+              "bsonType": "string"
+            },
+            "size": {
+              "bsonType": "string"
+            },
+            "storage_key": {
+              "bsonType": "string"
+            },
+            "url": {
+              "bsonType": "string"
+            },
+            "width": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "height": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "format": {
+              "bsonType": "string"
+            },
+            "bytes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "renditions_asset_id_size_format_c3e54c",
+          "key": {
+            "asset_id": 1,
+            "size": 1,
+            "format": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "uploads": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "asset_id",
+        "expected_bytes",
+        "expected_sha256",
+        "url_expires_at",
+        "completed_at",
+        "client_ip",
+        "created_by_kind",
+        "created_by_id"
+      ],
+      "nullable": [
+        "expected_sha256",
+        "completed_at",
+        "client_ip",
+        "created_by_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "url_expires_at",
+        "completed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "asset_id",
+            "expected_bytes",
+            "url_expires_at",
+            "created_by_kind"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "asset_id": {
+              "bsonType": "string"
+            },
+            "expected_bytes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "expected_sha256": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "url_expires_at": {
+              "bsonType": "date"
+            },
+            "completed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "client_ip": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_by_kind": {
+              "bsonType": "string"
+            },
+            "created_by_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "uploads_url_expires_at_d3b144",
+          "key": {
+            "url_expires_at": 1
+          },
+          "partial": {
+            "completed_at": {
+              "$type": "null"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "usages": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "asset_id",
+        "module",
+        "kind",
+        "ref_id",
+        "ref_label",
+        "evidence",
+        "attached_at",
+        "detached_at"
+      ],
+      "nullable": [
+        "ref_label",
+        "detached_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "attached_at",
+        "detached_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "asset_id",
+            "module",
+            "kind",
+            "ref_id",
+            "evidence",
+            "attached_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "asset_id": {
+              "bsonType": "string"
+            },
+            "module": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "ref_id": {
+              "bsonType": "string"
+            },
+            "ref_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "evidence": {
+              "bsonType": "bool"
+            },
+            "attached_at": {
+              "bsonType": "date"
+            },
+            "detached_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "usages_asset_id_5de728",
+          "key": {
+            "asset_id": 1
+          },
+          "partial": {
+            "detached_at": {
+              "$type": "null"
+            }
+          }
+        },
+        {
+          "name": "usages_asset_id_module_kind_ref_id_5d1b3b",
+          "key": {
+            "asset_id": 1,
+            "module": 1,
+            "kind": 1,
+            "ref_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "detached_at": {
+              "$type": "null"
+            }
+          }
+        },
+        {
+          "name": "usages_module_kind_ref_id_2127aa",
+          "key": {
+            "module": 1,
+            "kind": 1,
+            "ref_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "processing_jobs": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "asset_id",
+        "step",
+        "status",
+        "attempts",
+        "provider_ref",
+        "error",
+        "next_attempt_at",
+        "created_at",
+        "finished_at"
+      ],
+      "nullable": [
+        "provider_ref",
+        "error",
+        "next_attempt_at",
+        "finished_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "next_attempt_at",
+        "created_at",
+        "finished_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "asset_id",
+            "step",
+            "status",
+            "attempts",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "asset_id": {
+              "bsonType": "string"
+            },
+            "step": {
+              "bsonType": "string",
+              "enum": [
+                "scan",
+                "probe",
+                "strip",
+                "renditions",
+                "transcode",
+                "check"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "attempts": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "provider_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "error": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "next_attempt_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "finished_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "processing_jobs_status_next_attempt_at_0fe682",
+          "key": {
+            "status": 1,
+            "next_attempt_at": 1
+          }
+        },
+        {
+          "name": "processing_jobs_provider_ref_d17a01",
+          "key": {
+            "provider_ref": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "upload_counters": {
+      "idField": null,
+      "key": [
+        "owner_kind",
+        "owner_id",
+        "day"
+      ],
+      "columns": [
+        "owner_kind",
+        "owner_id",
+        "day",
+        "count",
+        "bytes"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "owner_kind",
+            "owner_id",
+            "day",
+            "count",
+            "bytes"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "owner_kind": {
+              "bsonType": "string"
+            },
+            "owner_id": {
+              "bsonType": "string"
+            },
+            "day": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "bytes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "upload_counters_owner_kind_owner_id_day_fdd4d8",
+          "key": {
+            "owner_kind": 1,
+            "owner_id": 1,
+            "day": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

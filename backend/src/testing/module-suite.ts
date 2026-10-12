@@ -68,11 +68,13 @@ export function describeModule(name: string) {
 
   describe(`${name} module`, () => {
     let app: FastifyInstance;
+    let onMongo = false;
     const ownerOnly = new Set(Object.values(allSpecs).flatMap((s) => s.permissions.filter((p) => p.ownerOnly).map((p) => p.key)));
 
     beforeAll(async () => {
       // every launch phase on, so auth and validation are exercised for later-phase endpoints too
       app = await buildTestApp({ only: [name], config: { launchPhase: 4, rateLimits: false } });
+      onMongo = app.kernel.mongoModules.includes(name);
     });
     afterAll(async () => {
       await app?.close();
@@ -83,7 +85,20 @@ export function describeModule(name: string) {
       for (const dep of spec.dependsOn) expect(app.kernel.modules).toContain(dep);
     });
 
-    it('creates the tables and columns of its spec', async () => {
+    it('creates the collections, validators and indexes of its spec (MongoDB) or its tables and columns (PostgreSQL)', async () => {
+      if (onMongo) {
+        const db = app.kernel.mongo.db;
+        const have = new Map((await db.listCollections({ name: { $regex: `^${name.replace(/[-]/g, '\\-')}\\.` } }).toArray()).map((c) => [c.name, c]));
+        for (const [table, def] of Object.entries(spec.collections)) {
+          const c = have.get(`${name}.${table}`) as { options?: { validator?: unknown } } | undefined;
+          expect(c, `${name}.${table} exists`).toBeDefined();
+          expect(c!.options?.validator, `${name}.${table} validator`).toEqual(def.validator);
+          const indexes = new Set((await db.collection(`${name}.${table}`).listIndexes().toArray()).map((i) => i.name as string));
+          for (const i of def.indexes) expect(indexes.has(i.name), `${name}.${table} index ${i.name} (${JSON.stringify(i.key)})`).toBe(true);
+        }
+        expect(have.size, 'no collections outside the spec').toBe(Object.keys(spec.collections).length);
+        return;
+      }
       const schema = schemaOf(name);
       const rows = await sql<{ table_name: string; column_name: string; is_nullable: string; udt_name: string }>`
         select table_name, column_name, is_nullable, udt_name from information_schema.columns where table_schema = ${schema}`.execute(app.kernel.database.kysely);

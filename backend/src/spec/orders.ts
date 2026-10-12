@@ -4267,6 +4267,1726 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "orders": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "checkout_session_id",
+        "attempt_no",
+        "reservation_id",
+        "delivery_address_id",
+        "customer_id",
+        "contact_email",
+        "contact_phone",
+        "contact_name",
+        "channel",
+        "lifecycle",
+        "display_status",
+        "flag_kinds",
+        "currency",
+        "items_total",
+        "discount_total",
+        "shipping_total",
+        "tax_total",
+        "total",
+        "delivery_address",
+        "gift_note",
+        "hide_prices",
+        "policy_versions",
+        "coupon_codes",
+        "payment_intent_id",
+        "payment_state",
+        "payment_method_label",
+        "captured_total",
+        "refunded_total",
+        "placed_at",
+        "accepted_at",
+        "completed_at"
+      ],
+      "nullable": [
+        "reservation_id",
+        "delivery_address_id",
+        "customer_id",
+        "contact_phone",
+        "gift_note",
+        "accepted_at",
+        "completed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "placed_at",
+        "accepted_at",
+        "completed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "checkout_session_id",
+            "attempt_no",
+            "contact_email",
+            "contact_name",
+            "channel",
+            "lifecycle",
+            "display_status",
+            "flag_kinds",
+            "currency",
+            "items_total",
+            "discount_total",
+            "shipping_total",
+            "tax_total",
+            "total",
+            "delivery_address",
+            "hide_prices",
+            "policy_versions",
+            "coupon_codes",
+            "payment_intent_id",
+            "payment_state",
+            "payment_method_label",
+            "captured_total",
+            "refunded_total",
+            "placed_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "checkout_session_id": {
+              "bsonType": "string"
+            },
+            "attempt_no": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reservation_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "delivery_address_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "customer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "contact_email": {
+              "bsonType": "string"
+            },
+            "contact_phone": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "contact_name": {
+              "bsonType": "string"
+            },
+            "channel": {
+              "bsonType": "string"
+            },
+            "lifecycle": {
+              "bsonType": "string",
+              "enum": [
+                "payment_pending",
+                "open",
+                "completed",
+                "cancelled"
+              ]
+            },
+            "display_status": {
+              "bsonType": "string"
+            },
+            "flag_kinds": {
+              "bsonType": "array",
+              "items": {
+                "bsonType": "string"
+              }
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "items_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "discount_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "shipping_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "tax_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "delivery_address": {},
+            "gift_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "hide_prices": {
+              "bsonType": "bool"
+            },
+            "policy_versions": {},
+            "coupon_codes": {},
+            "payment_intent_id": {
+              "bsonType": "string"
+            },
+            "payment_state": {
+              "bsonType": "string"
+            },
+            "payment_method_label": {
+              "bsonType": "string"
+            },
+            "captured_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "refunded_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "placed_at": {
+              "bsonType": "date"
+            },
+            "accepted_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "completed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "orders_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "orders_checkout_session_id_attempt_no_04cd9d",
+          "key": {
+            "checkout_session_id": 1,
+            "attempt_no": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "orders_customer_id_placed_at_38c4a9",
+          "key": {
+            "customer_id": 1,
+            "placed_at": -1
+          }
+        },
+        {
+          "name": "orders_contact_email_35ac7e",
+          "key": {
+            "contact_email": 1
+          },
+          "partial": {
+            "customer_id": {
+              "$type": "null"
+            }
+          },
+          "collation": {
+            "locale": "en",
+            "strength": 2
+          }
+        },
+        {
+          "name": "orders_display_status_placed_at_4f0b41",
+          "key": {
+            "display_status": 1,
+            "placed_at": -1
+          }
+        },
+        {
+          "name": "orders_lifecycle_deef5a",
+          "key": {
+            "lifecycle": 1
+          }
+        },
+        {
+          "name": "orders_contact_name_65950b",
+          "key": {
+            "contact_name": 1
+          }
+        },
+        {
+          "name": "orders_contact_email_4f8241",
+          "key": {
+            "contact_email": 1
+          }
+        },
+        {
+          "name": "orders_flag_kinds_3aee24",
+          "key": {
+            "flag_kinds": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "order_facts": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "order_id",
+        "kind",
+        "source_id",
+        "group_id",
+        "shipment_id",
+        "ref",
+        "status",
+        "subkind",
+        "customer_action",
+        "amount",
+        "item_ids",
+        "due_at",
+        "at"
+      ],
+      "nullable": [
+        "group_id",
+        "shipment_id",
+        "ref",
+        "status",
+        "subkind",
+        "customer_action",
+        "amount",
+        "item_ids",
+        "due_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "kind",
+            "source_id",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string",
+              "enum": [
+                "capture",
+                "chargeback",
+                "case",
+                "refund_sent",
+                "refund_approval",
+                "delivery_issue",
+                "seller_restricted",
+                "confirmation_resent"
+              ]
+            },
+            "source_id": {
+              "bsonType": "string"
+            },
+            "group_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "shipment_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "subkind": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "customer_action": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "item_ids": {
+              "bsonType": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "bsonType": "string"
+              }
+            },
+            "due_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "order_facts_order_id_kind_source_id_8ae832",
+          "key": {
+            "order_id": 1,
+            "kind": 1,
+            "source_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "order_facts_kind_source_id_e77bdf",
+          "key": {
+            "kind": 1,
+            "source_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "seller_groups": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "order_id",
+        "position",
+        "owner_type",
+        "seller_id",
+        "seller_name",
+        "ships_from",
+        "fulfilled_by",
+        "delivery",
+        "dispatch_by",
+        "dispatch_by_history",
+        "status",
+        "return_terms_summary",
+        "items_total",
+        "discount_total",
+        "shipping_total",
+        "tax_total",
+        "total",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "dispatch_by",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "position",
+            "owner_type",
+            "seller_name",
+            "ships_from",
+            "fulfilled_by",
+            "delivery",
+            "dispatch_by",
+            "dispatch_by_history",
+            "status",
+            "return_terms_summary",
+            "items_total",
+            "discount_total",
+            "shipping_total",
+            "tax_total",
+            "total"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "owner_type": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "seller_name": {
+              "bsonType": "string"
+            },
+            "ships_from": {
+              "bsonType": "string"
+            },
+            "fulfilled_by": {
+              "bsonType": "string"
+            },
+            "delivery": {},
+            "dispatch_by": {
+              "bsonType": "date"
+            },
+            "dispatch_by_history": {},
+            "status": {
+              "bsonType": "string"
+            },
+            "return_terms_summary": {
+              "bsonType": "string"
+            },
+            "items_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "discount_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "shipping_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "tax_total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "total": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "shipped_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "delivered_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "seller_groups_seller_id_status_dispatch_by_77b3fc",
+          "key": {
+            "seller_id": 1,
+            "status": 1,
+            "dispatch_by": 1
+          }
+        },
+        {
+          "name": "seller_groups_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        },
+        {
+          "name": "seller_groups_status_dispatch_by_8b18f8",
+          "key": {
+            "status": 1,
+            "dispatch_by": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "order_items": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "order_id",
+        "group_id",
+        "offer_id",
+        "product_id",
+        "variant_id",
+        "stock_item_id",
+        "category_id",
+        "product_snapshot",
+        "offer_snapshot",
+        "return_terms",
+        "quantity",
+        "unit_price",
+        "discounts",
+        "shipping_share",
+        "tax_share",
+        "paid_amount",
+        "refunded_amount",
+        "refund_status",
+        "state",
+        "state_before_request",
+        "shipment_id",
+        "return_id",
+        "return_ref",
+        "delivered_at",
+        "return_window_ends_at",
+        "split_from_item_id",
+        "replacement_of_item_id",
+        "checkout_line_id"
+      ],
+      "nullable": [
+        "category_id",
+        "state_before_request",
+        "shipment_id",
+        "return_id",
+        "return_ref",
+        "delivered_at",
+        "return_window_ends_at",
+        "split_from_item_id",
+        "replacement_of_item_id",
+        "checkout_line_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "delivered_at",
+        "return_window_ends_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "group_id",
+            "offer_id",
+            "product_id",
+            "variant_id",
+            "stock_item_id",
+            "product_snapshot",
+            "offer_snapshot",
+            "return_terms",
+            "quantity",
+            "unit_price",
+            "discounts",
+            "shipping_share",
+            "tax_share",
+            "paid_amount",
+            "refunded_amount",
+            "refund_status",
+            "state"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "group_id": {
+              "bsonType": "string"
+            },
+            "offer_id": {
+              "bsonType": "string"
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "variant_id": {
+              "bsonType": "string"
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "category_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "product_snapshot": {},
+            "offer_snapshot": {},
+            "return_terms": {},
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "unit_price": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "discounts": {},
+            "shipping_share": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "tax_share": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "paid_amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "refunded_amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "refund_status": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "state_before_request": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "shipment_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "return_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "return_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "delivered_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "return_window_ends_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "split_from_item_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "replacement_of_item_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "checkout_line_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "order_items_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        },
+        {
+          "name": "order_items_group_id_state_5cc68f",
+          "key": {
+            "group_id": 1,
+            "state": 1
+          }
+        },
+        {
+          "name": "order_items_offer_id_959ceb",
+          "key": {
+            "offer_id": 1
+          }
+        },
+        {
+          "name": "order_items_product_id_6c3e3e",
+          "key": {
+            "product_id": 1
+          }
+        },
+        {
+          "name": "order_items_split_from_item_id_fd92a8",
+          "key": {
+            "split_from_item_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "item_state_log": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "item_id",
+        "from_state",
+        "to_state",
+        "event",
+        "reason",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "reason",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "item_id",
+            "from_state",
+            "to_state",
+            "event",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "item_id": {
+              "bsonType": "string"
+            },
+            "from_state": {
+              "bsonType": "string"
+            },
+            "to_state": {
+              "bsonType": "string"
+            },
+            "event": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "item_state_log_item_id_at_ce4f0a",
+          "key": {
+            "item_id": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "cancellations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "order_id",
+        "group_id",
+        "initiated_by",
+        "reason_code",
+        "reason",
+        "items",
+        "status",
+        "respond_by",
+        "decided_by",
+        "decided_at",
+        "decline_reason",
+        "refund_preview",
+        "refund_status",
+        "payment_refund_id",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "reason",
+        "respond_by",
+        "decided_by",
+        "decided_at",
+        "decline_reason",
+        "payment_refund_id",
+        "idempotency_key"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "respond_by",
+        "decided_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "group_id",
+            "initiated_by",
+            "reason_code",
+            "items",
+            "status",
+            "refund_preview",
+            "refund_status",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "group_id": {
+              "bsonType": "string"
+            },
+            "initiated_by": {
+              "bsonType": "string"
+            },
+            "reason_code": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "items": {},
+            "status": {
+              "bsonType": "string"
+            },
+            "respond_by": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "decided_by": {},
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "decline_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "refund_preview": {},
+            "refund_status": {
+              "bsonType": "string"
+            },
+            "payment_refund_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "idempotency_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "cancellations_group_id_status_e331f0",
+          "key": {
+            "group_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "cancellations_status_respond_by_d4d721",
+          "key": {
+            "status": 1,
+            "respond_by": 1
+          }
+        },
+        {
+          "name": "cancellations_order_id_idempotency_key_7c78b9",
+          "key": {
+            "order_id": 1,
+            "idempotency_key": 1
+          },
+          "unique": true,
+          "partial": {
+            "idempotency_key": {
+              "$type": "string"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "shipment_refs": {
+      "idField": "shipment_id",
+      "key": [
+        "shipment_id"
+      ],
+      "columns": [
+        "shipment_id",
+        "order_id",
+        "group_id",
+        "package_label",
+        "carrier",
+        "service",
+        "tracking_number",
+        "tracking_url",
+        "status",
+        "estimated_arrival",
+        "shipped_at",
+        "delivered_at",
+        "item_ids"
+      ],
+      "nullable": [
+        "carrier",
+        "service",
+        "tracking_number",
+        "tracking_url",
+        "estimated_arrival",
+        "shipped_at",
+        "delivered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "shipped_at",
+        "delivered_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "group_id",
+            "package_label",
+            "status",
+            "item_ids"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "group_id": {
+              "bsonType": "string"
+            },
+            "package_label": {
+              "bsonType": "string"
+            },
+            "carrier": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "service": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "tracking_number": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "tracking_url": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "estimated_arrival": {},
+            "shipped_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "delivered_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "item_ids": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "shipment_refs_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        },
+        {
+          "name": "shipment_refs_tracking_number_da23e3",
+          "key": {
+            "tracking_number": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "timeline": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "order_id",
+        "group_id",
+        "item_id",
+        "visibility",
+        "label",
+        "detail",
+        "reason",
+        "actor_kind",
+        "actor_id",
+        "actor_name",
+        "at"
+      ],
+      "nullable": [
+        "group_id",
+        "item_id",
+        "detail",
+        "reason",
+        "actor_id",
+        "actor_name"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "visibility",
+            "label",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "group_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "item_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "visibility": {
+              "bsonType": "string",
+              "enum": [
+                "customer",
+                "seller",
+                "staff"
+              ]
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "detail": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "timeline_order_id_at_e3a2a3",
+          "key": {
+            "order_id": 1,
+            "at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "notes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "order_id",
+        "text",
+        "author_id",
+        "author_name",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "text",
+            "author_id",
+            "author_name",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "text": {
+              "bsonType": "string"
+            },
+            "author_id": {
+              "bsonType": "string"
+            },
+            "author_name": {
+              "bsonType": "string"
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "documents": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "order_id",
+        "group_id",
+        "kind",
+        "number",
+        "issued_at"
+      ],
+      "nullable": [
+        "group_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "issued_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "order_id",
+            "kind",
+            "number",
+            "issued_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "group_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "number": {
+              "bsonType": "string"
+            },
+            "issued_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "documents_number_86a411",
+          "key": {
+            "number": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "saved_filters": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "owner_staff_id",
+        "name",
+        "query",
+        "shared",
+        "cached_count",
+        "counted_at",
+        "created_at"
+      ],
+      "nullable": [
+        "cached_count",
+        "counted_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "counted_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "owner_staff_id",
+            "name",
+            "query",
+            "shared",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "owner_staff_id": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "query": {},
+            "shared": {
+              "bsonType": "bool"
+            },
+            "cached_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "counted_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "ref_sequences": {
+      "idField": "day",
+      "key": [
+        "day"
+      ],
+      "columns": [
+        "day",
+        "last_value"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "last_value"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "last_value": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

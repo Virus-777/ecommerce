@@ -1178,6 +1178,830 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "entries": {
+      "idField": null,
+      "key": [
+        "id",
+        "at"
+      ],
+      "columns": [
+        "id",
+        "seq",
+        "at",
+        "actor_kind",
+        "actor_id",
+        "actor_name",
+        "actor_roles",
+        "action",
+        "action_label",
+        "module",
+        "category",
+        "target_type",
+        "target_id",
+        "target_ref",
+        "target_label",
+        "target_screen",
+        "seller_id",
+        "reason",
+        "before",
+        "after",
+        "before_text",
+        "after_text",
+        "evidence",
+        "approval_request_id",
+        "approval_note",
+        "request_id",
+        "ip",
+        "visible_to_seller",
+        "prev_hash",
+        "hash"
+      ],
+      "nullable": [
+        "actor_id",
+        "actor_name",
+        "target_ref",
+        "target_label",
+        "target_screen",
+        "seller_id",
+        "reason",
+        "before",
+        "after",
+        "before_text",
+        "after_text",
+        "approval_request_id",
+        "approval_note",
+        "request_id",
+        "ip"
+      ],
+      "decimal": [],
+      "binary": [
+        "prev_hash",
+        "hash"
+      ],
+      "dates": [
+        "at"
+      ],
+      "identity": "seq",
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "id",
+            "seq",
+            "at",
+            "actor_kind",
+            "actor_roles",
+            "action",
+            "action_label",
+            "module",
+            "category",
+            "target_type",
+            "target_id",
+            "evidence",
+            "visible_to_seller",
+            "prev_hash",
+            "hash"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "id": {
+              "bsonType": "string"
+            },
+            "seq": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            },
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_roles": {},
+            "action": {
+              "bsonType": "string"
+            },
+            "action_label": {
+              "bsonType": "string"
+            },
+            "module": {
+              "bsonType": "string"
+            },
+            "category": {
+              "bsonType": "string"
+            },
+            "target_type": {
+              "bsonType": "string"
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "target_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "target_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "target_screen": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "before": {},
+            "after": {},
+            "before_text": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "after_text": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "evidence": {},
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "approval_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "ip": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "visible_to_seller": {
+              "bsonType": "bool"
+            },
+            "prev_hash": {
+              "bsonType": "binData"
+            },
+            "hash": {
+              "bsonType": "binData"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "entries_id_at_2f63f7",
+          "key": {
+            "id": 1,
+            "at": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "entries_seq_at_f81c3c",
+          "key": {
+            "seq": 1,
+            "at": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "entries_at_id_2a0522",
+          "key": {
+            "at": -1,
+            "id": 1
+          }
+        },
+        {
+          "name": "entries_target_type_target_id_at_52e743",
+          "key": {
+            "target_type": 1,
+            "target_id": 1,
+            "at": -1
+          }
+        },
+        {
+          "name": "entries_actor_id_at_1427d7",
+          "key": {
+            "actor_id": 1,
+            "at": -1
+          }
+        },
+        {
+          "name": "entries_category_at_95ff60",
+          "key": {
+            "category": 1,
+            "at": -1
+          }
+        },
+        {
+          "name": "entries_seller_id_at_0e2bf4",
+          "key": {
+            "seller_id": 1,
+            "at": -1
+          },
+          "partial": {
+            "visible_to_seller": true
+          }
+        },
+        {
+          "name": "entries_approval_request_id_901de1",
+          "key": {
+            "approval_request_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "entry_targets": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "entry_id",
+        "target_type",
+        "target_id",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "entry_id",
+            "target_type",
+            "target_id",
+            "at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "entry_id": {
+              "bsonType": "string"
+            },
+            "target_type": {
+              "bsonType": "string"
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "entry_targets_target_type_target_id_at_52e743",
+          "key": {
+            "target_type": 1,
+            "target_id": 1,
+            "at": -1
+          }
+        },
+        {
+          "name": "entry_targets_entry_id_3e0f0e",
+          "key": {
+            "entry_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "entry_partitions": {
+      "idField": "name",
+      "key": [
+        "name"
+      ],
+      "columns": [
+        "name",
+        "from_at",
+        "to_at",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "from_at",
+        "to_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "from_at",
+            "to_at",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "from_at": {
+              "bsonType": "date"
+            },
+            "to_at": {
+              "bsonType": "date"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "entry_partitions_from_at_b41274",
+          "key": {
+            "from_at": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "approval_states": {
+      "idField": "approval_request_id",
+      "key": [
+        "approval_request_id"
+      ],
+      "columns": [
+        "approval_request_id",
+        "state",
+        "approvers",
+        "steps",
+        "awaiting",
+        "decided_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "awaiting",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "state",
+            "approvers",
+            "steps",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "approvers": {},
+            "steps": {},
+            "awaiting": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "approval_states_state_f5a9e8",
+          "key": {
+            "state": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "retention": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "retain_years",
+        "pending_years",
+        "pending_reason",
+        "pending_approval_request_id",
+        "pending_requested_by",
+        "updated_by",
+        "updated_at",
+        "last_purge_at",
+        "last_purge_removed",
+        "last_purge_through"
+      ],
+      "nullable": [
+        "pending_years",
+        "pending_reason",
+        "pending_approval_request_id",
+        "pending_requested_by",
+        "updated_by",
+        "updated_at",
+        "last_purge_at",
+        "last_purge_removed",
+        "last_purge_through"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at",
+        "last_purge_at",
+        "last_purge_through"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "retain_years"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "retain_years": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "pending_years": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "pending_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "pending_approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "pending_requested_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "last_purge_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "last_purge_removed": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "last_purge_through": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "checkpoints": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "seq",
+        "hash",
+        "mac",
+        "key_id",
+        "kind",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [
+        "hash"
+      ],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "seq",
+            "hash",
+            "mac",
+            "key_id",
+            "kind",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seq": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "hash": {
+              "bsonType": "binData"
+            },
+            "mac": {
+              "bsonType": "string"
+            },
+            "key_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string",
+              "enum": [
+                "verified",
+                "purge"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "checkpoints_seq_52ef2e",
+          "key": {
+            "seq": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "checkpoints_created_at_a2a739",
+          "key": {
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "integrity_checks": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "started_at",
+        "finished_at",
+        "from_seq",
+        "to_seq",
+        "ok",
+        "broken_at_seq"
+      ],
+      "nullable": [
+        "finished_at",
+        "ok",
+        "broken_at_seq"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "started_at",
+        "finished_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "started_at",
+            "from_seq",
+            "to_seq"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "started_at": {
+              "bsonType": "date"
+            },
+            "finished_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "from_seq": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "to_seq": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ok": {
+              "bsonType": [
+                "bool",
+                "null"
+              ]
+            },
+            "broken_at_seq": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "integrity_checks_started_at_bc66d8",
+          "key": {
+            "started_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

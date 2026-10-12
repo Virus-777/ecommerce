@@ -3504,6 +3504,1966 @@ export const spec = defineModuleSpec({
       "visitor": "guest_session_id"
     }
   },
+  collections: {
+    "accounts": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "realm",
+        "email",
+        "email_normalized",
+        "email_verified_at",
+        "display_name",
+        "status",
+        "password_hash",
+        "password_changed_at",
+        "must_reset_password",
+        "failed_sign_ins",
+        "failed_window_started_at",
+        "locked_until",
+        "lock_reason",
+        "locked_by",
+        "closed_at",
+        "accepted_terms_version",
+        "created_at",
+        "last_sign_in_at",
+        "last_active_at",
+        "version",
+        "tokens_valid_after"
+      ],
+      "nullable": [
+        "email_verified_at",
+        "password_hash",
+        "password_changed_at",
+        "failed_window_started_at",
+        "locked_until",
+        "lock_reason",
+        "locked_by",
+        "closed_at",
+        "accepted_terms_version",
+        "last_sign_in_at",
+        "last_active_at",
+        "tokens_valid_after"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "email_verified_at",
+        "password_changed_at",
+        "failed_window_started_at",
+        "locked_until",
+        "closed_at",
+        "created_at",
+        "last_sign_in_at",
+        "last_active_at",
+        "tokens_valid_after"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "realm",
+            "email",
+            "email_normalized",
+            "display_name",
+            "status",
+            "must_reset_password",
+            "failed_sign_ins",
+            "created_at",
+            "version"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "realm": {
+              "bsonType": "string",
+              "enum": [
+                "member",
+                "staff"
+              ]
+            },
+            "email": {
+              "bsonType": "string"
+            },
+            "email_normalized": {
+              "bsonType": "string"
+            },
+            "email_verified_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "display_name": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "password_hash": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "password_changed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "must_reset_password": {
+              "bsonType": "bool"
+            },
+            "failed_sign_ins": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "failed_window_started_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "locked_until": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "lock_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "locked_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "closed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "accepted_terms_version": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "last_sign_in_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "last_active_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "tokens_valid_after": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "accounts_realm_email_normalized_b8b41e",
+          "key": {
+            "realm": 1,
+            "email_normalized": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "accounts_status_id_a54fb9",
+          "key": {
+            "status": 1,
+            "id": 1
+          }
+        },
+        {
+          "name": "accounts_realm_created_at_bfbcae",
+          "key": {
+            "realm": 1,
+            "created_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "password_history": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "password_hash",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "password_hash",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "password_hash": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "password_history_account_id_created_at_7c301e",
+          "key": {
+            "account_id": 1,
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "two_step_methods": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "method",
+        "secret_encrypted",
+        "phone_e164_encrypted",
+        "phone_masked",
+        "confirmed_at",
+        "last_used_at",
+        "last_used_step",
+        "removed_at"
+      ],
+      "nullable": [
+        "secret_encrypted",
+        "phone_e164_encrypted",
+        "phone_masked",
+        "confirmed_at",
+        "last_used_at",
+        "last_used_step",
+        "removed_at"
+      ],
+      "decimal": [],
+      "binary": [
+        "secret_encrypted",
+        "phone_e164_encrypted"
+      ],
+      "dates": [
+        "confirmed_at",
+        "last_used_at",
+        "removed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "method"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "method": {
+              "bsonType": "string",
+              "enum": [
+                "totp",
+                "sms"
+              ]
+            },
+            "secret_encrypted": {
+              "bsonType": [
+                "binData",
+                "null"
+              ]
+            },
+            "phone_e164_encrypted": {
+              "bsonType": [
+                "binData",
+                "null"
+              ]
+            },
+            "phone_masked": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "confirmed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "last_used_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "last_used_step": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "removed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "two_step_methods_account_id_0cdbcc",
+          "key": {
+            "account_id": 1
+          },
+          "partial": {
+            "removed_at": {
+              "$type": "null"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "recovery_codes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "code_hash",
+        "batch_id",
+        "used_at"
+      ],
+      "nullable": [
+        "used_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "used_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "code_hash",
+            "batch_id"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "code_hash": {
+              "bsonType": "string"
+            },
+            "batch_id": {
+              "bsonType": "string"
+            },
+            "used_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "recovery_codes_account_id_batch_id_cc2213",
+          "key": {
+            "account_id": 1,
+            "batch_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "challenges": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "purpose",
+        "target_email",
+        "code_hash",
+        "payload",
+        "attempts",
+        "max_attempts",
+        "status",
+        "expires_at",
+        "resend_available_at",
+        "created_at",
+        "completed_at",
+        "target_phone_encrypted"
+      ],
+      "nullable": [
+        "account_id",
+        "target_email",
+        "code_hash",
+        "resend_available_at",
+        "completed_at",
+        "target_phone_encrypted"
+      ],
+      "decimal": [],
+      "binary": [
+        "target_phone_encrypted"
+      ],
+      "dates": [
+        "expires_at",
+        "resend_available_at",
+        "created_at",
+        "completed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "purpose",
+            "payload",
+            "attempts",
+            "max_attempts",
+            "status",
+            "expires_at",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "purpose": {
+              "bsonType": "string",
+              "enum": [
+                "email_verification",
+                "email_change",
+                "phone_verification",
+                "sign_in_second_factor",
+                "two_step_setup"
+              ]
+            },
+            "target_email": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "code_hash": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "payload": {},
+            "attempts": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "max_attempts": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "resend_available_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "completed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "target_phone_encrypted": {
+              "bsonType": [
+                "binData",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "challenges_account_id_purpose_status_602b96",
+          "key": {
+            "account_id": 1,
+            "purpose": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "challenges_expires_at_ce8dd0",
+          "key": {
+            "expires_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "password_resets": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "token_hash",
+        "forced_by",
+        "forced_reason",
+        "expires_at",
+        "used_at",
+        "requested_ip",
+        "created_at"
+      ],
+      "nullable": [
+        "forced_by",
+        "forced_reason",
+        "used_at",
+        "requested_ip"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "used_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "token_hash",
+            "expires_at",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "token_hash": {
+              "bsonType": "string"
+            },
+            "forced_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "forced_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "used_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "requested_ip": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "password_resets_token_hash_ff3baa",
+          "key": {
+            "token_hash": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "password_resets_account_id_created_at_7c301e",
+          "key": {
+            "account_id": 1,
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "devices": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "kind",
+        "label",
+        "installation_id",
+        "user_agent",
+        "app_version",
+        "last_ip",
+        "last_location",
+        "two_step_trusted_until",
+        "first_seen_at",
+        "last_active_at"
+      ],
+      "nullable": [
+        "installation_id",
+        "user_agent",
+        "app_version",
+        "last_ip",
+        "last_location",
+        "two_step_trusted_until"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "two_step_trusted_until",
+        "first_seen_at",
+        "last_active_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "kind",
+            "label",
+            "first_seen_at",
+            "last_active_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string",
+              "enum": [
+                "web",
+                "android"
+              ]
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "installation_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "user_agent": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "app_version": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "last_ip": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "last_location": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "two_step_trusted_until": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "first_seen_at": {
+              "bsonType": "date"
+            },
+            "last_active_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "devices_account_id_last_active_at_93cd7a",
+          "key": {
+            "account_id": 1,
+            "last_active_at": -1
+          }
+        },
+        {
+          "name": "devices_account_id_installation_id_6628f8",
+          "key": {
+            "account_id": 1,
+            "installation_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "$and": [
+              {
+                "installation_id": {
+                  "$type": "string"
+                }
+              },
+              {
+                "installation_id": {
+                  "$type": "string"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "sessions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "device_id",
+        "audience",
+        "seller_id",
+        "seller_member_id",
+        "refresh_token_hash",
+        "previous_token_hash",
+        "keep_signed_in",
+        "two_step_verified_at",
+        "created_at",
+        "last_refreshed_at",
+        "last_active_at",
+        "expires_at",
+        "absolute_expires_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "nullable": [
+        "seller_id",
+        "seller_member_id",
+        "previous_token_hash",
+        "two_step_verified_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "two_step_verified_at",
+        "created_at",
+        "last_refreshed_at",
+        "last_active_at",
+        "expires_at",
+        "absolute_expires_at",
+        "revoked_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "device_id",
+            "audience",
+            "refresh_token_hash",
+            "keep_signed_in",
+            "created_at",
+            "last_refreshed_at",
+            "last_active_at",
+            "expires_at",
+            "absolute_expires_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "device_id": {
+              "bsonType": "string"
+            },
+            "audience": {
+              "bsonType": "string",
+              "enum": [
+                "store",
+                "seller",
+                "admin"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "seller_member_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "refresh_token_hash": {
+              "bsonType": "string"
+            },
+            "previous_token_hash": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "keep_signed_in": {
+              "bsonType": "bool"
+            },
+            "two_step_verified_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "last_refreshed_at": {
+              "bsonType": "date"
+            },
+            "last_active_at": {
+              "bsonType": "date"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "absolute_expires_at": {
+              "bsonType": "date"
+            },
+            "revoked_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "revoke_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "sessions_refresh_token_hash_cfae96",
+          "key": {
+            "refresh_token_hash": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "sessions_account_id_e9a213",
+          "key": {
+            "account_id": 1
+          },
+          "partial": {
+            "revoked_at": {
+              "$type": "null"
+            }
+          }
+        },
+        {
+          "name": "sessions_device_id_220b2b",
+          "key": {
+            "device_id": 1
+          }
+        },
+        {
+          "name": "sessions_seller_id_effa4c",
+          "key": {
+            "seller_id": 1
+          },
+          "partial": {
+            "revoked_at": {
+              "$type": "null"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "seller_access": {
+      "idField": null,
+      "key": [
+        "account_id",
+        "seller_id"
+      ],
+      "columns": [
+        "account_id",
+        "seller_id",
+        "seller_member_id",
+        "seller_name",
+        "role_label",
+        "is_owner",
+        "granted_at",
+        "revoked_at",
+        "last_used_at"
+      ],
+      "nullable": [
+        "revoked_at",
+        "last_used_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "granted_at",
+        "revoked_at",
+        "last_used_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "seller_id",
+            "seller_member_id",
+            "seller_name",
+            "role_label",
+            "is_owner",
+            "granted_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "seller_member_id": {
+              "bsonType": "string"
+            },
+            "seller_name": {
+              "bsonType": "string"
+            },
+            "role_label": {
+              "bsonType": "string"
+            },
+            "is_owner": {
+              "bsonType": "bool"
+            },
+            "granted_at": {
+              "bsonType": "date"
+            },
+            "revoked_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "last_used_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "seller_access_account_id_seller_id_f4bed9",
+          "key": {
+            "account_id": 1,
+            "seller_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "seller_access_seller_id_b7adb7",
+          "key": {
+            "seller_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "invitations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "realm",
+        "purpose",
+        "email",
+        "name",
+        "account_id",
+        "context_ref",
+        "context_label",
+        "token_hash",
+        "invited_by_kind",
+        "invited_by_id",
+        "status",
+        "sent_at",
+        "expires_at",
+        "accepted_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "nullable": [
+        "account_id",
+        "context_ref",
+        "context_label",
+        "accepted_at",
+        "revoked_at",
+        "revoke_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sent_at",
+        "expires_at",
+        "accepted_at",
+        "revoked_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "realm",
+            "purpose",
+            "email",
+            "name",
+            "token_hash",
+            "invited_by_kind",
+            "invited_by_id",
+            "status",
+            "sent_at",
+            "expires_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "realm": {
+              "bsonType": "string"
+            },
+            "purpose": {
+              "bsonType": "string",
+              "enum": [
+                "staff",
+                "seller_member"
+              ]
+            },
+            "email": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "account_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "context_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "context_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "token_hash": {
+              "bsonType": "string"
+            },
+            "invited_by_kind": {
+              "bsonType": "string"
+            },
+            "invited_by_id": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "sent_at": {
+              "bsonType": "date"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "accepted_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "revoked_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "revoke_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "invitations_token_hash_ff3baa",
+          "key": {
+            "token_hash": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "invitations_status_expires_at_613245",
+          "key": {
+            "status": 1,
+            "expires_at": 1
+          }
+        },
+        {
+          "name": "invitations_email_896614",
+          "key": {
+            "email": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "guest_sessions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "device_kind",
+        "created_at",
+        "last_seen_at",
+        "expires_at",
+        "claimed_by_account_id",
+        "claimed_at",
+        "audience",
+        "refresh_token_hash",
+        "previous_token_hash",
+        "rotated_at"
+      ],
+      "nullable": [
+        "claimed_by_account_id",
+        "claimed_at",
+        "previous_token_hash",
+        "rotated_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "last_seen_at",
+        "expires_at",
+        "claimed_at",
+        "rotated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "device_kind",
+            "created_at",
+            "last_seen_at",
+            "expires_at",
+            "audience",
+            "refresh_token_hash"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "device_kind": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "last_seen_at": {
+              "bsonType": "date"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "claimed_by_account_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "claimed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "audience": {
+              "bsonType": "string",
+              "enum": [
+                "store",
+                "seller",
+                "admin"
+              ]
+            },
+            "refresh_token_hash": {
+              "bsonType": "string"
+            },
+            "previous_token_hash": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "rotated_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "guest_sessions_refresh_token_hash_cfae96",
+          "key": {
+            "refresh_token_hash": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "guest_sessions_expires_at_ce8dd0",
+          "key": {
+            "expires_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "guest_order_grants": {
+      "idField": null,
+      "key": [
+        "guest_session_id",
+        "order_id"
+      ],
+      "columns": [
+        "guest_session_id",
+        "order_id",
+        "email_normalized",
+        "via",
+        "granted_at",
+        "expires_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "granted_at",
+        "expires_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "guest_session_id",
+            "order_id",
+            "email_normalized",
+            "via",
+            "granted_at",
+            "expires_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "guest_session_id": {
+              "bsonType": "string"
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "email_normalized": {
+              "bsonType": "string"
+            },
+            "via": {
+              "bsonType": "string",
+              "enum": [
+                "checkout",
+                "lookup",
+                "link"
+              ]
+            },
+            "granted_at": {
+              "bsonType": "date"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "guest_order_grants_guest_session_id_order_id_3c0713",
+          "key": {
+            "guest_session_id": 1,
+            "order_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "guest_order_grants_email_normalized_6188b6",
+          "key": {
+            "email_normalized": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "order_links": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "token_hash",
+        "order_id",
+        "email_normalized",
+        "expires_at",
+        "last_redeemed_at",
+        "redeem_count"
+      ],
+      "nullable": [
+        "last_redeemed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "last_redeemed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "token_hash",
+            "order_id",
+            "email_normalized",
+            "expires_at",
+            "redeem_count"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "token_hash": {
+              "bsonType": "string"
+            },
+            "order_id": {
+              "bsonType": "string"
+            },
+            "email_normalized": {
+              "bsonType": "string"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "last_redeemed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "redeem_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "order_links_token_hash_ff3baa",
+          "key": {
+            "token_hash": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "order_links_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "security_events": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "kind",
+        "result",
+        "audience",
+        "device_id",
+        "device_label",
+        "ip",
+        "location",
+        "actor_kind",
+        "actor_id",
+        "reason",
+        "detail",
+        "at"
+      ],
+      "nullable": [
+        "audience",
+        "device_id",
+        "device_label",
+        "ip",
+        "location",
+        "actor_kind",
+        "actor_id",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "kind",
+            "result",
+            "detail",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "result": {
+              "bsonType": "string"
+            },
+            "audience": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "device_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "device_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "ip": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "location": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_kind": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "detail": {},
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "security_events_account_id_at_d5fdb8",
+          "key": {
+            "account_id": 1,
+            "at": -1
+          }
+        },
+        {
+          "name": "security_events_kind_at_54df66",
+          "key": {
+            "kind": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "sign_in_attempts": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "email_normalized",
+        "ip",
+        "succeeded",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": "id",
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "email_normalized",
+            "ip",
+            "succeeded",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "email_normalized": {
+              "bsonType": "string"
+            },
+            "ip": {
+              "bsonType": "string"
+            },
+            "succeeded": {
+              "bsonType": "bool"
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "sign_in_attempts_email_normalized_at_e129d7",
+          "key": {
+            "email_normalized": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "sign_in_attempts_ip_at_ae063b",
+          "key": {
+            "ip": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "reauth_tokens": {
+      "idField": "token_hash",
+      "key": [
+        "token_hash"
+      ],
+      "columns": [
+        "token_hash",
+        "account_id",
+        "session_id",
+        "purpose",
+        "expires_at",
+        "used_at"
+      ],
+      "nullable": [
+        "used_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "used_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "session_id",
+            "purpose",
+            "expires_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "session_id": {
+              "bsonType": "string"
+            },
+            "purpose": {
+              "bsonType": "string"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "used_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "reauth_tokens_expires_at_ce8dd0",
+          "key": {
+            "expires_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

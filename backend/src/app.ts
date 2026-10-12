@@ -6,8 +6,8 @@ import swaggerUi from '@fastify/swagger-ui';
 import type { FastifyInstance } from 'fastify';
 import { createHash } from 'node:crypto';
 import { moduleAuthorities, type Authorities } from './kernel/auth/authorities.js';
-import { REFRESH_COOKIE_AUDIENCES, refreshCookieName, refreshCookieScheme, refreshCookieText, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
-import { memoryRateLimitStore, postgresRateLimitStore, PURGE_RATE_LIMITS_JOB } from './kernel/auth/rate-limit.js';
+import { mongoWebhookEventLog, REFRESH_COOKIE_AUDIENCES, refreshCookieName, refreshCookieScheme, refreshCookieText, type AuthChain, type WebhookVerifier } from './kernel/auth/chain.js';
+import { memoryRateLimitStore, mongoRateLimitStore, postgresRateLimitStore, PURGE_RATE_LIMITS_JOB } from './kernel/auth/rate-limit.js';
 import { fileLinkSecret } from './kernel/auth/file-links.js';
 import { createAuthChain } from './kernel/auth/setup.js';
 import type { Principal } from './kernel/auth/index.js';
@@ -18,15 +18,17 @@ import { registerErrorCodes } from './kernel/errors/index.js';
 import { EventBus } from './kernel/events/index.js';
 import { registerGraphQL, unusablePersistedQueries } from './kernel/graphql/index.js';
 import { registerFileRoute } from './kernel/http/files.js';
-import { postgresIdempotencyStore } from './kernel/http/idempotency.js';
+import { mongoIdempotencyStore } from './kernel/http/idempotency.js';
 import { createOpenApiObjectTransform, createOpenApiTransform } from './kernel/http/openapi.js';
 import { registerEndpoints } from './kernel/http/register.js';
 import { createServer } from './kernel/http/server.js';
 import type { PublicApiMap } from './kernel/module-system/public-apis.js';
 import { createJobScheduler, type JobScheduler } from './kernel/jobs/index.js';
 import { systemClock, type Clock } from './kernel/lib/clock.js';
-import { createRefGenerator } from './kernel/lib/refs.js';
+import { mongoRefGenerator } from './kernel/lib/refs.js';
 import { migrate, migrationUnits } from './kernel/migrations/index.js';
+import { connectMongo, type MongoStore } from './kernel/mongo/index.js';
+import { migrateMongo } from './kernel/mongo/schema.js';
 import { bootModules, type BootResult } from './kernel/module-system/boot.js';
 import { allSpecs, loadDefinitions } from './kernel/module-system/loader.js';
 import { enabledModules } from './modules.config.js';
@@ -42,6 +44,8 @@ export interface BuildOptions {
   modules?: string[];
   /** Bring your own database (tests share one); otherwise created from the config and closed with the app */
   database?: Database;
+  /** Bring your own MongoDB store (tests); otherwise connected from the config (MONGODB_URI, or an embedded replica set) and closed with the app */
+  mongo?: MongoStore;
   clock?: Clock;
   /** Wrap the authorities (tests) */
   authorities?: (base: Authorities) => Authorities;
@@ -57,9 +61,12 @@ export interface BuildOptions {
 export interface Kernel {
   config: Config;
   database: Database;
+  mongo: MongoStore;
   events: EventBus;
   jobs: JobScheduler;
   modules: string[];
+  /** Modules keeping their data in MongoDB (the others in PostgreSQL, until docs/04-mongodb-migration.md M3) */
+  mongoModules: string[];
   boot: BootResult;
   auth: AuthChain;
   /** Development and tests: the key that signs dev tokens */
@@ -110,10 +117,12 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   const app = createServer(config);
 
   // independent startup work runs in parallel: the database and the module imports
-  const [database, defs] = await Promise.all([
+  const [database, mongo, defs] = await Promise.all([
     opts.database ?? createDatabase({ url: config.databaseUrl, pgliteDir: config.pgliteDir }),
+    opts.mongo ?? connectMongo({ uri: config.mongo.uri, dataDir: config.mongo.dataDir }),
     loadDefinitions(opts.modules ?? config.modules ?? enabledModules, moduleLoaders),
   ]);
+  const onMongo = (d: (typeof defs)[number]) => d.store === 'mongo';
 
   /* ---------------------------------------------------------------- OpenAPI (generated from the same Zod schemas); Swagger UI in development */
   await app.register(swagger, {
@@ -143,6 +152,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     timeZone: config.market.timeZone,
     clock,
     connectionString: config.databaseUrl,
+    mongo,
     workers: config.jobsEnabled,
     // "on boot" jobs (registries synced from the enabled modules) run again when the deploy or the module set changes
     deployId: createHash('sha256')
@@ -150,20 +160,25 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
       .digest('hex')
       .slice(0, 16),
   });
-  const refs = createRefGenerator(database.kysely, clock, config.market.timeZone);
-  // rate-limit windows: in PostgreSQL every instance counts together; ended windows are purged by a kernel job
-  const rateLimits = config.rateLimitStore === 'postgres' ? postgresRateLimitStore(database.kysely, clock) : memoryRateLimitStore(clock);
+  const refs = mongoRefGenerator(mongo, clock, config.market.timeZone);
+  // rate-limit windows: in MongoDB (or PostgreSQL) every instance counts together; ended windows are purged by a kernel job
+  const rateLimits =
+    config.rateLimitStore === 'mongo' ? mongoRateLimitStore(mongo, clock) : config.rateLimitStore === 'postgres' ? postgresRateLimitStore(database.kysely, clock) : memoryRateLimitStore(clock);
   jobs.declare(PURGE_RATE_LIMITS_JOB);
   jobs.handle('kernel', PURGE_RATE_LIMITS_JOB.name, () => rateLimits.purge());
   for (const spec of Object.values(allSpecs)) registerErrorCodes(spec.name, spec.errorCodes);
   events.registerSpecs(Object.values(allSpecs));
 
   /* ---------------------------------------------------------------- modules */
-  if (config.migrateOnStart) await migrate(database, migrationUnits(defs), (m) => app.log.info(m));
+  if (config.migrateOnStart) {
+    // while modules move to MongoDB (docs/04-mongodb-migration.md), each keeps its data where its manifest says
+    await migrate(database, migrationUnits(defs.filter((d) => !onMongo(d))), (m) => app.log.info(m));
+    await migrateMongo(mongo, defs.filter(onMongo).map((d) => ({ module: d.spec.name, collections: d.spec.collections, schemas: d.schemas ?? {}, migrations: d.mongoMigrations })), (m) => app.log.info(m));
+  }
   // modules get permission checks before the auth chain exists (it needs their APIs): bind it late
   let authChain: AuthChain | undefined;
   const can = async (principal: Principal | null | undefined, permission: string) => (authChain ? authChain.canPrincipal(principal, permission) : false);
-  const boot = await bootModules(defs, { config, log: app.log, database, clock, events, jobs, refs, rateLimits, can, stubbed: Object.keys(opts.apiStubs ?? {}) });
+  const boot = await bootModules(defs, { config, log: app.log, database, mongo, clock, events, jobs, refs, rateLimits, can, stubbed: Object.keys(opts.apiStubs ?? {}) });
   for (const w of boot.warnings) app.log.debug(w);
   for (const [m, v] of Object.entries(opts.webhookVerifiers ?? {})) if (!boot.webhookVerifiers.has(m)) boot.webhookVerifiers.set(m, v);
   for (const [m, stub] of Object.entries(opts.apiStubs ?? {})) boot.apis.set(m, withStubs(boot.apis.get(m), stub as object));
@@ -178,6 +193,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     clock,
     log: app.log,
     db: database.kysely,
+    webhookEvents: mongoWebhookEventLog(mongo),
     authorities: moduleAuthorities((m) => boot.apis.get(m) as never),
     wrap: opts.authorities,
     webhookVerifiers: boot.webhookVerifiers,
@@ -190,7 +206,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   for (const name of ['access.role.changed', 'access.coverage.changed', 'access.away.started', 'access.away.ended']) events.subscribe('kernel', name, () => auth.invalidate('permissions'));
   for (const name of ['sellers.member.permissions_changed', 'sellers.member.removed', 'sellers.seller.closed']) events.subscribe('kernel', name, () => auth.invalidate('members'));
 
-  registerEndpoints(app, boot.endpoints, { config, auth, idempotency: postgresIdempotencyStore(database.kysely, clock), sessionCookie: boot.sessionCookie });
+  registerEndpoints(app, boot.endpoints, { config, auth, idempotency: mongoIdempotencyStore(mongo, clock), sessionCookie: boot.sessionCookie });
   if (fileRoute) registerFileRoute(app, fileRoute);
   const graphql = await registerGraphQL(app, {
     config,
@@ -205,9 +221,11 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   app.decorate('kernel', {
     config,
     database,
+    mongo,
     events,
     jobs,
     modules: defs.map((d) => d.spec.name),
+    mongoModules: defs.filter(onMongo).map((d) => d.spec.name),
     boot,
     auth,
     devSigner: auth.k.keys.dev,
@@ -224,6 +242,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
     await jobs.stop();
     await events.drain();
     if (!opts.database) await database.close();
+    if (!opts.mongo) await mongo.close();
   });
   return app;
 }

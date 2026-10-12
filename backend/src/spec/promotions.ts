@@ -4590,6 +4590,1839 @@ export const spec = defineModuleSpec({
       "customer": "customer_id"
     }
   },
+  collections: {
+    "campaigns": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "name",
+        "description",
+        "internal_note",
+        "owner_kind",
+        "seller_id",
+        "kind",
+        "discount",
+        "auto_apply",
+        "starts_at",
+        "ends_at",
+        "time_zone",
+        "scope_mode",
+        "eligibility",
+        "budget_amount",
+        "budget_used",
+        "usage_cap",
+        "usage_count",
+        "per_customer",
+        "per_order",
+        "per_customer_units",
+        "funding_owner",
+        "platform_share_bps",
+        "cost_center",
+        "funding_note",
+        "stacking",
+        "exclusive_group",
+        "participation",
+        "deals",
+        "terms",
+        "status",
+        "ended_reason",
+        "approval_request_id",
+        "currency",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "version"
+      ],
+      "nullable": [
+        "description",
+        "internal_note",
+        "seller_id",
+        "budget_amount",
+        "usage_cap",
+        "per_customer",
+        "per_order",
+        "per_customer_units",
+        "platform_share_bps",
+        "cost_center",
+        "funding_note",
+        "exclusive_group",
+        "participation",
+        "deals",
+        "terms",
+        "ended_reason",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "starts_at",
+        "ends_at",
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "name",
+            "owner_kind",
+            "kind",
+            "discount",
+            "auto_apply",
+            "starts_at",
+            "ends_at",
+            "time_zone",
+            "scope_mode",
+            "eligibility",
+            "budget_used",
+            "usage_count",
+            "funding_owner",
+            "stacking",
+            "status",
+            "currency",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "version"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "description": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "internal_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_kind": {
+              "bsonType": "string",
+              "enum": [
+                "platform",
+                "seller"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "discount": {},
+            "auto_apply": {
+              "bsonType": "bool"
+            },
+            "starts_at": {
+              "bsonType": "date"
+            },
+            "ends_at": {
+              "bsonType": "date"
+            },
+            "time_zone": {
+              "bsonType": "string"
+            },
+            "scope_mode": {
+              "bsonType": "string"
+            },
+            "eligibility": {},
+            "budget_amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "budget_used": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "usage_cap": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "usage_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "per_customer": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "per_order": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "per_customer_units": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "funding_owner": {
+              "bsonType": "string"
+            },
+            "platform_share_bps": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "cost_center": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "funding_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "stacking": {},
+            "exclusive_group": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "participation": {},
+            "deals": {},
+            "terms": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "ended_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "campaigns_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "campaigns_status_starts_at_8934be",
+          "key": {
+            "status": 1,
+            "starts_at": 1
+          }
+        },
+        {
+          "name": "campaigns_status_ends_at_0fb3f4",
+          "key": {
+            "status": 1,
+            "ends_at": 1
+          }
+        },
+        {
+          "name": "campaigns_seller_id_status_b608db",
+          "key": {
+            "seller_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "campaigns_owner_kind_status_id_2c384c",
+          "key": {
+            "owner_kind": 1,
+            "status": 1,
+            "id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "campaign_targets": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "campaign_id",
+        "kind",
+        "target_id",
+        "excluded",
+        "label"
+      ],
+      "nullable": [
+        "label"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "kind",
+            "target_id",
+            "excluded"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "excluded": {
+              "bsonType": "bool"
+            },
+            "label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "campaign_targets_campaign_id_kind_target_id_359627",
+          "key": {
+            "campaign_id": 1,
+            "kind": 1,
+            "target_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "campaign_targets_kind_target_id_bd69c3",
+          "key": {
+            "kind": 1,
+            "target_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "eligible_offers": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "campaign_id",
+        "offer_id",
+        "seller_id",
+        "official_store",
+        "eligible",
+        "reason",
+        "refreshed_at"
+      ],
+      "nullable": [
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "refreshed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "offer_id",
+            "seller_id",
+            "official_store",
+            "eligible",
+            "refreshed_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "offer_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "official_store": {
+              "bsonType": "bool"
+            },
+            "eligible": {
+              "bsonType": "bool"
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "refreshed_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "eligible_offers_offer_id_campaign_id_5e8d3d",
+          "key": {
+            "offer_id": 1,
+            "campaign_id": 1
+          }
+        },
+        {
+          "name": "eligible_offers_campaign_id_seller_id_0c96f1",
+          "key": {
+            "campaign_id": 1,
+            "seller_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "funding_reviews": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "state",
+        "sent_at",
+        "reviewer_id",
+        "decided_at",
+        "checks",
+        "platform_max",
+        "sellers_max",
+        "expected_sales",
+        "margin_impact_pts",
+        "comment",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "reviewer_id",
+        "decided_at",
+        "expected_sales",
+        "margin_impact_pts",
+        "comment",
+        "approval_request_id"
+      ],
+      "decimal": [
+        "margin_impact_pts"
+      ],
+      "binary": [],
+      "dates": [
+        "sent_at",
+        "decided_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "state",
+            "sent_at",
+            "checks",
+            "platform_max",
+            "sellers_max"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "sent_at": {
+              "bsonType": "date"
+            },
+            "reviewer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "checks": {},
+            "platform_max": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "sellers_max": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "expected_sales": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "margin_impact_pts": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "comment": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "participations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "seller_id",
+        "state",
+        "seller_share_bps",
+        "platform_share_bps",
+        "respond_by",
+        "consented_at",
+        "consented_by",
+        "consent_text",
+        "reason",
+        "updated_at"
+      ],
+      "nullable": [
+        "respond_by",
+        "consented_at",
+        "consented_by",
+        "consent_text",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "respond_by",
+        "consented_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "seller_id",
+            "state",
+            "seller_share_bps",
+            "platform_share_bps",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "seller_share_bps": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "platform_share_bps": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "respond_by": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "consented_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "consented_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "consent_text": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "participations_campaign_id_seller_id_bfe0f4",
+          "key": {
+            "campaign_id": 1,
+            "seller_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "participations_seller_id_state_e600c9",
+          "key": {
+            "seller_id": 1,
+            "state": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "participation_offers": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "participation_id",
+        "offer_id",
+        "eligible",
+        "ineligible_reasons",
+        "included"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "participation_id",
+            "offer_id",
+            "eligible",
+            "ineligible_reasons",
+            "included"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "participation_id": {
+              "bsonType": "string"
+            },
+            "offer_id": {
+              "bsonType": "string"
+            },
+            "eligible": {
+              "bsonType": "bool"
+            },
+            "ineligible_reasons": {},
+            "included": {
+              "bsonType": "bool"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "participation_offers_participation_id_offer_id_cc16d0",
+          "key": {
+            "participation_id": 1,
+            "offer_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "flash_items": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "offer_id",
+        "deal_price",
+        "regular_price",
+        "deal_stock",
+        "claimed",
+        "reserved",
+        "purchase_limit",
+        "state",
+        "sold_out_at"
+      ],
+      "nullable": [
+        "sold_out_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "sold_out_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "offer_id",
+            "deal_price",
+            "regular_price",
+            "deal_stock",
+            "claimed",
+            "reserved",
+            "purchase_limit",
+            "state"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "offer_id": {
+              "bsonType": "string"
+            },
+            "deal_price": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "regular_price": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "deal_stock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "claimed": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reserved": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "purchase_limit": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "sold_out_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "flash_items_campaign_id_offer_id_094333",
+          "key": {
+            "campaign_id": 1,
+            "offer_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "coupon_codes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "code",
+        "kind",
+        "max_redemptions",
+        "redemptions",
+        "assigned_customer_id",
+        "active",
+        "created_at"
+      ],
+      "nullable": [
+        "max_redemptions",
+        "assigned_customer_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "code",
+            "kind",
+            "redemptions",
+            "active",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "code": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string",
+              "enum": [
+                "shared",
+                "unique"
+              ]
+            },
+            "max_redemptions": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "redemptions": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "assigned_customer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "active": {
+              "bsonType": "bool"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "coupon_codes_code_082f1b",
+          "key": {
+            "code": 1
+          },
+          "unique": true,
+          "partial": {
+            "active": true
+          },
+          "collation": {
+            "locale": "en",
+            "strength": 2
+          }
+        },
+        {
+          "name": "coupon_codes_campaign_id_created_at_2c6ef6",
+          "key": {
+            "campaign_id": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "coupon_codes_assigned_customer_id_8df310",
+          "key": {
+            "assigned_customer_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "coupon_clips": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "customer_id",
+        "campaign_id",
+        "code_id",
+        "clipped_at"
+      ],
+      "nullable": [
+        "code_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "clipped_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "campaign_id",
+            "clipped_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "code_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "clipped_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "coupon_clips_customer_id_campaign_id_3c8831",
+          "key": {
+            "customer_id": 1,
+            "campaign_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "evaluations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "input_hash",
+        "result",
+        "valid_until"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "valid_until"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "input_hash",
+            "result",
+            "valid_until"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "input_hash": {
+              "bsonType": "string"
+            },
+            "result": {},
+            "valid_until": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "redemptions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "code_id",
+        "reservation_id",
+        "idempotency_key",
+        "evaluation_id",
+        "order_id",
+        "customer_id",
+        "guest_key",
+        "state",
+        "amount",
+        "platform_part",
+        "seller_part",
+        "reversed",
+        "currency",
+        "expires_at",
+        "created_at"
+      ],
+      "nullable": [
+        "code_id",
+        "order_id",
+        "customer_id",
+        "guest_key",
+        "expires_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "reservation_id",
+            "idempotency_key",
+            "evaluation_id",
+            "state",
+            "amount",
+            "platform_part",
+            "seller_part",
+            "reversed",
+            "currency",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "code_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reservation_id": {
+              "bsonType": "string"
+            },
+            "idempotency_key": {
+              "bsonType": "string"
+            },
+            "evaluation_id": {
+              "bsonType": "string"
+            },
+            "order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "customer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "guest_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "platform_part": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_part": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reversed": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "expires_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "redemptions_reservation_id_campaign_id_74c923",
+          "key": {
+            "reservation_id": 1,
+            "campaign_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "redemptions_campaign_id_state_7d7059",
+          "key": {
+            "campaign_id": 1,
+            "state": 1
+          }
+        },
+        {
+          "name": "redemptions_customer_id_campaign_id_42f422",
+          "key": {
+            "customer_id": 1,
+            "campaign_id": 1
+          }
+        },
+        {
+          "name": "redemptions_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "redemption_lines": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "redemption_id",
+        "line_id",
+        "order_item_id",
+        "offer_id",
+        "seller_id",
+        "quantity",
+        "amount",
+        "platform_part",
+        "seller_part",
+        "reversed"
+      ],
+      "nullable": [
+        "order_item_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "redemption_id",
+            "line_id",
+            "offer_id",
+            "seller_id",
+            "quantity",
+            "amount",
+            "platform_part",
+            "seller_part",
+            "reversed"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "redemption_id": {
+              "bsonType": "string"
+            },
+            "line_id": {
+              "bsonType": "string"
+            },
+            "order_item_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "offer_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "platform_part": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_part": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reversed": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "redemption_lines_order_item_id_219b1b",
+          "key": {
+            "order_item_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "usage_counters": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "campaign_id",
+        "customer_key",
+        "uses",
+        "units"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "customer_key",
+            "uses",
+            "units"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "customer_key": {
+              "bsonType": "string"
+            },
+            "uses": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "units": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "usage_counters_campaign_id_customer_key_d400b4",
+          "key": {
+            "campaign_id": 1,
+            "customer_key": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "event_reminders": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "customer_id",
+        "campaign_id",
+        "created_at",
+        "sent_at"
+      ],
+      "nullable": [
+        "sent_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "sent_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "campaign_id",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "sent_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "event_reminders_customer_id_campaign_id_3c8831",
+          "key": {
+            "customer_id": 1,
+            "campaign_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "campaign_log": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "campaign_id",
+        "action",
+        "reason",
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "reason",
+        "detail",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "action",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "action": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "detail": {},
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "campaign_results_daily": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "campaign_id",
+        "day",
+        "sales",
+        "orders",
+        "cost_platform",
+        "cost_seller",
+        "redemptions",
+        "returned_items",
+        "official_cost_basis",
+        "official_revenue"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "campaign_id",
+            "day",
+            "sales",
+            "orders",
+            "cost_platform",
+            "cost_seller",
+            "redemptions",
+            "returned_items",
+            "official_cost_basis",
+            "official_revenue"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "campaign_id": {
+              "bsonType": "string"
+            },
+            "day": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "sales": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "orders": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "cost_platform": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "cost_seller": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "redemptions": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "returned_items": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "official_cost_basis": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "official_revenue": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "campaign_results_daily_campaign_id_day_efa68d",
+          "key": {
+            "campaign_id": 1,
+            "day": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

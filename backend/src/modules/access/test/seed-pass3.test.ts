@@ -1,12 +1,9 @@
 /**
  * Gap pass 3: seeded recommend_only limits (proposers of Business-Owner-only actions get approval_required,
  * not denied), the settings.changes.apply-owner route, audit.retention.manage and offers.offers.remove seeds
- * (also for existing installs), AuthorityCheck.stepUpRequired and staffWithPermission.
+ * (fresh installs seed them from domain/seed.ts), AuthorityCheck.stepUpRequired and staffWithPermission.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { m0002Pass3SeedPermissions } from '../infra/postgres/migrations/0002_pass3_seed_permissions.js';
-import { m0003Pass4SeedAuditView } from '../infra/postgres/migrations/0003_pass4_seed_audit_view.js';
 import { accessFixture, usd, type Fixture } from './fixture.js';
 
 let f: Fixture;
@@ -28,12 +25,12 @@ beforeEach(() => f.clock.reset());
 
 async function limitOf(roleKey: string, actionKey: string) {
   const roleId = await f.roleId(roleKey);
-  return f.db.selectFrom('approval_limits').selectAll().where('role_id', '=', roleId).where('action_key', '=', actionKey).executeTakeFirst();
+  return f.table('approval_limits').findOne({ role_id: roleId, action_key: actionKey });
 }
 
 async function permissionsOf(roleKey: string) {
   const roleId = await f.roleId(roleKey);
-  return (await f.db.selectFrom('role_permissions').select('permission_key').where('role_id', '=', roleId).execute()).map((r) => r.permission_key);
+  return (await f.table('role_permissions').find({ role_id: roleId })).map((r) => r.permission_key);
 }
 
 describe('seeded recommend_only limits', () => {
@@ -71,13 +68,13 @@ describe('seeded recommend_only limits', () => {
 
   it('adds seeded limits a system role never had on later syncs (existing installs), never over a changed one', async () => {
     const roleId = await f.roleId('finance_manager');
-    await f.db.deleteFrom('approval_limits').where('role_id', '=', roleId).where('action_key', '=', 'finance.fees.change').execute();
+    await f.table('approval_limits').deleteMany({ role_id: roleId, action_key: 'finance.fees.change' });
     await f.svc.syncRegistry();
     expect(await limitOf('finance_manager', 'finance.fees.change')).toMatchObject({ authority: 'recommend_only' });
     // a limit the Business Owner set differently stays as it is
-    await f.db.updateTable('approval_limits').set({ authority: 'not_permitted' }).where('role_id', '=', roleId).where('action_key', '=', 'finance.fees.change').execute();
+    await f.table('approval_limits').updateMany({ role_id: roleId, action_key: 'finance.fees.change' }, { authority: 'not_permitted' });
     await f.svc.syncRegistry();
-    const rows = await f.db.selectFrom('approval_limits').selectAll().where('role_id', '=', roleId).where('action_key', '=', 'finance.fees.change').execute();
+    const rows = await f.table('approval_limits').find({ role_id: roleId, action_key: 'finance.fees.change' });
     expect(rows.map((r) => r.authority)).toEqual(['not_permitted']);
   });
 });
@@ -89,27 +86,10 @@ describe('seeded permissions', () => {
     expect(await permissionsOf('catalog_manager')).toEqual(expect.arrayContaining(['offers.offers.remove', 'offers.offers.view']));
   });
 
-  it('migration 0002 adds them on installs seeded before pass 3', async () => {
-    const bo = await f.roleId('business_owner');
-    const cat = await f.roleId('catalog_manager');
-    await f.db.deleteFrom('role_permissions').where('role_id', '=', bo).where('permission_key', '=', 'audit.retention.manage').execute();
-    await f.db.deleteFrom('role_permissions').where('role_id', '=', cat).where('permission_key', '=', 'offers.offers.remove').execute();
-    await sql.raw(m0002Pass3SeedPermissions.sql!).execute(f.app.kernel.database.kysely);
-    expect(await permissionsOf('business_owner')).toContain('audit.retention.manage');
-    expect(await permissionsOf('catalog_manager')).toContain('offers.offers.remove');
-    // running it again changes nothing
-    await sql.raw(m0002Pass3SeedPermissions.sql!).execute(f.app.kernel.database.kysely);
-  });
-
-  it('pass 4: the Platform Administrator reads the action history (fresh seed and migration 0003 on older installs)', async () => {
+  it('pass 4: the Platform Administrator reads the action history', async () => {
     expect(await permissionsOf('platform_administrator')).toContain('audit.entries.view');
     expect(await permissionsOf('business_owner')).toContain('audit.entries.view');
     expect(await permissionsOf('finance_manager')).not.toContain('audit.entries.view');
-    const pa = await f.roleId('platform_administrator');
-    await f.db.deleteFrom('role_permissions').where('role_id', '=', pa).where('permission_key', '=', 'audit.entries.view').execute();
-    await sql.raw(m0003Pass4SeedAuditView.sql).execute(f.app.kernel.database.kysely);
-    expect(await permissionsOf('platform_administrator')).toContain('audit.entries.view');
-    await sql.raw(m0003Pass4SeedAuditView.sql).execute(f.app.kernel.database.kysely); // idempotent
   });
 });
 

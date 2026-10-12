@@ -15,6 +15,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import { isNotImplemented } from '../errors/index.js';
 import { dateInZone, systemClock, zonedTimeToUtc, type Clock } from '../lib/clock.js';
+import type { MongoStore } from '../mongo/index.js';
 
 export type Schedule =
   | { kind: 'interval'; ms: number; window?: 'business-hours' }
@@ -57,7 +58,7 @@ export interface JobInfo extends JobDefinition {
 }
 
 export interface JobScheduler {
-  readonly backend: 'inprocess' | 'pgboss';
+  readonly backend: 'inprocess' | 'pgboss' | 'mongo';
   /** A job from a module spec (or the kernel's own); the schedule phrase is checked here */
   declare(def: JobDefinition): void;
   handle(module: string, name: string, run: () => Promise<unknown>): void;
@@ -129,6 +130,27 @@ export abstract class JobRegistry {
   }
 }
 
+/**
+ * The first run of a clock schedule after `now`, in the market time zone. Weekly runs keep the weekday of the
+ * day it was first computed on; monthly runs are on the 1st. Intervals: the next slot boundary (slots aligned to
+ * the epoch, so every instance agrees).
+ */
+export function nextOccurrence(p: Exclude<Schedule, { kind: 'boot' }>, now: Date, timeZone: string): Date {
+  if (p.kind === 'interval') return new Date((Math.floor(now.getTime() / p.ms) + 1) * p.ms);
+  let date = dateInZone(now, timeZone);
+  if (p.kind === 'monthly') date = `${date.slice(0, 8)}01`;
+  let next = zonedTimeToUtc(date, p.time, timeZone);
+  while (next <= now) {
+    const d = new Date(`${date}T12:00:00Z`);
+    if (p.kind === 'daily') d.setUTCDate(d.getUTCDate() + 1);
+    else if (p.kind === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+    else d.setUTCMonth(d.getUTCMonth() + 1, 1);
+    date = d.toISOString().slice(0, 10);
+    next = zonedTimeToUtc(date, p.time, timeZone);
+  }
+  return next;
+}
+
 /** Timers in this process: every instance runs every job (development and tests). */
 export class InProcessScheduler extends JobRegistry implements JobScheduler {
   readonly backend = 'inprocess' as const;
@@ -171,21 +193,7 @@ export class InProcessScheduler extends JobRegistry implements JobScheduler {
 
   #scheduleAt(name: string, p: Extract<Schedule, { time: string }>) {
     const now = this.clock.now();
-    let date = dateInZone(now, this.#timeZone);
-    let next = zonedTimeToUtc(date, p.time, this.#timeZone);
-    const step = () => {
-      const d = new Date(`${date}T12:00:00Z`);
-      if (p.kind === 'daily') d.setUTCDate(d.getUTCDate() + 1);
-      else if (p.kind === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
-      else d.setUTCMonth(d.getUTCMonth() + 1, 1);
-      date = d.toISOString().slice(0, 10);
-      next = zonedTimeToUtc(date, p.time, this.#timeZone);
-    };
-    if (p.kind === 'monthly') {
-      date = `${date.slice(0, 8)}01`;
-      next = zonedTimeToUtc(date, p.time, this.#timeZone);
-    }
-    while (next <= now) step();
+    const next = nextOccurrence(p, now, this.#timeZone);
     const t = setTimeout(() => {
       this.#timers.delete(t);
       void this.runNow(name).finally(() => this.#started && this.#scheduleAt(name, p));
@@ -203,8 +211,10 @@ export class InProcessScheduler extends JobRegistry implements JobScheduler {
 }
 
 export interface SchedulerOptions {
-  backend: 'inprocess' | 'pgboss';
+  backend: 'inprocess' | 'pgboss' | 'mongo';
   timeZone: string;
+  /** mongo: the store whose kernel.jobs collection is the queue */
+  mongo?: MongoStore;
   clock?: Clock;
   /** pgboss: the PostgreSQL connection string */
   connectionString?: string;
@@ -217,6 +227,11 @@ export interface SchedulerOptions {
 /** The runner the config asks for; pg-boss is loaded only when used. */
 export async function createJobScheduler(log: FastifyBaseLogger, o: SchedulerOptions): Promise<JobScheduler> {
   if (o.backend === 'inprocess') return new InProcessScheduler(log, o.timeZone, o.clock);
+  if (o.backend === 'mongo') {
+    if (!o.mongo) throw new Error('JOBS_BACKEND=mongo needs MongoDB');
+    const { MongoScheduler } = await import('./mongo.js');
+    return new MongoScheduler(log, { store: o.mongo, timeZone: o.timeZone, clock: o.clock, workers: o.workers ?? true, deployId: o.deployId ?? 'unversioned' });
+  }
   if (!o.connectionString) throw new Error('JOBS_BACKEND=pgboss needs DATABASE_URL');
   const { PgBossScheduler } = await import('./pgboss.js');
   return new PgBossScheduler(log, {

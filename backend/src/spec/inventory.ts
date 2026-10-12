@@ -3623,6 +3623,2228 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "locations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "code",
+        "name",
+        "kind",
+        "owner_type",
+        "seller_id",
+        "address",
+        "time_zone",
+        "sellable",
+        "active",
+        "is_default"
+      ],
+      "nullable": [
+        "seller_id",
+        "address"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "code",
+            "name",
+            "kind",
+            "owner_type",
+            "time_zone",
+            "sellable",
+            "active",
+            "is_default"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "code": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "owner_type": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "address": {},
+            "time_zone": {
+              "bsonType": "string"
+            },
+            "sellable": {
+              "bsonType": "bool"
+            },
+            "active": {
+              "bsonType": "bool"
+            },
+            "is_default": {
+              "bsonType": "bool"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "locations_code_0faf86",
+          "key": {
+            "code": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "stock_items": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "owner_type",
+        "seller_id",
+        "sku",
+        "offer_id",
+        "product_id",
+        "variant_id",
+        "condition",
+        "label",
+        "low_stock_threshold",
+        "reorder_quantity",
+        "unit_cost_amount",
+        "currency",
+        "primary_bin_code",
+        "low_since",
+        "service_location_id",
+        "archived",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "offer_id",
+        "low_stock_threshold",
+        "reorder_quantity",
+        "unit_cost_amount",
+        "primary_bin_code",
+        "low_since",
+        "service_location_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "low_since",
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "owner_type",
+            "sku",
+            "product_id",
+            "variant_id",
+            "condition",
+            "label",
+            "currency",
+            "archived",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "owner_type": {
+              "bsonType": "string",
+              "enum": [
+                "official",
+                "seller"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "sku": {
+              "bsonType": "string"
+            },
+            "offer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "variant_id": {
+              "bsonType": "string"
+            },
+            "condition": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "low_stock_threshold": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "reorder_quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "unit_cost_amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "primary_bin_code": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "low_since": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "service_location_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "archived": {
+              "bsonType": "bool"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "stock_items_owner_type_seller_id_sku_200e29",
+          "key": {
+            "owner_type": 1,
+            "seller_id": 1,
+            "sku": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "stock_items_seller_id_archived_9df3a8",
+          "key": {
+            "seller_id": 1,
+            "archived": 1
+          }
+        },
+        {
+          "name": "stock_items_offer_id_959ceb",
+          "key": {
+            "offer_id": 1
+          }
+        },
+        {
+          "name": "stock_items_variant_id_c68aaa",
+          "key": {
+            "variant_id": 1
+          }
+        },
+        {
+          "name": "stock_items_service_location_id_978694",
+          "key": {
+            "service_location_id": 1
+          },
+          "partial": {
+            "service_location_id": {
+              "$type": "string"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "stock_levels": {
+      "idField": null,
+      "key": [
+        "stock_item_id",
+        "location_id"
+      ],
+      "columns": [
+        "stock_item_id",
+        "location_id",
+        "available",
+        "reserved",
+        "incoming",
+        "damaged_held",
+        "returned",
+        "version",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "stock_item_id",
+            "location_id",
+            "available",
+            "reserved",
+            "incoming",
+            "damaged_held",
+            "returned",
+            "version",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "available": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ],
+              "minimum": 0
+            },
+            "reserved": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ],
+              "minimum": 0
+            },
+            "incoming": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ],
+              "minimum": 0
+            },
+            "damaged_held": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ],
+              "minimum": 0
+            },
+            "returned": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ],
+              "minimum": 0
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "stock_levels_stock_item_id_location_id_29a5c0",
+          "key": {
+            "stock_item_id": 1,
+            "location_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "stock_levels_location_id_52b500",
+          "key": {
+            "location_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "stock_movements": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "stock_item_id",
+        "location_id",
+        "from_group",
+        "to_group",
+        "quantity",
+        "reason_code",
+        "note",
+        "ref_kind",
+        "ref_id",
+        "ref_label",
+        "actor_kind",
+        "actor_id",
+        "actor_name",
+        "approved_by",
+        "after",
+        "at"
+      ],
+      "nullable": [
+        "note",
+        "ref_kind",
+        "ref_id",
+        "ref_label",
+        "actor_id",
+        "actor_name",
+        "approved_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "stock_item_id",
+            "location_id",
+            "from_group",
+            "to_group",
+            "quantity",
+            "reason_code",
+            "actor_kind",
+            "after",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "from_group": {
+              "bsonType": "string"
+            },
+            "to_group": {
+              "bsonType": "string"
+            },
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ],
+              "exclusiveMinimum": 0
+            },
+            "reason_code": {
+              "bsonType": "string"
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "ref_kind": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "ref_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "ref_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "approved_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "after": {},
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "stock_movements_stock_item_id_at_afa682",
+          "key": {
+            "stock_item_id": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "stock_movements_ref_kind_ref_id_b04193",
+          "key": {
+            "ref_kind": 1,
+            "ref_id": 1
+          }
+        },
+        {
+          "name": "stock_movements_reason_code_at_ee4054",
+          "key": {
+            "reason_code": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "incoming_expectations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "stock_item_id",
+        "location_id",
+        "source_kind",
+        "source_id",
+        "source_ref",
+        "quantity_open",
+        "expected_date"
+      ],
+      "nullable": [
+        "expected_date"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "stock_item_id",
+            "location_id",
+            "source_kind",
+            "source_id",
+            "source_ref",
+            "quantity_open"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "source_kind": {
+              "bsonType": "string",
+              "enum": [
+                "purchase_order",
+                "transfer",
+                "service_inbound"
+              ]
+            },
+            "source_id": {
+              "bsonType": "string"
+            },
+            "source_ref": {
+              "bsonType": "string"
+            },
+            "quantity_open": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "expected_date": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "incoming_expectations_stock_item_id_expected_date_223209",
+          "key": {
+            "stock_item_id": 1,
+            "expected_date": 1
+          }
+        },
+        {
+          "name": "incoming_expectations_source_kind_source_id_cefd49",
+          "key": {
+            "source_kind": 1,
+            "source_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "reservations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "source",
+        "key",
+        "order_id",
+        "order_ref",
+        "state",
+        "expires_at",
+        "released_reason",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "order_id",
+        "order_ref",
+        "expires_at",
+        "released_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "source",
+            "key",
+            "state",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "source": {
+              "bsonType": "string",
+              "enum": [
+                "checkout",
+                "replacement",
+                "exchange"
+              ]
+            },
+            "key": {
+              "bsonType": "string"
+            },
+            "order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "order_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "expires_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "released_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "reservations_source_key_6079a3",
+          "key": {
+            "source": 1,
+            "key": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "reservations_state_expires_at_26fb45",
+          "key": {
+            "state": 1,
+            "expires_at": 1
+          }
+        },
+        {
+          "name": "reservations_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "reservation_lines": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "reservation_id",
+        "stock_item_id",
+        "location_id",
+        "order_item_id",
+        "quantity",
+        "fulfilled_qty",
+        "released_qty",
+        "state"
+      ],
+      "nullable": [
+        "order_item_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "reservation_id",
+            "stock_item_id",
+            "location_id",
+            "quantity",
+            "fulfilled_qty",
+            "released_qty",
+            "state"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reservation_id": {
+              "bsonType": "string"
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "order_item_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "fulfilled_qty": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "released_qty": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "reservation_lines_reservation_id_f645e6",
+          "key": {
+            "reservation_id": 1
+          }
+        },
+        {
+          "name": "reservation_lines_stock_item_id_state_379088",
+          "key": {
+            "stock_item_id": 1,
+            "state": 1
+          }
+        },
+        {
+          "name": "reservation_lines_order_item_id_219b1b",
+          "key": {
+            "order_item_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "adjustments": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "stock_item_id",
+        "location_id",
+        "from_group",
+        "to_group",
+        "quantity",
+        "reason_code",
+        "note",
+        "review_date",
+        "state",
+        "approval_request_id",
+        "requested_by",
+        "decided_by",
+        "movement_id",
+        "created_at",
+        "applied_at"
+      ],
+      "nullable": [
+        "note",
+        "review_date",
+        "approval_request_id",
+        "decided_by",
+        "movement_id",
+        "applied_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "applied_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "stock_item_id",
+            "location_id",
+            "from_group",
+            "to_group",
+            "quantity",
+            "reason_code",
+            "state",
+            "requested_by",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "from_group": {
+              "bsonType": "string"
+            },
+            "to_group": {
+              "bsonType": "string"
+            },
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reason_code": {
+              "bsonType": "string"
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "review_date": {
+              "bsonType": [
+                "string",
+                "null"
+              ],
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "requested_by": {
+              "bsonType": "string"
+            },
+            "decided_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "movement_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "applied_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "adjustments_state_created_at_b9168f",
+          "key": {
+            "state": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "adjustments_stock_item_id_597367",
+          "key": {
+            "stock_item_id": 1
+          }
+        },
+        {
+          "name": "adjustments_approval_request_id_901de1",
+          "key": {
+            "approval_request_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "held_stock": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "stock_item_id",
+        "location_id",
+        "quantity",
+        "reason_code",
+        "reason",
+        "review_date",
+        "source_ref",
+        "released_at"
+      ],
+      "nullable": [
+        "reason",
+        "source_ref",
+        "released_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "released_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "stock_item_id",
+            "location_id",
+            "quantity",
+            "reason_code",
+            "review_date"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "reason_code": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "review_date": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "source_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "released_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "held_stock_review_date_b2ef9d",
+          "key": {
+            "review_date": 1
+          },
+          "partial": {
+            "released_at": {
+              "$type": "null"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "inbound_receipts": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "receipt_id",
+        "receipt_ref",
+        "source_kind",
+        "source_id",
+        "source_ref",
+        "owner_type",
+        "seller_id",
+        "purchase_order_id",
+        "purchase_order_ref",
+        "supplier_name",
+        "location_id",
+        "received_by",
+        "received_at",
+        "state",
+        "confirmed_by",
+        "confirmed_at",
+        "note"
+      ],
+      "nullable": [
+        "source_id",
+        "source_ref",
+        "seller_id",
+        "purchase_order_id",
+        "purchase_order_ref",
+        "confirmed_by",
+        "confirmed_at",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "received_at",
+        "confirmed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "receipt_id",
+            "receipt_ref",
+            "source_kind",
+            "owner_type",
+            "supplier_name",
+            "location_id",
+            "received_by",
+            "received_at",
+            "state"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "receipt_id": {
+              "bsonType": "string"
+            },
+            "receipt_ref": {
+              "bsonType": "string"
+            },
+            "source_kind": {
+              "bsonType": "string",
+              "enum": [
+                "purchase_order",
+                "service_inbound"
+              ]
+            },
+            "source_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "source_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "owner_type": {
+              "bsonType": "string",
+              "enum": [
+                "official",
+                "seller"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "purchase_order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "purchase_order_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "supplier_name": {
+              "bsonType": "string"
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "received_by": {
+              "bsonType": "string"
+            },
+            "received_at": {
+              "bsonType": "date"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "confirmed_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "confirmed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "inbound_receipts_receipt_id_866218",
+          "key": {
+            "receipt_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "inbound_receipts_state_received_at_5836ba",
+          "key": {
+            "state": 1,
+            "received_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "inbound_lines": {
+      "idField": null,
+      "key": [
+        "inbound_id",
+        "stock_item_id"
+      ],
+      "columns": [
+        "inbound_id",
+        "stock_item_id",
+        "expected",
+        "received",
+        "damaged",
+        "bin_code",
+        "unit_cost_amount",
+        "sellable",
+        "reason"
+      ],
+      "nullable": [
+        "bin_code",
+        "unit_cost_amount",
+        "sellable",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "inbound_id",
+            "stock_item_id",
+            "expected",
+            "received",
+            "damaged"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "inbound_id": {
+              "bsonType": "string"
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "expected": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "received": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "damaged": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "bin_code": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "unit_cost_amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "sellable": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "inbound_lines_inbound_id_stock_item_id_f69111",
+          "key": {
+            "inbound_id": 1,
+            "stock_item_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "return_outcomes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "return_id",
+        "return_ref",
+        "order_ref",
+        "stock_item_id",
+        "quantity",
+        "inspected_condition",
+        "proposed_outcome",
+        "proposed_target_sku",
+        "state",
+        "recorded_outcome",
+        "target_stock_item_id",
+        "recorded_by",
+        "recorded_at",
+        "inspected_at"
+      ],
+      "nullable": [
+        "proposed_target_sku",
+        "recorded_outcome",
+        "target_stock_item_id",
+        "recorded_by",
+        "recorded_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "recorded_at",
+        "inspected_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "return_id",
+            "return_ref",
+            "order_ref",
+            "stock_item_id",
+            "quantity",
+            "inspected_condition",
+            "proposed_outcome",
+            "state",
+            "inspected_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "return_id": {
+              "bsonType": "string"
+            },
+            "return_ref": {
+              "bsonType": "string"
+            },
+            "order_ref": {
+              "bsonType": "string"
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "inspected_condition": {
+              "bsonType": "string"
+            },
+            "proposed_outcome": {
+              "bsonType": "string"
+            },
+            "proposed_target_sku": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "recorded_outcome": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "target_stock_item_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "recorded_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "recorded_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "inspected_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "return_outcomes_return_id_stock_item_id_804ec7",
+          "key": {
+            "return_id": 1,
+            "stock_item_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "return_outcomes_state_f5a9e8",
+          "key": {
+            "state": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "discrepancies": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "kind",
+        "stock_item_id",
+        "location_id",
+        "bin_code",
+        "quantity",
+        "order_id",
+        "order_ref",
+        "note",
+        "photo_media_ids",
+        "state",
+        "resolution",
+        "resolution_note",
+        "reported_by",
+        "reported_at",
+        "resolved_by",
+        "resolved_at"
+      ],
+      "nullable": [
+        "bin_code",
+        "order_id",
+        "order_ref",
+        "note",
+        "resolution",
+        "resolution_note",
+        "resolved_by",
+        "resolved_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "reported_at",
+        "resolved_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "kind",
+            "stock_item_id",
+            "location_id",
+            "quantity",
+            "photo_media_ids",
+            "state",
+            "reported_by",
+            "reported_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "bin_code": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "order_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "photo_media_ids": {},
+            "state": {
+              "bsonType": "string"
+            },
+            "resolution": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "resolution_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reported_by": {
+              "bsonType": "string"
+            },
+            "reported_at": {
+              "bsonType": "date"
+            },
+            "resolved_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "resolved_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "discrepancies_state_reported_at_7e1756",
+          "key": {
+            "state": 1,
+            "reported_at": 1
+          }
+        },
+        {
+          "name": "discrepancies_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "transfers": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "from_location_id",
+        "to_location_id",
+        "state",
+        "created_by",
+        "note",
+        "shipped_at",
+        "received_at"
+      ],
+      "nullable": [
+        "note",
+        "shipped_at",
+        "received_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "shipped_at",
+        "received_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "from_location_id",
+            "to_location_id",
+            "state",
+            "created_by"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "from_location_id": {
+              "bsonType": "string"
+            },
+            "to_location_id": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "shipped_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "received_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "transfers_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "transfer_lines": {
+      "idField": null,
+      "key": [
+        "transfer_id",
+        "stock_item_id"
+      ],
+      "columns": [
+        "transfer_id",
+        "stock_item_id",
+        "quantity",
+        "received_quantity"
+      ],
+      "nullable": [
+        "received_quantity"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "transfer_id",
+            "stock_item_id",
+            "quantity"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "transfer_id": {
+              "bsonType": "string"
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "received_quantity": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "transfer_lines_transfer_id_stock_item_id_2bf0e0",
+          "key": {
+            "transfer_id": 1,
+            "stock_item_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "valuation_snapshots": {
+      "idField": null,
+      "key": [
+        "snapshot_date",
+        "stock_group"
+      ],
+      "columns": [
+        "snapshot_date",
+        "stock_group",
+        "units",
+        "value_at_cost_amount",
+        "currency",
+        "sku_count",
+        "taken_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "taken_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "snapshot_date",
+            "stock_group",
+            "units",
+            "value_at_cost_amount",
+            "currency",
+            "sku_count",
+            "taken_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "snapshot_date": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "stock_group": {
+              "bsonType": "string",
+              "enum": [
+                "available",
+                "reserved",
+                "incoming",
+                "damaged_held",
+                "returned"
+              ]
+            },
+            "units": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "value_at_cost_amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "sku_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "taken_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "valuation_snapshots_snapshot_date_stock_group_dbdfec",
+          "key": {
+            "snapshot_date": 1,
+            "stock_group": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "stock_counts": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "location_id",
+        "scope",
+        "state",
+        "created_by",
+        "submitted_at"
+      ],
+      "nullable": [
+        "submitted_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "location_id",
+            "scope",
+            "state",
+            "created_by"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "location_id": {
+              "bsonType": "string"
+            },
+            "scope": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "submitted_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "count_lines": {
+      "idField": null,
+      "key": [
+        "count_id",
+        "stock_item_id"
+      ],
+      "columns": [
+        "count_id",
+        "stock_item_id",
+        "bin_code",
+        "expected",
+        "counted"
+      ],
+      "nullable": [
+        "bin_code",
+        "counted"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "count_id",
+            "stock_item_id",
+            "expected"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "count_id": {
+              "bsonType": "string"
+            },
+            "stock_item_id": {
+              "bsonType": "string"
+            },
+            "bin_code": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "expected": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "counted": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "count_lines_count_id_stock_item_id_620cc5",
+          "key": {
+            "count_id": 1,
+            "stock_item_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { spec } from '../../../spec/settings.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { decided, draft, harness, inDays, inMinutes, staff, submit, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -48,15 +50,15 @@ describe('definitions and values', () => {
 
   it('sync-definitions writes the registry, the flags and seeds market defaults once', async () => {
     await h.app.kernel.jobs.runNow('settings.sync-definitions');
-    const db = h.app.kernel.database.kysely.withSchema('settings');
-    const defs = await db.selectFrom('definitions').select(['key', 'unavailable_since']).execute();
-    expect(defs.find((d: any) => d.key === 'market.timeZone')).toBeDefined();
-    const flags = await db.selectFrom('feature_flags').select('key').execute();
-    expect(flags.map((f: any) => f.key)).toContain('wishlist');
-    const seeded = await db.selectFrom('values').select(['key', 'version']).where('key', '=', 'market.country').execute();
-    expect(seeded).toEqual([{ key: 'market.country', version: 1 }]);
+    const store = h.app.kernel.mongo.module('settings', spec.collections, schemas);
+    const defs = await store.table<{ key: string }>('definitions').find();
+    expect(defs.find((d) => d.key === 'market.timeZone')).toBeDefined();
+    const flags = await store.table<{ key: string }>('feature_flags').find();
+    expect(flags.map((f) => f.key)).toContain('wishlist');
+    const seeded = await store.table<{ key: string; version: number }>('values').find({ key: 'market.country' });
+    expect(seeded.map((v) => ({ key: v.key, version: v.version }))).toEqual([{ key: 'market.country', version: 1 }]);
     await h.app.kernel.jobs.runNow('settings.sync-definitions');
-    expect(await db.selectFrom('values').select('key').where('key', '=', 'market.country').execute()).toHaveLength(1);
+    expect(await store.table('values').count({ key: 'market.country' })).toBe(1);
     const detail = (await get('/values/market.country')).json();
     expect(detail.current).toMatchObject({ version: 1, value: 'US', changedBy: { kind: 'system' } });
   });

@@ -1784,6 +1784,1182 @@ export const spec = defineModuleSpec({
       "customer": "customer_id"
     }
   },
+  collections: {
+    "accounts": {
+      "idField": "customer_id",
+      "key": [
+        "customer_id"
+      ],
+      "columns": [
+        "customer_id",
+        "currency",
+        "available",
+        "held",
+        "updated_at",
+        "version"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "currency",
+            "available",
+            "held",
+            "updated_at",
+            "version"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "available": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "held": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_at": {
+              "bsonType": "date"
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "lots": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "source",
+        "original",
+        "remaining",
+        "expires_at",
+        "reference",
+        "state",
+        "created_at"
+      ],
+      "nullable": [
+        "expires_at",
+        "reference"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "source",
+            "original",
+            "remaining",
+            "state",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "source": {
+              "bsonType": "string"
+            },
+            "original": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "remaining": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "expires_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "reference": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string",
+              "enum": [
+                "active",
+                "depleted",
+                "expired"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "lots_customer_id_state_expires_at_942b5e",
+          "key": {
+            "customer_id": 1,
+            "state": 1,
+            "expires_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "ledger": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "kind",
+        "amount",
+        "balance_after",
+        "lot_allocations",
+        "order_id",
+        "refund_id",
+        "case_id",
+        "hold_id",
+        "idempotency_key",
+        "actor_kind",
+        "actor_id",
+        "reason",
+        "at"
+      ],
+      "nullable": [
+        "order_id",
+        "refund_id",
+        "case_id",
+        "hold_id",
+        "idempotency_key",
+        "actor_id",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "kind",
+            "amount",
+            "balance_after",
+            "lot_allocations",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "balance_after": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "lot_allocations": {},
+            "order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "refund_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "case_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "hold_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "idempotency_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "ledger_customer_id_at_4e57ca",
+          "key": {
+            "customer_id": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "ledger_idempotency_key_9416f7",
+          "key": {
+            "idempotency_key": 1
+          },
+          "unique": true,
+          "partial": {
+            "idempotency_key": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "name": "ledger_refund_id_kind_912ccd",
+          "key": {
+            "refund_id": 1,
+            "kind": 1
+          },
+          "unique": true,
+          "partial": {
+            "$and": [
+              {
+                "refund_id": {
+                  "$type": "string"
+                }
+              },
+              {
+                "refund_id": {
+                  "$type": "string"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "holds": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "quote_id",
+        "order_id",
+        "amount",
+        "state",
+        "expires_at",
+        "idempotency_key"
+      ],
+      "nullable": [
+        "order_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "quote_id",
+            "amount",
+            "state",
+            "expires_at",
+            "idempotency_key"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "quote_id": {
+              "bsonType": "string"
+            },
+            "order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "idempotency_key": {
+              "bsonType": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "holds_idempotency_key_b82ef6",
+          "key": {
+            "idempotency_key": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "gift_card_batches": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "count",
+        "amount",
+        "currency",
+        "purpose",
+        "expires_at",
+        "reason",
+        "cost_center",
+        "status",
+        "approval_request_id",
+        "codes_ciphertext",
+        "codes_file_id",
+        "codes_delivered_at",
+        "codes_expire_at",
+        "created_by",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "expires_at",
+        "cost_center",
+        "approval_request_id",
+        "codes_ciphertext",
+        "codes_file_id",
+        "codes_delivered_at",
+        "codes_expire_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "codes_delivered_at",
+        "codes_expire_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "count",
+            "amount",
+            "currency",
+            "purpose",
+            "reason",
+            "status",
+            "created_by",
+            "idempotency_key",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "purpose": {
+              "bsonType": "string"
+            },
+            "expires_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "cost_center": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string",
+              "enum": [
+                "pending_approval",
+                "issued",
+                "rejected"
+              ]
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "codes_ciphertext": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "codes_file_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "codes_delivered_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "codes_expire_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "idempotency_key": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "gift_card_batches_idempotency_key_b82ef6",
+          "key": {
+            "idempotency_key": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "gift_card_batches_status_created_at_de0a8c",
+          "key": {
+            "status": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "gift_card_batches_codes_expire_at_b88650",
+          "key": {
+            "codes_expire_at": 1
+          },
+          "partial": {
+            "codes_ciphertext": {
+              "$type": "string"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "goodwill_grants": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "amount",
+        "currency",
+        "reason",
+        "reason_code",
+        "case_id",
+        "order_id",
+        "charged_to",
+        "seller_id",
+        "state",
+        "approval_request_id",
+        "requested_by",
+        "decided_by",
+        "ledger_entry_id",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "case_id",
+        "order_id",
+        "seller_id",
+        "approval_request_id",
+        "decided_by",
+        "ledger_entry_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "amount",
+            "currency",
+            "reason",
+            "reason_code",
+            "charged_to",
+            "state",
+            "requested_by",
+            "idempotency_key",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "reason_code": {
+              "bsonType": "string"
+            },
+            "case_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "charged_to": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "requested_by": {
+              "bsonType": "string"
+            },
+            "decided_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "ledger_entry_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "idempotency_key": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "goodwill_grants_idempotency_key_b82ef6",
+          "key": {
+            "idempotency_key": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "goodwill_grants_state_created_at_b9168f",
+          "key": {
+            "state": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "goodwill_grants_customer_id_created_at_a89138",
+          "key": {
+            "customer_id": 1,
+            "created_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "gift_cards": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "code_hash",
+        "code_last4",
+        "batch_id",
+        "initial",
+        "remaining",
+        "currency",
+        "state",
+        "purpose",
+        "expires_at",
+        "redeemed_by",
+        "redeemed_at",
+        "created_by",
+        "created_at"
+      ],
+      "nullable": [
+        "batch_id",
+        "expires_at",
+        "redeemed_by",
+        "redeemed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "expires_at",
+        "redeemed_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "code_hash",
+            "code_last4",
+            "initial",
+            "remaining",
+            "currency",
+            "state",
+            "purpose",
+            "created_by",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "code_hash": {
+              "bsonType": "string"
+            },
+            "code_last4": {
+              "bsonType": "string"
+            },
+            "batch_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "initial": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "remaining": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "purpose": {
+              "bsonType": "string"
+            },
+            "expires_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "redeemed_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "redeemed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "gift_cards_code_hash_aa554f",
+          "key": {
+            "code_hash": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "credit_corrections": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "amount",
+        "currency",
+        "reason",
+        "reference",
+        "state",
+        "approval_request_id",
+        "requested_by",
+        "decided_by",
+        "decided_at",
+        "ledger_entry_id",
+        "failure",
+        "idempotency_key",
+        "created_at"
+      ],
+      "nullable": [
+        "reference",
+        "approval_request_id",
+        "decided_by",
+        "decided_at",
+        "ledger_entry_id",
+        "failure"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "amount",
+            "currency",
+            "reason",
+            "state",
+            "requested_by",
+            "idempotency_key",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "currency": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "reference": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "bsonType": "string",
+              "enum": [
+                "pending_approval",
+                "applied",
+                "rejected",
+                "failed"
+              ]
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "requested_by": {
+              "bsonType": "string"
+            },
+            "decided_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "ledger_entry_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "failure": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "idempotency_key": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "credit_corrections_idempotency_key_b82ef6",
+          "key": {
+            "idempotency_key": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "credit_corrections_customer_id_state_created_at_46288a",
+          "key": {
+            "customer_id": 1,
+            "state": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "credit_corrections_approval_request_id_7e5ff9",
+          "key": {
+            "approval_request_id": 1
+          },
+          "partial": {
+            "approval_request_id": {
+              "$type": "string"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "loyalty_entries": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "customer_id",
+        "points",
+        "kind",
+        "order_id",
+        "at"
+      ],
+      "nullable": [
+        "order_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "customer_id",
+            "points",
+            "kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "customer_id": {
+              "bsonType": "string"
+            },
+            "points": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

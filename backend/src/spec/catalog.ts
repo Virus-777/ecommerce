@@ -3386,6 +3386,1847 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "categories": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "parent_id",
+        "name",
+        "slug",
+        "position",
+        "visible",
+        "coming_soon",
+        "image_media_id"
+      ],
+      "nullable": [
+        "parent_id",
+        "image_media_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "name",
+            "slug",
+            "position",
+            "visible",
+            "coming_soon"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "parent_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "visible": {
+              "bsonType": "bool"
+            },
+            "coming_soon": {
+              "bsonType": "bool"
+            },
+            "image_media_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "categories_slug_549e08",
+          "key": {
+            "slug": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "attributes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "category_id",
+        "name",
+        "kind",
+        "unit",
+        "options",
+        "required",
+        "filterable",
+        "variant_defining",
+        "position"
+      ],
+      "nullable": [
+        "unit"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "category_id",
+            "name",
+            "kind",
+            "options",
+            "required",
+            "filterable",
+            "variant_defining",
+            "position"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "category_id": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "unit": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "options": {},
+            "required": {
+              "bsonType": "bool"
+            },
+            "filterable": {
+              "bsonType": "bool"
+            },
+            "variant_defining": {
+              "bsonType": "bool"
+            },
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "image_standards": {
+      "idField": "category_id",
+      "key": [
+        "category_id"
+      ],
+      "columns": [
+        "category_id",
+        "min_width",
+        "min_count",
+        "rules"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "min_width",
+            "min_count",
+            "rules"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "min_width": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "min_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "rules": {}
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "brands": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "name",
+        "slug",
+        "logo_media_id",
+        "description",
+        "banner_media_id",
+        "status",
+        "status_reason",
+        "flag_note",
+        "trust_report_id",
+        "selling_policy",
+        "requested_by_seller_id",
+        "requested_for_product_id",
+        "requested_change_request_id",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "logo_media_id",
+        "description",
+        "banner_media_id",
+        "status_reason",
+        "flag_note",
+        "trust_report_id",
+        "requested_by_seller_id",
+        "requested_for_product_id",
+        "requested_change_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "name",
+            "slug",
+            "status",
+            "selling_policy",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "logo_media_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "banner_media_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string",
+              "enum": [
+                "active",
+                "under_review",
+                "blocked"
+              ]
+            },
+            "status_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "flag_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "trust_report_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "selling_policy": {
+              "bsonType": "string",
+              "enum": [
+                "open",
+                "authorized_list",
+                "official_only"
+              ]
+            },
+            "requested_by_seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "requested_for_product_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "requested_change_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "brands_slug_549e08",
+          "key": {
+            "slug": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "brands_status_name_91fbee",
+          "key": {
+            "status": 1,
+            "name": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "products": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "title",
+        "slug",
+        "brand_id",
+        "category_id",
+        "description",
+        "key_features",
+        "specs",
+        "included_items",
+        "media_ids",
+        "video_media_id",
+        "model_number",
+        "mpn",
+        "no_gtin",
+        "requested_brand",
+        "content_score",
+        "owner_type",
+        "owner_seller_id",
+        "review_state",
+        "publication",
+        "version",
+        "merged_into_id",
+        "created_at",
+        "updated_at",
+        "listed_at"
+      ],
+      "nullable": [
+        "brand_id",
+        "category_id",
+        "video_media_id",
+        "model_number",
+        "mpn",
+        "requested_brand",
+        "owner_seller_id",
+        "merged_into_id",
+        "listed_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at",
+        "updated_at",
+        "listed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "title",
+            "slug",
+            "description",
+            "key_features",
+            "specs",
+            "included_items",
+            "media_ids",
+            "no_gtin",
+            "content_score",
+            "owner_type",
+            "review_state",
+            "publication",
+            "version",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "slug": {
+              "bsonType": "string"
+            },
+            "brand_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "category_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "bsonType": "string"
+            },
+            "key_features": {},
+            "specs": {},
+            "included_items": {},
+            "media_ids": {},
+            "video_media_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "model_number": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "mpn": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "no_gtin": {
+              "bsonType": "bool"
+            },
+            "requested_brand": {},
+            "content_score": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "owner_type": {
+              "bsonType": "string",
+              "enum": [
+                "official",
+                "seller"
+              ]
+            },
+            "owner_seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "review_state": {
+              "bsonType": "string"
+            },
+            "publication": {
+              "bsonType": "string"
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "merged_into_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            },
+            "listed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "products_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "products_review_state_id_e834f9",
+          "key": {
+            "review_state": 1,
+            "id": 1
+          }
+        },
+        {
+          "name": "products_category_id_id_4d732a",
+          "key": {
+            "category_id": 1,
+            "id": 1
+          }
+        },
+        {
+          "name": "products_owner_seller_id_id_392532",
+          "key": {
+            "owner_seller_id": 1,
+            "id": 1
+          }
+        },
+        {
+          "name": "products_publication_id_2d56bc",
+          "key": {
+            "publication": 1,
+            "id": 1
+          }
+        },
+        {
+          "name": "products_brand_id_id_de6457",
+          "key": {
+            "brand_id": 1,
+            "id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "variants": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "product_id",
+        "options",
+        "gtin",
+        "media_ids",
+        "position",
+        "weight_grams",
+        "length_cm",
+        "width_cm",
+        "height_cm",
+        "list_price_amount",
+        "list_price_currency"
+      ],
+      "nullable": [
+        "gtin",
+        "weight_grams",
+        "length_cm",
+        "width_cm",
+        "height_cm",
+        "list_price_amount",
+        "list_price_currency"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "product_id",
+            "options",
+            "media_ids",
+            "position"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "options": {},
+            "gtin": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "media_ids": {},
+            "position": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "weight_grams": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ],
+              "exclusiveMinimum": 0
+            },
+            "length_cm": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "width_cm": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "height_cm": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "list_price_amount": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "list_price_currency": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "variants_gtin_745cc2",
+          "key": {
+            "gtin": 1
+          },
+          "unique": true,
+          "partial": {
+            "gtin": {
+              "$type": "string"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "review_log": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "product_id",
+        "action",
+        "reason",
+        "fields",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "reason",
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "product_id",
+            "action",
+            "fields",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "action": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {},
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "correction_suggestions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "product_id",
+        "seller_id",
+        "field",
+        "current",
+        "proposed",
+        "evidence_media_ids",
+        "state",
+        "decision_reason",
+        "decided_by",
+        "created_at"
+      ],
+      "nullable": [
+        "current",
+        "decision_reason",
+        "decided_by"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "product_id",
+            "seller_id",
+            "field",
+            "proposed",
+            "evidence_media_ids",
+            "state",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "field": {
+              "bsonType": "string"
+            },
+            "current": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "proposed": {
+              "bsonType": "string"
+            },
+            "evidence_media_ids": {},
+            "state": {
+              "bsonType": "string"
+            },
+            "decision_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "submissions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "product_id",
+        "kind",
+        "state",
+        "product_version",
+        "submitted_at",
+        "submitted_by",
+        "last_saved_at",
+        "last_saved_by",
+        "expected_review_by",
+        "review_due_at",
+        "paused_at",
+        "assignee_staff_id",
+        "assignee_name",
+        "decided_at",
+        "note"
+      ],
+      "nullable": [
+        "last_saved_at",
+        "last_saved_by",
+        "expected_review_by",
+        "review_due_at",
+        "paused_at",
+        "assignee_staff_id",
+        "assignee_name",
+        "decided_at",
+        "note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "submitted_at",
+        "last_saved_at",
+        "expected_review_by",
+        "review_due_at",
+        "paused_at",
+        "decided_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "product_id",
+            "kind",
+            "state",
+            "product_version",
+            "submitted_at",
+            "submitted_by"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string",
+              "enum": [
+                "new",
+                "content_change",
+                "resubmitted"
+              ]
+            },
+            "state": {
+              "bsonType": "string",
+              "enum": [
+                "open",
+                "decided",
+                "withdrawn"
+              ]
+            },
+            "product_version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "submitted_at": {
+              "bsonType": "date"
+            },
+            "submitted_by": {},
+            "last_saved_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "last_saved_by": {},
+            "expected_review_by": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "review_due_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "paused_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "assignee_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "assignee_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "submissions_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "submissions_state_review_due_at_bf7053",
+          "key": {
+            "state": 1,
+            "review_due_at": 1
+          }
+        },
+        {
+          "name": "submissions_product_id_submitted_at_334710",
+          "key": {
+            "product_id": 1,
+            "submitted_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "submission_checks": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "submission_id",
+        "kind",
+        "result",
+        "message",
+        "details",
+        "evidence",
+        "ran_at",
+        "dismissed_at",
+        "dismissed_by",
+        "dismiss_reason",
+        "dismissed_matched_product_id"
+      ],
+      "nullable": [
+        "dismissed_at",
+        "dismissed_by",
+        "dismiss_reason",
+        "dismissed_matched_product_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "ran_at",
+        "dismissed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "submission_id",
+            "kind",
+            "result",
+            "message",
+            "details",
+            "evidence",
+            "ran_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "submission_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "result": {
+              "bsonType": "string",
+              "enum": [
+                "pass",
+                "warn",
+                "fail"
+              ]
+            },
+            "message": {
+              "bsonType": "string"
+            },
+            "details": {},
+            "evidence": {},
+            "ran_at": {
+              "bsonType": "date"
+            },
+            "dismissed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "dismissed_by": {},
+            "dismiss_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "dismissed_matched_product_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "submission_checks_submission_id_4bc79a",
+          "key": {
+            "submission_id": 1
+          }
+        },
+        {
+          "name": "submission_checks_kind_result_48dd5b",
+          "key": {
+            "kind": 1,
+            "result": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "check_dismissals": {
+      "idField": null,
+      "key": [
+        "check_id",
+        "matched_product_id"
+      ],
+      "columns": [
+        "check_id",
+        "matched_product_id",
+        "dismissed_at",
+        "dismissed_by",
+        "reason"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "dismissed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "check_id",
+            "matched_product_id",
+            "dismissed_at",
+            "dismissed_by",
+            "reason"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "check_id": {
+              "bsonType": "string"
+            },
+            "matched_product_id": {
+              "bsonType": "string"
+            },
+            "dismissed_at": {
+              "bsonType": "date"
+            },
+            "dismissed_by": {},
+            "reason": {
+              "bsonType": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "check_dismissals_check_id_matched_product_id_995304",
+          "key": {
+            "check_id": 1,
+            "matched_product_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "review_drafts": {
+      "idField": null,
+      "key": [
+        "submission_id",
+        "staff_id"
+      ],
+      "columns": [
+        "submission_id",
+        "staff_id",
+        "decision",
+        "reason",
+        "fields",
+        "saved_at"
+      ],
+      "nullable": [
+        "decision",
+        "reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "saved_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "submission_id",
+            "staff_id",
+            "fields",
+            "saved_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "submission_id": {
+              "bsonType": "string"
+            },
+            "staff_id": {
+              "bsonType": "string"
+            },
+            "decision": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "fields": {},
+            "saved_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "review_drafts_submission_id_staff_id_6d7ca1",
+          "key": {
+            "submission_id": 1,
+            "staff_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "brand_authorized_sellers": {
+      "idField": null,
+      "key": [
+        "brand_id",
+        "seller_id"
+      ],
+      "columns": [
+        "brand_id",
+        "seller_id",
+        "source",
+        "added_by",
+        "added_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "added_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "brand_id",
+            "seller_id",
+            "source",
+            "added_by",
+            "added_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "brand_id": {
+              "bsonType": "string"
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "source": {
+              "bsonType": "string",
+              "enum": [
+                "staff",
+                "claim"
+              ]
+            },
+            "added_by": {},
+            "added_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "brand_authorized_sellers_brand_id_seller_id_f63bf4",
+          "key": {
+            "brand_id": 1,
+            "seller_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "brand_authorized_sellers_seller_id_b7adb7",
+          "key": {
+            "seller_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "offer_index": {
+      "idField": "offer_id",
+      "key": [
+        "offer_id"
+      ],
+      "columns": [
+        "offer_id",
+        "product_id",
+        "variant_id",
+        "owner_type",
+        "seller_id",
+        "seller_name",
+        "condition",
+        "status",
+        "eligible",
+        "in_stock",
+        "price",
+        "updated_at"
+      ],
+      "nullable": [
+        "seller_id",
+        "seller_name",
+        "price"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "product_id",
+            "variant_id",
+            "owner_type",
+            "condition",
+            "status",
+            "eligible",
+            "in_stock",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "product_id": {
+              "bsonType": "string"
+            },
+            "variant_id": {
+              "bsonType": "string"
+            },
+            "owner_type": {
+              "bsonType": "string",
+              "enum": [
+                "official",
+                "seller"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "seller_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "condition": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "eligible": {
+              "bsonType": "bool"
+            },
+            "in_stock": {
+              "bsonType": "bool"
+            },
+            "price": {},
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "offer_index_product_id_6c3e3e",
+          "key": {
+            "product_id": 1
+          }
+        },
+        {
+          "name": "offer_index_seller_id_b7adb7",
+          "key": {
+            "seller_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "listing_stats": {
+      "idField": "product_id",
+      "key": [
+        "product_id"
+      ],
+      "columns": [
+        "product_id",
+        "offer_count",
+        "live_offer_count",
+        "in_stock",
+        "best_price",
+        "offer_note",
+        "refreshed_at"
+      ],
+      "nullable": [
+        "best_price",
+        "offer_note"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "refreshed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "offer_count",
+            "live_offer_count",
+            "in_stock",
+            "refreshed_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "offer_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "live_offer_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "in_stock": {
+              "bsonType": "bool"
+            },
+            "best_price": {},
+            "offer_note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "refreshed_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "category_stats": {
+      "idField": "category_id",
+      "key": [
+        "category_id"
+      ],
+      "columns": [
+        "category_id",
+        "product_count",
+        "offer_count",
+        "refreshed_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "refreshed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "product_count",
+            "offer_count",
+            "refreshed_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "product_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "offer_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "refreshed_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "brand_stats": {
+      "idField": null,
+      "key": [
+        "brand_id",
+        "category_id"
+      ],
+      "columns": [
+        "brand_id",
+        "category_id",
+        "product_count",
+        "offer_count",
+        "seller_count",
+        "refreshed_at"
+      ],
+      "nullable": [
+        "category_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "refreshed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "brand_id",
+            "product_count",
+            "offer_count",
+            "seller_count",
+            "refreshed_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "brand_id": {
+              "bsonType": "string"
+            },
+            "category_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "product_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "offer_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "refreshed_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "brand_stats_brand_id_category_id_22b260",
+          "key": {
+            "brand_id": 1,
+            "category_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "brand_stats_category_id_product_count_c0f473",
+          "key": {
+            "category_id": 1,
+            "product_count": -1
+          }
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

@@ -41,7 +41,7 @@ import { APPROVER_LABELS, buildCatalogue, KNOWN_MODULE_SECTIONS, OWN_SECTIONS, s
 import { evaluateFlag, FLAG_CATALOGUE, type FlagState } from './domain/flags.js';
 import { settingChangeMachine } from './domain/state-machines.js';
 import { closedLabel, dateText, hoursLabel, sameValue, validateValue, valueText, type Issue } from './domain/values.js';
-import { SEED_ACTOR } from './infra/postgres/repository.js';
+import { SEED_ACTOR } from './infra/records.js';
 import type { ChangeMeta, ChangeRecord, DefinitionRecord, FlagRecord, SettingsRepository, ValueRecord } from './ports.js';
 
 export interface SettingsServiceDeps {

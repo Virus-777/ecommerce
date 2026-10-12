@@ -3183,6 +3183,1463 @@ export const spec = defineModuleSpec({
     }
   },
   tenantTables: {},
+  collections: {
+    "reports": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "type",
+        "title",
+        "description",
+        "source",
+        "reporter_kind",
+        "reporter_id",
+        "reporter_name",
+        "reporter_org",
+        "reporter_contact",
+        "reporter_count",
+        "detector",
+        "dedupe_key",
+        "status",
+        "risk_score",
+        "risk_factors",
+        "risk_override",
+        "assignee_staff_id",
+        "due_at",
+        "resolution",
+        "reporter_outcome",
+        "assessment",
+        "merged_into_id",
+        "created_at",
+        "updated_at"
+      ],
+      "nullable": [
+        "reporter_id",
+        "reporter_name",
+        "reporter_org",
+        "reporter_contact",
+        "detector",
+        "dedupe_key",
+        "risk_override",
+        "assignee_staff_id",
+        "due_at",
+        "resolution",
+        "reporter_outcome",
+        "assessment",
+        "merged_into_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "type",
+            "title",
+            "description",
+            "source",
+            "reporter_kind",
+            "reporter_count",
+            "status",
+            "risk_score",
+            "risk_factors",
+            "created_at",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "type": {
+              "bsonType": "string"
+            },
+            "title": {
+              "bsonType": "string"
+            },
+            "description": {
+              "bsonType": "string"
+            },
+            "source": {
+              "bsonType": "string"
+            },
+            "reporter_kind": {
+              "bsonType": "string"
+            },
+            "reporter_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reporter_name": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reporter_org": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reporter_contact": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reporter_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "detector": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "dedupe_key": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "risk_score": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "risk_factors": {},
+            "risk_override": {},
+            "assignee_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "due_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "resolution": {},
+            "reporter_outcome": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "assessment": {},
+            "merged_into_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "reports_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "reports_status_risk_score_1b594d",
+          "key": {
+            "status": 1,
+            "risk_score": -1
+          }
+        },
+        {
+          "name": "reports_type_status_1f6d43",
+          "key": {
+            "type": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "reports_assignee_staff_id_status_c5c7a6",
+          "key": {
+            "assignee_staff_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "reports_dedupe_key_2ab325",
+          "key": {
+            "dedupe_key": 1
+          },
+          "unique": true,
+          "partial": {
+            "status": {
+              "$in": [
+                "open",
+                "under_review",
+                "escalated"
+              ]
+            },
+            "dedupe_key": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "name": "reports_reporter_kind_reporter_id_created_at_d2e805",
+          "key": {
+            "reporter_kind": 1,
+            "reporter_id": 1,
+            "created_at": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "report_subjects": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "report_id",
+        "subject_type",
+        "subject_id",
+        "ref",
+        "label"
+      ],
+      "nullable": [
+        "ref"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "report_id",
+            "subject_type",
+            "subject_id",
+            "label"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "report_id": {
+              "bsonType": "string"
+            },
+            "subject_type": {
+              "bsonType": "string"
+            },
+            "subject_id": {
+              "bsonType": "string"
+            },
+            "ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "label": {
+              "bsonType": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "report_subjects_subject_type_subject_id_fb4ad6",
+          "key": {
+            "subject_type": 1,
+            "subject_id": 1
+          }
+        },
+        {
+          "name": "report_subjects_report_id_subject_type_subject_id_880e2a",
+          "key": {
+            "report_id": 1,
+            "subject_type": 1,
+            "subject_id": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "evidence": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "report_id",
+        "kind",
+        "result",
+        "text",
+        "media_ids",
+        "source",
+        "visibility",
+        "added_by_kind",
+        "added_by_id",
+        "added_at"
+      ],
+      "nullable": [
+        "result",
+        "added_by_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "added_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "report_id",
+            "kind",
+            "text",
+            "media_ids",
+            "source",
+            "visibility",
+            "added_by_kind",
+            "added_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "report_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "result": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "bsonType": "string"
+            },
+            "media_ids": {},
+            "source": {
+              "bsonType": "string"
+            },
+            "visibility": {
+              "bsonType": "string"
+            },
+            "added_by_kind": {
+              "bsonType": "string"
+            },
+            "added_by_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "added_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "evidence_report_id_added_at_6cad1f",
+          "key": {
+            "report_id": 1,
+            "added_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "evidence_requests": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "report_id",
+        "to_type",
+        "to_id",
+        "question",
+        "due_at",
+        "state",
+        "answer",
+        "answer_media_ids",
+        "answered_at"
+      ],
+      "nullable": [
+        "answer",
+        "answered_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "answered_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "report_id",
+            "to_type",
+            "to_id",
+            "question",
+            "due_at",
+            "state",
+            "answer_media_ids"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "report_id": {
+              "bsonType": "string"
+            },
+            "to_type": {
+              "bsonType": "string"
+            },
+            "to_id": {
+              "bsonType": "string"
+            },
+            "question": {
+              "bsonType": "string"
+            },
+            "due_at": {
+              "bsonType": "date"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "answer": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "answer_media_ids": {},
+            "answered_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "evidence_requests_to_type_to_id_state_5aab70",
+          "key": {
+            "to_type": 1,
+            "to_id": 1,
+            "state": 1
+          }
+        },
+        {
+          "name": "evidence_requests_state_due_at_c06642",
+          "key": {
+            "state": 1,
+            "due_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "recommendations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "report_id",
+        "action",
+        "label",
+        "owner_team",
+        "owner_role",
+        "owner_staff_id",
+        "targets",
+        "params",
+        "rationale",
+        "state",
+        "created_by",
+        "routed_at",
+        "routed_by",
+        "decided_at",
+        "decided_by",
+        "decision_reason",
+        "enforcement_id",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "owner_staff_id",
+        "created_by",
+        "routed_at",
+        "routed_by",
+        "decided_at",
+        "decided_by",
+        "decision_reason",
+        "enforcement_id",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "routed_at",
+        "decided_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "report_id",
+            "action",
+            "label",
+            "owner_team",
+            "owner_role",
+            "targets",
+            "params",
+            "rationale",
+            "state"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "report_id": {
+              "bsonType": "string"
+            },
+            "action": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "owner_team": {
+              "bsonType": "string"
+            },
+            "owner_role": {
+              "bsonType": "string"
+            },
+            "owner_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "targets": {},
+            "params": {},
+            "rationale": {
+              "bsonType": "string"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "created_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "routed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "routed_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "decided_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decision_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "enforcement_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "recommendations_owner_team_state_fa6246",
+          "key": {
+            "owner_team": 1,
+            "state": 1
+          }
+        },
+        {
+          "name": "recommendations_report_id_e9fd72",
+          "key": {
+            "report_id": 1
+          }
+        },
+        {
+          "name": "recommendations_approval_request_id_7e5ff9",
+          "key": {
+            "approval_request_id": 1
+          },
+          "partial": {
+            "approval_request_id": {
+              "$type": "string"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "enforcements": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "report_id",
+        "recommendation_id",
+        "action",
+        "owner_team",
+        "targets",
+        "reason",
+        "params",
+        "effects",
+        "recorded_by",
+        "recorded_at",
+        "execution_state",
+        "applied_ref",
+        "applied_at",
+        "failure",
+        "appealable",
+        "appeal_deadline",
+        "reversed_at",
+        "reversal_reason",
+        "reversal_request_id"
+      ],
+      "nullable": [
+        "recommendation_id",
+        "applied_ref",
+        "applied_at",
+        "failure",
+        "appeal_deadline",
+        "reversed_at",
+        "reversal_reason",
+        "reversal_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "recorded_at",
+        "applied_at",
+        "appeal_deadline",
+        "reversed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "report_id",
+            "action",
+            "owner_team",
+            "targets",
+            "reason",
+            "params",
+            "effects",
+            "recorded_by",
+            "recorded_at",
+            "execution_state",
+            "appealable"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "report_id": {
+              "bsonType": "string"
+            },
+            "recommendation_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "action": {
+              "bsonType": "string"
+            },
+            "owner_team": {
+              "bsonType": "string"
+            },
+            "targets": {},
+            "reason": {
+              "bsonType": "string"
+            },
+            "params": {},
+            "effects": {},
+            "recorded_by": {
+              "bsonType": "string"
+            },
+            "recorded_at": {
+              "bsonType": "date"
+            },
+            "execution_state": {
+              "bsonType": "string"
+            },
+            "applied_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "applied_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "failure": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "appealable": {
+              "bsonType": "bool"
+            },
+            "appeal_deadline": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "reversed_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "reversal_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reversal_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "enforcements_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "enforcements_execution_state_b5a075",
+          "key": {
+            "execution_state": 1
+          }
+        },
+        {
+          "name": "enforcements_owner_team_recorded_at_fd9e1a",
+          "key": {
+            "owner_team": 1,
+            "recorded_at": -1
+          }
+        },
+        {
+          "name": "enforcements_reversal_request_id_cf0374",
+          "key": {
+            "reversal_request_id": 1
+          },
+          "partial": {
+            "reversal_request_id": {
+              "$type": "string"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "enforcement_targets": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "enforcement_id",
+        "target_type",
+        "target_id"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "enforcement_id",
+            "target_type",
+            "target_id"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "enforcement_id": {
+              "bsonType": "string"
+            },
+            "target_type": {
+              "bsonType": "string"
+            },
+            "target_id": {
+              "bsonType": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "enforcement_targets_target_type_target_id_e31405",
+          "key": {
+            "target_type": 1,
+            "target_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "appeals": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "source",
+        "external_appeal_id",
+        "report_id",
+        "enforcement_id",
+        "appellant_kind",
+        "appellant_id",
+        "appellant_name",
+        "decision_appealed",
+        "argument",
+        "evidence_media_ids",
+        "reviewer_staff_id",
+        "original_decider_id",
+        "decide_by",
+        "state",
+        "decision",
+        "filed_at"
+      ],
+      "nullable": [
+        "external_appeal_id",
+        "report_id",
+        "enforcement_id",
+        "reviewer_staff_id",
+        "decision"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decide_by",
+        "filed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "source",
+            "appellant_kind",
+            "appellant_id",
+            "appellant_name",
+            "decision_appealed",
+            "argument",
+            "evidence_media_ids",
+            "original_decider_id",
+            "decide_by",
+            "state",
+            "filed_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "source": {
+              "bsonType": "string",
+              "enum": [
+                "trust",
+                "sellers"
+              ]
+            },
+            "external_appeal_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "report_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "enforcement_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "appellant_kind": {
+              "bsonType": "string"
+            },
+            "appellant_id": {
+              "bsonType": "string"
+            },
+            "appellant_name": {
+              "bsonType": "string"
+            },
+            "decision_appealed": {
+              "bsonType": "string"
+            },
+            "argument": {
+              "bsonType": "string"
+            },
+            "evidence_media_ids": {},
+            "reviewer_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "original_decider_id": {
+              "bsonType": "string"
+            },
+            "decide_by": {
+              "bsonType": "date"
+            },
+            "state": {
+              "bsonType": "string"
+            },
+            "decision": {},
+            "filed_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "appeals_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "appeals_state_decide_by_b1f298",
+          "key": {
+            "state": 1,
+            "decide_by": 1
+          }
+        },
+        {
+          "name": "appeals_source_external_appeal_id_d96e81",
+          "key": {
+            "source": 1,
+            "external_appeal_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "$and": [
+              {
+                "external_appeal_id": {
+                  "$type": "string"
+                }
+              },
+              {
+                "external_appeal_id": {
+                  "$type": "string"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "name": "appeals_appellant_kind_appellant_id_db5193",
+          "key": {
+            "appellant_kind": 1,
+            "appellant_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "report_notes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "report_id",
+        "body",
+        "author_id",
+        "author_name",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "report_id",
+            "body",
+            "author_id",
+            "author_name",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "report_id": {
+              "bsonType": "string"
+            },
+            "body": {
+              "bsonType": "string"
+            },
+            "author_id": {
+              "bsonType": "string"
+            },
+            "author_name": {
+              "bsonType": "string"
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "report_events": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "report_id",
+        "kind",
+        "detail",
+        "actor_kind",
+        "actor_id",
+        "at"
+      ],
+      "nullable": [
+        "actor_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "report_id",
+            "kind",
+            "detail",
+            "actor_kind",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "report_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "detail": {},
+            "actor_kind": {
+              "bsonType": "string"
+            },
+            "actor_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "report_events_report_id_at_378c2a",
+          "key": {
+            "report_id": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "detection_rules": {
+      "idField": "key",
+      "key": [
+        "key"
+      ],
+      "columns": [
+        "key",
+        "description",
+        "type",
+        "active",
+        "thresholds",
+        "base_score",
+        "updated_by",
+        "updated_at",
+        "last_run_at"
+      ],
+      "nullable": [
+        "last_run_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at",
+        "last_run_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "description",
+            "type",
+            "active",
+            "thresholds",
+            "base_score",
+            "updated_by",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "description": {
+              "bsonType": "string"
+            },
+            "type": {
+              "bsonType": "string"
+            },
+            "active": {
+              "bsonType": "bool"
+            },
+            "thresholds": {},
+            "base_score": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "updated_by": {
+              "bsonType": "string"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            },
+            "last_run_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "risk_signals": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "kind",
+        "subject_type",
+        "subject_id",
+        "features",
+        "at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "kind",
+            "subject_type",
+            "subject_id",
+            "features",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "subject_type": {
+              "bsonType": "string"
+            },
+            "subject_id": {
+              "bsonType": "string"
+            },
+            "features": {},
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "risk_signals_kind_at_54df66",
+          "key": {
+            "kind": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "risk_signals_subject_type_subject_id_at_3840d7",
+          "key": {
+            "subject_type": 1,
+            "subject_id": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

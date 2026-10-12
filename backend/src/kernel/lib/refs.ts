@@ -3,6 +3,7 @@
  * CS- cases, PO- payouts, PUR- purchase orders, PRD-NNNNN products, CU-NNNNNN customers.
  */
 import { sql, type Kysely } from 'kysely';
+import type { MongoStore } from '../mongo/index.js';
 import { dateInZone, type Clock } from './clock.js';
 
 export interface RefOptions {
@@ -14,6 +15,20 @@ export interface RefOptions {
 
 export interface RefGenerator {
   next(prefix: string, opts?: RefOptions): Promise<string>;
+}
+
+/** References numbered in MongoDB (kernel.ref_counters), shared by every instance */
+export function mongoRefGenerator(store: MongoStore, clock: Clock, timeZone: string): RefGenerator {
+  const counters = store.kernel('ref_counters');
+  return {
+    async next(prefix, { digits = 5, daily = true } = {}) {
+      const day = dateInZone(clock.now(), timeZone).replace(/-/g, '').slice(2);
+      const period = daily ? day : '-';
+      const row = await counters.findOneAndUpdate({ _id: `${prefix}|${period}` }, { $inc: { value: 1 }, $setOnInsert: { prefix, period } }, { upsert: true, new: true, lean: true });
+      const n = String((row as unknown as { value: number }).value).padStart(digits, '0');
+      return daily ? `${prefix}-${day}-${n}` : `${prefix}-${n}`;
+    },
+  };
 }
 
 export function createRefGenerator(db: Kysely<any>, clock: Clock, timeZone: string): RefGenerator {

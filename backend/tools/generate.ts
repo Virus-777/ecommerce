@@ -18,6 +18,9 @@ import { dirname, join, relative } from 'node:path';
 import { parseArgs } from 'node:util';
 import { parse, print, valueFromASTUntyped } from 'graphql';
 import { emitCommon, emitModule, GENERATED } from './lib/emit.js';
+import { collectionDefs } from './lib/mongo.js';
+import { emitMongooseSchemas } from './lib/mongoose.js';
+import { planTables } from './lib/sql.js';
 import { scaffoldFiles } from './lib/scaffold.js';
 import { apiDir, backendDir, camel, gqlDir, loadCommon, loadFragment, loadModules, readText, type ModuleSpec } from './lib/spec.js';
 import { TypeContext } from './lib/types.js';
@@ -141,6 +144,11 @@ for (const m of modules) {
 export const typeDefs = ${JSON.stringify(fragment)};
 `,
     );
+  }
+  {
+    // Mongoose schemas of the module's collections (problems are reported by the spec emitter)
+    const plans = planTables(m, []);
+    generated.set(join(dir, 'infra', 'mongo', 'schema.ts'), emitMongooseSchemas(m, plans, collectionDefs(m, plans, []), GENERATED(`docs/api/spec/modules/${m.name}.json`)));
   }
   const files = scaffoldFiles({ mod: m, common, types: new TypeContext(m, commonTypes, byName), hasFragment: Boolean(fragment), sourceFields: sourceFieldsOf(m, fragment) });
   for (const [rel, content] of Object.entries(files)) {

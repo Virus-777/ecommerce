@@ -112,14 +112,15 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 | `NODE_ENV` | `development` (`development`, `test`, `production`) | `production` |
 | `HOST` / `PORT` / `HEALTH_PORT` | `127.0.0.1` (`0.0.0.0` in production) / `4000` / `PORT`+1 (internal `GET /health`) | |
 | `LOG_LEVEL` | `info` (always `silent` in tests) | |
-| `DATABASE_URL` / `PGLITE_DIR` | none: in-process PGlite in memory, or in `PGLITE_DIR` | PostgreSQL |
+| `MONGODB_URI` / `MONGO_DATA_DIR` | none: an embedded MongoDB replica set (mongodb-memory-server; an installed MongoDB is used when there is one), in memory or in `MONGO_DATA_DIR` | **required**: a MongoDB 6.0+ replica set. Modules with `store: 'mongo'` keep their data here, and so do the kernel's job queue, idempotency keys, references and webhook records ([docs/04-mongodb-migration.md](../docs/04-mongodb-migration.md)) |
+| `DATABASE_URL` / `PGLITE_DIR` | none: in-process PGlite in memory, or in `PGLITE_DIR` | PostgreSQL, for the modules not on MongoDB yet |
 | `MIGRATE_ON_START` | on outside production | off: run `npm run migrate` |
 | `LAUNCH_PHASE` | `2` (1–4): endpoints of a later phase answer 501 | |
 | `MARKET_TIME_ZONE`, `MARKET_CURRENCY` | `America/Los_Angeles`, `USD` | |
 | `MARKET_DEFAULT_POSTAL_CODE`, `MARKET_DEFAULT_LOCATION_LABEL` | `97205`, `Portland`: the delivery location before the shopper gives one | |
 | `RESPONSE_VALIDATION` | on outside production | off by default |
 | `JOBS_ENABLED` | `false`: this process only enqueues | on for the worker instances |
-| `JOBS_BACKEND` | `pgboss` with `DATABASE_URL`, else `inprocess` | `pgboss` needs `DATABASE_URL` |
+| `JOBS_BACKEND` | `mongo` with `MONGODB_URI`, `pgboss` with `DATABASE_URL`, else `inprocess` | `mongo` (the queue in `kernel.jobs`) |
 | `DEPLOY_ID` | none | the image tag or commit: `on boot` jobs run once per deploy |
 | `GRAPHQL_PERSISTED_ONLY` | on in production: store and seller GraphQL take persisted query ids only | |
 | `AUTH_JWKS` | none (development trusts the dev key) | **required** |
@@ -133,7 +134,7 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 | `REVOCATION_POLL_MS` | `3000` (at least 500) | |
 | `DEV_TOKENS` / `DEV_SIGNING_KEY_FILE` | on outside production / `.data/dev-signing-key.json` | refused. With it on, startup also refuses a non-loopback `HOST` and a non-local `DATABASE_URL` |
 | `RATE_LIMITS` | `true` | `false` refused |
-| `RATE_LIMIT_STORE` | `postgres` with `DATABASE_URL`, else `memory` | |
+| `RATE_LIMIT_STORE` | `mongo` with `MONGODB_URI`, `postgres` with `DATABASE_URL`, else `memory` | `mongo` |
 | `TRUST_PROXY` | none: a hop count, `true`, or addresses/CIDRs | set behind a load balancer |
 | `CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS` | none: no browser origin is allowed | the apps' origins |
 | `DOCS_ENABLED` | on with `NODE_ENV=development` only | refused (`/docs` is served without a token) |

@@ -1821,6 +1821,909 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "conversations": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "kind",
+        "customer_id",
+        "guest_session_id",
+        "seller_id",
+        "order_id",
+        "order_item_id",
+        "return_id",
+        "case_id",
+        "application_id",
+        "started_by_staff_id",
+        "subject",
+        "status",
+        "locked_reason",
+        "locked_by_enforcement_id",
+        "reply_state",
+        "reply_due_at",
+        "awaiting_since",
+        "created_at",
+        "last_message_at",
+        "archive_after"
+      ],
+      "nullable": [
+        "customer_id",
+        "guest_session_id",
+        "seller_id",
+        "order_id",
+        "order_item_id",
+        "return_id",
+        "case_id",
+        "application_id",
+        "started_by_staff_id",
+        "locked_reason",
+        "locked_by_enforcement_id",
+        "reply_due_at",
+        "awaiting_since",
+        "archive_after"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "reply_due_at",
+        "awaiting_since",
+        "created_at",
+        "last_message_at",
+        "archive_after"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "kind",
+            "subject",
+            "status",
+            "reply_state",
+            "created_at",
+            "last_message_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "customer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "guest_session_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "order_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "order_item_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "return_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "case_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "application_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "started_by_staff_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "subject": {},
+            "status": {
+              "bsonType": "string"
+            },
+            "locked_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "locked_by_enforcement_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "reply_state": {
+              "bsonType": "string"
+            },
+            "reply_due_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "awaiting_since": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "last_message_at": {
+              "bsonType": "date"
+            },
+            "archive_after": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "conversations_customer_id_last_message_at_65ae82",
+          "key": {
+            "customer_id": 1,
+            "last_message_at": -1
+          }
+        },
+        {
+          "name": "conversations_seller_id_reply_state_reply_due_at_880d57",
+          "key": {
+            "seller_id": 1,
+            "reply_state": 1,
+            "reply_due_at": 1
+          }
+        },
+        {
+          "name": "conversations_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        },
+        {
+          "name": "conversations_case_id_ddb8b4",
+          "key": {
+            "case_id": 1
+          }
+        },
+        {
+          "name": "conversations_kind_customer_id_order_id_case_id_6fa7e5",
+          "key": {
+            "kind": 1,
+            "customer_id": 1,
+            "order_id": 1,
+            "case_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "kind": "support"
+          }
+        }
+      ],
+      "unenforced": [
+        "unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id) where kind <> 'support' (<> on kind, which has no enum values)"
+      ]
+    },
+    "participants": {
+      "idField": null,
+      "key": [],
+      "columns": [
+        "conversation_id",
+        "kind",
+        "participant_id",
+        "name",
+        "label",
+        "joined_at",
+        "joined_from_case_id",
+        "last_read_message_id",
+        "unread_count"
+      ],
+      "nullable": [
+        "joined_from_case_id",
+        "last_read_message_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "joined_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "conversation_id",
+            "kind",
+            "participant_id",
+            "name",
+            "label",
+            "joined_at",
+            "unread_count"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "conversation_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "participant_id": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "joined_at": {
+              "bsonType": "date"
+            },
+            "joined_from_case_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "last_read_message_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "unread_count": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "participants_conversation_id_kind_participant_id_46b63c",
+          "key": {
+            "conversation_id": 1,
+            "kind": 1,
+            "participant_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "participants_kind_participant_id_unread_count_1ed0e4",
+          "key": {
+            "kind": 1,
+            "participant_id": 1,
+            "unread_count": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "messages": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "conversation_id",
+        "kind",
+        "author_kind",
+        "author_id",
+        "author_label",
+        "body",
+        "original_body",
+        "media_ids",
+        "redactions",
+        "hidden",
+        "hidden_reason",
+        "client_message_id",
+        "at"
+      ],
+      "nullable": [
+        "author_kind",
+        "author_id",
+        "original_body",
+        "hidden_reason",
+        "client_message_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "conversation_id",
+            "kind",
+            "author_label",
+            "body",
+            "media_ids",
+            "redactions",
+            "hidden",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "conversation_id": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string"
+            },
+            "author_kind": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "author_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "author_label": {
+              "bsonType": "string"
+            },
+            "body": {
+              "bsonType": "string"
+            },
+            "original_body": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "media_ids": {},
+            "redactions": {},
+            "hidden": {
+              "bsonType": "bool"
+            },
+            "hidden_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "client_message_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "messages_conversation_id_at_a84000",
+          "key": {
+            "conversation_id": 1,
+            "at": -1
+          }
+        },
+        {
+          "name": "messages_conversation_id_author_id_client_message_be4921",
+          "key": {
+            "conversation_id": 1,
+            "author_id": 1,
+            "client_message_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "author_id": {
+              "$type": "string"
+            },
+            "client_message_id": {
+              "$type": "string"
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "message_reports": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "message_id",
+        "conversation_id",
+        "reporter_kind",
+        "reporter_id",
+        "reason",
+        "note",
+        "status",
+        "outcome",
+        "decided_by",
+        "decided_at",
+        "created_at"
+      ],
+      "nullable": [
+        "note",
+        "outcome",
+        "decided_by",
+        "decided_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "decided_at",
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "message_id",
+            "conversation_id",
+            "reporter_kind",
+            "reporter_id",
+            "reason",
+            "status",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "message_id": {
+              "bsonType": "string"
+            },
+            "conversation_id": {
+              "bsonType": "string"
+            },
+            "reporter_kind": {
+              "bsonType": "string"
+            },
+            "reporter_id": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "outcome": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "message_reports_status_created_at_de0a8c",
+          "key": {
+            "status": 1,
+            "created_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "reply_templates": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "seller_id",
+        "name",
+        "body",
+        "updated_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "seller_id",
+            "name",
+            "body",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "body": {
+              "bsonType": "string"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "reply_templates_seller_id_b7adb7",
+          "key": {
+            "seller_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "conversation_aliases": {
+      "idField": "old_id",
+      "key": [
+        "old_id"
+      ],
+      "columns": [
+        "old_id",
+        "conversation_id",
+        "merged_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "merged_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "conversation_id",
+            "merged_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "conversation_id": {
+              "bsonType": "string"
+            },
+            "merged_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "conversation_aliases_conversation_id_a1467d",
+          "key": {
+            "conversation_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "staff_access_log": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "conversation_id",
+        "staff_id",
+        "reason",
+        "case_id",
+        "at"
+      ],
+      "nullable": [
+        "case_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "conversation_id",
+            "staff_id",
+            "reason",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "conversation_id": {
+              "bsonType": "string"
+            },
+            "staff_id": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "case_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "staff_access_log_conversation_id_at_d806e0",
+          "key": {
+            "conversation_id": 1,
+            "at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "seller_reply_stats": {
+      "idField": "seller_id",
+      "key": [
+        "seller_id"
+      ],
+      "columns": [
+        "seller_id",
+        "period_from",
+        "period_to",
+        "average_reply_minutes",
+        "median_reply_minutes",
+        "replied",
+        "replied_within_target",
+        "decided",
+        "computed_at"
+      ],
+      "nullable": [
+        "average_reply_minutes",
+        "median_reply_minutes"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "computed_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "period_from",
+            "period_to",
+            "replied",
+            "replied_within_target",
+            "decided",
+            "computed_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "period_from": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "period_to": {
+              "bsonType": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            },
+            "average_reply_minutes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "median_reply_minutes": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "replied": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "replied_within_target": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "decided": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "computed_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "seller_reply_stats_computed_at_be3194",
+          "key": {
+            "computed_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

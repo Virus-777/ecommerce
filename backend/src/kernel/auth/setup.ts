@@ -9,7 +9,7 @@ import type { Config } from '../config/index.js';
 import type { Clock } from '../lib/clock.js';
 import { appProofVerifier } from './app-proof.js';
 import { devAuthorities, type Authorities } from './authorities.js';
-import { AuthChain, type FileLinkAuth, type WebhookVerifier } from './chain.js';
+import { AuthChain, type FileLinkAuth, type WebhookVerifier, type WebhookEventLog } from './chain.js';
 import type { Principal } from './index.js';
 import { memoryRateLimitStore, UNLIMITED, type RateLimitStore } from './rate-limit.js';
 import { RevocationList } from './revocation.js';
@@ -20,6 +20,8 @@ export interface AuthSetup {
   clock: Clock;
   log: FastifyBaseLogger;
   db: Kysely<any>;
+  /** Webhook replay log (default: PostgreSQL kernel.webhook_events) */
+  webhookEvents?: WebhookEventLog;
   /** The modules' answers (moduleAuthorities); wrapped with the development ones when DEV_TOKENS is on */
   authorities: Authorities;
   /** Wrap the final authorities (tests) */
@@ -87,6 +89,7 @@ export async function createAuthChain(s: AuthSetup): Promise<{ auth: AuthChain; 
     webhookVerifiers: s.webhookVerifiers,
     ownerOnly: s.ownerOnly,
     db: s.db,
+    webhookEvents: s.webhookEvents,
     claimsOf,
     fileLinks: s.fileLinks,
   });

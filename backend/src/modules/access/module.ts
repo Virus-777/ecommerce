@@ -3,8 +3,8 @@ import { spec } from '../../spec/access.js';
 import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresAccessRepository } from './infra/postgres/repository.js';
+import { createMongoAccessRepository } from './infra/mongo/repository.js';
+import { schemas } from './infra/mongo/schema.js';
 import { AccessService } from './service.js';
 
 /**
@@ -15,11 +15,13 @@ import { AccessService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
-  migrations,
+  version: '2.0.0',
+  store: 'mongo',
+  schemas,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
-    const service = new AccessService({ repo: createPostgresAccessRepository(ctx.db), ctx });
+    const service = new AccessService({ repo: createMongoAccessRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

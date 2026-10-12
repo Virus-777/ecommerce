@@ -2984,6 +2984,1430 @@ export const spec = defineModuleSpec({
       "seller": "seller_id"
     }
   },
+  collections: {
+    "roles": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "key",
+        "name",
+        "kind",
+        "work_area",
+        "description",
+        "system",
+        "escalation_role_id",
+        "archived_at",
+        "created_at",
+        "updated_at",
+        "version"
+      ],
+      "nullable": [
+        "description",
+        "escalation_role_id",
+        "archived_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "archived_at",
+        "created_at",
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "key",
+            "name",
+            "kind",
+            "work_area",
+            "system",
+            "created_at",
+            "updated_at",
+            "version"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "key": {
+              "bsonType": "string"
+            },
+            "name": {
+              "bsonType": "string"
+            },
+            "kind": {
+              "bsonType": "string",
+              "enum": [
+                "owner",
+                "management",
+                "task",
+                "custom"
+              ]
+            },
+            "work_area": {
+              "bsonType": "string"
+            },
+            "description": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "system": {
+              "bsonType": "bool"
+            },
+            "escalation_role_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "archived_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "roles_key_f44b4e",
+          "key": {
+            "key": 1
+          },
+          "unique": true
+        }
+      ],
+      "unenforced": []
+    },
+    "permissions": {
+      "idField": "key",
+      "key": [
+        "key"
+      ],
+      "columns": [
+        "key",
+        "module",
+        "area",
+        "label",
+        "description",
+        "sensitive",
+        "registered_at",
+        "unavailable_since"
+      ],
+      "nullable": [
+        "unavailable_since"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "registered_at",
+        "unavailable_since"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "module",
+            "area",
+            "label",
+            "description",
+            "sensitive",
+            "registered_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "module": {
+              "bsonType": "string"
+            },
+            "area": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "description": {
+              "bsonType": "string"
+            },
+            "sensitive": {
+              "bsonType": "bool"
+            },
+            "registered_at": {
+              "bsonType": "date"
+            },
+            "unavailable_since": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "permissions_module_3bb9ed",
+          "key": {
+            "module": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "role_permissions": {
+      "idField": null,
+      "key": [
+        "role_id",
+        "permission_key"
+      ],
+      "columns": [
+        "role_id",
+        "permission_key",
+        "granted_by",
+        "granted_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "granted_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "role_id",
+            "permission_key",
+            "granted_by",
+            "granted_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "role_id": {
+              "bsonType": "string"
+            },
+            "permission_key": {
+              "bsonType": "string"
+            },
+            "granted_by": {
+              "bsonType": "string"
+            },
+            "granted_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "role_permissions_role_id_permission_key_7e316b",
+          "key": {
+            "role_id": 1,
+            "permission_key": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "role_permissions_permission_key_5ed032",
+          "key": {
+            "permission_key": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "role_assignments": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "role_id",
+        "status",
+        "granted_by_kind",
+        "granted_by_id",
+        "reason",
+        "granted_at",
+        "expires_at",
+        "revoked_at",
+        "revoked_by",
+        "revoke_reason",
+        "approval_request_id"
+      ],
+      "nullable": [
+        "expires_at",
+        "revoked_at",
+        "revoked_by",
+        "revoke_reason",
+        "approval_request_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "granted_at",
+        "expires_at",
+        "revoked_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "role_id",
+            "status",
+            "granted_by_kind",
+            "granted_by_id",
+            "reason",
+            "granted_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "role_id": {
+              "bsonType": "string"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "granted_by_kind": {
+              "bsonType": "string"
+            },
+            "granted_by_id": {
+              "bsonType": "string"
+            },
+            "reason": {
+              "bsonType": "string"
+            },
+            "granted_at": {
+              "bsonType": "date"
+            },
+            "expires_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "revoked_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "revoked_by": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "revoke_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "role_assignments_account_id_d57d2a",
+          "key": {
+            "account_id": 1
+          },
+          "partial": {
+            "status": "active"
+          }
+        },
+        {
+          "name": "role_assignments_role_id_15b440",
+          "key": {
+            "role_id": 1
+          },
+          "partial": {
+            "status": "active"
+          }
+        },
+        {
+          "name": "role_assignments_account_id_role_id_8bdc8a",
+          "key": {
+            "account_id": 1,
+            "role_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "status": {
+              "$in": [
+                "active",
+                "pending_acceptance",
+                "pending_approval"
+              ]
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "role_coverage": {
+      "idField": "role_id",
+      "key": [
+        "role_id"
+      ],
+      "columns": [
+        "role_id",
+        "lead_account_id",
+        "backup_account_ids",
+        "updated_by",
+        "updated_at"
+      ],
+      "nullable": [
+        "lead_account_id"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "updated_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "backup_account_ids",
+            "updated_by",
+            "updated_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "lead_account_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "backup_account_ids": {},
+            "updated_by": {
+              "bsonType": "string"
+            },
+            "updated_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "approval_actions": {
+      "idField": "key",
+      "key": [
+        "key"
+      ],
+      "columns": [
+        "key",
+        "module",
+        "label",
+        "limit_kind",
+        "second_reviewer",
+        "approvers",
+        "default_eligible_role_keys",
+        "unavailable_since"
+      ],
+      "nullable": [
+        "approvers",
+        "unavailable_since"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "unavailable_since"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "module",
+            "label",
+            "limit_kind",
+            "second_reviewer",
+            "default_eligible_role_keys"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "module": {
+              "bsonType": "string"
+            },
+            "label": {
+              "bsonType": "string"
+            },
+            "limit_kind": {
+              "bsonType": "string",
+              "enum": [
+                "money",
+                "units",
+                "percent",
+                "none"
+              ]
+            },
+            "second_reviewer": {
+              "bsonType": "string",
+              "enum": [
+                "always",
+                "above-limit",
+                "never"
+              ]
+            },
+            "approvers": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "default_eligible_role_keys": {},
+            "unavailable_since": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [],
+      "unenforced": []
+    },
+    "approval_limits": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "role_id",
+        "action_key",
+        "authority",
+        "limit_amount_minor",
+        "limit_currency",
+        "limit_number",
+        "second_above_amount_minor",
+        "second_above_number",
+        "second_reviewer_role_keys",
+        "effective_from",
+        "effective_to",
+        "limit_change_id"
+      ],
+      "nullable": [
+        "limit_amount_minor",
+        "limit_currency",
+        "limit_number",
+        "second_above_amount_minor",
+        "second_above_number",
+        "effective_to",
+        "limit_change_id"
+      ],
+      "decimal": [
+        "limit_number",
+        "second_above_number"
+      ],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "effective_to"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "role_id",
+            "action_key",
+            "authority",
+            "second_reviewer_role_keys",
+            "effective_from"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "role_id": {
+              "bsonType": "string"
+            },
+            "action_key": {
+              "bsonType": "string"
+            },
+            "authority": {
+              "bsonType": "string"
+            },
+            "limit_amount_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "limit_currency": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "limit_number": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "second_above_amount_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "second_above_number": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "second_reviewer_role_keys": {},
+            "effective_from": {
+              "bsonType": "date"
+            },
+            "effective_to": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "limit_change_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "approval_limits_role_id_action_key_effective_from_72e3c1",
+          "key": {
+            "role_id": 1,
+            "action_key": 1,
+            "effective_from": -1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "limit_changes": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "role_id",
+        "changes",
+        "reason",
+        "effective_from",
+        "status",
+        "proposed_by_kind",
+        "proposed_by_id",
+        "approval_request_id",
+        "created_at",
+        "applied_at",
+        "cancel_reason"
+      ],
+      "nullable": [
+        "approval_request_id",
+        "applied_at",
+        "cancel_reason"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "effective_from",
+        "created_at",
+        "applied_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "role_id",
+            "changes",
+            "reason",
+            "effective_from",
+            "status",
+            "proposed_by_kind",
+            "proposed_by_id",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "role_id": {
+              "bsonType": "string"
+            },
+            "changes": {},
+            "reason": {
+              "bsonType": "string"
+            },
+            "effective_from": {
+              "bsonType": "date"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "proposed_by_kind": {
+              "bsonType": "string"
+            },
+            "proposed_by_id": {
+              "bsonType": "string"
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "applied_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "cancel_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "limit_changes_status_effective_from_d086f0",
+          "key": {
+            "status": 1,
+            "effective_from": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "approval_requests": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "ref",
+        "action_key",
+        "module",
+        "target_type",
+        "target_id",
+        "target_ref",
+        "target_label",
+        "target_screen",
+        "seller_id",
+        "amount_minor",
+        "currency",
+        "quantity",
+        "summary",
+        "details",
+        "reason",
+        "requested_by_kind",
+        "requested_by_id",
+        "requester_roles",
+        "requester_counts_as_first",
+        "required_approvals",
+        "status",
+        "eligible_role_keys",
+        "nominated_reviewer_id",
+        "limit_snapshot",
+        "due_at",
+        "expires_at",
+        "created_at",
+        "decided_at",
+        "outcome_reason",
+        "last_reminded_at",
+        "version"
+      ],
+      "nullable": [
+        "target_ref",
+        "target_label",
+        "target_screen",
+        "seller_id",
+        "amount_minor",
+        "currency",
+        "quantity",
+        "nominated_reviewer_id",
+        "due_at",
+        "decided_at",
+        "outcome_reason",
+        "last_reminded_at"
+      ],
+      "decimal": [
+        "quantity"
+      ],
+      "binary": [],
+      "dates": [
+        "due_at",
+        "expires_at",
+        "created_at",
+        "decided_at",
+        "last_reminded_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "ref",
+            "action_key",
+            "module",
+            "target_type",
+            "target_id",
+            "summary",
+            "details",
+            "reason",
+            "requested_by_kind",
+            "requested_by_id",
+            "requester_roles",
+            "requester_counts_as_first",
+            "required_approvals",
+            "status",
+            "eligible_role_keys",
+            "limit_snapshot",
+            "expires_at",
+            "created_at",
+            "version"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "ref": {
+              "bsonType": "string"
+            },
+            "action_key": {
+              "bsonType": "string"
+            },
+            "module": {
+              "bsonType": "string"
+            },
+            "target_type": {
+              "bsonType": "string"
+            },
+            "target_id": {
+              "bsonType": "string"
+            },
+            "target_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "target_label": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "target_screen": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "seller_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "amount_minor": {
+              "bsonType": [
+                "int",
+                "long",
+                "double",
+                "null"
+              ]
+            },
+            "currency": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "quantity": {
+              "bsonType": [
+                "decimal",
+                "null"
+              ]
+            },
+            "summary": {
+              "bsonType": "string"
+            },
+            "details": {},
+            "reason": {
+              "bsonType": "string"
+            },
+            "requested_by_kind": {
+              "bsonType": "string"
+            },
+            "requested_by_id": {
+              "bsonType": "string"
+            },
+            "requester_roles": {},
+            "requester_counts_as_first": {
+              "bsonType": "bool"
+            },
+            "required_approvals": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "eligible_role_keys": {},
+            "nominated_reviewer_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "limit_snapshot": {},
+            "due_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "expires_at": {
+              "bsonType": "date"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "decided_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "outcome_reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "last_reminded_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "version": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "approval_requests_ref_8cef23",
+          "key": {
+            "ref": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "approval_requests_status_created_at_de0a8c",
+          "key": {
+            "status": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "approval_requests_module_target_type_target_id_121890",
+          "key": {
+            "module": 1,
+            "target_type": 1,
+            "target_id": 1
+          }
+        },
+        {
+          "name": "approval_requests_requested_by_id_status_1a1b76",
+          "key": {
+            "requested_by_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "approval_requests_action_key_target_type_target_id_056b23",
+          "key": {
+            "action_key": 1,
+            "target_type": 1,
+            "target_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "status": {
+              "$in": [
+                "pending",
+                "partially_approved",
+                "returned"
+              ]
+            }
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "approval_decisions": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "request_id",
+        "step",
+        "decision",
+        "by_account_id",
+        "roles",
+        "note",
+        "via_delegation_from",
+        "at"
+      ],
+      "nullable": [
+        "note",
+        "via_delegation_from"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "request_id",
+            "step",
+            "decision",
+            "by_account_id",
+            "roles",
+            "at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "request_id": {
+              "bsonType": "string"
+            },
+            "step": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "decision": {
+              "bsonType": "string"
+            },
+            "by_account_id": {
+              "bsonType": "string"
+            },
+            "roles": {},
+            "note": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "via_delegation_from": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "approval_decisions_request_id_step_ad5cf8",
+          "key": {
+            "request_id": 1,
+            "step": 1
+          }
+        },
+        {
+          "name": "approval_decisions_request_id_by_account_id_7b18ae",
+          "key": {
+            "request_id": 1,
+            "by_account_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "decision": "approved"
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "away_periods": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "account_id",
+        "starts_at",
+        "ends_at",
+        "status",
+        "delegate_approvals",
+        "reason",
+        "approval_request_id",
+        "created_by_kind",
+        "created_by_id",
+        "created_at",
+        "ended_at"
+      ],
+      "nullable": [
+        "reason",
+        "approval_request_id",
+        "ended_at"
+      ],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "starts_at",
+        "ends_at",
+        "created_at",
+        "ended_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "account_id",
+            "starts_at",
+            "ends_at",
+            "status",
+            "delegate_approvals",
+            "created_by_kind",
+            "created_by_id",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "account_id": {
+              "bsonType": "string"
+            },
+            "starts_at": {
+              "bsonType": "date"
+            },
+            "ends_at": {
+              "bsonType": "date"
+            },
+            "status": {
+              "bsonType": "string"
+            },
+            "delegate_approvals": {
+              "bsonType": "bool"
+            },
+            "reason": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "approval_request_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "created_by_kind": {
+              "bsonType": "string"
+            },
+            "created_by_id": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            },
+            "ended_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "away_periods_account_id_starts_at_5299a3",
+          "key": {
+            "account_id": 1,
+            "starts_at": 1
+          }
+        },
+        {
+          "name": "away_periods_status_starts_at_8934be",
+          "key": {
+            "status": 1,
+            "starts_at": 1
+          }
+        },
+        {
+          "name": "away_periods_status_ends_at_0fb3f4",
+          "key": {
+            "status": 1,
+            "ends_at": 1
+          }
+        }
+      ],
+      "unenforced": []
+    },
+    "away_coverage": {
+      "idField": null,
+      "key": [
+        "away_period_id",
+        "role_id"
+      ],
+      "columns": [
+        "away_period_id",
+        "role_id",
+        "covered_by_account_id"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "away_period_id",
+            "role_id",
+            "covered_by_account_id"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "away_period_id": {
+              "bsonType": "string"
+            },
+            "role_id": {
+              "bsonType": "string"
+            },
+            "covered_by_account_id": {
+              "bsonType": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "away_coverage_away_period_id_role_id_c2790c",
+          "key": {
+            "away_period_id": 1,
+            "role_id": 1
+          },
+          "unique": true
+        },
+        {
+          "name": "away_coverage_covered_by_account_id_8b4700",
+          "key": {
+            "covered_by_account_id": 1
+          }
+        }
+      ],
+      "unenforced": []
+    }
+  },
   endpoints,
 });
 

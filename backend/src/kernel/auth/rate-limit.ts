@@ -10,6 +10,7 @@
 import { sql, type Kysely } from 'kysely';
 import { AppError } from '../errors/index.js';
 import type { Clock } from '../lib/clock.js';
+import type { MongoStore } from '../mongo/index.js';
 
 export interface Limit {
   limit: number;
@@ -85,6 +86,37 @@ export function postgresRateLimitStore(db: Kysely<any>, clock: Clock): RateLimit
     async purge() {
       const r = await db.deleteFrom('kernel.rate_limits').where('window_end', '<=', clock.now()).executeTakeFirst();
       return Number(r.numDeletedRows);
+    },
+  };
+}
+
+/**
+ * Windows in MongoDB (kernel.rate_limits), shared by every instance: one document per scope, key and window,
+ * counted with a conditional $inc. A full window makes the upsert collide with the existing document (duplicate
+ * key), which is the refusal; ended windows expire by a TTL index (and the purge job).
+ */
+export function mongoRateLimitStore(store: MongoStore, clock: Clock): RateLimitStore {
+  const windows = store.kernel('rate_limits');
+  return {
+    async hit(scope, key, l, o = {}) {
+      const now = clock.now().getTime();
+      const { start, end } = windowOf(now, l.windowMs);
+      if (l.limit <= 0) return refused(end, now);
+      const _id = `${scope}|${key}|${start}`;
+      if (o.peek) {
+        const row = (await windows.findOne({ _id }).lean()) as { count: number } | null;
+        return (row?.count ?? 0) < l.limit ? ALLOWED : refused(end, now);
+      }
+      try {
+        await windows.updateOne({ _id, count: { $lt: l.limit } }, { $inc: { count: 1 }, $setOnInsert: { scope, key, window_start: new Date(start), window_end: new Date(end) } }, { upsert: true });
+        return ALLOWED;
+      } catch (err) {
+        if ((err as { code?: number }).code === 11000) return refused(end, now);
+        throw err;
+      }
+    },
+    async purge() {
+      return (await windows.deleteMany({ window_end: { $lte: clock.now() } })).deletedCount;
     },
   };
 }

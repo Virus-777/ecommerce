@@ -1,10 +1,8 @@
 /**
  * Fulfilled by Marketly (phase 4): the fulfillment-service staff keys are seeded for the roles that do the
- * service's work (fresh installs) and added by migration 0004 on installs seeded before them.
+ * service's work (a fresh install seeds them from domain/seed.ts; on MongoDB every install starts fresh).
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { m0004FsSeedPermissions } from '../infra/postgres/migrations/0004_fs_seed_permissions.js';
 import { accessFixture, usd, type Fixture } from './fixture.js';
 
 let f: Fixture;
@@ -17,7 +15,7 @@ afterAll(async () => {
 
 async function permissionsOf(roleKey: string) {
   const roleId = await f.roleId(roleKey);
-  return (await f.db.selectFrom('role_permissions').select('permission_key').where('role_id', '=', roleId).execute()).map((r) => r.permission_key);
+  return (await f.table('role_permissions').find({ role_id: roleId })).map((r) => r.permission_key);
 }
 
 const EXPECTED: [string, string[]][] = [
@@ -48,22 +46,10 @@ describe('Fulfilled by Marketly staff permissions', () => {
 
   it('keeps the seeded approval limits of the service actions (fulfillment-service is off here: the rows are what check() reads once it is on)', async () => {
     const limit = async (role: string, action: string) =>
-      f.db.selectFrom('approval_limits').selectAll().where('role_id', '=', await f.roleId(role)).where('action_key', '=', action).executeTakeFirst();
+      f.table('approval_limits').findOne({ role_id: await f.roleId(role), action_key: action });
     expect(await limit('warehouse_manager', 'fulfillment-service.reimbursements.approve')).toMatchObject({ authority: 'permitted', limit_amount_minor: usd(500).amount });
     expect(await limit('finance_manager', 'fulfillment-service.reimbursements.approve')).toMatchObject({ authority: 'permitted', limit_amount_minor: usd(10_000).amount });
     expect(await limit('finance_manager', 'fulfillment-service.charges.reverse')).toMatchObject({ authority: 'permitted', limit_amount_minor: usd(10_000).amount });
-  });
-
-  it('migration 0004 adds them on installs seeded before them, idempotently, and leaves other roles alone', async () => {
-    for (const [role, keys] of EXPECTED) {
-      const roleId = await f.roleId(role);
-      await f.db.deleteFrom('role_permissions').where('role_id', '=', roleId).where('permission_key', 'in', keys).execute();
-    }
-    expect(await permissionsOf('seller_manager')).not.toContain('fulfillment-service.enrollment.review');
-    await sql.raw(m0004FsSeedPermissions.sql!).execute(f.app.kernel.database.kysely);
-    await sql.raw(m0004FsSeedPermissions.sql!).execute(f.app.kernel.database.kysely); // running it again changes nothing
-    for (const [role, keys] of EXPECTED) expect(await permissionsOf(role), role).toEqual(expect.arrayContaining(keys));
-    expect((await permissionsOf('shipping_manager')).filter((k) => k.startsWith('fulfillment-service.'))).toEqual([]);
   });
 
 });
