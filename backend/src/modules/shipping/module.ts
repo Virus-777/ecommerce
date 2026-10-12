@@ -8,8 +8,7 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { devCarrierAdapter } from './infra/carriers/dev.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresShippingRepository } from './infra/postgres/repository.js';
+import { createMongoShippingRepository } from './infra/mongo/repository.js';
 import { ShippingService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -21,13 +20,14 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
     // carriers sit behind a port; the deterministic dev adapter until real carrier accounts are connected
-    const service = new ShippingService({ repo: createPostgresShippingRepository(ctx.db), ctx, carriers: devCarrierAdapter() });
+    const service = new ShippingService({ repo: createMongoShippingRepository(ctx.mongo), ctx, carriers: devCarrierAdapter() });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     // carrier webhooks: HMAC per carrier ({carrier} in the URL names the secret)

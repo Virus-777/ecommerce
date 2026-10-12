@@ -2,14 +2,13 @@
  * Fulfilled by Marketly (fulfillment-service, phase 4): groups with fulfilledBy marketly_service are a seller's
  * packages that Marketly's warehouse ships. Quotes follow the Official schedule from the service location, the
  * warehouse's package is recorded as the seller's shipment, the seller cannot act on it (409 FULFILLED_BY_MARKETLY),
- * exceptions are staff-owned, the seller's dispatch metrics leave the packages out, and migration 0004 backfills.
+ * exceptions are staff-owned, the seller's dispatch metrics leave the packages out, and fulfilled_by is required.
  * fulfillment-service.getServiceLocation is stubbed (h.serviceLocation): FS is built in parallel.
  */
 import { marketDate } from '../../../testing/app.js';
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0004FulfilledByMarketly } from '../infra/postgres/migrations/0004_fulfilled_by_marketly.js';
+import { spec } from '../../../spec/shipping.js';
 import { checkout, group, harness, idem, line, offer, product, sellerOrder, tokens, ups, USD, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -288,14 +287,13 @@ describe('exceptions on Marketly packages (G5)', () => {
   });
 });
 
-describe('migration 0004', () => {
-  it('has the column on a fresh install and backfills old rows from owner_type', async () => {
-    const db = h.app.kernel.database;
-    const cols = await sql<{ table_name: string; is_nullable: string }>`select table_name, is_nullable from information_schema.columns where table_schema = 'shipping' and column_name = 'fulfilled_by' order by table_name`.execute(db.kysely);
-    expect(cols.rows).toEqual([
-      { table_name: 'dispatch_watch', is_nullable: 'NO' },
-      { table_name: 'exceptions', is_nullable: 'NO' },
-      { table_name: 'shipments', is_nullable: 'NO' },
+describe('fulfilled_by', () => {
+  it('is a required field of the three collections, set on new rows; other values are refused', async () => {
+    const cols = Object.entries(spec.collections as Record<string, { columns: readonly string[]; nullable: readonly string[] }>).filter(([, c]) => c.columns.includes('fulfilled_by'));
+    expect(cols.map(([name, c]) => ({ name, nullable: c.nullable.includes('fulfilled_by') })).sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { name: 'dispatch_watch', nullable: false },
+      { name: 'exceptions', nullable: false },
+      { name: 'shipments', nullable: false },
     ]);
 
     const seller = await sellerOrder(h, { dispatchInHours: 1 });
@@ -307,14 +305,13 @@ describe('migration 0004', () => {
     const ex = await h.call('POST', `${ADMIN}/exceptions`, tokens.staff(), { kind: 'lost_or_damaged', groupId: official.groupId, situation: 'Crushed' });
     expect(ex.status).toBe(201);
 
-    // the state before 0004: no fulfilled_by anywhere
-    await db.exec(`alter table shipping.shipments drop column fulfilled_by; alter table shipping.dispatch_watch drop column fulfilled_by; alter table shipping.exceptions drop column fulfilled_by`);
-    await db.exec(m0004FulfilledByMarketly.sql);
 
     expect(await h.service.core.repo.get('shipments', s1.body.id)).toMatchObject({ owner_type: 'seller', fulfilled_by: 'seller' });
     expect(await h.service.core.repo.get('shipments', s2.id)).toMatchObject({ owner_type: 'official', fulfilled_by: 'official_warehouse' });
     expect(await h.service.core.repo.get('dispatch_watch', seller.groupId)).toMatchObject({ fulfilled_by: 'seller' });
     expect(await h.service.core.repo.get('exceptions', ex.body.id)).toMatchObject({ owner_type: 'official', fulfilled_by: 'official_warehouse' });
-    await expect(sql`update shipping.shipments set fulfilled_by = 'robot' where id = ${s1.body.id}`.execute(db.kysely)).rejects.toThrow();
+    const shipments = h.app.kernel.mongo.db.collection('shipping.shipments');
+    await expect(shipments.updateOne({ _id: s1.body.id }, { $set: { fulfilled_by: 'robot' } })).rejects.toThrow();
+    await expect(shipments.updateOne({ _id: s1.body.id }, { $set: { fulfilled_by: null } })).rejects.toThrow();
   });
 });

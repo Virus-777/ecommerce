@@ -14,6 +14,7 @@ import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type { Coverage, OfficialDispatchTarget, SellerDispatchTarget } from '../../../spec/shipping.js';
 import { MON_FRI } from '../domain/calendar.js';
 import { CONTIGUOUS_48_DC, MILITARY, TERRITORIES } from '../domain/geo.js';
+import { carrierSeedId, carrierServiceSeedId } from '../domain/seed.js';
 import { CARRIER_CATALOG, DEFAULT_CARRIERS } from '../domain/tracking.js';
 import type { CarrierPort, ShippingRepository, TargetsRec } from '../ports.js';
 
@@ -251,7 +252,7 @@ export class Core {
     for (const code of DEFAULT_CARRIERS) {
       const def = CARRIER_CATALOG[code]!;
       await repo.insertIfNew('carriers', {
-        id: newId(),
+        id: carrierSeedId(code),
         code,
         name: def.name,
         account_label: `Marketly ${def.name} account`,
@@ -265,7 +266,7 @@ export class Core {
       const carrier = (await repo.find('carriers', { code }))[0]!;
       for (const s of def.services) {
         await repo.insertIfNew('carrier_services', {
-          id: newId(),
+          id: carrierServiceSeedId(code, s.code),
           carrier_id: carrier.id,
           code: s.code,
           name: s.name,
