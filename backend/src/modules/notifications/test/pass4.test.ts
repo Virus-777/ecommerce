@@ -4,11 +4,10 @@
  * deadline expire actionNoticeExpiryDays after they were created.
  */
 import type { FastifyInstance } from 'fastify';
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { actorText, LANGUAGE } from '../app/core.js';
 import type { NotificationsService } from '../service.js';
-import { as, bootWorld, newId, publish, type World } from './harness.js';
+import { as, bootWorld, newId, publish, tables, type World } from './harness.js';
 
 let app: FastifyInstance;
 let world: World;
@@ -87,9 +86,9 @@ describe('action notices without a deadline', () => {
       service.notify({ topic: 'customer.return.info_requested', recipients: [{ kind: 'customer', customerId: c.customerId }], link: { kind: 'return', id: newId(), screen: 'account/return', ref }, actionRequired: true, dedupeKey: `return:${newId()}:info` });
     const [oldId] = (await notify('RT-OLD')).noticeIds;
     const [newerId] = (await notify('RT-NEW')).noticeIds;
-    const db = app.kernel.database.kysely;
-    await sql`update notifications.notices set created_at = now() - interval '31 days' where id = ${oldId}`.execute(db);
-    await sql`update notifications.notices set created_at = now() - interval '5 days' where id = ${newerId}`.execute(db);
+    const notices = tables(app).table('notices');
+    await notices.update(oldId, { created_at: new Date(Date.now() - 31 * 86_400_000) });
+    await notices.update(newerId, { created_at: new Date(Date.now() - 5 * 86_400_000) });
 
     await app.kernel.jobs.runNow('notifications.purge');
     const byId = new Map((await inbox(as.customer(c))).map((n) => [n.id, n]));

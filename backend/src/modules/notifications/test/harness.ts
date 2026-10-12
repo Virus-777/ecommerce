@@ -12,7 +12,9 @@ import type * as audit from '../../../spec/audit.js';
 import type * as customers from '../../../spec/customers.js';
 import type * as identity from '../../../spec/identity.js';
 import { auth, buildTestApp, token } from '../../../testing/app.js';
+import { spec } from '../../../spec/notifications.js';
 import { devOutbox } from '../infra/dev-outbox.js';
+import { schemas } from '../infra/mongo/schema.js';
 import type { NotificationsService } from '../service.js';
 
 export interface Person {
@@ -184,3 +186,6 @@ export async function publish(app: FastifyInstance, name: string, payload: unkno
 export const emailsTo = (address: string) => devOutbox.emailsTo(address);
 export const money = (amount: number) => ({ amount, currency: 'USD' });
 export { devOutbox, newId };
+
+/** This module's collections, read and written the way the repository does */
+export const tables = (app: FastifyInstance) => app.kernel.mongo.module('notifications', spec.collections, schemas);

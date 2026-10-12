@@ -122,7 +122,7 @@ export class NotificationsService implements NotificationsPublicApi {
       return id;
     }
     return this.core.repo.transaction(async (tx) => {
-      if (!(await tx.claim(this.core.ctx.inbox, claimKey))) return null;
+      if (!(await tx.claim(claimKey))) return null;
       await tx.insertScheduled(row);
       return id;
     });

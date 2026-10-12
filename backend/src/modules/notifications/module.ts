@@ -6,8 +6,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresNotificationsRepository } from './infra/postgres/repository.js';
+import { createMongoNotificationsRepository } from './infra/mongo/repository.js';
 import { NotificationsService } from './service.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { createDevEmailProvider } from './infra/email/dev.js';
@@ -23,14 +22,15 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   async register(ctx) {
     // Providers: deterministic development adapters (no network); real adapters plug in behind the same ports
     const providers = { email: createDevEmailProvider(), sms: createDevSmsProvider(), push: createDevPushProvider() };
-    const service = new NotificationsService({ repo: createPostgresNotificationsRepository(ctx.db), ctx, providers });
+    const service = new NotificationsService({ repo: createMongoNotificationsRepository(ctx.mongo), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));

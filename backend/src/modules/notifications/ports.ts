@@ -1,11 +1,10 @@
 /**
  * What the notifications service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; providers (email, SMS, push) live in infra/<provider>/.
+ * The MongoDB adapter lives in infra/mongo/; providers (email, SMS, push) live in infra/<provider>/.
  */
 import type { NotificationsDb } from '../../spec/notifications.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { Page } from '../../spec/common.js';
-import type { Inbox } from '../../kernel/events/inbox.js';
 
 export type TopicRow = NotificationsDb['topics'];
 export type TemplateRow = NotificationsDb['templates'];
@@ -66,8 +65,8 @@ export type SubjectKey = 'orderId' | 'returnId' | 'caseId' | 'conversationId' | 
 /** Persistence for this module's own tables: notifications.topics, notifications.templates, notifications.template_versions, notifications.notices, notifications.notice_recipients, notifications.scheduled_notifications, notifications.deliveries, notifications.delivery_events, notifications.member_preferences, notifications.staff_preferences, notifications.push_devices, notifications.suppressions, notifications.broadcasts. */
 export interface NotificationsRepository {
   transaction<T>(fn: (repo: NotificationsRepository) => Promise<T>): Promise<T>;
-  /** Claims a consumed event's inbox key on this repository's connection (inside transaction(): together with the effects) */
-  claim(inbox: Inbox, key: string): Promise<boolean>;
+  /** Claims a consumed event's inbox key (inside transaction(): together with the effects) */
+  claim(key: string): Promise<boolean>;
 
   /* topics and templates */
   listTopics(): Promise<TopicRow[]>;

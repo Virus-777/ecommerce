@@ -162,7 +162,7 @@ export class Sender {
     }
 
     const fresh = await core.repo.transaction(async (tx) => {
-      if (input.claimKey && !(await tx.claim(core.ctx.inbox, input.claimKey))) return false; // this event was already handled
+      if (input.claimKey && !(await tx.claim(input.claimKey))) return false; // this event was already handled
       for (const n of notices) await tx.insertNotice(n);
       await tx.insertRecipients(recipients);
       await tx.insertDeliveries(deliveries);

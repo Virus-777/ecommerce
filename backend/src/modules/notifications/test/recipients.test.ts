@@ -6,7 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { NotificationsService } from '../service.js';
-import { as, bootWorld, emailsTo, money, newId, publish, type World } from './harness.js';
+import { as, bootWorld, emailsTo, money, newId, publish, tables, type World } from './harness.js';
 
 let app: FastifyInstance;
 let world: World;
@@ -195,11 +195,11 @@ describe('invitation to apply', () => {
     expect(detail.statusCode).toBe(200);
     expect(JSON.stringify(detail.json())).not.toContain(code);
     // nothing kept in the database carries the code (no in-app notice, redacted subject, no body)
-    const db = service.core.ctx.db;
+    const db = tables(app);
     const stored = [
-      ...(await db.selectFrom('deliveries').selectAll().where('topic_key', '=', 'seller.application.invitation').execute()),
-      ...(await db.selectFrom('notices').selectAll().where('topic_key', '=', 'seller.application.invitation').execute()),
-      ...(await db.selectFrom('delivery_events').selectAll().where('delivery_id', '=', d.id).execute()),
+      ...(await db.table('deliveries').find({ topic_key: 'seller.application.invitation' })),
+      ...(await db.table('notices').find({ topic_key: 'seller.application.invitation' })),
+      ...(await db.table('delivery_events').find({ delivery_id: d.id })),
     ];
     expect(stored.length).toBeGreaterThan(0);
     expect(JSON.stringify(stored)).not.toContain(code);
