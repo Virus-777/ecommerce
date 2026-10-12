@@ -1,12 +1,9 @@
 /**
  * Gap pass 4: session facts in columns (email, contact name, payment intent and state, order attempt, quote total)
- * with the 0002 backfill, and guest ad attribution: the visitor key and the shopper's personalization choice kept
- * on the session; createOrder gets visitorId only when personalization is allowed.
+ * and guest ad attribution: the visitor key and the shopper's personalization choice kept on the session; createOrder gets visitorId only when personalization is allowed.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { callers } from '../../../testing/app.js';
-import { m0002SessionColumns } from '../infra/postgres/migrations/0002_session_columns.js';
 import { STORE, key, placeBody, readyCheckout, world, type World } from './helpers.js';
 
 let w: World;
@@ -70,29 +67,3 @@ describe('session columns', () => {
   });
 });
 
-describe('migration 0002', () => {
-  it('backfills the session columns from the jsonb they lived in', async () => {
-    const visitor = callers.visitor();
-    const v = await readyCheckout(w, visitor, { source: 'buy_now', offerId: w.offers.white, quantity: 1 });
-    const placed = await w.call('POST', `${STORE}/sessions/${v.id}/place`, visitor, placeBody(v), { 'idempotency-key': key() });
-    expect(placed.body.outcome).toBe('accepted');
-    const now = await row(v.id);
-    const db = w.app.kernel.database;
-
-    // the state before 0002: email and name in account, the intent in payment_selection, no new columns
-    await db.exec(`alter table checkout.sessions drop column email, drop column contact_name, drop column visitor_key, drop column personalization_allowed,
-      drop column quote_total, drop column payment_intent_id, drop column payment_state, drop column order_attempt`);
-    await sql`update checkout.sessions set account = account || ${JSON.stringify({ email: now.email, name: now.contact_name })}::jsonb,
-      payment_selection = payment_selection || ${JSON.stringify({ intentId: now.payment_intent_id, intentState: 'accepted' })}::jsonb where id = ${v.id}`.execute(db.kysely);
-
-    await db.exec(m0002SessionColumns.sql);
-
-    const back = await row(v.id);
-    expect(back).toMatchObject({ email: now.email, contact_name: now.contact_name, payment_intent_id: now.payment_intent_id, payment_state: 'accepted', order_attempt: 1, quote_total: now.quote_total, visitor_key: null, personalization_allowed: false });
-    expect(back.account).not.toHaveProperty('email');
-    expect(back.payment_selection).not.toHaveProperty('intentId');
-    // the views read the backfilled columns
-    const view = await w.call('GET', `${STORE}/sessions/${v.id}`, visitor);
-    expect(view.body.account).toMatchObject({ email: now.email });
-  });
-});

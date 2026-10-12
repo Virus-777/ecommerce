@@ -3,10 +3,9 @@
  * Offer.shipping; packages are keyed owner + seller + fulfilledBy + ships-from (like the cart), so one seller's
  * Marketly-fulfilled and self-shipped items are two packages with their own options; shipping.quoteOptions gets the
  * package's fulfilledBy; createOrder gets each group's fulfilledBy and shipsFrom from the package; revalidation turns a
- * fulfilment flip into a terms_changed change. Migration 0003 backfills session_lines/session_packages.fulfilled_by.
+ * fulfilment flip into a terms_changed change.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { m0003FulfilledBy } from '../infra/postgres/migrations/0003_fulfilled_by.js';
 import { STORE, fillCart, key, placeBody, readyCheckout, world, type World } from './helpers.js';
 
 let w: World;
@@ -149,23 +148,3 @@ describe('revalidation', () => {
   });
 });
 
-describe('migration 0003', () => {
-  it('adds fulfilled_by to session lines and packages, backfilled from the owner, with its check', async () => {
-    const eve = await w.customer('eve-fbm@example.com');
-    await fillCart(w, eve.token, [
-      { offerId: w.offers.white, quantity: 1 },
-      { offerId: w.offers.officialWhite, quantity: 1 },
-    ]);
-    const v = await readyCheckout(w, eve.token, { source: 'cart' });
-    // old data: the columns did not exist
-    const db = w.app.kernel.database;
-    await db.exec('alter table checkout.session_lines drop column fulfilled_by');
-    await db.exec('alter table checkout.session_packages drop column fulfilled_by');
-    await db.exec(m0003FulfilledBy.sql);
-    const stored = await rows(v.id);
-    expect(Object.fromEntries(stored.lines.map((l) => [l.offer_id, l.fulfilled_by]))).toEqual({ [w.offers.white]: 'seller', [w.offers.officialWhite]: 'official_warehouse' });
-    expect(Object.fromEntries(stored.packages.map((p) => [p.owner_type, p.fulfilled_by]))).toEqual({ seller: 'seller', official: 'official_warehouse' });
-    await expect(db.exec(`update checkout.session_lines set fulfilled_by = 'drone' where session_id = '${v.id}'`)).rejects.toThrow();
-    await expect(db.exec(`update checkout.session_packages set fulfilled_by = null where session_id = '${v.id}'`)).rejects.toThrow();
-  });
-});

@@ -82,7 +82,7 @@ describe('the order and the stock hold', () => {
     const v = await readyCheckout(w, jo.token, { source: 'buy_now', offerId: w.offers.black, quantity: 1 });
     const placed = await w.call('POST', `${STORE}/sessions/${v.id}/place`, jo.token, placeBody(v), { 'idempotency-key': key() });
     expect(placed.body.outcome, JSON.stringify(placed.body)).toBe('accepted');
-    const holdId = (await sql<{ stock_reservation_id: string | null }>`select stock_reservation_id from checkout.sessions where id = ${v.id}`.execute(w.service.core.ctx.db)).rows[0]!.stock_reservation_id;
+    const holdId = (await w.service.core.repo.getSession(v.id))!.stock_reservation_id;
     expect(holdId).toEqual(expect.any(String));
     expect(w.named('orders.order.accepted').find((e) => e.orderId === placed.body.orderId)).toMatchObject({ reservationId: holdId });
     expect(w.named('inventory.reservation.allocated').filter((e) => e.orderId === placed.body.orderId)).toHaveLength(1);

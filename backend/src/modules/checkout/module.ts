@@ -4,8 +4,7 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresCheckoutRepository } from './infra/postgres/repository.js';
+import { createMongoCheckoutRepository } from './infra/mongo/repository.js';
 import { createDevTaxProvider } from './infra/tax/dev.js';
 import { CheckoutService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
@@ -18,13 +17,14 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
     // sales tax: the launch rate table behind the TaxProvider port; a tax service adapter plugs in here later
-    const service = new CheckoutService({ repo: createPostgresCheckoutRepository(ctx.db), ctx, tax: createDevTaxProvider() });
+    const service = new CheckoutService({ repo: createMongoCheckoutRepository(ctx.mongo), ctx, tax: createDevTaxProvider() });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
