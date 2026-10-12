@@ -1,11 +1,10 @@
 /**
  * Gap pass 4: return terms keep returns' policy version (text) and the category exception text on the offer
- * (columns, migration backfill, job backfill for older rows), and Official Store ships-from follows the inventory
+ * (columns, job backfill for older rows), and Official Store ships-from follows the inventory
  * default location through the hourly job.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0003ReturnTermsColumns } from '../infra/postgres/migrations/0003_return_terms_columns.js';
 import type { OffersService } from '../service.js';
 import { ADDRESS, addProduct, addSeller, asStaff, harness, profile, sellerOffer, sku, warehouse, type Harness } from './helpers.js';
 
@@ -86,23 +85,5 @@ describe('Official Store ships-from', () => {
       inventory.getDefaultLocation = before;
       await svc.featured.refreshOfficialShipsFrom();
     }
-  });
-});
-
-describe('migration 0003', () => {
-  it('turns return_policy_id into return_policy_version text and adds return_category_exception', async () => {
-    const sellerId = addSeller(h);
-    const p = addProduct(h);
-    const { id } = await sellerOffer(h, sellerId, p.id, p.variants[0]!);
-    const { id: other } = await sellerOffer(h, sellerId, p.id, p.variants[1]!);
-    const old = newId();
-    // the state before 0003: a uuid return_policy_id, no version or exception columns
-    await h.app.kernel.database.exec(`alter table offers.offers drop column return_policy_version, drop column return_category_exception;
-      alter table offers.offers add column return_policy_id uuid;
-      update offers.offers set return_policy_id = '${old}' where id = '${id}';`);
-    await h.app.kernel.database.exec(m0003ReturnTermsColumns.sql);
-    expect(await row(id)).toMatchObject({ return_policy_version: old, return_category_exception: null });
-    expect(await row(other)).toMatchObject({ return_policy_version: null, return_category_exception: null });
-    expect(await row(id)).not.toHaveProperty('return_policy_id');
   });
 });

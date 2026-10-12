@@ -16,7 +16,7 @@ interface Cached {
 }
 
 /** Statuses that take part in a featured decision (as candidates; only active ones can win) */
-const CANDIDATE_STATUSES = ['active', 'out_of_stock', 'ineligible', 'paused'];
+const CANDIDATE_STATUSES: OfferRec['status'][] = ['active', 'out_of_stock', 'ineligible', 'paused'];
 
 export class FeaturedPart extends Part {
   #defaultEnsured = false;

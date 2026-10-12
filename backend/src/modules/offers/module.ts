@@ -5,9 +5,8 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
 import { mediaBulkFileReader } from './infra/files/media.js';
-import { createPostgresOffersRepository } from './infra/postgres/repository.js';
+import { createMongoOffersRepository } from './infra/mongo/repository.js';
 import { OffersService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -19,12 +18,13 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
-    const service = new OffersService({ repo: createPostgresOffersRepository(ctx.db, ctx.inbox), ctx, files: mediaBulkFileReader(ctx) });
+    const service = new OffersService({ repo: createMongoOffersRepository(ctx.mongo), ctx, files: mediaBulkFileReader(ctx) });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

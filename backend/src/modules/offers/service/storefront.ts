@@ -41,7 +41,7 @@ export interface Facts {
   fulfilment: Fulfilment;
 }
 
-const LISTED = ['active', 'out_of_stock', 'ineligible'];
+const LISTED: OfferRec['status'][] = ['active', 'out_of_stock', 'ineligible'];
 const MAX_COMPARED = 100;
 
 export class StorefrontPart extends Part {

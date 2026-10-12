@@ -1,6 +1,6 @@
 /**
  * What the offers service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; the bulk file reader (media download) in infra/files/.
+ * The MongoDB adapter lives in infra/mongo/; the bulk file reader (media download) in infra/files/.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';

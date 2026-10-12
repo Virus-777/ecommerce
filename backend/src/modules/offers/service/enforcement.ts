@@ -14,7 +14,7 @@ import type { OfferRec } from '../ports.js';
 import { Part, SYSTEM, type By, type ProductCache, type TransitionSpec } from './core.js';
 
 type Source = NonNullable<TransitionSpec['source']>;
-const STOPPABLE = ['active', 'paused', 'out_of_stock'];
+const STOPPABLE: OfferRec['status'][] = ['active', 'paused', 'out_of_stock'];
 const SELLER_APPEAL = 'Appeal from Seller Center > Account health';
 const SERVICE_ACTIVITY = 'Sales of this offer';
 

@@ -1908,7 +1908,7 @@ export interface OffersDb {
     warranty_kind: string;
     warranty_months: number | null;
     warranty_handled_by: string | null;
-    status: string;
+    status: 'draft' | 'active' | 'paused' | 'out_of_stock' | 'ineligible' | 'removed';
     status_before_ineligible: string | null;
     /** { kind: restriction|suspension|product|staff|fulfillment_service, id } */
     ineligible_source: Json | null;
@@ -4307,7 +4307,15 @@ export const spec = defineModuleSpec({
               ]
             },
             "status": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "out_of_stock",
+                "ineligible",
+                "removed"
+              ]
             },
             "status_before_ineligible": {
               "bsonType": [
@@ -4366,6 +4374,45 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
+          "name": "offers_owner_type_seller_id_variant_id_107cf9",
+          "key": {
+            "owner_type": 1,
+            "seller_id": 1,
+            "variant_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "condition": "new",
+            "status": {
+              "$in": [
+                "draft",
+                "active",
+                "paused",
+                "out_of_stock",
+                "ineligible"
+              ]
+            }
+          }
+        },
+        {
+          "name": "offers_stock_item_id_428230",
+          "key": {
+            "stock_item_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "status": {
+              "$in": [
+                "draft",
+                "active",
+                "paused",
+                "out_of_stock",
+                "ineligible"
+              ]
+            }
+          }
+        },
+        {
           "name": "offers_product_id_variant_id_status_43e526",
           "key": {
             "product_id": 1,
@@ -4408,10 +4455,7 @@ export const spec = defineModuleSpec({
           }
         }
       ],
-      "unenforced": [
-        "unique nulls not distinct (owner_type, seller_id, variant_id) where condition = 'new' and status <> 'removed' (<> on status, which has no enum values)",
-        "unique (stock_item_id) where status <> 'removed' (<> on status, which has no enum values)"
-      ]
+      "unenforced": []
     },
     "offer_price_history": {
       "idField": "id",

@@ -5,14 +5,12 @@
  * - C2: Offer.shipping, the delivery estimate ('Ships from Marketly'), OfferView.fulfilledBy, the order snapshot and
  *   SellerOfferDetail.fulfillmentNote follow fulfillment-service.getServiceTerms; the service off or answering null makes
  *   a service offer not sellable;
- * - migration 0004 backfills fulfilled_by on existing offers.
  * fulfillment-service is being rebuilt in parallel: its getServiceTerms is stubbed (h.serviceTerms below).
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as fulfillment from '../../../spec/fulfillment-service.js';
-import { m0004FulfilledBy } from '../infra/postgres/migrations/0004_fulfilled_by.js';
 import type { OffersService } from '../service.js';
 import { addProduct, addSeller, asSeller, asStaff, asVisitor, emit, eventsNamed, harness, profile, sellerOffer, sku, warehouse, type Harness } from './helpers.js';
 
@@ -229,25 +227,5 @@ describe('Fulfilled by Marketly (service off)', () => {
     // the stored status is untouched: turning the service on is enough to sell again
     const svc = h.app.kernel.boot.apis.get('offers') as OffersService;
     expect((await svc.core.repo.get('offers', o.id))!.status).toBe('active');
-  });
-
-  it('migration 0004 backfills fulfilled_by from the owner on existing offers', async () => {
-    const svc = h.app.kernel.boot.apis.get('offers') as OffersService;
-    const sellerId = addSeller(h);
-    const p = addProduct(h);
-    const seller = await sellerOffer(h, sellerId, p.id, p.variants[0]!);
-    const q = addProduct(h);
-    const res = await asStaff(h, 'POST', '/official/offers', { productId: q.id, variantId: q.variants[0], condition: 'new', price: { amount: 19900, currency: 'USD' }, sku: sku('MIG4'), dispatchBusinessDays: 1, shippingProfileId: profile(h, 0, 2, null), returnTerms: { kind: 'baseline' }, warranty: { kind: 'none' }, publish: true });
-    expect(res.statusCode, res.body).toBe(201);
-    const official = res.json().offer.id as string;
-
-    // the state before 0004
-    await h.app.kernel.database.exec(`alter table offers.offers drop constraint offers_fulfilled_by_check; alter table offers.offers drop column fulfilled_by`);
-    await h.app.kernel.database.exec(m0004FulfilledBy.sql);
-
-    expect((await svc.core.repo.get('offers', seller.id))!.fulfilled_by).toBe('seller');
-    expect((await svc.core.repo.get('offers', official))!.fulfilled_by).toBe('official_warehouse');
-    // and the column is required and checked from now on
-    await expect(svc.core.repo.update('offers', seller.id, { fulfilled_by: 'somebody' as never })).rejects.toThrow();
   });
 });

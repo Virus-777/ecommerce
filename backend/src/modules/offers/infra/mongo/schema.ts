@@ -44,7 +44,7 @@ const offers = new Schema(
     warranty_kind: { type: String, required: true },
     warranty_months: { type: Number, default: null, validate: integer },
     warranty_handled_by: { type: String, default: null },
-    status: { type: String, required: true },
+    status: { type: String, required: true, enum: ["draft","active","paused","out_of_stock","ineligible","removed"] },
     status_before_ineligible: { type: String, default: null },
     ineligible_source: { type: Schema.Types.Mixed, default: null }, // { kind: restriction|suspension|product|staff|fulfillment_service, id }
     status_reason: { type: Schema.Types.Mixed, default: null },
@@ -61,14 +61,14 @@ const offers = new Schema(
   collectionOptions("offers.offers"),
 );
 offers.index({"owner_type":1,"seller_id":1,"seller_sku":1}, {"name":"offers_owner_type_seller_id_seller_sku_1dba87","unique":true});
+offers.index({"owner_type":1,"seller_id":1,"variant_id":1}, {"name":"offers_owner_type_seller_id_variant_id_107cf9","unique":true,"partialFilterExpression":{"condition":"new","status":{"$in":["draft","active","paused","out_of_stock","ineligible"]}}});
+offers.index({"stock_item_id":1}, {"name":"offers_stock_item_id_428230","unique":true,"partialFilterExpression":{"status":{"$in":["draft","active","paused","out_of_stock","ineligible"]}}});
 offers.index({"product_id":1,"variant_id":1,"status":1}, {"name":"offers_product_id_variant_id_status_43e526"});
 offers.index({"seller_id":1,"status":1,"id":1}, {"name":"offers_seller_id_status_id_aeade9"});
 offers.index({"status":1,"id":1}, {"name":"offers_status_id_a54fb9"});
 offers.index({"stock_item_id":1}, {"name":"offers_stock_item_id_597367"});
 offers.index({"shipping_profile_id":1,"status":1}, {"name":"offers_shipping_profile_id_status_e4b547"});
 offers.index({"title":1}, {"name":"offers_title_0810ba"});
-// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): unique nulls not distinct (owner_type, seller_id, variant_id) where condition = 'new' and status <> 'removed' (<> on status, which has no enum values)
-// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): unique (stock_item_id) where status <> 'removed' (<> on status, which has no enum values)
 
 /** Every price in force and when; basis for 'lowest price in the last 30 days' was-price checks */
 const offer_price_history = new Schema(
