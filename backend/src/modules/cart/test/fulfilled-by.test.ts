@@ -1,14 +1,12 @@
 /**
  * Fulfilled by Marketly: lines take who ships them, their profile and dispatch from the offer's effective
  * Offer.shipping; packages are keyed by owner + seller + fulfilledBy + ships-from, so one seller's Marketly-fulfilled
- * and self-shipped items are two packages, each quoted by shipping with its fulfilledBy. Migration 0004 backfills
- * cart_items.fulfilled_by.
+ * and self-shipped items are two packages, each quoted by shipping with its fulfilledBy.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import type * as shipping from '../../../spec/shipping.js';
-import { m0004ItemFulfilledBy } from '../infra/postgres/migrations/0004_item_fulfilled_by.js';
 import { boot, lineOf, STORE, type Kit } from './helpers.js';
 
 let k: Kit;
@@ -141,17 +139,14 @@ describe('packages', () => {
   });
 });
 
-describe('migration 0004', () => {
-  it('adds fulfilled_by, backfilled from the owner (official_warehouse or seller), with its check', async () => {
+describe('cart_items.fulfilled_by', () => {
+  it('is official_warehouse or seller from the owner, and takes only the spec values', async () => {
     const p = await k.product({ variants: 2 });
     const official = await k.offer({ productId: p.productId, variantId: p.variantIds[0]!, price: 1000, official: true });
     const seller = await k.offer({ productId: p.productId, variantId: p.variantIds[1]!, price: 1000 });
     const v = k.visitor();
     await add(v.token, official.id);
     await add(v.token, seller.id);
-    // old data: the column did not exist
-    await k.app.kernel.database.exec('alter table cart.cart_items drop column fulfilled_by');
-    await k.app.kernel.database.exec(m0004ItemFulfilledBy.sql);
     const items = await itemsOf(v.sid);
     expect(Object.fromEntries(items.map((i) => [i.offer_id, i.fulfilled_by]))).toEqual({ [official.id]: 'official_warehouse', [seller.id]: 'seller' });
     await expect(repo().updateItem(items[0]!.id, { fulfilled_by: 'drone' })).rejects.toThrow();

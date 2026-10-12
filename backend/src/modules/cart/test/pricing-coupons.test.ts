@@ -7,7 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
-import type { Kysely } from 'kysely';
+import { spec } from '../../../spec/cart.js';
+import { schemas } from '../infra/mongo/schema.js';
 import type { CartDb } from '../../../spec/cart.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as promotions from '../../../spec/promotions.js';
@@ -286,7 +287,7 @@ describe('saved for later, checkout hand-offs and GraphQL', () => {
     await k.call('POST', `${STORE}/cart/items/${add.itemId}/save-for-later`, { token: v.token });
     // the emptied guest cart expires before sign-in
     const guestCart = (await k.call('GET', `${STORE}/cart`, { token: v.token })).body.id;
-    await (k.app.kernel.database.kysely.withSchema('cart') as Kysely<CartDb>).updateTable('carts').set({ status: 'expired' }).where('id', '=', guestCart).execute();
+    await k.app.kernel.mongo.module('cart', spec.collections, schemas).table<CartDb['carts']>('carts').update(guestCart, { status: 'expired' });
     const cust = k.customer();
     await k.publish('identity', 'identity.guest_session.claimed', { guestSessionId: v.sid, accountId: cust.accountId });
     const saved = (await k.call('GET', `${STORE}/cart/saved`, { token: cust.token })).body.items;

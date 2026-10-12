@@ -4,7 +4,6 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0003ItemCondition } from '../infra/postgres/migrations/0003_item_condition.js';
 import { boot, STORE, type Kit } from './helpers.js';
 
 let k: Kit;
@@ -61,16 +60,14 @@ describe('cart_items.condition', () => {
   });
 });
 
-describe('migration 0003', () => {
-  it('adds the condition column (null for existing lines) with its check', async () => {
+describe('cart_items.condition', () => {
+  it('takes only the spec values', async () => {
     const p = await k.product();
     const o = await k.offer({ productId: p.productId, variantId: p.variantIds[0]!, price: 1000 });
     const v = k.visitor();
     await add(v.token, o.id);
-    await k.app.kernel.database.exec('alter table cart.cart_items drop column condition');
-    await k.app.kernel.database.exec(m0003ItemCondition.sql);
     const [item] = await itemsOf(v.sid);
-    expect(item!.condition).toBeNull();
+    expect(item!.condition).toBe('new');
     await expect(repo().updateItem(item!.id, { condition: 'mint' })).rejects.toThrow();
   });
 });

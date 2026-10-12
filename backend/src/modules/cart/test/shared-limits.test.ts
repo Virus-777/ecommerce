@@ -1,14 +1,17 @@
 /**
  * Coupon attempts are counted in the kernel's shared rate limits (kernel.rate_limits): two cart
- * instances on one PostgreSQL database share the hourly limit.
+ * instances on one database share the hourly limit.
  */
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { createDatabase, type Database } from '../../../kernel/db/index.js';
+import type { MongoStore } from '../../../kernel/mongo/index.js';
 import { movingClock, tokenClock } from '../../../testing/app.js';
+import { testMongo } from '../../../testing/mongo.js';
 import { pgliteServer, type PgServer } from '../../../testing/pg-server.js';
 import { boot, STORE, type Kit } from './helpers.js';
 
 let server: PgServer;
+let mongo: MongoStore;
 const dbs: Database[] = [];
 const kits: Kit[] = [];
 // windows are clock hours: both instances run at half past an hour, so the 31 attempts never straddle two windows,
@@ -19,16 +22,18 @@ clock.set(new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000 + 30 * 60_000)
 beforeAll(async () => {
   tokenClock.now = () => clock.now();
   server = await pgliteServer({ migrated: true });
+  mongo = await testMongo();
   for (let i = 0; i < 2; i++) {
     const database = await createDatabase({ url: server.url });
     dbs.push(database);
-    kits.push(await boot({ database, clock, config: { rateLimitStore: 'postgres' } }));
+    kits.push(await boot({ database, mongo, clock, config: { rateLimitStore: 'mongo' } }));
   }
 });
 
 afterAll(async () => {
   for (const k of kits) await k.app.close();
   for (const d of dbs) await d.close();
+  await mongo?.close();
   await server?.close();
   tokenClock.now = undefined;
 });
