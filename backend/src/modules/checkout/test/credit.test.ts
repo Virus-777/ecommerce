@@ -4,7 +4,6 @@
  * accepted order captures a live hold (no late re-capture of a released one). Also: the order is created with
  * the checkout's stock hold as its reservation.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { STORE, USD, key, placeBody, readyCheckout, world, type World } from './helpers.js';
