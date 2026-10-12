@@ -7,8 +7,7 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresFinanceRepository } from './infra/postgres/repository.js';
+import { createMongoFinanceRepository } from './infra/mongo/repository.js';
 import { createDevPayoutProvider } from './infra/provider/dev.js';
 import { FinanceService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
@@ -21,14 +20,15 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
     // payout provider: the deterministic development adapter until a real one is wired behind the same port
     const provider = createDevPayoutProvider(ctx.clock);
-    const service = new FinanceService({ repo: createPostgresFinanceRepository(ctx.db, ctx.inbox), ctx, provider });
+    const service = new FinanceService({ repo: createMongoFinanceRepository(ctx.mongo), ctx, provider });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service), publicRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));

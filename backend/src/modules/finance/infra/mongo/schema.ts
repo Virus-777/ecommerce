@@ -304,7 +304,7 @@ const payout_runs = new Schema(
   {
     _id: { type: String, required: true }, // id
     ref: { type: String, required: true },
-    status: { type: String, required: true },
+    status: { type: String, required: true, enum: ["draft","pending_approval","approved","releasing","completed","cancelled"] },
     scheduled_release: { type: Date, required: true },
     cutoff_at: { type: Date, required: true },
     total: { type: Number, required: true, validate: integer },
@@ -324,6 +324,7 @@ const payout_runs = new Schema(
 );
 payout_runs.index({"ref":1}, {"name":"payout_runs_ref_8cef23","unique":true});
 payout_runs.index({"status":1,"scheduled_release":1}, {"name":"payout_runs_status_scheduled_release_9a341d"});
+payout_runs.index({"cutoff_at":1}, {"name":"payout_runs_cutoff_at_34ba28","unique":true,"partialFilterExpression":{"status":{"$in":["draft","pending_approval","approved","releasing","completed"]}}});
 
 const payouts = new Schema(
   {
@@ -404,6 +405,7 @@ const trading_entries = new Schema(
 );
 trading_entries.index({"at":1}, {"name":"trading_entries_at_76991a"});
 trading_entries.index({"kind":1,"at":1}, {"name":"trading_entries_kind_at_54df66"});
+trading_entries.index({"ref_kind":1,"at":1}, {"name":"trading_entries_ref_kind_at_8fd2ce"});
 
 /** Official Store sales and margin targets per month, optionally per category */
 const trading_targets = new Schema(

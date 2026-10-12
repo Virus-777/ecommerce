@@ -127,7 +127,7 @@ export class PayoutsPart extends Part {
   }
 
   async listRuns(filter: { status?: string | null }, page: PageRequest, by?: By | null): Promise<common.Page<PayoutRun>> {
-    const res = await this.repo.page('payout_runs', filter.status ? { status: filter.status } : {}, page, { column: 'created_at', direction: 'desc' });
+    const res = await this.repo.page('payout_runs', filter.status ? { status: filter.status as RunRec['status'] } : {}, page, { column: 'created_at', direction: 'desc' });
     return { ...res, items: await Promise.all(res.items.map((r) => this.runView(r, by))) };
   }
 
@@ -333,7 +333,7 @@ export class PayoutsPart extends Part {
 
   async submit(id: string, by: By): Promise<PayoutRun> {
     const run = await this.run(id);
-    const status = this.core.step(payoutRunMachine, run.status, 'submit');
+    const status = this.core.step<RunRec['status']>(payoutRunMachine, run.status, 'submit');
     // the second reviewer slot is added when the first approver's limit (access) is below the run total
     const approvals: RunApproval[] = [{ order: 1, approver: null, role: 'Finance Manager', status: 'pending', at: null, dueAt: run.scheduled_release.toISOString(), note: null }];
     await this.repo.update('payout_runs', id, { status, approvals: approvals as never, approval_request_id: null });
@@ -414,7 +414,7 @@ export class PayoutsPart extends Part {
   async sendBack(id: string, reason: string, by: By): Promise<PayoutRun> {
     if (!reason?.trim()) throw invalid([{ path: 'reason', message: 'Say what needs to change' }]);
     const run = await this.run(id);
-    const status = this.core.step(payoutRunMachine, run.status, 'sendBack');
+    const status = this.core.step<RunRec['status']>(payoutRunMachine, run.status, 'sendBack');
     const approvals = ((Array.isArray(run.approvals) ? run.approvals : []) as unknown as RunApproval[]).map((a) => (a.status === 'pending' ? { ...a, status: 'sent_back' as const, approver: by.actor, at: this.now().toISOString(), note: reason } : a));
     if (run.approval_request_id) await this.core.optionalDep(() => this.ctx.use('access').cancelApproval(run.approval_request_id!, by.actor, reason));
     await this.repo.update('payout_runs', id, { status, approvals: approvals as never, approval_request_id: null });
@@ -440,7 +440,7 @@ export class PayoutsPart extends Part {
   async release(id: string, by: By): Promise<PayoutRun> {
     const run = await this.run(id);
     if (run.status === 'releasing' || run.status === 'completed') return this.runView(run, by);
-    const status = this.core.step(payoutRunMachine, run.status, 'release');
+    const status = this.core.step<RunRec['status']>(payoutRunMachine, run.status, 'release');
     const moved = await this.repo.transaction(async (tx) => {
       const r = await tx.get('payout_runs', id, { forUpdate: true });
       if (r?.status !== 'approved') return false;

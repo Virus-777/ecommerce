@@ -2318,7 +2318,7 @@ export interface FinanceDb {
   payout_runs: {
     id: string;
     ref: string;
-    status: string;
+    status: 'draft' | 'pending_approval' | 'approved' | 'releasing' | 'completed' | 'cancelled';
     scheduled_release: Date;
     cutoff_at: Date;
     total: number;
@@ -7328,7 +7328,15 @@ export const spec = defineModuleSpec({
               "bsonType": "string"
             },
             "status": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "draft",
+                "pending_approval",
+                "approved",
+                "releasing",
+                "completed",
+                "cancelled"
+              ]
             },
             "scheduled_release": {
               "bsonType": "date"
@@ -7406,6 +7414,24 @@ export const spec = defineModuleSpec({
           "key": {
             "status": 1,
             "scheduled_release": 1
+          }
+        },
+        {
+          "name": "payout_runs_cutoff_at_34ba28",
+          "key": {
+            "cutoff_at": 1
+          },
+          "unique": true,
+          "partial": {
+            "status": {
+              "$in": [
+                "draft",
+                "pending_approval",
+                "approved",
+                "releasing",
+                "completed"
+              ]
+            }
           }
         }
       ],
@@ -7898,6 +7924,13 @@ export const spec = defineModuleSpec({
           "name": "trading_entries_kind_at_54df66",
           "key": {
             "kind": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "trading_entries_ref_kind_at_8fd2ce",
+          "key": {
+            "ref_kind": 1,
             "at": 1
           }
         }
