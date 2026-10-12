@@ -409,7 +409,9 @@ export class Intents {
   /** Allocations of groups not captured yet follow the latest numbers; captured groups keep theirs */
   private async replaceAllocations(tx: PaymentsRepository, i: IntentRec, allocations: Allocation[]) {
     if (!allocations.length) return;
-    const [current, captures] = await Promise.all([tx.find('allocations', { intent_id: i.id }), tx.find('captures', { intent_id: i.id, status: ['succeeded', 'pending', 'unknown'] })]);
+    // one after the other: both run in the caller's transaction
+    const current = await tx.find('allocations', { intent_id: i.id });
+    const captures = await tx.find('captures', { intent_id: i.id, status: ['succeeded', 'pending', 'unknown'] });
     if (captures.some((c) => c.group_id === null)) {
       if (current.length) return; // the whole payment was captured with its allocations
     }

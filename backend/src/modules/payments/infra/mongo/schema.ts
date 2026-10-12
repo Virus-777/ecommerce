@@ -24,7 +24,7 @@ const intents = new Schema(
     method: { type: Schema.Types.Mixed }, // MethodSnapshot
     provider: { type: String, required: true },
     provider_ref: { type: String, default: null },
-    status: { type: String, required: true },
+    status: { type: String, required: true, enum: ["created","authorizing","requires_action","pending_check","authorized","partially_captured","captured","failed","voided","expired"] },
     decline: { type: Schema.Types.Mixed, default: null },
     next_action: { type: Schema.Types.Mixed, default: null }, // NextAction: the bank challenge waiting for the customer while the intent is requires_action; cleared when it ends
     authorized_amount: { type: Number, required: true, validate: integer },
@@ -48,11 +48,11 @@ const intents = new Schema(
 intents.index({"ref":1}, {"name":"intents_ref_8cef23","unique":true});
 intents.index({"idempotency_key":1}, {"name":"intents_idempotency_key_b82ef6","unique":true});
 intents.index({"checkout_session_id":1,"attempt_no":1}, {"name":"intents_checkout_session_id_attempt_no_9fbb91"});
+intents.index({"checkout_session_id":1}, {"name":"intents_checkout_session_id_4b4e1b","unique":true,"partialFilterExpression":{"status":{"$in":["created","authorizing","requires_action","pending_check","authorized","partially_captured","captured"]}}});
 intents.index({"order_id":1}, {"name":"intents_order_id_4c5e85"});
 intents.index({"status":1,"next_check_at":1}, {"name":"intents_status_next_check_at_dd88c3"});
 intents.index({"provider":1,"provider_ref":1}, {"name":"intents_provider_provider_ref_178b7f"});
 intents.index({"status":1,"updated_at":1,"_id":1}, {"name":"intents_status_updated_at__id_3b6830"});
-// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): unique (checkout_session_id) where status not in ('failed','voided','expired') (not in on status, which has no enum values)
 
 /** Captured money per seller group */
 const allocations = new Schema(
@@ -116,14 +116,14 @@ const refunds = new Schema(
     order_id: { type: String, default: null }, // null for an orphan payment refund: money without an order
     checkout_session_id: { type: String, required: true }, // checkout session of the payment; what an orphan payment refund is found by
     intent_id: { type: String, required: true },
-    origin: { type: String, required: true },
+    origin: { type: String, required: true, enum: ["cancellation","return","case","exception","correction","orphan_payment"] },
     origin_id: { type: String, default: null },
     origin_ref: { type: String, default: null },
     amount: { type: Number, required: true, validate: integer },
     currency: { type: String, required: true },
     destination: { type: String, required: true },
     destination_label: { type: String, required: true },
-    status: { type: String, required: true },
+    status: { type: String, required: true, enum: ["requested","processing","sent","failed","cancelled"] },
     attempts: { type: Number, required: true, validate: integer },
     outcome_unknown: { type: Boolean, required: true },
     failure_code: { type: String, default: null },
@@ -149,8 +149,8 @@ refunds.index({"idempotency_key":1}, {"name":"refunds_idempotency_key_b82ef6","u
 refunds.index({"order_id":1}, {"name":"refunds_order_id_4c5e85"});
 refunds.index({"checkout_session_id":1}, {"name":"refunds_checkout_session_id_db7d43"});
 refunds.index({"status":1,"next_attempt_at":1}, {"name":"refunds_status_next_attempt_at_0fe682"});
+refunds.index({"origin":1,"origin_id":1}, {"name":"refunds_origin_origin_id_c661ff","unique":true,"partialFilterExpression":{"$and":[{"origin_id":{"$type":"string"},"origin":{"$in":["return","case","exception","correction","orphan_payment"]},"status":{"$in":["requested","processing","sent","failed"]}},{"origin_id":{"$type":"string"}}]}});
 refunds.index({"origin":1,"origin_id":1}, {"name":"refunds_origin_origin_id_e9fa93"});
-// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): unique (origin, origin_id) where origin_id is not null and origin <> 'cancellation' and status <> 'cancelled' (<> on origin, which has no enum values)
 
 /** Refund amount per order item; the cap check sums these */
 const refund_items = new Schema(

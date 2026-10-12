@@ -1276,7 +1276,7 @@ export interface PaymentsDb {
     method: Json;
     provider: string;
     provider_ref: string | null;
-    status: string;
+    status: 'created' | 'authorizing' | 'requires_action' | 'pending_check' | 'authorized' | 'partially_captured' | 'captured' | 'failed' | 'voided' | 'expired';
     decline: Json | null;
     /** NextAction: the bank challenge waiting for the customer while the intent is requires_action; cleared when it ends */
     next_action: Json | null;
@@ -1335,14 +1335,14 @@ export interface PaymentsDb {
     /** checkout session of the payment; what an orphan payment refund is found by */
     checkout_session_id: string;
     intent_id: string;
-    origin: string;
+    origin: 'cancellation' | 'return' | 'case' | 'exception' | 'correction' | 'orphan_payment';
     origin_id: string | null;
     origin_ref: string | null;
     amount: number;
     currency: string;
     destination: string;
     destination_label: string;
-    status: string;
+    status: 'requested' | 'processing' | 'sent' | 'failed' | 'cancelled';
     attempts: number;
     outcome_unknown: boolean;
     failure_code: string | null;
@@ -3282,7 +3282,19 @@ export const spec = defineModuleSpec({
               ]
             },
             "status": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "created",
+                "authorizing",
+                "requires_action",
+                "pending_check",
+                "authorized",
+                "partially_captured",
+                "captured",
+                "failed",
+                "voided",
+                "expired"
+              ]
             },
             "decline": {},
             "next_action": {},
@@ -3383,6 +3395,26 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "intents_checkout_session_id_4b4e1b",
+          "key": {
+            "checkout_session_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "status": {
+              "$in": [
+                "created",
+                "authorizing",
+                "requires_action",
+                "pending_check",
+                "authorized",
+                "partially_captured",
+                "captured"
+              ]
+            }
+          }
+        },
+        {
           "name": "intents_order_id_4c5e85",
           "key": {
             "order_id": 1
@@ -3411,9 +3443,7 @@ export const spec = defineModuleSpec({
           }
         }
       ],
-      "unenforced": [
-        "unique (checkout_session_id) where status not in ('failed','voided','expired') (not in on status, which has no enum values)"
-      ]
+      "unenforced": []
     },
     "allocations": {
       "idField": null,
@@ -3814,7 +3844,15 @@ export const spec = defineModuleSpec({
               "bsonType": "string"
             },
             "origin": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "cancellation",
+                "return",
+                "case",
+                "exception",
+                "correction",
+                "orphan_payment"
+              ]
             },
             "origin_id": {
               "bsonType": [
@@ -3845,7 +3883,14 @@ export const spec = defineModuleSpec({
               "bsonType": "string"
             },
             "status": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "requested",
+                "processing",
+                "sent",
+                "failed",
+                "cancelled"
+              ]
             },
             "attempts": {
               "bsonType": [
@@ -3957,6 +4002,45 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "refunds_origin_origin_id_c661ff",
+          "key": {
+            "origin": 1,
+            "origin_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "$and": [
+              {
+                "origin_id": {
+                  "$type": "string"
+                },
+                "origin": {
+                  "$in": [
+                    "return",
+                    "case",
+                    "exception",
+                    "correction",
+                    "orphan_payment"
+                  ]
+                },
+                "status": {
+                  "$in": [
+                    "requested",
+                    "processing",
+                    "sent",
+                    "failed"
+                  ]
+                }
+              },
+              {
+                "origin_id": {
+                  "$type": "string"
+                }
+              }
+            ]
+          }
+        },
+        {
           "name": "refunds_origin_origin_id_e9fa93",
           "key": {
             "origin": 1,
@@ -3964,9 +4048,7 @@ export const spec = defineModuleSpec({
           }
         }
       ],
-      "unenforced": [
-        "unique (origin, origin_id) where origin_id is not null and origin <> 'cancellation' and status <> 'cancelled' (<> on origin, which has no enum values)"
-      ]
+      "unenforced": []
     },
     "refund_items": {
       "idField": null,

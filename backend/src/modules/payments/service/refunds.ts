@@ -89,11 +89,10 @@ export class Refunds {
 
   /** Per item paid, sent, in flight and remaining, from the given repository (inside the lock when deciding) */
   private async caps(repo: PaymentsRepository, orderId: string, intent: IntentRec | undefined, paid: ItemPaidAmount[]): Promise<{ items: ItemCap[]; sent: number; inFlight: number; captured: number }> {
-    const [totals, captured, payment] = await Promise.all([
-      repo.refundTotals(orderId),
-      this.capturedGroups(repo, intent),
-      intent ? repo.intentRefundTotals(intent.id) : Promise.resolve({ sent: 0, inFlight: 0 }),
-    ]);
+    // one after the other: repo may be a transaction (no concurrent operations on one session)
+    const totals = await repo.refundTotals(orderId);
+    const captured = await this.capturedGroups(repo, intent);
+    const payment = intent ? await repo.intentRefundTotals(intent.id) : { sent: 0, inFlight: 0 };
     const items = paid.map((p) => {
       const t = totals.find((x) => x.orderItemId === p.orderItemId);
       const sent = t?.sent ?? 0;
@@ -248,7 +247,7 @@ export class Refunds {
     return this.toApi((await this.repo.get('refunds', created.id))!, lookup, cfg);
   }
 
-  private async byOrigin(repo: PaymentsRepository, origin: string, originId: string): Promise<RefundRec | undefined> {
+  private async byOrigin(repo: PaymentsRepository, origin: RefundRec['origin'], originId: string): Promise<RefundRec | undefined> {
     return (await repo.find('refunds', { origin, origin_id: originId, status: ['requested', 'processing', 'sent', 'failed'] }))[0];
   }
 
@@ -263,7 +262,7 @@ export class Refunds {
     return this.core.nextRef('RF');
   }
 
-  private newRow(o: { ref: string; orderId: string | null; intent: IntentRec; origin: string; originId: string | null; originRef: string | null; amount: number; destination: string; reason: string; requestedBy: common.Actor; key: string }): RefundRec {
+  private newRow(o: { ref: string; orderId: string | null; intent: IntentRec; origin: RefundRec['origin']; originId: string | null; originRef: string | null; amount: number; destination: string; reason: string; requestedBy: common.Actor; key: string }): RefundRec {
     const now = this.core.now();
     return {
       id: newId(),

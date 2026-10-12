@@ -7,8 +7,7 @@ import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { createDevCardProcessor } from './infra/card-processor/dev.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresPaymentsRepository } from './infra/postgres/repository.js';
+import { createMongoPaymentsRepository } from './infra/mongo/repository.js';
 import { PaymentsService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -21,12 +20,13 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
-    const service = new PaymentsService({ repo: createPostgresPaymentsRepository(ctx.db), ctx, provider: createDevCardProcessor() });
+    const service = new PaymentsService({ repo: createMongoPaymentsRepository(ctx.mongo), ctx, provider: createDevCardProcessor() });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
