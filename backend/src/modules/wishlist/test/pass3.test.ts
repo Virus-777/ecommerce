@@ -4,13 +4,14 @@
  * alerts, the customer data export hook, account closure and WishlistAlert.sellerId in GraphQL.
  */
 import type { FastifyInstance } from 'fastify';
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { allSpecs, withDependencies } from '../../../kernel/module-system/loader.js';
 import { auth, buildTestApp, movingClock, tokenClock } from '../../../testing/app.js';
 import { flows, type Flows, type Listing } from '../../../testing/flows.js';
+import { spec } from '../../../spec/wishlist.js';
+import { schemas } from '../infra/mongo/schema.js';
 import type { WishlistService } from '../service.js';
 
 const clock = movingClock();
@@ -50,9 +51,10 @@ afterAll(async () => {
 let itemId: string;
 let alertId: string;
 /** As if what the alert follows was seen out of stock (the listing stays in stock in these tests) */
-const armed = (id: string) => sql`update wishlist.alerts set armed_at = now() where id = ${id}`.execute(app.kernel.database.kysely);
+const table = (name: 'items' | 'alerts') => app.kernel.mongo.module('wishlist', spec.collections, schemas).table<Record<string, unknown>>(name);
+const armed = (id: string) => table('alerts').update(id, { armed_at: clock.now() });
 /** The customer id wishlist keeps for gia (customers' id of the signed-in account) */
-const wishlistCustomerId = async () => (await sql<{ customer_id: string }>`select customer_id from wishlist.items where id = ${itemId}`.execute(app.kernel.database.kysely)).rows[0]!.customer_id;
+const wishlistCustomerId = async () => (await table('items').get(itemId))!.customer_id as string;
 
 describe('move to cart with the price the card showed', () => {
   it('refuses a different current price with OFFER_CHANGED and adds nothing; the shown price goes through', async () => {

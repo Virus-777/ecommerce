@@ -1,16 +1,14 @@
 /**
  * Gap pass 4 with real modules: alerts.armed_at. A back-in-stock alert switched on while the item is in stock no
  * longer fires at the next evaluate-alerts run; it is armed when the item goes out of stock and fires on the restock.
- * One switched on while the item is out of stock is armed at once. Migration 0003 keeps existing alerts armed.
+ * One switched on while the item is out of stock is armed at once.
  */
 import type { FastifyInstance } from 'fastify';
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { allSpecs, withDependencies } from '../../../kernel/module-system/loader.js';
 import { buildTestApp, movingClock, tokenClock } from '../../../testing/app.js';
 import { flows, type Flows, type Listing } from '../../../testing/flows.js';
-import { m0003AlertArmedAt } from '../infra/postgres/migrations/0003_alert_armed_at.js';
 
 const clock = movingClock();
 const launchModules = Object.values(allSpecs)
@@ -75,18 +73,5 @@ describe('back-in-stock alerts switched on while in stock', () => {
 
     await setStock(3);
     expect(fired().map((e) => e.alertId).sort()).toEqual([id, later.body.id].sort());
-  });
-});
-
-describe('migration 0003', () => {
-  it('keeps existing alerts armed since they were created', async () => {
-    const k = app.kernel.database;
-    const created = await f.call('POST', `${S}/alerts`, { token: ann.accessToken, body: { productId: listing.productId, kind: 'price_drop' } });
-    await k.exec('alter table wishlist.alerts drop column armed_at;');
-    await k.exec(`begin;\n${m0003AlertArmedAt.sql}\ncommit;`);
-    const rows = (await sql<{ armed_at: Date; created_at: Date }>`select armed_at, created_at from wishlist.alerts`.execute(k.kysely)).rows;
-    expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((r) => r.armed_at.getTime() === r.created_at.getTime())).toBe(true);
-    expect((await alertOf(created.body.id)).armedAt).toEqual(expect.any(String));
   });
 });
