@@ -1,5 +1,5 @@
 // Category page sample: the first page of "Headphones" listings, with the attributes the filters use.
-import type { CardProduct } from '@/ui';
+import type { CardProduct } from '@marketly/web-shared/ui';
 
 export type HeadphoneType = 'over' | 'in' | 'on';
 export type Anc = 'active' | 'passive' | 'none';

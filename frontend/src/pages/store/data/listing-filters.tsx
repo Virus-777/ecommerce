@@ -1,7 +1,7 @@
 // Listing filters shared by the Category and Search pages: filter state, matching, sorting and
 // the filter groups (desktop rail and phone sheet). Same markup as the design's .shop-fg groups.
 import { Fragment, useState, type MouseEvent, type ReactNode } from 'react';
-import { Checkbox, Icon, Radio, Stars5 } from '@/ui';
+import { Checkbox, Icon, Radio, Stars5 } from '@marketly/web-shared/ui';
 import {
   ANCS, BATTERY, BRANDS, BRANDS_SHOWN, CONDITIONS, CONNECTIONS, PRICE_RANGES, RATINGS, SELLERS, TYPES,
   type Anc, type Condition, type Connection, type HeadphoneType, type Listing, type Sort,

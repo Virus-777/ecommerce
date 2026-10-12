@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { AccountLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Checkbox, Dialog, Field, Icon, Select, Textarea, TextInput, type IconName } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Checkbox, Dialog, Field, Icon, Select, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-addresses.html · view "edit-address" = the edit dialog with a ZIP error.
 

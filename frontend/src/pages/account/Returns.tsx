@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { P } from '@/data/fixtures';
+import { P } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { href } from '@/routes/href';
-import { Badge, Button, Card, Icon, Img, Stat, Tabs, type Tone } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Button, Card, Icon, Img, Stat, Tabs, type Tone } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-returns.html (one view). Return status tracks the item, refund status the money.
 

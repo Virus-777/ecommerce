@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Breadcrumbs, Button, Dialog, EmptyState, Icon, IconButton, Img, Pager, ProductCard, Radio, Select } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Breadcrumbs, Button, Dialog, EmptyState, Icon, IconButton, Img, Pager, ProductCard, Radio, Select } from '@marketly/web-shared/ui';
 import { CHIPS, HEADPHONES, PAGE_SIZE, SORTS, TOTAL_RESULTS, TYPES, type Sort } from './data/category';
 import { Count, DEFAULT_FILTERS, FilterGroups, matches, sameFilters, sortListings, toggleIn, type Filters, type ListKey, type SetFilter } from './data/listing-filters';
 

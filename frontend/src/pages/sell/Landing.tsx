@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { href } from '@/routes/href';
-import { Badge, Button, Field, Icon, Select, SummaryRow, TableWrap, TextInput, Timeline, type IconName, type TimelineEvent } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Button, Field, Icon, Select, SummaryRow, TableWrap, TextInput, Timeline, type IconName, type TimelineEvent } from '@marketly/web-shared/ui';
 
 // Design: pages/store/sell-landing.html · the "How a sale works out" card is a live fee calculator
 // (its default, the 10% example on a $100 item, is the design's state).

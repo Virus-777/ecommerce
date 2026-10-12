@@ -1,20 +1,11 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { BRAND } from '@/config';
+import { BRAND } from '@marketly/web-shared/config';
 import { useSession } from '@/app/session';
-import { cx } from '@/lib/cx';
-import { href } from '@/routes/href';
-import { Icon, IconButton, LogoMark, type IconName } from '@/ui';
-
-export function Logo({ area }: { area?: string }) {
-  return (
-    <Link className="logo" to={href('store/home')}>
-      <LogoMark />
-      <span>{BRAND}</span>
-      {area && <span className="area">{area}</span>}
-    </Link>
-  );
-}
+import { cx } from '@marketly/web-shared/lib/cx';
+import { href } from '@marketly/web-shared/routes';
+import { Logo } from '@marketly/web-shared/layouts';
+import { Icon, IconButton, type IconName } from '@marketly/web-shared/ui';
 
 export type StoreNavKey = 'categories' | 'deals' | 'official' | 'new' | 'best' | 'brands';
 const STORE_NAV: Array<{ key: StoreNavKey; label: string; icon?: IconName; to: string; deal?: boolean }> = [

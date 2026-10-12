@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { AccountLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { href } from '@/routes/href';
-import { Badge, Button, Icon, IconButton, Img, LogoTile, SearchInput, SellerBadge } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Button, Icon, IconButton, Img, LogoTile, SearchInput, SellerBadge } from '@marketly/web-shared/ui';
 import { THREADS, type Thread } from './data/messages';
 
 // Design: pages/store/account-messages.html (one view): inbox + the open conversation.

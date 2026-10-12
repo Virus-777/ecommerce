@@ -1,10 +1,10 @@
 import { useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
-import { P } from '@/data/fixtures';
+import { P } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
-import { money, percentOff } from '@/lib/format';
-import { href } from '@/routes/href';
-import { Badge, Button, Countdown, Icon, Img, Meter, Price, ProductCard, Tabs, announce } from '@/ui';
+import { money, percentOff } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Button, Countdown, Icon, Img, Meter, Price, ProductCard, Tabs, announce } from '@marketly/web-shared/ui';
 import { items } from './data/collection';
 import { CLEARANCE_IDS, CLEARANCE_TOTAL, COUPONS, DEAL_TABS, EVENTS, FLASH, FLASH_DEALS, type DealTab, type FlashDeal } from './data/deals';
 

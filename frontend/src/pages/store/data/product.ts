@@ -1,9 +1,9 @@
 // Sample data for the product detail page (design: pages/store/store-product*.html).
 // Two products: the Halden Aurora (reviews, several offers) and the Brightline desk lamp
 // (new listing with no reviews, one offer: the "no-reviews-yet" view).
-import { auroraOffers, P, type Offer, type SellerId, type Tint } from '@/data/fixtures';
-import { money } from '@/lib/format';
-import type { CardProduct, IconName } from '@/ui';
+import { auroraOffers, P, type Offer, type SellerId, type Tint } from '@marketly/web-shared/data/fixtures';
+import { money } from '@marketly/web-shared/lib/format';
+import type { CardProduct, IconName } from '@marketly/web-shared/ui';
 
 export interface Variant {
   name: string;

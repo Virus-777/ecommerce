@@ -1,6 +1,6 @@
 // Headphones category sample used by the ad-placements screen (ads/formats).
-import type { SellerId, Tint } from '@/data/fixtures';
-import type { IconName } from '@/ui';
+import type { SellerId, Tint } from '@marketly/web-shared/data/fixtures';
+import type { IconName } from '@marketly/web-shared/ui';
 
 export interface AdProduct {
   id: string;

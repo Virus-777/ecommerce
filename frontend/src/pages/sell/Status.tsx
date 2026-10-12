@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { StoreLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Dialog, Field, FileDrop, Icon, IconButton, KeyValue, Select, StatusBadge, Textarea, TextInput, Timeline, type TimelineEvent } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Dialog, Field, FileDrop, Icon, IconButton, KeyValue, Select, StatusBadge, Textarea, TextInput, Timeline, type TimelineEvent } from '@marketly/web-shared/ui';
 
 // Design: pages/store/sell-status.html (Information required) · views "approved", "rejected".
 // Approval or rejection is decided by a Seller Manager (admin/seller-application); the applicant can

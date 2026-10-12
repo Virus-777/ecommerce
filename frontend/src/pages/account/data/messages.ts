@@ -1,5 +1,5 @@
 // Shopper message threads (order conversations with sellers and Marketly Support).
-import type { IconName, Tone } from '@/ui';
+import type { IconName, Tone } from '@marketly/web-shared/ui';
 
 export type Entry =
   | { kind: 'sys'; text: string }

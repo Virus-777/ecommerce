@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Button, Checkbox, Icon, TextInput, announce } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Button, Checkbox, Icon, TextInput, announce } from '@marketly/web-shared/ui';
 import { AuthShell, CodeInput, EMAIL_RE, PasswordInput, emptyCode, maskEmail, mss, useResendTimer, useSignedOut } from './data/parts';
 
 // Design: pages/store/auth-sign-in.html

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { AccountLayout } from '@/layouts';
-import { announce, Alert, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, TextInput } from '@/ui';
+import { announce, Alert, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, TextInput } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-payment-methods.html (one view): saved cards (default, remove,
 // update an expired card) and the "Add a card" form. Only type, last 4 and expiry are kept.

@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Button, CopyButton, Icon, Img } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Button, CopyButton, Icon, Img } from '@marketly/web-shared/ui';
 import Category from '@/pages/store/Category';
 import { AdOverlay } from './data/overlay';
 

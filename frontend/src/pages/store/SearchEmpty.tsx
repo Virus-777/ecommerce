@@ -1,10 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { auroraOffers, customer, sellers, type Offer } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Alert, Badge, Breadcrumbs, Button, Field, Icon, Price, ProductCard, SellerBadge, ShipLine, Stars, TextInput, type IconName } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { auroraOffers, customer, sellers, type Offer } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Breadcrumbs, Button, Field, Icon, Price, ProductCard, SellerBadge, ShipLine, Stars, TextInput, type IconName } from '@marketly/web-shared/ui';
 import { HEADPHONES } from './data/category';
 
 // Design: pages/store/store-search-empty.html (no results) · view "product-unavailable" = an

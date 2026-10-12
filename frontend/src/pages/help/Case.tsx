@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { P } from '@/data/fixtures';
+import { P } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Avatar, Breadcrumbs, Button, Dialog, Field, Icon, Img, KeyValue, Select, StatusBadge, Textarea, Timeline, Track, type TimelineEvent } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Avatar, Breadcrumbs, Button, Dialog, Field, Icon, Img, KeyValue, Select, StatusBadge, Textarea, Timeline, Track, type TimelineEvent } from '@marketly/web-shared/ui';
 
 // Design: pages/store/help-case.html (open, waiting on seller) · view "decision-made" = help-case--decision-made.html.
 // The decision is made by Marketly staff (admin/case); here the shopper replies, and appeals once decided.

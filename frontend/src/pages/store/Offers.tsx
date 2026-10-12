@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '@/app/session';
-import { P, sellers, type SellerId } from '@/data/fixtures';
+import { P, sellers, type SellerId } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { money, num } from '@/lib/format';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Badge, Breadcrumbs, Chip, Icon, Img, Stars, TableWrap, announce } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { money, num } from '@marketly/web-shared/lib/format';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Breadcrumbs, Chip, Icon, Img, Stars, TableWrap, announce } from '@marketly/web-shared/ui';
 import { offerRows, total, type ConditionGroup, type OfferRow } from './data/offers';
 
 // Design: pages/store/store-offers.html (sorted by total cost)

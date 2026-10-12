@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { href } from '@/routes/href';
-import { Badge, Button, Icon, KeyValue, Sponsored, TableWrap, type IconName } from '@/ui';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Button, Icon, KeyValue, Sponsored, TableWrap, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/info-about.html
 

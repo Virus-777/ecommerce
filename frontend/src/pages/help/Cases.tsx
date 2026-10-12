@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import type { Tint } from '@/data/fixtures';
+import type { Tint } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { href } from '@/routes/href';
-import { Alert, Button, Icon, Img, StatusBadge, TableWrap, Tabs, type IconName } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Button, Icon, Img, StatusBadge, TableWrap, Tabs, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/help-cases.html · Open / Closed / All tabs filter the list (All is the design's state).
 

@@ -2,10 +2,10 @@ import { useEffect } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { sellers } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Icon, Img, SummaryRow, Timeline, announce } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { sellers } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Icon, Img, SummaryRow, Timeline, announce } from '@marketly/web-shared/ui';
 import { CARD, COUPON_WELCOME, ORDER_ITEMS, ORDER_LINES, ORDER_REF, ORDER_SHIPPING, ORDER_TOTAL, PkgHead, groupBySeller, pkgMeta, plural } from './data/purchase';
 
 // Design: pages/store/store-confirmation.html

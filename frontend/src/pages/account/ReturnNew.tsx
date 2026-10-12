@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { order, P, sellers, type SellerId } from '@/data/fixtures';
+import { order, P, sellers, type SellerId } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { money } from '@/lib/format';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Breadcrumbs, Button, Card, Field, FileDrop, Icon, Img, KeyValue, OptionCard, Select, SellerLine, StatusBadge, Steps, SummaryRow, TableWrap, Textarea } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { money } from '@marketly/web-shared/lib/format';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Breadcrumbs, Button, Card, Field, FileDrop, Icon, Img, KeyValue, OptionCard, Select, SellerLine, StatusBadge, Steps, SummaryRow, TableWrap, Textarea } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-return-new.html · a 3-step wizard: "" = choose items,
 // "reason-and-remedy" = what's wrong + what you want, "review" = check and submit.

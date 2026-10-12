@@ -2,10 +2,10 @@
 // blocks those screens share. Shapes follow the cart/checkout API: lines grouped by seller
 // into packages, each package with its own delivery options and return terms.
 import { Fragment } from 'react';
-import { cx } from '@/lib/cx';
-import { useScrollRegion } from '@/lib/hooks';
-import { sellers, type SellerId, type Tint } from '@/data/fixtures';
-import { Icon, Img, LogoTile, SellerBadge, type IconName } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { useScrollRegion } from '@marketly/web-shared/lib/hooks';
+import { sellers, type SellerId, type Tint } from '@marketly/web-shared/data/fixtures';
+import { Icon, Img, LogoTile, SellerBadge, type IconName } from '@marketly/web-shared/ui';
 
 export interface CartLine {
   id: string;

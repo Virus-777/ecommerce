@@ -1,10 +1,10 @@
 import { Fragment, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { CheckoutLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import type { Tint } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Card, Dialog, Icon, Img, OptionCard, SummaryRow, type IconName } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import type { Tint } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Card, Dialog, Icon, Img, OptionCard, SummaryRow, type IconName } from '@marketly/web-shared/ui';
 import { BuyMini, CheckoutSteps, SecN } from './data/purchase';
 
 // Design: pages/store/store-checkout-review-changes.html: the checkout re-check found changes

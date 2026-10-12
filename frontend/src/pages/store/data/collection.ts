@@ -1,8 +1,8 @@
 // Store merchandising data: products that appear on the brand, seller, Official Store, deals and
 // collection pages but are not in the shared fixtures, the shared sort options, and the
 // four collection views (New arrivals, Best sellers, Home Week, Desk setup for small spaces).
-import { P } from '@/data/fixtures';
-import type { CardProduct, IconName } from '@/ui';
+import { P } from '@marketly/web-shared/data/fixtures';
+import type { CardProduct, IconName } from '@marketly/web-shared/ui';
 
 /** A product card plus the fields the store pages filter on. */
 export interface ShopItem extends CardProduct {

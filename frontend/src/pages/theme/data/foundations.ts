@@ -1,4 +1,4 @@
-import type { IconName } from '@/ui';
+import type { IconName } from '@marketly/web-shared/ui';
 
 // Design tokens documented on theme-foundations.html. Hex values are light · dark.
 

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Breadcrumbs, Button, Dialog, Field, Icon, Select } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Breadcrumbs, Button, Dialog, Field, Icon, Select } from '@marketly/web-shared/ui';
 import { POLICIES, type PolicySlug } from './data/policies';
 
 // Design: pages/store/info-policy.html (Returns) · views shipping, seller-rules, privacy, purchase-terms.

@@ -1,10 +1,10 @@
 import { Fragment, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { order, P, sellers, type Seller, type SellerId } from '@/data/fixtures';
+import { order, P, sellers, type Seller, type SellerId } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { href } from '@/routes/href';
-import { Alert, Breadcrumbs, Button, Field, FileDrop, Icon, IconButton, Img, LogoTile, OptionCard, SellerBadge, StatusBadge, Textarea, type IconName } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Breadcrumbs, Button, Field, FileDrop, Icon, IconButton, Img, LogoTile, OptionCard, SellerBadge, StatusBadge, Textarea, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/help-order-problem.html (the order's packages, with the delayed duvet preselected).
 

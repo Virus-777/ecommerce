@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { P } from '@/data/fixtures';
+import { P } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Button, EmptyState, Icon, Img, Pager, SearchInput, StatusBadge, Tabs } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Button, EmptyState, Icon, Img, Pager, SearchInput, StatusBadge, Tabs } from '@marketly/web-shared/ui';
 import { ORDER_COUNTS, ORDER_SUMMARIES, type OrderSummary, type OrderTab } from './data/orders';
 
 // Design: pages/store/account-orders.html · view "no-matches" = a search + date range with no results.

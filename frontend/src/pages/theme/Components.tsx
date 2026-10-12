@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { products } from '@/data/fixtures';
-import { cx } from '@/lib/cx';
-import { money } from '@/lib/format';
-import { href } from '@/routes/href';
+import { products } from '@marketly/web-shared/data/fixtures';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { money } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
 import {
   Alert, Badge, Breadcrumbs, Button, Checkbox, Chip, Deadline, Dialog, Drawer, EmptyState, Field, Icon, Legend, LineChart,
   OptionCard, ProductCard, QuantityStepper, Radio, SegmentedControl, Select, Sponsored, Stat, StatusBadge, StatusLegend, Steps,
   Switch, TableWrap, Tabs, Textarea, TextInput, Timeline, Track,
-} from '@/ui';
+} from '@marketly/web-shared/ui';
 import { DEMO_ORDERS, SALES_CHART, STATUS_ROWS } from './data/components';
 
 // Design: pages/theme/theme-components.html (design-system reference page, no store chrome).

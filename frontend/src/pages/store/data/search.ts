@@ -1,5 +1,5 @@
 // Search sample data: the design's query, its result page, suggestions and recent searches.
-import { products } from '@/data/fixtures';
+import { products } from '@marketly/web-shared/data/fixtures';
 import { DEFAULT_FILTERS, type Filters } from './listing-filters';
 import { HEADPHONES, type Listing } from './category';
 

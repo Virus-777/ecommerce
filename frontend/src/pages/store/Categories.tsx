@@ -1,10 +1,10 @@
 import { useState, type MouseEvent } from 'react';
 import { Link } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { num } from '@/lib/format';
-import { brands, products } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Badge, Breadcrumbs, Icon, Img, LogoTile, Price } from '@/ui';
+import { num } from '@marketly/web-shared/lib/format';
+import { brands, products } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Breadcrumbs, Icon, Img, LogoTile, Price } from '@marketly/web-shared/ui';
 import { CATEGORY_TREE, TOTAL_PRODUCTS, type TopCategory } from './data/categories';
 
 // Design: pages/store/store-categories.html (phone: category rail + pane; website: category card grid).

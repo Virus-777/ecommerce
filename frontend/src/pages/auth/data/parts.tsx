@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { Icon } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { Icon } from '@marketly/web-shared/ui';
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

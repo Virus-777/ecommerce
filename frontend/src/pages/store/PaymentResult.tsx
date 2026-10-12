@@ -2,11 +2,11 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
 import { CheckoutLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { money } from '@/lib/format';
-import { sellers } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Card, Icon, KeyValue, OptionCard, SummaryRow, Timeline, announce } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { money } from '@marketly/web-shared/lib/format';
+import { sellers } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Card, Icon, KeyValue, OptionCard, SummaryRow, Timeline, announce } from '@marketly/web-shared/ui';
 import { BuyMini, CARD, ORDER_LINES, ORDER_REF, ORDER_TOTAL, groupBySeller, pkgMeta, plural } from './data/purchase';
 
 // Design: pages/store/store-payment-result.html (payment failed) · view "checking-payment" =

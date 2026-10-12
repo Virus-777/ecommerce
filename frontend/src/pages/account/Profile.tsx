@@ -2,8 +2,8 @@ import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '@/app/session';
 import { AccountLayout } from '@/layouts';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Card, Field, Icon, Switch, TextInput } from '@/ui';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Card, Field, Icon, Switch, TextInput } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-profile.html (one view): personal details form, message preferences,
 // search history, data export and account closure (blocked while orders/returns/cases are open).

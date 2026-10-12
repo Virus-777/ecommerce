@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { order, P, sellers, type SellerId } from '@/data/fixtures';
+import { order, P, sellers, type SellerId } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { href } from '@/routes/href';
-import { Alert, announce, Breadcrumbs, Button, Card, Icon, Img, LogoTile, SellerBadge, StatusBadge, SummaryRow, Track } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, announce, Breadcrumbs, Button, Card, Icon, Img, LogoTile, SellerBadge, StatusBadge, SummaryRow, Track } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-order.html (one view). Packages come from the shared order fixture;
 // per-item notes and actions are screen copy.

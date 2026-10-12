@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
-import { href } from '@/routes/href';
-import { TableWrap, type IconName } from '@/ui';
+import { href } from '@marketly/web-shared/routes';
+import { TableWrap, type IconName } from '@marketly/web-shared/ui';
 
 // Policy documents (design: pages/store/info-policy*.html). The API phase serves these as
 // versioned policy records; the page renders the current version.

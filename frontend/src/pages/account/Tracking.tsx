@@ -1,11 +1,11 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { order, P } from '@/data/fixtures';
+import { order, P } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Breadcrumbs, Button, Card, CopyButton, Field, Icon, Img, OptionCard, Select, SellerLine, StatusBadge, Timeline, Track, type TimelineEvent } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Breadcrumbs, Button, Card, CopyButton, Field, Icon, Img, OptionCard, Select, SellerLine, StatusBadge, Timeline, Track, type TimelineEvent } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-tracking.html · view "delivery-failed" = the carrier's failed attempt,
 // with the "Choose next step" form (redeliver, pick up, send back).

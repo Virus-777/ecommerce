@@ -1,14 +1,9 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
-import { customer } from '@/data/fixtures';
+import { customer } from '@marketly/web-shared/data/fixtures';
 
-// Mock session shared across pages (signed-in shopper, cart count, staff identities).
+// Mock store session shared across pages (signed-in shopper, cart count).
 // The API phase replaces this with the identity/cart modules (visitor token -> shopper session).
 
-export const STAFF = {
-  seller: { name: 'Avery Stone', role: 'Owner · Northwind Audio', store: 'Northwind Audio', storeInitials: 'NA' },
-  admin: { name: 'Riley Chen', role: 'Platform Administrator' },
-  ops: { name: 'Theo Grant', role: 'Order & Shipping Manager' },
-} as const;
 
 interface Session {
   signedIn: boolean;

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
-import type { Tint } from '@/data/fixtures';
+import type { Tint } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
-import { href } from '@/routes/href';
-import { Button, Icon, Img, StatusBadge, type IconName } from '@/ui';
+import { href } from '@marketly/web-shared/routes';
+import { Button, Icon, Img, StatusBadge, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/help-center.html
 

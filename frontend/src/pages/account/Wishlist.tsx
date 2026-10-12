@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
-import { P, type SellerId } from '@/data/fixtures';
+import { P, type SellerId } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import { href } from '@/routes/href';
-import { Alert, announce, Badge, Button, Card, EmptyState, Icon, IconButton, Img, Price, SellerLine, StatusBadge, Switch, TableWrap } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, announce, Badge, Button, Card, EmptyState, Icon, IconButton, Img, Price, SellerLine, StatusBadge, Switch, TableWrap } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-wishlist.html (one view): saved items with price-drop and back-in-stock
 // switches; the alerts table is built from those switches. Recently viewed can be cleared.

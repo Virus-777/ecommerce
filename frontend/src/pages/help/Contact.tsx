@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
-import { href } from '@/routes/href';
-import { Breadcrumbs, Button, Field, FileDrop, Icon, IconButton, KeyValue, OptionCard, Select, Textarea, type IconName } from '@/ui';
+import { href } from '@marketly/web-shared/routes';
+import { Breadcrumbs, Button, Field, FileDrop, Icon, IconButton, KeyValue, OptionCard, Select, Textarea, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/help-contact.html
 

@@ -1,11 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { money } from '@/lib/format';
-import { sellers, type SellerId, type Tint } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Alert, Button, Field, Icon, Img, LogoTile, SellerBadge, StatusBadge, SummaryRow, TextInput, announce, type IconName } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { money } from '@marketly/web-shared/lib/format';
+import { sellers, type SellerId, type Tint } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Button, Field, Icon, Img, LogoTile, SellerBadge, StatusBadge, SummaryRow, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
 import { AuthShell, EMAIL_RE, useSignedOut } from './data/parts';
 
 // Design: pages/store/auth-guest-orders.html · view "found" = the order after a successful lookup.

@@ -1,10 +1,10 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { AccountLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import type { ScreenId } from '@/routes/catalogue';
-import { href } from '@/routes/href';
-import { announce, Button, Chip, ChipRow, Icon, type IconName } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import type { ScreenId } from '@marketly/web-shared/routes';
+import { href } from '@marketly/web-shared/routes';
+import { announce, Button, Chip, ChipRow, Icon, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-notifications.html (one view). Chips filter by category; opening an
 // item marks it read; "Mark all as read" clears the unread dots.

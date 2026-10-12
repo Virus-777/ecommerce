@@ -2,11 +2,11 @@ import { Fragment, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useSession } from '@/app/session';
 import { CheckoutLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { money } from '@/lib/format';
-import { sellers, type SellerId } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Alert, Avatar, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, Select, SellerBadge, SummaryRow, TextInput, announce } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { money } from '@marketly/web-shared/lib/format';
+import { sellers, type SellerId } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Avatar, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, Select, SellerBadge, SummaryRow, TextInput, announce } from '@marketly/web-shared/ui';
 import { BuyMini, CARD, CheckoutSteps, COUPON_WELCOME, ORDER_ITEMS, ORDER_LINES, SecN, groupBySeller, pkgMeta, plural, standardShipping } from './data/purchase';
 
 // Design: pages/store/store-checkout.html

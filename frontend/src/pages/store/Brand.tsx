@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { brands } from '@/data/fixtures';
+import { brands } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
-import { num } from '@/lib/format';
-import { href } from '@/routes/href';
-import { Breadcrumbs, Chip, ChipRow, Icon, Img, LogoTile, Pager, ProductCard, type IconName } from '@/ui';
+import { num } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
+import { Breadcrumbs, Chip, ChipRow, Icon, Img, LogoTile, Pager, ProductCard, type IconName } from '@marketly/web-shared/ui';
 import { SORT_OPTIONS, items, sortItems, type SortKey } from './data/collection';
 
 // Design: pages/store/store-brand.html (Halden). Chips filter the grid, Sort re-sorts it, the pager pages it.

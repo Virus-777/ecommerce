@@ -1,4 +1,4 @@
-import { Icon, Price } from '@/ui';
+import { Icon, Price } from '@marketly/web-shared/ui';
 import { BREAKPOINTS, ICON_SAMPLES, RADII, SHADOWS, SPACING, SWATCH_GROUPS, TYPE_SCALE } from './data/foundations';
 
 // Design: pages/theme/theme-foundations.html (design-system reference page, no store chrome).

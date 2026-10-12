@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { cx } from '@/lib/cx';
-import { percentOff } from '@/lib/format';
-import { sellers } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Badge, Breadcrumbs, Button, Icon, IconButton, Img, Meter, Price, SellerLine, Stars, announce, type IconName } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { percentOff } from '@marketly/web-shared/lib/format';
+import { sellers } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Breadcrumbs, Button, Icon, IconButton, Img, Meter, Price, SellerLine, Stars, announce, type IconName } from '@marketly/web-shared/ui';
 import { HEADPHONES, SORTS, sortProducts, type AdProduct, type Sort } from './data/headphones';
 import { AdOverlay } from './data/overlay';
 

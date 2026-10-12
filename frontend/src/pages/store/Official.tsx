@@ -1,9 +1,9 @@
 import { useState, type MouseEvent } from 'react';
 import { Link } from 'react-router';
-import { categories } from '@/data/fixtures';
+import { categories } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
-import { href } from '@/routes/href';
-import { Badge, Icon, Img, Pager, ProductCard, type IconName } from '@/ui';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Icon, Img, Pager, ProductCard, type IconName } from '@marketly/web-shared/ui';
 import { SORT_OPTIONS, items, sortItems, type SortKey } from './data/collection';
 
 // Design: pages/store/store-official.html. Sort re-sorts the grid and the pager pages it; the hero

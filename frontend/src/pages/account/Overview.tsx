@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '@/app/session';
-import { BRAND } from '@/config';
-import { P } from '@/data/fixtures';
+import { BRAND } from '@marketly/web-shared/config';
+import { P } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { money } from '@/lib/format';
-import type { ScreenId } from '@/routes/catalogue';
-import { href } from '@/routes/href';
-import { Alert, Avatar, Badge, Button, Card, Icon, Img, SegmentedControl, StatusBadge, type IconName, type Tone } from '@/ui';
+import { money } from '@marketly/web-shared/lib/format';
+import type { ScreenId } from '@marketly/web-shared/routes';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Avatar, Badge, Button, Card, Icon, Img, SegmentedControl, StatusBadge, type IconName, type Tone } from '@marketly/web-shared/ui';
 import { ORDER_SUMMARIES } from './data/orders';
 
 // Design: pages/store/account-overview.html. On the phone this is the Account tab: no app bar,

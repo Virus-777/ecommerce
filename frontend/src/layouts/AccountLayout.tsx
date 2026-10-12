@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '@/app/session';
-import { cx } from '@/lib/cx';
-import type { ScreenId } from '@/routes/catalogue';
-import { href } from '@/routes/href';
-import { Avatar, Icon, type IconName } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import type { ScreenId } from '@marketly/web-shared/routes';
+import { href } from '@marketly/web-shared/routes';
+import { Avatar, Icon, type IconName } from '@marketly/web-shared/ui';
 import { StoreLayout } from './StoreLayout';
 
 export type AccountNavKey =

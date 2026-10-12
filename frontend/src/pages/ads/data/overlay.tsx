@@ -3,8 +3,8 @@
 // scroll; the announcement toast is non-modal (no lock, no trap: QA m-10).
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { cx } from '@/lib/cx';
-import { useBodyLock } from '@/lib/hooks';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { useBodyLock } from '@marketly/web-shared/lib/hooks';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 

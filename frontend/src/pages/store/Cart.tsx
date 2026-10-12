@@ -2,11 +2,11 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { money } from '@/lib/format';
-import { P, sellers, type Product } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Card, EmptyState, Icon, Img, ProductCard, QuantityStepper, SectionHeader, SummaryRow, announce } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { money } from '@marketly/web-shared/lib/format';
+import { P, sellers, type Product } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Card, EmptyState, Icon, Img, ProductCard, QuantityStepper, SectionHeader, SummaryRow, announce } from '@marketly/web-shared/ui';
 import { CART_LINES, COUPON_WELCOME, PkgHead, groupBySeller, pkgMeta, plural, standardShipping, type CartLine } from './data/purchase';
 
 // Design: pages/store/store-cart.html · view "empty" = no items (also reached by removing the last item).

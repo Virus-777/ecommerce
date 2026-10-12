@@ -1,10 +1,10 @@
 import { useState, type MouseEvent } from 'react';
 import { Link } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { percentOff } from '@/lib/format';
-import { brands, categories, P, sellers, type Product, type SellerId } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Badge, Button, Countdown, Icon, Img, LogoTile, Meter, Price, ProductCard, SectionHeader, type IconName } from '@/ui';
+import { percentOff } from '@marketly/web-shared/lib/format';
+import { brands, categories, P, sellers, type Product, type SellerId } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Button, Countdown, Icon, Img, LogoTile, Meter, Price, ProductCard, SectionHeader, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/store-home.html
 

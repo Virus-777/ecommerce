@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { order, P, sellers, type SellerId } from '@/data/fixtures';
+import { order, P, sellers, type SellerId } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { money } from '@/lib/format';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Breadcrumbs, Button, Card, Field, Img, Select, SellerLine, StatusBadge, SummaryRow, Textarea, Timeline } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { money } from '@marketly/web-shared/lib/format';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Breadcrumbs, Button, Card, Field, Img, Select, SellerLine, StatusBadge, SummaryRow, Textarea, Timeline } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-cancel.html · view "cancellation-requested" = after "Request cancellation".
 // Only items the seller hasn't shipped can be cancelled; the coupon is split across items by price.

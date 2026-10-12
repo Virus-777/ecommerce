@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Button, Icon, Img, LogoTile, Price } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Button, Icon, Img, LogoTile, Price } from '@marketly/web-shared/ui';
 import Home from '@/pages/store/Home';
 import { AdOverlay } from './data/overlay';
 

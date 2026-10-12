@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Avatar, Badge, Button, Checkbox, Field, FileDrop, Icon, IconButton, KeyValue, Meter, OptionCard, Select, Steps, TextInput, type IconName } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Avatar, Badge, Button, Checkbox, Field, FileDrop, Icon, IconButton, KeyValue, Meter, OptionCard, Select, Steps, TextInput, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/sell-apply.html (step 1, account) · views business-details, verification,
 // payout-and-return-address (steps 4–5 on one page) and agreement. Each step validates before Continue;

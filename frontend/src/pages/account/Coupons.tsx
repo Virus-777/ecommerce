@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from 'react';
 import { AccountLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { money } from '@/lib/format';
-import { announce, Badge, Button, Card, CopyButton, Icon, TableWrap } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { money } from '@marketly/web-shared/lib/format';
+import { announce, Badge, Button, Card, CopyButton, Icon, TableWrap } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-coupons.html (one view): store credit + history, coupons to clip
 // (or copy the code to type at checkout), and used/expired coupons.

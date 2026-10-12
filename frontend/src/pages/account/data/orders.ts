@@ -1,6 +1,6 @@
 // Shopper order summaries used by the account Overview and Orders pages.
 // API shape: one row per order with its packages (one per seller) and item product ids.
-import type { Tone } from '@/ui';
+import type { Tone } from '@marketly/web-shared/ui';
 
 export type OrderTab = 'in-progress' | 'delivered' | 'returns' | 'cancelled';
 

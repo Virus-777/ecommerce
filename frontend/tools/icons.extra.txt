@@ -1,3 +1,0 @@
-# Extra Lucide icon names (kebab-case) used by the React app but not by the design export.
-chevron-down
-x

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { StoreLayout, type StoreNavKey } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Avatar, Breadcrumbs, Chip, ChipRow, EmptyState, Icon, Img, Pager, ProductCard, StatusBadge, Tabs } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Avatar, Breadcrumbs, Chip, ChipRow, EmptyState, Icon, Img, Pager, ProductCard, StatusBadge, Tabs } from '@marketly/web-shared/ui';
 import { BEST_SELLERS, BEST_TABS, CURATED_SECTIONS, NEW_CHIPS, NEW_GROUPS, NEW_PAGES, SEASON_SECTIONS, SEASON_TERMS, item, items } from './data/collection';
 
 // Design: pages/store/store-collection.html (New arrivals) · views: best-sellers, seasonal (Home Week),

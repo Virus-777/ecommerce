@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Button, Icon, type IconName } from '@/ui';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Button, Icon, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/store-not-found.html · view "something-went-wrong" = the server error page.
 // Also the catch-all 404 route.

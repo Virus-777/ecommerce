@@ -1,12 +1,12 @@
 import { useState, type MouseEvent } from 'react';
 import { Link } from 'react-router';
-import { sellers } from '@/data/fixtures';
+import { sellers } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
-import { num } from '@/lib/format';
-import { href } from '@/routes/href';
+import { num } from '@marketly/web-shared/lib/format';
+import { href } from '@marketly/web-shared/routes';
 import {
   Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, IconButton, KeyValue, LogoTile, Pager, ProductCard, SearchInput, SellerBadge, Stars, Stat, Tabs,
-} from '@/ui';
+} from '@marketly/web-shared/ui';
 import { SORT_OPTIONS, items, sortItems, type SortKey } from './data/collection';
 import { FEEDBACK, FEEDBACK_STATS, POLICIES, STORE, STORE_CHIPS, STORE_PRODUCT_IDS, VERIFIED } from './data/seller';
 

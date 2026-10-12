@@ -1,5 +1,5 @@
-import type { ScreenId } from '@/routes/catalogue';
-import type { IconName } from '@/ui';
+import type { ScreenId } from '@marketly/web-shared/routes';
+import type { IconName } from '@marketly/web-shared/ui';
 
 // Sample content for theme-patterns.html.
 

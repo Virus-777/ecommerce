@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { AccountLayout } from '@/layouts';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Card, Dialog, Field, Icon, OptionCard, StatusBadge, TableWrap, TextInput, type IconName } from '@/ui';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Card, Dialog, Field, Icon, OptionCard, StatusBadge, TableWrap, TextInput, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-security.html (one view): password change, 2-step verification,
 // email verification, signed-in devices and recent security activity.

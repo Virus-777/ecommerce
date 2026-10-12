@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router';
 import { StoreLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { money, percentOff } from '@/lib/format';
-import { useView } from '@/lib/hooks';
-import { brands, sellers } from '@/data/fixtures';
-import { href } from '@/routes/href';
-import { Badge, Button, Checkbox, Dialog, EmptyState, Icon, IconButton, Img, LogoTile, Pager, Price, Radio, Select, SellerLine, Stars } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { money, percentOff } from '@marketly/web-shared/lib/format';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { brands, sellers } from '@marketly/web-shared/data/fixtures';
+import { href } from '@marketly/web-shared/routes';
+import { Badge, Button, Checkbox, Dialog, EmptyState, Icon, IconButton, Img, LogoTile, Pager, Price, Radio, Select, SellerLine, Stars } from '@marketly/web-shared/ui';
 import { ANCS, BATTERY, CONDITIONS, CONNECTIONS, HEADPHONES, PRICE_RANGES, SELLERS, SORTS, TYPES, type Listing, type Sort } from './data/category';
 import { Count, DEFAULT_FILTERS, FilterGroups, matches, sortListings, toggleIn, type Filters, type ListKey, type SetFilter } from './data/listing-filters';
 import {

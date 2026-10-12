@@ -1,9 +1,9 @@
 import type { FormEvent } from 'react';
 import { Link } from 'react-router';
-import { Logo } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { href } from '@/routes/href';
-import { Avatar, Badge, Count, Icon, IconButton, LogoMark, LogoTile, Price, ShipLine, Sponsored } from '@/ui';
+import { Logo } from '@marketly/web-shared/layouts';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { href } from '@marketly/web-shared/routes';
+import { Avatar, Badge, Count, Icon, IconButton, LogoMark, LogoTile, Price, ShipLine, Sponsored } from '@marketly/web-shared/ui';
 import { APP_VS_WEB, OFFERS, SELLER_NAV_DEMO, STORE_NAV_DEMO, TABBAR_DEMO } from './data/patterns';
 
 // Design: pages/theme/theme-patterns.html (design-system reference page, no store chrome).

@@ -1,11 +1,11 @@
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
-import { P } from '@/data/fixtures';
+import { P } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
-import { Alert, Badge, Button, Card, Dialog, Icon, Img, LogoTile, Stars5, StatusBadge, Tabs, type IconName, type Tone } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Card, Dialog, Icon, Img, LogoTile, Stars5, StatusBadge, Tabs, type IconName, type Tone } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-reviews.html · tabs as views: "" = product reviews,
 // "seller-feedback", "reports-you-made".

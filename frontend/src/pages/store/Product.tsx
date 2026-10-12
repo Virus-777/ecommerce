@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import { useSession } from '@/app/session';
-import { sellers } from '@/data/fixtures';
+import { sellers } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { money, num } from '@/lib/format';
-import { useView } from '@/lib/hooks';
-import { href } from '@/routes/href';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { money, num } from '@marketly/web-shared/lib/format';
+import { useView } from '@marketly/web-shared/lib/hooks';
+import { href } from '@marketly/web-shared/routes';
 import {
   Alert, Avatar, Badge, Breadcrumbs, Button, Chip, EmptyState, Icon, IconButton, Img, KeyValue, Meter, PhoneCollapse,
   Price, ProductCard, SearchInput, SellerBadge, Stars5, announce, type IconName,
-} from '@/ui';
+} from '@marketly/web-shared/ui';
 import { aurora, lamp, type BuyOffer, type ProductDetail, type QaAnswer, type Review } from './data/product';
 
 // Design: pages/store/store-product.html (Official Store offer)

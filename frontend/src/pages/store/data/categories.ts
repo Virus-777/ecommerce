@@ -1,7 +1,7 @@
 // Category tree for the store browse pages (All categories, Category page).
 // Counts are items in stock now; `soon` marks a planned category/subcategory with no stock yet.
-import type { IconName } from '@/ui';
-import type { Tint } from '@/data/fixtures';
+import type { IconName } from '@marketly/web-shared/ui';
+import type { Tint } from '@marketly/web-shared/data/fixtures';
 
 export interface SubCategory {
   name: string;

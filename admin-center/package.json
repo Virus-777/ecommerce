@@ -1,0 +1,19 @@
+{
+  "name": "@marketly/admin-center",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Marketly Admin Center and Operations Center for internal staff.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p . && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@marketly/web-shared": "*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^8.4.0"
+  }
+}

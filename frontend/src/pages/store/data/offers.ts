@@ -1,7 +1,7 @@
 // Sample data for the All offers page (design: pages/store/store-offers*.html).
 // Base offers come from the shared fixtures (auroraOffers); this adds what the comparison shows.
-import { auroraOffers, type Offer } from '@/data/fixtures';
-import type { IconName } from '@/ui';
+import { auroraOffers, type Offer } from '@marketly/web-shared/data/fixtures';
+import type { IconName } from '@marketly/web-shared/ui';
 
 export type ConditionGroup = 'New' | 'Used' | 'Refurbished';
 

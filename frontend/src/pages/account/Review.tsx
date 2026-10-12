@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { order, P } from '@/data/fixtures';
+import { order, P } from '@marketly/web-shared/data/fixtures';
 import { AccountLayout } from '@/layouts';
-import { cx } from '@/lib/cx';
-import { href } from '@/routes/href';
-import { Alert, announce, Badge, Breadcrumbs, Button, Card, Checkbox, Field, FileDrop, Icon, IconButton, Img, SegmentedControl, SellerLine, TextInput, Textarea } from '@/ui';
+import { cx } from '@marketly/web-shared/lib/cx';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, announce, Badge, Breadcrumbs, Button, Card, Checkbox, Field, FileDrop, Icon, IconButton, Img, SegmentedControl, SellerLine, TextInput, Textarea } from '@marketly/web-shared/ui';
 
 // Design: pages/store/account-review.html (one view): product review (rating, headline, text,
 // photos) and separate seller feedback, posted together.
