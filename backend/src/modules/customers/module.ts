@@ -6,8 +6,7 @@ import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { devAddressProvider } from './infra/address/dev.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresCustomersRepository } from './infra/postgres/repository.js';
+import { createMongoCustomersRepository } from './infra/mongo/repository.js';
 import { CustomersService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -19,14 +18,15 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
     // Address validation provider: the deterministic dev adapter in development and tests; none is wired for production yet (format rules only)
     const addressProvider = ctx.config.devTokens ? devAddressProvider : undefined;
-    const service = new CustomersService({ repo: createPostgresCustomersRepository(ctx.db, ctx.inbox), ctx, addressProvider });
+    const service = new CustomersService({ repo: createMongoCustomersRepository(ctx.mongo), ctx, addressProvider });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
