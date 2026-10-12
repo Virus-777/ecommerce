@@ -1,5 +1,5 @@
 /**
- * Shared setup for the wallet behaviour tests: the app with wallet and its dependencies on PGlite, a movable
+ * Shared setup for the wallet behaviour tests: the app with wallet and its dependencies on MongoDB, a movable
  * clock, recorded events, audit entries and notices.
  *
  * Real modules: wallet, customers, payments, orders, access, identity and the rest booted as dependencies;
@@ -21,7 +21,12 @@ import type * as notifications from '../../../spec/notifications.js';
 import type { OrderDetail } from '../../../spec/orders.js';
 import type { BuildOptions } from '../../../app.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
+import { spec } from '../../../spec/wallet.js';
+import { schemas } from '../infra/mongo/schema.js';
 import type { WalletService } from '../service.js';
+
+/** A collection of the module, as its repository reads it (rows in spec shape) */
+export const walletTable = (app: FastifyInstance, name: keyof typeof schemas) => app.kernel.mongo.module('wallet', spec.collections, schemas).table<any>(name);
 
 export const USD = (amount: number) => ({ amount, currency: 'USD' });
 export const DAY = 86_400_000;

@@ -6,14 +6,14 @@
  * (kernel/mongo/schema.ts); repositories reach them through ctx.mongo.table(name).
  */
 import { Schema } from 'mongoose';
-import { collectionOptions, integer } from '../../../../kernel/mongo/schemas.js';
+import { collectionOptions, integer, positive } from '../../../../kernel/mongo/schemas.js';
 
 const accounts = new Schema(
   {
     _id: { type: String, required: true }, // customer_id
     currency: { type: String, required: true },
-    available: { type: Number, required: true, validate: integer },
-    held: { type: Number, required: true, validate: integer },
+    available: { type: Number, required: true, min: 0, validate: integer },
+    held: { type: Number, required: true, min: 0, validate: integer },
     updated_at: { type: Date, required: true },
     version: { type: Number, required: true, validate: integer },
     /** lock-by-write counter (kernel/mongo/table.ts) */
@@ -27,9 +27,9 @@ const lots = new Schema(
   {
     _id: { type: String, required: true }, // id
     customer_id: { type: String, required: true },
-    source: { type: String, required: true },
-    original: { type: Number, required: true, validate: integer },
-    remaining: { type: Number, required: true, validate: integer },
+    source: { type: String, required: true, enum: ["refund","goodwill","price_adjustment","gift_card","correction"] },
+    original: { type: Number, required: true, validate: [integer, positive] },
+    remaining: { type: Number, required: true, min: 0, validate: integer },
     expires_at: { type: Date, default: null },
     reference: { type: String, default: null },
     state: { type: String, required: true, enum: ["active","depleted","expired"] },
@@ -40,6 +40,7 @@ const lots = new Schema(
   collectionOptions("wallet.lots"),
 );
 lots.index({"customer_id":1,"state":1,"expires_at":1}, {"name":"lots_customer_id_state_expires_at_942b5e"});
+lots.index({"state":1,"expires_at":1}, {"name":"lots_state_expires_at_7df19b","partialFilterExpression":{"state":"active"}});
 
 /** Append-only; balance is the sum of entries */
 const ledger = new Schema(
@@ -67,6 +68,8 @@ const ledger = new Schema(
 ledger.index({"customer_id":1,"at":1}, {"name":"ledger_customer_id_at_4e57ca"});
 ledger.index({"idempotency_key":1}, {"name":"ledger_idempotency_key_9416f7","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
 ledger.index({"refund_id":1,"kind":1}, {"name":"ledger_refund_id_kind_912ccd","unique":true,"partialFilterExpression":{"$and":[{"refund_id":{"$type":"string"}},{"refund_id":{"$type":"string"}}]}});
+ledger.index({"order_id":1}, {"name":"ledger_order_id_9876c3","partialFilterExpression":{"order_id":{"$type":"string"}}});
+ledger.index({"hold_id":1}, {"name":"ledger_hold_id_d89f1e","partialFilterExpression":{"hold_id":{"$type":"string"}}});
 
 const holds = new Schema(
   {
@@ -74,8 +77,8 @@ const holds = new Schema(
     customer_id: { type: String, required: true },
     quote_id: { type: String, required: true },
     order_id: { type: String, default: null },
-    amount: { type: Number, required: true, validate: integer },
-    state: { type: String, required: true },
+    amount: { type: Number, required: true, validate: [integer, positive] },
+    state: { type: String, required: true, enum: ["held","captured","released"] },
     expires_at: { type: Date, required: true },
     idempotency_key: { type: String, required: true },
     /** lock-by-write counter (kernel/mongo/table.ts) */
@@ -84,6 +87,9 @@ const holds = new Schema(
   collectionOptions("wallet.holds"),
 );
 holds.index({"idempotency_key":1}, {"name":"holds_idempotency_key_b82ef6","unique":true});
+holds.index({"quote_id":1}, {"name":"holds_quote_id_0d2e74","unique":true,"partialFilterExpression":{"state":"held"}});
+holds.index({"state":1,"expires_at":1}, {"name":"holds_state_expires_at_26fb45"});
+holds.index({"customer_id":1,"state":1}, {"name":"holds_customer_id_state_4f9ba7"});
 
 /** Issued batches. The plain codes are kept only encrypted (secret-store key) until the issuer downloads them once or giftCardCodesTtlHours pass, then cleared; cards keep only code hashes */
 const gift_card_batches = new Schema(
@@ -118,7 +124,7 @@ const goodwill_grants = new Schema(
   {
     _id: { type: String, required: true }, // id
     customer_id: { type: String, required: true },
-    amount: { type: Number, required: true, validate: integer },
+    amount: { type: Number, required: true, validate: [integer, positive] },
     currency: { type: String, required: true },
     reason: { type: String, required: true },
     reason_code: { type: String, required: true },
@@ -126,7 +132,7 @@ const goodwill_grants = new Schema(
     order_id: { type: String, default: null },
     charged_to: { type: String, required: true },
     seller_id: { type: String, default: null },
-    state: { type: String, required: true },
+    state: { type: String, required: true, enum: ["pending_approval","granted","rejected","reversed"] },
     approval_request_id: { type: String, default: null },
     requested_by: { type: String, required: true },
     decided_by: { type: String, default: null },
@@ -141,6 +147,8 @@ const goodwill_grants = new Schema(
 goodwill_grants.index({"idempotency_key":1}, {"name":"goodwill_grants_idempotency_key_b82ef6","unique":true});
 goodwill_grants.index({"state":1,"created_at":1}, {"name":"goodwill_grants_state_created_at_b9168f"});
 goodwill_grants.index({"customer_id":1,"created_at":1}, {"name":"goodwill_grants_customer_id_created_at_a89138"});
+goodwill_grants.index({"approval_request_id":1}, {"name":"goodwill_grants_approval_request_id_7e5ff9","partialFilterExpression":{"approval_request_id":{"$type":"string"}}});
+goodwill_grants.index({"ledger_entry_id":1}, {"name":"goodwill_grants_ledger_entry_id_b1fdb3","partialFilterExpression":{"ledger_entry_id":{"$type":"string"}}});
 
 const gift_cards = new Schema(
   {
@@ -148,10 +156,10 @@ const gift_cards = new Schema(
     code_hash: { type: String, required: true },
     code_last4: { type: String, required: true },
     batch_id: { type: String, default: null },
-    initial: { type: Number, required: true, validate: integer },
-    remaining: { type: Number, required: true, validate: integer },
+    initial: { type: Number, required: true, validate: [integer, positive] },
+    remaining: { type: Number, required: true, min: 0, validate: integer },
     currency: { type: String, required: true },
-    state: { type: String, required: true },
+    state: { type: String, required: true, enum: ["issued","active","redeemed","voided","expired"] },
     purpose: { type: String, required: true },
     expires_at: { type: Date, default: null },
     redeemed_by: { type: String, default: null },
@@ -164,6 +172,9 @@ const gift_cards = new Schema(
   collectionOptions("wallet.gift_cards"),
 );
 gift_cards.index({"code_hash":1}, {"name":"gift_cards_code_hash_aa554f","unique":true});
+gift_cards.index({"batch_id":1,"created_at":1}, {"name":"gift_cards_batch_id_created_at_bbedaa"});
+gift_cards.index({"code_last4":1}, {"name":"gift_cards_code_last4_d4e903"});
+gift_cards.index({"state":1,"expires_at":1}, {"name":"gift_cards_state_expires_at_26fb45"});
 
 /** Staff balance corrections. One within the caller's adjustment limit is applied at once (state applied); one above it is saved pending_approval with its access approval request and applied (or rejected, or failed when the credit is no longer there) on access.approval.decided */
 const credit_corrections = new Schema(
@@ -206,6 +217,7 @@ const loyalty_entries = new Schema(
   },
   collectionOptions("wallet.loyalty_entries"),
 );
+loyalty_entries.index({"customer_id":1,"at":1}, {"name":"loyalty_entries_customer_id_at_4e57ca"});
 
 /** Table name → schema */
 export const schemas = {

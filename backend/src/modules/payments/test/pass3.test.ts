@@ -3,7 +3,6 @@
  * new key, one failing intent never stops the walk); orphan amounts are card money only, with the store credit
  * apart; a payment pending check keeps its store-credit hold alive (wallet.extendHold, real wallet).
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { WalletPublicApi } from '../../../spec/wallet.js';
@@ -131,12 +130,12 @@ describe('a payment pending check keeps its store-credit hold alive', () => {
     }
     const i = (await intent(auth.intentId))!;
     expect(i.status).toBe('pending_check');
-    const db = h.app.kernel.database.kysely;
-    const row = (await sql<{ state: string; expires_at: Date }>`select state, expires_at from wallet.holds where id = ${hold.id}`.execute(db)).rows[0]!;
+    const holds = h.app.kernel.mongo.db.collection<{ _id: string; state: string; expires_at: Date }>('wallet.holds');
+    const row = (await holds.findOne({ _id: hold.id }))!;
     expect(row.state).toBe('held');
     expect(row.expires_at.getTime()).toBe(i.next_check_at!.getTime() + Intents.HOLD_MARGIN_MS);
     await h.run('wallet.release-stale-holds');
-    expect((await sql<{ state: string }>`select state from wallet.holds where id = ${hold.id}`.execute(db)).rows[0]!.state).toBe('held');
+    expect((await holds.findOne({ _id: hold.id }))!.state).toBe('held');
     expect((await wallet.getBalance(customerId)).held).toEqual(USD(1_500));
   });
 });

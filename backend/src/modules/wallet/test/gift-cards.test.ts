@@ -3,16 +3,15 @@
  * for one download, check and redemption into store credit (rate-limited), void and expiry; and the loyalty
  * placeholder.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
-import { DAY, harness, idem, USD, type Harness } from './helpers.js';
+import { DAY, harness, idem, USD, walletTable, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
-  // gift card attempts counted in kernel.rate_limits, as in production
-  h = await harness({ config: { rateLimitStore: 'postgres' } });
+  // gift card attempts counted in kernel.rate_limits (MongoDB), as in production
+  h = await harness({ config: { rateLimitStore: 'mongo' } });
   h.settings['wallet.giftCardsEnabled'] = true;
 });
 afterAll(async () => {
@@ -27,7 +26,8 @@ const STORE = '/api/store/wallet';
 /** One issuer: only the staff member who issued a batch may download its codes */
 const ISSUER = newId();
 const manager = (accountId = ISSUER) => h.staff(['wallet.gift_cards.manage'], accountId);
-const db = () => h.app.kernel.database.kysely;
+const table = (name: Parameters<typeof walletTable>[1]) => walletTable(h.app, name);
+const pick = (row: Record<string, unknown> | undefined, cols: string[]) => (row ? Object.fromEntries(cols.map((c) => [c, row[c]])) : undefined);
 
 /** The batch's codes through GET /gift-cards/batches/{id}/codes */
 async function download(batchId: string, token = manager()) {
@@ -55,8 +55,8 @@ describe('issuing', () => {
     expect(Math.abs(new Date(res.body.codesAvailableUntil).getTime() - until.getTime())).toBeLessThan(5_000);
 
     // the batch row holds the codes only sealed
-    const sealed = await sql<{ codes_ciphertext: string | null; status: string; count: number; amount: number; codes_delivered_at: Date | null }>`select codes_ciphertext, status, count, amount, codes_delivered_at from wallet.gift_card_batches where id = ${res.body.batchId}`.execute(db());
-    expect(sealed.rows[0]).toMatchObject({ status: 'issued', count: 3, amount: 2500, codes_delivered_at: null, codes_ciphertext: expect.any(String) });
+    const sealed = pick(await table('gift_card_batches').get(res.body.batchId), ['codes_ciphertext', 'status', 'count', 'amount', 'codes_delivered_at']);
+    expect(sealed).toMatchObject({ status: 'issued', count: 3, amount: 2500, codes_delivered_at: null, codes_ciphertext: expect.any(String) });
 
     const file = await download(res.body.batchId);
     expect(file.status, JSON.stringify(file.body)).toBe(200);
@@ -65,23 +65,23 @@ describe('issuing', () => {
     expect(new Set(codes).size).toBe(3);
     expect(codes[0]).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
     const plain = codes.map((c) => c.replace(/-/g, ''));
-    for (const c of [...codes, ...plain]) expect(sealed.rows[0]!.codes_ciphertext).not.toContain(c);
+    for (const c of [...codes, ...plain]) expect(sealed!.codes_ciphertext as string).not.toContain(c);
     expect(doc.text).toBe(['code', ...codes].join('\n') + '\n');
 
     // downloadable once: the sealed copy is deleted
     const again = await download(res.body.batchId);
     expect(again.status).toBe(410);
     expect(again.body.error.code).toBe('GIFT_CARD_CODES_UNAVAILABLE');
-    const after = await sql<{ codes_ciphertext: string | null; codes_delivered_at: Date | null }>`select codes_ciphertext, codes_delivered_at from wallet.gift_card_batches where id = ${res.body.batchId}`.execute(db());
-    expect(after.rows[0]).toMatchObject({ codes_ciphertext: null, codes_delivered_at: expect.any(Date) });
+    const after = pick(await table('gift_card_batches').get(res.body.batchId), ['codes_ciphertext', 'codes_delivered_at']);
+    expect(after).toMatchObject({ codes_ciphertext: null, codes_delivered_at: expect.any(Date) });
 
     // a retry is the same batch (no new cards, no new codes)
     const retry = { body: await h.service.giftCards.issue({ count: 3, amount: USD(2500), purpose: 'customer_service', reason: 'Service recovery' }, { actor: { kind: 'staff', id: ISSUER } }, key['idempotency-key']) };
     expect(retry.body).toEqual({ batchId: res.body.batchId, count: 3, total: USD(7500), status: 'issued', codesFileId: doc.id, codesAvailableUntil: null });
 
-    const raw = await sql<{ code_hash: string; code_last4: string; state: string }>`select code_hash, code_last4, state from wallet.gift_cards where batch_id = ${res.body.batchId}`.execute(db());
-    expect(raw.rows).toHaveLength(3);
-    for (const r of raw.rows) {
+    const raw = await table('gift_cards').find({ batch_id: res.body.batchId });
+    expect(raw).toHaveLength(3);
+    for (const r of raw) {
       expect(plain).not.toContain(r.code_hash);
       expect(r.code_hash).toMatch(/^[0-9a-f]{64}$/);
       expect(r.state).toBe('active');
@@ -120,8 +120,8 @@ describe('issuing', () => {
       expect(late.status).toBe(410);
       expect(late.body.error.code).toBe('GIFT_CARD_CODES_UNAVAILABLE');
       await h.app.kernel.jobs.runNow('wallet.release-stale-holds');
-      const row = await sql<{ codes_ciphertext: string | null; codes_delivered_at: Date | null }>`select codes_ciphertext, codes_delivered_at from wallet.gift_card_batches where id = ${res.body.batchId}`.execute(db());
-      expect(row.rows[0]).toEqual({ codes_ciphertext: null, codes_delivered_at: null });
+      const row = pick(await table('gift_card_batches').get(res.body.batchId), ['codes_ciphertext', 'codes_delivered_at']);
+      expect(row).toEqual({ codes_ciphertext: null, codes_delivered_at: null });
     } finally {
       delete h.settings['wallet.giftCardCodesTtlHours'];
     }
@@ -142,8 +142,7 @@ describe('issuing', () => {
     await h.decide(req.id, 'approved'); // redelivered: nothing more
     const listed = await h.call('GET', `${ADMIN}/gift-cards?batchId=${batchId}&limit=100`, manager());
     expect(listed.body.items).toHaveLength(100);
-    const count = await sql<{ n: number }>`select count(*)::int as n from wallet.gift_cards where batch_id = ${batchId}`.execute(db());
-    expect(count.rows[0]!.n).toBe(200);
+    expect(await table('gift_cards').count({ batch_id: batchId })).toBe(200);
     expect(h.named('wallet.gift_card.issued')).toContainEqual({ batchId, count: 200, total: USD(1_000_000), purpose: 'sold' });
     const file = await download(batchId);
     expect(file.status).toBe(200);
@@ -156,8 +155,7 @@ describe('issuing', () => {
     const res = await h.call('POST', `${ADMIN}/gift-cards`, manager(), { count: 5, amount: USD(5000), purpose: 'sold', reason: 'Retail partner' }, key);
     const req = h.approvals.find((a) => a.target.id === res.body.batchId)!;
     await h.decide(req.id, 'rejected');
-    const row = await sql<{ status: string }>`select status from wallet.gift_card_batches where id = ${res.body.batchId}`.execute(db());
-    expect(row.rows[0]!.status).toBe('rejected');
+    expect((await table('gift_card_batches').get(res.body.batchId))!.status).toBe('rejected');
     expect((await h.call('GET', `${ADMIN}/gift-cards?batchId=${res.body.batchId}`, manager())).body.items).toHaveLength(0);
     expect((await download(res.body.batchId)).status).toBe(410);
   });
@@ -256,7 +254,7 @@ describe('loyalty (phase 4 experiment)', () => {
     expect(off.status).toBe(501);
     expect(off.body.error.code).toBe('NOT_IMPLEMENTED');
     h.settings['wallet.loyaltyEnabled'] = true;
-    await sql`insert into wallet.loyalty_entries (id, customer_id, points, kind, order_id, at) values (${newId()}, ${c.id}, 120, 'earned', null, now())`.execute(h.app.kernel.database.kysely);
+    await table('loyalty_entries').insert({ id: newId(), customer_id: c.id, points: 120, kind: 'earned', order_id: null, at: h.clock.now() });
     const on = await h.call('GET', `${STORE}/loyalty`, c.token);
     expect(on.body).toEqual({ customerId: c.id, points: 120, tier: null, pendingPoints: 0, programTerms: null });
   });

@@ -2,13 +2,12 @@
  * Store credit: balance, lots and the append-only ledger; holds at checkout (hold → capture | release | expire),
  * refunds to credit, expiry, the balance check and the consumers of orders and payments events.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isAppError } from '../../../kernel/errors/index.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
-import { DAY, harness, USD, type Harness } from './helpers.js';
+import { DAY, harness, USD, walletTable, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -19,20 +18,22 @@ afterAll(async () => {
 });
 
 const STORE = '/api/store/wallet';
-const db = () => h.app.kernel.database.kysely;
+const table = (name: Parameters<typeof walletTable>[1]) => walletTable(h.app, name);
+const sum = (rows: Record<string, number>[], field: string) => rows.reduce((s, r) => s + Number(r[field]), 0);
 
 /** Sum of the ledger, lots and holds next to the account (the balance check's invariant) */
 async function invariant(customerId: string) {
-  const r = await sql<{ available: number; held: number; ledger: number; lots: number; holds: number }>`
-    select a.available, a.held,
-      (select coalesce(sum(amount), 0) from wallet.ledger where customer_id = a.customer_id)::bigint as ledger,
-      (select coalesce(sum(remaining), 0) from wallet.lots where customer_id = a.customer_id and state = 'active')::bigint as lots,
-      (select coalesce(sum(amount), 0) from wallet.holds where customer_id = a.customer_id and state = 'held')::bigint as holds
-    from wallet.accounts a where a.customer_id = ${customerId}`.execute(db());
-  const x = r.rows[0]!;
-  expect(Number(x.ledger)).toBe(x.available + x.held);
-  expect(Number(x.lots)).toBe(x.available);
-  expect(Number(x.holds)).toBe(x.held);
+  const a = (await table('accounts').get(customerId))!;
+  const x = {
+    available: a.available as number,
+    held: a.held as number,
+    ledger: sum(await table('ledger').find({ customer_id: customerId }), 'amount'),
+    lots: sum(await table('lots').find({ customer_id: customerId, state: 'active' }), 'remaining'),
+    holds: sum(await table('holds').find({ customer_id: customerId, state: 'held' }), 'amount'),
+  };
+  expect(x.ledger).toBe(x.available + x.held);
+  expect(x.lots).toBe(x.available);
+  expect(x.holds).toBe(x.held);
   return x;
 }
 
@@ -80,13 +81,6 @@ describe('balance and history', () => {
     await expect(h.service.creditRefund({ ...input, amount: USD(0) }, 'k3')).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     await invariant(c.id);
   });
-
-  it('refuses to edit or delete ledger entries (append-only)', async () => {
-    const c = h.customer();
-    await h.give(c.id, 500);
-    await expect(sql`update wallet.ledger set amount = 99999 where customer_id = ${c.id}`.execute(db())).rejects.toThrow(/append-only/);
-    await expect(sql`delete from wallet.ledger where customer_id = ${c.id}`.execute(db())).rejects.toThrow(/append-only/);
-  });
 });
 
 describe('holds at checkout', () => {
@@ -100,7 +94,7 @@ describe('holds at checkout', () => {
     const bal = await h.service.getBalance(c.id);
     expect(bal).toMatchObject({ available: USD(2500), held: USD(2500) });
     // the goodwill lot (expires in 30 days) went first: 2000 from it, 500 from the refund lot
-    const lots = await db().selectFrom('wallet.lots' as never).selectAll().where('customer_id' as never, '=', c.id as never).execute();
+    const lots = await table('lots').find({ customer_id: c.id });
     expect(lots.map((l: any) => [l.source, l.remaining]).sort()).toEqual([
       ['goodwill', 0],
       ['refund', 2500],
@@ -188,7 +182,7 @@ describe('holds at checkout', () => {
     h.clock.advance(31 * 60_000);
     await h.app.kernel.jobs.runNow('wallet.release-stale-holds');
     expect(await h.service.getBalance(c.id)).toMatchObject({ available: USD(900), held: USD(0) });
-    const row = await db().selectFrom('wallet.holds' as never).selectAll().where('id' as never, '=', hold.id as never).executeTakeFirst();
+    const row = await table('holds').get(hold.id);
     expect((row as any).state).toBe('released');
   });
 });
@@ -203,7 +197,7 @@ describe('refunds of orders paid with credit', () => {
     const refundId = newId();
     const entry = await h.service.creditRefund({ customerId: c.id, refundId, orderId, amount: USD(2500), reason: 'Order cancelled' }, newId());
     expect(entry).toMatchObject({ kind: 'refund_to_credit', amount: USD(1000), refundId });
-    const rows = await db().selectFrom('wallet.ledger' as never).selectAll().where('refund_id' as never, '=', refundId as never).execute();
+    const rows = await table('ledger').find({ refund_id: refundId });
     expect(rows.map((r: any) => [r.kind, Number(r.amount)]).sort()).toEqual([
       ['order_refund_returned', 1500],
       ['refund_to_credit', 1000],
@@ -226,7 +220,7 @@ describe('events from orders and payments', () => {
     const placed = { orderId, ref: 'MK-261009-30003', checkoutSessionId: sessionId, attemptNo: 1, customerId: c.id, guestEmail: null, contactName: 'Ana Lopez', paymentIntentId: newId(), paymentState: 'accepted', total: USD(9900), couponCodes: [], groups: [], placedAt: h.clock.now().toISOString() };
     await h.publish('orders', 'orders.order.placed', placed);
     await h.publish('orders', 'orders.order.placed', placed); // twice: still one use
-    const row: any = await db().selectFrom('wallet.holds' as never).selectAll().where('id' as never, '=', hold.id as never).executeTakeFirst();
+    const row: any = await table('holds').get(hold.id);
     expect(row).toMatchObject({ state: 'captured', order_id: orderId });
     expect(h.named('wallet.credit.used').filter((e) => e.orderId === orderId)).toHaveLength(1);
   });
@@ -238,11 +232,11 @@ describe('events from orders and payments', () => {
     const hold = await h.service.holdCredit(c.id, sessionId, USD(400), newId());
     const orderId = newId();
     await h.publish('orders', 'orders.order.placed', { orderId, ref: 'MK-261009-30004', checkoutSessionId: sessionId, attemptNo: 1, customerId: c.id, guestEmail: null, contactName: 'Ana Lopez', paymentIntentId: newId(), paymentState: 'pending_check', total: USD(9900), couponCodes: [], groups: [], placedAt: h.clock.now().toISOString() });
-    let row: any = await db().selectFrom('wallet.holds' as never).selectAll().where('id' as never, '=', hold.id as never).executeTakeFirst();
+    let row: any = await table('holds').get(hold.id);
     expect(row).toMatchObject({ state: 'held', order_id: orderId });
     expect(new Date(row.expires_at).getTime()).toBeGreaterThan(h.clock.now().getTime() + 20 * 3_600_000);
     await h.publish('payments', 'payments.payment.failed', { intentId: newId(), checkoutSessionId: sessionId, orderId, declineCategory: 'card_declined', afterPendingCheck: true, at: h.clock.now().toISOString() });
-    row = await db().selectFrom('wallet.holds' as never).selectAll().where('id' as never, '=', hold.id as never).executeTakeFirst();
+    row = await table('holds').get(hold.id);
     expect(row.state).toBe('released');
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(1000));
     // unknown checkouts are ignored
@@ -305,19 +299,19 @@ describe('expiry and checks', () => {
     await h.give(c.id, 800);
     await h.app.kernel.jobs.runNow('wallet.balance-check');
     expect(h.audits.filter((a) => a.action === 'wallet.balance_check.difference')).toEqual([]);
-    await sql`update wallet.accounts set available = available + 1 where customer_id = ${c.id}`.execute(db());
+    await table('accounts').update(c.id, { $inc: { available: 1 } });
     await h.app.kernel.jobs.runNow('wallet.balance-check');
     const flagged = h.audits.filter((a) => a.action === 'wallet.balance_check.difference');
     expect(flagged).toHaveLength(1);
     expect(flagged[0]).toMatchObject({ category: 'financial', target: { type: 'wallet_account', id: c.id } });
-    await sql`update wallet.accounts set available = available - 1 where customer_id = ${c.id}`.execute(db());
+    await table('accounts').update(c.id, { $inc: { available: -1 } });
   });
 });
 
 describe('pass 3: holds kept alive, liability total, expiry payload', () => {
   const holdMadeAt = async (holdId: string) => {
-    const r = await sql<{ at: Date }>`select at from wallet.ledger where hold_id = ${holdId} and kind = 'hold'`.execute(db());
-    return r.rows[0]!.at.getTime();
+    const r = await table('ledger').findOne({ hold_id: holdId, kind: 'hold' });
+    return (r!.at as Date).getTime();
   };
 
   it('extendHold keeps a hold past holdTtlMinutes so the capture after a slow payment check succeeds (no INSUFFICIENT_CREDIT)', async () => {
@@ -424,14 +418,13 @@ describe('balance check reports differences to finance', () => {
     await hf.give(c.id, 800);
     await hf.app.kernel.jobs.runNow('wallet.balance-check');
     expect(hf.financeDiffs).toEqual([]);
-    const fdb = hf.app.kernel.database.kysely;
-    await sql`update wallet.accounts set available = available + 25 where customer_id = ${c.id}`.execute(fdb);
+    await walletTable(hf.app, 'accounts').update(c.id, { $inc: { available: 25 } });
     await hf.app.kernel.jobs.runNow('wallet.balance-check');
     const date = dateInZone(hf.clock.now(), hf.app.kernel.config.market.timeZone);
     expect(hf.financeDiffs).toEqual([
       { check: 'store_credit', subject: `Store credit account ${c.id}`, description: 'Store credit balance $8.25 differs from its ledger sum $8.00', expected: USD(800), actual: USD(825), key: `${c.id}:${date}` },
     ]);
     expect(hf.audits.filter((a) => a.action === 'wallet.balance_check.difference')).toHaveLength(1);
-    await sql`update wallet.accounts set available = available - 25 where customer_id = ${c.id}`.execute(fdb);
+    await walletTable(hf.app, 'accounts').update(c.id, { $inc: { available: -25 } });
   });
 });

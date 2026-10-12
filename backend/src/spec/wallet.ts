@@ -600,7 +600,7 @@ export interface WalletDb {
   lots: {
     id: string;
     customer_id: string;
-    source: string;
+    source: 'refund' | 'goodwill' | 'price_adjustment' | 'gift_card' | 'correction';
     original: number;
     remaining: number;
     expires_at: Date | null;
@@ -632,7 +632,7 @@ export interface WalletDb {
     quote_id: string;
     order_id: string | null;
     amount: number;
-    state: string;
+    state: 'held' | 'captured' | 'released';
     expires_at: Date;
     idempotency_key: string;
   };
@@ -668,7 +668,7 @@ export interface WalletDb {
     order_id: string | null;
     charged_to: string;
     seller_id: string | null;
-    state: string;
+    state: 'pending_approval' | 'granted' | 'rejected' | 'reversed';
     approval_request_id: string | null;
     requested_by: string;
     decided_by: string | null;
@@ -684,7 +684,7 @@ export interface WalletDb {
     initial: number;
     remaining: number;
     currency: string;
-    state: string;
+    state: 'issued' | 'active' | 'redeemed' | 'voided' | 'expired';
     purpose: string;
     expires_at: Date | null;
     redeemed_by: string | null;
@@ -1835,14 +1835,16 @@ export const spec = defineModuleSpec({
                 "int",
                 "long",
                 "double"
-              ]
+              ],
+              "minimum": 0
             },
             "held": {
               "bsonType": [
                 "int",
                 "long",
                 "double"
-              ]
+              ],
+              "minimum": 0
             },
             "updated_at": {
               "bsonType": "date"
@@ -1915,21 +1917,31 @@ export const spec = defineModuleSpec({
               "bsonType": "string"
             },
             "source": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "refund",
+                "goodwill",
+                "price_adjustment",
+                "gift_card",
+                "correction"
+              ]
             },
             "original": {
               "bsonType": [
                 "int",
                 "long",
                 "double"
-              ]
+              ],
+              "minimum": 0,
+              "exclusiveMinimum": true
             },
             "remaining": {
               "bsonType": [
                 "int",
                 "long",
                 "double"
-              ]
+              ],
+              "minimum": 0
             },
             "expires_at": {
               "bsonType": [
@@ -1965,6 +1977,16 @@ export const spec = defineModuleSpec({
             "customer_id": 1,
             "state": 1,
             "expires_at": 1
+          }
+        },
+        {
+          "name": "lots_state_expires_at_7df19b",
+          "key": {
+            "state": 1,
+            "expires_at": 1
+          },
+          "partial": {
+            "state": "active"
           }
         }
       ],
@@ -2145,6 +2167,28 @@ export const spec = defineModuleSpec({
               }
             ]
           }
+        },
+        {
+          "name": "ledger_order_id_9876c3",
+          "key": {
+            "order_id": 1
+          },
+          "partial": {
+            "order_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "name": "ledger_hold_id_d89f1e",
+          "key": {
+            "hold_id": 1
+          },
+          "partial": {
+            "hold_id": {
+              "$type": "string"
+            }
+          }
         }
       ],
       "unenforced": []
@@ -2213,10 +2257,17 @@ export const spec = defineModuleSpec({
                 "int",
                 "long",
                 "double"
-              ]
+              ],
+              "minimum": 0,
+              "exclusiveMinimum": true
             },
             "state": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "held",
+                "captured",
+                "released"
+              ]
             },
             "expires_at": {
               "bsonType": "date"
@@ -2235,6 +2286,30 @@ export const spec = defineModuleSpec({
             "idempotency_key": 1
           },
           "unique": true
+        },
+        {
+          "name": "holds_quote_id_0d2e74",
+          "key": {
+            "quote_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "state": "held"
+          }
+        },
+        {
+          "name": "holds_state_expires_at_26fb45",
+          "key": {
+            "state": 1,
+            "expires_at": 1
+          }
+        },
+        {
+          "name": "holds_customer_id_state_4f9ba7",
+          "key": {
+            "customer_id": 1,
+            "state": 1
+          }
         }
       ],
       "unenforced": []
@@ -2495,7 +2570,9 @@ export const spec = defineModuleSpec({
                 "int",
                 "long",
                 "double"
-              ]
+              ],
+              "minimum": 0,
+              "exclusiveMinimum": true
             },
             "currency": {
               "bsonType": "string"
@@ -2528,7 +2605,13 @@ export const spec = defineModuleSpec({
               ]
             },
             "state": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "pending_approval",
+                "granted",
+                "rejected",
+                "reversed"
+              ]
             },
             "approval_request_id": {
               "bsonType": [
@@ -2581,6 +2664,28 @@ export const spec = defineModuleSpec({
           "key": {
             "customer_id": 1,
             "created_at": 1
+          }
+        },
+        {
+          "name": "goodwill_grants_approval_request_id_7e5ff9",
+          "key": {
+            "approval_request_id": 1
+          },
+          "partial": {
+            "approval_request_id": {
+              "$type": "string"
+            }
+          }
+        },
+        {
+          "name": "goodwill_grants_ledger_entry_id_b1fdb3",
+          "key": {
+            "ledger_entry_id": 1
+          },
+          "partial": {
+            "ledger_entry_id": {
+              "$type": "string"
+            }
           }
         }
       ],
@@ -2664,20 +2769,30 @@ export const spec = defineModuleSpec({
                 "int",
                 "long",
                 "double"
-              ]
+              ],
+              "minimum": 0,
+              "exclusiveMinimum": true
             },
             "remaining": {
               "bsonType": [
                 "int",
                 "long",
                 "double"
-              ]
+              ],
+              "minimum": 0
             },
             "currency": {
               "bsonType": "string"
             },
             "state": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "issued",
+                "active",
+                "redeemed",
+                "voided",
+                "expired"
+              ]
             },
             "purpose": {
               "bsonType": "string"
@@ -2717,6 +2832,26 @@ export const spec = defineModuleSpec({
             "code_hash": 1
           },
           "unique": true
+        },
+        {
+          "name": "gift_cards_batch_id_created_at_bbedaa",
+          "key": {
+            "batch_id": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "gift_cards_code_last4_d4e903",
+          "key": {
+            "code_last4": 1
+          }
+        },
+        {
+          "name": "gift_cards_state_expires_at_26fb45",
+          "key": {
+            "state": 1,
+            "expires_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -2956,7 +3091,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "loyalty_entries_customer_id_at_4e57ca",
+          "key": {
+            "customer_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     }
   },

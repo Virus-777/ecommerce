@@ -20,7 +20,13 @@ afterAll(async () => {
 
 const wallet = () => w.api('wallet');
 const balance = async (customerId: string) => (await wallet().getBalance(customerId)).available.amount as number;
-const holdsOf = async (sessionId: string) => (await sql<{ id: string; state: string; idempotency_key: string; order_id: string | null }>`select id, state, idempotency_key, order_id from wallet.holds where quote_id = ${sessionId} order by expires_at`.execute(w.service.core.ctx.db)).rows;
+const holdsOf = async (sessionId: string) =>
+  (await w.app.kernel.mongo.db.collection('wallet.holds').find({ quote_id: sessionId }).sort({ expires_at: 1 }).toArray()).map((h) => ({
+    id: h._id as unknown as string,
+    state: h.state as string,
+    idempotency_key: h.idempotency_key as string,
+    order_id: h.order_id as string | null,
+  }));
 
 describe('store credit and a declined card', () => {
   it('drops the released credit hold on decline and holds the credit again on the retry', async () => {

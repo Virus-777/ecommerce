@@ -4,7 +4,6 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0004CreditCorrections } from '../infra/postgres/migrations/0004_credit_corrections.js';
 import { harness, idem, USD, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -264,17 +263,6 @@ describe('balance corrections', () => {
     expect((await h.service.getBalance(c.id)).available).toEqual(USD(700));
     const row = await h.service.core.repo.correctionByKey(key);
     expect(row).toMatchObject({ state: 'applied', approval_request_id: requestId, reference: 'OLD-1', customer_id: c.id });
-  });
-
-  it('migration 0004 backfills applied corrections from the ledger', async () => {
-    const c = h.customer();
-    const res = await h.call('POST', `${ADMIN}/customers/${c.id}/corrections`, finance(), { amount: USD(1200), reason: 'Backfill me', reference: 'BF-1' }, { 'idempotency-key': 'bf-key-1' });
-    expect(res.status).toBe(201);
-    await h.app.kernel.database.exec(`drop table wallet.credit_corrections`);
-    await h.app.kernel.database.exec(m0004CreditCorrections.sql);
-    const row = await h.service.core.repo.correctionByKey('bf-key-1');
-    expect(row).toMatchObject({ customer_id: c.id, amount: 1200, currency: 'USD', state: 'applied', ledger_entry_id: res.body.entry.id, reason: 'Backfill me' });
-    expect(JSON.parse(row!.requested_by)).toMatchObject({ kind: 'staff' });
   });
 });
 
