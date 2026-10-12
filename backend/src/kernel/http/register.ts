@@ -205,6 +205,7 @@ function registerEndpoint(app: FastifyInstance, r: EndpointRegistration, k: Http
     preValidation: hooks.preValidation,
     // conditional permissions → Idempotency-Key replay → step-up (a replay never spends a re-auth token)
     preHandler: [hooks.preHandlerBefore, ...(idempotent ? [idempotent, stepUp] : [hooks.preHandlerAfter])],
+    onSend: hooks.onSend,
     onResponse: hooks.onResponse,
     async handler(request, reply) {
       if (request.webhookDuplicate) {

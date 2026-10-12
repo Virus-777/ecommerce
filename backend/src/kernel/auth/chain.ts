@@ -8,7 +8,8 @@
  *   (preValidation)             refresh token (+ Origin and X-Requested-With for the cookie) and its per-session limit · webhook
  *                               signature + replay check + per-provider limit · rate-limit classes · step-up proof present
  *   (preHandler)                conditional permissions → [idempotency, in register.ts] → step-up proof verified
- *   (onResponse)                consume the re-auth token · record the webhook event
+ *   (onSend)                    a failed request gives its re-auth token back
+ *   (onResponse)                record the webhook event
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { sql, type Kysely } from 'kysely';
@@ -387,18 +388,25 @@ export class AuthChain {
       }
     };
 
-    const onResponse = async (request: FastifyRequest, reply: { statusCode: number }) => {
-      if (reply.statusCode >= 400) {
-        if (request.reauthToken) await k.authorities.releaseReauthToken(request.reauthToken).catch(() => {});
-        return;
+    // a failed request gives its re-auth token back before the response leaves, so an immediate retry can use it
+    const onSend = async (request: FastifyRequest, reply: { statusCode: number }, payload: unknown) => {
+      if (reply.statusCode >= 400 && request.reauthToken) {
+        const token = request.reauthToken;
+        request.reauthToken = undefined;
+        await k.authorities.releaseReauthToken(token).catch(() => {});
       }
+      return payload;
+    };
+
+    const onResponse = async (request: FastifyRequest, reply: { statusCode: number }) => {
+      if (reply.statusCode >= 400) return;
       const ev = request.auth?.provider;
       if (ev?.eventId && !request.webhookDuplicate) {
         await webhookLog(k).record(ev.name, ev.eventId).catch(() => {});
       }
     };
 
-    return { onRequest, preValidation, preHandlerBefore, preHandlerAfter, onResponse };
+    return { onRequest, preValidation, preHandlerBefore, preHandlerAfter, onSend, onResponse };
   }
 
   #matches(cond: Readonly<Record<string, string>>, request: FastifyRequest) {
