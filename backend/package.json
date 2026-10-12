@@ -16,7 +16,7 @@
     "test:watch": "vitest",
     "gen": "tsx tools/generate.ts",
     "gen:check": "tsx tools/generate.ts --check",
-    "migrate": "tsx tools/migrate.ts",
+    "migrate": "tsx --env-file-if-exists=.env tools/migrate.ts",
     "modules": "tsx tools/modules.ts",
     "module:new": "tsx tools/new-module.ts",
     "check:api": "tsx tools/check-api.ts",

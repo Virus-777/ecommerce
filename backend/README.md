@@ -100,7 +100,7 @@ Every module is built. A new module starts from its spec (`npm run module:new <n
 | `npm run test:http` | Boots all 33 modules on a real port and calls every endpoint over HTTP with input generated from the spec: no token, invalid token, another app's token, wrong caller, missing permission, missing step-up, right token. `-- --only a,b` limits it to modules; `-- --url http://localhost:4000` tests a running dev server (`RATE_LIMITS=false`); report in `.data/test-http-report.json` |
 | `npm run modules` | Phase, on/off, version, endpoints built, dependencies, load order; `--graph` (Mermaid), `--without <m>` |
 | `npm run module:new <name>` | Scaffold a module from a new spec file |
-| `npm run migrate` | Apply migrations to `DATABASE_URL` or `PGLITE_DIR`, and pg-boss's tables when jobs run on pg-boss |
+| `npm run migrate` | Apply migrations to `DATABASE_URL` or `PGLITE_DIR` (read from `.env` when it exists), and pg-boss's tables when jobs run on pg-boss. In a `DATABASE_URL`, percent-encode special characters in the password (`@` → `%40`, `#` → `%23`, `!` → `%21`) and don't quote it |
 | `npm run token -- <visitor\|customer\|seller\|staff>` | Development token, valid 12 h (`--permissions a,b`, `--seller <id>`, `--account <id>`, `--audience store\|seller\|admin`) |
 
 ## Configuration
