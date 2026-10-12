@@ -143,7 +143,7 @@ describe('Fulfilled by Marketly, end to end', () => {
     w.ownOfferId = own.offer.id;
     await app.kernel.events.drain();
 
-    // with fulfillment-service running, the products_inventory template grants (sellers migration 0004) were applied at start
+    // with fulfillment-service running, the products_inventory template grants (sellers domain/seed.ts) were applied at start
     const grants = await (app.kernel.boot.apis.get('sellers') as { core: { repo: { find(t: string, w: object): Promise<{ applied_at: Date | null }[]> } } }).core.repo.find('template_grants', {});
     expect(grants.length).toBe(2);
     expect(grants.every((g) => g.applied_at !== null)).toBe(true);

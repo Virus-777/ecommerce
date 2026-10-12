@@ -5,6 +5,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { specs } from '../../../spec/index.js';
 import type { InviteMemberInput, PermissionEntry, SellerMember, SellerRoleTemplate } from '../../../spec/sellers.js';
 import { permissionCatalogue, ROLE_TEMPLATES, ROLE_TEXT } from '../domain/catalogue.js';
+import { TEMPLATE_GRANTS } from '../domain/seed.js';
 import { sellerMemberMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
 import type { MemberRec, SellerRec, SellersRepository } from '../ports.js';
@@ -324,12 +325,14 @@ export class MembersPart extends Part {
   }
 
   /**
-   * Template permissions added after members were invited with the template (template_grants, migration 0004): each
-   * grant whose key is in this process's catalogue (its module runs) is applied once to the open, non-owner members
-   * of the template who lack it, and marked applied. Grants of modules that are off wait for a start where they run.
-   * Runs after boot; safe when several instances start together (the grant row is locked).
+   * Template permissions added after members were invited with the template (template_grants, seeded from
+   * domain/seed.ts): each grant whose key is in this process's catalogue (its module runs) is applied once to the
+   * open, non-owner members of the template who lack it, and marked applied. Grants of modules that are off wait for a
+   * start where they run. Runs after boot; safe when several instances start together (the grant row is locked).
    */
   async applyTemplateGrants(): Promise<number> {
+    const at = this.now();
+    await this.repo.seedTemplateGrants(TEMPLATE_GRANTS.map((g) => ({ id: newId(), template: g.template, permission: g.permission, created_at: at, applied_at: null, members_updated: null })));
     const known = new Set(this.allSellerKeys());
     const pending = (await this.repo.find('template_grants', { applied_at: null })).filter((g) => known.has(g.permission));
     let updated = 0;

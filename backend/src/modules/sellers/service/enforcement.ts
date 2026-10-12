@@ -1134,7 +1134,7 @@ export class EnforcementPart extends Part {
   async onEnforcementReversed(e: EventPayload<'trust.enforcement.reversed'>, eventId?: string) {
     if (!['restrict_seller', 'warn_seller', 'suspend_seller'].includes(e.action)) return;
     const key = `trust-enforcement-reversed:${eventId ?? e.enforcementId}`;
-    if (await this.ctx.inbox.seen(this.ctx.db, key)) return;
+    if (await this.ctx.mongo.seen(key)) return;
     const by: By = { actor: e.reversedBy?.kind === 'staff' ? e.reversedBy : { ...TRUST_TEAM } };
     const reason = `Reversed by Trust and Risk (${e.ref}): ${e.reason}`;
     const sellerIds = new Set((e.targets ?? []).filter((t) => t?.type === 'seller' && isUuid(t.id)).map((t) => t.id));
@@ -1175,7 +1175,7 @@ export class EnforcementPart extends Part {
       if (legacy?.state === 'open' && !rows.some((r) => r.id === legacy.id) && mine([legacy]).length) rows.push(legacy);
       for (const w of rows) await this.resolveWarning(w.id, reason, by);
     }
-    await this.ctx.inbox.claim(this.ctx.db, key);
+    await this.ctx.mongo.claim(key);
   }
 
   /* ---------------------------------------------------------------- jobs */

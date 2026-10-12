@@ -548,7 +548,7 @@ const account_events = new Schema(
 );
 account_events.index({"seller_id":1,"at":-1}, {"name":"account_events_seller_id_at_b94f3a"});
 
-/** Permissions added to a member role template after members were invited with it (migration 0004: the two Fulfilled by Marketly keys of products_inventory). Applied once, on the first start where the permission's module runs, to the open members of that template who lack it */
+/** Permissions added to a member role template after members were invited with it (seeded on boot from domain/seed.ts: the two Fulfilled by Marketly keys of products_inventory). Applied once, on the first start where the permission's module runs, to the open members of that template who lack it */
 const template_grants = new Schema(
   {
     _id: { type: String, required: true }, // id

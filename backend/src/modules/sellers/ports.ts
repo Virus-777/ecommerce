@@ -1,6 +1,6 @@
 /**
  * What the sellers service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; providers (verification, payout tokenisation,
+ * The MongoDB adapter lives in infra/mongo/; providers (verification, payout tokenisation,
  * address checks) have deterministic dev adapters in infra/providers/.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
@@ -36,6 +36,7 @@ export type AccountEventRec = Db['account_events'];
 export type InvitationRec = Db['seller_invitations'];
 export type PayoutChangeRec = Db['payout_changes'];
 export type PendingChangeRec = Db['pending_changes'];
+export type TemplateGrantRec = Db['template_grants'];
 
 /** A column condition: a value (=), a list (in), null (is null) or an operator */
 export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not'; value: V | null };
@@ -114,6 +115,10 @@ export interface SellersRepository {
   performanceFacts(sellerId: string, since: Date): Promise<PerformanceFacts[]>;
   unresolvedCasesPastDeadline(sellerId: string, nowMs: number): Promise<number>;
   latestSnapshots(sellerIds: readonly string[], perSeller: number): Promise<SnapshotRec[]>;
+
+  /* members */
+  /** Seeds template grants (domain/seed.ts) that are not there yet, by (template, permission); safe on concurrent starts */
+  seedTemplateGrants(rows: readonly TemplateGrantRec[]): Promise<void>;
 
   /* jobs */
   deleteDocumentsDue(today: string, limit: number): Promise<DocumentRec[]>;

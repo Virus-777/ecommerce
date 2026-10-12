@@ -46,7 +46,7 @@ describe('products_inventory template', () => {
   });
 });
 
-describe('template grants (migration 0004): the two keys reach members invited with products_inventory before', () => {
+describe('template grants (seeded on boot from domain/seed.ts): the two keys reach members invited with products_inventory before', () => {
   const FS_KEYS = ['fulfillment-service.inbound.manage', 'fulfillment-service.fees.view'];
 
   it('wait while fulfillment-service is off, then are applied once to the open products_inventory members who lack them', async () => {
