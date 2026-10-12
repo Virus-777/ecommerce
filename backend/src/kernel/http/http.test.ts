@@ -7,22 +7,23 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as common from '../../spec/common.js';
 import { auth, callers, ISSUER, TEST_JWK, token } from '../../testing/app.js';
+import { testMongo } from '../../testing/mongo.js';
 import { devClaims } from '../auth/dev.js';
 import { moduleAuthorities } from '../auth/authorities.js';
 import { signFileLink } from '../auth/file-links.js';
-import type { AuthChain } from '../auth/chain.js';
+import { mongoWebhookEventLog, type AuthChain } from '../auth/chain.js';
 import { principalOf } from '../auth/index.js';
 import { CALLER_LIMITS, memoryRateLimitStore, REFRESH_LIMIT, WEBHOOK_LIMIT } from '../auth/rate-limit.js';
 import { createAuthChain } from '../auth/setup.js';
 import { devSigner, newDevJwk, signAccessToken } from '../auth/tokens.js';
 import { loadConfig } from '../config/index.js';
-import { createDatabase, type Database } from '../db/index.js';
 import { AppError } from '../errors/index.js';
 import { newId } from '../lib/ids.js';
-import { migrate } from '../migrations/index.js';
+import type { MongoStore } from '../mongo/index.js';
+import { migrateMongo } from '../mongo/schema.js';
 import { defineEndpoints } from '../spec/define.js';
 import { registerFileRoute } from './files.js';
-import { postgresIdempotencyStore } from './idempotency.js';
+import { mongoIdempotencyStore } from './idempotency.js';
 import { notImplemented, routes } from './index.js';
 import { registerEndpoints, registrationsOf } from './register.js';
 import { createServer } from './server.js';
@@ -102,7 +103,7 @@ const STORE_ORIGIN = 'https://store.example';
 const SELLER_ORIGIN = 'https://seller.example';
 const FILES_SECRET = 'demo-files-secret';
 let app: FastifyInstance;
-let db: Database;
+let mongo: MongoStore;
 let chain: AuthChain;
 /** The middleware's counters (rate limits are on in this app) */
 const limits = memoryRateLimitStore({ now: () => new Date() });
@@ -110,14 +111,14 @@ const usedReauth = new Set<string>();
 
 beforeAll(async () => {
   const config = loadConfig({ NODE_ENV: 'test' }, { launchPhase: 2, devSigning: { file: '', jwk: TEST_JWK }, cors: { store: [STORE_ORIGIN], seller: [SELLER_ORIGIN], admin: [] } });
-  db = await createDatabase();
-  await migrate(db, []);
+  mongo = await testMongo();
+  await migrateMongo(mongo, []);
   app = createServer(config);
   ({ auth: chain } = await createAuthChain({
     config,
     clock: { now: () => new Date() },
     log: app.log,
-    db: db.kysely,
+    webhookEvents: mongoWebhookEventLog(mongo),
     limits,
     authorities: moduleAuthorities(() => undefined),
     // REFRESH is session-1; "refresh-session-<x>" is its own session x
@@ -138,7 +139,7 @@ beforeAll(async () => {
   registerEndpoints(app, [...registrationsOf('demo', 'Demo', sets), ...registrationsOf('acks', 'Acks', ackSets)], {
     config,
     auth: chain,
-    idempotency: postgresIdempotencyStore(db.kysely),
+    idempotency: mongoIdempotencyStore(mongo),
     sessionCookie: new Set(['demo.start']),
   });
   // the file the verified link names, as the serving module receives it
@@ -148,7 +149,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app.close();
-  await db.close();
+  await mongo.close();
 });
 
 const visitor = auth(callers.visitor());

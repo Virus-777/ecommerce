@@ -1,5 +1,5 @@
 /**
- * Test kit for cart: boots cart on in-memory PostgreSQL with an in-memory "offer world" behind stubs
+ * Test kit for cart: boots cart on the in-memory MongoDB with an in-memory "offer world" behind stubs
  * of offers, catalog (product content) and inventory availability (stock changes are published as
  * inventory.stock.changed, as inventory does). Shipping and promotions are optional: tests that need
  * them boot them and stub them.

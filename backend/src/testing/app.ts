@@ -1,14 +1,11 @@
 /**
- * Test helpers: boot the app (or a few modules) on in-memory PostgreSQL and sign requests with
+ * Test helpers: boot the app (or a few modules) on the in-memory MongoDB (testing/mongo.ts) and sign requests with
  * development tokens (EdDSA JWTs, the same format identity issues) for any kind of caller.
  */
 import type { FastifyInstance } from 'fastify';
-import { readFile } from 'node:fs/promises';
-import { inject } from 'vitest';
 import { buildApp, type BuildOptions } from '../app.js';
 import { devClaims, type DevClaims, type DevOptions } from '../kernel/auth/dev.js';
 import { devSigner, newDevJwk, signAccessToken } from '../kernel/auth/tokens.js';
-import { createDatabase, type Database } from '../kernel/db/index.js';
 import { dateInZone } from '../kernel/lib/clock.js';
 import { withDependencies } from '../kernel/module-system/loader.js';
 import { testMongo } from './mongo.js';
@@ -19,27 +16,18 @@ const signer = devSigner({ jwk: TEST_JWK });
 export const ISSUER = 'marketly-identity';
 export { signWebhook } from '../kernel/http/webhooks.js';
 
-/** A PGlite database with every module's tables, started from the dump made by global-setup.ts. */
-export async function testDatabase(): Promise<Database> {
-  return createDatabase({ pgliteDump: new Blob([await readFile(inject('pgliteDump'))]) });
-}
-
 export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}): Promise<FastifyInstance> {
-  const database = opts.database ?? (await testDatabase());
   const mongo = opts.mongo ?? (await testMongo());
   const app = await buildApp({
     env: { NODE_ENV: 'test' },
     ...opts,
-    database,
     mongo,
     modules: opts.modules ?? (opts.only ? withDependencies(opts.only) : undefined),
     config: { devTokens: true, devSigning: { file: '', jwk: TEST_JWK }, migrateOnStart: true, responseValidation: true, ...opts.config },
   }).catch(async (err) => {
-    if (!opts.database) await database.close();
     if (!opts.mongo) await mongo.close();
     throw err;
   });
-  if (!opts.database) app.addHook('onClose', () => database.close());
   if (!opts.mongo) app.addHook('onClose', () => mongo.close());
   await app.ready();
   return app;

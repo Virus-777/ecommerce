@@ -1,30 +1,32 @@
 /**
- * Rate-limit stores: the same contract in memory and in PostgreSQL (kernel.rate_limits), and two app
+ * Rate-limit stores: the same contract in memory and in MongoDB (kernel.rate_limits), and two app
  * instances on one database sharing the middleware's limits.
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../../app.js';
-import { TEST_JWK, testDatabase } from '../../testing/app.js';
-import { pgliteServer, type PgServer } from '../../testing/pg-server.js';
-import { createDatabase, type Database } from '../db/index.js';
-import { IP_LIMIT, memoryRateLimitStore, postgresRateLimitStore, type RateLimitStore } from './rate-limit.js';
+import { TEST_JWK } from '../../testing/app.js';
+import { testMongo } from '../../testing/mongo.js';
+import type { MongoStore } from '../mongo/index.js';
+import { migrateMongo } from '../mongo/schema.js';
+import { IP_LIMIT, memoryRateLimitStore, mongoRateLimitStore, type RateLimitStore } from './rate-limit.js';
 
 const HOUR = 3_600_000;
 let now = Date.parse('2026-05-04T10:15:00Z');
 const clock = { now: () => new Date(now) };
 
-let db: Database;
+let mongo: MongoStore;
 beforeAll(async () => {
-  db = await testDatabase();
+  mongo = await testMongo();
+  await migrateMongo(mongo, []);
 });
 afterAll(async () => {
-  await db?.close();
+  await mongo?.close();
 });
 
 describe.each([
   ['memory', () => memoryRateLimitStore(clock)],
-  ['postgres', () => postgresRateLimitStore(db.kysely, clock)],
+  ['mongo', () => mongoRateLimitStore(mongo, clock)],
 ])('%s store', (_name, make) => {
   let store: RateLimitStore;
   beforeAll(() => {
@@ -76,26 +78,20 @@ describe.each([
 });
 
 describe('two app instances on one database', () => {
-  let server: PgServer;
   const apps: FastifyInstance[] = [];
-  const dbs: Database[] = [];
 
   beforeAll(async () => {
-    server = await pgliteServer({ migrated: true });
+    // both apps are given the same MongoDB database, as two servers on one replica set
     for (let i = 0; i < 2; i++) {
-      const database = await createDatabase({ url: server.url });
-      dbs.push(database);
       // one fixed time for both, so the requests fall in one minute window
       const fixed = { now: () => new Date('2026-05-04T10:00:30Z') };
-      const app = await buildApp({ env: { NODE_ENV: 'test' }, database, clock: fixed, modules: [], config: { rateLimitStore: 'postgres', migrateOnStart: false, devTokens: true, devSigning: { file: '', jwk: TEST_JWK } } });
+      const app = await buildApp({ env: { NODE_ENV: 'test' }, mongo, clock: fixed, modules: [], config: { rateLimitStore: 'mongo', migrateOnStart: false, devTokens: true, devSigning: { file: '', jwk: TEST_JWK } } });
       await app.ready();
       apps.push(app);
     }
   });
   afterAll(async () => {
     for (const app of apps) await app.close();
-    for (const d of dbs) await d.close();
-    await server?.close();
   });
 
   it('share the per-IP limit', async () => {

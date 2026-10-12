@@ -1,7 +1,7 @@
 /**
  * Recipients named by the events (spec correctness pass): customerId / contactEmail on customer-facing
  * events, sellerId on case messages, seller members from sellers.listMembers / ownerOf, the invitation
- * to apply (code emailed, never stored) and idempotent consumers (ctx.inbox).
+ * to apply (code emailed, never stored) and idempotent consumers (ctx.mongo.claim).
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

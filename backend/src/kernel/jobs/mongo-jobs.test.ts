@@ -1,5 +1,5 @@
 /**
- * The MongoDB job queue (jobs/mongo.ts): the guarantees pg-boss gave, on kernel.jobs.
+ * The MongoDB job queue (jobs/mongo.ts, kernel.jobs): what several instances on one replica set rely on.
  */
 import type { FastifyBaseLogger } from 'fastify';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -131,6 +131,42 @@ describe('MongoDB job queue', () => {
     await s.start();
     await until(async () => (await store.kernel('jobs').findOne({ name: 'q.fail', state: 'failed' })) !== null);
     expect(runs).toBe(3);
+  });
+
+  it('an instance without workers enqueues and waits for one that has them', async () => {
+    let ranOn = '';
+    const worker = scheduler();
+    const web = scheduler({ workers: false });
+    for (const [s, who] of [
+      [worker, 'worker'],
+      [web, 'web'],
+    ] as const) {
+      s.declare(job('q.split'));
+      s.handle('test', 'q.split', async () => {
+        ranOn = who;
+      });
+      await s.start();
+    }
+    await web.runNow('q.split');
+    expect(ranOn).toBe('worker');
+  });
+
+  it('stop lets the run in progress finish, then nothing runs', async () => {
+    const s = scheduler();
+    let started = 0;
+    let finished = 0;
+    s.declare(job('q.slow', 'every 1 sec'));
+    s.handle('test', 'q.slow', async () => {
+      started++;
+      await sleep(300);
+      finished++;
+    });
+    await s.start();
+    await until(() => started === 1);
+    await s.stop();
+    expect(finished).toBe(started);
+    await sleep(1_500);
+    expect(started).toBe(1);
   });
 
   it('computes the next run in the market time zone', () => {

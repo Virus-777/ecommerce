@@ -1,38 +1,20 @@
 /**
  * The contract every module is held to, whatever is built inside it:
  *   - it boots with exactly its spec dependencies;
- *   - its migrations create the spec's tables and columns;
+ *   - its collections, validators and indexes in MongoDB are the spec's;
  *   - every spec endpoint is routed at the spec URL;
  *   - every endpoint answers 401 without a token, 403 WRONG_AUDIENCE for another app's token,
  *     403 FORBIDDEN (or OWNER_ONLY) without its permission;
  *   - with the right token, requests pass the middleware and validation and reach the handler.
  */
 import type { FastifyInstance } from 'fastify';
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { routeUrlOf, urlOf } from '../kernel/http/register.js';
-import { schemaOf } from '../kernel/migrations/index.js';
 import { allSpecs, specOf } from '../kernel/module-system/loader.js';
 import type { Area, AuthKind, EndpointDef } from '../kernel/spec/define.js';
 import type { Audience } from '../kernel/auth/tokens.js';
 import { auth, buildTestApp, callers } from './app.js';
 import { sampleParams } from './samples.js';
-
-const PG_TYPE: Record<string, string> = {
-  int: 'int4',
-  integer: 'int4',
-  bigint: 'int8',
-  bigserial: 'int8',
-  bool: 'bool',
-  boolean: 'bool',
-  char: 'bpchar',
-};
-
-const udtOf = (t: string): string => {
-  const base = t.replace(/\(.*\)/, '');
-  if (base.endsWith('[]')) return `_${udtOf(base.slice(0, -2))}`;
-  return PG_TYPE[base] ?? base;
-};
 
 const fill = (url: string, params: Record<string, string>) => url.replace(/\{(\w+)\}/g, (_, k: string) => encodeURIComponent(params[k] ?? 'x'));
 
@@ -68,13 +50,11 @@ export function describeModule(name: string) {
 
   describe(`${name} module`, () => {
     let app: FastifyInstance;
-    let onMongo = false;
     const ownerOnly = new Set(Object.values(allSpecs).flatMap((s) => s.permissions.filter((p) => p.ownerOnly).map((p) => p.key)));
 
     beforeAll(async () => {
       // every launch phase on, so auth and validation are exercised for later-phase endpoints too
       app = await buildTestApp({ only: [name], config: { launchPhase: 4, rateLimits: false } });
-      onMongo = app.kernel.mongoModules.includes(name);
     });
     afterAll(async () => {
       await app?.close();
@@ -86,34 +66,16 @@ export function describeModule(name: string) {
     });
 
     it('creates the collections, validators and indexes of its spec in MongoDB', async () => {
-      {
-        const db = app.kernel.mongo.db;
-        const have = new Map((await db.listCollections({ name: { $regex: `^${name.replace(/[-]/g, '\\-')}\\.` } }).toArray()).map((c) => [c.name, c]));
-        for (const [table, def] of Object.entries(spec.collections)) {
-          const c = have.get(`${name}.${table}`) as { options?: { validator?: unknown } } | undefined;
-          expect(c, `${name}.${table} exists`).toBeDefined();
-          expect(c!.options?.validator, `${name}.${table} validator`).toEqual(def.validator);
-          const indexes = new Set((await db.collection(`${name}.${table}`).listIndexes().toArray()).map((i) => i.name as string));
-          for (const i of def.indexes) expect(indexes.has(i.name), `${name}.${table} index ${i.name} (${JSON.stringify(i.key)})`).toBe(true);
-        }
-        expect(have.size, 'no collections outside the spec').toBe(Object.keys(spec.collections).length);
+      const db = app.kernel.mongo.db;
+      const have = new Map((await db.listCollections({ name: { $regex: `^${name.replace(/[-]/g, '\\-')}\\.` } }).toArray()).map((c) => [c.name, c]));
+      for (const [table, def] of Object.entries(spec.collections)) {
+        const c = have.get(`${name}.${table}`) as { options?: { validator?: unknown } } | undefined;
+        expect(c, `${name}.${table} exists`).toBeDefined();
+        expect(c!.options?.validator, `${name}.${table} validator`).toEqual(def.validator);
+        const indexes = new Set((await db.collection(`${name}.${table}`).listIndexes().toArray()).map((i) => i.name as string));
+        for (const i of def.indexes) expect(indexes.has(i.name), `${name}.${table} index ${i.name} (${JSON.stringify(i.key)})`).toBe(true);
       }
-    });
-
-    it('keeps its tables and columns in PostgreSQL until it moves to MongoDB', async () => {
-      if (onMongo) return;
-      const schema = schemaOf(name);
-      const rows = await sql<{ table_name: string; column_name: string; is_nullable: string; udt_name: string }>`
-        select table_name, column_name, is_nullable, udt_name from information_schema.columns where table_schema = ${schema}`.execute(app.kernel.database.kysely);
-      const actual = new Map(rows.rows.map((r) => [`${r.table_name}.${r.column_name}`, r]));
-      const expected = Object.entries(spec.tables).flatMap(([t, cols]) => Object.entries(cols).map(([c, d]) => ({ key: `${t}.${c}`, ...d })));
-      for (const e of expected) {
-        const a = actual.get(e.key);
-        expect(a, `${schema}.${e.key} exists`).toBeDefined();
-        expect(a!.udt_name, `${schema}.${e.key} type`).toBe(udtOf(e.type));
-        expect(a!.is_nullable === 'YES', `${schema}.${e.key} nullable`).toBe(e.nullable);
-      }
-      expect(rows.rows.length, 'no columns outside the spec').toBe(expected.length);
+      expect(have.size, 'no collections outside the spec').toBe(Object.keys(spec.collections).length);
     });
 
     it.each(endpoints)('routes %s at its spec URL', (_id, def) => {

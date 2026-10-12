@@ -1,5 +1,5 @@
 /**
- * Test kit for reviews: boots reviews with its dependencies on in-memory PostgreSQL, a movable clock,
+ * Test kit for reviews: boots reviews with its dependencies on the in-memory MongoDB, a movable clock,
  * recorded events, audit entries and calls.
  *
  * Built modules run for real except where a test needs to control the answer:

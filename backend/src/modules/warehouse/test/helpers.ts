@@ -1,5 +1,5 @@
 /**
- * Warehouse behaviour tests: warehouse runs for real on PGlite; the neighbours whose answers the tests control
+ * Warehouse behaviour tests: warehouse runs for real on the in-memory MongoDB; the neighbours whose answers the tests control
  * (orders' fulfillment task, inventory's discrepancies and SKU lookups, shipping's quotes and labels, returns,
  * media, audit, work queues) are stubbed. src/modules/warehouse/test/official-order.test.ts runs with real modules.
  */

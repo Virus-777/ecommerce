@@ -14,9 +14,8 @@ import { schemas } from '../infra/mongo/schema.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as identity from '../../../spec/identity.js';
 import type { AccessService } from '../service.js';
-import type { Selectable } from 'kysely';
 
-type Row<T extends keyof AccessDb> = Selectable<AccessDb[T]>;
+type Row<T extends keyof AccessDb> = AccessDb[T];
 
 export interface Fixture {
   app: FastifyInstance;

@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { collectionDefs } from '../../../tools/lib/mongo.js';
-import { planTables } from '../../../tools/lib/sql.js';
+import { planTables } from '../../../tools/lib/tables.js';
 import type { ModuleSpec } from '../../../tools/lib/spec.js';
 import { testMongo } from '../../testing/mongo.js';
 import { newId } from '../lib/ids.js';
@@ -95,7 +95,7 @@ describe('schema from the spec', () => {
     await expect(items.insert({ ...item(), sku: undefined as never })).rejects.toThrow(/validation/i);
   });
 
-  it('keeps PostgreSQL null rules: several null values in a unique nullable column, a case-insensitive unique index', async () => {
+  it('keeps the spec null rules: several null values in a unique nullable column, a case-insensitive unique index', async () => {
     const items = store.module('demo', defs, schemas).table<Item>('items');
     await items.insert(item({ alt_code: null }));
     await items.insert(item({ alt_code: null }));

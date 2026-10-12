@@ -1,6 +1,5 @@
 /** Shared helpers for the audit behaviour tests. */
 import type { FastifyInstance } from 'fastify';
-import type { Selectable } from 'kysely';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { Table } from '../../../kernel/mongo/index.js';
 import { spec, type AuditDb, type AuditPublicApi, type RecordInput } from '../../../spec/audit.js';
@@ -28,8 +27,8 @@ export function entry(over: Partial<RecordInput> = {}): RecordInput {
  * A collection of the module as its repository reads it (rows in spec shape). Writing through it changes rows behind
  * the app's back, as someone with database access would.
  */
-export function auditTable<T extends keyof AuditDb & string>(app: FastifyInstance, name: T): Table<Selectable<AuditDb[T]>> {
-  return app.kernel.mongo.module('audit', spec.collections, schemas).table<Selectable<AuditDb[T]>>(name);
+export function auditTable<T extends keyof AuditDb & string>(app: FastifyInstance, name: T): Table<AuditDb[T]> {
+  return app.kernel.mongo.module('audit', spec.collections, schemas).table<AuditDb[T]>(name);
 }
 
 export async function waitForEvents(app: FastifyInstance) {

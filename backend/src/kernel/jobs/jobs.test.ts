@@ -1,14 +1,14 @@
 /**
- * The two job runners: the same contract for runNow, then what only pg-boss does (several instances on
- * one database, retries, once-per-deploy boot jobs), on PGlite behind a socket server.
+ * The two job runners hold the same contract for runNow. What only the MongoDB queue does (several instances on one
+ * database, retries, once-per-deploy boot jobs) is in mongo-jobs.test.ts.
  */
 import type { FastifyBaseLogger } from 'fastify';
-import { TestClock } from 'pg-boss';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { pgliteServer, type PgServer } from '../../testing/pg-server.js';
+import { testMongo } from '../../testing/mongo.js';
+import type { MongoStore } from '../mongo/index.js';
+import { migrateMongo } from '../mongo/schema.js';
 import { InProcessScheduler, type JobScheduler } from './index.js';
-import { parseSchedule } from './index.js';
-import { cronOf, migrateJobQueue, PgBossScheduler, type PgBossSchedulerOptions } from './pgboss.js';
+import { MongoScheduler } from './mongo.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const errors: unknown[] = [];
@@ -33,44 +33,35 @@ async function until(cond: () => boolean | Promise<boolean>, ms = 15_000) {
   }
 }
 
-let server: PgServer;
+let store: MongoStore;
 const open: JobScheduler[] = [];
 beforeAll(async () => {
-  server = await pgliteServer();
+  store = await testMongo();
+  await migrateMongo(store, []);
 });
 afterEach(async () => {
   await Promise.all(open.splice(0).map((s) => s.stop()));
+  await store.kernel('jobs').deleteMany({});
+  await store.kernel('job_schedules').deleteMany({});
 });
 afterAll(async () => {
-  await server?.close();
+  await store?.close();
 });
 
-let schemaSeq = 0;
-/** pg-boss on its own schema per test, so tests don't see each other's queues */
-function pgboss(o: Partial<PgBossSchedulerOptions> & { schema?: string } = {}): PgBossScheduler {
-  const s = new PgBossScheduler(log, {
-    connectionString: server.url,
-    timeZone: TZ,
-    workers: true,
-    deployId: 'deploy-1',
-    pollingIntervalSeconds: 0.5,
-    listenNotify: false,
-    retry: { limit: 2, delaySeconds: 1, maxDelaySeconds: 1 },
-    ...o,
-    schema: o.schema ?? `jobs_${++schemaSeq}`,
-  });
-  open.push(s);
-  return s;
-}
 const inprocess = () => {
   const s = new InProcessScheduler(log, TZ);
+  open.push(s);
+  return s;
+};
+const mongo = () => {
+  const s = new MongoScheduler(log, { store, timeZone: TZ, workers: true, deployId: 'deploy-1', pollMs: 50 });
   open.push(s);
   return s;
 };
 
 describe.each([
   ['in process', inprocess],
-  ['pg-boss', () => pgboss()],
+  ['MongoDB', mongo],
 ])('%s runner', (_name, make) => {
   it('runNow resolves once the run is done', async () => {
     const s = make();
@@ -120,154 +111,5 @@ describe.each([
     expect(errors.length).toBeGreaterThan(0);
     expect(s.list().find((j) => j.name === 't.fail')).toMatchObject({ handled: true, lastError: 'boom' });
     await expect(s.runNow('t.none')).rejects.toThrow(/no handler/);
-  });
-});
-
-describe('pg-boss runner', () => {
-  it('maps spec schedules to cron in the market time zone', () => {
-    const cron = (text: string) => cronOf(parseSchedule(text));
-    expect(cron('every 1 min')).toBe('* * * * *');
-    expect(cron('every 15 min')).toBe('*/15 * * * *');
-    expect(cron('hourly')).toBe('0 * * * *');
-    expect(cron('daily 02:30 market time')).toBe('30 2 * * *');
-    expect(cron('nightly 03:00 PT')).toBe('0 3 * * *');
-    expect(cron('weekly')).toBe('0 0 * * 1');
-    expect(cron('monthly, 1st 03:00 market time')).toBe('0 3 1 * *');
-    expect(cron('every 30 s')).toBeUndefined(); // sent throttled instead
-    expect(cron('on boot')).toBeUndefined();
-  });
-
-  it('two instances on one database run a scheduled job once per tick', async () => {
-    const clock = new TestClock(new Date('2026-03-02T20:00:50Z'));
-    const schema = 'jobs_cron';
-    const runs: string[] = [];
-    const make = (who: string) => {
-      const s = pgboss({ schema, boss: { clock, cronMonitorIntervalSeconds: 5 } });
-      s.declare(job('t.minutely', 'every 1 min'));
-      s.handle('test', 't.minutely', async () => {
-        runs.push(who);
-      });
-      return s;
-    };
-    const a = make('a');
-    const b = make('b');
-    await a.start();
-    await b.start();
-    // 20:00:50 → 20:03:10: the occurrences 20:00 (still due at start), 20:01, 20:02, 20:03
-    for (let i = 0; i < 28; i++) {
-      await clock.tick(5000);
-      await sleep(20);
-    }
-    await until(() => runs.length >= 4);
-    await clock.tick(1000);
-    await sleep(500);
-    expect(runs).toHaveLength(4);
-  });
-
-  it('retries a failing run with backoff', async () => {
-    const s = pgboss();
-    let attempts = 0;
-    s.declare(job('t.flaky', 'on boot'));
-    s.handle('test', 't.flaky', async () => {
-      attempts++;
-      if (attempts < 3) throw new Error(`attempt ${attempts} failed`);
-    });
-    await s.start();
-    await until(() => attempts >= 3);
-    await sleep(1500);
-    expect(attempts).toBe(3);
-  });
-
-  it('runs an "on boot" job once per deploy across instances', async () => {
-    const schema = 'jobs_boot';
-    let runs = 0;
-    const make = (deployId: string) => {
-      const s = pgboss({ schema, deployId });
-      s.declare(job('t.sync', 'on boot'));
-      s.handle('test', 't.sync', async () => {
-        runs++;
-      });
-      return s;
-    };
-    await Promise.all([make('deploy-1').start(), make('deploy-1').start()]);
-    await until(() => runs >= 1);
-    await sleep(1500);
-    expect(runs).toBe(1);
-    await make('deploy-1').start(); // a restart of the same deploy
-    await sleep(1500);
-    expect(runs).toBe(1);
-    await make('deploy-2').start();
-    await until(() => runs >= 2);
-  });
-
-  it('sends sub-minute intervals once per slot across instances', async () => {
-    const schema = 'jobs_throttle';
-    let runs = 0;
-    const make = () => {
-      const s = pgboss({ schema });
-      s.declare(job('t.fast', 'every 2 s'));
-      s.handle('test', 't.fast', async () => {
-        runs++;
-      });
-      return s;
-    };
-    const started = Date.now();
-    await Promise.all([make().start(), make().start()]);
-    await sleep(6000);
-    const slots = Math.ceil((Date.now() - started) / 2000) + 1;
-    expect(runs).toBeGreaterThanOrEqual(2);
-    expect(runs).toBeLessThanOrEqual(slots); // two instances each sending every slot would run twice as often
-  });
-
-  it('an instance without workers enqueues and waits for one that has them', async () => {
-    const schema = 'jobs_split';
-    let ranOn = '';
-    const worker = pgboss({ schema });
-    const web = pgboss({ schema, workers: false });
-    for (const [s, who] of [
-      [worker, 'worker'],
-      [web, 'web'],
-    ] as const) {
-      s.declare(job('t.split'));
-      s.handle('test', 't.split', async () => {
-        ranOn = who;
-      });
-    }
-    await worker.start();
-    await web.start();
-    await web.runNow('t.split');
-    expect(ranOn).toBe('worker');
-  });
-
-  it('npm run migrate installs the queue tables ahead of the servers', async () => {
-    await migrateJobQueue(server.url, 'jobs_migrated');
-    const s = pgboss({ schema: 'jobs_migrated' });
-    let ran = false;
-    s.declare(job('t.after-migrate'));
-    s.handle('test', 't.after-migrate', async () => {
-      ran = true;
-    });
-    await s.start();
-    await s.runNow('t.after-migrate');
-    expect(ran).toBe(true);
-  });
-
-  it('stop lets the run in progress finish, then nothing runs', async () => {
-    const s = pgboss();
-    let finished = 0;
-    let started = 0;
-    s.declare(job('t.slow', 'every 2 s'));
-    s.handle('test', 't.slow', async () => {
-      started++;
-      await sleep(700);
-      finished++;
-    });
-    await s.start();
-    await until(() => started === 1);
-    await s.stop();
-    expect(finished).toBe(started);
-    const after = started;
-    await sleep(2500);
-    expect(started).toBe(after);
   });
 });
