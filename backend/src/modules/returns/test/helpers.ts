@@ -414,7 +414,7 @@ export async function placeOrder(h: Harness, groups: OrderGroupInput[], o: { cus
  * offers fulfillment-service confirms (off in these tests), so the test sets the stored group as orders would.
  */
 export async function makeServiceGroup(h: Harness, groupId: string): Promise<void> {
-  await h.app.kernel.database.exec(`update orders.seller_groups set fulfilled_by = 'marketly_service' where id = '${groupId}'`);
+  await h.app.kernel.mongo.db.collection('orders.seller_groups').updateOne({ _id: groupId as never }, { $set: { fulfilled_by: 'marketly_service' } });
 }
 
 export const tokens = {

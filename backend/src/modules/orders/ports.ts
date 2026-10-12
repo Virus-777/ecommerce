@@ -1,6 +1,6 @@
 /**
  * What the orders service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as catalog from '../../spec/catalog.js';
@@ -176,7 +176,7 @@ export interface OrdersRepository {
   update<T extends Table>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
   remove<T extends Table>(table: T, id: string): Promise<void>;
 
-  /** Inbox claim (ctx.inbox): true the first time this key is claimed; commits with the transaction it runs in */
+  /** Inbox claim (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
   claim(key: string): Promise<boolean>;
   /** Inserts the order unless the (checkout session, attempt) pair already has one (then null) */
   insertOrderIfNew(row: OrderRec): Promise<OrderRec | null>;
