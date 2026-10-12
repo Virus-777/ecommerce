@@ -1,10 +1,10 @@
 /**
  * Gap pass 4: submissions.paused_at (paused submissions keep their deadline), per-candidate duplicate dismissals in
- * check_dismissals, the review queue kind content_change, review dates on the settings business calendar, and the
- * migration that backfills both from the old markers (null review_due_at, dismissedAt inside the evidence jsonb).
+ * check_dismissals, the review queue kind content_change, review dates on the settings business calendar.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { m0003PausedAtCheckDismissals } from '../infra/postgres/migrations/0003_paused_at_check_dismissals.js';
+import { spec } from '../../../spec/catalog.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { api, brand, category, catalogApp, newId, productInput, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
 
 const DAY = 86_400_000;
@@ -106,45 +106,9 @@ describe('duplicate dismissals', () => {
     const all = (await a.admin('POST', `/products/${p.id}/checks/duplicate/dismiss`, { reason: 'Not a duplicate' })).json();
     expect(dup(all).evidence.filter((e) => e.matchedProductId).every((e) => e.dismissedAt)).toBe(true);
     expect(all).toMatchObject({ duplicateSuspected: false, duplicateCandidates: [] });
-    const rows = await (t.app.kernel.database.kysely.withSchema('catalog') as any).selectFrom('check_dismissals').selectAll().execute();
+    const rows = await t.app.kernel.mongo.module('catalog', spec.collections, schemas).table<{ matched_product_id: string }>('check_dismissals').find();
     const mine = rows.filter((r: { matched_product_id: string }) => [first.id, second.id].includes(r.matched_product_id));
     expect(mine.find((r: { matched_product_id: string }) => r.matched_product_id === first.id)).toMatchObject({ reason: 'Different model year', dismissed_by: { kind: 'staff' } });
     expect(mine.find((r: { matched_product_id: string }) => r.matched_product_id === second.id)).toMatchObject({ reason: 'Not a duplicate' });
-  });
-});
-
-describe('migration 0003', () => {
-  it('backfills paused_at from a null deadline and check_dismissals from the evidence jsonb', async () => {
-    const k = t.app.kernel.database;
-    const db = k.kysely.withSchema('catalog') as any;
-    const productId = (await sellerProduct(t, newId(), { brandId, categoryId: cat.id })).id;
-    // back to the schema before 0003
-    await k.exec('drop table catalog.check_dismissals; alter table catalog.submissions drop column paused_at;');
-    const paused = newId();
-    const open = newId();
-    const sub = (id: string, due: Date | null) => ({
-      id, ref: `SUB-LEGACY-${id.slice(-12)}`, product_id: productId, kind: 'new', state: 'open', product_version: 1, submitted_at: new Date(), submitted_by: JSON.stringify({ kind: 'seller' }),
-      last_saved_at: null, last_saved_by: null, expected_review_by: null, review_due_at: due, assignee_staff_id: null, assignee_name: null, decided_at: null, note: null,
-    });
-    await db.insertInto('submissions').values([sub(paused, null), sub(open, new Date())]).execute();
-    const checkId = newId();
-    const [m1, m2] = [newId(), newId()];
-    const at = '2026-09-01T10:00:00.000Z';
-    await db.insertInto('submission_checks').values({
-      id: checkId, submission_id: paused, kind: 'duplicate', result: 'warn', message: '2 possible duplicates', details: JSON.stringify([]),
-      evidence: JSON.stringify([{ label: 'Matched product', matchedProductId: m1, dismissedAt: at }, { label: 'Matched product', matchedProductId: m2 }]),
-      ran_at: new Date(), dismissed_at: new Date(at), dismissed_by: JSON.stringify({ kind: 'staff', id: newId() }), dismiss_reason: 'Different bundle', dismissed_matched_product_id: m1,
-    }).execute();
-
-    await k.exec(`begin;\n${m0003PausedAtCheckDismissals.sql}\ncommit;`);
-
-    const subs = await db.selectFrom('submissions').select(['id', 'paused_at']).where('id', 'in', [paused, open]).execute();
-    expect(subs.find((s: { id: string }) => s.id === paused).paused_at).toBeInstanceOf(Date);
-    expect(subs.find((s: { id: string }) => s.id === open).paused_at).toBeNull();
-    const dismissals = await db.selectFrom('check_dismissals').selectAll().where('check_id', '=', checkId).execute();
-    expect(dismissals).toEqual([expect.objectContaining({ matched_product_id: m1, reason: 'Different bundle', dismissed_by: expect.objectContaining({ kind: 'staff' }) })]);
-    expect(dismissals[0].dismissed_at.toISOString()).toBe(at);
-    const check = await db.selectFrom('submission_checks').select('evidence').where('id', '=', checkId).executeTakeFirst();
-    expect(check.evidence).toEqual([{ label: 'Matched product', matchedProductId: m1 }, { label: 'Matched product', matchedProductId: m2 }]);
   });
 });
