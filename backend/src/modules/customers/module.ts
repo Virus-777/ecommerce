@@ -9,6 +9,7 @@ import { devAddressProvider } from './infra/address/dev.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresCustomersRepository } from './infra/postgres/repository.js';
 import { CustomersService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Customers: The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.
@@ -19,6 +20,7 @@ import { CustomersService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

@@ -8,6 +8,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresSupportRepository } from './infra/postgres/repository.js';
 import { SupportService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Support: Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules.
@@ -18,6 +19,7 @@ import { SupportService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   async register(ctx) {

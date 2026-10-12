@@ -11,6 +11,7 @@ import { migrations } from './infra/postgres/migrations/index.js';
 import { devExternalIdentityVerifier } from './infra/external-id/dev.js';
 import { createPostgresIdentityRepository } from './infra/postgres/repository.js';
 import { IdentityService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Identity: Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.
@@ -21,6 +22,7 @@ import { IdentityService } from './service.js';
 export default defineModule({
   spec,
   version: '1.5.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

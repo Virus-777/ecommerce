@@ -5,6 +5,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresFulfillmentServiceRepository } from './infra/postgres/repository.js';
 import { FulfillmentServiceService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Fulfillment service: Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility.
@@ -15,6 +16,7 @@ import { FulfillmentServiceService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   register(ctx) {
     const service = new FulfillmentServiceService({ repo: createPostgresFulfillmentServiceRepository(ctx.db, ctx.inbox), ctx });

@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresWalletRepository } from './infra/postgres/repository.js';
 import { WalletService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Wallet: Customer store credit with an auditable ledger (refunds to credit, goodwill credit within approval limits, price adjustments, use at checkout, expiry), gift cards, and a placeholder for loyalty rewards. Checkout and payments use the balance through the in-process public API.
@@ -17,6 +18,7 @@ import { WalletService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

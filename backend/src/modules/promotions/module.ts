@@ -8,6 +8,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresPromotionsRepository } from './infra/postgres/repository.js';
 import { PromotionsService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Promotions: Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-spend and free-shipping offers, flash sales, seller discounts and platform campaigns with seller consent. Owns eligibility, stacking, budgets and caps, the funding owner of every discount, coupon clipping and redemption, the Deals page data and campaign results.
@@ -18,6 +19,7 @@ import { PromotionsService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

@@ -21,9 +21,12 @@ export interface ScaffoldInput {
   hasFragment: boolean;
   /** GraphQL fields this module resolves: Type.field → publicApi function */
   sourceFields: { field: string; fn: string }[];
+  /** Where the module keeps its data: mongo for new modules (docs/04-mongodb-migration.md), else what its manifest says */
+  store: 'postgres' | 'mongo';
 }
 
-export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields }: ScaffoldInput): Record<string, () => string> {
+export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields, store }: ScaffoldInput): Record<string, () => string> {
+  const mongo = store === 'mongo';
   const P = pascal(mod.name);
   const n = mod.name;
   const areas = Object.keys(common.areas).filter((a) => mod.endpoints.some((e) => e.area === a));
@@ -39,8 +42,11 @@ export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields }:
     return `import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/${n}.js';
 ${hasFragment ? `import { resolvers } from './graphql/resolvers.js';\nimport { typeDefs } from './graphql/schema.js';\n` : ''}${areas.map((a) => `import { ${a}Routes } from './http/${a}.js';`).join('\n')}
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgres${P}Repository } from './infra/postgres/repository.js';
+${
+  mongo
+    ? `import { createMongo${P}Repository } from './infra/mongo/repository.js';\nimport { schemas } from './infra/mongo/schema.js';`
+    : `import { migrations } from './infra/postgres/migrations/index.js';\nimport { createPostgres${P}Repository } from './infra/postgres/repository.js';`
+}
 import { ${P}Service } from './service.js';
 
 /**
@@ -52,9 +58,9 @@ import { ${P}Service } from './service.js';
 export default defineModule({
   spec,
   version: '0.1.0',
-  migrations,${hasFragment ? '\n  graphql: typeDefs,' : ''}
+${mongo ? "  store: 'mongo',\n  schemas,\n  migrations: []," : '  migrations,'}${hasFragment ? '\n  graphql: typeDefs,' : ''}
   register(ctx) {
-    const service = new ${P}Service({ repo: createPostgres${P}Repository(ctx.db), ctx });
+    const service = new ${P}Service({ repo: ${mongo ? `createMongo${P}Repository(ctx.mongo)` : `createPostgres${P}Repository(ctx.db)`}, ctx });
     ctx.provide(service);
     ctx.http.routes(${areas.map((a) => `${a}Routes(service)`).join(', ')});${hasFragment ? '\n    ctx.graphql.resolvers(resolvers(service));' : ''}${wiring.map((l) => (l ? `\n    ${l}` : '\n')).join('')}
   },
@@ -79,7 +85,7 @@ export const { permissions, approvalActions } = spec;
     const tables = (mod.tables ?? []).map((t) => `${snake(n)}.${t.name}`);
     return `/**
  * What the ${n} service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * ${mongo ? 'The MongoDB adapter lives in infra/mongo/ (docs/04-mongodb-migration.md).' : 'The Postgres adapter lives in infra/postgres/ until the module moves to MongoDB (infra/mongo/).'}
  */
 
 /** Persistence for this module's own tables: ${tables.join(', ') || '(none)'}. */
@@ -87,7 +93,19 @@ export interface ${P}Repository {}
 `;
   };
 
-  files['infra/postgres/repository.ts'] = () => `import type { Kysely } from 'kysely';
+  if (mongo) {
+    files['infra/mongo/repository.ts'] = () => `import type { ModuleStore } from '../../../../kernel/mongo/index.js';
+import type { ${P}Repository } from '../../ports.js';
+
+/** MongoDB adapter for ${P}Repository (backend/docs/BUILDING-MODULES.md §5b): one collection per spec table, store.table(name). */
+export function createMongo${P}Repository(store: ModuleStore): ${P}Repository {
+  void store;
+  return {};
+}
+`;
+  }
+
+  if (!mongo) files['infra/postgres/repository.ts'] = () => `import type { Kysely } from 'kysely';
 import type { ${P}Db } from '../../../../spec/${n}.js';
 import type { ${P}Repository } from '../../ports.js';
 
@@ -97,7 +115,7 @@ export function createPostgres${P}Repository(db: Kysely<${P}Db>): ${P}Repository
 }
 `;
 
-  files['infra/postgres/migrations/0001_init.ts'] = () => {
+  if (!mongo) files['infra/postgres/migrations/0001_init.ts'] = () => {
     const problems: string[] = [];
     const sql = migrationSql(mod, planTables(mod, problems), problems);
     return `import type { Migration } from '../../../../../kernel/migrations/index.js';
@@ -112,7 +130,7 @@ ${sql.replace(/`/g, '\\`').replace(/\$\{/g, '\\${')}
 `;
   };
 
-  files['infra/postgres/migrations/index.ts'] = () => `import type { Migration } from '../../../../../kernel/migrations/index.js';
+  if (!mongo) files['infra/postgres/migrations/index.ts'] = () => `import type { Migration } from '../../../../../kernel/migrations/index.js';
 import { m0001Init } from './0001_init.js';
 
 /** In order. Never edit an applied migration: add the next file and bump the module version. */

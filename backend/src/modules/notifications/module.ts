@@ -13,6 +13,7 @@ import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { createDevEmailProvider } from './infra/email/dev.js';
 import { createDevSmsProvider } from './infra/sms/dev.js';
 import { createDevPushProvider } from './infra/push/dev.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Notifications: Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3).
@@ -23,6 +24,7 @@ import { createDevPushProvider } from './infra/push/dev.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   async register(ctx) {

@@ -8,6 +8,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresCatalogRepository } from './infra/postgres/repository.js';
 import { CatalogService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Catalog: What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.
@@ -18,6 +19,7 @@ import { CatalogService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

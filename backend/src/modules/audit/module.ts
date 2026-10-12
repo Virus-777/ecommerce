@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresAuditRepository } from './infra/postgres/repository.js';
 import { AuditService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Action history: The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting.
@@ -17,6 +18,7 @@ import { AuditService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

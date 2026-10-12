@@ -8,6 +8,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresAdvertisingRepository } from './infra/postgres/repository.js';
 import { AdvertisingService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Advertising: Ad placements and their rules, ad campaigns through the full lifecycle, creatives and their review, audiences, schedules, frequency caps and dismissal suppression, rotation and priority, the serving decision for each page view, display/click/dismissal tracking with attribution, and seller sponsored campaigns with spending limits and ad charges kept separate from commission.
@@ -18,6 +19,7 @@ import { AdvertisingService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

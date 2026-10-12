@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresContentRepository } from './infra/postgres/repository.js';
 import { ContentService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Content: Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.
@@ -17,6 +18,7 @@ import { ContentService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

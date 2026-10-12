@@ -8,6 +8,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createSearchAdapters } from './infra/select.js';
 import { SearchService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Search: Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results.
@@ -18,6 +19,7 @@ import { SearchService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

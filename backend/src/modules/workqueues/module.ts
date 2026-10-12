@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresWorkqueuesRepository } from './infra/postgres/repository.js';
 import { WorkqueuesService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Work queues: The Operations Center's shared to-do system: queue definitions with an owner role, a named lead, a backup and an escalation route, and work items raised from other modules' events (overdue dispatch, low stock, waiting approvals, cases past target, failed payouts, mismatches) with deadlines, assignment and automatic escalation. Also the My work queues view, the dashboard's needs-attention tiles, the day-end review, the daily routine and saved filters.
@@ -17,6 +18,7 @@ import { WorkqueuesService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

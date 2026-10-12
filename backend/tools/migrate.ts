@@ -1,8 +1,8 @@
 #!/usr/bin/env tsx
 /**
  * npm run migrate   apply pending migrations of the kernel and every enabled module to persistent databases:
- *                   MongoDB (MONGODB_URI): kernel collections and the collections, validators and indexes of the
- *                   modules on MongoDB, then their data migrations; PostgreSQL (DATABASE_URL, or PGLITE_DIR) for the
+ *                   MongoDB (MONGODB_URI): kernel collections and every module's collections, validators and
+ *                   indexes, then the data migrations of the modules on MongoDB; PostgreSQL (DATABASE_URL, or PGLITE_DIR) for the
  *                   modules not moved yet (docs/04-mongodb-migration.md)
  */
 import { loadConfig } from '../src/kernel/config/index.js';
@@ -16,7 +16,6 @@ import { moduleLoaders } from '../src/modules/index.js';
 
 const config = loadConfig();
 const defs = await loadDefinitions(config.modules ?? enabledModules, moduleLoaders);
-const onMongo = defs.filter((d) => d.store === 'mongo');
 const onPostgres = defs.filter((d) => d.store !== 'mongo');
 
 if (!config.mongo.uri) {
@@ -26,7 +25,8 @@ if (!config.mongo.uri) {
 const mongo = await connectMongo({ uri: config.mongo.uri });
 const applied = await migrateMongo(
   mongo,
-  onMongo.map((d) => ({ module: d.spec.name, collections: d.spec.collections, schemas: d.schemas ?? {}, migrations: d.mongoMigrations })),
+  // every module's collections, validators and indexes; data migrations only for the modules already on MongoDB
+  defs.map((d) => ({ module: d.spec.name, collections: d.spec.collections, schemas: d.schemas ?? {}, migrations: d.store === 'mongo' ? d.mongoMigrations : [] })),
   (m) => console.log(m),
 );
 console.log(applied.length ? `MongoDB: applied ${applied.join(', ')}.` : 'MongoDB is up to date.');

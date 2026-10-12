@@ -85,8 +85,8 @@ export function describeModule(name: string) {
       for (const dep of spec.dependsOn) expect(app.kernel.modules).toContain(dep);
     });
 
-    it('creates the collections, validators and indexes of its spec (MongoDB) or its tables and columns (PostgreSQL)', async () => {
-      if (onMongo) {
+    it('creates the collections, validators and indexes of its spec in MongoDB', async () => {
+      {
         const db = app.kernel.mongo.db;
         const have = new Map((await db.listCollections({ name: { $regex: `^${name.replace(/[-]/g, '\\-')}\\.` } }).toArray()).map((c) => [c.name, c]));
         for (const [table, def] of Object.entries(spec.collections)) {
@@ -97,8 +97,11 @@ export function describeModule(name: string) {
           for (const i of def.indexes) expect(indexes.has(i.name), `${name}.${table} index ${i.name} (${JSON.stringify(i.key)})`).toBe(true);
         }
         expect(have.size, 'no collections outside the spec').toBe(Object.keys(spec.collections).length);
-        return;
       }
+    });
+
+    it('keeps its tables and columns in PostgreSQL until it moves to MongoDB', async () => {
+      if (onMongo) return;
       const schema = schemaOf(name);
       const rows = await sql<{ table_name: string; column_name: string; is_nullable: string; udt_name: string }>`
         select table_name, column_name, is_nullable, udt_name from information_schema.columns where table_schema = ${schema}`.execute(app.kernel.database.kysely);

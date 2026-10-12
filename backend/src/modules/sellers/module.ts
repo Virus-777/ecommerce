@@ -11,6 +11,7 @@ import { createPostgresSellersRepository } from './infra/postgres/repository.js'
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { devProviders } from './infra/providers/dev.js';
 import { SellersService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Sellers: Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals.
@@ -21,6 +22,7 @@ import { SellersService } from './service.js';
 export default defineModule({
   spec,
   version: '1.4.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

@@ -9,6 +9,7 @@ import { migrations } from './infra/postgres/migrations/index.js';
 import { mediaBulkFileReader } from './infra/files/media.js';
 import { createPostgresOffersRepository } from './infra/postgres/repository.js';
 import { OffersService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Offers: How one seller (or the Official Store) sells one variant in one condition: price and authentic was-price, purchase limit, seller SKU, dispatch, shipping profile, return and warranty terms, offer status, and the published featured-offer rule that picks the main offer for a delivery location.
@@ -19,6 +20,7 @@ import { OffersService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

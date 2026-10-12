@@ -11,6 +11,7 @@ import { devCarrierAdapter } from './infra/carriers/dev.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresShippingRepository } from './infra/postgres/repository.js';
 import { ShippingService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Shipping: How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims.
@@ -21,6 +22,7 @@ import { ShippingService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

@@ -4136,7 +4136,8 @@ export const spec = defineModuleSpec({
                 "long",
                 "double"
               ],
-              "exclusiveMinimum": 0
+              "minimum": 0,
+              "exclusiveMinimum": true
             },
             "reason_code": {
               "bsonType": "string"

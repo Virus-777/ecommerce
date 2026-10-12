@@ -8,6 +8,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresMessagingRepository } from './infra/postgres/repository.js';
 import { MessagingService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Messaging: Private service conversations linked to an order, item, return or case: customer with seller (or the Official Store), which Marketly support can join from a case, with attachments, read state, seller reply targets and overdue flags, and staff moderation. No promotional messages.
@@ -18,6 +19,7 @@ import { MessagingService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

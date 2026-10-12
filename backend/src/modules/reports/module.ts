@@ -8,6 +8,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresReportsRepository } from './infra/postgres/repository.js';
 import { ReportsService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Reports: Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables.
@@ -18,6 +19,7 @@ import { ReportsService } from './service.js';
 export default defineModule({
   spec,
   version: '1.4.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

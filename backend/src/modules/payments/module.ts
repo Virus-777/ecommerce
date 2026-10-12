@@ -10,6 +10,7 @@ import { createDevCardProcessor } from './infra/card-processor/dev.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresPaymentsRepository } from './infra/postgres/repository.js';
 import { PaymentsService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Payments: Charging customers through provider adapters (card, digital wallet): payment intents per checkout attempt, authorization and capture per order and seller group, declines with retry, uncertain results resolved by a status-check job, refund execution (Requested → Processing → Sent / Failed) capped at the remaining refundable amount, chargebacks and payment disputes, saved payment methods and provider webhooks.
@@ -21,6 +22,7 @@ import { PaymentsService } from './service.js';
 export default defineModule({
   spec,
   version: '1.2.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

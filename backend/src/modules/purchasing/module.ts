@@ -4,6 +4,7 @@ import { adminRoutes } from './http/admin.js';
 import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresPurchasingRepository } from './infra/postgres/repository.js';
 import { PurchasingService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Purchasing: Buying stock for the Official Store: suppliers and their price lists, purchase orders (Draft, Sent, Partly received, Received, Cancelled) with buying costs and expected deliveries, receiving records (expected vs received, shortages, damage) that feed inventory, and supplier claims.
@@ -14,6 +15,7 @@ import { PurchasingService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   register(ctx) {
     const service = new PurchasingService({ repo: createPostgresPurchasingRepository(ctx.db), ctx });

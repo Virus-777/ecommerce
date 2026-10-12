@@ -8,6 +8,7 @@ import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresCheckoutRepository } from './infra/postgres/repository.js';
 import { createDevTaxProvider } from './infra/tax/dev.js';
 import { CheckoutService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Checkout: Turns a cart (or a Buy now offer) into an accepted order: identify the customer or guest, choose an address with a per-item shippability check, pick delivery options per package, apply coupons or credit with reasons and item coverage, choose payment, review sellers, return terms and totals, revalidate into a change set the customer must accept, and place the order idempotently with clear payment results.
@@ -18,6 +19,7 @@ import { CheckoutService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

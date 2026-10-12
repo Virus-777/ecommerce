@@ -11,6 +11,7 @@ import { migrations } from './infra/postgres/migrations/index.js';
 import { createPostgresFinanceRepository } from './infra/postgres/repository.js';
 import { createDevPayoutProvider } from './infra/provider/dev.js';
 import { FinanceService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Finance: Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.
@@ -21,6 +22,7 @@ import { FinanceService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   graphql: typeDefs,
   register(ctx) {

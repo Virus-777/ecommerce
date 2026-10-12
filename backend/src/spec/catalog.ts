@@ -4106,7 +4106,8 @@ export const spec = defineModuleSpec({
                 "double",
                 "null"
               ],
-              "exclusiveMinimum": 0
+              "minimum": 0,
+              "exclusiveMinimum": true
             },
             "length_cm": {
               "bsonType": [

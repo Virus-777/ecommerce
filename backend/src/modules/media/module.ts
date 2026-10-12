@@ -15,6 +15,7 @@ import { createDevScanner } from './infra/scanner/dev.js';
 import { createLocalStorage } from './infra/storage/local.js';
 import { createMemoryStorage } from './infra/storage/memory.js';
 import { MediaService } from './service.js';
+import { schemas } from './infra/mongo/schema.js';
 
 /**
  * Media: Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).
@@ -25,6 +26,7 @@ import { MediaService } from './service.js';
 export default defineModule({
   spec,
   version: '1.3.0',
+  schemas,
   migrations,
   register(ctx) {
     // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads

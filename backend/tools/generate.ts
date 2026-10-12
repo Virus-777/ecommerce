@@ -150,7 +150,10 @@ export const typeDefs = ${JSON.stringify(fragment)};
     const plans = planTables(m, []);
     generated.set(join(dir, 'infra', 'mongo', 'schema.ts'), emitMongooseSchemas(m, plans, collectionDefs(m, plans, []), GENERATED(`docs/api/spec/modules/${m.name}.json`)));
   }
-  const files = scaffoldFiles({ mod: m, common, types: new TypeContext(m, commonTypes, byName), hasFragment: Boolean(fragment), sourceFields: sourceFieldsOf(m, fragment) });
+  // new modules start on MongoDB; an existing one keeps the store its manifest declares (docs/04-mongodb-migration.md)
+  const manifest = join(dir, 'module.ts');
+  const store = !existsSync(manifest) || /store:\s*'mongo'/.test(readFileSync(manifest, 'utf8')) ? 'mongo' : 'postgres';
+  const files = scaffoldFiles({ mod: m, common, types: new TypeContext(m, commonTypes, byName), hasFragment: Boolean(fragment), sourceFields: sourceFieldsOf(m, fragment), store });
   for (const [rel, content] of Object.entries(files)) {
     const p = join(dir, rel);
     if (existsSync(p)) continue;

@@ -103,7 +103,8 @@ function property(c: Column): Record<string, unknown> {
   if (base === 'date') p.pattern = '^\\d{4}-\\d{2}-\\d{2}$';
   if (c.enumValues) p.enum = c.nullable ? [...c.enumValues, null] : [...c.enumValues];
   const check = c.check && /\s(>=|>)\s*(-?\d+(?:\.\d+)?)$/.exec(c.check);
-  if (check) p[check[1] === '>=' ? 'minimum' : 'exclusiveMinimum'] = Number(check[2]);
+  // MongoDB's $jsonSchema is draft 4: exclusiveMinimum is a flag on minimum
+  if (check) Object.assign(p, { minimum: Number(check[2]) }, check[1] === '>' ? { exclusiveMinimum: true } : {});
   return p;
 }
 

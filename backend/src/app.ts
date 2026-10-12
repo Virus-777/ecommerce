@@ -171,9 +171,14 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
 
   /* ---------------------------------------------------------------- modules */
   if (config.migrateOnStart) {
-    // while modules move to MongoDB (docs/04-mongodb-migration.md), each keeps its data where its manifest says
+    // while modules move to MongoDB (docs/04-mongodb-migration.md), each keeps its data where its manifest says;
+    // every module's collections, validators and indexes exist in MongoDB from now on
     await migrate(database, migrationUnits(defs.filter((d) => !onMongo(d))), (m) => app.log.info(m));
-    await migrateMongo(mongo, defs.filter(onMongo).map((d) => ({ module: d.spec.name, collections: d.spec.collections, schemas: d.schemas ?? {}, migrations: d.mongoMigrations })), (m) => app.log.info(m));
+    await migrateMongo(
+      mongo,
+      defs.map((d) => ({ module: d.spec.name, collections: d.spec.collections, schemas: d.schemas ?? {}, migrations: onMongo(d) ? d.mongoMigrations : [] })),
+      (m) => app.log.info(m),
+    );
   }
   // modules get permission checks before the auth chain exists (it needs their APIs): bind it late
   let authChain: AuthChain | undefined;
