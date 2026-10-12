@@ -1,10 +1,9 @@
 /**
- * Gap pass 4: campaigns.funding_note column (and the migration moving it out of deals), perOrder limited to 1,
+ * Gap pass 4: campaigns.funding_note column, perOrder limited to 1,
  * automatic discounts on offer prices covering category scopes and minimum spends, and the was-price window
  * read from offers.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { m0003FundingNote } from '../infra/postgres/migrations/0003_funding_note.js';
 import { ADMIN, boot, campaignInput, ELECTRONICS, HOME, KITCHEN, liveCampaign, SELLER_A, USD, type Kit } from './helpers.js';
 
 let k: Kit;
@@ -57,15 +56,3 @@ describe('automatic discounts on offer prices', () => {
   });
 });
 
-describe('migration 0003', () => {
-  it('moves the funding note out of deals into funding_note and leaves deals as the placement', async () => {
-    const a = (await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { name: 'Old A' }))).body.id as string;
-    const b = (await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { name: 'Old B' }))).body.id as string;
-    await k.app.kernel.database.exec(`alter table promotions.campaigns drop column funding_note;
-      update promotions.campaigns set deals = '{"placement": {"show": true, "section": "flash"}, "fundingNote": "Company cost"}' where id = '${a}';
-      update promotions.campaigns set deals = '{"placement": null, "fundingNote": null}' where id = '${b}';`);
-    await k.app.kernel.database.exec(m0003FundingNote.sql);
-    expect(await k.svc.core.repo.get('campaigns', a)).toMatchObject({ funding_note: 'Company cost', deals: { show: true, section: 'flash' } });
-    expect(await k.svc.core.repo.get('campaigns', b)).toMatchObject({ funding_note: null, deals: null });
-  });
-});

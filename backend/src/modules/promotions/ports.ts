@@ -1,6 +1,6 @@
 /**
  * What the promotions service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
@@ -62,7 +62,7 @@ export interface CostTotals {
 
 export interface PromotionsRepository {
   transaction<R>(fn: (tx: PromotionsRepository) => Promise<R>): Promise<R>;
-  /** Inbox (kernel ctx.inbox): true the first time this key is claimed; inside a transaction it commits with the effects */
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; inside a transaction it commits with the effects */
   claim(key: string): Promise<boolean>;
 
   /* generic table access */
