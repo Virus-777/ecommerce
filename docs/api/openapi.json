@@ -197146,7 +197146,7 @@
         "properties": {
           "engine": {
             "type": "string",
-            "description": "e.g. 'postgres-fts'"
+            "description": "e.g. 'mongo-text'"
           },
           "documents": {
             "type": "integer"

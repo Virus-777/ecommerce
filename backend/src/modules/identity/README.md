@@ -594,7 +594,7 @@ Links are valid 7 days. Resend issues a new token and invalidates the old one.
 | version | int |
 | tokens_valid_after | timestamptz? |
 
-Indexes: `unique (realm, email_normalized)`, `(status, id)`, `(realm, created_at)`
+Indexes: `unique (realm, email_normalized)`, `(status, id)`, `(realm, created_at)`, `(tokens_valid_after) where tokens_valid_after is not null`
 
 **password_history**: Last N hashes to block reuse
 
@@ -714,7 +714,7 @@ Indexes: `(account_id, last_active_at desc)`, `unique (account_id, installation_
 | revoked_at | timestamptz? |
 | revoke_reason | text? |
 
-Indexes: `(account_id) where revoked_at is null`, `(device_id)`, `(seller_id) where revoked_at is null`
+Indexes: `(account_id) where revoked_at is null`, `(device_id)`, `(seller_id) where revoked_at is null`, `(previous_token_hash) where previous_token_hash is not null`, `(revoked_at) where revoked_at is not null`
 
 **seller_access**: Sellers an account may act for. Written only by the sellers module through grantSellerContext / revokeSellerContext.
 
@@ -754,7 +754,7 @@ Indexes: `pk (account_id, seller_id)`, `(seller_id)`
 | revoked_at | timestamptz? |
 | revoke_reason | text? |
 
-Indexes: `(status, expires_at)`, `(email)`
+Indexes: `(status, expires_at)`, `(email)`, `(account_id) where account_id is not null`
 
 **guest_sessions**: Visitor sessions (auth v3): one per app install before sign-in; in the store also the guest session
 
@@ -772,7 +772,7 @@ Indexes: `(status, expires_at)`, `(email)`
 | previous_token_hash | text? |
 | rotated_at | timestamptz? |
 
-Indexes: `(expires_at)`
+Indexes: `(expires_at)`, `(previous_token_hash) where previous_token_hash is not null`, `(claimed_at) where claimed_at is not null`
 
 **guest_order_grants**: Orders a guest session may open
 

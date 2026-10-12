@@ -518,7 +518,7 @@ Indexes: `(event) where active`
 | due_at | timestamptz |
 | deadline_state | text (on_time|due_soon|overdue) |
 | priority | text |
-| state | text |
+| state | text (open|assigned|in_progress|waiting|resolved|dismissed) |
 | waiting_on | text? |
 | waiting_since | timestamptz? (set on wait, cleared on resume; used to push due_at when the queue pauses while waiting) |
 | escalation_level | int |
@@ -534,7 +534,7 @@ Indexes: `(event) where active`
 | resolution | jsonb? |
 | archived_at | timestamptz? (resolved items past itemRetentionDays; rows stay) |
 
-Indexes: `unique(dedupe_key) where state not in ('resolved','dismissed')`, `(queue_key, state, due_at)`, `(assignee_staff_id, state)`, `(deadline_state, due_at) where state not in ('resolved','dismissed')`, `(seller_id, state) where visible_to_seller`, `(subject_type, subject_id)`
+Indexes: `unique(dedupe_key) where state in ('open','assigned','in_progress','waiting')`, `(queue_key, state, due_at)`, `(assignee_staff_id, state)`, `(deadline_state, due_at) where state in ('open','assigned','in_progress','waiting')`, `(seller_id, state) where visible_to_seller`, `(subject_type, subject_id)`
 
 **item_events**: History: raised, refreshed, assigned, state changes, escalations, notes
 

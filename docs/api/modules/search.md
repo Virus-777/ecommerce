@@ -6,7 +6,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 - **Depends on:** [catalog](catalog.md), [offers](offers.md) · **Optional:** [inventory](inventory.md), [reviews](reviews.md), [sellers](sellers.md), [advertising](advertising.md), [promotions](promotions.md), [customers](customers.md), [media](media.md), [reports](reports.md), [wishlist](wishlist.md), [orders](orders.md), [returns](returns.md), [audit](audit.md)
 
 ## Owns
-- Product search index (Postgres full-text + trigram first; external engine adapter later)
+- Product search index (OpenSearch in production; a MongoDB engine for development and tests)
 - Search and category listings with universal filters (category, price, brand, rating, seller, condition, availability, delivery) and category attribute filters
 - Facets with counts, applied-filter chips with individual removal and clear all
 - Sorting: recommended (published ranking policy), price ascending/descending, newest, highest rated; best selling once sales history exists
@@ -446,7 +446,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 
 | Field | Type |
 |---|---|
-| engine | `string` e.g. 'postgres-fts' |
+| engine | `string` e.g. 'mongo-text' |
 | documents | `int` |
 | offerRows | `int` |
 | staleDocuments | `int` |
@@ -588,14 +588,14 @@ One full reindex at a time (REINDEX_ALREADY_RUNNING). Scoped jobs only mark docu
 | sales_30d | int |
 | first_listed_at | timestamptz |
 | popularity | numeric |
-| tsv | tsvector (title A, brand A, category B, attributes C, description D) |
+| terms | jsonb? (development engine: stemmed words of the title and brand (weight 1), category (0.4), attributes (0.2) and description (0.1), as [{t, w}]) |
 | title_norm | text (for trigram) |
 | version | bigint |
 | indexed_at | timestamptz |
 | best_seller_rank | int? (rank in best_seller_category_id by sales_30d; null outside the top 100) |
 | best_seller_category_id | uuid? |
 
-Indexes: `gin(tsv)`, `gin(title_norm gin_trgm_ops)`, `gin(seller_ids)`, `gin(category_path_ids)`, `gin(attributes jsonb_path_ops)`, `(in_stock, featured_price)`, `(first_listed_at)`, `(rating, rating_count)`
+Indexes: `gin(terms jsonb_path_ops)`, `gin(title_norm gin_trgm_ops)`, `gin(seller_ids)`, `gin(category_path_ids)`, `gin(attributes jsonb_path_ops)`, `(in_stock, featured_price)`, `(first_listed_at)`, `(rating, rating_count)`
 
 **search_offers**: Offer-level rows so seller, condition and price filters show the matching seller's price (e.g. Official Store filter shows company offers)
 
@@ -824,7 +824,7 @@ Indexes: `pk (product_id, day)`, `(day)`
 | searchEngine | `"postgres"` | enum (postgres \| external), approval: second reviewer | postgres | external (adapter added later) |
 
 ## Integrations
-- **PostgreSQL full-text search and pg_trgm**: Ranking, misspelling tolerance and suggestions at launch
+- **MongoDB text matching (development and tests)**: Stemmed word and prefix matching over the read model, ranking, misspelling correction and suggestions without a search cluster
 - **External search engine (later)**: OpenSearch or Meilisearch adapter behind the same API when volume needs it
 
 ## Notes
@@ -840,7 +840,7 @@ Indexes: `pk (product_id, day)`, `(day)`
 - Recent searches are stored per customer or guest session and merged on sign-in when search consumes identity.guest_session.claimed. For a customer they are saved to the account only while customers.MarketingPreferences.recentSearches is on (customers.getMarketingConsent at save time). Turning it off deletes the saved history: customers publishes customers.marketing_preferences.changed and search deletes the rows. With customers disabled, nothing is saved to accounts.
 - Reports read unavailable searches through zeroResultStats; query logs are not exported directly.
 - Optional dependencies: inventory (stock flags), reviews (ratings), sellers (store suggestions), advertising (sponsored slots), promotions (deal badges), customers (recent-search preference), orders (sales counts), audit (synonym, reindex and ranking policy changes are written to the action history when audit is enabled). With any of them off, the related fields are simply empty.
-- Engines (docs/02-backend-architecture.md §9): the environment variable SEARCH_ENGINE picks PostgreSQL full-text + pg_trgm (default; development and tests) or OpenSearch (production) at startup; the API is the same with either. search_documents and search_offers stay the read model in PostgreSQL and feed the OpenSearch index after each commit; a full reindex builds a new versioned index and swaps the alias atomically while the live index keeps serving. GET /index reports the engine and its index (engine).
+- Engines (docs/02-backend-architecture.md §9): the environment variable SEARCH_ENGINE picks the MongoDB engine (mongo: stemmed words and prefixes over the read model, misspellings corrected by trigram similarity among words with the same first letter; default, development and tests) or OpenSearch (production) at startup; the API is the same with either. search_documents and search_offers stay the read model in MongoDB and feed the OpenSearch index after each commit; a full reindex builds a new versioned index and swaps the alias atomically while the live index keeps serving. GET /index reports the engine and its index (engine).
 
 ## GraphQL (read layer)
 

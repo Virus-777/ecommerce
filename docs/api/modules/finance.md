@@ -1249,7 +1249,7 @@ Indexes: `(status, requested_at)`
 |---|---|
 | id | uuid pk |
 | ref | text unique |
-| status | text |
+| status | text (draft|pending_approval|approved|releasing|completed|cancelled) |
 | scheduled_release | timestamptz |
 | cutoff_at | timestamptz |
 | total | bigint |
@@ -1263,7 +1263,7 @@ Indexes: `(status, requested_at)`
 | released_at | timestamptz? |
 | completed_at | timestamptz? |
 
-Indexes: `(status, scheduled_release)`
+Indexes: `(status, scheduled_release)`, `unique (cutoff_at) where status <> 'cancelled'`
 
 **payouts**
 
@@ -1328,7 +1328,7 @@ Indexes: `(seller_id, period_to desc)`
 | ref_kind | text? |
 | ref_id | text? |
 
-Indexes: `(at)`, `(kind, at)`
+Indexes: `(at)`, `(kind, at)`, `(ref_kind, at)`
 
 **trading_targets**: Official Store sales and margin targets per month, optionally per category
 

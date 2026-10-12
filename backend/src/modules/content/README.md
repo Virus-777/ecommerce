@@ -926,10 +926,10 @@ Indexes: `unique (entity, entity_id, number)`
 | live_version_id | uuid? → versions |
 | draft_version_id | uuid? → versions |
 | views | int |
-| search | tsvector (generated from live version) |
+| search | text? (generated from the live version: title, summary, topics and body as plain text, matched by help search) |
 | updated_at | timestamptz |
 
-Indexes: `(category_id, status)`, `gin(search)`, `(status, review_due_at)`
+Indexes: `(category_id, status)`, `(status, review_due_at)`
 
 **article_feedback**
 

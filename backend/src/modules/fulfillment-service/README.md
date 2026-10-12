@@ -596,6 +596,8 @@ Indexes: `(seller_id, state)`, `(state, expected_arrival)`
 | received | int |
 | damaged | int |
 
+Indexes: `(inbound_id)`
+
 **inbound_receipts**: One row per receiving record of an inbound shipment, submitted to inventory as a service receipt and confirmed by the Inventory Manager
 
 | Column | Type |
@@ -611,7 +613,7 @@ Indexes: `(seller_id, state)`, `(state, expected_arrival)`
 | confirmed_by | text? |
 | confirmed_at | timestamptz? |
 
-Indexes: `unique (inbound_id, seq)`
+Indexes: `unique (inbound_id, seq)`, `(inventory_receipt_id)`
 
 **discrepancies**
 
@@ -626,6 +628,8 @@ Indexes: `unique (inbound_id, seq)`
 | decision | text? |
 | decided_by | text? |
 | decided_at | timestamptz? |
+
+Indexes: `(inbound_id)`
 
 **ownership_ledger**: Every movement of seller-owned units in our warehouse (received, reserved, shipped, returned, unsellable, removed, disposed, adjusted) with reason; reconciles with inventory
 
@@ -663,6 +667,8 @@ Indexes: `(seller_id, at)`, `(sku_enrollment_id, at)`
 | short_reported_at | timestamptz? |
 | created_at | timestamptz |
 
+Indexes: `(seller_id, state)`, `(order_id)`
+
 **service_returns**
 
 | Column | Type |
@@ -680,7 +686,7 @@ Indexes: `(seller_id, at)`, `(sku_enrollment_id, at)`
 | evidence_media_ids | jsonb |
 | inspected_at | timestamptz? |
 
-Indexes: `unique (return_id, order_item_id)`
+Indexes: `unique (return_id, order_item_id)`, `(seller_id, outcome)`
 
 **removal_orders**
 
@@ -700,6 +706,8 @@ Indexes: `unique (return_id, order_item_id)`
 | approved_at | timestamptz? |
 | completed_at | timestamptz? |
 
+Indexes: `(seller_id, state)`
+
 **stock_differences**: Daily reconciliation differences between the ownership ledger and inventory at the service location, per SKU
 
 | Column | Type |
@@ -718,7 +726,7 @@ Indexes: `unique (return_id, order_item_id)`
 | decided_by | text? |
 | decided_at | timestamptz? |
 
-Indexes: `unique (sku_enrollment_id, day)`, `(state, day)`
+Indexes: `unique (sku_enrollment_id, day)`, `(state, day)`, `(seller_id, state)`
 
 **fee_schedules**
 
@@ -750,7 +758,7 @@ Indexes: `unique (sku_enrollment_id, day)`, `(state, day)`
 | reason | text? |
 | idempotency_key | text unique |
 
-Indexes: `(seller_id, state)`, `(type, period)`
+Indexes: `(seller_id, state)`, `(type, period)`, `(seller_id, period)`, `(reference)`
 
 **storage_snapshots**: Daily volume per seller and SKU for storage billing
 
@@ -763,7 +771,7 @@ Indexes: `(seller_id, state)`, `(type, period)`
 | cubic_feet | numeric |
 | aged_units | jsonb |
 
-Indexes: `unique (day, sku_enrollment_id)`
+Indexes: `unique (day, sku_enrollment_id)`, `(seller_id, day)`
 
 ## Events
 

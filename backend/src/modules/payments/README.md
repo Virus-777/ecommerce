@@ -552,7 +552,7 @@ The provider takes the money back when a chargeback opens; finance holds the sel
 | method | jsonb (MethodSnapshot) |
 | provider | text |
 | provider_ref | text? |
-| status | text |
+| status | text (created|authorizing|requires_action|pending_check|authorized|partially_captured|captured|failed|voided|expired) |
 | decline | jsonb? |
 | next_action | jsonb? (NextAction: the bank challenge waiting for the customer while the intent is requires_action; cleared when it ends) |
 | authorized_amount | int |
@@ -569,7 +569,7 @@ The provider takes the money back when a chargeback opens; finance holds the sel
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) where status not in ('failed','voided','expired')`, `(order_id)`, `(status, next_check_at)`, `(provider, provider_ref)`, `(status, updated_at, id)`
+Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) where status in ('created','authorizing','requires_action','pending_check','authorized','partially_captured','captured')`, `(order_id)`, `(status, next_check_at)`, `(provider, provider_ref)`, `(status, updated_at, id)`
 
 **allocations**: Captured money per seller group
 
@@ -622,14 +622,14 @@ Indexes: `(intent_id, at)`, `(refund_id, at)`
 | order_id | uuid? (null for an orphan payment refund: money without an order) |
 | checkout_session_id | uuid (checkout session of the payment; what an orphan payment refund is found by) |
 | intent_id | uuid → intents |
-| origin | text |
+| origin | text (cancellation|return|case|exception|correction|orphan_payment) |
 | origin_id | uuid? |
 | origin_ref | text? |
 | amount | int |
 | currency | text |
 | destination | text |
 | destination_label | text |
-| status | text |
+| status | text (requested|processing|sent|failed|cancelled) |
 | attempts | int |
 | outcome_unknown | bool |
 | failure_code | text? |

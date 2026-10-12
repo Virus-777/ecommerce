@@ -323,7 +323,7 @@ Actioning hides the message or locks the conversation; serious cases are referre
 | Column | Type |
 |---|---|
 | id | uuid pk |
-| kind | text |
+| kind | text (order|support|staff_seller) |
 | customer_id | uuid? |
 | guest_session_id | text? |
 | seller_id | uuid? |

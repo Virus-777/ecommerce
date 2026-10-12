@@ -917,7 +917,7 @@ Nothing changes until apply. Only rows marked ready are applied; error rows are 
 | warranty_kind | text |
 | warranty_months | int? |
 | warranty_handled_by | text? |
-| status | text |
+| status | text (draft|active|paused|out_of_stock|ineligible|removed) |
 | status_before_ineligible | text? |
 | ineligible_source | jsonb? ({ kind: restriction|suspension|product|staff|fulfillment_service, id }) |
 | status_reason | jsonb? |

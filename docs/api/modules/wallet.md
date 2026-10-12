@@ -279,8 +279,8 @@ Redeeming moves the full remaining value into a store credit lot (source gift_ca
 |---|---|
 | customer_id | uuid pk |
 | currency | text |
-| available | bigint |
-| held | bigint |
+| available | bigint check >= 0 |
+| held | bigint check >= 0 |
 | updated_at | timestamptz |
 | version | int |
 
@@ -290,15 +290,15 @@ Redeeming moves the full remaining value into a store credit lot (source gift_ca
 |---|---|
 | id | uuid pk |
 | customer_id | uuid → accounts |
-| source | text |
-| original | bigint |
-| remaining | bigint |
+| source | text (refund|goodwill|price_adjustment|gift_card|correction) |
+| original | bigint check > 0 |
+| remaining | bigint check >= 0 |
 | expires_at | timestamptz? |
 | reference | text? |
 | state | text (active|depleted|expired) |
 | created_at | timestamptz |
 
-Indexes: `(customer_id, state, expires_at)`
+Indexes: `(customer_id, state, expires_at)`, `(state, expires_at) where state = 'active'`
 
 **ledger**: Append-only; balance is the sum of entries
 
@@ -320,7 +320,7 @@ Indexes: `(customer_id, state, expires_at)`
 | reason | text? |
 | at | timestamptz |
 
-Indexes: `(customer_id, at)`, `unique (idempotency_key)`, `unique (refund_id, kind) where refund_id is not null`
+Indexes: `(customer_id, at)`, `unique (idempotency_key)`, `unique (refund_id, kind) where refund_id is not null`, `(order_id) where order_id is not null`, `(hold_id) where hold_id is not null`
 
 **holds**
 
@@ -330,10 +330,12 @@ Indexes: `(customer_id, at)`, `unique (idempotency_key)`, `unique (refund_id, ki
 | customer_id | uuid → accounts |
 | quote_id | uuid |
 | order_id | uuid? |
-| amount | bigint |
-| state | text |
+| amount | bigint check > 0 |
+| state | text (held|captured|released) |
 | expires_at | timestamptz |
 | idempotency_key | text unique |
+
+Indexes: `unique (quote_id) where state = 'held'`, `(state, expires_at)`, `(customer_id, state)`
 
 **gift_card_batches**: Issued batches. The plain codes are kept only encrypted (secret-store key) until the issuer downloads them once or giftCardCodesTtlHours pass, then cleared; cards keep only code hashes
 
@@ -365,7 +367,7 @@ Indexes: `(status, created_at)`, `(codes_expire_at) where codes_ciphertext is no
 |---|---|
 | id | uuid pk |
 | customer_id | uuid |
-| amount | bigint |
+| amount | bigint check > 0 |
 | currency | text |
 | reason | text |
 | reason_code | text |
@@ -373,7 +375,7 @@ Indexes: `(status, created_at)`, `(codes_expire_at) where codes_ciphertext is no
 | order_id | uuid? |
 | charged_to | text |
 | seller_id | uuid? |
-| state | text |
+| state | text (pending_approval|granted|rejected|reversed) |
 | approval_request_id | uuid? |
 | requested_by | text |
 | decided_by | text? |
@@ -381,7 +383,7 @@ Indexes: `(status, created_at)`, `(codes_expire_at) where codes_ciphertext is no
 | idempotency_key | text unique |
 | created_at | timestamptz |
 
-Indexes: `(state, created_at)`, `(customer_id, created_at)`
+Indexes: `(state, created_at)`, `(customer_id, created_at)`, `(approval_request_id) where approval_request_id is not null`, `(ledger_entry_id) where ledger_entry_id is not null`
 
 **gift_cards**
 
@@ -391,16 +393,18 @@ Indexes: `(state, created_at)`, `(customer_id, created_at)`
 | code_hash | text unique |
 | code_last4 | text |
 | batch_id | uuid? |
-| initial | bigint |
-| remaining | bigint |
+| initial | bigint check > 0 |
+| remaining | bigint check >= 0 |
 | currency | text |
-| state | text |
+| state | text (issued|active|redeemed|voided|expired) |
 | purpose | text |
 | expires_at | timestamptz? |
 | redeemed_by | uuid? |
 | redeemed_at | timestamptz? |
 | created_by | text |
 | created_at | timestamptz |
+
+Indexes: `(batch_id, created_at)`, `(code_last4)`, `(state, expires_at)`
 
 **credit_corrections**: Staff balance corrections. One within the caller's adjustment limit is applied at once (state applied); one above it is saved pending_approval with its access approval request and applied (or rejected, or failed when the credit is no longer there) on access.approval.decided
 
@@ -434,6 +438,8 @@ Indexes: `(customer_id, state, created_at)`, `(approval_request_id) where approv
 | kind | text |
 | order_id | uuid? |
 | at | timestamptz |
+
+Indexes: `(customer_id, at)`
 
 ## Events
 
