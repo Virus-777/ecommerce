@@ -326,9 +326,9 @@ export interface WishlistPublicApi {
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
 
-/* ------------------------------------------------------------------ tables (Kysely row types) */
+/* ------------------------------------------------------------------ tables (row types) */
 
-/** Tables in the `wishlist` schema. Use with `ctx.db` (already scoped to the schema). */
+/** Rows of this module's spec tables, as repositories read them from its collections (`wishlist.<table>`, ctx.mongo.table(name)). */
 export interface WishlistDb {
   lists: {
     id: string;
@@ -872,146 +872,6 @@ export const spec = defineModuleSpec({
       "meaning": "The saved offer's price or availability changed; details carry the current offer to confirm."
     }
   },
-  tables: {
-    "lists": {
-      "id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "customer_id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "name": {
-        "type": "text",
-        "nullable": false
-      },
-      "is_default": {
-        "type": "bool",
-        "nullable": false
-      },
-      "share_token": {
-        "type": "text",
-        "nullable": true
-      },
-      "created_at": {
-        "type": "timestamptz",
-        "nullable": false
-      },
-      "updated_at": {
-        "type": "timestamptz",
-        "nullable": false
-      }
-    },
-    "items": {
-      "id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "list_id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "customer_id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "product_id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "variant_id": {
-        "type": "uuid",
-        "nullable": true
-      },
-      "offer_id": {
-        "type": "uuid",
-        "nullable": true
-      },
-      "price_when_saved": {
-        "type": "bigint",
-        "nullable": true
-      },
-      "currency": {
-        "type": "text",
-        "nullable": false
-      },
-      "note": {
-        "type": "text",
-        "nullable": true
-      },
-      "added_at": {
-        "type": "timestamptz",
-        "nullable": false
-      }
-    },
-    "alerts": {
-      "id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "customer_id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "item_id": {
-        "type": "uuid",
-        "nullable": true
-      },
-      "product_id": {
-        "type": "uuid",
-        "nullable": false
-      },
-      "variant_id": {
-        "type": "uuid",
-        "nullable": true
-      },
-      "seller_id": {
-        "type": "uuid",
-        "nullable": true
-      },
-      "kind": {
-        "type": "text",
-        "nullable": false
-      },
-      "target_price": {
-        "type": "bigint",
-        "nullable": true
-      },
-      "reference_price": {
-        "type": "bigint",
-        "nullable": true
-      },
-      "state": {
-        "type": "text",
-        "nullable": false
-      },
-      "triggered_at": {
-        "type": "timestamptz",
-        "nullable": true
-      },
-      "triggered_price": {
-        "type": "bigint",
-        "nullable": true
-      },
-      "paused_reason": {
-        "type": "text",
-        "nullable": true
-      },
-      "last_notified_at": {
-        "type": "timestamptz",
-        "nullable": true
-      },
-      "armed_at": {
-        "type": "timestamptz",
-        "nullable": true
-      },
-      "created_at": {
-        "type": "timestamptz",
-        "nullable": false
-      }
-    }
-  },
   tenantTables: {
     "lists": {
       "customer": "customer_id"
@@ -1435,8 +1295,5 @@ declare module '../kernel/events/event-map.js' {
 declare module '../kernel/module-system/public-apis.js' {
   interface PublicApiMap {
     "wishlist": WishlistPublicApi;
-  }
-  interface ModuleDbMap {
-    "wishlist": WishlistDb;
   }
 }

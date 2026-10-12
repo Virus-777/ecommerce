@@ -8,8 +8,8 @@
  *
  *   npm run bootstrap-owner -- --email owner@example.com --name "Ana Lee" --deputy-email cfo@example.com --deputy-name "Ben Ruiz"
  *
- * Runs against the configured database (DATABASE_URL or PGLITE_DIR); the in-memory default would
- * forget the accounts when the command ends, so it refuses that. Prints the invitation links (they are
+ * Runs against the configured database (MONGODB_URI, or the embedded one kept in MONGO_DATA_DIR); the in-memory
+ * default would forget the accounts when the command ends, so it refuses that. Prints the invitation links (they are
  * also emailed through notifications). The deputy is optional but recommended: without one, sensitive
  * grants can't be approved until a second Business Owner exists.
  */
@@ -23,8 +23,8 @@ if (!values.email || !values.name || Boolean(values['deputy-email']) !== Boolean
   process.exit(1);
 }
 const deputy = values['deputy-email'] ? { email: values['deputy-email'], name: values['deputy-name']! } : null;
-if (!process.env.DATABASE_URL && !process.env.PGLITE_DIR) {
-  console.error('Set DATABASE_URL or PGLITE_DIR: an in-memory database would forget the Business Owner when this command ends.');
+if (!process.env.MONGODB_URI && !process.env.MONGO_DATA_DIR) {
+  console.error('Set MONGODB_URI or MONGO_DATA_DIR: an in-memory database would forget the Business Owner when this command ends.');
   process.exit(1);
 }
 

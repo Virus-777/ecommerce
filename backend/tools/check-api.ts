@@ -2,7 +2,7 @@
 /**
  * Does the running server match the API design?
  *
- * Boots every module in the spec (launch phases included, no database), takes the OpenAPI document
+ * Boots every module in the spec (launch phases included, on the embedded MongoDB), takes the OpenAPI document
  * the server generates from its own route schemas (what /docs shows), and compares it with
  * docs/api/openapi.json, the published design:
  *   - the same operations (method + path), operation ids and auth schemes;

@@ -3,8 +3,7 @@
  * After that they belong to the developer; the generator never overwrites them.
  * Each file is a thunk, so content is only built for files that are actually missing.
  */
-import { migrationSql, planTables } from './sql.js';
-import { camel, commentText, doc, mergeConsumes, pascal, pascalWords, snake, type CommonSpec, type ModuleSpec } from './spec.js';
+import { camel, commentText, doc, mergeConsumes, pascal, pascalWords, type CommonSpec, type ModuleSpec } from './spec.js';
 import { translateSignature, type TypeContext } from './types.js';
 
 const handlerName = (event: string) => {
@@ -21,12 +20,9 @@ export interface ScaffoldInput {
   hasFragment: boolean;
   /** GraphQL fields this module resolves: Type.field → publicApi function */
   sourceFields: { field: string; fn: string }[];
-  /** Where the module keeps its data: mongo for new modules (docs/04-mongodb-migration.md), else what its manifest says */
-  store: 'postgres' | 'mongo';
 }
 
-export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields, store }: ScaffoldInput): Record<string, () => string> {
-  const mongo = store === 'mongo';
+export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields }: ScaffoldInput): Record<string, () => string> {
   const P = pascal(mod.name);
   const n = mod.name;
   const areas = Object.keys(common.areas).filter((a) => mod.endpoints.some((e) => e.area === a));
@@ -42,11 +38,8 @@ export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields, s
     return `import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/${n}.js';
 ${hasFragment ? `import { resolvers } from './graphql/resolvers.js';\nimport { typeDefs } from './graphql/schema.js';\n` : ''}${areas.map((a) => `import { ${a}Routes } from './http/${a}.js';`).join('\n')}
-${
-  mongo
-    ? `import { createMongo${P}Repository } from './infra/mongo/repository.js';\nimport { schemas } from './infra/mongo/schema.js';`
-    : `import { migrations } from './infra/postgres/migrations/index.js';\nimport { createPostgres${P}Repository } from './infra/postgres/repository.js';`
-}
+import { createMongo${P}Repository } from './infra/mongo/repository.js';
+import { schemas } from './infra/mongo/schema.js';
 import { ${P}Service } from './service.js';
 
 /**
@@ -58,9 +51,9 @@ import { ${P}Service } from './service.js';
 export default defineModule({
   spec,
   version: '0.1.0',
-${mongo ? "  store: 'mongo',\n  schemas,\n  migrations: []," : '  migrations,'}${hasFragment ? '\n  graphql: typeDefs,' : ''}
+  schemas,${hasFragment ? '\n  graphql: typeDefs,' : ''}
   register(ctx) {
-    const service = new ${P}Service({ repo: ${mongo ? `createMongo${P}Repository(ctx.mongo)` : `createPostgres${P}Repository(ctx.db)`}, ctx });
+    const service = new ${P}Service({ repo: createMongo${P}Repository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(${areas.map((a) => `${a}Routes(service)`).join(', ')});${hasFragment ? '\n    ctx.graphql.resolvers(resolvers(service));' : ''}${wiring.map((l) => (l ? `\n    ${l}` : '\n')).join('')}
   },
@@ -82,19 +75,18 @@ export const { permissions, approvalActions } = spec;
 `;
 
   files['ports.ts'] = () => {
-    const tables = (mod.tables ?? []).map((t) => `${snake(n)}.${t.name}`);
+    const tables = (mod.tables ?? []).map((t) => `${n}.${t.name}`);
     return `/**
  * What the ${n} service needs from the outside world, database-agnostic.
- * ${mongo ? 'The MongoDB adapter lives in infra/mongo/ (docs/04-mongodb-migration.md).' : 'The Postgres adapter lives in infra/postgres/ until the module moves to MongoDB (infra/mongo/).'}
+ * The MongoDB adapter lives in infra/mongo/ (backend/docs/BUILDING-MODULES.md §5b).
  */
 
-/** Persistence for this module's own tables: ${tables.join(', ') || '(none)'}. */
+/** Persistence for this module's own collections: ${tables.join(', ') || '(none)'}. */
 export interface ${P}Repository {}
 `;
   };
 
-  if (mongo) {
-    files['infra/mongo/repository.ts'] = () => `import type { ModuleStore } from '../../../../kernel/mongo/index.js';
+  files['infra/mongo/repository.ts'] = () => `import type { ModuleStore } from '../../../../kernel/mongo/index.js';
 import type { ${P}Repository } from '../../ports.js';
 
 /** MongoDB adapter for ${P}Repository (backend/docs/BUILDING-MODULES.md §5b): one collection per spec table, store.table(name). */
@@ -102,39 +94,6 @@ export function createMongo${P}Repository(store: ModuleStore): ${P}Repository {
   void store;
   return {};
 }
-`;
-  }
-
-  if (!mongo) files['infra/postgres/repository.ts'] = () => `import type { Kysely } from 'kysely';
-import type { ${P}Db } from '../../../../spec/${n}.js';
-import type { ${P}Repository } from '../../ports.js';
-
-/** Postgres adapter for ${P}Repository. \`db\` is scoped to the \`${snake(n)}\` schema. */
-export function createPostgres${P}Repository(db: Kysely<${P}Db>): ${P}Repository {
-  return {};
-}
-`;
-
-  if (!mongo) files['infra/postgres/migrations/0001_init.ts'] = () => {
-    const problems: string[] = [];
-    const sql = migrationSql(mod, planTables(mod, problems), problems);
-    return `import type { Migration } from '../../../../../kernel/migrations/index.js';
-
-/** Tables, constraints and indexes from docs/api/spec/modules/${n}.json (spec "tables"). */
-export const m0001Init: Migration = {
-  id: '0001_init',
-  sql: /* sql */ \`
-${sql.replace(/`/g, '\\`').replace(/\$\{/g, '\\${')}
-\`,
-};
-`;
-  };
-
-  if (!mongo) files['infra/postgres/migrations/index.ts'] = () => `import type { Migration } from '../../../../../kernel/migrations/index.js';
-import { m0001Init } from './0001_init.js';
-
-/** In order. Never edit an applied migration: add the next file and bump the module version. */
-export const migrations: Migration[] = [m0001Init];
 `;
 
   files['domain/state-machines.ts'] = () => {
@@ -212,8 +171,8 @@ export const resolvers = (service: ${P}Service): ModuleResolvers => ({});
 
   files[`${n}.test.ts`] = () => `import { describeModule } from '../../testing/module-suite.js';
 
-// Boots ${n} with its dependencies on in-memory PostgreSQL and checks it against its spec:
-// routes, auth, tables and wiring. Add behaviour tests below as the module is built.
+// Boots ${n} with its dependencies on the in-memory MongoDB and checks it against its spec:
+// routes, auth, collections and wiring. Add behaviour tests below as the module is built.
 describeModule('${n}');
 `;
 

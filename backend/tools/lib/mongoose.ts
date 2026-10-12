@@ -5,7 +5,7 @@
  */
 import type { CollectionDef } from './mongo.js';
 import type { ModuleSpec } from './spec.js';
-import type { Column, TablePlan } from './sql.js';
+import type { Column, TablePlan } from './tables.js';
 
 const str = (s: string) => JSON.stringify(s);
 const ident = (s: string) => (/^[a-z_$][a-z0-9_$]*$/i.test(s) ? s : str(s));
@@ -51,7 +51,7 @@ function field(c: Column): string {
   const array = base.endsWith('[]');
   const parts = [`type: ${typeOf(c.sqlType)}`];
   // arrays: Mongoose's required means "not empty"; json: a NOT NULL jsonb column may hold JSON null (a value in
-  // PostgreSQL, null in MongoDB). The database validator requires both to be present instead.
+  // the spec, null in MongoDB). The database validator requires both to be present instead.
   const json = base === 'jsonb' || base === 'json';
   if (!c.nullable && !array && !json) parts.push('required: true');
   if (c.nullable) parts.push('default: null');

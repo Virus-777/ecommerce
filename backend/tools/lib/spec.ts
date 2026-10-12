@@ -53,7 +53,7 @@ export interface TableSpec {
   name: string;
   desc?: string;
   columns: Record<string, string>;
-  /** "(a, b)", "unique (a) where …", "unique nulls not distinct (a, b)", "pk (a, b)", "gin(expr)" (lib/sql.ts) */
+  /** "(a, b)", "unique (a) where …", "unique nulls not distinct (a, b)", "pk (a, b)", "gin(expr)" (lib/tables.ts, lib/mongo.ts) */
   indexes?: string[];
   /** Tenant column override; false = not a tenant table */
   tenant?: string | false;
@@ -152,7 +152,6 @@ export const pascal = (s: string) => {
   const c = camel(s);
   return c.charAt(0).toUpperCase() + c.slice(1);
 };
-export { schemaOf as snake } from '../../src/kernel/migrations/index.js';
 
 /** Dotted or snake_case words → PascalCase: 'orders.order.price_changed' → 'OrdersOrderPriceChanged' */
 export const pascalWords = (s: string) => s.split(/[._-]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join('');

@@ -1,11 +1,11 @@
 /**
- * Table notation (docs/api/spec/modules/*.json "tables", lib/sql.ts) → MongoDB collections (docs/04-mongodb-migration.md):
+ * Table notation (docs/api/spec/modules/*.json "tables", lib/tables.ts) → MongoDB collections (docs/04-mongodb-migration.md):
  * each table is a collection `<module>.<table>` with a $jsonSchema validator and the spec's indexes.
  *
  *   - a single-column primary key is stored as `_id`; a composite key (or none) gets a generated `_id` and,
  *     for a key, a unique index;
  *   - types, NOT NULL, enum values and `check >= 0` become the validator; tsvector columns are not stored;
- *   - unique columns become unique indexes (nullable ones partial, so several nulls are allowed as in PostgreSQL);
+ *   - unique columns become unique indexes (nullable ones partial, so several rows may hold null: the spec's meaning);
  *     `unique nulls not distinct` is a plain unique index (MongoDB treats nulls as equal);
  *   - `where …` becomes a partialFilterExpression: is null → {$type: 'null'} (rows store explicit nulls),
  *     is not null → {$type: <the column's type>}, = and in → equality and $in, a bare boolean → true,
@@ -16,7 +16,7 @@
  */
 import { createHash } from 'node:crypto';
 import type { ModuleSpec } from './spec.js';
-import type { Column, TablePlan } from './sql.js';
+import type { Column, TablePlan } from './tables.js';
 
 export interface IndexDef {
   name: string;
@@ -260,7 +260,7 @@ function indexOf(idx: string, table: string, columns: Map<string, Column>, probl
     }
   }
   if (!Object.keys(key).length) return null;
-  // PostgreSQL's unique ignores rows with a null in the key (several are allowed); MongoDB counts null as a value.
+  // In the spec a unique key ignores rows with a null in it (several are allowed); MongoDB counts null as a value.
   // Same meaning: the index covers only rows whose nullable key columns all have a value.
   if (unique && !nullsEqual) {
     const conds: Record<string, unknown>[] = [];

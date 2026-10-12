@@ -20,7 +20,7 @@ import { parse, print, valueFromASTUntyped } from 'graphql';
 import { emitCommon, emitModule, GENERATED } from './lib/emit.js';
 import { collectionDefs } from './lib/mongo.js';
 import { emitMongooseSchemas } from './lib/mongoose.js';
-import { planTables } from './lib/sql.js';
+import { planTables } from './lib/tables.js';
 import { scaffoldFiles } from './lib/scaffold.js';
 import { apiDir, backendDir, camel, gqlDir, loadCommon, loadFragment, loadModules, readText, type ModuleSpec } from './lib/spec.js';
 import { TypeContext } from './lib/types.js';
@@ -150,10 +150,7 @@ export const typeDefs = ${JSON.stringify(fragment)};
     const plans = planTables(m, []);
     generated.set(join(dir, 'infra', 'mongo', 'schema.ts'), emitMongooseSchemas(m, plans, collectionDefs(m, plans, []), GENERATED(`docs/api/spec/modules/${m.name}.json`)));
   }
-  // new modules start on MongoDB; an existing one keeps the store its manifest declares (docs/04-mongodb-migration.md)
-  const manifest = join(dir, 'module.ts');
-  const store = !existsSync(manifest) || /store:\s*'mongo'/.test(readFileSync(manifest, 'utf8')) ? 'mongo' : 'postgres';
-  const files = scaffoldFiles({ mod: m, common, types: new TypeContext(m, commonTypes, byName), hasFragment: Boolean(fragment), sourceFields: sourceFieldsOf(m, fragment), store });
+  const files = scaffoldFiles({ mod: m, common, types: new TypeContext(m, commonTypes, byName), hasFragment: Boolean(fragment), sourceFields: sourceFieldsOf(m, fragment) });
   for (const [rel, content] of Object.entries(files)) {
     const p = join(dir, rel);
     if (existsSync(p)) continue;

@@ -6,7 +6,6 @@
  */
 import { parseArgs } from 'node:util';
 import { isPlaceholder } from '../src/kernel/http/index.js';
-import { schemaOf } from '../src/kernel/migrations/index.js';
 import { allSpecs, dependencyProblems, dependentsOf, loadOrder } from '../src/kernel/module-system/loader.js';
 import { enabledModules } from '../src/modules.config.js';
 import { moduleLoaders } from '../src/modules/index.js';
@@ -15,12 +14,14 @@ import { buildOfflineApp } from './lib/offline.js';
 const { values: opts } = parseArgs({ options: { graph: { type: 'boolean' }, without: { type: 'string' } } });
 const specs = Object.values(allSpecs);
 const enabled = new Set(enabledModules);
+/** A module name as a Mermaid node id (no hyphens) */
+const nodeId = (name: string) => name.replace(/-/g, '_');
 
 if (opts.graph) {
   console.log('graph LR');
   for (const m of specs) {
-    for (const d of m.dependsOn) console.log(`  ${schemaOf(m.name)} --> ${schemaOf(d)}`);
-    for (const d of m.optionalDeps) console.log(`  ${schemaOf(m.name)} -.-> ${schemaOf(d)}`);
+    for (const d of m.dependsOn) console.log(`  ${nodeId(m.name)} --> ${nodeId(d)}`);
+    for (const d of m.optionalDeps) console.log(`  ${nodeId(m.name)} -.-> ${nodeId(d)}`);
   }
   process.exit(0);
 }
@@ -34,7 +35,7 @@ if (opts.without) {
   process.exit(0);
 }
 
-// Boot every module folder (no database) and count the handlers that are still placeholders
+// Boot every module folder (embedded MongoDB, schema not applied) and count the handlers that are still placeholders
 const app = await buildOfflineApp();
 const built = new Map<string, number>();
 for (const e of app.kernel.boot.endpoints) if (!isPlaceholder(e.handler)) built.set(e.module, (built.get(e.module) ?? 0) + 1);
