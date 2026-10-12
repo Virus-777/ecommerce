@@ -184,8 +184,9 @@ export class Items {
           ref = await core.ctx.refs.next('WQ', { digits: 4 });
           continue;
         }
-        // two raises of the same key at once: the unique index refuses the second insert; refresh instead
-        if (attempt < 3 && (err as { code?: string })?.code === '23505') continue;
+        // two raises of the same key at once: the unique index refuses the second insert (MongoDB duplicate key,
+        // which aborts that transaction); run it again and refresh instead
+        if (attempt < 3 && (err as { code?: unknown })?.code === 11000) continue;
         throw err;
       }
     }

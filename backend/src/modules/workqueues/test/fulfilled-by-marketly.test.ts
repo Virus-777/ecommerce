@@ -1,15 +1,13 @@
 /**
- * Fulfilled by Marketly: the four fulfillment.* queues (seeded on a fresh install and added to old installs by
- * migration 0004), fulfillment-service raises landing in them by dedupe prefix, and the Marketly warehouse's
- * overdue dispatches and delivery exceptions kept away from the seller.
+ * Fulfilled by Marketly: the four fulfillment.* queues (seeded on a fresh install), fulfillment-service raises
+ * landing in them by dedupe prefix, and the Marketly warehouse's overdue dispatches and delivery exceptions kept
+ * away from the seller.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { allSpecs } from '../../../kernel/module-system/loader.js';
 import { validSample } from '../../../testing/samples.js';
 import { QUEUE_SEEDS } from '../domain/catalog.js';
 import { escalationLabel } from '../domain/rules.js';
-import { m0004FulfillmentService } from '../infra/postgres/migrations/0004_fulfillment_service.js';
 import { as, boot, newId, publish } from './harness.js';
 
 type Booted = Awaited<ReturnType<typeof boot>>;
@@ -50,13 +48,7 @@ describe('fulfillment.* queues', () => {
     expect(res.json().queue).toMatchObject({ key: 'fulfillment.receiving', name: 'Fulfilled by Marketly receiving', area: 'inventory_warehouse', ownerRole: 'warehouse_manager', visibleToSeller: false });
   });
 
-  it('migration 0004 adds them to an install seeded before them, with the catalogue definitions; idempotent, staff edits kept', async () => {
-    const db = t.app.kernel.database.kysely;
-    // an install from before Fulfilled by Marketly
-    await sql`delete from workqueues.queues where key like 'fulfillment.%'`.execute(db);
-    expect(await t.service.core.repo.getQueue('fulfillment.receiving')).toBeFalsy();
-
-    await t.app.kernel.database.exec(m0004FulfillmentService.sql!);
+  it('are seeded with the catalogue definitions', async () => {
     for (const key of Object.keys(FS_QUEUES)) {
       const q = (await t.service.core.repo.getQueue(key))!;
       const s = QUEUE_SEEDS[key]!;
@@ -76,11 +68,6 @@ describe('fulfillment.* queues', () => {
       });
       expect(q.escalation_route, key).toEqual(s.escalationRoute);
     }
-
-    await sql`update workqueues.queues set name = 'FBM inbound' where key = 'fulfillment.receiving'`.execute(db);
-    await t.app.kernel.database.exec(m0004FulfillmentService.sql!);
-    expect((await t.service.core.repo.getQueue('fulfillment.receiving'))!.name).toBe('FBM inbound');
-    expect((await sql<{ n: number }>`select count(*)::int as n from workqueues.queues where key like 'fulfillment.%'`.execute(db)).rows[0]!.n).toBe(4);
   });
 });
 

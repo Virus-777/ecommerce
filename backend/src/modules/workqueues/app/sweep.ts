@@ -79,7 +79,7 @@ export class Sweep {
 
   /**
    * Resolved and dismissed items older than itemRetentionDays are marked archived (archived_at). Rows,
-   * notes and history stay in Postgres: archived items leave the default lists and stay reachable by id
+   * notes and history stay: archived items leave the default lists and stay reachable by id
    * and with archived=true. Nothing is deleted.
    */
   async archive(): Promise<number> {

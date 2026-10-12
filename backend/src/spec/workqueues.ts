@@ -934,7 +934,7 @@ export interface WorkqueuesDb {
     due_at: Date;
     deadline_state: 'on_time' | 'due_soon' | 'overdue';
     priority: string;
-    state: string;
+    state: 'open' | 'assigned' | 'in_progress' | 'waiting' | 'resolved' | 'dismissed';
     waiting_on: string | null;
     /** set on wait, cleared on resume; used to push due_at when the queue pauses while waiting */
     waiting_since: Date | null;
@@ -3042,7 +3042,15 @@ export const spec = defineModuleSpec({
               "bsonType": "string"
             },
             "state": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "open",
+                "assigned",
+                "in_progress",
+                "waiting",
+                "resolved",
+                "dismissed"
+              ]
             },
             "waiting_on": {
               "bsonType": [
@@ -3117,6 +3125,23 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
+          "name": "items_dedupe_key_498c58",
+          "key": {
+            "dedupe_key": 1
+          },
+          "unique": true,
+          "partial": {
+            "state": {
+              "$in": [
+                "open",
+                "assigned",
+                "in_progress",
+                "waiting"
+              ]
+            }
+          }
+        },
+        {
           "name": "items_queue_key_state_due_at_d27d9e",
           "key": {
             "queue_key": 1,
@@ -3132,10 +3157,20 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "items_deadline_state_due_at_178caf",
+          "name": "items_deadline_state_due_at_09ac95",
           "key": {
             "deadline_state": 1,
             "due_at": 1
+          },
+          "partial": {
+            "state": {
+              "$in": [
+                "open",
+                "assigned",
+                "in_progress",
+                "waiting"
+              ]
+            }
           }
         },
         {
@@ -3156,9 +3191,7 @@ export const spec = defineModuleSpec({
           }
         }
       ],
-      "unenforced": [
-        "unique(dedupe_key) where state not in ('resolved','dismissed') (unsupported condition \"state not in ('resolved','dismissed')\")"
-      ]
+      "unenforced": []
     },
     "item_events": {
       "idField": "id",

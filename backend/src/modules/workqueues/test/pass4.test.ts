@@ -1,9 +1,8 @@
 /**
  * Gap pass 4: QueueInput.key (given or derived) and the inventory.merge_candidates queue (seeded, routed by
- * the merge-candidate dedupe prefix, and the migration that moves old items out of inventory.low_stock).
+ * the merge-candidate dedupe prefix).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { m0003Pass4 } from '../infra/postgres/migrations/0003_pass4.js';
 import { as, boot, newId, type Person } from './harness.js';
 
 type Booted = Awaited<ReturnType<typeof boot>>;
@@ -62,16 +61,5 @@ describe('inventory.merge_candidates', () => {
     expect(item.queueKey).toBe('inventory.merge_candidates');
     const other = await t.service.raise({ sourceModule: 'inventory', queueKey: 'inventory.low_stock', kind: 'manual_task', title: 'Count shelf 4', subject: { type: 'stock_item', id: newId() }, dedupeKey: `inventory.count:${newId()}` });
     expect(other.queueKey).toBe('inventory.low_stock');
-  });
-
-  it('the pass 4 migration moves open merge candidates out of inventory.low_stock (idempotent)', async () => {
-    const [a, b] = [newId(), newId()];
-    const item = await t.service.raise({ sourceModule: 'inventory', queueKey: 'inventory.low_stock', kind: 'manual_task', title: 'Merge', subject: { type: 'stock_item', id: a }, dedupeKey: `inventory.merge_candidate:${a}:${b}` });
-    const low = await t.service.raise({ sourceModule: 'inventory', queueKey: 'inventory.low_stock', kind: 'low_stock', title: 'Low', subject: { type: 'stock_item', id: a }, dedupeKey: `low_stock:${a}` });
-    await t.service.core.repo.updateItem(item.id, { queue_key: 'inventory.low_stock' });
-    await t.app.kernel.database.exec(m0003Pass4.sql!);
-    await t.app.kernel.database.exec(m0003Pass4.sql!);
-    expect(await t.service.core.repo.getItem(item.id)).toMatchObject({ queue_key: 'inventory.merge_candidates' });
-    expect(await t.service.core.repo.getItem(low.id)).toMatchObject({ queue_key: 'inventory.low_stock' });
   });
 });

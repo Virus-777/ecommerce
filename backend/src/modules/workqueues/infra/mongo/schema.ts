@@ -76,7 +76,7 @@ const items = new Schema(
     due_at: { type: Date, required: true },
     deadline_state: { type: String, required: true, enum: ["on_time","due_soon","overdue"] },
     priority: { type: String, required: true },
-    state: { type: String, required: true },
+    state: { type: String, required: true, enum: ["open","assigned","in_progress","waiting","resolved","dismissed"] },
     waiting_on: { type: String, default: null },
     waiting_since: { type: Date, default: null }, // set on wait, cleared on resume; used to push due_at when the queue pauses while waiting
     escalation_level: { type: Number, required: true, validate: integer },
@@ -97,12 +97,12 @@ const items = new Schema(
   collectionOptions("workqueues.items"),
 );
 items.index({"ref":1}, {"name":"items_ref_8cef23","unique":true});
+items.index({"dedupe_key":1}, {"name":"items_dedupe_key_498c58","unique":true,"partialFilterExpression":{"state":{"$in":["open","assigned","in_progress","waiting"]}}});
 items.index({"queue_key":1,"state":1,"due_at":1}, {"name":"items_queue_key_state_due_at_d27d9e"});
 items.index({"assignee_staff_id":1,"state":1}, {"name":"items_assignee_staff_id_state_473014"});
-items.index({"deadline_state":1,"due_at":1}, {"name":"items_deadline_state_due_at_178caf"});
+items.index({"deadline_state":1,"due_at":1}, {"name":"items_deadline_state_due_at_09ac95","partialFilterExpression":{"state":{"$in":["open","assigned","in_progress","waiting"]}}});
 items.index({"seller_id":1,"state":1}, {"name":"items_seller_id_state_6ba116","partialFilterExpression":{"visible_to_seller":true}});
 items.index({"subject_type":1,"subject_id":1}, {"name":"items_subject_type_subject_id_fb4ad6"});
-// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): unique(dedupe_key) where state not in ('resolved','dismissed') (unsupported condition "state not in ('resolved','dismissed')")
 
 /** History: raised, refreshed, assigned, state changes, escalations, notes */
 const item_events = new Schema(

@@ -238,6 +238,37 @@ describe('notes, manual tasks, lists', () => {
     expect(official.statusCode).toBe(200);
   });
 
+  it('priority and amount sorts page by cursor in order; two raises of one key at once make one item', async () => {
+    const tag = `sorttest${newId().slice(0, 8)}`;
+    const raise = (priority: 'low' | 'normal' | 'high' | 'urgent', amount: number | null, dedupeKey = `${tag}:${newId()}`) =>
+      t.service.raise({ sourceModule: 'shipping', queueKey: 'shipping.overdue_dispatch', kind: 'manual_task', title: `${tag} ${priority}`, subject: { type: 'other', id: newId() }, priority, amount: amount === null ? null : { amount, currency: 'USD' }, dedupeKey });
+    await raise('low', 500);
+    await raise('urgent', null);
+    await raise('high', 9000);
+    await raise('normal', 100);
+    const walk = async (sort: string) => {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const res = await call('GET', `/items?q=${tag}&limit=1&sort=${sort}${cursor ? `&cursor=${cursor}` : ''}`, agent, WORKER);
+        expect(res.statusCode, res.body).toBe(200);
+        seen.push(...res.json().items.map((i: { priority: string }) => i.priority));
+        cursor = res.json().nextCursor;
+      } while (cursor);
+      return seen;
+    };
+    expect(await walk('priority')).toEqual(['urgent', 'high', 'normal', 'low']);
+    expect(await walk('amount')).toEqual(['high', 'low', 'normal', 'urgent']);
+    const page2 = await call('GET', `/items?q=${tag}&page=2&limit=2&sort=amount`, agent, WORKER);
+    expect(page2.json()).toMatchObject({ page: 2, total: 4, totalPages: 2 });
+    expect(page2.json().items.map((i: { priority: string }) => i.priority)).toEqual(['normal', 'urgent']);
+
+    const key = `${tag}:same`;
+    const [a, b] = await Promise.all([raise('normal', null, key), raise('normal', null, key)]);
+    expect(a.id).toBe(b.id);
+    expect(await t.service.core.repo.countItems({ search: `${tag} normal`, states: ['open', 'assigned', 'in_progress', 'waiting'] })).toBe(2);
+  });
+
   it('exports through reports, limited to the caller\'s queues (audited)', async () => {
     const res = await call('POST', '/items/exports', lead, LEAD, { filters: { queueKey: 'shipping.overdue_dispatch' }, format: 'csv' });
     expect(res.statusCode, res.body).toBe(202);
