@@ -6,6 +6,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { ReturnsPublicApi } from '../../../spec/returns.js';
+import { spec } from '../../../spec/support.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { DAY, harness, idem, reportProblem, sellerOrder, tokens, USD, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -250,7 +252,7 @@ describe('decisions, drafts and appeals', () => {
     expect(res.body.case.decision).toBeNull();
     const request = h.calls.approvals.at(-1)!;
     expect(request).toMatchObject({ action: 'support.remedies.approve', amount: USD(7000), target: { type: 'case', id: x.caseId } });
-    const row = (await (h.app.kernel.database.kysely.withSchema('support') as any).selectFrom('cases').selectAll().where('id', '=', x.caseId).executeTakeFirst()) as any;
+    const row = (await h.app.kernel.mongo.module('support', spec.collections, schemas).table<any>('cases').get(x.caseId)) as any;
     expect(row).toMatchObject({ approval_request_id: requestId, pending_decision: { kind: 'decision', decision: { outcome: 'customer_favored' } } });
     // another decision while this one waits: nothing is saved (409)
     const again = await h.call('POST', `/api/admin/support/cases/${x.caseId}/decide`, tokens.staff(), { outcome: 'seller_favored', remedies: [], reason: 'Changed my mind', notifyParties: true }, idem());

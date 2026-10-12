@@ -1,11 +1,13 @@
 /**
- * Gap pass 4: case facts in columns (with the 0002 backfill from next_action->'facts' and decision_draft->'pending'),
+ * Gap pass 4: case facts in columns (the 0002 backfill of PostgreSQL installs is not ported: every MongoDB install starts
+ * fresh),
  * goodwill remedies matched on their grant id, escalated → escalated, guest viewers of Order.cases and the customer
  * data export hook.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0002Pass4CaseFactsApprovalsGrants } from '../infra/postgres/migrations/0002_pass4_case_facts_approvals_grants.js';
+import { spec } from '../../../spec/support.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { harness, idem, reportProblem, sellerOrder, tokens, USD, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -19,7 +21,7 @@ afterAll(async () => {
   await hw?.app.close();
 });
 
-const raw = async (x: Harness, id: string) => (await (x.app.kernel.database.kysely.withSchema('support') as any).selectFrom('cases').selectAll().where('id', '=', id).executeTakeFirst()) as Record<string, any>;
+const raw = async (x: Harness, id: string) => (await x.app.kernel.mongo.module('support', spec.collections, schemas).table<Record<string, any>>('cases').get(id))!;
 
 describe('case facts in columns', () => {
   it('stores what the customer asked for, the seller reply, information requests and escalations in columns', async () => {
@@ -126,55 +128,5 @@ describe('exportCustomerData', () => {
     expect(texts.join(' ')).not.toMatch(/Internal|Seller only/);
     expect(rec.messages.find((m: { text: string }) => m.text === 'It arrived cracked').from).toBe('You');
     expect(await h.service.exportCustomerData({ customerId: newId(), accountId: newId() })).toEqual([{ key: 'support-cases', title: 'Help cases', module: 'support', records: [], attachmentIds: [] }]);
-  });
-});
-
-describe('migration 0002 backfill', () => {
-  let hm: Harness;
-  beforeAll(async () => {
-    hm = await harness();
-  });
-  afterAll(async () => {
-    await hm?.app.close();
-  });
-
-  it('moves facts out of next_action and the pending decision out of decision_draft into columns', async () => {
-    const o = await sellerOrder(hm);
-    const opened = await hm.call('POST', '/api/store/support/cases', tokens.customer(o.customerId), { kind: 'order_problem', category: 'item_damaged', orderId: o.order.id, orderItemIds: [o.itemId], problemType: 'wrong_item', message: 'Wrong colour', desiredRemedy: 'refund', replyChannel: 'phone', callbackPhone: '555-0100' }, idem());
-    const id = opened.body.id as string;
-    expect((await hm.call('POST', `/api/seller/support/cases/${id}/messages`, tokens.seller(o.sellerId), { body: 'Checking' })).status).toBe(200);
-    expect((await hm.call('POST', `/api/admin/support/cases/${id}/escalate`, tokens.staff(), { to: 'returns', reason: 'Needs a return', convertToDispute: true })).status).toBe(200);
-    const due = new Date(hm.clock.now().getTime() + 86_400_000).toISOString();
-    expect((await hm.call('POST', `/api/admin/support/cases/${id}/request-info`, tokens.staff(), { from: 'seller', question: 'Tracking?', dueAt: due })).status).toBe(200);
-    const before = (await hm.service.core.repo.get('cases', id))!;
-    const db = hm.app.kernel.database;
-    const requestId = newId();
-    const pending = { kind: 'decision', requestId, ref: 'AP-7', decision: { outcome: 'customer_favored', remedies: [], reason: 'x', notifyParties: true }, requestedBy: { kind: 'staff', id: newId() }, principal: { kind: 'staff', accountId: newId() }, requestedAt: new Date().toISOString() };
-    // the shape before 0002: facts inside next_action, the pending decision inside decision_draft (no draft)
-    await (db.kysely.withSchema('support') as any)
-      .updateTable('cases')
-      .set({ next_action: JSON.stringify({ ...before.next_action, facts: before.facts }), decision_draft: JSON.stringify({ draft: null, savedAt: pending.requestedAt, savedBy: pending.requestedBy, pending }) })
-      .where('id', '=', id)
-      .execute();
-    const cols = ['order_ref', 'placed_at', 'return_ref', 'customer_name', 'contact_email', 'city', 'seller_name', 'owner_type', 'reference', 'trust_report_id', 'problem_type', 'desired_remedy', 'callback_phone', 'info_request_from', 'info_request_question', 'info_request_due_at', 'info_requested_at', 'info_requested_by', 'escalated_at', 'escalated_by', 'escalation_reason', 'escalated_to', 'escalation_note', 'seller_replied_at', 'dispatch_overdue_due_at', 'dispatch_overdue_noted_at', 'overdue_notified_for', 'appeal_window_closed', 'approval_request_id', 'pending_decision'];
-    await db.exec(`alter table support.cases ${cols.map((c) => `drop column ${c}`).join(', ')};
-alter table support.case_remedies drop column goodwill_grant_id;
-drop index support.case_remedies_replacement_id_idx;`);
-
-    await db.exec(`begin;\n${m0002Pass4CaseFactsApprovalsGrants.sql}\ncommit;`);
-
-    const after = (await hm.service.core.repo.get('cases', id))!;
-    expect(after.facts).toEqual(before.facts);
-    expect(after.facts).toMatchObject({ problemType: 'wrong_item', desiredRemedy: 'refund', callbackPhone: '555-0100', infoRequest: { from: 'seller', question: 'Tracking?' }, escalation: { to: 'returns', reason: 'Needs a return' } });
-    expect(after.pending).toMatchObject({ requestId, ref: 'AP-7', kind: 'decision', decision: { outcome: 'customer_favored' } });
-    expect(after.decision_draft).toBeNull();
-    const row = await raw(hm, id);
-    expect(row.next_action).not.toHaveProperty('facts');
-    expect(row.pending_decision).not.toHaveProperty('requestId');
-    // the module keeps working on the backfilled row
-    const detail = await hm.call('GET', `/api/admin/support/cases/${id}`, tokens.staff());
-    expect(detail.status).toBe(200);
-    expect(detail.body.pendingApproval).toMatchObject({ approvalRequestId: requestId });
-    expect(detail.body.customer).toMatchObject({ asksFor: 'Refund' });
   });
 });
