@@ -7,7 +7,7 @@ import type { GraphQLContext } from '../../../kernel/graphql/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { resolvers } from '../graphql/resolvers.js';
 import type { InventoryService } from '../service.js';
-import { admin, call, eventsNamed, harness, ledgerMismatches, officialItem, quantities, reservedMismatches, sellerHeaders, sellerItem, staffHeaders, warehouse, type Harness } from './helpers.js';
+import { admin, call, eventsNamed, harness, ledgerMismatches, officialItem, quantities, reservedMismatches, sellerHeaders, sellerItem, staffHeaders, table, warehouse, type Harness } from './helpers.js';
 
 let h: Harness;
 let loc: { id: string };
@@ -78,7 +78,7 @@ describe('receiving', () => {
   it('keeps counted units in Incoming until the Inventory Manager confirms them; weighted average cost', async () => {
     const a = await officialItem(h, loc.id, 0);
     const b = await officialItem(h, loc.id, 0);
-    await h.app.kernel.database.kysely.updateTable('inventory.stock_items').set({ unit_cost_amount: 10000 }).where('id', '=', a.id).execute();
+    await table(h, 'stock_items').update(a.id, { unit_cost_amount: 10000 });
     await admin(h, 'POST', '/adjustments', { stockItemId: a.id, fromGroup: 'outside', toGroup: 'available', quantity: 10, reasonCode: 'found_stock' });
     const po = newId();
     await h.api.expectIncoming(po, 'PUR-2610-0042', loc.id, [{ stockItemId: a.id, quantity: 10, expectedDate: '2026-10-20' }, { stockItemId: b.id, quantity: 4, expectedDate: '2026-10-20' }]);
@@ -213,7 +213,7 @@ describe('returns', () => {
   it('records a different condition at the original cost, holds for repair, writes off at cost', async () => {
     const a = await officialItem(h, loc.id, 0);
     const likeNew = await officialItem(h, loc.id, 0, { condition: 'used_like_new' });
-    await h.app.kernel.database.kysely.updateTable('inventory.stock_items').set({ unit_cost_amount: 9000 }).where('id', '=', a.id).execute();
+    await table(h, 'stock_items').update(a.id, { unit_cost_amount: 9000 });
     const r1 = newId();
     const r2 = newId();
     const r3 = newId();

@@ -1,12 +1,10 @@
 /**
  * Gap pass 4: reservations.source (instead of the order-allocation key prefix), transfers.note, StockItem.image from
- * catalog, cancellation and dispatch dedupe through the kernel inbox (not movement notes), valuation_snapshots, and
- * migration 0002 backfilling the source, the inbox keys and the new columns on an existing install.
+ * catalog, cancellation and dispatch dedupe through the kernel inbox (not movement notes), and valuation_snapshots.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0002Pass4Columns } from '../infra/postgres/migrations/0002_pass4_columns.js';
-import { admin, harness, ledgerMismatches, officialItem, quantities, reservedMismatches, warehouse, type Harness } from './helpers.js';
+import { admin, harness, inboxKeys, ledgerMismatches, officialItem, quantities, reservedMismatches, table, warehouse, type Harness } from './helpers.js';
 
 let h: Harness;
 let main: { id: string; code: string };
@@ -23,7 +21,6 @@ beforeEach(async () => {
   h.events.length = 0;
 });
 
-const db = () => h.app.kernel.database.kysely.withSchema('inventory') as any;
 const consistent = async () => {
   expect(await ledgerMismatches(h)).toEqual([]);
   expect(await reservedMismatches(h)).toEqual([]);
@@ -96,7 +93,7 @@ describe('reservations.source', () => {
     expect(ex).toMatchObject({ key, source: 'exchange' });
     // the same source and key is the same reservation
     expect((await h.api.allocateForOrder({ key, orderId: newId(), source: { kind: 'exchange', id: newId() }, lines: [{ stockItemId: a.id, quantity: 1 }], actor: { kind: 'system' } })).id).toBe(ex.id);
-    const rows = await db().selectFrom('reservations').select(['id', 'source', 'key']).where('key', '=', key).execute();
+    const rows = await table(h, 'reservations').find({ key });
     expect(rows.map((r: { source: string }) => r.source).sort()).toEqual(['checkout', 'exchange', 'replacement']);
     // releaseHold releases an allocation by its source
     await h.api.releaseHold(rep.id, 'Replacement cancelled');
@@ -124,7 +121,7 @@ describe('consumers dedupe through the inbox', () => {
     await h.app.kernel.events.drain();
     expect(await quantities(h, a.id)).toMatchObject({ available: 4, reserved: 1 });
 
-    const keys = (await h.app.kernel.database.kysely.selectFrom('kernel.processed_events' as never).select('key' as never).where('module' as never, '=', 'inventory' as never).execute()).map((r: any) => r.key);
+    const keys = await inboxKeys(h);
     expect(keys).toEqual(expect.arrayContaining([`item-cancelled:${cancellationId}:${o.orderItemId}:${o.reservationId}`, `shipment-dispatched:${shipmentId}`]));
     await consistent();
   });
@@ -167,57 +164,14 @@ describe('valuation snapshots', () => {
   it('the daily job writes one row per group for the market day; a second run replaces it', async () => {
     await officialItem(h, main.id, 3, { unitCost: usd(2500) } as never);
     await h.app.kernel.jobs.runNow('inventory.valuation-snapshot');
-    const first = await db().selectFrom('valuation_snapshots').selectAll().execute();
+    const first = await table(h, 'valuation_snapshots').find();
     expect(first.map((r: { stock_group: string }) => r.stock_group).sort()).toEqual(['available', 'damaged_held', 'incoming', 'reserved', 'returned']);
     const available = first.find((r: { stock_group: string }) => r.stock_group === 'available');
     expect(available).toMatchObject({ currency: 'USD', units: expect.any(Number), sku_count: expect.any(Number) });
     await officialItem(h, main.id, 2);
     await h.app.kernel.jobs.runNow('inventory.valuation-snapshot');
-    const second = await db().selectFrom('valuation_snapshots').selectAll().execute();
+    const second = await table(h, 'valuation_snapshots').find();
     expect(second).toHaveLength(5);
     expect(second.find((r: { stock_group: string }) => r.stock_group === 'available').units).toBe(available.units + 2);
-  });
-});
-
-describe('migration 0002', () => {
-  it('backfills source from the key prefix and claims the cancellations and shipments already applied', async () => {
-    const a = await officialItem(h, main.id, 4);
-    const o = await acceptedOrder(a.id, 2);
-    const k = h.app.kernel.database;
-    // back to the schema before 0002
-    // (keys of other sources made unique again first: one key per source is what 0002 allows)
-    await k.exec(`update inventory.reservations set key = key || ':' || source where source <> 'checkout';
-drop index inventory.reservations_source_key_idx;
-alter table inventory.reservations drop column source;
-alter table inventory.reservations add constraint reservations_key_key unique (key);
-alter table inventory.transfers drop column note;
-drop table inventory.valuation_snapshots;`);
-    const legacyId = newId();
-    const now = new Date();
-    await db().insertInto('reservations').values({ id: legacyId, key: 'order-allocation:exchange:EX-1', order_id: o.orderId, order_ref: 'MK-261010-00400', state: 'allocated', expires_at: null, released_reason: null, created_at: now, updated_at: now }).execute();
-    await db().insertInto('reservations').values({ id: newId(), key: 'order-allocation:replacement:RP-1', order_id: o.orderId, order_ref: null, state: 'released', expires_at: null, released_reason: 'x', created_at: now, updated_at: now }).execute();
-    // what the old consumers left: released units with the cancellation in the note, a dispatch with the shipment
-    const cancellationId = newId();
-    const shipmentId = newId();
-    await db().updateTable('reservation_lines').set({ released_qty: 1 }).where('reservation_id', '=', o.reservationId).execute();
-    const movement = (reason: string, note: string) => ({ id: newId(), stock_item_id: a.id, location_id: main.id, from_group: 'reserved', to_group: reason === 'dispatched' ? 'outside' : 'available', quantity: 1, reason_code: reason, note, ref_kind: 'order', ref_id: o.orderId, ref_label: 'Order MK-261010-00400', actor_kind: 'system', actor_id: null, actor_name: null, approved_by: null, after: JSON.stringify({}), at: now });
-    await db().insertInto('stock_movements').values([movement('order_cancelled', `Cancellation ${cancellationId}`), movement('dispatched', `Shipment ${shipmentId}`)]).execute();
-
-    await k.exec(`begin;\n${m0002Pass4Columns.sql}\ncommit;`);
-
-    const rows = await db().selectFrom('reservations').select(['id', 'source', 'key']).where('order_id', '=', o.orderId).execute();
-    expect(rows).toEqual(
-      expect.arrayContaining([
-        { id: legacyId, source: 'exchange', key: 'EX-1' },
-        expect.objectContaining({ source: 'replacement', key: 'RP-1' }),
-        { id: o.reservationId, source: 'checkout', key: expect.not.stringMatching(/^order-allocation:/) },
-      ]),
-    );
-    const keys = (await k.kysely.selectFrom('kernel.processed_events' as never).select('key' as never).where('module' as never, '=', 'inventory' as never).execute()).map((r: any) => r.key);
-    expect(keys).toEqual(expect.arrayContaining([`shipment-dispatched:${shipmentId}`, `item-cancelled:${cancellationId}:${o.orderItemId}:${o.reservationId}`]));
-    expect(await db().selectFrom('valuation_snapshots').selectAll().execute()).toEqual([]);
-    // the same key now lives once per source
-    const dup = await db().insertInto('reservations').values({ id: newId(), source: 'exchange', key: 'EX-1', order_id: null, order_ref: null, state: 'held', expires_at: null, released_reason: null, created_at: now, updated_at: now }).execute().catch((e: unknown) => e);
-    expect((dup as { code?: string }).code).toBe('23505');
   });
 });

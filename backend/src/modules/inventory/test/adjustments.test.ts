@@ -1,7 +1,7 @@
 /** Company stock adjustments: reasons, review dates, group limits and second review through access. */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { admin, eventsNamed, harness, ledgerMismatches, officialItem, quantities, sellerItem, warehouse, type Harness } from './helpers.js';
+import { admin, eventsNamed, harness, ledgerMismatches, officialItem, quantities, sellerItem, table, warehouse, type Harness } from './helpers.js';
 
 let h: Harness;
 let loc: { id: string };
@@ -99,7 +99,7 @@ describe('company stock adjustments', () => {
 
   it('reports written-off company stock to finance at cost', async () => {
     const item = await officialItem(h, loc.id, 0);
-    await h.app.kernel.database.kysely.updateTable('inventory.stock_items').set({ unit_cost_amount: 4500 }).where('id', '=', item.id).execute();
+    await table(h, 'stock_items').update(item.id, { unit_cost_amount: 4500 });
     await admin(h, 'POST', '/adjustments', { stockItemId: item.id, fromGroup: 'outside', toGroup: 'available', quantity: 4, reasonCode: 'found_stock' });
     await admin(h, 'POST', '/adjustments', { stockItemId: item.id, fromGroup: 'available', toGroup: 'outside', quantity: 2, reasonCode: 'theft_or_loss' });
     expect(h.costs).toEqual([expect.objectContaining({ kind: 'write_off', amount: { amount: 9000, currency: 'USD' }, reference: expect.objectContaining({ kind: 'adjustment' }) })]);

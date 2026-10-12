@@ -3,12 +3,11 @@
  * The sellable rule (a service item sells only at its service location; own-location units kept but not on sale),
  * setServiceLocation, moveServiceStock, service inbound Incoming and receipts confirmed in the same queue,
  * getLevels, SERVICE_MANAGED on seller edits, adjustment.recorded/stock.low/receipt.confirmed fields, the seller
- * views, and migration 0003 on an existing install.
+ * views.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0003FulfilledByMarketly } from '../infra/postgres/migrations/0003_fulfilled_by_marketly.js';
-import { admin, eventsNamed, harness, ledgerMismatches, officialItem, quantities, reservedMismatches, seller, sellerItem, warehouse, type Harness } from './helpers.js';
+import { admin, eventsNamed, harness, ledgerMismatches, officialItem, quantities, reservedMismatches, seller, sellerItem, table, warehouse, type Harness } from './helpers.js';
 
 let h: Harness;
 let dock: { id: string; code: string };
@@ -25,7 +24,6 @@ beforeEach(async () => {
   h.events.length = 0;
 });
 
-const db = () => h.app.kernel.database.kysely.withSchema('inventory') as any;
 const staff = { kind: 'staff' as const, id: newId(), name: 'Rina Okafor' };
 const consistent = async () => {
   expect(await ledgerMismatches(h)).toEqual([]);
@@ -104,8 +102,8 @@ describe('service inbound and receipts (decision D3)', () => {
     const res = await admin(h, 'POST', `/inbound/${receipt.id}/confirm`, { lines: [], checked: true });
     expect(res.statusCode, res.body).toBe(200);
     expect(await levelAt(item.id, dock.id)).toEqual({ available: 9, reserved: 0, incoming: 0, damagedHeld: 1, returned: 0 });
-    const row = await db().selectFrom('stock_items').select(['unit_cost_amount', 'primary_bin_code']).where('id', '=', item.id).executeTakeFirst();
-    expect(row).toEqual({ unit_cost_amount: null, primary_bin_code: 'A-01-1' }); // no valuation for seller stock
+    const { unit_cost_amount, primary_bin_code } = await table(h, 'stock_items').get(item.id);
+    expect({ unit_cost_amount, primary_bin_code }).toEqual({ unit_cost_amount: null, primary_bin_code: 'A-01-1' }); // no valuation for seller stock
     const [confirmed] = eventsNamed(h, 'inventory.receipt.confirmed');
     expect(confirmed).toMatchObject({
       inboundId: receipt.id,
@@ -219,7 +217,7 @@ describe('the sellable rule and setServiceLocation (decision D4)', () => {
     await expect(h.api.setServiceLocation(company.id, dock.id, staff)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     const s = await sellerItem(h, newId(), 1);
     await expect(h.api.setServiceLocation(s.id, newId(), staff)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-    const own = (await db().selectFrom('locations').select('id').where('seller_id', '=', s.sellerId).executeTakeFirst()).id;
+    const own = (await table(h, 'locations').findOne({ seller_id: s.sellerId })).id;
     await expect(h.api.setServiceLocation(s.id, own, staff)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     const closed = await warehouse(h, 'FBM-OFF', { sellable: false, active: false });
     await expect(h.api.setServiceLocation(s.id, closed.id, staff)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
@@ -250,7 +248,7 @@ describe('moveServiceStock', () => {
 
     // into damaged_held writes a held_stock row; out of it releases it
     await h.api.moveServiceStock({ key: `fs:removal:${ref.id}`, stockItemId: item.id, locationId: dock.id, from: 'available', to: 'damaged_held', quantity: 2, reasonCode: 'service_removal_reserved', ref: { kind: 'service_removal', id: ref.id, label: 'Removal RM-1' }, actor: staff });
-    const held = await db().selectFrom('held_stock').selectAll().where('stock_item_id', '=', item.id).execute();
+    const held = await table(h, 'held_stock').find({ stock_item_id: item.id });
     expect(held).toEqual([expect.objectContaining({ quantity: 2, reason_code: 'service_removal_reserved', location_id: dock.id })]);
     await h.api.moveServiceStock({ key: `fs:removal-done:${ref.id}`, stockItemId: item.id, locationId: dock.id, from: 'damaged_held', to: null, quantity: 2, reasonCode: 'service_removal_completed', ref: { kind: 'service_removal', id: ref.id, label: 'Removal RM-1' }, actor: staff });
     expect(await levelAt(item.id, dock.id)).toMatchObject({ available: 4, damagedHeld: 0, returned: 1 });
@@ -324,7 +322,7 @@ describe('staff changes at the service location publish adjustment.recorded with
     expect(eventsNamed(h, 'inventory.adjustment.recorded')).toEqual([expect.objectContaining({ stockItemId: item.id, locationId: dock.id, ownerType: 'seller', sellerId, serviceManaged: true, fromGroup: 'available', toGroup: 'outside', quantity: 1, reasonCode: 'theft_or_loss' })]);
     expect(h.costs).toHaveLength(costs); // seller stock has no company cost to write off
     // the seller's own-location units are not staff's to adjust
-    const own = (await db().selectFrom('locations').select('id').where('seller_id', '=', sellerId).executeTakeFirst()).id;
+    const own = (await table(h, 'locations').findOne({ seller_id: sellerId })).id;
     expect((await admin(h, 'POST', '/adjustments', { stockItemId: item.id, locationId: own, fromGroup: 'available', toGroup: 'outside', quantity: 1, reasonCode: 'theft_or_loss' })).statusCode).toBe(400);
     const plain = await sellerItem(h, sellerId, 2);
     expect((await admin(h, 'POST', '/adjustments', { stockItemId: plain.id, fromGroup: 'available', toGroup: 'outside', quantity: 1, reasonCode: 'theft_or_loss' })).statusCode).toBe(400);
@@ -367,50 +365,5 @@ describe('getLevels', () => {
     const fresh = await sellerItem(h, newId(), 1);
     const levels = await h.api.getLevels([item.id, fresh.id, 'not-an-id'], dock.id);
     expect(levels).toEqual({ [item.id]: { available: 2, reserved: 0, incoming: 0, damagedHeld: 0, returned: 0 }, [fresh.id]: { available: 0, reserved: 0, incoming: 0, damagedHeld: 0, returned: 0 } });
-  });
-});
-
-describe('migration 0003', () => {
-  it('backfills existing purchase receipts and lets old rows keep working', async () => {
-    const k = h.app.kernel.database;
-    // a purchase receipt from before 0003
-    const a = await officialItem(h, dock.id, 0);
-    const po = newId();
-    const receiptRowId = newId();
-    await h.api.expectIncoming(po, 'PUR-2610-0100', dock.id, [{ stockItemId: a.id, quantity: 2, expectedDate: '2026-10-20' }]);
-    // back to the schema before 0003
-    await k.exec(`delete from inventory.inbound_lines where inbound_id in (select id from inventory.inbound_receipts where source_kind = 'service_inbound');
-delete from inventory.inbound_receipts where source_kind = 'service_inbound';
-update inventory.incoming_expectations set source_kind = 'transfer' where source_kind = 'service_inbound';
-update inventory.inbound_lines set unit_cost_amount = 0 where unit_cost_amount is null;
-drop index inventory.stock_items_service_location_idx;
-alter table inventory.stock_items drop column service_location_id;
-drop index inventory.inbound_receipts_source_idx;
-alter table inventory.inbound_receipts drop column source_kind, drop column source_id, drop column source_ref, drop column owner_type, drop column seller_id;
-alter table inventory.inbound_receipts alter column purchase_order_id set not null, alter column purchase_order_ref set not null;
-alter table inventory.inbound_lines alter column unit_cost_amount set not null;
-alter table inventory.incoming_expectations drop constraint incoming_expectations_source_kind_check;
-alter table inventory.incoming_expectations add constraint incoming_expectations_source_kind_check check (source_kind in ('purchase_order', 'transfer'));`);
-    const now = new Date();
-    await db()
-      .insertInto('inbound_receipts')
-      .values({ id: receiptRowId, receipt_id: newId(), receipt_ref: 'REC-OLD', purchase_order_id: po, purchase_order_ref: 'PUR-2610-0100', supplier_name: 'Halden', location_id: dock.id, received_by: 'Old', received_at: now, state: 'awaiting_confirmation', confirmed_by: null, confirmed_at: null, note: null })
-      .execute();
-    await db().insertInto('inbound_lines').values({ inbound_id: receiptRowId, stock_item_id: a.id, expected: 2, received: 2, damaged: 0, bin_code: null, unit_cost_amount: 900, sellable: null, reason: null }).execute();
-
-    await k.exec(`begin;\n${m0003FulfilledByMarketly.sql}\ncommit;`);
-
-    const row = await db().selectFrom('inbound_receipts').selectAll().where('id', '=', receiptRowId).executeTakeFirst();
-    expect(row).toMatchObject({ source_kind: 'purchase_order', source_id: po, source_ref: 'PUR-2610-0100', owner_type: 'official', seller_id: null });
-    expect((await db().selectFrom('stock_items').select('service_location_id').where('id', '=', a.id).executeTakeFirst()).service_location_id).toBeNull();
-    // the old receipt confirms as before
-    const res = await admin(h, 'POST', `/inbound/${receiptRowId}/confirm`, { lines: [], checked: true });
-    expect(res.statusCode, res.body).toBe(200);
-    expect(res.json()).toMatchObject({ source: { kind: 'purchase_order', id: po, ref: 'PUR-2610-0100' }, ownerType: 'official' });
-    expect(await quantities(h, a.id)).toMatchObject({ available: 2, incoming: 0 });
-    // the new kinds are accepted
-    const { item } = await serviceItem(0, 1);
-    expect((await h.api.getLevels([item.id], dock.id))[item.id]).toMatchObject({ available: 1 });
-    await expect(db().insertInto('inbound_receipts').values({ id: newId(), receipt_id: newId(), receipt_ref: 'X', source_kind: 'other', supplier_name: 'x', location_id: dock.id, received_by: 'x', received_at: now, state: 'awaiting_confirmation' }).execute()).rejects.toMatchObject({ code: '23514' });
   });
 });

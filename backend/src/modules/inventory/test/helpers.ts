@@ -12,15 +12,15 @@
  *   catalog.getProduct → products registered in h.products; catalog.getVariants → their variants (gtin when registered).
  */
 import type { FastifyInstance } from 'fastify';
-import { sql } from 'kysely';
 import { devClaims, type DevOptions } from '../../../kernel/auth/dev.js';
 import { fixedClock } from '../../../kernel/lib/clock.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
-import type { InventoryPublicApi, StockItem } from '../../../spec/inventory.js';
+import { spec, type InventoryPublicApi, type StockItem } from '../../../spec/inventory.js';
 import type * as reports from '../../../spec/reports.js';
 import { auth, buildTestApp, token } from '../../../testing/app.js';
+import { schemas } from '../infra/mongo/schema.js';
 
 export const INVENTORY_EVENTS = [
   'inventory.stock.changed',
@@ -138,6 +138,8 @@ export async function harness(opts: { launchPhase?: number; withCatalog?: boolea
       },
     },
   });
+  // the clock starts when the app is up: a slow boot (a loaded machine) must not leave tokens issued now in its future
+  clock.set(new Date());
   for (const name of INVENTORY_EVENTS) app.kernel.events.subscribe('test', name, (e) => void h.events.push({ name, payload: e.payload }));
   return { ...h, app, api: app.kernel.boot.apis.get('inventory') as InventoryPublicApi };
 }
@@ -189,35 +191,48 @@ export const quantities = async (h: Harness, id: string) => (await admin(h, 'GET
 
 export const eventsNamed = (h: Harness, name: string) => h.events.filter((e) => e.name === name).map((e) => e.payload);
 
+/** One of inventory's collections, read and written the way the repository does */
+export const table = (h: Harness, name: string) => h.app.kernel.mongo.module('inventory', spec.collections, schemas).table<any>(name);
+
+const GROUPS = ['available', 'reserved', 'incoming', 'damaged_held', 'returned'] as const;
+
 /**
  * The ledger proves the quantities: for every item and location, each group equals the units moved
  * into it minus the units moved out of it.
  */
 export async function ledgerMismatches(h: Harness): Promise<unknown[]> {
-  const rows = await sql<{ stock_item_id: string; location_id: string; group: string; level: number; ledger: number }>`
-    with moves as (
-      select stock_item_id, location_id, to_group as grp, quantity as q from inventory.stock_movements where to_group <> 'outside'
-      union all
-      select stock_item_id, location_id, from_group as grp, -quantity as q from inventory.stock_movements where from_group <> 'outside'
-    ),
-    ledger as (select stock_item_id, location_id, grp, sum(q)::int as n from moves group by 1, 2, 3),
-    levels as (
-      select stock_item_id, location_id, g.grp, case g.grp when 'available' then available when 'reserved' then reserved when 'incoming' then incoming when 'damaged_held' then damaged_held else returned end as n
-      from inventory.stock_levels cross join (values ('available'), ('reserved'), ('incoming'), ('damaged_held'), ('returned')) as g(grp)
-    )
-    select l.stock_item_id, l.location_id, l.grp as group, l.n as level, coalesce(m.n, 0) as ledger
-    from levels l left join ledger m on m.stock_item_id = l.stock_item_id and m.location_id = l.location_id and m.grp = l.grp
-    where l.n <> coalesce(m.n, 0)`.execute(h.app.kernel.database.kysely);
-  return rows.rows;
+  const ledger = new Map<string, number>();
+  const add = (k: string, n: number) => ledger.set(k, (ledger.get(k) ?? 0) + n);
+  for (const m of await table(h, 'stock_movements').find()) {
+    if (m.to_group !== 'outside') add(`${m.stock_item_id}|${m.location_id}|${m.to_group}`, m.quantity);
+    if (m.from_group !== 'outside') add(`${m.stock_item_id}|${m.location_id}|${m.from_group}`, -m.quantity);
+  }
+  const out: unknown[] = [];
+  for (const l of await table(h, 'stock_levels').find()) {
+    for (const group of GROUPS) {
+      const n = ledger.get(`${l.stock_item_id}|${l.location_id}|${group}`) ?? 0;
+      if (l[group] !== n) out.push({ stock_item_id: l.stock_item_id, location_id: l.location_id, group, level: l[group], ledger: n });
+    }
+  }
+  return out;
 }
 
 /** Open reservation lines account for every Reserved unit */
 export async function reservedMismatches(h: Harness): Promise<unknown[]> {
-  const rows = await sql`
-    select l.stock_item_id, l.location_id, l.reserved, coalesce(sum(r.quantity - r.fulfilled_qty - r.released_qty), 0)::int as open
-    from inventory.stock_levels l
-    left join inventory.reservation_lines r on r.stock_item_id = l.stock_item_id and r.location_id = l.location_id and r.state in ('held', 'allocated')
-    group by l.stock_item_id, l.location_id, l.reserved
-    having l.reserved <> coalesce(sum(r.quantity - r.fulfilled_qty - r.released_qty), 0)`.execute(h.app.kernel.database.kysely);
-  return rows.rows;
+  const open = new Map<string, number>();
+  for (const r of await table(h, 'reservation_lines').find({ state: { $in: ['held', 'allocated'] } })) {
+    const k = `${r.stock_item_id}|${r.location_id}`;
+    open.set(k, (open.get(k) ?? 0) + r.quantity - r.fulfilled_qty - r.released_qty);
+  }
+  const out: unknown[] = [];
+  for (const l of await table(h, 'stock_levels').find()) {
+    const n = open.get(`${l.stock_item_id}|${l.location_id}`) ?? 0;
+    if (l.reserved !== n) out.push({ stock_item_id: l.stock_item_id, location_id: l.location_id, reserved: l.reserved, open: n });
+  }
+  return out;
+}
+
+/** Keys inventory claimed in the kernel inbox */
+export async function inboxKeys(h: Harness): Promise<string[]> {
+  return (await h.app.kernel.mongo.kernel('processed_events').find({ module: 'inventory' }).lean()).map((r: any) => r.key);
 }
