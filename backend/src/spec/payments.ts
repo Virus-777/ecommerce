@@ -3403,16 +3403,16 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "intents_status_updated_at_id_8631f7",
+          "name": "intents_status_updated_at__id_3b6830",
           "key": {
             "status": 1,
             "updated_at": 1,
-            "id": 1
+            "_id": 1
           }
         }
       ],
       "unenforced": [
-        "unique (checkout_session_id) where status not in ('failed','voided','expired') (unsupported condition \"status not in ('failed','voided','expired')\")"
+        "unique (checkout_session_id) where status not in ('failed','voided','expired') (not in on status, which has no enum values)"
       ]
     },
     "allocations": {

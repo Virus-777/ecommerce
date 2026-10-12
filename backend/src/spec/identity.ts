@@ -3713,10 +3713,10 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "accounts_status_id_a54fb9",
+          "name": "accounts_status__id_1ab776",
           "key": {
             "status": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {

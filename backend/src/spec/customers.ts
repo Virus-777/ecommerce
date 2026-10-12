@@ -2733,10 +2733,10 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "customers_account_status_id_904659",
+          "name": "customers_account_status__id_9c984f",
           "key": {
             "account_status": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {
@@ -2746,10 +2746,10 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "customers_created_at_id_89f2e1",
+          "name": "customers_created_at__id_501e84",
           "key": {
             "created_at": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {

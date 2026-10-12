@@ -4914,11 +4914,11 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "campaigns_owner_kind_status_id_2c384c",
+          "name": "campaigns_owner_kind_status__id_a0e666",
           "key": {
             "owner_kind": 1,
             "status": 1,
-            "id": 1
+            "_id": 1
           }
         }
       ],

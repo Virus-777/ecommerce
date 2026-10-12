@@ -48,7 +48,7 @@ const entries = new Schema(
   collectionOptions("audit.entries"),
 );
 entries.index({"seq":1}, {"name":"entries_seq_52ef2e","unique":true});
-entries.index({"at":-1,"id":1}, {"name":"entries_at_id_2a0522"});
+entries.index({"at":-1,"_id":1}, {"name":"entries_at__id_273cfb"});
 entries.index({"target_type":1,"target_id":1,"at":-1}, {"name":"entries_target_type_target_id_at_52e743"});
 entries.index({"actor_id":1,"at":-1}, {"name":"entries_actor_id_at_1427d7"});
 entries.index({"category":1,"at":-1}, {"name":"entries_category_at_95ff60"});

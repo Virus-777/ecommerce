@@ -39,7 +39,7 @@ const accounts = new Schema(
   collectionOptions("identity.accounts"),
 );
 accounts.index({"realm":1,"email_normalized":1}, {"name":"accounts_realm_email_normalized_b8b41e","unique":true});
-accounts.index({"status":1,"id":1}, {"name":"accounts_status_id_a54fb9"});
+accounts.index({"status":1,"_id":1}, {"name":"accounts_status__id_1ab776"});
 accounts.index({"realm":1,"created_at":1}, {"name":"accounts_realm_created_at_bfbcae"});
 accounts.index({"tokens_valid_after":1}, {"name":"accounts_tokens_valid_after_808d08","partialFilterExpression":{"tokens_valid_after":{"$type":"date"}}});
 

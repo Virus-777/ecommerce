@@ -4421,18 +4421,18 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "offers_seller_id_status_id_aeade9",
+          "name": "offers_seller_id_status__id_be35e0",
           "key": {
             "seller_id": 1,
             "status": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {
-          "name": "offers_status_id_a54fb9",
+          "name": "offers_status__id_1ab776",
           "key": {
             "status": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {

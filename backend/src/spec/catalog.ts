@@ -3991,38 +3991,38 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "products_review_state_id_e834f9",
+          "name": "products_review_state__id_136a53",
           "key": {
             "review_state": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {
-          "name": "products_category_id_id_4d732a",
+          "name": "products_category_id__id_4ee289",
           "key": {
             "category_id": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {
-          "name": "products_owner_seller_id_id_392532",
+          "name": "products_owner_seller_id__id_0c9474",
           "key": {
             "owner_seller_id": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {
-          "name": "products_publication_id_2d56bc",
+          "name": "products_publication__id_e42336",
           "key": {
             "publication": 1,
-            "id": 1
+            "_id": 1
           }
         },
         {
-          "name": "products_brand_id_id_de6457",
+          "name": "products_brand_id__id_a31711",
           "key": {
             "brand_id": 1,
-            "id": 1
+            "_id": 1
           }
         }
       ],

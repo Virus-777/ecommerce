@@ -64,8 +64,8 @@ offers.index({"owner_type":1,"seller_id":1,"seller_sku":1}, {"name":"offers_owne
 offers.index({"owner_type":1,"seller_id":1,"variant_id":1}, {"name":"offers_owner_type_seller_id_variant_id_107cf9","unique":true,"partialFilterExpression":{"condition":"new","status":{"$in":["draft","active","paused","out_of_stock","ineligible"]}}});
 offers.index({"stock_item_id":1}, {"name":"offers_stock_item_id_428230","unique":true,"partialFilterExpression":{"status":{"$in":["draft","active","paused","out_of_stock","ineligible"]}}});
 offers.index({"product_id":1,"variant_id":1,"status":1}, {"name":"offers_product_id_variant_id_status_43e526"});
-offers.index({"seller_id":1,"status":1,"id":1}, {"name":"offers_seller_id_status_id_aeade9"});
-offers.index({"status":1,"id":1}, {"name":"offers_status_id_a54fb9"});
+offers.index({"seller_id":1,"status":1,"_id":1}, {"name":"offers_seller_id_status__id_be35e0"});
+offers.index({"status":1,"_id":1}, {"name":"offers_status__id_1ab776"});
 offers.index({"stock_item_id":1}, {"name":"offers_stock_item_id_597367"});
 offers.index({"shipping_profile_id":1,"status":1}, {"name":"offers_shipping_profile_id_status_e4b547"});
 offers.index({"title":1}, {"name":"offers_title_0810ba"});

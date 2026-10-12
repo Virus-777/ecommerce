@@ -154,6 +154,12 @@ function partialFilter(where: string, columns: Map<string, Column>): Record<stri
       conds.push({ [c.name]: { $type: t } });
     } else if ((m = /^(\w+)\s*=\s*(.+)$/.exec(term))) conds.push({ [col(m[1]!).name]: literal(m[2]!) });
     else if ((m = /^(\w+)\s+in\s*\((.+)\)$/i.exec(term))) conds.push({ [col(m[1]!).name]: { $in: splitTop(m[2]!).map(literal) } });
+    else if ((m = /^(\w+)\s+not\s+in\s*\((.+)\)$/i.exec(term))) {
+      const c = col(m[1]!);
+      if (!c.enumValues) throw new Error(`not in on ${c.name}, which has no enum values`);
+      const not = new Set(splitTop(m[2]!).map(literal));
+      conds.push({ [c.name]: { $in: c.enumValues.filter((v) => !not.has(v)) } });
+    }
     else if ((m = /^(\w+)\s*(<>|!=)\s*(.+)$/.exec(term))) {
       const c = col(m[1]!);
       if (!c.enumValues) throw new Error(`<> on ${c.name}, which has no enum values`);
@@ -274,6 +280,17 @@ function indexOf(idx: string, table: string, columns: Map<string, Column>, probl
   return { name: indexName(table, def), ...def };
 }
 
+/** An index with the primary key column renamed to _id (in its keys and its partial filter); its name follows */
+function withIdField(i: IndexDef, idField: string, table: string): IndexDef {
+  const rename = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k === idField ? '_id' : k, v]));
+  const renameFilter = (f: Record<string, unknown>): Record<string, unknown> =>
+    Array.isArray(f.$and) ? { $and: (f.$and as Record<string, unknown>[]).map(rename) } : rename(f);
+  if (!(idField in i.key) && !(i.partial && JSON.stringify(i.partial).includes(`"${idField}"`))) return i;
+  const { name: _name, ...rest } = i;
+  const def: Omit<IndexDef, 'name'> = { ...rest, key: rename(i.key) as IndexDef['key'], ...(i.partial ? { partial: renameFilter(i.partial) } : {}) };
+  return { name: indexName(table, def), ...def };
+}
+
 /** Every table of a module as a collection definition */
 export function collectionDefs(mod: ModuleSpec, plans: TablePlan[], problems: string[]): Record<string, CollectionDef> {
   const out: Record<string, CollectionDef> = {};
@@ -306,7 +323,9 @@ export function collectionDefs(mod: ModuleSpec, plans: TablePlan[], problems: st
     }
     for (const idx of table.indexes ?? []) {
       if (/^pk\s*\(/.test(idx)) continue;
-      const def = indexOf(idx, table.name, byName, problems, where, unenforced);
+      const found = indexOf(idx, table.name, byName, problems, where, unenforced);
+      // the primary key column is stored as _id: an index or partial filter naming it must say _id
+      const def = found && idField ? withIdField(found, idField, table.name) : found;
       if (def && !indexes.some((i) => i.name === def.name)) indexes.push(def);
     }
     // MongoDB allows one text index per collection: merge text keys

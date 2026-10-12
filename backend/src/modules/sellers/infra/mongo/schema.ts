@@ -51,7 +51,7 @@ const sellers = new Schema(
 );
 sellers.index({"ref":1}, {"name":"sellers_ref_8cef23","unique":true});
 sellers.index({"slug":1}, {"name":"sellers_slug_549e08","unique":true});
-sellers.index({"status":1,"id":1}, {"name":"sellers_status_id_a54fb9"});
+sellers.index({"status":1,"_id":1}, {"name":"sellers_status__id_1ab776"});
 sellers.index({"verification_state":1}, {"name":"sellers_verification_state_73d30f"});
 sellers.index({"store_name":"text","legal_name":"text"}, {"name":"sellers_store_name_legal_name_7c7434"});
 

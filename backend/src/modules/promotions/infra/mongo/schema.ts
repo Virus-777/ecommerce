@@ -59,7 +59,7 @@ campaigns.index({"ref":1}, {"name":"campaigns_ref_8cef23","unique":true});
 campaigns.index({"status":1,"starts_at":1}, {"name":"campaigns_status_starts_at_8934be"});
 campaigns.index({"status":1,"ends_at":1}, {"name":"campaigns_status_ends_at_0fb3f4"});
 campaigns.index({"seller_id":1,"status":1}, {"name":"campaigns_seller_id_status_b608db"});
-campaigns.index({"owner_kind":1,"status":1,"id":1}, {"name":"campaigns_owner_kind_status_id_2c384c"});
+campaigns.index({"owner_kind":1,"status":1,"_id":1}, {"name":"campaigns_owner_kind_status__id_a0e666"});
 
 /** Included and excluded categories, products, offers, sellers, brands */
 const campaign_targets = new Schema(

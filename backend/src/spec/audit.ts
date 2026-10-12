@@ -1390,10 +1390,10 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "entries_at_id_2a0522",
+          "name": "entries_at__id_273cfb",
           "key": {
             "at": -1,
-            "id": 1
+            "_id": 1
           }
         },
         {

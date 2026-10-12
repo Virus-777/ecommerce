@@ -35,9 +35,9 @@ const customers = new Schema(
 );
 customers.index({"user_id":1}, {"name":"customers_user_id_55cbfe","unique":true});
 customers.index({"ref":1}, {"name":"customers_ref_8cef23","unique":true});
-customers.index({"account_status":1,"id":1}, {"name":"customers_account_status_id_904659"});
+customers.index({"account_status":1,"_id":1}, {"name":"customers_account_status__id_9c984f"});
 customers.index({"email":1}, {"name":"customers_email_896614"});
-customers.index({"created_at":1,"id":1}, {"name":"customers_created_at_id_89f2e1"});
+customers.index({"created_at":1,"_id":1}, {"name":"customers_created_at__id_501e84"});
 customers.index({"first_name":"text","last_name":"text","email":"text"}, {"name":"customers_first_name_last_name_email_15063f"});
 
 /** Saved addresses. Soft-deleted so past checkout references stay explainable; orders hold their own copy. */

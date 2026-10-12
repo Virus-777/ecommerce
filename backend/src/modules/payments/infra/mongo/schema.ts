@@ -51,8 +51,8 @@ intents.index({"checkout_session_id":1,"attempt_no":1}, {"name":"intents_checkou
 intents.index({"order_id":1}, {"name":"intents_order_id_4c5e85"});
 intents.index({"status":1,"next_check_at":1}, {"name":"intents_status_next_check_at_dd88c3"});
 intents.index({"provider":1,"provider_ref":1}, {"name":"intents_provider_provider_ref_178b7f"});
-intents.index({"status":1,"updated_at":1,"id":1}, {"name":"intents_status_updated_at_id_8631f7"});
-// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): unique (checkout_session_id) where status not in ('failed','voided','expired') (unsupported condition "status not in ('failed','voided','expired')")
+intents.index({"status":1,"updated_at":1,"_id":1}, {"name":"intents_status_updated_at__id_3b6830"});
+// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): unique (checkout_session_id) where status not in ('failed','voided','expired') (not in on status, which has no enum values)
 
 /** Captured money per seller group */
 const allocations = new Schema(

@@ -119,11 +119,11 @@ const products = new Schema(
   collectionOptions("catalog.products"),
 );
 products.index({"ref":1}, {"name":"products_ref_8cef23","unique":true});
-products.index({"review_state":1,"id":1}, {"name":"products_review_state_id_e834f9"});
-products.index({"category_id":1,"id":1}, {"name":"products_category_id_id_4d732a"});
-products.index({"owner_seller_id":1,"id":1}, {"name":"products_owner_seller_id_id_392532"});
-products.index({"publication":1,"id":1}, {"name":"products_publication_id_2d56bc"});
-products.index({"brand_id":1,"id":1}, {"name":"products_brand_id_id_de6457"});
+products.index({"review_state":1,"_id":1}, {"name":"products_review_state__id_136a53"});
+products.index({"category_id":1,"_id":1}, {"name":"products_category_id__id_4ee289"});
+products.index({"owner_seller_id":1,"_id":1}, {"name":"products_owner_seller_id__id_0c9474"});
+products.index({"publication":1,"_id":1}, {"name":"products_publication__id_e42336"});
+products.index({"brand_id":1,"_id":1}, {"name":"products_brand_id__id_a31711"});
 
 const variants = new Schema(
   {
