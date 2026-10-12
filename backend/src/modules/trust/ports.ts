@@ -1,6 +1,6 @@
 /**
  * What the trust service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  */
 import type * as common from '../../spec/common.js';
 import type { RiskFactor, TrustDb, TrustSubject } from '../../spec/trust.js';
