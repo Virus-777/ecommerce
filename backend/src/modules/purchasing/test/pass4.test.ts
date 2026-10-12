@@ -1,13 +1,13 @@
 /**
  * Gap pass 4: supplier_claims.supplier_reference (instead of a notes line), suppliers.return_authorization_required
- * (getPreferredSupplier answers it), the delivery going back to Arrived when its only receiving record is discarded,
- * and migration 0002 backfilling the reference from the notes.
+ * (getPreferredSupplier answers it), and the delivery going back to Arrived when its only receiving record is
+ * discarded.
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import type { PurchasingPublicApi } from '../../../spec/purchasing.js';
-import { m0002Pass4Columns } from '../infra/postgres/migrations/0002_pass4_columns.js';
+import { spec, type PurchasingPublicApi } from '../../../spec/purchasing.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { api, LOCATION, makeStubs, purchasingApp, usd } from './helpers.js';
 
 const stubs = makeStubs();
@@ -59,21 +59,12 @@ describe('delivery reopen', () => {
 });
 
 describe('supplier_claims.supplier_reference', () => {
-  it('is kept in its own column; migration 0002 moves old notes lines into it', async () => {
+  it('is kept in its own column', async () => {
     const { po } = await sentOrder();
     const c = (await call('POST', '/claims', { purchaseOrderId: po.id, kind: 'damage', lines: [{ stockItemId: lamp, sku: 'BRT-LAMP-4', quantity: 1, unitCost: usd(2800) }], notes: 'Cracked shade' })).json();
     const sent = (await call('POST', `/claims/${c.id}/submit`, { supplierReference: 'RMA-77' })).json();
     expect(sent).toMatchObject({ supplierReference: 'RMA-77', notes: 'Cracked shade' });
-
-    // an existing install: the reference was a notes line
-    const k = app.kernel.database;
-    const db = k.kysely.withSchema('purchasing') as any;
-    await k.exec('alter table purchasing.supplier_claims drop column supplier_reference; alter table purchasing.suppliers drop column return_authorization_required;');
-    await db.updateTable('supplier_claims').set({ notes: 'Cracked shade\nSupplier reference: RMA-1\nSupplier reference: RMA-2\nCredit note CN-9 received' }).where('id', '=', c.id).execute();
-    await k.exec(`begin;\n${m0002Pass4Columns.sql}\ncommit;`);
-    const row = await db.selectFrom('supplier_claims').select(['supplier_reference', 'notes']).where('id', '=', c.id).executeTakeFirst();
-    expect(row).toEqual({ supplier_reference: 'RMA-2', notes: 'Cracked shade\nCredit note CN-9 received' });
-    const sup = await db.selectFrom('suppliers').select('return_authorization_required').limit(1).executeTakeFirst();
-    expect(sup.return_authorization_required).toBe(false);
+    const row = await app.kernel.mongo.module('purchasing', spec.collections, schemas).table<any>('supplier_claims').get(c.id);
+    expect(row).toMatchObject({ supplier_reference: 'RMA-77', notes: 'Cracked shade' });
   });
 });

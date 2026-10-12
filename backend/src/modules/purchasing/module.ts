@@ -1,8 +1,7 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/purchasing.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresPurchasingRepository } from './infra/postgres/repository.js';
+import { createMongoPurchasingRepository } from './infra/mongo/repository.js';
 import { PurchasingService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -14,11 +13,12 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   register(ctx) {
-    const service = new PurchasingService({ repo: createPostgresPurchasingRepository(ctx.db), ctx });
+    const service = new PurchasingService({ repo: createMongoPurchasingRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
 
