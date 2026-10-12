@@ -1,13 +1,12 @@
 /**
  * Gap pass 4: pause and reject facts as columns (paused_by, paused_at, pause_cause, rejected_reason), the promoted
  * product on campaign_items (product_id instead of synthetic offer_product rows), frequency counters for the day and
- * the campaign total on frequency_state, TrackEvent.at optional, page types as plain strings, and migration 0004.
+ * the campaign total on frequency_state, TrackEvent.at optional and page types as plain strings.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
-import { m0004PauseItemsFrequency } from '../infra/postgres/migrations/0004_pause_items_frequency.js';
-import { ADMIN, boot, campaignInput, liveCampaign, openingCreatives, serve, STORE, track, type Kit } from './helpers.js';
+import { ADMIN, boot, campaignInput, liveCampaign, openingCreatives, serve, STORE, type Kit } from './helpers.js';
 
 let k: Kit;
 beforeAll(async () => {
@@ -19,7 +18,6 @@ afterAll(async () => {
 
 const DAY = 86_400_000;
 const row = (id: string) => k.svc.core.repo.get('campaigns', id);
-const exec = (sql: string) => k.app.kernel.database.exec(sql);
 
 describe('frequency counters', () => {
   it('a perCampaign cap counts displays on frequency_state and survives the hourly expiry while the campaign runs', async () => {
@@ -46,6 +44,23 @@ describe('frequency counters', () => {
     expect(await k.svc.core.repo.find('frequency_state', { campaign_id: c.id })).toHaveLength(rows.length);
     expect((await serve(k, { visitorId: 'v-total', sessionId: 's-4' })).overlay?.campaignId).not.toBe(c.id);
     await k.call('POST', `${ADMIN}/campaigns/${c.id}/finish`, k.staff, { reason: 'Test done' });
+  });
+});
+
+describe('frequency counters under concurrency', () => {
+  it('parallel displays and dismissals of one visitor and campaign are all counted (atomic updates, first row included)', async () => {
+    const campaignId = newId();
+    const now = k.clock.now();
+    const day = { day: k.svc.core.today(now), start: k.svc.core.dayStart(k.svc.core.today(now)) };
+    await Promise.all(Array.from({ length: 12 }, () => k.svc.core.repo.recordDisplay(['v-par', 'v-par-2'], campaignId, 's-par', now, 7, day)));
+    const rows = await k.svc.core.repo.find('frequency_state', { campaign_id: campaignId });
+    expect(rows).toHaveLength(2);
+    for (const r of rows) expect(r).toMatchObject({ total_displays: 12, day_displays: 12, session_displays: 12, window_displays: 12, display_day: day.day });
+
+    const until = new Date(now.getTime() + DAY);
+    await Promise.all([k.svc.core.repo.recordDismissal(['v-par'], campaignId, 's-other', until, now), k.svc.core.repo.recordDismissal(['v-par'], campaignId, 's-other', new Date(now.getTime() + 2 * DAY), now)]);
+    const [after] = await k.svc.core.repo.find('frequency_state', { campaign_id: campaignId, visitor_key: 'v-par' });
+    expect(after).toMatchObject({ session_id: 's-other', session_displays: 0, total_displays: 12, suppressed_until: new Date(now.getTime() + 2 * DAY) });
   });
 });
 
@@ -87,36 +102,5 @@ describe('page types are plain strings', () => {
     expect(await k.svc.isAdBlockedPage('home')).toBe(false);
     expect(await k.svc.adPositionsFor('checkout')).toEqual([]);
     expect(await k.svc.sponsoredForResults({ page: 'checkout', visitorId: 'v', sessionId: 's', device: 'web', organicOfferIds: [], personalizationAllowed: false })).toEqual([]);
-  });
-});
-
-describe('migration 0004', () => {
-  it('fills the pause and reject columns from the log, product_id from offer_product rows and total_displays from ad_events', async () => {
-    const c = await liveCampaign(k, { name: 'Migrated', frequencyCap: { perCampaign: 5, label: '' } });
-    const d = await serve(k, { visitorId: 'v-mig', sessionId: 's-mig' });
-    expect(d.overlay?.campaignId).toBe(c.id);
-    await track(k, [{ impressionToken: d.overlay!.impressionToken, kind: 'display' }]);
-    await k.call('POST', `${ADMIN}/campaigns/${c.id}/pause`, k.staff, { reason: 'Hold' });
-    const rejectedRow = (await k.svc.core.repo.find('campaigns', { status: 'rejected' }))[0]!;
-    const offerId = newId();
-    const productId = newId();
-
-    // the state before 0004: no columns; rejection text in paused_reason; a synthetic offer_product row
-    await exec(`update advertising.campaigns set paused_reason = rejected_reason where id = '${rejectedRow.id}';
-      alter table advertising.campaigns drop column paused_by, drop column paused_at, drop column pause_cause, drop column rejected_reason;
-      alter table advertising.campaign_items drop constraint if exists campaign_items_kind_check;
-      alter table advertising.campaign_items drop column product_id;
-      insert into advertising.campaign_items (campaign_id, kind, target_id, label) values ('${c.id}', 'offer', '${offerId}', 'Lamp'), ('${c.id}', 'offer_product', '${productId}', '${offerId}');
-      alter table advertising.frequency_state drop column display_day, drop column day_displays, drop column total_displays;`);
-    await exec(m0004PauseItemsFrequency.sql);
-
-    expect(await row(c.id)).toMatchObject({ status: 'paused', paused_by: expect.stringMatching(/^staff/), paused_at: expect.any(Date), pause_cause: null, paused_reason: 'Hold' });
-    expect(await row(rejectedRow.id)).toMatchObject({ rejected_reason: rejectedRow.rejected_reason, paused_reason: null });
-    const items = await k.svc.core.repo.find('campaign_items', { campaign_id: c.id });
-    expect(items.find((i) => i.target_id === offerId)).toMatchObject({ kind: 'offer', product_id: productId });
-    expect(items.some((i) => (i.kind as string) === 'offer_product')).toBe(false);
-    const freq = await k.svc.core.repo.find('frequency_state', { campaign_id: c.id });
-    expect(Math.max(...freq.map((f) => f.total_displays))).toBe(1);
-    expect(freq.every((f) => f.display_day === null)).toBe(true);
   });
 });

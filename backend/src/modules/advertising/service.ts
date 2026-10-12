@@ -3,6 +3,7 @@ import { isUuid } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
 import type { AdCampaignSummary, AdsDashboard, AdvertisingPublicApi, CampaignDayPerformance, SponsoredProductSlot } from '../../spec/advertising.js';
 import type { PageTypeName } from './domain/rules.js';
+import { placementSeedRows, rulesSeedRow } from './domain/seed.js';
 import { BillingPart } from './service/billing.js';
 import { CampaignsPart } from './service/campaigns.js';
 import { Core, type AdvertisingServiceDeps } from './service/core.js';
@@ -44,6 +45,12 @@ export class AdvertisingService implements AdvertisingPublicApi {
     this.reports = new ReportsPart(this.core);
     this.ops = new OpsPart(this.core);
     this.core.parts = { views: this.views, campaigns: this.campaigns, creatives: this.creatives, setup: this.setup, serving: this.serving, sellers: this.sellers, billing: this.billing, reports: this.reports, ops: this.ops };
+  }
+
+  /** Install seed on boot: the launch placements and global rules version 1, each only when absent (domain/seed.ts) */
+  async seed(): Promise<void> {
+    for (const row of placementSeedRows()) await this.core.repo.insertIgnore('placements', row);
+    await this.core.repo.insertIgnore('global_rules', rulesSeedRow());
   }
 
   /* ---------------- public API (in-process) */

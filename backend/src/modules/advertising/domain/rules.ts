@@ -79,8 +79,8 @@ export interface PlacementSeed {
 
 /**
  * Plan ch. 16/20: launch = opening full-screen, banners and pop-ups; sponsored product is a pilot; the rest ship off.
- * These seed migration 0002 (its SQL is generated from them and checksummed): never change them in place;
- * change placements through PATCH /placements or a new migration.
+ * These are the install seed (domain/seed.ts, inserted on boot when absent): changing them here does not reach
+ * existing installs; change placements through PATCH /placements or a data migration (mongoMigrations).
  */
 export const PLACEMENT_SEEDS: readonly PlacementSeed[] = [
   {
