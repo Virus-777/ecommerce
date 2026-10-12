@@ -1,7 +1,9 @@
 /** Product reviews: Verified Purchase eligibility, writing, editing, deleting, votes, lists, pending and context. */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { spec } from '../../../spec/reviews.js';
 import { resolvers } from '../graphql/resolvers.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { boot, DAY, type Kit, LONG, OFFICIAL_STORE_ID, order, product, reviewInput, seller, STORE, tokens } from './helpers.js';
 
 let k: Kit;
@@ -234,7 +236,7 @@ describe('invitations', () => {
     await k.app.kernel.jobs.runNow('reviews.invites');
     await k.app.kernel.events.drain();
   };
-  const inviteRow = async (orderItemId: string) => (k.app.kernel.database.kysely.withSchema('reviews') as any).selectFrom('review_invites').selectAll().where('order_item_id', '=', orderItemId).executeTakeFirst();
+  const inviteRow = async (orderItemId: string) => k.app.kernel.mongo.module('reviews', spec.collections, schemas).table<any>('review_invites').get(orderItemId);
 
   it('stores the delivered item in review_invites and publishes reviews.invite.due inviteDelayDays later, once (D-R2)', async () => {
     const b = buyer({ deliveredDaysAgo: 0 });
