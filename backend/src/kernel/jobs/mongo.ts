@@ -1,6 +1,6 @@
 /**
- * Jobs on MongoDB (kernel.jobs), for production and for several server instances on one replica set; replaces pg-boss
- * (docs/04-mongodb-migration.md §4) with the same guarantees:
+ * Jobs on MongoDB (kernel.jobs), for production and for several server instances on one replica set
+ * (docs/04-mongodb-migration.md §4):
  *
  *   - a job's queue holds at most one waiting run and one running run (unique partial indexes on the job name), so a
  *     job never overlaps itself across instances and missed ticks don't pile up;

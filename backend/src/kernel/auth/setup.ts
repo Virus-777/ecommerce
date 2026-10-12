@@ -4,7 +4,6 @@
  */
 import type { FastifyBaseLogger } from 'fastify';
 import { createPrivateKey, createPublicKey, type KeyObject } from 'node:crypto';
-import type { Kysely } from 'kysely';
 import type { Config } from '../config/index.js';
 import type { Clock } from '../lib/clock.js';
 import { appProofVerifier } from './app-proof.js';
@@ -19,9 +18,8 @@ export interface AuthSetup {
   config: Config;
   clock: Clock;
   log: FastifyBaseLogger;
-  db: Kysely<any>;
-  /** Webhook replay log (default: PostgreSQL kernel.webhook_events) */
-  webhookEvents?: WebhookEventLog;
+  /** Webhook replay log (mongoWebhookEventLog: kernel.webhook_events) */
+  webhookEvents: WebhookEventLog;
   /** The modules' answers (moduleAuthorities); wrapped with the development ones when DEV_TOKENS is on */
   authorities: Authorities;
   /** Wrap the final authorities (tests) */
@@ -88,7 +86,6 @@ export async function createAuthChain(s: AuthSetup): Promise<{ auth: AuthChain; 
     limits: config.rateLimits ? (s.limits ?? memoryRateLimitStore(clock)) : UNLIMITED,
     webhookVerifiers: s.webhookVerifiers,
     ownerOnly: s.ownerOnly,
-    db: s.db,
     webhookEvents: s.webhookEvents,
     claimsOf,
     fileLinks: s.fileLinks,

@@ -3,10 +3,10 @@
  * module's spec with a schedule; the module supplies the handler with ctx.jobs.handle().
  *
  * Two runners behind one interface (JOBS_BACKEND):
- *   - pgboss (production, DATABASE_URL): a pg-boss queue per job in PostgreSQL. Schedules are pg-boss
- *     schedules, so with several server instances each run happens once; failures are retried with backoff
- *     (pgboss.ts).
- *   - inprocess (development and tests on PGlite): timers in this process. Every instance runs every job.
+ *   - mongo (production, MONGODB_URI): a queue in MongoDB (kernel.jobs, mongo.ts). With several server instances
+ *     each scheduled run happens once; failures are retried with backoff.
+ *   - inprocess (development and tests on the embedded MongoDB): timers in this process. Every instance runs
+ *     every job.
  *
  * Both understand the spec's schedule phrases ("every 10 min", "hourly", "daily 02:00 market time",
  * "nightly 03:00 PT", "on boot"). Any other phrase fails boot: a job the scheduler can't time would
@@ -58,7 +58,7 @@ export interface JobInfo extends JobDefinition {
 }
 
 export interface JobScheduler {
-  readonly backend: 'inprocess' | 'pgboss' | 'mongo';
+  readonly backend: 'inprocess' | 'mongo';
   /** A job from a module spec (or the kernel's own); the schedule phrase is checked here */
   declare(def: JobDefinition): void;
   handle(module: string, name: string, run: () => Promise<unknown>): void;
@@ -211,34 +211,22 @@ export class InProcessScheduler extends JobRegistry implements JobScheduler {
 }
 
 export interface SchedulerOptions {
-  backend: 'inprocess' | 'pgboss' | 'mongo';
+  backend: 'inprocess' | 'mongo';
   timeZone: string;
   /** mongo: the store whose kernel.jobs collection is the queue */
   mongo?: MongoStore;
   clock?: Clock;
-  /** pgboss: the PostgreSQL connection string */
-  connectionString?: string;
-  /** pgboss: whether this instance works jobs (JOBS_ENABLED); otherwise it only enqueues */
+  /** mongo: whether this instance works jobs (JOBS_ENABLED); otherwise it only enqueues */
   workers?: boolean;
-  /** pgboss: identifies the deployment, so "on boot" jobs run once per deploy */
+  /** mongo: identifies the deployment, so "on boot" jobs run once per deploy */
   deployId?: string;
 }
 
-/** The runner the config asks for; pg-boss is loaded only when used. */
+/** The runner the config asks for */
 export async function createJobScheduler(log: FastifyBaseLogger, o: SchedulerOptions): Promise<JobScheduler> {
   if (o.backend === 'inprocess') return new InProcessScheduler(log, o.timeZone, o.clock);
-  if (o.backend === 'mongo') {
-    if (!o.mongo) throw new Error('JOBS_BACKEND=mongo needs MongoDB');
-    const { MongoScheduler } = await import('./mongo.js');
-    return new MongoScheduler(log, { store: o.mongo, timeZone: o.timeZone, clock: o.clock, workers: o.workers ?? true, deployId: o.deployId ?? 'unversioned' });
-  }
-  if (!o.connectionString) throw new Error('JOBS_BACKEND=pgboss needs DATABASE_URL');
-  const { PgBossScheduler } = await import('./pgboss.js');
-  return new PgBossScheduler(log, {
-    connectionString: o.connectionString,
-    timeZone: o.timeZone,
-    clock: o.clock,
-    workers: o.workers ?? true,
-    deployId: o.deployId ?? 'unversioned',
-  });
+  if (!o.mongo) throw new Error('JOBS_BACKEND=mongo needs MongoDB');
+  // imported here, not at the top: mongo.ts extends this file's JobRegistry
+  const { MongoScheduler } = await import('./mongo.js');
+  return new MongoScheduler(log, { store: o.mongo, timeZone: o.timeZone, clock: o.clock, workers: o.workers ?? true, deployId: o.deployId ?? 'unversioned' });
 }

@@ -19,14 +19,11 @@ const schema = z.object({
   /** Internal port for /health (load balancer); not the public listener */
   HEALTH_PORT: z.coerce.number().int().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
-  /** postgres://… ; empty = in-process PGlite (in memory, or in PGLITE_DIR) */
-  DATABASE_URL: z.string().optional(),
-  PGLITE_DIR: z.string().optional(),
   /** mongodb://…/marketly?replicaSet=rs0 (a replica set: transactions need one); empty = an embedded replica set (development, tests) */
   MONGODB_URI: z.string().optional(),
   /** Embedded MongoDB only: keep its data in this folder between restarts */
   MONGO_DATA_DIR: z.string().optional(),
-  /** Run pending migrations when the server starts (production runs `npm run migrate` instead) */
+  /** Apply the MongoDB schema and pending data migrations when the server starts (production runs `npm run migrate` instead) */
   MIGRATE_ON_START: flag,
   /** Plan ch. 20: endpoints of a later phase answer NOT_IMPLEMENTED. Phases 1–2 are designed for launch. */
   LAUNCH_PHASE: z.coerce.number().int().min(1).max(4).default(2),
@@ -39,8 +36,8 @@ const schema = z.object({
   RESPONSE_VALIDATION: flag,
   /** Work jobs and keep their schedules in this process */
   JOBS_ENABLED: flag,
-  /** pgboss: queue in PostgreSQL, each run once across instances; inprocess: timers in each process. Default pgboss with DATABASE_URL */
-  JOBS_BACKEND: z.enum(['inprocess', 'pgboss', 'mongo']).optional(),
+  /** mongo: queue in MongoDB, each run once across instances; inprocess: timers in each process. Default mongo with MONGODB_URI */
+  JOBS_BACKEND: z.enum(['inprocess', 'mongo']).optional(),
   /** Identifies a deployment (image tag, commit): "on boot" jobs run once per deploy and module set */
   DEPLOY_ID: z.string().optional(),
   /** Store and seller GraphQL accept persisted query ids only (on in production) */
@@ -70,8 +67,8 @@ const schema = z.object({
   DEV_SIGNING_KEY_FILE: z.string().default('.data/dev-signing-key.json'),
   /** Rate limits by IP, caller and sign-in style classes (off only for contract tests and load tests) */
   RATE_LIMITS: flag,
-  /** Where rate-limit windows are counted: postgres (shared by every instance) or memory (per process). Default postgres with DATABASE_URL */
-  RATE_LIMIT_STORE: z.enum(['memory', 'postgres', 'mongo']).optional(),
+  /** Where rate-limit windows are counted: mongo (shared by every instance) or memory (per process). Default mongo with MONGODB_URI */
+  RATE_LIMIT_STORE: z.enum(['memory', 'mongo']).optional(),
   /** Proxies in front of the server: a hop count, "true", or comma-separated addresses/CIDRs */
   TRUST_PROXY: z.string().optional(),
   /** Allowed browser origins per app (comma-separated) */
@@ -92,8 +89,6 @@ export interface Config {
   port: number;
   healthPort: number;
   logLevel: string;
-  databaseUrl: string | undefined;
-  pgliteDir: string | undefined;
   /** MongoDB: the server (undefined = embedded replica set) and, for the embedded one, its data folder */
   mongo: { uri: string | undefined; dataDir: string | undefined };
   migrateOnStart: boolean;
@@ -101,7 +96,7 @@ export interface Config {
   market: { timeZone: string; currency: string; defaultLocation: { postalCode: string; label: string } };
   responseValidation: boolean;
   jobsEnabled: boolean;
-  jobsBackend: 'inprocess' | 'pgboss' | 'mongo';
+  jobsBackend: 'inprocess' | 'mongo';
   deployId: string | undefined;
   graphqlPersistedOnly: boolean;
   auth: { jwks: string | undefined; issuer: string; revocationPollMs: number; signingJwk?: Jwk & { kid?: string } };
@@ -118,7 +113,7 @@ export interface Config {
   devTokens: boolean;
   devSigning: { file: string; jwk?: Jwk };
   rateLimits: boolean;
-  rateLimitStore: 'memory' | 'postgres' | 'mongo';
+  rateLimitStore: 'memory' | 'mongo';
   trustProxy: boolean | number | string[];
   cors: { store: string[]; seller: string[]; admin: string[] };
   docsEnabled: boolean;
@@ -129,14 +124,13 @@ export interface Config {
 /** localhost, 127.0.0.0/8 or ::1: reachable from this machine only */
 export const isLoopbackHost = (host: string) => /^(localhost|127(\.\d{1,3}){3}|::1|\[::1\])$/i.test(host.trim());
 
-/** PGlite (no DATABASE_URL), or a PostgreSQL server on loopback or a local socket */
-export function isLocalDatabase(url: string | undefined): boolean {
-  if (!url) return true;
+/** The embedded replica set (no MONGODB_URI), or a MongoDB server on loopback or a local socket (mongodb://%2Ftmp%2Fmongodb-27017.sock) */
+export function isLocalMongo(uri: string | undefined): boolean {
+  if (!uri) return true;
   try {
-    const u = new URL(url);
-    const socket = u.searchParams.get('host');
-    if (socket) return socket.startsWith('/') || isLoopbackHost(socket);
-    return u.hostname === '' || isLoopbackHost(u.hostname);
+    // several hosts (mongodb://a,b/…) do not parse as one URL: refused, to be safe
+    const host = decodeURIComponent(new URL(uri).hostname);
+    return host.startsWith('/') || isLoopbackHost(host);
   } catch {
     return false;
   }
@@ -161,8 +155,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     port: e.PORT,
     healthPort: e.HEALTH_PORT ?? e.PORT + 1,
     logLevel: e.NODE_ENV === 'test' ? 'silent' : e.LOG_LEVEL,
-    databaseUrl: e.DATABASE_URL || undefined,
-    pgliteDir: e.PGLITE_DIR || undefined,
     mongo: { uri: e.MONGODB_URI || undefined, dataDir: e.MONGO_DATA_DIR || undefined },
     migrateOnStart: e.MIGRATE_ON_START ?? !prod,
     launchPhase: e.LAUNCH_PHASE,
@@ -173,7 +165,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     responseValidation: e.RESPONSE_VALIDATION ?? !prod,
     jobsEnabled: e.JOBS_ENABLED ?? false,
-    jobsBackend: e.JOBS_BACKEND ?? (e.MONGODB_URI ? 'mongo' : e.DATABASE_URL ? 'pgboss' : 'inprocess'),
+    jobsBackend: e.JOBS_BACKEND ?? (e.MONGODB_URI ? 'mongo' : 'inprocess'),
     deployId: e.DEPLOY_ID || undefined,
     graphqlPersistedOnly: e.GRAPHQL_PERSISTED_ONLY ?? prod,
     auth: { jwks: e.AUTH_JWKS || undefined, issuer: e.AUTH_ISSUER, revocationPollMs: e.REVOCATION_POLL_MS, signingJwk: e.AUTH_SIGNING_JWK ? JSON.parse(e.AUTH_SIGNING_JWK) : undefined },
@@ -189,7 +181,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     devTokens,
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },
     rateLimits: e.RATE_LIMITS ?? true,
-    rateLimitStore: e.RATE_LIMIT_STORE ?? (e.MONGODB_URI ? 'mongo' : e.DATABASE_URL ? 'postgres' : 'memory'),
+    rateLimitStore: e.RATE_LIMIT_STORE ?? (e.MONGODB_URI ? 'mongo' : 'memory'),
     trustProxy: parseTrustProxy(e.TRUST_PROXY),
     cors: { store: e.CORS_STORE_ORIGINS, seller: e.CORS_SELLER_ORIGINS, admin: e.CORS_ADMIN_ORIGINS },
     docsEnabled: e.DOCS_ENABLED ?? e.NODE_ENV === 'development',
@@ -203,11 +195,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (config.devTokens && !isLoopbackHost(config.host)) {
     throw new Error(`DEV_TOKENS are only served on a loopback HOST (got ${config.host}); use HOST=127.0.0.1, or DEV_TOKENS=false with AUTH_SIGNING_JWK, AUTH_JWKS and APP_SECRET`);
   }
-  if (config.devTokens && config.mongo.uri && !isLocalDatabase(config.mongo.uri)) {
+  if (config.devTokens && !isLocalMongo(config.mongo.uri)) {
     throw new Error('DEV_TOKENS are only allowed with a local MongoDB (embedded, or MONGODB_URI on localhost); use DEV_TOKENS=false with AUTH_SIGNING_JWK, AUTH_JWKS and APP_SECRET');
-  }
-  if (config.devTokens && !isLocalDatabase(config.databaseUrl)) {
-    throw new Error('DEV_TOKENS are only allowed with a local database (PGlite, or DATABASE_URL on localhost); use DEV_TOKENS=false with AUTH_SIGNING_JWK, AUTH_JWKS and APP_SECRET');
   }
   if (!e.APP_SECRET && !config.devTokens && !prod && !isLoopbackHost(config.host)) {
     throw new Error(`APP_SECRET is required on a non-loopback HOST (${config.host})`);
@@ -218,7 +207,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (prod && !e.API_URL) throw new Error('API_URL is required in production (links to the files the API serves)');
   if (prod && config.media.storage === 'memory') throw new Error('MEDIA_STORAGE=memory loses every file on restart; use local in production');
   if (prod && !config.rateLimits) throw new Error('RATE_LIMITS cannot be turned off in production');
-  if (config.jobsBackend === 'pgboss' && !config.databaseUrl) throw new Error('JOBS_BACKEND=pgboss needs DATABASE_URL (on PGlite jobs run in process)');
   if (prod && !config.mongo.uri) throw new Error('MONGODB_URI is required in production (a MongoDB replica set)');
   if (prod && !config.auth.jwks) throw new Error('AUTH_JWKS is required in production (the public keys that verify tokens)');
   return config;

@@ -2,7 +2,7 @@
  * Mongoose schema helpers for the generated module schemas (src/modules/<m>/infra/mongo/schema.ts, docs/04 §3) and
  * the kernel's own collections.
  *
- * Meaning kept from PostgreSQL: NOT NULL is "not null" (an empty string is a value: Mongoose's required would refuse
+ * The spec's meaning (docs/api/spec/FORMAT.md): NOT NULL is "not null" (an empty string is a value: Mongoose's required would refuse
  * it), so `required` only checks for null; custom validators let null through (nullable columns).
  */
 import { Schema, type SchemaOptions } from 'mongoose';

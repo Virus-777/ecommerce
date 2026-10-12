@@ -12,7 +12,6 @@
  *   (onResponse)                record the webhook event
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { sql, type Kysely } from 'kysely';
 import type { Config } from '../config/index.js';
 import { AppError } from '../errors/index.js';
 import { appOrigins } from '../http/security.js';
@@ -54,9 +53,8 @@ export interface AuthKernel {
   webhookVerifiers: Map<string, WebhookVerifier>;
   /** Seller permission keys only the owner may use (spec permissions with ownerOnly) */
   ownerOnly: ReadonlySet<string>;
-  db: Kysely<any>;
-  /** Provider events already processed (replays are acknowledged without running the handler); default: PostgreSQL kernel.webhook_events */
-  webhookEvents?: WebhookEventLog;
+  /** Provider events already processed (replays are acknowledged without running the handler) */
+  webhookEvents: WebhookEventLog;
   /** Claims behind each verified principal (development authorities read dev claims from it) */
   claimsOf: WeakMap<Principal, AccessClaims>;
   /** Signed file links (GET /files/…), when a module serves files */
@@ -402,7 +400,7 @@ export class AuthChain {
       if (reply.statusCode >= 400) return;
       const ev = request.auth?.provider;
       if (ev?.eventId && !request.webhookDuplicate) {
-        await webhookLog(k).record(ev.name, ev.eventId).catch(() => {});
+        await k.webhookEvents.record(ev.name, ev.eventId).catch(() => {});
       }
     };
 
@@ -462,7 +460,7 @@ export class AuthChain {
     await enforce(this.k.limits, `webhook:${info.provider}`, WEBHOOK_LIMIT);
     request.auth = { via: 'provider', principal: null, provider: { name: info.provider, eventId: info.eventId } };
     if (info.eventId) {
-      request.webhookDuplicate = await webhookLog(this.k).seen(info.provider, info.eventId);
+      request.webhookDuplicate = await this.k.webhookEvents.seen(info.provider, info.eventId);
     }
   }
 
@@ -503,15 +501,4 @@ export function mongoWebhookEventLog(store: MongoStore): WebhookEventLog {
       await events.updateOne({ _id: `${provider}|${eventId}` }, { $setOnInsert: { provider, event_id: eventId, received_at: new Date() } }, { upsert: true });
     },
   };
-}
-
-function webhookLog(k: { db: Kysely<any>; webhookEvents?: WebhookEventLog }): WebhookEventLog {
-  return (
-    k.webhookEvents ?? {
-      seen: async (provider, eventId) => (await sql<{ n: number }>`select 1 as n from kernel.webhook_events where provider = ${provider} and event_id = ${eventId}`.execute(k.db)).rows.length > 0,
-      async record(provider, eventId) {
-        await sql`insert into kernel.webhook_events (provider, event_id) values (${provider}, ${eventId}) on conflict do nothing`.execute(k.db);
-      },
-    }
-  );
 }

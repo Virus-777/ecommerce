@@ -2,8 +2,7 @@
  * MongoDB through Mongoose (docs/04-mongodb-migration.md): one database, each module's collections named
  * `<module>.<table>` with the Mongoose schemas generated from the spec (src/modules/<m>/infra/mongo/schema.ts),
  * kernel collections `kernel.*` (kernel/mongo/schemas.ts). Production and staging connect to a replica set
- * (MONGODB_URI); development without MONGODB_URI and tests run an in-process replica set (mongodb-memory-server),
- * as PGlite did for PostgreSQL.
+ * (MONGODB_URI); development without MONGODB_URI and tests run an in-process replica set (mongodb-memory-server).
  *
  * Transactions need a replica set. `store.transaction(fn)` runs fn in a session transaction (snapshot reads,
  * majority writes) and runs it again when MongoDB reports a transient error (write conflict, failover), so:
@@ -36,7 +35,7 @@ export interface MongoStore {
   kernel(name: KernelCollection): Model<any>;
   /** fn in a transaction, retried on transient errors; inside a transaction already, fn simply runs in it */
   transaction<T>(fn: (session: ClientSession) => Promise<T>, session?: ClientSession): Promise<T>;
-  /** Next value of a named counter (identity columns, sequences); never rolled back, like a PostgreSQL sequence */
+  /** Next value of a named counter (identity columns, sequences); never rolled back: a number taken by an aborted transaction is skipped */
   nextValue(counter: string): Promise<number>;
   close(): Promise<void>;
 }
@@ -149,7 +148,7 @@ export class ModuleStore {
   }
 
   /**
-   * Serialises transactions on a name (PostgreSQL's pg_advisory_xact_lock): a second transaction locking the same
+   * Serialises transactions on a name: a second transaction locking the same
    * name conflicts and is retried after this one commits. Only inside a transaction.
    */
   async lock(name: string): Promise<void> {

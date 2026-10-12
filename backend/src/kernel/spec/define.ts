@@ -104,8 +104,6 @@ export interface ModuleSpecDef {
   readonly jobs: Readonly<Record<string, { readonly schedule: string; readonly does: string }>>;
   readonly settings: Readonly<Record<string, SettingDecl>>;
   readonly errorCodes: Readonly<Record<string, { readonly status: number; readonly meaning: string }>>;
-  /** table → column → { type, nullable } as declared in the spec (used to detect migration drift) */
-  readonly tables: Readonly<Record<string, Readonly<Record<string, { readonly type: string; readonly nullable: boolean }>>>>;
   /** table → owner column per caller kind (seller_id, customer_id, guest_session_id) */
   readonly tenantTables: Readonly<Record<string, Readonly<{ seller?: string; customer?: string; visitor?: string }>>>;
   /** table → its MongoDB collection: _id field, validator and indexes (tools/lib/mongo.ts, docs/04-mongodb-migration.md) */

@@ -2,7 +2,6 @@
  * Every list pages two ways (architecture §5): `?cursor=` for the Android app's infinite scroll
  * and `?page=` for the website's numbered pages. Responses: { items, nextCursor, page?, totalPages?, total? }.
  */
-import { sql, type SelectQueryBuilder } from 'kysely';
 import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, type Page, type PageInput } from '../../spec/common.js';
 import { AppError } from '../errors/index.js';
 
@@ -46,50 +45,11 @@ export function pageOf<T>(all: readonly T[], req: PageRequest): Page<T> {
   return { items, nextCursor: start + req.limit < all.length ? encodeCursor([start + req.limit]) : null, total: all.length };
 }
 
+/** The order of a keyset-paged read (Table.page in kernel/mongo/table.ts): cursor mode pages on (column, id) */
 export interface KeysetOrder {
-  /** Column to sort by (qualified if the query joins), e.g. 'created_at' */
+  /** Field to sort by, e.g. 'created_at' */
   column: string;
   direction: 'asc' | 'desc';
   /** Unique tie-breaker, default 'id' */
   id?: string;
-}
-
-/**
- * Pages a Kysely select. Cursor mode uses keyset paging on (column, id); page mode uses
- * offset paging with a total count. Rows must include the sort column and the id.
- */
-export async function paginate<DB, TB extends keyof DB, O extends Record<string, unknown>>(
-  query: SelectQueryBuilder<DB, TB, O>,
-  req: PageRequest,
-  order: KeysetOrder,
-): Promise<Page<O>> {
-  const idCol = order.id ?? 'id';
-  const dir = order.direction;
-  const cmp = dir === 'desc' ? sql.raw('<') : sql.raw('>');
-  const sorted = query.orderBy(sql.ref(order.column), dir).orderBy(sql.ref(idCol), dir);
-  const field = (row: O, col: string) => row[col.split('.').pop()!];
-  const cursorOf = (row: O) => {
-    const v = field(row, order.column);
-    return encodeCursor([v instanceof Date ? v.toISOString() : v, field(row, idCol)]);
-  };
-
-  if (req.mode === 'page') {
-    const [countRow, items] = await Promise.all([
-      query.clearSelect().clearOrderBy().select(sql<number>`count(*)::int`.as('n')).executeTakeFirst(),
-      sorted.limit(req.limit).offset((req.page - 1) * req.limit).execute() as Promise<O[]>,
-    ]);
-    const total = (countRow as { n: number } | undefined)?.n ?? 0;
-    const totalPages = Math.max(1, Math.ceil(total / req.limit));
-    const last = items.at(-1);
-    return { items, nextCursor: req.page < totalPages && last ? cursorOf(last) : null, page: req.page, totalPages, total };
-  }
-
-  let q = sorted;
-  if (req.cursor) {
-    const [v, id] = decodeCursor(req.cursor);
-    q = q.where(sql<boolean>`(${sql.ref(order.column)}, ${sql.ref(idCol)}) ${cmp} (${v}, ${id})`);
-  }
-  const rows = (await q.limit(req.limit + 1).execute()) as O[];
-  const items = rows.slice(0, req.limit);
-  return { items, nextCursor: rows.length > req.limit ? cursorOf(items.at(-1)!) : null };
 }

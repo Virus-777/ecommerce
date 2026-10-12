@@ -5,7 +5,6 @@
  * Keys are scoped to the operation and the caller, and kept for 24 hours.
  */
 import { createHash } from 'node:crypto';
-import type { Kysely } from 'kysely';
 import type { MongoStore } from '../mongo/index.js';
 import { AppError } from '../errors/index.js';
 import { systemClock, type Clock } from '../lib/clock.js';
@@ -59,43 +58,6 @@ export function mongoIdempotencyStore(store: MongoStore, clock: Clock = systemCl
     },
     async release(scope, key) {
       await keys.deleteOne({ _id: idOf(scope, key) });
-    },
-  };
-}
-
-export function postgresIdempotencyStore(db: Kysely<any>, clock: Clock = systemClock): IdempotencyStore {
-  const table = 'kernel.idempotency_keys';
-  const release = (scope: string, key: string) => db.deleteFrom(table).where('scope', '=', scope).where('key', '=', key).execute();
-
-  return {
-    async begin(scope, key, requestHash) {
-      const claimed = await db
-        .insertInto(table)
-        .values({ scope, key, request_hash: requestHash, status: 'in_progress', created_at: clock.now() })
-        .onConflict((oc) => oc.columns(['scope', 'key']).doNothing())
-        .returning('key')
-        .executeTakeFirst();
-      if (claimed) return null;
-      const row = await db.selectFrom(table).selectAll().where('scope', '=', scope).where('key', '=', key).executeTakeFirst();
-      if (!row) return null;
-      if (clock.now().getTime() - new Date(row.created_at).getTime() > TTL_MS) {
-        await release(scope, key);
-        return this.begin(scope, key, requestHash);
-      }
-      if (row.request_hash !== requestHash) throw new AppError('IDEMPOTENCY_KEY_REUSED');
-      if (row.status !== 'completed') throw new AppError('CONFLICT', 'A request with this Idempotency-Key is still being processed');
-      return { status: row.response_status, body: row.response_body };
-    },
-    async complete(scope, key, status, body) {
-      await db
-        .updateTable(table)
-        .set({ status: 'completed', response_status: status, response_body: JSON.stringify(body ?? null), completed_at: clock.now() })
-        .where('scope', '=', scope)
-        .where('key', '=', key)
-        .execute();
-    },
-    async release(scope, key) {
-      await release(scope, key);
     },
   };
 }

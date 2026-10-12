@@ -1,9 +1,8 @@
 /**
- * Record scope (docs/03-auth-middleware.md §7): which rows a caller reaches. Every handler receives
- * `input.scope`; repositories read tenant tables through `scoped(db, scope, spec.tenantTables)`, which
- * adds the owner condition, so another seller's or customer's record is simply not found.
+ * Record scope (docs/03-auth-middleware.md §7): which records a caller reaches. Every handler receives
+ * `input.scope`; services and repositories filter tenant records by it (the owning seller, customer or
+ * visitor session), so another seller's or customer's record is simply not found.
  */
-import type { Kysely } from 'kysely';
 import type { EndpointScope } from '../spec/define.js';
 import type { Principal, RequestAuth } from './index.js';
 
@@ -31,45 +30,4 @@ export function scopeFor(endpointScope: EndpointScope, auth: RequestAuth | undef
     default:
       return { kind: 'public' };
   }
-}
-
-type Tenants = Readonly<Record<string, Readonly<{ seller?: string; customer?: string; visitor?: string }>>>;
-
-/** The owner column and value this scope imposes on a table, if any. */
-export function ownerCondition(scope: Scope, tenants: Tenants, table: string): { column: string; value: string | null } | undefined {
-  const t = tenants[table];
-  if (!t) return undefined;
-  if (scope.kind === 'seller' && t.seller) return { column: t.seller, value: scope.sellerId };
-  if (scope.kind === 'customer' && t.customer) return { column: t.customer, value: scope.customerId };
-  if (scope.kind === 'visitor' && t.visitor) return { column: t.visitor, value: scope.visitorSessionId };
-  return undefined;
-}
-
-/**
- * Kysely builders that only see the caller's rows on tenant tables. Staff and public scopes read
- * everything (public endpoints only expose public data). An owner whose id isn't known reads nothing.
- */
-export function scoped<DB>(db: Kysely<DB>, scope: Scope, tenants: Tenants) {
-  const cond = (table: string) => ownerCondition(scope, tenants, table);
-  const apply = <Q extends { where: (...a: any[]) => any }>(q: Q, table: string): Q => {
-    const c = cond(table);
-    return c ? (q.where(c.column as never, c.value === null ? 'is' : '=', c.value as never) as Q) : q;
-  };
-  return {
-    scope,
-    selectFrom<T extends keyof DB & string>(table: T) {
-      return apply(db.selectFrom(table), table);
-    },
-    updateTable<T extends keyof DB & string>(table: T) {
-      return apply(db.updateTable(table), table);
-    },
-    deleteFrom<T extends keyof DB & string>(table: T) {
-      return apply(db.deleteFrom(table), table);
-    },
-    /** Inserts are not filtered; the owner column must match the scope */
-    ownerValues(table: string): Record<string, string> {
-      const c = cond(table);
-      return c && c.value !== null ? { [c.column]: c.value } : {};
-    },
-  };
 }

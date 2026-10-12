@@ -26,6 +26,11 @@ export interface MongoUnit {
   migrations?: readonly MongoMigration[];
 }
 
+/** The units of module definitions, in the order given (dependency order) */
+export const mongoUnits = (
+  defs: readonly { spec: { name: string; collections: MongoUnit['collections'] }; schemas: ModuleSchemas; mongoMigrations?: readonly MongoMigration[] }[],
+): MongoUnit[] => defs.map((d) => ({ module: d.spec.name, collections: d.spec.collections, schemas: d.schemas, migrations: d.mongoMigrations }));
+
 async function ensureCollection(db: Db, model: Model<any>, validator: Record<string, unknown> | undefined, existing: Set<string>) {
   const name = model.collection.collectionName;
   if (!existing.has(name)) {

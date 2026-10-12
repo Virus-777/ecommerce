@@ -2,7 +2,7 @@
  * Pure cart rules (no I/O): notice kinds and severities, reconciling detected changes with the
  * notices already stored, line state, quantity limits, package keys and customer-facing sentences.
  */
-import type { Json } from '../../../kernel/db/types.js';
+import type { Json } from '../../../kernel/lib/json.js';
 import { format as formatMoney, money, type Money } from '../../../kernel/lib/money.js';
 import type { CartItem, CartNotice, CartPackage } from '../../../spec/cart.js';
 import type * as offers from '../../../spec/offers.js';

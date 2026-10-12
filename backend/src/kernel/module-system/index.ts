@@ -1,19 +1,17 @@
 /**
  * Module system (architecture §3). A module is a folder with a manifest:
  *
- *   export default defineModule({ spec, version, migrations, graphql, register(ctx) { … } })
+ *   export default defineModule({ spec, version, schemas, graphql, register(ctx) { … } })
  *
  * `spec` is the generated copy of docs/api/spec/modules/<name>.json: name, launch phase,
- * dependencies, permissions, events, jobs, settings and endpoints all come from it.
+ * dependencies, permissions, events, jobs, settings and endpoints all come from it. `schemas` are the
+ * generated Mongoose schemas of its collections (infra/mongo/schema.ts).
  */
 import type { FastifyBaseLogger } from 'fastify';
-import type { Kysely } from 'kysely';
 import type { specs } from '../../spec/index.js';
 import type { Config } from '../config/index.js';
 import type { Principal } from '../auth/index.js';
 import type { RateLimitResult } from '../auth/rate-limit.js';
-import type { Database } from '../db/index.js';
-import type { Inbox } from '../events/inbox.js';
 import type { AppError } from '../errors/index.js';
 import type { ModuleEvents } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
@@ -22,13 +20,12 @@ import type { RouteSet } from '../http/index.js';
 import type { WebhookVerifier } from '../http/register.js';
 import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
-import type { Migration } from '../migrations/index.js';
 import type { ModuleSchemas, ModuleStore } from '../mongo/index.js';
 import type { MongoMigration } from '../mongo/schema.js';
 import type { ModuleSpecDef } from '../spec/define.js';
-import type { ModuleDbMap, PublicApiMap } from './public-apis.js';
+import type { PublicApiMap } from './public-apis.js';
 
-export type { ModuleDbMap, PublicApiMap };
+export type { PublicApiMap };
 
 type Specs = typeof specs;
 export type ModuleName = keyof Specs & string;
@@ -42,7 +39,6 @@ type JobsOf<N extends ModuleName> = keyof SpecOf<N>['jobs'] & string;
 type SettingsOf<N extends ModuleName> = SpecOf<N>['settings'];
 type Widen<T> = T extends number ? number : T extends string ? string : T extends boolean ? boolean : T;
 type ApiOf<N> = N extends keyof PublicApiMap ? PublicApiMap[N] : never;
-type DbOf<N> = N extends keyof ModuleDbMap ? ModuleDbMap[N] : never;
 
 export interface ModuleContext<N extends ModuleName> {
   readonly name: N;
@@ -51,13 +47,9 @@ export interface ModuleContext<N extends ModuleName> {
   readonly modules: readonly ModuleName[];
   readonly config: Config;
   readonly log: FastifyBaseLogger;
-  /** Query builder scoped to this module's own schema. Other modules' tables are off limits. */
-  readonly db: Kysely<DbOf<N>>;
-  /** The whole database (transactions, raw SQL). Use ctx.db for queries. */
-  readonly database: Database;
   /**
-   * MongoDB (docs/04-mongodb-migration.md): this module's collections, one per spec table, for modules with
-   * `store: 'mongo'` (repositories in infra/mongo/). Transactions, locks and the inbox are on it too.
+   * This module's collections in MongoDB, one per spec table (repositories in infra/mongo/); other modules'
+   * collections are off limits. Transactions, named locks and the event inbox (claim, seen) are on it too.
    */
   readonly mongo: ModuleStore;
   readonly clock: Clock;
@@ -75,8 +67,6 @@ export interface ModuleContext<N extends ModuleName> {
   };
   /** An AppError with this module's status for the code (module codes are scoped; use it instead of new AppError for module codes) */
   error(code: keyof SpecOf<N>['errorCodes'] | (string & {}), message?: string, details?: unknown): AppError;
-  /** Idempotent event handling: claim a key in the same transaction as the effects (kernel/events/inbox.ts) */
-  readonly inbox: Inbox;
   /**
    * Whether a caller holds a permission, with the same answer their request got (staff through access,
    * seller members through their member access, development tokens through their dev claims). For public
@@ -130,13 +120,9 @@ export interface ModuleDefinition<S extends ModuleSpecDef = ModuleSpecDef> {
   readonly spec: S;
   /** Bump on every change; shown by npm run modules */
   readonly version: string;
-  /** Where the module keeps its data while modules move to MongoDB (default postgres; docs/04-mongodb-migration.md) */
-  readonly store?: 'postgres' | 'mongo';
-  /** PostgreSQL migrations (store postgres) */
-  readonly migrations: Migration[];
-  /** The Mongoose schemas of the module's collections (generated: infra/mongo/schema.ts; store mongo) */
-  readonly schemas?: ModuleSchemas;
-  /** MongoDB data migrations, run once each after the schema from the spec (store mongo) */
+  /** The Mongoose schemas of the module's collections (generated: infra/mongo/schema.ts) */
+  readonly schemas: ModuleSchemas;
+  /** Data migrations (backfills, renames), each run once after the collections from the spec exist */
   readonly mongoMigrations?: readonly MongoMigration[];
   /** GraphQL fragment (graphql/schema.ts), when the module contributes to the read layer */
   readonly graphql?: string;
@@ -146,9 +132,7 @@ export interface ModuleDefinition<S extends ModuleSpecDef = ModuleSpecDef> {
 export function defineModule<S extends ModuleSpecDef & { name: ModuleName }>(def: {
   spec: S;
   version: string;
-  store?: 'postgres' | 'mongo';
-  migrations: Migration[];
-  schemas?: ModuleSchemas;
+  schemas: ModuleSchemas;
   mongoMigrations?: readonly MongoMigration[];
   graphql?: string;
   register(ctx: ModuleContext<S['name']>): void | Promise<void>;

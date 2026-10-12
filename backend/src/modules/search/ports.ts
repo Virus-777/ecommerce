@@ -5,7 +5,7 @@
  * production engine: it keeps its own index, fed from the repository's writes (SearchIndexFeed). The engine is
  * chosen by SEARCH_ENGINE (infra/config.ts).
  */
-import type { Json } from '../../kernel/db/types.js';
+import type { Json } from '../../kernel/lib/json.js';
 import type { SearchDb } from '../../spec/search.js';
 import type { ConditionGroup, SortKey } from './domain/types.js';
 import type { RankingFactorKey } from './domain/ranking.js';

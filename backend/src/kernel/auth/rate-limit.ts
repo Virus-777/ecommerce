@@ -4,10 +4,9 @@
  *
  * Fixed windows aligned to the epoch (an hour window runs from :00 to :00), counted per (scope, key,
  * window start): scope "http" for the middleware, the module name for ctx.rateLimit. A refused attempt
- * is not counted. Two stores (RATE_LIMIT_STORE): PostgreSQL (kernel.rate_limits), shared by every
- * server instance, and memory, per process (development and tests). A key always uses one window size.
+ * is not counted. Two stores (RATE_LIMIT_STORE): MongoDB (kernel.rate_limits), shared by every server
+ * instance, and memory, per process (development and tests). A key always uses one window size.
  */
-import { sql, type Kysely } from 'kysely';
 import { AppError } from '../errors/index.js';
 import type { Clock } from '../lib/clock.js';
 import type { MongoStore } from '../mongo/index.js';
@@ -60,33 +59,6 @@ export function memoryRateLimitStore(clock: Clock): RateLimitStore {
       return ALLOWED;
     },
     purge: async () => purge(clock.now().getTime()),
-  };
-}
-
-/** kernel.rate_limits: one row per (scope, key, window start), counted with a single upsert */
-export function postgresRateLimitStore(db: Kysely<any>, clock: Clock): RateLimitStore {
-  return {
-    async hit(scope, key, l, o = {}) {
-      const now = clock.now().getTime();
-      const { start, end } = windowOf(now, l.windowMs);
-      if (l.limit <= 0) return refused(end, now);
-      const at = new Date(start);
-      if (o.peek) {
-        const row = await db.selectFrom('kernel.rate_limits').select('count').where('scope', '=', scope).where('key', '=', key).where('window_start', '=', at).executeTakeFirst();
-        return (row?.count ?? 0) < l.limit ? ALLOWED : refused(end, now);
-      }
-      // counts only while under the limit: no row back means the window is full
-      const { rows } = await sql<{ count: number }>`
-        insert into kernel.rate_limits as r (scope, key, window_start, window_end, count)
-        values (${scope}, ${key}, ${at}, ${new Date(end)}, 1)
-        on conflict (scope, key, window_start) do update set count = r.count + 1 where r.count < ${l.limit}
-        returning r.count`.execute(db);
-      return rows.length ? ALLOWED : refused(end, now);
-    },
-    async purge() {
-      const r = await db.deleteFrom('kernel.rate_limits').where('window_end', '<=', clock.now()).executeTakeFirst();
-      return Number(r.numDeletedRows);
-    },
   };
 }
 

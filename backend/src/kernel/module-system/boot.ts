@@ -5,11 +5,9 @@
  */
 import type { FastifyBaseLogger } from 'fastify';
 import type { Config } from '../config/index.js';
-import type { Database } from '../db/index.js';
 import type { MongoStore } from '../mongo/index.js';
 import type { Principal } from '../auth/index.js';
 import { isAppError, isNotImplemented, moduleError, notImplemented } from '../errors/index.js';
-import { moduleInbox } from '../events/inbox.js';
 import { moduleEvents, type EventBus } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
 import type { FileRoute, ModuleFileRoute } from '../http/files.js';
@@ -19,7 +17,6 @@ import type { RateLimitStore } from '../auth/rate-limit.js';
 import type { JobScheduler } from '../jobs/index.js';
 import type { Clock } from '../lib/clock.js';
 import type { RefGenerator } from '../lib/refs.js';
-import { schemaOf } from '../migrations/index.js';
 import type { ModuleSpecDef } from '../spec/define.js';
 import type { ModuleContext, ModuleDefinition, ModuleName } from './index.js';
 import { specOf } from './loader.js';
@@ -27,13 +24,12 @@ import { specOf } from './loader.js';
 export interface KernelServices {
   config: Config;
   log: FastifyBaseLogger;
-  database: Database;
   mongo: MongoStore;
   clock: Clock;
   events: EventBus;
   jobs: JobScheduler;
   refs: RefGenerator;
-  /** Business rate limits (ctx.rateLimit), shared by every instance with the postgres store */
+  /** Business rate limits (ctx.rateLimit), shared by every instance with the mongo store */
   rateLimits: RateLimitStore;
   /** Permission check for an in-process principal (set by the app once the auth chain exists) */
   can(principal: Principal | null | undefined, permission: string): Promise<boolean>;
@@ -129,9 +125,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
       modules,
       config: k.config,
       log: k.log.child({ module: name }),
-      db: k.database.kysely.withSchema(schemaOf(name)),
-      database: k.database,
-      mongo: k.mongo.module(name, spec.collections, def.schemas ?? {}),
+      mongo: k.mongo.module(name, spec.collections, def.schemas),
       clock: k.clock,
       events: moduleEvents(k.events, spec),
       jobs: {
@@ -169,7 +163,6 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
       },
       refs: k.refs,
       rateLimit: (key: string, l: { limit: number; windowMs: number; peek?: boolean }) => k.rateLimits.hit(name, key, l, { peek: l.peek }),
-      inbox: moduleInbox(name),
       can: (principal, permission) => k.can(principal, permission),
       error: moduleError(name),
       provide(api: object) {

@@ -226,7 +226,7 @@ export class Table<R extends object> {
   }
 
   /**
-   * Inserts the row unless one with the same key exists (PostgreSQL's on conflict do nothing): the inserted row, or
+   * Inserts the row unless one with the same key exists, without a duplicate-key error: the inserted row, or
    * undefined. `key` names the unique fields (default: the primary key).
    */
   async insertIfAbsent(row: Partial<R> | Record<string, unknown>, key: readonly string[] = this.#defaultKey()): Promise<R | undefined> {
@@ -302,7 +302,7 @@ export class Table<R extends object> {
     return doc ? this.fromDoc(doc as Document) : undefined;
   }
 
-  /** Updates every matching row; how many matched (as PostgreSQL counts updated rows) */
+  /** Updates every matching row; how many matched */
   async updateMany(f: Filter, u: UpdateSpec): Promise<number> {
     const r = await this.model.updateMany(this.filter(f), this.#update(u), { session: this.session, runValidators: true });
     return r.matchedCount;

@@ -39,7 +39,7 @@ export interface HandlerInput<E extends EndpointDef> {
   /** Seller-area calls: the seller the session acts for (seller-area paths never contain it) */
   sellerId: E['area'] extends 'seller' ? string : undefined;
   sellerAccess: E['area'] extends 'seller' ? SellerMemberAccess : undefined;
-  /** Which records the caller reaches; read tenant tables through scoped(ctx.db, scope, spec.tenantTables) */
+  /** Which records the caller reaches: filter tenant records by it (kernel/auth/scope.ts) */
   scope: Scope;
   /** Whether the caller holds a permission (field-level decisions; endpoint permissions are already checked) */
   can(permission: string): Promise<boolean>;

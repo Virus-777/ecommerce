@@ -7,7 +7,7 @@
  * An outbox table replaces this in-memory dispatch later without changing module code.
  */
 import type { FastifyBaseLogger } from 'fastify';
-import { setImmediate, setTimeout } from 'node:timers/promises';
+import { setImmediate } from 'node:timers/promises';
 import type { z } from 'zod';
 import type { Actor } from '../../spec/common.js';
 import { isNotImplemented } from '../errors/index.js';
@@ -16,9 +16,6 @@ import { newId } from '../lib/ids.js';
 import type { ModuleSpecDef } from '../spec/define.js';
 import type { EventMap } from './event-map.js';
 
-/** PostgreSQL deadlock_detected and serialization_failure: the transaction was rolled back and may simply run again */
-const TRANSIENT_DB_ERRORS = new Set(['40P01', '40001']);
-const HANDLER_ATTEMPTS = 3;
 
 export type { EventMap };
 export type EventName = keyof EventMap & string;
@@ -86,29 +83,14 @@ export class EventBus {
     await Promise.all(
       handlers.map(async (h) => {
         try {
-          await this.#withRetry(envelope, h);
+          // a write conflict inside a handler's transaction is retried by the transaction itself (kernel/mongo)
+          await h.fn(envelope);
         } catch (err) {
           const level = isNotImplemented(err) ? 'debug' : 'error';
           this.#log[level]({ err, event: envelope.name, subscriber: h.module }, `subscriber ${h.module} failed on ${envelope.name}`);
         }
       }),
     );
-  }
-
-  /**
-   * A handler that lost a deadlock or a serialization conflict had its transaction rolled back, so it runs again
-   * (handlers are idempotent: their inbox claims commit with their effects). Other errors are not retried.
-   */
-  async #withRetry(envelope: EventEnvelope, h: { module: string; fn: Handler }) {
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return await h.fn(envelope);
-      } catch (err) {
-        if (!TRANSIENT_DB_ERRORS.has((err as { code?: string })?.code ?? '') || attempt >= HANDLER_ATTEMPTS) throw err;
-        this.#log.warn({ event: envelope.name, subscriber: h.module, code: (err as { code?: string }).code, attempt }, `subscriber ${h.module} retries ${envelope.name}`);
-        await setTimeout(10 * attempt + Math.floor(Math.random() * 20));
-      }
-    }
   }
 
   /** Wait until every delivery started so far has finished (tests, graceful shutdown). */
