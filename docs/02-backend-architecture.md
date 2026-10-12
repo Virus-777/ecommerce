@@ -10,12 +10,12 @@ Status: **design**. This document defines the backend's structure; the API desig
 | HTTP | **Fastify 5** | Lightweight, fast, plugin-per-module fits removable modules, schema-first |
 | Validation + API docs | **Zod 4** via `fastify-type-provider-zod`, OpenAPI at `/docs` | One schema drives validation, types and docs |
 | Complex screen reads | **GraphQL** via **Mercurius** (Fastify plugin), read-only, three schemas (store, seller, admin) composed from module fragments | One round trip for screens that combine many modules; writes stay on REST |
-| Database | **PostgreSQL** through **Kysely** (typed SQL query builder) | No ORM magic; SQL stays portable; easy to replace per module |
-| Local / test database | **PGlite** (PostgreSQL compiled to WASM, in-process) | Real Postgres semantics with nothing to install |
-| Product search | **OpenSearch** in production (`@opensearch-project/opensearch`); PostgreSQL full-text + `pg_trgm` in development and tests (`SEARCH_ENGINE`, §9) | Relevance, typo tolerance and facets at catalogue scale, off the primary database |
-| Jobs / schedules | Kernel `JobScheduler` interface: **pg-boss** queue in PostgreSQL in production (each scheduled run happens once across server instances, failed runs retried with backoff); in-process timers on PGlite (development, tests) | Payout runs, ad schedules, SLA timers |
+| Database | **MongoDB 6.0** replica set through **Mongoose 8** (one generated schema per collection; [04-mongodb-migration.md](04-mongodb-migration.md)) | One database for data, jobs, rate limits and idempotency keys; transactions need a replica set |
+| Local / test database | An embedded single-node replica set (`mongodb-memory-server`; an installed `mongod` is used when there is one) | Real MongoDB with nothing to configure |
+| Product search | **OpenSearch** in production (`@opensearch-project/opensearch`); a MongoDB engine (stemmed words and prefixes) in development and tests (`SEARCH_ENGINE`, §9) | Relevance, typo tolerance and facets at catalogue scale, off the primary database |
+| Jobs / schedules | Kernel `JobScheduler` interface: a queue in MongoDB (`kernel.jobs`) in production (each scheduled run happens once across server instances, failed runs retried with backoff); in-process timers in development and tests | Payout runs, ad schedules, SLA timers |
 | Events | Kernel in-process typed event bus; outbox table later | Modules talk through events, not each other's tables |
-| Tests | Vitest + `app.inject()` + PGlite | Each module boots with only its dependencies in a test |
+| Tests | Vitest + `app.inject()` + one in-memory MongoDB replica set per run | Each module boots with only its dependencies in a test |
 
 ## 2. Shape of the backend
 
@@ -29,7 +29,7 @@ backend/
     app.ts                 buildApp(): kernel + enabled modules
     spec/                  GENERATED from docs/api/spec by npm run gen
     kernel/                Shared plumbing. Small, stable, no business rules.
-      config/  db/  migrations/  events/  jobs/  http/  auth/  errors/  graphql/  spec/
+      config/  mongo/  events/  jobs/  http/  auth/  errors/  graphql/  spec/
       module-system/       defineModule(), dependency graph, loader, boot
       lib/                 money, ids (UUIDv7), refs, pagination (cursor + page), state machines, clock, secrets
     modules/
@@ -69,10 +69,10 @@ export default defineModule({
   spec,                               // generated from docs/api/spec/modules/catalog.json: name, launch phase,
                                       //   dependsOn, optionalDeps, permissions, events, jobs, settings, endpoints
   version: '1.2.0',                   // bump on every change (npm run modules shows it)
-  migrations,                         // owned tables, schema "catalog"
+  schemas,                            // Mongoose schemas of its collections catalog.* (generated)
   graphql: typeDefs,                  // the module's GraphQL fragment (generated)
   register(ctx) {
-    const service = new CatalogService({ repo: createPostgresCatalogRepository(ctx.db, ctx.inbox), ctx });
+    const service = new CatalogService({ repo: createMongoCatalogRepository(ctx.mongo), ctx });
     ctx.provide(service);                                   // public API for other modules
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -83,7 +83,7 @@ export default defineModule({
 ```
 
 **Rules that keep modules removable**
-1. **Own your data.** Each module owns a PostgreSQL schema (`catalog.*`, `orders.*`). No foreign keys across schemas. Other modules' records are referenced by ID.
+1. **Own your data.** Each module owns its collections (`catalog.*`, `orders.*`; `ctx.mongo` reaches only those). Other modules' records are referenced by ID.
 2. **Public surface only.** Another module may import only `modules/<x>/contract.ts`: types, the service interface and event payloads. `npm run check:boundaries` fails the build otherwise.
 3. **Talk through the kernel.** Synchronous calls use `ctx.use('x')` for a `dependsOn` module (or `ctx.tryUse('x')` for an optional one; undefined when it is off), typed from that module's spec `publicApi`. Reactions use events (`ctx.events.on('orders.order.placed', …)`).
 4. **Declare dependencies.** The loader sorts modules by `dependsOn`, refuses to start if one is missing or if there is a cycle, and explains which module needs which.
@@ -91,9 +91,9 @@ export default defineModule({
 | Task | Steps |
 |---|---|
 | **Add** | Write its spec in `docs/api/spec/modules/` → `npm run module:new loyalty` → build it → add `'loyalty'` to `modules.config.ts` → `npm run migrate` |
-| **Update** | Change the module; add a new migration file; bump its `version`. Contract changes are visible to dependents through TypeScript |
+| **Update** | Change the module (a schema change is a spec change and `npm run gen`; a data change is a `mongoMigrations` entry); bump its `version`. Contract changes are visible to dependents through TypeScript |
 | **Disable** | Remove it from `modules.config.ts`. `npm run modules` lists modules that depend on it and blocks the start if a required dependent is still on |
-| **Remove** | Disable, then delete the folder. Its tables stay until you drop the schema (`DROP SCHEMA <name> CASCADE`), so nothing is lost by accident |
+| **Remove** | Disable, then delete the folder. Its collections (`<name>.*`) stay until you drop them, so nothing is lost by accident |
 | **Enable a later-phase module** | Uncomment it in `modules.config.ts` (or add it to `MODULES`) and `npm run migrate`. Nothing else blocks the start: e.g. Fulfilled by Marketly (`fulfillment-service`, phase 4) is routed end to end by offers, checkout, orders, warehouse, shipping and returns. Set its settings `serviceLocationId` / `serviceShippingProfileId` first, or rely on the defaults (inventory's default company location, shipping's Official Store default profile); without them no offer sells as Fulfilled by Marketly |
 
 ## 4. Module catalog
@@ -146,11 +146,11 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | **Pagination** | Every list supports **cursor** paging (`?cursor=&limit=`, for the Android app's infinite scroll) and **page** paging (`?page=&limit=`, for the website's numbered pages). Responses: `{ items, nextCursor, page?, totalPages?, total? }` |
 | **State machines** | Statuses from the plan (product review, seller account, order item, refund, payout, return, case, ad campaign) are explicit transition tables in each module's `domain/`; illegal moves return `409` |
 | **Idempotency** | Writes that move money or create orders require an `Idempotency-Key` header (plan scenario 3: no duplicate orders or charges). The kernel stores the first response per operation, caller and key for 24 hours (`kernel.idempotency_keys`) and replays it; a failed request, or a refused step-up proof, frees the key for the retry |
-| **Audit** | Material changes write an audit entry through the audit module's `record()` (an optional dependency, called after the commit): actor, role, action, target, reason, before/after, approvals (plan ch. 2, 18). Entries are append-only and hash-chained, kept in month partitions (below) |
+| **Audit** | Material changes write an audit entry through the audit module's `record()` (an optional dependency, called after the commit): actor, role, action, target, reason, before/after, approvals (plan ch. 2, 18). Entries are append-only and hash-chained (below) |
 | **Approvals** | Limits per role (refunds, payouts, holds, restrictions, price changes). Above the limit the action becomes an approval request; some actions always need a second reviewer. Granting access never grants financial authority |
 | **Purchase snapshots** | Orders copy the product description, variation, condition, price, seller and terms accepted at purchase (plan ch. 8) |
 | **Errors** | `{ error: { code, message, details } }` with stable codes (`OFFER_CHANGED`, `ILLEGAL_TRANSITION`, `APPROVAL_REQUIRED` …) |
-| **Database portability** | Services depend on repository interfaces (`ports.ts`). Postgres adapters live in `infra/postgres/`. A MongoDB switch adds `infra/mongo/` per module; no cross-module joins or foreign keys exist to untangle |
+| **Database portability** | Services depend on repository interfaces (`ports.ts`); the MongoDB adapters live in `infra/mongo/`. No cross-module joins or references exist to untangle, so another database means new adapters, not new services |
 | **File storage** | Owner decision: files live on the server's **local file system** (no S3). media's storage port has two adapters, chosen by `MEDIA_STORAGE` (below); both stream bytes through the API: uploads to `PUT /api/{area}/media/uploads/{id}/content` (the caller's token), downloads from `GET /files/{bucket}/{key}` by signed links the auth middleware verifies ([03-auth-middleware.md](03-auth-middleware.md) §0 "File links") |
 
 ### File storage configuration (media)
@@ -166,42 +166,39 @@ Limits: an upload is refused above the ticket's `maxBytes` while it streams (not
 
 ### Several server instances: jobs and rate limits
 
-Shared state lives in PostgreSQL only (no Redis), so any number of server instances can run on one database.
+Shared state lives in MongoDB only (no Redis), so any number of server instances can run on one replica set.
 
-**Jobs** (`kernel/jobs/`). Every job in a module spec is a [pg-boss](https://github.com/timgit/pg-boss) queue of the same name (pg-boss keeps its tables in the `pgboss` schema and migrates them itself when it starts; `npm run migrate` also installs them ahead):
+**Jobs** (`kernel/jobs/mongo.ts`). Every job in a module spec is queued in `kernel.jobs` under its name:
 
 | Schedule phrase | Runs as |
 |---|---|
-| `every N min`, `hourly`, `every N hours` | pg-boss cron schedule (`*/N * * * *` …): one job per occurrence, whatever the number of instances |
-| `daily` / `nightly HH:MM`, `weekly` (Monday), `monthly` (the 1st) | pg-boss cron schedule in `MARKET_TIME_ZONE` |
-| `every N s` (and intervals cron can't express) | each working instance sends throttled: one job per N-second slot across instances |
-| `on boot` | sent once per deploy: the job id comes from `DEPLOY_ID` plus the enabled modules and their versions |
+| `every N s`, `every N min`, `hourly`, `every N hours` | one run per slot (slots aligned to the clock), whatever the number of instances |
+| `daily` / `nightly HH:MM`, `weekly`, `monthly` (the 1st) | one run per occurrence in `MARKET_TIME_ZONE` |
+| `on boot` | once per deploy: keyed by `DEPLOY_ID` plus the enabled modules and their versions (`kernel.job_boots`) |
 
-A queue holds at most one waiting and one running job (policy `stately`), so a job never overlaps itself and missed ticks don't pile up. A failed run is retried 3 times with exponential backoff (30 s, doubling, at most 15 min); a run that takes over an hour counts as failed. `runNow` enqueues a run (not retried) and waits until whichever instance worked it is done; when a run is already waiting, it waits for that one.
+The next tick of each schedule is kept in `kernel.job_schedules`; the instance that advances it enqueues the run. A job holds at most one waiting and one running run (unique indexes), so it never overlaps itself and missed ticks don't pile up. A failed run is retried 3 times with exponential backoff (30 s, doubling, at most 15 min); a run whose instance stopped is taken again when its one-hour lease ends. `runNow` enqueues a run (not retried) and waits until whichever instance worked it is done; when a run is already waiting, it waits for that one. Finished runs are kept 7 days.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `JOBS_BACKEND` | `pgboss` with `DATABASE_URL`, else `inprocess` | `inprocess` runs timers in each process (development and tests on PGlite; every instance runs every job) |
+| `JOBS_BACKEND` | `mongo` with `MONGODB_URI`, else `inprocess` | `inprocess` runs timers in each process (development and tests; every instance runs every job) |
 | `JOBS_ENABLED` | `false` | This instance works the queues and keeps the schedules. Instances without it only enqueue (`runNow`), so web and worker instances can be split |
 | `DEPLOY_ID` | - | The deployment (image tag, commit); `on boot` jobs run once per value and module set |
 
-**Rate limits** (`kernel/auth/rate-limit.ts`). The middleware's limits ([03-auth-middleware.md §11](03-auth-middleware.md#11-rate-limits)) and modules' business limits (`ctx.rateLimit(key, { limit, windowMs, peek? })` → `{ allowed, retryAfterMs }`, e.g. coupon attempts in cart, gift card attempts in wallet) count in fixed windows aligned to the clock (an hour window runs :00 to :00), one row per scope (`http` or the module), key and window start in `kernel.rate_limits` (an unlogged table; one upsert per attempt). A refused attempt is not counted. The kernel job `kernel.purge-rate-limits` deletes ended windows every 10 minutes.
+**Rate limits** (`kernel/auth/rate-limit.ts`). The middleware's limits ([03-auth-middleware.md §11](03-auth-middleware.md#11-rate-limits)) and modules' business limits (`ctx.rateLimit(key, { limit, windowMs, peek? })` → `{ allowed, retryAfterMs }`, e.g. coupon attempts in cart, gift card attempts in wallet) count in fixed windows aligned to the clock (an hour window runs :00 to :00), one document per scope (`http` or the module), key and window start in `kernel.rate_limits` (one conditional upsert per attempt; a TTL index removes ended windows). A refused attempt is not counted. The kernel job `kernel.purge-rate-limits` deletes ended windows every 10 minutes.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RATE_LIMIT_STORE` | `postgres` with `DATABASE_URL`, else `memory` | `memory` counts per process (development and tests) |
+| `RATE_LIMIT_STORE` | `mongo` with `MONGODB_URI`, else `memory` | `memory` counts per process (development and tests) |
 | `RATE_LIMITS` | `true` | Off only for contract and load tests (refused in production); modules' business limits apply either way |
 
-### Audit history partitions
+### Audit history
 
-`audit.entries` and `audit.entry_targets` are partitioned by range on `at`, one partition per market month (`MARKET_TIME_ZONE`), in the schema `audit_partitions` (`entries_<name>`, `entry_targets_<name>`). `audit.entry_partitions` lists them (migration `0004_monthly_partitions`; PostgreSQL 13 or later).
+`audit.entries` is one collection (with `audit.entry_targets` for lookups by related record); the hash chain and signed checkpoints make any change detectable. The repository only inserts entries; in production the database user's role should also allow no update or delete on `audit.*` except for the purge.
 
 | Job | Schedule | Does |
 |---|---|---|
-| `audit.prepare-partitions` | daily 02:30 market time | Creates the partitions for the current market month and the next 3 (idempotent). `record()` also creates a missing month on demand (backdated entries) |
-| `audit.purge-expired` | monthly | Writes a signed checkpoint, then drops whole months older than the retention cut-off; entries before the cut-off in a month that also holds kept entries are deleted row by row. The purge is recorded as an entry, so the chain still verifies |
-
-The append-only triggers stay on every partition. An event trigger refuses dropping an entries table outside a purge, where the migration role may create event triggers; elsewhere a dropped month is caught by `audit.verify-chain`.
+| `audit.verify-chain` | daily 03:00 market time | Recomputes the chain from the newest signed checkpoint and writes a new checkpoint; a mismatch publishes `audit.integrity.failed` |
+| `audit.purge-expired` | monthly | Writes a signed checkpoint, then deletes the entries older than the retention cut-off (by the indexed `at`) with their targets. The purge is recorded as an entry, so the chain still verifies |
 
 ## 6. Plan scenarios → modules (plan ch. 21)
 
@@ -222,18 +219,18 @@ Every module has the same shape, so any developer can find their way around any 
 
 ```
 src/modules/<module>/
-  module.ts              Manifest: the generated spec, version, migrations, GraphQL fragment, wiring (routes, consumers, jobs, resolvers)
+  module.ts              Manifest: the generated spec, version, Mongoose schemas, GraphQL fragment, wiring (routes, consumers, jobs, resolvers)
   contract.ts            The ONLY file other modules may import: public API interface, shared types, event payloads
   README.md              Generated from the module's API spec (docs/api/modules/<module>.md)
   domain/                State machines and pure business rules (no framework, no database)
   service.ts             Use cases; implements the public API, event consumers and jobs, through ports.ts and ctx
   ports.ts               Repository interfaces (database-agnostic) and provider ports
-  infra/postgres/        Postgres repository + migrations (infra/mongo/ added only if the database changes)
+  infra/mongo/           MongoDB repository (repository.ts) and the generated Mongoose schemas (schema.ts)
   infra/<provider>/      Provider adapters behind ports (storage, scanning, search engine …), with a dev adapter
   http/<area>.ts         One typed handler per spec endpoint of that area (store, seller, admin, public, webhooks); request and response schemas are generated in src/spec
   graphql/               This module's schema fragment + resolvers (read-only; fields it owns, incl. fields on other modules' types)
   permissions.ts         Permission keys this module declares
-  <module>.test.ts       The contract suite: boots the module with its dependencies against an in-memory PostgreSQL
+  <module>.test.ts       The contract suite: boots the module with its dependencies on the in-memory MongoDB
   test/                  Behaviour tests (helpers.ts boots the module for them)
 ```
 
@@ -257,12 +254,12 @@ Search's public API and endpoints are the same with either engine; only the adap
 
 | `SEARCH_ENGINE` | Where | What answers queries |
 |---|---|---|
-| `postgres` (default) | development, tests | PostgreSQL full-text (`english`) and `pg_trgm` over the read-model tables `search_documents` / `search_offers` (`infra/postgres/engine.ts`) |
+| `mongo` (default) | development, tests | Stemmed words and prefixes over the read-model collections `search.search_documents` / `search.search_offers`, with aggregation pipelines (`infra/mongo/engine.ts`). Misspellings are corrected only when the first letter is right |
 | `opensearch` | production | An OpenSearch index fed from the same read model (`infra/opensearch/`) |
 
-**Read model and feed.** PostgreSQL stays the source of truth for the index: event consumers and jobs write `search_documents` and `search_offers` exactly as before. With OpenSearch the repository is wrapped (`infra/index-feed.ts`): after each commit the changed products are read back and sent as one `_bulk` request. A rebuilt document carries its searchable texts and replaces the indexed one; other changes replace every field but the texts. Each write is a Painless update that applies only if the read-model `version` is not older, so concurrent servers cannot put an older state back. Rejected (429) and failed (5xx) items are retried with backoff (`OPENSEARCH_BULK_ATTEMPTS`); whatever still fails — the cluster is down, or a change arrives for a document the index lacks — is marked dirty and rebuilt in full by `search.process-dirty`. Suggestion terms (popular queries, category, brand and store names), synonyms, recent searches, logs and jobs stay in PostgreSQL.
+**Read model and feed.** MongoDB stays the source of truth for the index: event consumers and jobs write `search_documents` and `search_offers` exactly as before. With OpenSearch the repository is wrapped (`infra/index-feed.ts`): after each commit the changed products are read back and sent as one `_bulk` request. A rebuilt document carries its searchable texts and replaces the indexed one; other changes replace every field but the texts. Each write is a Painless update that applies only if the read-model `version` is not older, so concurrent servers cannot put an older state back. Rejected (429) and failed (5xx) items are retried with backoff (`OPENSEARCH_BULK_ATTEMPTS`); whatever still fails — the cluster is down, or a change arrives for a document the index lacks — is marked dirty and rebuilt in full by `search.process-dirty`. Suggestion terms (popular queries, category, brand and store names), synonyms, recent searches, logs and jobs stay in MongoDB.
 
-**Index.** Queries and writes use the alias `<prefix>-products`, which points at one versioned index `<prefix>-products-<UTC timestamp>` (the first one is `…-00000000000000000`). Documents hold every read-model field (cards are built from hits), the texts (title and brand weighted highest, then category, attributes, description; English analysis with Porter stems like PostgreSQL's `english` configuration), live offers as `nested` documents (seller, condition, price, stock, delivery, featured flag and `card_rank`: featured first, then in stock, then cheapest), category attributes as nested key/value pairs, keyword facets, numeric prices, rating, popularity and `sales_30d`, dispatch days and same-day cutoffs for "ships today" and "arrives by". `MAPPING_VERSION` (`infra/opensearch/mapping.ts`) is stored in the index; bump it on any mapping change.
+**Index.** Queries and writes use the alias `<prefix>-products`, which points at one versioned index `<prefix>-products-<UTC timestamp>` (the first one is `…-00000000000000000`). Documents hold every read-model field (cards are built from hits), the texts (title and brand weighted highest, then category, attributes, description; English analysis with Porter stems, as the MongoDB engine stems), live offers as `nested` documents (seller, condition, price, stock, delivery, featured flag and `card_rank`: featured first, then in stock, then cheapest), category attributes as nested key/value pairs, keyword facets, numeric prices, rating, popularity and `sales_30d`, dispatch days and same-day cutoffs for "ships today" and "arrives by". `MAPPING_VERSION` (`infra/opensearch/mapping.ts`) is stored in the index; bump it on any mapping change.
 
 **Queries** (`infra/opensearch/query.ts`, exact bodies unit-tested):
 - Text: every word (group) must match across the text fields (`cross_fields`, operator and), any synonym alternative of a group; phrases match as phrases; a full GTIN matches the `gtins` keyword. Synonyms come from search's synonym table and are expanded by the service before the engine sees the query, so a synonym change applies on the next query with no reindex.
@@ -270,18 +267,18 @@ Search's public API and endpoints are the same with either engine; only the adap
 - Recommended ranking = text relevance (BM25 `s/(s+1)` × weight) + the published ranking policy's factors as scripts (in stock and delivery speed of the card offer, featured offer, rating with ≥ 3 reviews, conversion) + 1 for a GTIN match. Explain splits a hit's score into the same factors.
 - Price sorts use the card offer's price exactly: products are split into streams by where their card offer comes from (featured / in stock / any), each sorted by a nested minimum over that tier, and merged.
 - Facets: one aggregation per facet, counted against the other active filters (categories, active brands, sellers and the Official Store, conditions, ratings, availability by card offer, delivery, category attributes); the price range is the lowest and highest card-offer price.
-- Typo tolerance: a misspelled word is corrected ("Showing results for …") from candidates the term suggester finds within two edits in the index's title words plus the suggestion terms' words, ranked by trigram similarity like `pg_trgm`; suggestions while typing match title words as prefixes and with `fuzziness: AUTO`.
+- Typo tolerance: a misspelled word is corrected ("Showing results for …") from candidates the term suggester finds within two edits in the index's title words plus the suggestion terms' words, ranked by trigram similarity; suggestions while typing match title words as prefixes and with `fuzziness: AUTO`.
 - Paging keeps the API's cursors (an offset); pages beyond `max_result_window` (10,000) are empty.
 
 **Full reindex (blue/green).** `search.full-reindex` (nightly, or `POST /api/admin/search/reindex-jobs` with scope `all`) creates a new versioned index and points `<prefix>-products-building` at it; every server writes each change to both indices (servers re-check the building alias every `OPENSEARCH_ALIAS_CACHE_MS`, and the job waits that long before rebuilding). Every product is rebuilt from the source modules; products that cannot be rebuilt keep their current document (copied from the live index). Then one `_aliases` call moves `<prefix>-products` to the new index atomically. The previous index is kept for a manual rollback; older ones are deleted. A failed reindex drops the new index and the live one keeps serving. At startup a new (empty) index over a populated read model, or one built with an older `MAPPING_VERSION`, queues a full reindex automatically.
 
-**Health.** `GET /api/admin/search/index` reports the engine in `engine`, e.g. `opensearch (green, index marketly-products-20261010031500123)`, with `mapping vN < vM: full reindex needed`, `rebuilding into …` or `unreachable: …` when they apply (`postgres-fts` for PostgreSQL).
+**Health.** `GET /api/admin/search/index` reports the engine in `engine`, e.g. `opensearch (green, index marketly-products-20261010031500123)`, with `mapping vN < vM: full reindex needed`, `rebuilding into …` or `unreachable: …` when they apply (`mongo-text` for the MongoDB engine).
 
 **Configuration** (`backend/.env.example`):
 
 | Variable | Default | |
 |---|---|---|
-| `SEARCH_ENGINE` | `postgres` | `postgres` or `opensearch` |
+| `SEARCH_ENGINE` | `mongo` | `mongo` or `opensearch` |
 | `OPENSEARCH_URL` | — | Required for `opensearch`; one node or a comma-separated list |
 | `OPENSEARCH_USERNAME`, `OPENSEARCH_PASSWORD` | — | Basic authentication (together) |
 | `OPENSEARCH_API_KEY` | — | Instead of a username: sent as `Authorization: ApiKey <key>` |
@@ -294,6 +291,6 @@ Search's public API and endpoints are the same with either engine; only the adap
 
 **Tests.** No cluster is needed:
 - `test/opensearch-query.test.ts` checks the translation (exact request bodies), documents, the scripts' JavaScript twins and the configuration.
-- `test/opensearch-fake/` is an in-memory OpenSearch behind the real client (a `Connection` class, so request building, NDJSON, response parsing and errors are the client's own). `test/engine-contract.test.ts` runs the same scenarios on PostgreSQL and on the adapter with the fake; `SEARCH_TEST_ENGINE=opensearch npx vitest run src/modules/search` runs the whole search suite on the fake. `test/opensearch-index.test.ts` covers the index lifecycle, retries, the blue/green swap and the feed.
-- What the fake does not prove: Painless is not executed (each script is matched by its source to a JavaScript twin in `scripts.ts`, which must change with it); writes are visible at once (no refresh interval); one shard, so BM25 statistics and `cardinality` are exact; the standard tokenizer, fuzzy scoring and the term suggester's ranking are approximations; cluster behaviour (replicas, timeouts, partial failures) only as far as a test injects faults. Relevance order between products whose only difference is text relevance may differ between PostgreSQL and OpenSearch.
+- `test/opensearch-fake/` is an in-memory OpenSearch behind the real client (a `Connection` class, so request building, NDJSON, response parsing and errors are the client's own). `test/engine-contract.test.ts` runs the same scenarios on the MongoDB engine and on the adapter with the fake; `SEARCH_TEST_ENGINE=opensearch npx vitest run src/modules/search` runs the whole search suite on the fake. `test/opensearch-index.test.ts` covers the index lifecycle, retries, the blue/green swap and the feed.
+- What the fake does not prove: Painless is not executed (each script is matched by its source to a JavaScript twin in `scripts.ts`, which must change with it); writes are visible at once (no refresh interval); one shard, so BM25 statistics and `cardinality` are exact; the standard tokenizer, fuzzy scoring and the term suggester's ranking are approximations; cluster behaviour (replicas, timeouts, partial failures) only as far as a test injects faults. Relevance order between products whose only difference is text relevance may differ between the MongoDB engine and OpenSearch.
 - `test/opensearch.integration.test.ts` runs the contract and the index lifecycle on a real cluster, only when `OPENSEARCH_URL` is set, with throwaway indices (`it-<time>-<random>`, deleted afterwards): `OPENSEARCH_URL=http://localhost:9200 npx vitest run src/modules/search/test/opensearch.integration.test.ts` (e.g. `docker run -p 9200:9200 -e discovery.type=single-node -e DISABLE_SECURITY_PLUGIN=true opensearchproject/opensearch:2`). `SEARCH_TEST_ENGINE=opensearch-live` runs the whole search suite there.

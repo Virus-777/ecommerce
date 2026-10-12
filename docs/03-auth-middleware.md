@@ -106,7 +106,7 @@ GET /files/marketly-public/renditions/<uuid>/medium.webp?sig=<base64url HMAC>
 2. **Access is not authority.** A permission opens an action; an approval limit decides the amount. Assigning a role that carries a limit therefore needs the Business Owner (§12).
 3. **Deny by default, derived from the spec.** Each endpoint's chain is built at startup from its spec fields. An endpoint with an unknown auth kind, or an admin GraphQL root field without `@auth`, fails the build.
 4. **Scope is a property of data access, not a habit.** Tenant tables (anything with `seller_id`, `customer_id` or guest grants) are read for the caller's scope only, and a generated cross-tenant test should run for every endpoint with parameters (§7 says how much of this is built).
-5. **One source of truth for revocation.** Revoked sessions live in PostgreSQL and every server polls them. A server never relies on having received an event (§6).
+5. **One source of truth for revocation.** Revoked sessions live in the database (identity's collections) and every server polls them. A server never relies on having received an event (§6).
 6. **Fail closed.** No endpoint takes an optional token: a missing or unverifiable token is always 401. If identity, access or sellers can't answer, the request gets 503, not access.
 7. **One chain for REST and GraphQL.** GraphQL endpoints run the same middleware and mask the same sensitive fields the same way (§9).
 8. **Restrictions are not sign-in blocks.** A restricted seller keeps orders, returns and support (scenario 7); services call `sellers.canSell` for the blocked activities.
@@ -259,7 +259,7 @@ Browsers call these with `credentials: 'include'`. A module declares its cookie 
 v1 left scope to a helper that each handler would have to remember to call. Across about 1,000 handlers that is a data breach waiting to happen. v2 designs it in four places; what is built is marked:
 
 1. **Spec field `scope`** on every endpoint that returns tenant data: `own-seller | own-customer | own-member | guest-order | staff | public`. Generated defaults: seller area → `own-seller`; store area with `customer` auth → `own-customer`; `shopper` → `own-customer` or `guest-order`. *Built:* every handler receives `input.scope` (seller and member from the token, never the path; the customer id of the account; the visitor session).
-2. **Scoped data access.** Tenant tables are read for that scope (`seller_id = ?` / `customer_id = ?` / the visitor session), on tables declared tenant-owned in the spec (`tenant` table flag). *Built in part:* module services and repositories filter by `input.scope` and answer 404 for another tenant's record. The kernel wrapper `scoped(ctx.db, scope, tenantTables)` exists but modules don't use it yet, and no build check rejects an unscoped read of a tenant table (`check:boundaries` checks module imports only).
+2. **Scoped data access.** Tenant tables are read for that scope (`seller_id = ?` / `customer_id = ?` / the visitor session), on tables declared tenant-owned in the spec (`tenant` table flag). *Built in part:* module services and repositories filter by `input.scope` and answer 404 for another tenant's record. The tenant tables are generated into `spec.tenantTables`, but no kernel helper applies them yet, and no build check rejects an unscoped read of a tenant table (`check:boundaries` checks module imports only).
 3. **Generated cross-tenant tests.** For every endpoint with path parameters: create the record as tenant A, call as tenant B, expect 404. *Not built* (§17); module tests cover some cross-tenant cases by hand.
 4. **GraphQL:** there is no `@scope` directive. Record scope comes from the area (the seller schema's resolvers read the caller's own seller account, the store's the caller's own customer or guest session) and from the scoped loaders the resolvers share with REST.
 
@@ -321,7 +321,7 @@ v1 left scope to a helper that each handler would have to remember to call. Acro
 | preValidation | Refresh and sign-out | session | 30/hour per session, after the refresh token is verified |
 | M11 | Webhooks | provider | 1,000/min per provider, after the signature is verified; the 600/min per-IP limit applies first |
 
-Decision 4 took these as proposed. Every stage counts in the PostgreSQL table `kernel.rate_limits`, so every server instance counts in the same fixed windows (no Redis; see [02-backend-architecture.md](02-backend-architecture.md#several-server-instances-jobs-and-rate-limits)); `RATE_LIMIT_STORE=memory` counts per process (the default without `DATABASE_URL`). Modules count their own business limits there too, with `ctx.rateLimit`. A spec `rateLimit` class the kernel doesn't know fails startup.
+Decision 4 took these as proposed. Every stage counts in the MongoDB collection `kernel.rate_limits`, so every server instance counts in the same fixed windows (no Redis; see [02-backend-architecture.md](02-backend-architecture.md#several-server-instances-jobs-and-rate-limits)); `RATE_LIMIT_STORE=memory` counts per process (the default without `MONGODB_URI`). Modules count their own business limits there too, with `ctx.rateLimit`. A spec `rateLimit` class the kernel doesn't know fails startup.
 
 - **Writes** are requests other than `GET` and `HEAD`; GraphQL requests count as reads (the read layer has no mutations).
 - **Retry-After.** Every 429 `RATE_LIMITED` carries `details.retryAfterSeconds` and a `Retry-After` header in seconds. Module 429s get the header too, from `details.retryAfterSeconds` or `details.lockedUntil`; a module 429 with neither has no header.
@@ -448,7 +448,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 |---|---|---|
 | Record scope | helper for services | spec `scope` → `input.scope`, scoped data access, generated cross-tenant tests (§7 says what is built); GraphQL by area and shared scoped loaders (no `@scope`) |
 | Development tokens | on outside production, public default secret, `*` staff | on only on this machine: loopback `HOST`, local database (below); warning logged |
-| Revocation | in-memory list fed by events | PostgreSQL source of truth, polled; `tokens_valid_after`; admin liveness check; failed-sign-in locks don't revoke |
+| Revocation | in-memory list fed by events | database source of truth, polled; `tokens_valid_after`; admin liveness check; failed-sign-in locks don't revoke |
 | Token format | "signed" | EdDSA JWT, alg allowlist, `kid`, `iss`, `aud`, `typ`, `iat`, `jti`, 60 s leeway, key rotation |
 | Web tokens | undefined | HttpOnly refresh cookie per app, in-memory access token, Origin check, CORS allowlist, CSP |
 | Guest | session id is the secret | separate 256-bit token, verified on attach, ends on claim |
@@ -463,14 +463,14 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 | Errors | 401 for everything | 401 only for token problems; 403 for audience, step-up, owner-only |
 | Facts | 6 errors | refund approval → Finance; `advertising.rules.change` → Business Owner; publication override is declared; Finance staff limits; seller closure needs re-auth; store `/reauth` is not exempt |
 
-**Development tokens, as built** (`kernel/config/index.ts`). `DEV_TOKENS` is on by default in development and tests and can't be turned on in production. It enables the per-machine dev signing key, dev claims (permissions, owner flag), the `dev` app proof, the `dev-reauth.<purpose>` re-auth token and the `000000` step-up code (the last two for dev-key tokens only), and default secrets. `HOST` defaults to `127.0.0.1` outside production and `0.0.0.0` in production. With `DEV_TOKENS` on, startup refuses a non-loopback `HOST` and a non-local `DATABASE_URL` (local = PGlite, `localhost`, `127.0.0.0/8`, `::1`, or a socket). Without `DEV_TOKENS`, a non-loopback `HOST` needs a real `APP_SECRET`. To serve beyond this machine: `DEV_TOKENS=false` with `AUTH_SIGNING_JWK`, `AUTH_JWKS` and `APP_SECRET`.
+**Development tokens, as built** (`kernel/config/index.ts`). `DEV_TOKENS` is on by default in development and tests and can't be turned on in production. It enables the per-machine dev signing key, dev claims (permissions, owner flag), the `dev` app proof, the `dev-reauth.<purpose>` re-auth token and the `000000` step-up code (the last two for dev-key tokens only), and default secrets. `HOST` defaults to `127.0.0.1` outside production and `0.0.0.0` in production. With `DEV_TOKENS` on, startup refuses a non-loopback `HOST` and a non-local `MONGODB_URI` (local = the embedded replica set, `localhost`, `127.0.0.0/8`, `::1`, or a socket). Without `DEV_TOKENS`, a non-loopback `HOST` needs a real `APP_SECRET`. To serve beyond this machine: `DEV_TOKENS=false` with `AUTH_SIGNING_JWK`, `AUTH_JWKS` and `APP_SECRET`.
 
 ## 17. What is built
 
 **Built** (`backend/src/kernel/auth`, `kernel/http`), checked by `npm run check`:
 - `chain.ts`: app-level onRequest authenticates **every** URL (unknown URLs and GraphQL included: 401 before 404), with the staff session check (`identity.touchStaffSession`) and the `X-Client` version gate (426); per-endpoint hooks for phase gate, caller rate limit, audience, caller kind, seller context + member access, permission / OWNER_ONLY, staff 2-step, refresh token + cookie guard + per-session limit, webhook signature + per-provider limit + replay record, rate-limit classes, step-up proof present (preValidation), `permissionWhen`, step-up proof verified (preHandler);
 - `tokens.ts`: EdDSA JWT verify/sign, `AUTH_JWKS`, per-machine dev key (`kid dev-…`, `dev` claims honoured only on dev keys);
-- `revocation.ts` (fails closed for admin requests in production, §6), `rate-limit.ts` (§11), `app-proof.ts` (`dev`, `turnstile:`; `play:` answers 503 until a Play Integrity verifier is wired), `scope.ts` (`input.scope`, `scoped()`), `masking.ts`, `authorities.ts` (answers from the identity, access, sellers, customers and settings public APIs, fail closed), `setup.ts`;
+- `revocation.ts` (fails closed for admin requests in production, §6), `rate-limit.ts` (§11), `app-proof.ts` (`dev`, `turnstile:`; `play:` answers 503 until a Play Integrity verifier is wired), `scope.ts` (`input.scope`), `masking.ts`, `authorities.ts` (answers from the identity, access, sellers, customers and settings public APIs, fail closed), `setup.ts`;
 - `http/security.ts`: CORS per area, credentials on the cookie routes, every app's origins on `account` endpoints, exposed headers (§5); preflight before auth; no-store; `WWW-Authenticate` only on 401 `UNAUTHORIZED` (`error="invalid_token"` for a bad token, plain `Bearer` otherwise); health check moved to an internal port (`HEALTH_PORT`);
 - `http/server.ts`: `X-Request-Id` (§3, M1), `Retry-After` on every 429 (§11), one error format; `config/index.ts`: the development-token guard (§16);
 - `file-links.ts` + `http/files.ts`: signed file links for `GET`/`HEAD /files/{bucket}/{key}` (auth kind `file-link`), registered by the module that serves files (`ctx.http.files`, media) and verified in M4 with that module's key (`secretFor(config, '<module>.files')`); tested in `http/http.test.ts` (tampered, foreign key, longer life, other content type, private permanent link → 401; expired → 403) and over HTTP in `modules/media/test/files.test.ts`;
@@ -486,7 +486,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 
 **Not built yet:**
 - the Play Integrity verifier (deployment);
-- `scoped()` in module repositories, a check against unscoped tenant reads, and generated cross-tenant 404 tests (§7).
+- a kernel helper that applies `spec.tenantTables` in repositories, a check against unscoped tenant reads, and generated cross-tenant 404 tests (§7).
 
 ### Planned layout (v3 design, for reference)
 

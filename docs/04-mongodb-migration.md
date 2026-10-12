@@ -1,6 +1,6 @@
 # Phase: MongoDB migration plan
 
-Status: **M1 built** (kernel on MongoDB, settings and access moved); M2 next. Phases in §6.
+Status: **M1, M2 and M3 built.** The kernel and all 33 modules keep their data in MongoDB only; PostgreSQL, PGlite, Kysely and pg-boss are removed from the code, the tools, the tests and the packages (M3, 2026-10-13). What remains is **M4**: running against a real MongoDB 6.0 replica set (§6). The rest of this document is the plan as decided; where it names PostgreSQL it records where the design came from.
 
 The database requirement changed: the backend must run on MongoDB. Decisions taken (2026-10-12):
 
@@ -28,7 +28,7 @@ The layering was built for this: services talk only to their module's repository
 
 ## 2. Kernel database layer
 
-**Connection and naming.** One database (`MONGODB_URI`, e.g. `mongodb://localhost:27017/marketly?replicaSet=rs0`, replacing `DATABASE_URL`). Each module's collections are named `<module>.<table>` (`catalog.products`, `orders.order_items`); `ctx.db` only reaches the module's own collections, as the PostgreSQL schema did. Kernel collections are `kernel.*`.
+**Connection and naming.** One database (`MONGODB_URI`, e.g. `mongodb://localhost:27017/marketly?replicaSet=rs0`, replacing `DATABASE_URL`). Each module's collections are named `<module>.<table>` (`catalog.products`, `orders.order_items`); `ctx.mongo` only reaches the module's own collections, as the PostgreSQL schema did. Kernel collections are `kernel.*`.
 
 **Documents.** A row becomes a document with the same field names. The `id` column is stored as `_id` (UUIDv7 string) and mapped back to `id` by a shared helper, so repositories and services keep `row.id`.
 
@@ -58,7 +58,7 @@ The layering was built for this: services talk only to their module's repository
 | expression or gin index (22: `lower(email)`, text search…) | a stored normalised field with a normal index, a collation index, or the search engine |
 | foreign key inside a module (289) | checked by the repository where an insert could break it; deletes that cascaded are explicit |
 
-**Transactions.** `ctx.db.transaction(fn)` runs `fn` in a MongoDB session transaction and retries it on `TransientTransactionError` and `UnknownTransactionCommitResult`. Rule: a transaction function only reads and writes this module's collections; events are published after the commit (already the case) and providers are never called inside one, because a retry runs `fn` again.
+**Transactions.** `ctx.mongo.transaction(fn)` runs `fn` in a MongoDB session transaction and retries it on `TransientTransactionError` and `UnknownTransactionCommitResult`. Rule: a transaction function only reads and writes this module's collections; events are published after the commit (already the case) and providers are never called inside one, because a retry runs `fn` again.
 
 **Row locks (`forUpdate`, 130 calls in repositories).** MongoDB has no `SELECT … FOR UPDATE`. Inside a transaction, "lock" means *write first*: the repository reads the document with `findOneAndUpdate({_id}, {$inc: {_lock: 1}})`. A second transaction that writes the same document gets a write conflict and is retried by the transaction wrapper, so the read-decide-write sequences of today (stock levels, balances, states) stay serialised. The lock order found on PostgreSQL stays the rule: reservations, then their lines, then stock levels (inventory, fixed on 2026-10-12).
 
@@ -109,9 +109,9 @@ Each phase ends with `npm run check` green and a report; the next starts after a
 
 | Phase | Work | Done when |
 |---|---|---|
-| **M1 Foundations** | Kernel MongoDB layer (client, naming, transactions with retry, lock-by-write, id mapping, keyset paging), schema setup and migrations, kernel collections, job queue, rate-limit store, inbox, refs, idempotency; generator (types, validators, indexes); test harness (in-memory replica set); contract suite on collections. Pilot: **settings** and **access** ported to `infra/mongo/` | kernel tests and the two pilot modules pass on MongoDB; the pattern is written into `backend/docs/BUILDING-MODULES.md` |
-| **M2 Modules, in tranches** (dependency order, parallel builders as before) | A: identity, audit, media, notifications · B: customers, catalog, inventory, sellers, purchasing, workqueues · C: offers, search, promotions, cart, orders, content · D: payments, shipping, checkout, messaging, reviews, finance, returns · E: support, trust, advertising, reports, warehouse · F: wishlist, wallet, fulfillment-service | each module's tests and its `test:http` pass on MongoDB |
-| **M3 Remove PostgreSQL** | Delete `infra/postgres/`, PGlite, `pg`, `pg-boss`, Kysely; configuration (`MONGODB_URI`); docs 02, 03, README, FORMAT, .env.example | `npm run check` green with MongoDB only |
+| **M1 Foundations** (built) | Kernel MongoDB layer (client, naming, transactions with retry, lock-by-write, id mapping, keyset paging), schema setup and migrations, kernel collections, job queue, rate-limit store, inbox, refs, idempotency; generator (types, validators, indexes); test harness (in-memory replica set); contract suite on collections. Pilot: **settings** and **access** ported to `infra/mongo/` | kernel tests and the two pilot modules pass on MongoDB; the pattern is written into `backend/docs/BUILDING-MODULES.md` |
+| **M2 Modules, in tranches** (built; dependency order, parallel builders as before) | A: identity, audit, media, notifications · B: customers, catalog, inventory, sellers, purchasing, workqueues · C: offers, search, promotions, cart, orders, content · D: payments, shipping, checkout, messaging, reviews, finance, returns · E: support, trust, advertising, reports, warehouse · F: wishlist, wallet, fulfillment-service | each module's tests and its `test:http` pass on MongoDB |
+| **M3 Remove PostgreSQL** (built) | Delete `infra/postgres/`, PGlite, `pg`, `pg-boss`, Kysely; configuration (`MONGODB_URI`); docs 02, 03, README, FORMAT, .env.example | `npm run check` green with MongoDB only |
 | **M4 Real server** | Run against a local MongoDB 6.0 replica set: migrate, start, `test:http --url`, and the whole suite under real concurrency (as was done on PostgreSQL, where it found deadlocks and lost updates) | all green on the real server |
 
 ## 7. Risks

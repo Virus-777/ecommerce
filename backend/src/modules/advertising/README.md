@@ -1134,7 +1134,7 @@ Indexes: `unique (campaign_id, day)`, `(seller_id, state)`
 | `orders.order.placed` | orders | Attribute the order to the last ad click within attributionDays: by customerId for signed-in shoppers, and for guests by the payload visitorId (present only when the shopper allowed personalization; hashed like ad_events.visitor_key). Orders with neither are not attributed. unique (order_id, campaign_id) keeps redelivery idempotent |
 | `orders.item.cancelled` | orders | Reduce attributed sales for cancelled items |
 | `content.page.published` | content | Re-run link checks for creatives pointing at the page |
-| `access.approval.decided` | access | Apply an approved global rules change at its effective time (and finish non-draft fee schedule approvals). Inbox-claimed per event (ctx.inbox) before acting, so a redelivered decision applies once and writes one audit entry |
+| `access.approval.decided` | access | Apply an approved global rules change at its effective time (and finish non-draft fee schedule approvals). Inbox-claimed per event (ctx.mongo.claim) before acting, so a redelivered decision applies once and writes one audit entry |
 | `catalog.product.merged` | catalog | Repoint ads, ad requests and creatives that promote the duplicate product (or its variants, mapped through newVariantId / intoVariantId) to the kept product; delivery, spend and attribution history stay on the ad |
 
 ## In-process API (for other modules)

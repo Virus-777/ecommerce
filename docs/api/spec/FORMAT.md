@@ -11,7 +11,7 @@ One JSON file per backend module: `docs/api/spec/modules/<module>.json`.
 
 ```jsonc
 {
-  "name": "catalog",                       // kebab-case, = URL segment, = DB schema (snake_case)
+  "name": "catalog",                       // kebab-case, = URL segment, = collection prefix (catalog.<table>)
   "title": "Catalog",
   "group": "Catalog and stock",            // Platform | Participants | Catalog and stock | Buying | After-sales and money | Growth | Later phases
   "phase": 1,                              // plan ch. 20 launch phase (1–4); 3–4 are off at launch
@@ -118,7 +118,7 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
 
 ## Tables
 
-Column notation: `<type>[?] [pk] [unique] [→ table] [check <expr>] [(comment)]`, e.g. `"uuid? → items"`, `"text (open|closed)"` (a list of plain words becomes a CHECK). Index notation: `"(a, b)"`, `"(a, b) unique"`, `"unique (a) where …"`, `"pk (a, b)"`, `"gin(expr)"`, and `"unique nulls not distinct (a, b)"` when null key columns must count as equal (one row per key, e.g. a saved product with no variant). The generator turns them into the module's first migration (`backend/tools/lib/sql.ts`); later migrations must match what the spec says.
+Each table is a MongoDB collection `<module>.<table>` (docs/04-mongodb-migration.md §2–3); the notation keeps SQL type names. Column notation: `<type>[?] [pk] [unique] [→ table] [check <expr>] [(comment)]`, e.g. `"uuid? → items"`, `"text (open|closed)"` (a list of plain words is the set of allowed values). Types: `uuid`, `text`, `char(n)`, `int`, `smallint`, `bigint`, `numeric(p,s)` (exact, read as a string), `bool`, `date` (`YYYY-MM-DD`), `timestamptz`, `jsonb`, `bytea`, arrays (`text[]`); `tsvector` columns are not stored (search is the search engine's job). `?` allows null; without it a value must be present (an empty string is a value). Index notation: `"(a, b)"`, `"(a, b) unique"`, `"unique (a) where …"`, `"pk (a, b)"`, `"gin(expr)"`, and `"unique nulls not distinct (a, b)"` when null key columns must count as equal (one row per key, e.g. a saved product with no variant); a plain unique key ignores rows with a null in it. `npm run gen` turns tables into the Mongoose schemas, validators and indexes (`backend/tools/lib/tables.ts`, `mongo.ts`, `mongoose.ts`), and the kernel applies them (`npm run migrate`).
 
 ## Settings
 
@@ -174,6 +174,6 @@ Modules holding a customer's personal data (orders, returns, support, messaging,
 4. Anything that moves money or creates orders is `idempotent: true`.
 5. Status changes go through a declared state machine; illegal moves return `ILLEGAL_TRANSITION`.
 6. Material admin actions are `audited: true` and take a `reason` where the plan asks for one.
-7. Tables live in the module's own schema; reference other modules by id only (no cross-module foreign keys).
+7. Tables are the module's own collections; reference other modules by id only (no cross-module references).
 8. Every endpoint requires a token. Only `identity.startAppSession` uses `bootstrap` (an app proof instead of a token). Secrets never go in URL paths or queries.
 9. Tables with a `seller_id` or `customer_id` column are tenant tables: seller and customer callers only reach their own rows. Add `"tenant": false` to a table to opt out, or `"tenant": "<column>"` to name another column.

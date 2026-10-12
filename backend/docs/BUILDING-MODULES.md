@@ -23,12 +23,12 @@ code, an event), work within it if you reasonably can, and list it under "Spec g
 ## 2. Layers
 
 ```
-http/<area>.ts      thin: map HandlerInput → service call → response. No SQL, no rules.
+http/<area>.ts      thin: map HandlerInput → service call → response. No queries, no rules.
 graphql/resolvers   thin: call service read methods (batched where the field is on a list).
 service.ts          use cases: authorization beyond the middleware, rules, transactions, events, audit.
 domain/             pure rules and state machines (no I/O): pricing math, eligibility, transitions.
 ports.ts            repository interface (+ provider ports) in domain terms.
-infra/postgres/     Kysely repository on ctx.db (already scoped to the module's schema).
+infra/mongo/        repository on ctx.mongo (the module's own collections, §5b) + the GENERATED Mongoose schemas.
 infra/<provider>/   provider adapters (email, payments, carriers, storage) behind ports, with a dev adapter.
 ```
 
@@ -59,8 +59,8 @@ and Idempotency-Key replay are all checked (`docs/03-auth-middleware.md`). In pa
 The service still owns:
 
 - **Record scope.** A customer, seller or visitor must only reach their own records. Read tenant tables
-  through `scoped(ctx.db, input.scope, spec.tenantTables)` (`kernel/auth/scope.ts`) or add the owner
-  condition explicitly. Another tenant's record is **NOT_FOUND (404)**, never FORBIDDEN (don't confirm it exists).
+  with the owner condition of `input.scope` (`kernel/auth/scope.ts`; the owner columns are in
+  `spec.tenantTables`). Another tenant's record is **NOT_FOUND (404)**, never FORBIDDEN (don't confirm it exists).
   Never take the owner id from the body: sellers act for `input.sellerId`, customers for `scope.customerId`/`principal.accountId`.
 - **Business permissions** the spec describes in prose (e.g. "only the assignee or a lead may…"): use `input.can('perm')`.
 - **Approval limits** (§6).
@@ -94,9 +94,9 @@ async approveThing(id: string, input: { actor: Actor; reason?: string; requestId
 ```
 
 - **Inside a transaction, touch only your own repository.** Take references (`ctx.refs`), settings,
-  other modules' calls, audit and events before the transaction or after the commit: they use their own
-  connection, and on PGlite (development and tests: one connection) a call inside a transaction waits forever.
-- **Transactions:** `ctx.db.transaction().execute(async (trx) => …)`; give the repository a `transaction(fn)` that hands `fn` a repository bound to `trx`. Use `forUpdate()` when a decision depends on the row you're changing (stock, balances, states).
+  other modules' calls, audit and events before the transaction or after the commit: they run outside its session,
+  and a write conflict runs the transaction function again (§5b), which would repeat them.
+- **Transactions:** `ctx.mongo.transaction((tx) => …)`; give the repository a `transaction(fn)` that hands `fn` a repository bound to `tx` (§5b). Use `forUpdate` when a decision depends on the record you're changing (stock, balances, states).
 - **Events** are published **after** the commit (delivery is asynchronous; subscribers never fail the publisher). Payloads must match the spec (validated outside production). Publish exactly the events the spec lists for the action.
 - **Audit:** endpoints marked `audited` (and material changes the spec describes) write one entry via the audit module, which every module but cart, checkout and wishlist has as an optional dependency:
   ```ts
@@ -105,19 +105,19 @@ async approveThing(id: string, input: { actor: Actor; reason?: string; requestId
   }
   ```
   (If `audit` is not in the module's `optionalDeps`, skip auditing and note it as a spec gap.)
-- **Idempotency:** the kernel stores and replays responses for `idempotent` endpoints. Still make money and stock operations safe to retry at the data level (unique keys, `on conflict do nothing`).
-- **Event consumers** claim a key with `ctx.inbox.claim(trx, key)` (the envelope id, or a natural key such as `order-placed:<orderId>`) inside the transaction that applies their effects: the claim and the effects commit together, so a redelivered event changes nothing (kernel/events/inbox.ts). Wire the envelope id through: `ctx.events.on(name, (e) => service.onX(e.payload, e.id))`.
+- **Idempotency:** the kernel stores and replays responses for `idempotent` endpoints. Still make money and stock operations safe to retry at the data level (unique keys, `insertIfAbsent`).
+- **Event consumers** claim a key with `tx.claim(key)` on the module store (the envelope id, or a natural key such as `order-placed:<orderId>`) inside the transaction that applies their effects: the claim and the effects commit together, so a redelivered event changes nothing (`ModuleStore.claim` in kernel/mongo/index.ts). Wire the envelope id through: `ctx.events.on(name, (e) => service.onX(e.payload, e.id))`.
 - **Permissions of a caller handed to you in-process** (a principal in an export or admin read): `ctx.can(principal, permission)` gives the same answer their request got, development tokens included.
 - **Event consumers** (`onXFromY`) must be idempotent (same event twice = same result) and must not throw for records they don't know (log and ignore).
 
 ## 5b. Repositories on MongoDB (docs/04-mongodb-migration.md)
 
-Modules move from PostgreSQL to MongoDB one by one (settings and access first). A module on MongoDB:
+Every module keeps its data in MongoDB, one collection per spec table (`<module>.<table>`):
 
 ```ts
 // module.ts
 import { schemas } from './infra/mongo/schema.js';              // GENERATED Mongoose schemas, one per spec table
-export default defineModule({ spec, version, store: 'mongo', schemas, migrations: [], register(ctx) {
+export default defineModule({ spec, version, schemas, register(ctx) {
   const service = new ThingService({ repo: createMongoThingRepository(ctx.mongo), ctx });
   …
 ```
@@ -139,9 +139,9 @@ export function createMongoThingRepository(store: ModuleStore): ThingRepository 
 - **Transactions are retried** when MongoDB reports a write conflict: the function runs again, so it must only read and write this module's tables (no events, provider calls or other modules; that was already the rule). Run operations inside one transaction one after another, never with `Promise.all`.
 - **`forUpdate`** locks by writing (`_lock` is incremented): a second transaction writing the same document conflicts and is retried after the first commits. Keep the lock order the module already uses (inventory: reservations, their lines, then stock levels).
 - **Never insert-and-catch a duplicate key inside a transaction**: the error aborts the whole transaction. Use `insertIfAbsent` / `insertManyIfAbsent` (on conflict do nothing) and `upsert` / `upsertMany` (on conflict do update).
-- **SQL meaning to keep by hand:** `col != x` skips nulls in SQL, so write `{ col: { $nin: [x, null] } }`; an empty `IN ()` matches nothing (`{ $in: [] }` does the same); JSON containment (`items @> [{key}]`) is a dotted filter (`{ 'items.key': key }`); a join is two reads.
-- **Inbox, locks, counters:** `store.claim(key)` inside the transaction of the effects (true the first time); `store.lock(name)` for pg_advisory_xact_lock; `store.nextValue(name)` for sequences.
-- **Seed data** lives in code (`domain/seed.ts`), applied on boot; PostgreSQL migrations that only updated existing installs are not ported (every MongoDB install starts fresh). Data changes after launch are `mongoMigrations: [{ id, up(db) }]`.
+- **Nulls and lists:** `{ col: { $ne: x } }` also matches documents where `col` is null; when null rows must not match (the spec's `<>` conditions mean that), write `{ col: { $nin: [x, null] } }`. `{ $in: [] }` matches nothing; a condition on an array of objects is a dotted filter (`{ 'items.key': key }`); a join is two reads.
+- **Inbox, locks, counters:** `store.claim(key)` inside the transaction of the effects (true the first time); `store.lock(name)` serialises transactions on a name; `store.nextValue(name)` for sequences and identity columns.
+- **Seed data** lives in code (`domain/seed.ts`), applied on boot. A schema change is a spec change (`npm run gen`; the kernel syncs validators and indexes); data changes after launch (backfills, renames) are `mongoMigrations: [{ id, up(db) }]` in the manifest, each run once.
 - **Tests** read a module's collections the way its repository does: `app.kernel.mongo.module(name, spec.collections, schemas).table(t)`.
 
 ## 6. Approvals and limits (money and enforcement actions)
@@ -164,7 +164,7 @@ Granting a permission never grants financial authority: `check` is the only sour
 
 ## 7. Reads, lists and paging
 
-- `paging: true` handlers get `input.page`; use `paginate(query, page, { column: 'created_at', direction: 'desc' })` (`kernel/lib/pagination`). Small bounded lists can use `pageOf(array, page)`.
+- `paging: true` handlers get `input.page`; the repository pages with `table.page(filter, page, { column: 'created_at', direction: 'desc' })` (keyset on the column and `id`; `kernel/mongo/table.ts`). Small bounded lists can use `pageOf(array, page)` (`kernel/lib/pagination`).
 - Filters in the spec's `query` are all optional unless typed otherwise; apply only the ones given.
 - Batch lookups across modules (`getAccounts(ids)`, `getStaffRef`) instead of calling per row.
 
