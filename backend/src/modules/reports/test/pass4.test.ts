@@ -1,11 +1,12 @@
 /**
  * Pass 4: metric change notes and owner history in columns/tables, open stock-outs and campaign references in their
  * own tables (not read_model_checkpoints), order item facts with accepted_at and group_id (captures match the group),
- * EXPORT_TOO_LARGE with matchedRows, and the 0004 backfill.
+ * EXPORT_TOO_LARGE with matchedRows.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0004Pass4LookupsOwnerHistoryOrderFacts } from '../infra/postgres/migrations/0004_pass4_lookups_owner_history_order_facts.js';
+import { spec } from '../../../spec/reports.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { harness, usd, type Harness } from './harness.js';
 
 let h: Harness;
@@ -16,7 +17,7 @@ afterAll(async () => {
   await h.app.close();
 });
 
-const db = () => h.app.kernel.database.kysely.withSchema('reports') as any;
+const table = (name: string) => h.app.kernel.mongo.module('reports', spec.collections, schemas).table<any>(name);
 
 describe('metric definitions', () => {
   it('keep the draft or published change note and the owner history', async () => {
@@ -31,7 +32,7 @@ describe('metric definitions', () => {
     expect(created.body).toMatchObject({ status: 'draft', changeNote: 'New metric' });
     const published = await h.call('POST', `/api/admin/reports/metrics/${key}/publish`, h.tokens.staff(), { effectiveFrom: '2026-01-01', changeNote: 'First version' });
     expect(published.body.changeNote).toBe('First version');
-    expect(await db().selectFrom('metric_definitions').select('change_note').where('key', '=', key).executeTakeFirst()).toEqual({ change_note: 'First version' });
+    expect((await table('metric_definitions').get(key))?.change_note).toBe('First version');
     const revised = await h.call('PATCH', `/api/admin/reports/metrics/${key}`, h.tokens.staff(), { ...body, changeNote: 'Returns deducted' });
     expect(revised.body).toMatchObject({ status: 'draft', version: 2, changeNote: 'Returns deducted' });
 
@@ -50,12 +51,12 @@ describe('read model lookups in their own tables', () => {
     const stock = { stockItemId, offerId, ownerType: 'seller', productId, variantId: newId(), available: 0, reserved: 0, previousAvailable: 2, archived: false, cause: 'order' };
     h.publish('inventory', 'inventory.stock.changed', { ...stock, state: 'out_of_stock' });
     await h.drain();
-    expect(await db().selectFrom('open_stockouts').selectAll().where('stock_item_id', '=', stockItemId).executeTakeFirst()).toMatchObject({ product_id: productId });
+    expect(await table('open_stockouts').get(stockItemId)).toMatchObject({ product_id: productId });
     h.clock.advance(30 * 60_000);
     h.publish('inventory', 'inventory.stock.changed', { ...stock, available: 5, previousAvailable: 0, state: 'in_stock', cause: 'restock' });
     await h.drain();
-    expect(await db().selectFrom('open_stockouts').selectAll().where('stock_item_id', '=', stockItemId).execute()).toEqual([]);
-    expect(await db().selectFrom('read_model_checkpoints').selectAll().where('key', 'like', 'lookup:%').execute()).toEqual([]);
+    expect(await table('open_stockouts').find({ stock_item_id: stockItemId })).toEqual([]);
+    expect(await table('read_model_checkpoints').find({ key: { $regex: '^lookup:' } })).toEqual([]);
   });
 
   it('the campaign of a redemption is a campaign_refs row the reversal reads', async () => {
@@ -66,7 +67,7 @@ describe('read model lookups in their own tables', () => {
     await h.drain();
     h.publish('promotions', 'promotions.coupon.redeemed', { redemptionId, campaignId, orderId: o.id, amount: usd(800), platformPart: usd(500), sellerPart: usd(300) });
     await h.drain();
-    expect(await db().selectFrom('campaign_refs').selectAll().where('ref_id', '=', redemptionId).executeTakeFirst()).toMatchObject({ kind: 'redemption', campaign_id: campaignId });
+    expect(await table('campaign_refs').findOne({ ref_id: redemptionId })).toMatchObject({ kind: 'redemption', campaign_id: campaignId });
   });
 });
 
@@ -80,44 +81,14 @@ describe('order item facts', () => {
     h.ordersById.set(o.id, o);
     h.placed(o);
     await h.drain();
-    const rows = await db().selectFrom('fact_order_items').selectAll().where('order_id', '=', o.id).execute();
+    const rows = await table('fact_order_items').find({ order_id: o.id });
     expect(rows.map((r: any) => r.group_id).sort()).toEqual([o.groups[0]!.id, second.id].sort());
     expect(rows.every((r: any) => r.accepted_at instanceof Date)).toBe(true);
     const groupId = second.id;
     h.publish('payments', 'payments.payment.captured', { intentId: newId(), captureId: newId(), orderId: o.id, groupId, amount: usd(1900), allocations: [{ groupId, ownerType: 'seller', sellerId, amount: usd(1900) }], capturedAt: h.clock.now().toISOString() });
     await h.drain();
-    const after = await db().selectFrom('fact_order_items').select(['group_id', 'paid_at']).where('order_id', '=', o.id).execute();
+    const after = await table('fact_order_items').find({ order_id: o.id });
     expect(after.find((r: any) => r.group_id === groupId).paid_at).toBeInstanceOf(Date);
     expect(after.find((r: any) => r.group_id === o.groups[0]!.id).paid_at).toBeNull();
-  });
-});
-
-describe('migration 0004 backfill', () => {
-  it('moves lookups out of read_model_checkpoints, fills change_note and accepted_at', async () => {
-    const o = h.order({ sellerId: newId(), items: [{ unit: 2000 }] });
-    h.placed(o);
-    await h.drain();
-    const stockItem = newId();
-    const product = newId();
-    const redemption = newId();
-    const charge = newId();
-    const campaign = newId();
-    const since = '2026-10-01T08:00:00.000Z';
-    const k = h.app.kernel.database;
-    await k.exec(`drop table reports.open_stockouts; drop table reports.campaign_refs; drop table reports.metric_owner_changes;
-alter table reports.metric_definitions drop column change_note;
-alter table reports.fact_order_items drop column accepted_at, drop column group_id;`);
-    const lookup = (key: string, value: string) => ({ key: `lookup:${key}`, last_event_id: value, last_event_at: null, state: 'lookup', rebuild_started_at: null, rebuild_progress: null });
-    await db().insertInto('read_model_checkpoints').values([lookup(`stockout:${stockItem}`, `${product}|${since}`), lookup(`redemption:${redemption}`, campaign), lookup(`charge:${charge}`, campaign)]).execute();
-    await k.exec(`begin;\n${m0004Pass4LookupsOwnerHistoryOrderFacts.sql}\ncommit;`);
-    expect(await db().selectFrom('open_stockouts').selectAll().where('stock_item_id', '=', stockItem).executeTakeFirst()).toMatchObject({ product_id: product, since: new Date(since) });
-    expect((await db().selectFrom('campaign_refs').selectAll().where('campaign_id', '=', campaign).execute()).map((r: any) => [r.kind, r.ref_id]).sort()).toEqual([['charge', charge], ['redemption', redemption]].sort());
-    expect(await db().selectFrom('read_model_checkpoints').selectAll().where('key', 'like', 'lookup:%').execute()).toEqual([]);
-    const seeded = await db().selectFrom('metric_definitions').select(['change_note', 'status']).where('status', '=', 'published').execute();
-    expect(seeded.length).toBeGreaterThan(0);
-    expect(seeded.every((m: any) => typeof m.change_note === 'string')).toBe(true);
-    const facts = await db().selectFrom('fact_order_items').selectAll().where('order_id', '=', o.id).execute();
-    expect(facts[0]).toMatchObject({ group_id: null });
-    expect(facts[0].accepted_at).toEqual(facts[0].placed_at);
   });
 });

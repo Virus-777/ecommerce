@@ -2,7 +2,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
+import { spec } from '../../../spec/reports.js';
 import { splitRefund } from '../domain/rules.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { harness, usd, type Harness } from './harness.js';
 
 let h: Harness;
@@ -13,8 +15,9 @@ afterAll(async () => {
   await h.app.close();
 });
 
+const table = (name: string) => h.app.kernel.mongo.module('reports', spec.collections, schemas).table<any>(name);
 const refundRows = async (refundId: string) =>
-  (await (h.app.kernel.database.kysely.withSchema('reports') as any).selectFrom('fact_refunds').selectAll().where('refund_id', '=', refundId).orderBy('amount_minor', 'desc').execute()).map((r: any) => ({ sellerId: r.seller_id, ownerType: r.owner_type, amount: Number(r.amount_minor), afterPayout: r.after_payout }));
+  (await table('fact_refunds').find({ refund_id: refundId }, { sort: { amount_minor: -1 } })).map((r: any) => ({ sellerId: r.seller_id, ownerType: r.owner_type, amount: Number(r.amount_minor), afterPayout: r.after_payout }));
 
 describe('refunds over several sellers (D5)', () => {
   it('splitRefund: named items to their sellers, the rest by item amounts, shares add up exactly', () => {

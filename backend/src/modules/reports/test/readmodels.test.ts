@@ -46,10 +46,10 @@ describe('order facts from events (idempotent, order-tolerant)', () => {
     h.placed(o);
     await h.drain();
     const core = h.service.core;
-    expect(await core.ctx.inbox.seen(core.ctx.db, `order_items:${o.id}`)).toBe(true);
+    expect(await core.ctx.mongo.seen(`order_items:${o.id}`)).toBe(true);
     const facts = await core.repo.getOrderItems(o.id);
     expect(facts.map((f) => f.category_id)).toEqual([categoryId]);
-    const seenRows = await (core.ctx.db as any).selectFrom('read_model_checkpoints').select('key').where('key', 'like', 'seen:%').execute();
+    const seenRows = await core.ctx.mongo.table('read_model_checkpoints').find({ key: { $regex: '^seen:' } });
     expect(seenRows).toEqual([]);
   });
 

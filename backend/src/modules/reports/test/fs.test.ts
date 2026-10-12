@@ -1,15 +1,13 @@
 /**
  * Fulfilled by Marketly (fulfillment-service, phase 4): fact_order_items.fulfilled_by, Marketly's dispatches kept in
  * fact_marketly_fulfillment_daily (never the seller's service row), service fees from fulfillment-service fee events,
- * the two seeded metrics, the seller dashboard's service-fees line, the four dataset keys and migrations 0005 and 0006
- * (delivery issues of Marketly's packages in the Marketly row).
+ * the two seeded metrics, the seller dashboard's service-fees line and the four dataset keys.
  * fulfillment-service itself is off here: its events are published with the contract payloads.
  */
-import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0005FulfilledByMarketly } from '../infra/postgres/migrations/0005_fulfilled_by_marketly.js';
-import { m0006MarketlyDeliveryExceptions } from '../infra/postgres/migrations/0006_marketly_delivery_exceptions.js';
+import { spec } from '../../../spec/reports.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { harness, usd, type Harness } from './harness.js';
 
 let h: Harness;
@@ -21,12 +19,13 @@ afterAll(async () => {
 });
 
 const kpi = (body: any, key: string) => body.kpis.find((k: any) => k.metricKey === key);
-const db = () => h.app.kernel.database.kysely;
+const table = (name: string) => h.app.kernel.mongo.module('reports', spec.collections, schemas).table<any>(name);
 const factsOf = async (orderId: string) =>
-  (await sql<{ order_item_id: string; owner_type: string; fulfilled_by: string | null }>`select order_item_id, owner_type, fulfilled_by from reports.fact_order_items where order_id = ${orderId}`.execute(db())).rows;
-type Row = { dispatched: number; dispatched_on_time: number; overdue: number; delivery_exceptions: number };
-const serviceRow = async (sellerId: string) => (await sql<Row>`select dispatched, dispatched_on_time, overdue, delivery_exceptions from reports.fact_service_daily where seller_id = ${sellerId}`.execute(db())).rows;
-const marketlyRow = async (sellerId: string) => (await sql<Row>`select dispatched, dispatched_on_time, overdue, delivery_exceptions from reports.fact_marketly_fulfillment_daily where seller_id = ${sellerId}`.execute(db())).rows;
+  (await table('fact_order_items').find({ order_id: orderId })).map((r) => ({ order_item_id: r.order_item_id as string, owner_type: r.owner_type as string, fulfilled_by: r.fulfilled_by as string | null }));
+const counters = (r: any) => ({ dispatched: r.dispatched, dispatched_on_time: r.dispatched_on_time, overdue: r.overdue, delivery_exceptions: r.delivery_exceptions });
+const serviceRow = async (sellerId: string) => (await table('fact_service_daily').find({ seller_id: sellerId })).map(counters);
+const marketlyRow = async (sellerId: string) => (await table('fact_marketly_fulfillment_daily').find({ seller_id: sellerId })).map(counters);
+const serviceFees = async (sellerId: string) => (await table('fact_marketplace_finance_daily').find({ seller_id: sellerId })).map((r) => Number(r.service_fees_minor));
 
 function dispatched(o: { id: string; groups: { id: string; items: { id: string }[] }[] }, sellerId: string, fulfilledBy: 'seller' | 'marketly_service', onTime: boolean) {
   const now = h.clock.now().toISOString();
@@ -54,7 +53,7 @@ describe('fact_order_items.fulfilled_by', () => {
     const o = h.order({ sellerId: newId(), fulfilledBy: 'marketly_service' });
     h.placed(o);
     await h.drain();
-    await sql`update reports.fact_order_items set fulfilled_by = null where order_id = ${o.id}`.execute(db());
+    await table('fact_order_items').updateMany({ order_id: o.id }, { fulfilled_by: null });
     h.placed(o); // redelivered: the facts exist, only the missing fulfilled_by is filled
     await h.drain();
     expect((await factsOf(o.id)).map((r) => r.fulfilled_by)).toEqual(['marketly_service']);
@@ -90,7 +89,7 @@ describe("Marketly's dispatches", () => {
     expect(await serviceRow(sellerId)).toEqual([{ dispatched: 1, dispatched_on_time: 1, overdue: 0, delivery_exceptions: 1 }]);
     expect(await marketlyRow(sellerId)).toEqual([{ dispatched: 2, dispatched_on_time: 1, overdue: 1, delivery_exceptions: 1 }]);
     // the shipment date basis still fills for the service items
-    const shipped = (await sql<{ shipped_at: Date | null }>`select shipped_at from reports.fact_order_items where order_id = ${service.id}`.execute(db())).rows;
+    const shipped = await table('fact_order_items').find({ order_id: service.id });
     expect(shipped[0]!.shipped_at).not.toBeNull();
 
     // the seller's own service report only counts what the seller shipped
@@ -137,8 +136,7 @@ describe('service fees', () => {
     h.publish('fulfillment-service', 'fulfillment-service.fee.reversed', reversal);
     h.publish('fulfillment-service', 'fulfillment-service.fee.reversed', reversal);
     await h.drain();
-    const rows = (await sql<{ service_fees_minor: string }>`select service_fees_minor::text from reports.fact_marketplace_finance_daily where seller_id = ${sellerId}`.execute(db())).rows;
-    expect(rows.map((r) => Number(r.service_fees_minor))).toEqual([1250]);
+    expect(await serviceFees(sellerId)).toEqual([1250]);
 
     const fees = await h.call('POST', '/api/admin/reports/reports/marketplace.fees/query', h.tokens.staff(), { preset: 'today', sellerId });
     expect(fees.status).toBe(200);
@@ -189,41 +187,5 @@ describe('seeded definitions and datasets', () => {
       ['fulfillment-service.seller.stock', 'fulfillment-service.inbound.manage', 'seller'],
     ]);
     expect(fs.every((d: any) => d.available === false && d.phase === 4)).toBe(true);
-  });
-});
-
-describe('migrations 0005 and 0006 on an install from before them', () => {
-  it('adds the columns and the table, filling fulfilled_by from the owner, service fees and delivery issues with 0', async () => {
-    const sellerId = newId();
-    const own = h.order({ sellerId });
-    const official = h.order({ sellerId: null });
-    h.placed(own);
-    h.placed(official);
-    await h.drain();
-    h.publish('finance', 'finance.payout.paid', { payoutId: newId(), ref: 'PO-1', sellerId, amount: usd(7000), paidAt: h.clock.now().toISOString() });
-    await h.drain();
-
-    // back to the 0004 schema, as an older install has it
-    await h.app.kernel.database.exec(`
-alter table reports.fact_order_items drop column fulfilled_by;
-alter table reports.fact_marketplace_finance_daily drop column service_fees_minor;
-drop table reports.fact_marketly_fulfillment_daily;`);
-    await h.app.kernel.database.exec(m0005FulfilledByMarketly.sql!);
-    // a Marketly row recorded between 0005 and 0006 gets 0 delivery issues
-    const between = newId();
-    await h.app.kernel.database.exec(`insert into reports.fact_marketly_fulfillment_daily (seller_id, day, dispatched, dispatched_on_time, overdue) values ('${between}', current_date, 3, 2, 1)`);
-    await h.app.kernel.database.exec(m0006MarketlyDeliveryExceptions.sql);
-    expect(await marketlyRow(between)).toEqual([{ dispatched: 3, dispatched_on_time: 2, overdue: 1, delivery_exceptions: 0 }]);
-
-    expect((await factsOf(own.id)).map((r) => r.fulfilled_by)).toEqual(['seller']);
-    expect((await factsOf(official.id)).map((r) => r.fulfilled_by)).toEqual(['official_warehouse']);
-    const fin = (await sql<{ service_fees_minor: string }>`select service_fees_minor::text from reports.fact_marketplace_finance_daily where seller_id = ${sellerId}`.execute(db())).rows;
-    expect(fin.map((r) => Number(r.service_fees_minor))).toEqual([0]);
-    expect(await marketlyRow(sellerId)).toEqual([]);
-    // the read models keep working on the migrated schema
-    h.publish('fulfillment-service', 'fulfillment-service.fee.charged', { chargeId: newId(), sellerId, type: 'storage', amount: usd(300), reference: null, period: '2026-10' });
-    await h.drain();
-    const after = (await sql<{ service_fees_minor: string }>`select service_fees_minor::text from reports.fact_marketplace_finance_daily where seller_id = ${sellerId}`.execute(db())).rows;
-    expect(after.map((r) => Number(r.service_fees_minor))).toEqual([300]);
   });
 });
