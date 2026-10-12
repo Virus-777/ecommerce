@@ -2,7 +2,7 @@
  * Seed rows written on boot (every MongoDB install starts from code; docs/04-mongodb-migration.md §3).
  *
  * TEMPLATE_GRANTS: permissions added to a member role template after members may have been invited with it
- * (sellers.template_grants; PostgreSQL migration 0004). A member invited while the permission's module was off gets
+ * (sellers.template_grants). A member invited while the permission's module was off gets
  * the template without the key; MembersPart.applyTemplateGrants applies each grant once, at the first start where the
  * key is in the catalogue (its module runs), to the open members of the template who lack it.
  */

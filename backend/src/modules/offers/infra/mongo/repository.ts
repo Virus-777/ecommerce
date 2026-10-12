@@ -52,7 +52,7 @@ function where(w: Record<string, unknown>): Filter {
 const definedOnly = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined));
 
 /**
- * A duplicate key in MongoDB as PostgreSQL's unique violation (code 23505, the index as `constraint`): the service
+ * A duplicate key as a unique violation error (code 23505, the index name as `constraint`): the service
  * tells DUPLICATE_OFFER reasons apart by the index name (stock_item, sku, variant).
  */
 function uniqueViolation(err: unknown): unknown {
@@ -99,8 +99,8 @@ export function createMongoOffersRepository(store: ModuleStore): OffersRepositor
     if (f.shippingProfileId) and.push({ shipping_profile_id: f.shippingProfileId });
     const q = f.q?.trim();
     if (q) {
-      // title (substring, any case), seller SKU, or the exact offer id; PostgreSQL's trigram similarity on the title
-      // (misspellings) has no MongoDB counterpart here: search proper is the search module's
+      // title (substring, any case), seller SKU, or the exact offer id; misspellings are not matched here: search
+      // proper is the search module's
       const like = { $regex: escapeRegExp(q), $options: 'i' };
       and.push({ $or: [{ title: like }, { seller_sku: like }, { id: q.toLowerCase() }] });
     }

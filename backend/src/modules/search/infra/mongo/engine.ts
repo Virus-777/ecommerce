@@ -9,9 +9,9 @@
  *   summed as r and scaled to r / (r + 1) like ts_rank_cd's normalization 32.
  * - The card offer ("eo"): the document's offers that pass the offer filters ($lookup), featured first, then in stock,
  *   then cheapest, then by offer id. Facet counts run the same pipeline without the facet's own filter.
- * - Typing: words as prefixes of the stems; spelling: trigram similarity (pg_trgm's) computed here among the words
- *   that start with the same letter as the misspelled one. Misspelling tolerance is therefore weaker than with
- *   PostgreSQL's pg_trgm (a wrong first letter is not corrected) and than OpenSearch's fuzziness.
+ * - Typing: words as prefixes of the stems; spelling: trigram similarity computed here among the words that start
+ *   with the same letter as the misspelled one. Misspelling tolerance is therefore weaker than OpenSearch's fuzziness
+ *   (a wrong first letter is not corrected).
  */
 import type { ModuleStore } from '../../../../kernel/mongo/index.js';
 import type { RankingFactorKey } from '../../domain/ranking.js';

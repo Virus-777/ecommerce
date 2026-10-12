@@ -5,7 +5,7 @@ import type { Filter } from '../../../../kernel/mongo/table.js';
 import type { Page } from '../../../../spec/common.js';
 import type { PaymentsRepository, Recs, Table, WebhookRec } from '../../ports.js';
 
-/** jsonb columns per table: stored as JSON (dates inside become strings, as PostgreSQL's jsonb gave them back) */
+/** jsonb columns per table: stored as JSON (dates inside become ISO strings when read back) */
 const JSON_COLUMNS: Record<Table, readonly string[]> = {
   intents: ['tenders', 'method', 'decline', 'next_action'],
   allocations: [],

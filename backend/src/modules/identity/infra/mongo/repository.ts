@@ -24,7 +24,7 @@ type PasswordHistoryRow = IdentityDb['password_history'];
 type SignInAttemptRow = IdentityDb['sign_in_attempts'];
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** Stored bytes (bytea): a Buffer, as the PostgreSQL adapter wrote them */
+/** Stored bytes (bytea): a Buffer (Mongoose refuses a plain Uint8Array) */
 const bin = (v: Uint8Array | null | undefined) => (v ? Buffer.from(v.buffer, v.byteOffset, v.byteLength) : v);
 /** A json column as jsonb kept it (JSON.stringify) */
 const json = (v: unknown) => JSON.parse(JSON.stringify(v ?? {})) as never;

@@ -47,8 +47,7 @@ const DAILY: Record<DailyTable, { key: string[]; defaults: Record<string, unknow
 const lit = (v: unknown) => ({ $literal: v });
 
 /**
- * to_char(date_trunc(unit, <instant> at time zone tz), 'YYYY-MM-DD'): the market day, week (from Monday, as
- * PostgreSQL's ISO weeks) or month an instant falls in
+ * The market day, week (from Monday, ISO weeks) or month an instant falls in, as YYYY-MM-DD of its first day
  */
 const bucketOf = (date: unknown, unit: string, timezone: string) => ({
   $dateToString: { format: '%Y-%m-%d', timezone, date: { $dateTrunc: { date, unit, timezone, ...(unit === 'week' ? { startOfWeek: 'monday' } : {}) } } },
@@ -56,7 +55,7 @@ const bucketOf = (date: unknown, unit: string, timezone: string) => ({
 /** The market day of an instant ((<instant> at time zone tz)::date) */
 const dayOf = (field: string, timezone: string) => ({ $dateToString: { format: '%Y-%m-%d', date: `$${field}`, timezone } });
 
-/** ORDER BY key: text order, nulls last (PostgreSQL's ascending order) */
+/** Rows by key: text order, nulls last */
 const byKey = <T extends { key: string | null }>(rows: T[]): T[] =>
   rows.sort((a, b) => (a.key === b.key ? 0 : a.key === null ? 1 : b.key === null ? -1 : a.key < b.key ? -1 : 1));
 

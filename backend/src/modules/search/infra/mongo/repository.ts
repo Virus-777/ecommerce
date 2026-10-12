@@ -350,7 +350,7 @@ export function createMongoSearchRepository(store: ModuleStore): SearchRepositor
     },
     activeFullJob: () => t.jobs.findOne({ scope: 'all', state: oneOf(['queued', 'running']) }, { sort: { id: 1 } }),
     queuedJobs: () => t.jobs.find({ state: oneOf(['queued', 'running']) }, { sort: { id: 1 } }),
-    // finished_at desc as PostgreSQL orders it: nulls first
+    // finished_at descending with nulls first: a completed job without a finish time counts as the latest
     async lastCompletedFullJob() {
       return (await t.jobs.findOne({ scope: 'all', state: 'completed', finished_at: null })) ?? t.jobs.findOne({ scope: 'all', state: 'completed' }, { sort: { finished_at: -1 } });
     },

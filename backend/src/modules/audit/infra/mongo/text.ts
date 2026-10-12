@@ -1,10 +1,10 @@
 /**
- * What PostgreSQL did for the audit history and MongoDB does not: the simple text search behind q, and the text form
- * of an IP address (inet). Pure functions.
+ * The simple text search behind q and the canonical text form of an IP address (inet), for the audit history. Pure
+ * functions.
  */
 
 /**
- * The words of a text for the search behind q (PostgreSQL's to_tsvector('simple', …) / plainto_tsquery): lower-case
+ * The words of a text for the search behind q (no stemming, no stop words): lower-case
  * runs of letters and digits, each once. A hyphenated or dotted token (MK-261002-55410, returns.window) gives its
  * parts, so a query matches when every one of its words is in the entry.
  */
@@ -13,7 +13,7 @@ export function searchWords(text: string): string[] {
 }
 
 /**
- * An address in the text form PostgreSQL's host(inet) gives (the hash covers it, so it must not change): IPv4 as is;
+ * An address in its canonical text form (the hash covers it, so it must not change): IPv4 as is;
  * IPv6 in lower-case hex with the longest run of two or more zero groups (the first one on a tie) written as ::, and
  * an IPv4-compatible (::a.b.c.d) or IPv4-mapped (::ffff:a.b.c.d) address with its last 32 bits as a dotted quad.
  * `ip` is a valid address (net.isIP).

@@ -1,8 +1,6 @@
 /**
- * Gap pass 4: case facts in columns (the 0002 backfill of PostgreSQL installs is not ported: every MongoDB install starts
- * fresh),
- * goodwill remedies matched on their grant id, escalated → escalated, guest viewers of Order.cases and the customer
- * data export hook.
+ * Gap pass 4: case facts in columns, goodwill remedies matched on their grant id, escalated → escalated, guest
+ * viewers of Order.cases and the customer data export hook.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';

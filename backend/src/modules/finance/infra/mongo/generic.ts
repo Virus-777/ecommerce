@@ -1,6 +1,6 @@
 /**
  * The generic table access of FinanceRepository (get / find / insert / update with a Where of column conditions)
- * on MongoDB, with PostgreSQL's meaning kept (docs/04-mongodb-migration.md §2):
+ * on MongoDB, with these meanings (docs/04-mongodb-migration.md §2):
  *   - `<>` and `not in` skip nulls, an empty list matches nothing, `like` is an anchored pattern (% and _);
  *   - jsonb columns are stored as JSON (dates inside become strings, as jsonb gave them back);
  *   - insert-if-new ("on conflict do nothing") looks for every unique key first: a duplicate key inside a
@@ -50,7 +50,7 @@ export function toFilter(where: Row): Filter {
           out[k] = { $ne: v.value };
           break;
         case 'not in':
-          // an empty list leaves the column unfiltered (as the PostgreSQL adapter did)
+          // an empty list leaves the column unfiltered
           if (Array.isArray(v.value) && v.value.length) out[k] = { $nin: [...v.value, null] };
           break;
         case 'like':

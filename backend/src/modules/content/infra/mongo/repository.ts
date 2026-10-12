@@ -29,7 +29,7 @@ function found<T>(row: T | undefined, what: string): T {
   return row;
 }
 
-/** English stop words (PostgreSQL's english dictionary drops them from a query, as plainto_tsquery did) */
+/** English stop words, dropped from a help search query */
 const STOP_WORDS = new Set(
   (
     'a about above after again against all am an and any are as at be because been before being below between both but by can did do does doing down ' +
@@ -54,7 +54,7 @@ function stem(word: string): string {
 }
 
 /**
- * The help search on the article's live text (PostgreSQL: search @@ plainto_tsquery('english', q)): every word of
+ * The help search on the article's live text: every word of
  * the query that is not a stop word appears in the text, compared by a rough stem at the start of a word. A query of
  * stop words only matches nothing through the text (title and summary still match).
  */

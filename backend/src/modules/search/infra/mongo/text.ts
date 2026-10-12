@@ -1,10 +1,9 @@
 /**
- * Text analysis of the MongoDB search engine (development and tests): what PostgreSQL's 'english' text search
- * configuration did for the old engine. Words are runs of letters and digits, lower case and accent-folded;
+ * Text analysis of the MongoDB search engine (development and tests), the same as the OpenSearch analyzer. Words are runs of letters and digits, lower case and accent-folded;
  * English stop words are dropped and words are stemmed (Porter), so 'speakers' and 'speaker' match.
  *
  * A document stores its stems with the weight of the best field they occur in (search_documents.terms):
- * title and brand 1, category 0.4, attributes 0.2, description 0.1 (PostgreSQL's A/B/C/D weights).
+ * title and brand 1, category 0.4, attributes 0.2, description 0.1 (four weight classes).
  */
 import type { DocTexts } from '../../ports.js';
 

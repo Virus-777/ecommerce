@@ -1,7 +1,6 @@
 /**
  * Pass 4: seller summaries keep overall_sum (the average comes from the summary row), referrals to Trust and Risk have
  * their own table (no fake 'refer' decisions), and helpful votes of a closed account stay counted without the customer id.
- * (The 0004 backfill of PostgreSQL installs is not ported: every MongoDB install starts fresh.)
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';

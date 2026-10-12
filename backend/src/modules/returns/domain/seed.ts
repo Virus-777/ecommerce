@@ -1,5 +1,5 @@
 /**
- * Seed data every install starts with (applied on boot; it was the PostgreSQL migration 0003_pass3):
+ * Seed data every install starts with (applied on boot):
  * baseline policy version 1.0 (decision D-RT2: 30-day window, $7.99 change-of-mind return shipping), active and
  * effective at install, so resolveTerms, eligibility and terms snapshots always have a policy version and a
  * policyVersionId. Nothing is inserted when a version exists.

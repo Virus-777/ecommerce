@@ -342,7 +342,7 @@ export function createMongoReviewsRepository(store: ModuleStore): ReviewsReposit
             _id: null,
             n: { $sum: 1 },
             s: { $sum: '$rating' },
-            // length(trim(body)) > 0 (PostgreSQL trim removes spaces)
+            // a body with more than spaces (spaces only are trimmed)
             w: countIf({ $gt: [{ $strLenCP: { $trim: { input: { $ifNull: ['$body', ''] }, chars: ' ' } } }, 0] }),
             p: countIf({ $gt: [{ $size: { $cond: [{ $isArray: '$media_ids' }, '$media_ids', []] } }, 0] }),
             r1: countIf({ $eq: ['$rating', 1] }),

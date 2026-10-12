@@ -21,7 +21,7 @@ const containsAnyCase = (s: string) => ({ $regex: escapeRegExp(s.trim()), $optio
 /** A value inside an aggregation expression, never read as a field path or operator */
 const lit = (v: unknown) => ({ $literal: v });
 
-/** Unique keys an "insert unless it exists" checks (PostgreSQL's on conflict do nothing); default: the primary key */
+/** Unique keys an "insert unless it exists" checks (an existing row with the same key wins); default: the primary key */
 const UNIQUE: Partial<Record<Table, readonly string[]>> = {
   placements: ['key'],
   campaign_creatives: ['campaign_id', 'creative_id'],

@@ -1,9 +1,8 @@
 /**
  * The conversation key: `unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id,
  * order_item_id, return_id) where kind <> 'support'` (a partial index on kind in (order, staff_seller), the other
- * kinds), and `(kind, customer_id, order_id, case_id) where kind = 'support'`. MongoDB treats nulls as equal, as
- * nulls not distinct did. (Migrations 0003 and 0004, which folded duplicates on PostgreSQL installs, are not ported:
- * every MongoDB install starts fresh.)
+ * kinds), and `(kind, customer_id, order_id, case_id) where kind = 'support'`. MongoDB treats nulls in a unique
+ * index as equal, which is what nulls not distinct means.
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

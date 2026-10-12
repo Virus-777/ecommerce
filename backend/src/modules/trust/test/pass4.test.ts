@@ -1,7 +1,6 @@
 /**
  * Pass 4: recommendations keep who drafted and routed them and their pending approval in columns, enforcements their
- * pending reversal, and rights-owner reports their organisation (reporter_org). (The 0002 backfill of PostgreSQL installs
- * is not ported: every MongoDB install starts fresh.)
+ * pending reversal, and rights-owner reports their organisation (reporter_org).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';

@@ -38,7 +38,7 @@ function found<T>(row: T | undefined, what: string): T {
 /** related_subjects @> [{ type, id }] */
 const relatedHas = (type: string, id: string): Filter => ({ related_subjects: { $elemMatch: { type, id } } });
 
-/** The item filter of a query (the PostgreSQL adapter's where clause) */
+/** The item filter of a query */
 function conditions(q: ItemQuery): Filter {
   const c: Filter[] = [];
   const v = q.visibility;
@@ -80,7 +80,7 @@ function conditions(q: ItemQuery): Filter {
   return c.length ? { $and: c } : {};
 }
 
-/** Sort values computed by the PostgreSQL adapter's select (priority_rank, amount_sort) */
+/** Computed sort values (priority_rank, amount_sort) */
 const PRIORITY_RANK = { $switch: { branches: [{ case: { $eq: ['$priority', 'urgent'] }, then: 3 }, { case: { $eq: ['$priority', 'high'] }, then: 2 }, { case: { $eq: ['$priority', 'normal'] }, then: 1 }], default: 0 } };
 const AMOUNT_SORT = { $ifNull: ['$amount_minor', -1] };
 const priorityRank = (p: string) => (p === 'urgent' ? 3 : p === 'high' ? 2 : p === 'normal' ? 1 : 0);
@@ -100,7 +100,7 @@ export function createMongoWorkqueuesRepository(store: ModuleStore): WorkqueuesR
     counts: store.table<DailyCountRow>('daily_counts'),
   };
 
-  /** A page of items sorted by a computed value (descending), then id: keyset on (value, id) as the PostgreSQL adapter's paginate */
+  /** A page of items sorted by a computed value (descending), then id: keyset on (value, id) */
   async function pageByComputed(filter: Filter, req: PageRequest, expr: unknown, valueOf: (row: ItemRow) => number): Promise<Page<ItemRow>> {
     const match = t.items.filter(filter);
     const cursorOf = (row: ItemRow) => encodeCursor([valueOf(row), row.id]);

@@ -8,8 +8,8 @@ const oneOf = (values: readonly unknown[]) => ({ $in: [...values] });
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * json columns. PostgreSQL parsed a JSON text written to a jsonb column (the service writes some as
- * JSON.stringify(…)), so a string written to one of these is parsed here and stored as the value it encodes.
+ * json columns. The service writes some of them as JSON.stringify(…), so a string written to one of these is
+ * parsed here and stored as the value it encodes.
  */
 const JSON_COLUMNS: Partial<Record<Table, readonly string[]>> = {
   locations: ['address'],

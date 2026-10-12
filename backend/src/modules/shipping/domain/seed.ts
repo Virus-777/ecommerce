@@ -1,6 +1,6 @@
 /**
- * Ids of the seeded carriers and carrier services (decision D-S1). They are derived from the codes, as the
- * PostgreSQL migration 0002_pass3 seeded them, so every install has the same ids for the same carrier.
+ * Ids of the seeded carriers and carrier services (decision D-S1). They are derived from the codes, so every
+ * install has the same ids for the same carrier.
  */
 import { createHash } from 'node:crypto';
 

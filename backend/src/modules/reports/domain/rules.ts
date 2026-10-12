@@ -71,7 +71,7 @@ export function instantsOf(r: DayRange, timeZone: string): { start: Date; end: D
 
 export const marketDay = (at: Date | string, timeZone: string) => dateInZone(typeof at === 'string' ? new Date(at) : at, timeZone);
 
-/** Start day of the bucket a day falls in (weeks start on Monday, like PostgreSQL date_trunc) */
+/** Start day of the bucket a day falls in (weeks start on Monday) */
 export function bucketOf(day: string, g: Granularity): string {
   if (g === 'day') return day;
   if (g === 'month') return `${day.slice(0, 8)}01`;

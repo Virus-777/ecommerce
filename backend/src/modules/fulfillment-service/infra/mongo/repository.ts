@@ -62,7 +62,7 @@ export function createMongoFulfillmentServiceRepository(store: ModuleStore): Ful
     insertMany: (table, rows) => t(table).insertMany(rows),
     async insertIfNew(table, row) {
       // on conflict (any unique key) do nothing: an upsert matching any of the row's unique keys inserts only when
-      // none exists (keys with a null are skipped: a null never conflicts, as in PostgreSQL)
+      // none exists (keys with a null are skipped: a null never conflicts with another row)
       const c = t(table);
       const values = row as Record<string, unknown>;
       const keys = uniqueKeys(table).filter((k) => k.every((col) => values[col] != null));

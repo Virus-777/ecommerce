@@ -1,7 +1,7 @@
 /**
  * Gap pass 4: payout_changes (instead of applications.payout jsonb), sellers.payout_blocked_reasons, suspensions.ref,
  * pending_changes for closures, restriction changes and targets waiting for a second reviewer, the SAP- appeal
- * prefix. (Migration 0003, which backfilled them on PostgreSQL installs, is not ported: every MongoDB install starts fresh.)
+ * prefix.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';

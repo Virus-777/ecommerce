@@ -143,7 +143,7 @@ export function createMongoPromotionsRepository(store: ModuleStore): PromotionsR
           $group: {
             _id: '$campaign_id',
             total: { $sum: { $subtract: ['$amount', '$reversed'] } },
-            // platform_part - round(reversed * platform_part / amount): PostgreSQL rounds halves away from zero (values are >= 0)
+            // platform_part - round(reversed * platform_part / amount), halves away from zero (values are >= 0)
             platform: {
               $sum: {
                 $subtract: ['$platform_part', { $cond: [{ $eq: ['$amount', 0] }, 0, { $floor: { $add: [{ $divide: [{ $multiply: ['$reversed', '$platform_part'] }, '$amount'] }, 0.5] } }] }],

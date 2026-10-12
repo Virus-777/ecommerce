@@ -108,7 +108,7 @@ export function productIndexBody(o: { shards: number; replicas: number }) {
           en_stem: { type: 'stemmer', language: 'english' },
         },
         analyzer: {
-          /** like PostgreSQL's english configuration: lower case, accents folded, stop words out, Porter stems */
+          /** English analysis, as the MongoDB engine does it (infra/mongo/text.ts): lower case, accents folded, stop words out, Porter stems */
           text_en: { type: 'custom', tokenizer: 'standard', filter: ['en_possessive', 'lowercase', 'asciifolding', 'en_stop', 'en_stem'] },
           /** whole words, for spelling correction and suggestions while typing */
           words: { type: 'custom', tokenizer: 'whitespace', filter: ['lowercase', 'asciifolding'] },

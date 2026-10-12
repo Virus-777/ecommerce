@@ -53,7 +53,7 @@ const productIn = <T extends Partial<ProductRow>>(row: T): Omit<T, 'search'> => 
   return rest;
 };
 
-/** A duplicate GTIN (unique index variants.gtin) reads as the PostgreSQL error did: the service matches /unique/ */
+/** A duplicate GTIN (unique index variants.gtin) as an error whose message says "unique": the service matches /unique/ */
 async function gtinUnique<T>(op: () => Promise<T>): Promise<T> {
   try {
     return await op();
@@ -211,7 +211,7 @@ export function createMongoCatalogRepository(store: ModuleStore): CatalogReposit
     getBrand: (id, opts = {}) => t.brands.get(id, opts),
     getBrands: (ids) => t.brands.getMany([...new Set(ids)]),
     getBrandBySlug: (slug) => t.brands.findOne({ slug }),
-    // lower(trim(name)) = lower(trim(input)): PostgreSQL's trim removes spaces only
+    // the same name, any case, ignoring leading and trailing spaces (spaces only, not tabs or new lines)
     findBrandByName: (name) => t.brands.findOne({ name: { $regex: `^ *${escapeRegExp(name.replace(/^ +| +$/g, ''))} *$`, $options: 'i' } }, { sort: { created_at: 1 } }),
     findBrandByChangeRequest: (changeRequestId) => t.brands.findOne({ requested_change_request_id: changeRequestId }),
     brandSlugTaken: (slug, exceptId) => t.brands.exists({ slug, ...(exceptId ? { id: { $ne: exceptId } } : {}) }),

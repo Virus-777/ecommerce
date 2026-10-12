@@ -157,8 +157,10 @@ export class ModuleStore {
   }
 
   /**
-   * Inbox (kernel/events/inbox.ts): true the first time this module claims the key. Inside a transaction the claim
-   * commits with the effects. An upsert, never a duplicate-key error (which would abort the transaction).
+   * Inbox for idempotent event consumers: true the first time this module claims the key (the event id, or a natural
+   * key such as `order-placed:<orderId>`). Inside a transaction the claim commits with the effects, so a redelivered
+   * event changes nothing and a failed attempt leaves the key free for the retry. An upsert, never a duplicate-key
+   * error (which would abort the transaction).
    */
   async claim(key: string): Promise<boolean> {
     const r = await this.root.kernel('processed_events').updateOne({ _id: `${this.module}:${key}` }, { $setOnInsert: { module: this.module, key, at: new Date() } }, { upsert: true, session: this.session });

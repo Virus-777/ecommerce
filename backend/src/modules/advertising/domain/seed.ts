@@ -1,6 +1,6 @@
 /**
  * Install seed (applied on boot, insert-if-absent): the launch placements and the first version of the global
- * rules. Until the move to MongoDB this was PostgreSQL migration 0002; the rows are the same (version 1, by
+ * rules (version 1, by
  * 'system', dated 2026-01-01). Placements and rules edited later through the API are never overwritten.
  */
 import type { PlacementRec, RulesRec } from '../ports.js';
