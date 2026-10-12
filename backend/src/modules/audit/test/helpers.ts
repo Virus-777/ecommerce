@@ -1,8 +1,10 @@
 /** Shared helpers for the audit behaviour tests. */
 import type { FastifyInstance } from 'fastify';
-import { sql } from 'kysely';
+import type { Selectable } from 'kysely';
 import { newId } from '../../../kernel/lib/ids.js';
-import type { AuditPublicApi, RecordInput } from '../../../spec/audit.js';
+import type { Table } from '../../../kernel/mongo/index.js';
+import { spec, type AuditDb, type AuditPublicApi, type RecordInput } from '../../../spec/audit.js';
+import { schemas } from '../infra/mongo/schema.js';
 
 export const auditApi = (app: FastifyInstance) => app.kernel.boot.apis.get('audit') as AuditPublicApi;
 
@@ -22,13 +24,12 @@ export function entry(over: Partial<RecordInput> = {}): RecordInput {
   };
 }
 
-/** Changes rows behind the app's back, as someone with database access would (the append-only trigger off). */
-export async function tamper(app: FastifyInstance, statement: ReturnType<typeof sql>) {
-  const db = app.kernel.database.kysely;
-  await db.transaction().execute(async (trx) => {
-    await sql`set local session_replication_role = replica`.execute(trx);
-    await statement.execute(trx);
-  });
+/**
+ * A collection of the module as its repository reads it (rows in spec shape). Writing through it changes rows behind
+ * the app's back, as someone with database access would.
+ */
+export function auditTable<T extends keyof AuditDb & string>(app: FastifyInstance, name: T): Table<Selectable<AuditDb[T]>> {
+  return app.kernel.mongo.module('audit', spec.collections, schemas).table<Selectable<AuditDb[T]>>(name);
 }
 
 export async function waitForEvents(app: FastifyInstance) {

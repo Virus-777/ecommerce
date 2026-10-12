@@ -4,12 +4,11 @@
  * rewritten with every hash recomputed is still caught. New categories (support, trust, inventory, shipping).
  */
 import type { FastifyInstance } from 'fastify';
-import { sql } from 'kysely';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
 import { hashRow } from '../domain/chain.js';
 import type { AuditRepository } from '../ports.js';
-import { auditApi, entry, tamper, waitForEvents } from './helpers.js';
+import { auditApi, auditTable, entry, waitForEvents } from './helpers.js';
 
 let app: FastifyInstance;
 const staff = auth(callers.staff());
@@ -18,10 +17,9 @@ const verify = async () => {
   await app.kernel.jobs.runNow('audit.verify-chain');
   return integrity();
 };
-const db = () => app.kernel.database.kysely;
 const repo = () => (app.kernel.boot.apis.get('audit') as unknown as { deps: { repo: AuditRepository } }).deps.repo;
-const checkpoints = async () => (await sql<{ seq: number; kind: string; mac: string; key_id: string }>`select seq::int, kind, mac, key_id from audit.checkpoints order by seq`.execute(db())).rows;
-const maxSeq = async () => (await sql<{ m: number }>`select max(seq)::int as m from audit.entries`.execute(db())).rows[0]!.m;
+const checkpoints = async () => (await auditTable(app, 'checkpoints').find({}, { sort: { seq: 1 } })).map(({ seq, kind, mac, key_id }) => ({ seq, kind, mac, key_id }));
+const maxSeq = async () => (await auditTable(app, 'entries').findOne({}, { sort: { seq: -1 } }))!.seq;
 
 beforeEach(async () => {
   // a fresh database per test: checkpoints are global to the chain
@@ -58,7 +56,7 @@ describe('signed checkpoints', () => {
     const row = (await repo().entryBySeq(head))!;
     const forged = { ...row, reason: 'Rewritten reason' };
     const hash = hashRow(forged.prevHash, forged);
-    await tamper(app, sql`update audit.entries set reason = 'Rewritten reason', hash = ${hash} where seq = ${head}`);
+    await auditTable(app, 'entries').updateOne({ seq: head }, { reason: 'Rewritten reason', hash: Buffer.from(hash) });
     const status = await verify();
     expect(status).toMatchObject({ ok: false, brokenAtSeq: head });
     await waitForEvents(app);
@@ -69,7 +67,7 @@ describe('signed checkpoints', () => {
     await auditApi(app).recordMany([entry(), entry()]);
     await verify();
     const head = await maxSeq();
-    await tamper(app, sql`update audit.checkpoints set mac = ${'0'.repeat(64)} where seq = ${head}`);
+    await auditTable(app, 'checkpoints').updateOne({ seq: head }, { mac: '0'.repeat(64) });
     expect(await integrity()).toMatchObject({ ok: false, checkpointSignatureOk: false, brokenAtSeq: head, message: expect.stringMatching(/does not verify/) });
     const status = await verify();
     expect(status).toMatchObject({ ok: false, checkpointSignatureOk: false, brokenAtSeq: head });
@@ -82,7 +80,7 @@ describe('signed checkpoints', () => {
     await verify();
     const head = await maxSeq();
     await auditApi(app).record(entry());
-    await tamper(app, sql`delete from audit.entries where seq = ${head}`);
+    await auditTable(app, 'entries').deleteMany({ seq: head });
     expect(await verify()).toMatchObject({ ok: false, brokenAtSeq: head });
   });
 });

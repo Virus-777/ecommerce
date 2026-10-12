@@ -4,10 +4,9 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresAuditRepository } from './infra/postgres/repository.js';
-import { AuditService } from './service.js';
+import { createMongoAuditRepository } from './infra/mongo/repository.js';
 import { schemas } from './infra/mongo/schema.js';
+import { AuditService } from './service.js';
 
 /**
  * Action history: The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting.
@@ -17,13 +16,13 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
-    const repo = createPostgresAuditRepository(ctx.db, { timeZone: ctx.config.market.timeZone, now: () => ctx.clock.now() });
-    const service = new AuditService({ repo, ctx });
+    const service = new AuditService({ repo: createMongoAuditRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

@@ -8,10 +8,10 @@
 import { Schema } from 'mongoose';
 import { collectionOptions, integer } from '../../../../kernel/mongo/schemas.js';
 
-/** Append-only (no UPDATE/DELETE grants for the app role; triggers refuse UPDATE, DELETE, TRUNCATE and dropping a partition outside a purge). Partitioned by range on at, one partition per market month (audit_partitions.entries_<entry_partitions.name>), so the key is (id, at) and seq is unique per (seq, at) (identity: unique in practice). hash = sha256(prev_hash || canonical row). */
+/** Append-only: the repository only inserts entries and never updates or deletes them, except the retention purge (audit.purge-expired), which deletes the entries before the cut-off by their indexed at; the database user's role should allow no update or delete on audit.* but the purge's. hash = sha256(prev_hash || canonical row). search_words holds the lower-case words of the refs, labels, reason, names and action (the simple text search behind q). */
 const entries = new Schema(
   {
-    id: { type: String, required: true },
+    _id: { type: String, required: true }, // id
     seq: { type: Number, required: true, validate: integer },
     at: { type: Date, required: true },
     actor_kind: { type: String, required: true },
@@ -39,23 +39,24 @@ const entries = new Schema(
     request_id: { type: String, default: null },
     ip: { type: String, default: null },
     visible_to_seller: { type: Boolean, required: true },
+    search_words: { type: [String], default: undefined }, // lower-case words of refs, labels, reason, names and action
     prev_hash: { type: Buffer, required: true },
     hash: { type: Buffer, required: true },
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },
-  collectionOptions("audit.entries", { generatedId: true }),
+  collectionOptions("audit.entries"),
 );
-entries.index({"id":1,"at":1}, {"name":"entries_id_at_2f63f7","unique":true});
-entries.index({"seq":1,"at":1}, {"name":"entries_seq_at_f81c3c","unique":true});
+entries.index({"seq":1}, {"name":"entries_seq_52ef2e","unique":true});
 entries.index({"at":-1,"id":1}, {"name":"entries_at_id_2a0522"});
 entries.index({"target_type":1,"target_id":1,"at":-1}, {"name":"entries_target_type_target_id_at_52e743"});
 entries.index({"actor_id":1,"at":-1}, {"name":"entries_actor_id_at_1427d7"});
 entries.index({"category":1,"at":-1}, {"name":"entries_category_at_95ff60"});
 entries.index({"seller_id":1,"at":-1}, {"name":"entries_seller_id_at_0e2bf4","partialFilterExpression":{"visible_to_seller":true}});
 entries.index({"approval_request_id":1}, {"name":"entries_approval_request_id_901de1"});
+entries.index({"search_words":1}, {"name":"entries_search_words_0561d9"});
 
-/** Related targets for history lookups (an order item entry also appears under its order and seller). Partitioned like entries (at is the entry's at, so a target row lives in the same month as its entry and its partition is dropped with the entry's); written in the same transaction as the entry, without a foreign key so dropping a month needs no reference check. */
+/** Related targets for history lookups (an order item entry also appears under its order and seller). at is the entry's at, so the purge deletes a target row with its entry; written in the same transaction as the entry. */
 const entry_targets = new Schema(
   {
     entry_id: { type: String, required: true }, // entries.id
@@ -69,20 +70,6 @@ const entry_targets = new Schema(
 );
 entry_targets.index({"target_type":1,"target_id":1,"at":-1}, {"name":"entry_targets_target_type_target_id_at_52e743"});
 entry_targets.index({"entry_id":1}, {"name":"entry_targets_entry_id_3e0f0e"});
-
-/** The month partitions of entries and entry_targets ([from_at, to_at), one market month; the first month after the partitioning migration may be shorter where it meets the UTC months of older rows). Created ahead by audit.prepare-partitions and on demand by record; dropped by audit.purge-expired. */
-const entry_partitions = new Schema(
-  {
-    _id: { type: String, required: true }, // name: lower bound in UTC as YYYYMMDD_HH24MI: tables audit_partitions.entries_<name> and entry_targets_<name>
-    from_at: { type: Date, required: true },
-    to_at: { type: Date, required: true },
-    created_at: { type: Date, required: true },
-    /** lock-by-write counter (kernel/mongo/table.ts) */
-    _lock: Number,
-  },
-  collectionOptions("audit.entry_partitions"),
-);
-entry_partitions.index({"from_at":1}, {"name":"entry_partitions_from_at_b41274","unique":true});
 
 /** Projection of access approval requests referenced by entries; updated from access events, so entries stay immutable */
 const approval_states = new Schema(
@@ -159,7 +146,6 @@ integrity_checks.index({"started_at":-1}, {"name":"integrity_checks_started_at_b
 export const schemas = {
   entries: entries,
   entry_targets: entry_targets,
-  entry_partitions: entry_partitions,
   approval_states: approval_states,
   retention: retention,
   checkpoints: checkpoints,

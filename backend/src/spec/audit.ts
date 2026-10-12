@@ -412,7 +412,7 @@ export interface AuditPublicApi {
 
 /** Tables in the `audit` schema. Use with `ctx.db` (already scoped to the schema). */
 export interface AuditDb {
-  /** Append-only (no UPDATE/DELETE grants for the app role; triggers refuse UPDATE, DELETE, TRUNCATE and dropping a partition outside a purge). Partitioned by range on at, one partition per market month (audit_partitions.entries_<entry_partitions.name>), so the key is (id, at) and seq is unique per (seq, at) (identity: unique in practice). hash = sha256(prev_hash || canonical row). */
+  /** Append-only: the repository only inserts entries and never updates or deletes them, except the retention purge (audit.purge-expired), which deletes the entries before the cut-off by their indexed at; the database user's role should allow no update or delete on audit.* but the purge's. hash = sha256(prev_hash || canonical row). search_words holds the lower-case words of the refs, labels, reason, names and action (the simple text search behind q). */
   entries: {
     id: string;
     seq: Generated<number>;
@@ -442,26 +442,18 @@ export interface AuditDb {
     request_id: string | null;
     ip: string | null;
     visible_to_seller: boolean;
-    /** generated: refs, labels, reason, names */
-    search: string | null;
+    /** lower-case words of refs, labels, reason, names and action */
+    search_words: string[];
     prev_hash: Uint8Array;
     hash: Uint8Array;
   };
-  /** Related targets for history lookups (an order item entry also appears under its order and seller). Partitioned like entries (at is the entry's at, so a target row lives in the same month as its entry and its partition is dropped with the entry's); written in the same transaction as the entry, without a foreign key so dropping a month needs no reference check. */
+  /** Related targets for history lookups (an order item entry also appears under its order and seller). at is the entry's at, so the purge deletes a target row with its entry; written in the same transaction as the entry. */
   entry_targets: {
     /** entries.id */
     entry_id: string;
     target_type: string;
     target_id: string;
     at: Date;
-  };
-  /** The month partitions of entries and entry_targets ([from_at, to_at), one market month; the first month after the partitioning migration may be shorter where it meets the UTC months of older rows). Created ahead by audit.prepare-partitions and on demand by record; dropped by audit.purge-expired. */
-  entry_partitions: {
-    /** lower bound in UTC as YYYYMMDD_HH24MI: tables audit_partitions.entries_<name> and entry_targets_<name> */
-    name: string;
-    from_at: Date;
-    to_at: Date;
-    created_at: Date;
   };
   /** Projection of access approval requests referenced by entries; updated from access events, so entries stay immutable */
   approval_states: {
@@ -826,11 +818,11 @@ export const spec = defineModuleSpec({
     },
     "audit.purge-expired": {
       "schedule": "monthly",
-      "does": "Write a signed checkpoint at the last entry before the cut-off (retainYears, never below minimumRetentionYears, at a market month start), then drop the month partitions entirely older than the cut-off whose entries are all before it in the chain; entries before the cut-off in a partition that also holds kept entries are deleted row by row. Record the purge as an entry (removedEntries, droppedPartitions, checkpoint) so the chain still verifies"
+      "does": "Write a signed checkpoint at the last entry before the cut-off (retainYears, never below minimumRetentionYears, at a market month start), then delete the entries before the cut-off that come before every kept entry in the chain, with their related targets (by the indexed at). Record the purge as an entry (removedEntries, checkpoint) so the chain still verifies"
     },
     "audit.prepare-partitions": {
       "schedule": "daily 02:30 market time",
-      "does": "Create the entries and entry_targets partitions for the current market month and the next 3 (idempotent); record also creates a missing month on demand (backdated entries)"
+      "does": "Nothing to prepare on MongoDB (entries are one collection, not month partitions): kept under its name and schedule, and always succeeds"
     }
   },
   settings: {
@@ -987,9 +979,9 @@ export const spec = defineModuleSpec({
         "type": "bool",
         "nullable": false
       },
-      "search": {
-        "type": "tsvector",
-        "nullable": true
+      "search_words": {
+        "type": "text[]",
+        "nullable": false
       },
       "prev_hash": {
         "type": "bytea",
@@ -1014,24 +1006,6 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "at": {
-        "type": "timestamptz",
-        "nullable": false
-      }
-    },
-    "entry_partitions": {
-      "name": {
-        "type": "text",
-        "nullable": false
-      },
-      "from_at": {
-        "type": "timestamptz",
-        "nullable": false
-      },
-      "to_at": {
-        "type": "timestamptz",
-        "nullable": false
-      },
-      "created_at": {
         "type": "timestamptz",
         "nullable": false
       }
@@ -1180,10 +1154,9 @@ export const spec = defineModuleSpec({
   },
   collections: {
     "entries": {
-      "idField": null,
+      "idField": "id",
       "key": [
-        "id",
-        "at"
+        "id"
       ],
       "columns": [
         "id",
@@ -1214,6 +1187,7 @@ export const spec = defineModuleSpec({
         "request_id",
         "ip",
         "visible_to_seller",
+        "search_words",
         "prev_hash",
         "hash"
       ],
@@ -1248,7 +1222,6 @@ export const spec = defineModuleSpec({
           "bsonType": "object",
           "required": [
             "_id",
-            "id",
             "seq",
             "at",
             "actor_kind",
@@ -1261,20 +1234,20 @@ export const spec = defineModuleSpec({
             "target_id",
             "evidence",
             "visible_to_seller",
+            "search_words",
             "prev_hash",
             "hash"
           ],
           "properties": {
-            "_id": {},
+            "_id": {
+              "bsonType": "string"
+            },
             "_lock": {
               "bsonType": [
                 "int",
                 "long",
                 "double"
               ]
-            },
-            "id": {
-              "bsonType": "string"
             },
             "seq": {
               "bsonType": [
@@ -1392,6 +1365,12 @@ export const spec = defineModuleSpec({
             "visible_to_seller": {
               "bsonType": "bool"
             },
+            "search_words": {
+              "bsonType": "array",
+              "items": {
+                "bsonType": "string"
+              }
+            },
             "prev_hash": {
               "bsonType": "binData"
             },
@@ -1404,18 +1383,9 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "entries_id_at_2f63f7",
+          "name": "entries_seq_52ef2e",
           "key": {
-            "id": 1,
-            "at": 1
-          },
-          "unique": true
-        },
-        {
-          "name": "entries_seq_at_f81c3c",
-          "key": {
-            "seq": 1,
-            "at": 1
+            "seq": 1
           },
           "unique": true
         },
@@ -1462,6 +1432,12 @@ export const spec = defineModuleSpec({
           "name": "entries_approval_request_id_901de1",
           "key": {
             "approval_request_id": 1
+          }
+        },
+        {
+          "name": "entries_search_words_0561d9",
+          "key": {
+            "search_words": 1
           }
         }
       ],
@@ -1532,70 +1508,6 @@ export const spec = defineModuleSpec({
           "key": {
             "entry_id": 1
           }
-        }
-      ],
-      "unenforced": []
-    },
-    "entry_partitions": {
-      "idField": "name",
-      "key": [
-        "name"
-      ],
-      "columns": [
-        "name",
-        "from_at",
-        "to_at",
-        "created_at"
-      ],
-      "nullable": [],
-      "decimal": [],
-      "binary": [],
-      "dates": [
-        "from_at",
-        "to_at",
-        "created_at"
-      ],
-      "identity": null,
-      "validator": {
-        "$jsonSchema": {
-          "bsonType": "object",
-          "required": [
-            "_id",
-            "from_at",
-            "to_at",
-            "created_at"
-          ],
-          "properties": {
-            "_id": {
-              "bsonType": "string"
-            },
-            "_lock": {
-              "bsonType": [
-                "int",
-                "long",
-                "double"
-              ]
-            },
-            "from_at": {
-              "bsonType": "date"
-            },
-            "to_at": {
-              "bsonType": "date"
-            },
-            "created_at": {
-              "bsonType": "date"
-            }
-          },
-          "additionalProperties": false
-        }
-      },
-      "indexes": [
-        {
-          "name": "entry_partitions_from_at_b41274",
-          "key": {
-            "from_at": 1
-          },
-          "unique": true
         }
       ],
       "unenforced": []

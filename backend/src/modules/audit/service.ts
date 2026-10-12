@@ -33,7 +33,6 @@ import {
   decideRetention,
   DEFAULT_MAX_EXPORT_ROWS,
   nextPurgeAt,
-  PARTITION_MONTHS_AHEAD,
   PURGE_ACTION,
   purgeCutoff,
   RETENTION_ACTION,
@@ -734,11 +733,11 @@ export class AuditService implements AuditPublicApi {
   }
 
   /**
-   * Job audit.purge-expired (monthly): Write a signed checkpoint at the last entry before the cut-off, then drop the
-   * month partitions entirely older than the cut-off whose entries are all before it in the chain; entries before the
-   * cut-off in a partition that also holds kept entries are deleted row by row. Record the purge as an entry.
+   * Job audit.purge-expired (monthly): Write a signed checkpoint at the last entry before the cut-off, then delete the
+   * entries before the cut-off that come before every kept entry in the chain, with their related targets. Record the
+   * purge as an entry.
    */
-  async purgeExpired(): Promise<{ removed: number; droppedPartitions: number; removedThrough: string }> {
+  async purgeExpired(): Promise<{ removed: number; removedThrough: string }> {
     const now = this.now();
     const [minimum, defaultYears, redactKeys] = await Promise.all([
       this.ctx.settings.get('minimumRetentionYears'),
@@ -749,8 +748,8 @@ export class AuditService implements AuditPublicApi {
     const keepYears = Math.max(r.retainYears, minimum);
     const cutoff = purgeCutoff(now, keepYears, this.timeZone);
 
-    const { removed, droppedPartitions } = await this.repo.transaction(async (tx) => {
-      const none = { removed: 0, droppedPartitions: 0 };
+    const { removed } = await this.repo.transaction(async (tx) => {
+      const none = { removed: 0 };
       await tx.lockChain();
       const head = await tx.chainHead();
       if (!head) return none;
@@ -773,7 +772,6 @@ export class AuditService implements AuditPublicApi {
           reason: `Retention period of ${years(keepYears)}`,
           after: {
             removedEntries: purged.removed,
-            droppedPartitions: purged.droppedPartitions,
             removedThrough: cutoff.toISOString(),
             retainYears: keepYears,
             checkpoint: { seq: last.seq, hash: toHex(last.hash) },
@@ -788,20 +786,15 @@ export class AuditService implements AuditPublicApi {
       return purged;
     });
     await this.repo.updateRetention({ lastPurgeAt: now, lastPurgeRemoved: removed, lastPurgeThrough: cutoff });
-    return { removed, droppedPartitions, removedThrough: cutoff.toISOString() };
+    return { removed, removedThrough: cutoff.toISOString() };
   }
 
   /**
-   * Job audit.prepare-partitions (daily): Create the entries and entry_targets partitions for the current market
-   * month and the next PARTITION_MONTHS_AHEAD (idempotent); record also creates a missing month on demand.
+   * Job audit.prepare-partitions (daily): nothing to prepare on MongoDB, where entries are one collection rather
+   * than month partitions; the job keeps its spec name and schedule and always succeeds.
    */
   async preparePartitions(): Promise<{ created: number }> {
-    const created = await this.repo.transaction(async (tx) => {
-      await tx.lockChain(); // the same order as appends: chain, then partitions
-      return tx.preparePartitions(this.now(), PARTITION_MONTHS_AHEAD);
-    });
-    if (created) this.ctx.log.info({ created }, 'audit month partitions created');
-    return { created };
+    return { created: 0 };
   }
 
   /* ================================================================ internals */
