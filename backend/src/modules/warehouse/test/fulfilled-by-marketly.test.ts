@@ -5,7 +5,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as returns from '../../../spec/returns.js';
-import { m0003FulfilledByMarketly } from '../infra/postgres/migrations/0003_fulfilled_by_marketly.js';
+import { spec } from '../../../spec/warehouse.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { harness, RENO, USD, type Harness, type ServiceSeller, type StockRec } from './helpers.js';
 
 let h: Harness;
@@ -26,7 +27,7 @@ afterAll(async () => {
   await h?.app.close();
 });
 
-const db = () => h.app.kernel.database.kysely.withSchema('warehouse') as any;
+const table = (name: string) => h.app.kernel.mongo.module('warehouse', spec.collections, schemas).table<any>(name);
 
 async function stocked(sku: string, label: string, code = 'S-01-1'): Promise<StockRec> {
   const item = h.item(sku, label);
@@ -66,7 +67,7 @@ describe('Fulfilled by Marketly orders', () => {
     expect(o.fulfillment.lines).toEqual([expect.objectContaining({ stockItemId: item.id, sku: 'FBM-MUG', quantity: 2, binCode: 'S-01-1' })]);
     // only the service group: the other group's seller ships it
     expect((await h.service.getTasksForOrderGroups([o.groupId]))[o.groupId]).toMatchObject({ id: o.fulfillment.id });
-    expect(await db().selectFrom('fulfillments').select('id').where('order_id', '=', o.orderId).execute()).toHaveLength(1);
+    expect(await table('fulfillments').find({ order_id: o.orderId })).toHaveLength(1);
     expect(h.events.slice(before).filter((e) => e.name === 'warehouse.fulfillment.created').map((e) => e.payload)).toEqual([
       { fulfillmentId: o.fulfillment.id, orderId: o.orderId, sellerGroupId: o.groupId, fulfilledBy: 'marketly_service', sellerId: seller.sellerId, shipBy: o.fulfillment.shipBy },
     ]);
@@ -191,7 +192,7 @@ describe('Fulfilled by Marketly put-away (fulfillment-service.inbound.received)'
     expect(tasks.find((t: any) => t.stockItemId === a.id && t.quantity === 9)).toMatchObject({ suggestedBinCode: 'S-02-1', sku: 'FBM-IN-A' });
     expect(tasks.find((t: any) => t.stockItemId === a.id && t.quantity === 1)).toMatchObject({ suggestedBinCode: 'S-QA-1' });
     expect(tasks.find((t: any) => t.stockItemId === b.id)).toMatchObject({ quantity: 3 });
-    const rows = await db().selectFrom('putaway_tasks').select(['location_id']).where('receipt_id', '=', receiptId).execute();
+    const rows = await table('putaway_tasks').find({ receipt_id: receiptId });
     expect(rows.every((r: any) => r.location_id === h.locationId)).toBe(true);
     const sellable = tasks.find((t: any) => t.stockItemId === a.id && t.quantity === 9);
     expect((await h.call('POST', `/putaway-tasks/${sellable.id}/complete`, { binCode: 'S-02-1', quantity: 9 })).body).toMatchObject({ status: 'done', binCode: 'S-02-1' });
@@ -254,19 +255,17 @@ describe('Fulfilled by Marketly return parcels', () => {
   });
 });
 
-describe('migration 0003', () => {
-  it('adds fulfilled_by (existing fulfilments are Official Store ones), seller_id and seller_name', async () => {
+describe('fulfillments.fulfilled_by', () => {
+  it('says who fulfils each fulfilment (seller of record for marketly_service); the collection refuses anything else', async () => {
     const o = await h.order([{ item: h.item('FBM-MIG', 'Spoon, Steel'), quantity: 1 }]);
     const s = await h.order([{ item: h.item('FBM-MIG-S', 'Knife, Steel'), quantity: 1 }], { service: seller });
-    const k = h.app.kernel.database;
-    await k.exec('alter table warehouse.fulfillments drop constraint fulfillments_fulfilled_by_check; alter table warehouse.fulfillments drop column fulfilled_by; alter table warehouse.fulfillments drop column seller_id; alter table warehouse.fulfillments drop column seller_name;');
-    await k.exec(`begin;\n${m0003FulfilledByMarketly.sql}\ncommit;`);
-    const rows = await db().selectFrom('fulfillments').select(['id', 'fulfilled_by', 'seller_id', 'seller_name']).where('id', 'in', [o.fulfillment.id, s.fulfillment.id]).execute();
-    expect(rows.map((r: any) => r.fulfilled_by)).toEqual(['official_warehouse', 'official_warehouse']);
-    expect(rows.every((r: any) => r.seller_id === null && r.seller_name === null)).toBe(true);
+    expect(await table('fulfillments').get(o.fulfillment.id)).toMatchObject({ fulfilled_by: 'official_warehouse', seller_id: null, seller_name: null });
+    expect(await table('fulfillments').get(s.fulfillment.id)).toMatchObject({ fulfilled_by: 'marketly_service', seller_id: seller.sellerId });
     // fresh rows must say who fulfils them
-    await expect(k.exec(`update warehouse.fulfillments set fulfilled_by = 'seller' where id = '${o.fulfillment.id}'`)).rejects.toThrow();
-    await expect(k.exec(`insert into warehouse.fulfillments (id, order_id, order_ref, seller_group_id, location_id, status, ship_by, delivery_choice, ship_to, discrepancy_ids, total_packages_in_order, created_at, updated_at) values ('${newId()}', '${newId()}', 'MK-1', '${newId()}', '${h.locationId}', 'awaiting_pick', now(), 'Standard', '{}', '[]', 1, now(), now())`)).rejects.toThrow();
+    const fulfillments = h.app.kernel.mongo.db.collection('warehouse.fulfillments');
+    await expect(fulfillments.updateOne({ _id: o.fulfillment.id }, { $set: { fulfilled_by: 'seller' } })).rejects.toThrow();
+    const now = new Date();
+    await expect(fulfillments.insertOne({ _id: newId(), order_id: newId(), order_ref: 'MK-1', seller_group_id: newId(), location_id: h.locationId, status: 'awaiting_pick', ship_by: now, delivery_choice: 'Standard', ship_to: {}, discrepancy_ids: [], total_packages_in_order: 1, created_at: now, updated_at: now } as never)).rejects.toThrow();
     expect((await h.call('GET', `/fulfillments/${o.fulfillment.id}`)).body).toMatchObject({ fulfilledBy: 'official_warehouse', sellerId: null, sellerName: null });
   });
 });

@@ -3,8 +3,7 @@ import { spec } from '../../spec/warehouse.js';
 import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresWarehouseRepository } from './infra/postgres/repository.js';
+import { createMongoWarehouseRepository } from './infra/mongo/repository.js';
 import { WarehouseService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -16,12 +15,13 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.3.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
-    const service = new WarehouseService({ repo: createPostgresWarehouseRepository(ctx.db, ctx.inbox), ctx });
+    const service = new WarehouseService({ repo: createMongoWarehouseRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

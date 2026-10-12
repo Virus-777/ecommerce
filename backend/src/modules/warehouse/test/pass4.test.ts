@@ -1,10 +1,11 @@
 /**
  * Gap pass 4: packages.carrier_service_id (the chosen shipping service, used for the label), fulfillments.dispatch_overdue_at,
- * idempotency through the kernel inbox instead of scan_log rows, and migration 0002 backfilling both from scan_log.
+ * idempotency through the kernel inbox instead of scan_log rows.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { m0002Pass4Columns } from '../infra/postgres/migrations/0002_pass4_columns.js';
+import { spec } from '../../../spec/warehouse.js';
+import { schemas } from '../infra/mongo/schema.js';
 import { harness, type Harness, type StockRec } from './helpers.js';
 
 let h: Harness;
@@ -20,8 +21,8 @@ afterAll(async () => {
   await h?.app.close();
 });
 
-const db = () => h.app.kernel.database.kysely.withSchema('warehouse') as any;
-const inboxKeys = async () => (await h.app.kernel.database.kysely.selectFrom('kernel.processed_events' as never).select('key' as never).where('module' as never, '=', 'warehouse' as never).execute()).map((r: any) => r.key as string);
+const table = (name: string) => h.app.kernel.mongo.module('warehouse', spec.collections, schemas).table<any>(name);
+const inboxKeys = async () => ((await h.app.kernel.mongo.kernel('processed_events').find({ module: 'warehouse' }).lean()) as unknown as { key: string }[]).map((r) => r.key);
 
 async function stocked(sku: string, label: string): Promise<StockRec> {
   const item = h.item(sku, label);
@@ -46,7 +47,7 @@ describe('fulfillments.dispatch_overdue_at', () => {
     expect((await h.call('GET', `/fulfillments/${o.fulfillment.id}`)).body).toMatchObject({ dispatchOverdueAt: first.dispatchOverdueAt, shipBy: dueAt });
     expect(await inboxKeys()).toContain(`dispatch-overdue:${exceptionId}`);
     // scan_log keeps one troubleshooting row, but it is no longer what makes the consumer idempotent
-    expect(await db().selectFrom('scan_log').select('id').where('context', '=', 'overdue').where('context_id', '=', exceptionId).execute()).toHaveLength(1);
+    expect(await table('scan_log').find({ context: 'overdue', context_id: exceptionId })).toHaveLength(1);
   });
 });
 
@@ -66,31 +67,5 @@ describe('packages.carrier_service_id', () => {
     const label = await h.call('POST', `/packages/${pkg.id}/label`, { format: 'pdf' }, { headers: { 'idempotency-key': newId() } });
     expect(label.status, JSON.stringify(label.body)).toBe(200);
     expect(h.labels.at(-1)!.input).toMatchObject({ carrierServiceId: fast.carrierServiceId });
-  });
-});
-
-describe('migration 0002', () => {
-  it('backfills dispatch_overdue_at and the inbox keys from scan_log', async () => {
-    const o = await h.order([{ item: h.item('P4-LAMP', 'Lamp, Brass'), quantity: 1 }], { dispatchInHours: 72 });
-    const k = h.app.kernel.database;
-    await k.exec('alter table warehouse.packages drop column carrier_service_id; alter table warehouse.fulfillments drop column dispatch_overdue_at;');
-    const [exceptionId, cancellationId, lineId] = [newId(), newId(), newId()];
-    const at = new Date('2026-10-01T10:00:00.000Z');
-    const scan = (context: string, contextId: string, code: string, result: string) => ({ id: newId(), context, context_id: contextId, code, result, actor_id: 'system', station: null, at });
-    await db().insertInto('scan_log').values([
-      scan('overdue', exceptionId, o.ref, 'dispatch overdue'),
-      scan('order_cancel', cancellationId, newId(), 'cancelled 1'),
-      scan('order_cancel', lineId, 'P4-01-1', 'return 1 to bin'),
-      scan('at_risk', o.fulfillment.id, o.ref, 'awaiting_pick'),
-    ]).execute();
-    await k.exec(`begin;\n${m0002Pass4Columns.sql}\ncommit;`);
-    const f = await db().selectFrom('fulfillments').select('dispatch_overdue_at').where('id', '=', o.fulfillment.id).executeTakeFirst();
-    expect(f.dispatch_overdue_at.toISOString()).toBe(at.toISOString());
-    const keys = await inboxKeys();
-    expect(keys).toEqual(expect.arrayContaining([`dispatch-overdue:${exceptionId}`, `item-cancelled:${cancellationId}`, `at-risk:${o.fulfillment.id}`]));
-    expect(keys).not.toContain(`item-cancelled:${lineId}`);
-    // the backfilled claim holds: the same report is not applied again
-    await overdue(o, exceptionId, new Date(h.clock.now().getTime() - 3_600_000).toISOString());
-    expect((await h.call('GET', `/fulfillments/${o.fulfillment.id}`)).body.dispatchOverdueAt).toBe(at.toISOString());
   });
 });

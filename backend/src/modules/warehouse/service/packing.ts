@@ -41,7 +41,9 @@ export class Packing {
     const p = await tx.get('packages', id, o);
     if (!p) throw notFound('Package');
     const f = await this.fulfillments.load(p.fulfillment_id, tx);
-    const [items, lines] = await Promise.all([tx.find('package_items', { package_id: id }), tx.find('fulfillment_lines', { fulfillment_id: f.id })]);
+    // one after the other: tx may be a transaction (no concurrent operations on one session)
+    const items = await tx.find('package_items', { package_id: id });
+    const lines = await tx.find('fulfillment_lines', { fulfillment_id: f.id });
     return { p, f, items, lines };
   }
 
