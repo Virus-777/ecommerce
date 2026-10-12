@@ -1622,7 +1622,7 @@ export interface ContentDb {
     live_version_id: string | null;
     draft_version_id: string | null;
     views: number;
-    /** generated from live version */
+    /** generated from the live version: title, summary, topics and body as plain text, matched by help search */
     search: string | null;
     updated_at: Date;
   };
@@ -3621,7 +3621,7 @@ export const spec = defineModuleSpec({
         "nullable": false
       },
       "search": {
-        "type": "tsvector",
+        "type": "text",
         "nullable": true
       },
       "updated_at": {
@@ -4509,6 +4509,7 @@ export const spec = defineModuleSpec({
         "live_version_id",
         "draft_version_id",
         "views",
+        "search",
         "updated_at"
       ],
       "nullable": [
@@ -4520,7 +4521,8 @@ export const spec = defineModuleSpec({
         "effective_at",
         "review_due_at",
         "live_version_id",
-        "draft_version_id"
+        "draft_version_id",
+        "search"
       ],
       "decimal": [],
       "binary": [],
@@ -4640,6 +4642,12 @@ export const spec = defineModuleSpec({
                 "int",
                 "long",
                 "double"
+              ]
+            },
+            "search": {
+              "bsonType": [
+                "string",
+                "null"
               ]
             },
             "updated_at": {

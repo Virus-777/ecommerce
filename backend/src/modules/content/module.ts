@@ -4,8 +4,7 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresContentRepository } from './infra/postgres/repository.js';
+import { createMongoContentRepository } from './infra/mongo/repository.js';
 import { ContentService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -17,12 +16,13 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
-    const service = new ContentService({ repo: createPostgresContentRepository(ctx.db, ctx.inbox), ctx });
+    const service = new ContentService({ repo: createMongoContentRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

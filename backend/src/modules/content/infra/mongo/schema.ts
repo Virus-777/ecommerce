@@ -133,6 +133,7 @@ const help_articles = new Schema(
     live_version_id: { type: String, default: null },
     draft_version_id: { type: String, default: null },
     views: { type: Number, required: true, validate: integer },
+    search: { type: String, default: null }, // generated from the live version: title, summary, topics and body as plain text, matched by help search
     updated_at: { type: Date, required: true },
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,

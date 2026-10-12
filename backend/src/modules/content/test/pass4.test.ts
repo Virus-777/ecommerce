@@ -1,11 +1,9 @@
 /**
  * Gap pass 4: drafts and scheduled pages can be removed (the schedule goes too), collectionProducts takes the
- * common PageInput, policies have a slug key and a kind (migration backfill), and the navigation's company line
- * and legal name come from settings.storeInfo.
+ * common PageInput, and the navigation's company line and legal name come from settings.storeInfo.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
-import { m0003PolicyKind } from '../infra/postgres/migrations/0003_policy_kind.js';
 import { DAY, harness, inMs, MIN, newId, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -55,21 +53,6 @@ describe('collectionProducts', () => {
     expect(first.items.map((t) => t.title)).toEqual(['Lamp A']);
     const next = await h.service.collectionProducts(id, { paging: { limit: 1, cursor: first.nextCursor ?? undefined } });
     expect(next.items.map((t) => t.title)).toEqual(['Lamp B']);
-  });
-});
-
-describe('migration 0003', () => {
-  it('adds policies.kind and fills it from the key', async () => {
-    const owner = newId();
-    const created = await h.admin('POST', '/policies', { key: 'cookies', title: 'Cookie policy', ownerStaffId: owner, audience: 'customer' });
-    expect(created.statusCode, created.body).toBe(201);
-    await h.app.kernel.database.exec(`alter table content.policies drop constraint policies_kind_check; alter table content.policies drop column kind;
-      insert into content.policies (id, key, title, owner_staff_id, editor_staff_id, audience) values ('${newId()}', 'legacy-odd', 'Odd', '${owner}', null, 'customer');`);
-    await h.app.kernel.database.exec(m0003PolicyKind.sql);
-    const rows = await h.app.kernel.database.kysely.withSchema('content').selectFrom('policies' as never).select(['key' as never, 'kind' as never]).execute();
-    const byKey = new Map((rows as { key: string; kind: string }[]).map((r) => [r.key, r.kind]));
-    expect(byKey.get('cookies')).toBe('cookies');
-    expect(byKey.get('legacy-odd')).toBe('other');
   });
 });
 
