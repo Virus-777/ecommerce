@@ -608,6 +608,13 @@ class PgCatalogRepository implements CatalogRepository {
       )
       .execute();
   }
+  async insertOfferIfMissing(row: OfferIndexRow) {
+    await this.db
+      .insertInto('offer_index')
+      .values(enc('offer_index', row))
+      .onConflict((oc) => oc.column('offer_id').doNothing())
+      .execute();
+  }
   async updateOffer(offerId: string, patch: Partial<OfferIndexRow>) {
     if (Object.keys(patch).length) await this.db.updateTable('offer_index').set(enc('offer_index', patch)).where('offer_id', '=', offerId).execute();
   }

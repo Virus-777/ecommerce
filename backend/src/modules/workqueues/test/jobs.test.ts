@@ -200,8 +200,10 @@ describe('deadline sweep and escalation', () => {
     const item = await overdueDispatch(true); // queue deadline 4 h, route: seller manager (seller items) at 0, order manager after 4 h, owner after 48 h
     t.clock.advance(3 * H + 10 * MIN);
     await sweep();
+    await t.app.kernel.events.drain();
     expect((await t.service.core.repo.getItem(item.id))!.deadline_state).toBe('due_soon');
-    expect(seen).toEqual([]);
+    // only this item: an earlier test leaves an overdue item that this sweep reports
+    expect(seen.filter((e) => e.payload.itemId === item.id)).toEqual([]);
 
     t.clock.advance(51 * MIN);
     await sweep();

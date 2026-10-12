@@ -181,6 +181,8 @@ export interface CatalogRepository {
   /* offer index and listing stats */
   getOffer(offerId: string): Promise<OfferIndexRow | undefined>;
   upsertOffer(row: OfferIndexRow): Promise<void>;
+  /** Inserts the row unless the offer is already indexed (then nothing changes) */
+  insertOfferIfMissing(row: OfferIndexRow): Promise<void>;
   updateOffer(offerId: string, patch: Partial<OfferIndexRow>): Promise<void>;
   offersOf(productIds: string[]): Promise<OfferIndexRow[]>;
   offersOfSeller(sellerId: string, productIds: string[]): Promise<OfferIndexRow[]>;

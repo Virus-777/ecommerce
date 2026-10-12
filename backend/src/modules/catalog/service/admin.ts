@@ -731,23 +731,29 @@ export class CatalogAdmin extends CatalogReview {
 
   /* ================================================================ listing read model */
 
-  /** listing_stats of one product from offer_index */
+  /**
+   * listing_stats of one product from offer_index. One refresh per product at a time (the product row lock), each
+   * reading the offers as committed when it starts: offer and stock events handled at the same moment would
+   * otherwise save a listing computed from an older read last.
+   */
   protected async refreshListing(productId: string) {
-    const offers = (await this.repo.offersOf([productId])).filter((o) => o.status !== 'removed');
-    const live = offers.filter((o) => o.eligible && o.in_stock);
-    const prices = live.map((o) => o.price as common.Money | null).filter((m): m is common.Money => Boolean(m));
-    const best = prices.length ? prices.reduce((a, b) => (b.currency === a.currency && b.amount < a.amount ? b : a)) : null;
-    const notLive = offers.filter((o) => !(o.eligible && o.in_stock));
-    let note: string | null = null;
-    if (notLive.length) {
-      const first = notLive[0]!;
-      const who = first.seller_id ? (first.seller_name ?? 'A seller') : OFFICIAL_STORE_NAME;
-      const state = first.eligible && !first.in_stock ? 'out of stock' : (NOT_LIVE[first.status] ?? first.status.replace(/_/g, ' '));
-      const more = notLive.length > 1 ? ` (+${notLive.length - 1} more not live)` : '';
-      note = `${who} offer ${state}${more} · ${live.length} other offer${live.length === 1 ? '' : 's'} live`;
-    }
-    if (!(await this.repo.getProduct(productId))) return;
-    await this.repo.saveListingStats({ product_id: productId, offer_count: offers.length, live_offer_count: live.length, in_stock: live.length > 0, best_price: best as never, offer_note: note, refreshed_at: this.now() });
+    await this.repo.transaction(async (tx) => {
+      if (!(await tx.getProduct(productId, { forUpdate: true }))) return;
+      const offers = (await tx.offersOf([productId])).filter((o) => o.status !== 'removed');
+      const live = offers.filter((o) => o.eligible && o.in_stock);
+      const prices = live.map((o) => o.price as common.Money | null).filter((m): m is common.Money => Boolean(m));
+      const best = prices.length ? prices.reduce((a, b) => (b.currency === a.currency && b.amount < a.amount ? b : a)) : null;
+      const notLive = offers.filter((o) => !(o.eligible && o.in_stock));
+      let note: string | null = null;
+      if (notLive.length) {
+        const first = notLive[0]!;
+        const who = first.seller_id ? (first.seller_name ?? 'A seller') : OFFICIAL_STORE_NAME;
+        const state = first.eligible && !first.in_stock ? 'out of stock' : (NOT_LIVE[first.status] ?? first.status.replace(/_/g, ' '));
+        const more = notLive.length > 1 ? ` (+${notLive.length - 1} more not live)` : '';
+        note = `${who} offer ${state}${more} · ${live.length} other offer${live.length === 1 ? '' : 's'} live`;
+      }
+      await tx.saveListingStats({ product_id: productId, offer_count: offers.length, live_offer_count: live.length, in_stock: live.length > 0, best_price: best as never, offer_note: note, refreshed_at: this.now() });
+    });
   }
 
   /** Job catalog.refresh-counts: listing_stats → category_stats (with subcategories) and brand_stats (overall and per top-level category) */

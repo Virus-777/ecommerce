@@ -434,9 +434,10 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
   /** inventory.stock.changed: in_stock of the offer and listing_stats */
   async onStockChangedFromInventory(event: EventPayload<'inventory.stock.changed'>): Promise<void> {
     if (!event.offerId) return;
-    const offer = await this.repo.getOffer(event.offerId);
+    // the stock event can be handled before offers.offer.created: index what it says rather than lose the change
+    const offer = await this.ensureOffer({ offerId: event.offerId, productId: event.productId, variantId: event.variantId, sellerId: event.sellerId, ownerType: event.ownerType });
     if (!offer) {
-      this.ctx.log.debug({ offerId: event.offerId }, 'catalog: stock change for an offer not in offer_index');
+      this.ctx.log.debug({ offerId: event.offerId }, 'catalog: stock change for an offer on an unknown product');
       return;
     }
     await this.repo.updateOffer(offer.offer_id, { in_stock: event.available > 0 && event.state !== 'out_of_stock', updated_at: this.now() });
@@ -474,8 +475,9 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
       price: null,
       updated_at: this.now(),
     };
-    await this.repo.upsertOffer(row);
-    return row;
+    // another event of the same offer may index it at the same moment: never overwrite what it wrote
+    await this.repo.insertOfferIfMissing(row);
+    return (await this.repo.getOffer(e.offerId)) ?? row;
   }
 
   private async sellerName(sellerId: string | null): Promise<string | null> {

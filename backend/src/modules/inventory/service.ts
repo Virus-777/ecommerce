@@ -819,6 +819,10 @@ export class InventoryService implements InventoryPublicApi {
     await this.#stock(
       'merge',
       async (st) => {
+        // lock order: reservations, their lines, then stock levels (as every reservation path does)
+        const open = await st.tx.linesWhere({ itemIds: [from.id], states: ['held', 'allocated'] });
+        for (const rid of [...new Set(open.map((l) => l.reservation_id))].sort()) await st.tx.get('reservations', rid, { forUpdate: true });
+        const openLines = await st.tx.linesWhere({ itemIds: [from.id], states: ['held', 'allocated'] }, { forUpdate: true });
         await st.lock([from.id, into.id]);
         const src = st.item(from.id);
         const dst = st.item(into.id);
@@ -850,7 +854,7 @@ export class InventoryService implements InventoryPublicApi {
           }
         }
         // open reservation lines and incoming expectations follow their units
-        for (const l of await st.tx.linesWhere({ itemIds: [from.id], states: ['held', 'allocated'] }, { forUpdate: true })) await st.tx.update('reservation_lines', l.id, { stock_item_id: into.id });
+        for (const l of openLines) await st.tx.update('reservation_lines', l.id, { stock_item_id: into.id });
         const theirs = await st.tx.expectations({ itemIds: [into.id], openOnly: true }, { forUpdate: true });
         for (const e of await st.tx.expectations({ itemIds: [from.id], openOnly: true }, { forUpdate: true })) {
           const twin = theirs.find((x) => x.source_kind === e.source_kind && x.source_id === e.source_id && x.location_id === e.location_id);
@@ -2430,8 +2434,10 @@ export class InventoryService implements InventoryPublicApi {
       async (st) => {
         const locked = (await st.tx.get('discrepancies', id, { forUpdate: true }))!;
         const state = discrepancyMachine.next(locked.state as 'open', 'resolve');
-        await st.lock([locked.stock_item_id]);
+        // lock order: the order's reservations, their lines, then stock levels (as every reservation path does)
+        if (locked.order_id) await st.tx.reservationsByOrder(locked.order_id, { forUpdate: true });
         const orderLines = locked.order_id ? await this.#openOrderLines(st.tx, locked.order_id, locked.stock_item_id, locked.location_id) : [];
+        await st.lock([locked.stock_item_id]);
         if (body.resolution === 'reallocated') {
           if (!locked.order_id) throw invalid('resolution', 'Only a report for an order can be reallocated');
           if (locked.kind === 'damage_found') {
@@ -2920,6 +2926,8 @@ export class InventoryService implements InventoryPublicApi {
     const reservationIds = [...new Set(candidates.map((l) => l.reservation_id))];
     const moved = await this.repo.transaction(async (tx) => {
       if (!(await tx.claimEvent(`item-split:${event.newItemId}`))) return null;
+      // lock order: reservations, then their lines (as every reservation path does; a cancellation of the same item runs at the same time)
+      for (const rid of [...reservationIds].sort()) await tx.get('reservations', rid, { forUpdate: true });
       const lines = (await tx.lines(reservationIds, { forUpdate: true }))
         .filter((l) => l.order_item_id === event.itemId && (l.state === 'held' || l.state === 'allocated'))
         .filter((l) => !event.stockItemId || !isUuid(event.stockItemId) || l.stock_item_id === event.stockItemId || candidates.every((c) => c.stock_item_id !== event.stockItemId));
@@ -2998,9 +3006,12 @@ export class InventoryService implements InventoryPublicApi {
     if (!lines.length && !free.length) return;
     await this.#stock('dispatched', async (st) => {
       if (!(await st.tx.claimEvent(claim))) return;
+      // lock order: reservations, their lines, then stock levels (as every reservation path does)
+      const reservationIds = [...new Set([...lines, ...free].map((x) => x.reservation_id))].sort();
+      for (const rid of reservationIds) await st.tx.get('reservations', rid, { forUpdate: true });
+      const locked = await st.tx.lines(reservationIds, { forUpdate: true });
       await st.lock([...lines, ...free].map((l) => l.stock_item_id));
       const touched = new Set<string>();
-      const locked = await st.tx.lines([...new Set([...lines, ...free].map((x) => x.reservation_id))], { forUpdate: true });
       const own = locked.filter((x) => lines.some((l) => l.id === x.id));
       const spare = locked.filter((x) => free.some((l) => l.id === x.id));
       const plan: { l: Row<'reservation_lines'>; itemId: string | null }[] = [...own.map((l) => ({ l, itemId: l.order_item_id })), ...spare.map((l) => ({ l, itemId: null }))];

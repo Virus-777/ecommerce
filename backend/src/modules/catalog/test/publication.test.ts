@@ -127,7 +127,9 @@ describe('publication', () => {
 
     // approved by the second reviewer: catalog reactivates it, once (the event delivered twice)
     const approvalId = newId();
-    t.stubs.access.getApproval.mockResolvedValueOnce({ id: approvalId, reason: 'Seller proved authenticity', requestedBy: { kind: 'staff', id: requesterId, name: 'Riley Chen' } } as never);
+    // both deliveries may run at once (each asks for the approval), so the stub answers every call for it
+    const approval = { id: approvalId, reason: 'Seller proved authenticity', requestedBy: { kind: 'staff', id: requesterId, name: 'Riley Chen' } };
+    t.stubs.access.getApproval.mockImplementation(async (id: string) => (id === approvalId ? approval : null) as never);
     t.stubs.audit.record.mockClear();
     t.app.kernel.events.publish('access', 'access.approval.decided', decided(approvalId, 'approved'));
     t.app.kernel.events.publish('access', 'access.approval.decided', decided(approvalId, 'approved'));
