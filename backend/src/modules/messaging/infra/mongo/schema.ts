@@ -11,7 +11,7 @@ import { collectionOptions, DATE, integer } from '../../../../kernel/mongo/schem
 const conversations = new Schema(
   {
     _id: { type: String, required: true }, // id
-    kind: { type: String, required: true },
+    kind: { type: String, required: true, enum: ["order","support","staff_seller"] },
     customer_id: { type: String, default: null },
     guest_session_id: { type: String, default: null },
     seller_id: { type: String, default: null },
@@ -40,8 +40,8 @@ conversations.index({"customer_id":1,"last_message_at":-1}, {"name":"conversatio
 conversations.index({"seller_id":1,"reply_state":1,"reply_due_at":1}, {"name":"conversations_seller_id_reply_state_reply_due_at_880d57"});
 conversations.index({"order_id":1}, {"name":"conversations_order_id_4c5e85"});
 conversations.index({"case_id":1}, {"name":"conversations_case_id_ddb8b4"});
+conversations.index({"kind":1,"customer_id":1,"seller_id":1,"application_id":1,"order_id":1,"order_item_id":1,"return_id":1}, {"name":"conversations_kind_customer_id_seller_id_application_i_e4bdf4","unique":true,"partialFilterExpression":{"kind":{"$in":["order","staff_seller"]}}});
 conversations.index({"kind":1,"customer_id":1,"order_id":1,"case_id":1}, {"name":"conversations_kind_customer_id_order_id_case_id_6fa7e5","unique":true,"partialFilterExpression":{"kind":"support"}});
-// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id) where kind <> 'support' (<> on kind, which has no enum values)
 
 const participants = new Schema(
   {

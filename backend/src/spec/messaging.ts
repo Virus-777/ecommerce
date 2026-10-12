@@ -594,7 +594,7 @@ export interface MessagingPublicApi {
 export interface MessagingDb {
   conversations: {
     id: string;
-    kind: string;
+    kind: 'order' | 'support' | 'staff_seller';
     customer_id: string | null;
     guest_session_id: string | null;
     seller_id: string | null;
@@ -1900,7 +1900,12 @@ export const spec = defineModuleSpec({
               ]
             },
             "kind": {
-              "bsonType": "string"
+              "bsonType": "string",
+              "enum": [
+                "order",
+                "support",
+                "staff_seller"
+              ]
             },
             "customer_id": {
               "bsonType": [
@@ -2032,6 +2037,27 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "conversations_kind_customer_id_seller_id_application_i_e4bdf4",
+          "key": {
+            "kind": 1,
+            "customer_id": 1,
+            "seller_id": 1,
+            "application_id": 1,
+            "order_id": 1,
+            "order_item_id": 1,
+            "return_id": 1
+          },
+          "unique": true,
+          "partial": {
+            "kind": {
+              "$in": [
+                "order",
+                "staff_seller"
+              ]
+            }
+          }
+        },
+        {
           "name": "conversations_kind_customer_id_order_id_case_id_6fa7e5",
           "key": {
             "kind": 1,
@@ -2045,9 +2071,7 @@ export const spec = defineModuleSpec({
           }
         }
       ],
-      "unenforced": [
-        "unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id) where kind <> 'support' (<> on kind, which has no enum values)"
-      ]
+      "unenforced": []
     },
     "participants": {
       "idField": null,

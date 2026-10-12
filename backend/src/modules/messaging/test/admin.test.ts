@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { ADMIN, harness, placeOrder, SELLER, STORE, tokens, type Harness, type Placed } from './helpers.js';
+import { ADMIN, harness, placeOrder, SELLER, STORE, table, tokens, type Harness, type Placed } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -41,8 +41,7 @@ describe('admin: finding and reading conversations', () => {
     expect(h.audits.slice(before)).toEqual([
       expect.objectContaining({ action: 'messaging.conversation.read', module: 'messaging', reason: 'Case about a torn duvet', target: expect.objectContaining({ type: 'conversation', id: t.id }), actor: expect.objectContaining({ kind: 'staff', id: staffId }) }),
     ]);
-    const db = h.app.kernel.database.kysely as any;
-    const log = await db.withSchema('messaging').selectFrom('staff_access_log').selectAll().where('conversation_id', '=', t.id).execute();
+    const log = await table(h, 'staff_access_log').find({ conversation_id: t.id });
     expect(log).toEqual([expect.objectContaining({ staff_id: staffId, reason: 'Case about a torn duvet', case_id: caseId })]);
     expect((await h.call('GET', `${ADMIN}/conversations/${newId()}/messages?reason=x`, staff)).status).toBe(404);
   });

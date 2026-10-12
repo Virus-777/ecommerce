@@ -5,8 +5,7 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { migrations } from './infra/postgres/migrations/index.js';
-import { createPostgresMessagingRepository } from './infra/postgres/repository.js';
+import { createMongoMessagingRepository } from './infra/mongo/repository.js';
 import { MessagingService } from './service.js';
 import { schemas } from './infra/mongo/schema.js';
 
@@ -18,12 +17,13 @@ import { schemas } from './infra/mongo/schema.js';
  */
 export default defineModule({
   spec,
-  version: '1.2.0',
+  version: '2.0.0',
+  store: 'mongo',
   schemas,
-  migrations,
+  migrations: [],
   graphql: typeDefs,
   register(ctx) {
-    const service = new MessagingService({ repo: createPostgresMessagingRepository(ctx.db, ctx.inbox), ctx });
+    const service = new MessagingService({ repo: createMongoMessagingRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

@@ -1,7 +1,7 @@
 /** Pass 3: guests keyed by order, applicants as participants, restrictions, email replies, closure, export hook, aliases */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { ADMIN, harness, placeOrder, SELLER, STORE, tokens, type Harness } from './helpers.js';
+import { ADMIN, harness, placeOrder, SELLER, STORE, table, tokens, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -140,7 +140,7 @@ describe('conversation aliases and reply figures', () => {
     const t = await h.call('POST', `${STORE}/conversations`, me, { with: 'seller', orderId: o.order.id, sellerId: o.sellerA, body: 'Hello' });
     const id = t.body.conversation.id;
     const oldId = newId();
-    await (h.app.kernel.database.kysely.withSchema('messaging') as any).insertInto('conversation_aliases').values({ old_id: oldId, conversation_id: id, merged_at: new Date() }).execute();
+    await table(h, 'conversation_aliases').insert({ old_id: oldId, conversation_id: id, merged_at: new Date() });
     const viaOld = await h.call('GET', `${STORE}/conversations/${oldId}`, me);
     expect(viaOld.status).toBe(200);
     expect(viaOld.body.id).toBe(id);

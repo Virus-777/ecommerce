@@ -37,6 +37,8 @@ const ROUND_LOOKBACK_MS = 14 * DAY;
 const JOB_BATCH = 100;
 const FORMER_CUSTOMER = 'Former customer';
 const MAX_BATCHES = 50;
+/** A unique index refused the write (MongoDB duplicate key, E11000) */
+const isDuplicateKey = (err: unknown) => (err as { code?: unknown })?.code === 11000 || /E11000 duplicate key/.test(String((err as Error)?.message ?? ''));
 
 /** A conversation as one viewer sees it, with the summary fields (GraphQL Conversation has both) */
 export interface ConversationView {
@@ -1263,8 +1265,8 @@ export class MessagingService implements MessagingPublicApi {
     try {
       c = await this.createConversation(key, extra, participants, now);
     } catch (err) {
-      // the conversation key is unique (nulls not distinct): a concurrent request created it first, so use that one
-      if (!retried && (err as { code?: string })?.code === '23505') return this.findOrCreate(key, extra, participants, by, true);
+      // the conversation key is unique (nulls equal): a concurrent request created it first, so use that one
+      if (!retried && isDuplicateKey(err)) return this.findOrCreate(key, extra, participants, by, true);
       throw err;
     }
     this.core.publish('messaging.conversation.started', { conversationId: c.id, kind: c.kind, orderId: c.order_id, customerId: c.customer_id ?? participants.find((p) => p.kind === 'customer')?.participant_id ?? null, sellerId: c.seller_id ?? null, officialStore: isOfficialConversation(c), applicationId: c.application_id }, by);

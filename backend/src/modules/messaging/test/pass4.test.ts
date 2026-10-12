@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { ADMIN, harness, placeOrder, SELLER, STORE, tokens, type Harness } from './helpers.js';
+import { ADMIN, harness, placeOrder, SELLER, STORE, table, tokens, type Harness } from './helpers.js';
 
 let h: Harness;
 let noTrust: Harness;
@@ -17,7 +17,7 @@ afterAll(async () => {
   await noTrust?.app.close();
 });
 
-const stats = (x: Harness, sellerId: string) => (x.app.kernel.database.kysely.withSchema('messaging') as any).selectFrom('seller_reply_stats').selectAll().where('seller_id', '=', sellerId).executeTakeFirst();
+const stats = (x: Harness, sellerId: string) => table(x, 'seller_reply_stats').get(sellerId);
 
 describe('seller_reply_stats', () => {
   it('the job rolls up 30-day reply figures; a conversation reads its seller label from the table', async () => {
@@ -37,7 +37,7 @@ describe('seller_reply_stats', () => {
   it('a seller without a row is computed on first use', async () => {
     const o = await placeOrder(h);
     const start = await h.call('POST', `${STORE}/conversations`, tokens.customer(o.customerId!), { with: 'seller', orderId: o.order.id, sellerId: o.sellerA, body: 'Hello' });
-    await (h.app.kernel.database.kysely.withSchema('messaging') as any).deleteFrom('seller_reply_stats').where('seller_id', '=', o.sellerA).execute();
+    await table(h, 'seller_reply_stats').delete(o.sellerA);
     expect((await h.call('GET', `${STORE}/conversations/${start.body.conversation.id}`, tokens.customer(o.customerId!))).status).toBe(200);
     expect(await stats(h, o.sellerA)).toMatchObject({ seller_id: o.sellerA, replied: 0 });
   });

@@ -1,6 +1,6 @@
 /**
  * What the messaging service needs from the outside world, database-agnostic.
- * The Postgres adapter lives in infra/postgres/; a MongoDB switch would add infra/mongo/.
+ * The MongoDB adapter lives in infra/mongo/.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
@@ -35,7 +35,7 @@ export interface FindOptions<R> {
  * the key only for support conversations; for order and staff conversations it is a link.
  */
 export interface ConversationKey {
-  kind: string;
+  kind: ConversationRec['kind'];
   customer_id: string | null;
   seller_id: string | null;
   application_id: string | null;

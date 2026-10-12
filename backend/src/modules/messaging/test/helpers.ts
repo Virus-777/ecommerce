@@ -23,6 +23,8 @@ import type * as sellers from '../../../spec/sellers.js';
 import type * as trust from '../../../spec/trust.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
 import type { MessagingService } from '../service.js';
+import { spec } from '../../../spec/messaging.js';
+import { schemas } from '../infra/mongo/schema.js';
 
 export const USD = (amount: number) => ({ amount, currency: 'USD' });
 
@@ -293,6 +295,9 @@ export const tokens = {
     callers.staff(permissions, { ...(o.sub ? { sub: o.sub } : {}), ...(o.name ? { dev: { permissions: permissions ?? ['*'], name: o.name } } : {}) }),
   visitor: (sid?: string) => callers.visitor({}, sid ? { sid } : {}),
 };
+
+/** A messaging collection, as the repository reads it (rows in spec shape) */
+export const table = (h: { app: FastifyInstance }, name: string) => h.app.kernel.mongo.module('messaging', spec.collections, schemas).table<any>(name);
 
 export const STORE = '/api/store/messaging';
 export const SELLER = '/api/seller/messaging';
