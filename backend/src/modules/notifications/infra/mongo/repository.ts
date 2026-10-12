@@ -38,15 +38,6 @@ function found<T>(row: T | undefined, what: string): T {
   return row;
 }
 
-/**
- * bytea columns as Buffers: Mongoose casts a Buffer to binary but refuses a plain Uint8Array (the kernel table does
- * not convert it yet), and rows carry Uint8Array.
- */
-function withBuffer<T extends Partial<PushDeviceRow>>(row: T): T {
-  const v = row.token_encrypted;
-  return v instanceof Uint8Array && !Buffer.isBuffer(v) ? { ...row, token_encrypted: Buffer.from(v.buffer, v.byteOffset, v.byteLength) } : row;
-}
-
 /** An open action notice: needs action, neither resolved nor expired */
 const OPEN_ACTION: Filter = { action_required: true, resolved_at: null, expired_at: null };
 
@@ -412,8 +403,8 @@ export function createMongoNotificationsRepository(store: ModuleStore): Notifica
     pushDeviceByInstallation: (accountId, audience, installationId) =>
       t.pushDevices.findOne({ account_id: accountId, audience, installation_id: installationId, invalidated_at: null }),
     getPushDevice: (id) => t.pushDevices.get(id),
-    insertPushDevice: (row) => t.pushDevices.insert(withBuffer(row)),
-    updatePushDevice: async (id, patch) => found(await t.pushDevices.update(id, withBuffer(patch)), `push device ${id}`),
+    insertPushDevice: (row) => t.pushDevices.insert(row),
+    updatePushDevice: async (id, patch) => found(await t.pushDevices.update(id, patch), `push device ${id}`),
     setPushEnabled: (accountId, audience, enabled) => t.pushDevices.updateMany({ account_id: accountId, audience, invalidated_at: null }, { enabled }),
     invalidatePushDevices: (accountId, at) => t.pushDevices.updateMany({ account_id: accountId, invalidated_at: null }, { invalidated_at: at, enabled: false }),
 

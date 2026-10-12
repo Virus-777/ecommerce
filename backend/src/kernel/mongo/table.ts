@@ -32,6 +32,7 @@ const isOperator = (k: string) => k.startsWith('$');
 
 export class Table<R extends object> {
   readonly #decimal: Set<string>;
+  readonly #binary: Set<string>;
   readonly #dates: Set<string>;
 
   constructor(
@@ -42,6 +43,7 @@ export class Table<R extends object> {
     readonly session?: ClientSession,
   ) {
     this.#decimal = new Set(def.decimal);
+    this.#binary = new Set(def.binary);
     this.#dates = new Set(def.dates);
   }
 
@@ -60,9 +62,17 @@ export class Table<R extends object> {
     const out: Document = {};
     for (const [k, v] of Object.entries(row)) {
       if (v === undefined) continue;
-      out[this.#field(k)] = this.#decimal.has(k) && v !== null && !(v instanceof Decimal128) ? Decimal128.fromString(String(v)) : v;
+      out[this.#field(k)] = this.#store(k, v);
     }
     return out;
+  }
+
+  /** A field's value as stored: numeric as Decimal128, bytea as a Buffer (Mongoose refuses a plain Uint8Array) */
+  #store(k: string, v: unknown): unknown {
+    if (v === null) return v;
+    if (this.#decimal.has(k) && !(v instanceof Decimal128)) return Decimal128.fromString(String(v));
+    if (this.#binary.has(k) && v instanceof Uint8Array && !Buffer.isBuffer(v)) return Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+    return v;
   }
 
   /** A stored document as a row */
