@@ -1,12 +1,9 @@
 /**
- * What the media service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts; providers (storage, malware scanning, image and
- * video processing) have deterministic dev adapters in providers/.
+ * Row types of the media collections (repository.ts), and the providers the service uses: storage, malware
+ * scanning, image and video processing (implementations in providers/).
  */
 import type { Readable } from 'node:stream';
-import type { Page } from '../../spec/common.js';
 import type { ImageMeasurements, MediaDb } from '../../spec/media.js';
-import type { PageRequest } from '../../kernel/lib/pagination.js';
 
 /* ------------------------------------------------------------------ persistence */
 
@@ -35,78 +32,6 @@ export interface AssetFilter {
   inUse?: boolean;
   failedChecks?: boolean;
   q?: string;
-}
-
-/** Persistence for this module's own collections: media.assets, media.renditions, media.uploads, media.usages, media.processing_jobs, media.upload_counters. */
-export interface MediaRepository {
-  /** Runs fn with a repository bound to one transaction */
-  transaction<T>(fn: (tx: MediaRepository) => Promise<T>): Promise<T>;
-
-  /* assets */
-  insertAsset(row: Omit<AssetRow, 'check_result'> & { check_result?: unknown }): Promise<AssetRow>;
-  getAsset(id: string, opts?: { owner?: OwnerFilter; forUpdate?: boolean }): Promise<AssetRow | null>;
-  getAssets(ids: readonly string[]): Promise<AssetRow[]>;
-  updateAsset(id: string, patch: AssetPatch): Promise<AssetRow>;
-  listAssets(filter: AssetFilter, page: PageRequest): Promise<Page<AssetRow>>;
-  findAssetByStorageKey(bucket: string, key: string): Promise<AssetRow | null>;
-  /** An earlier live asset of the same owner with this perceptual hash */
-  findDuplicate(owner: OwnerFilter, phash: number, asset: { id: string; createdAt: Date }): Promise<string | null>;
-  /**
-   * Ready public images whose perceptual hash is within maxDistance (Hamming) of phash, closest first. Private
-   * files are never returned. usageKinds: only images with an active usage of one of these kinds.
-   */
-  similarImages(
-    phash: number,
-    filter: { excludeId: string; maxDistance: number; limit: number; ownerKind?: string; ownerId?: string; usageKinds?: readonly string[] },
-  ): Promise<{ asset: AssetRow; distance: number }[]>;
-  /** Bytes an owner stores (live files), for the storage quota */
-  storedBytes(owner: OwnerFilter): Promise<number>;
-  /** Assets of one owner in the given statuses (account and seller closure) */
-  assetsOfOwner(owner: OwnerFilter, statuses: readonly string[]): Promise<AssetRow[]>;
-
-  /* job selections, oldest first, bounded */
-  pendingUploadsBefore(cutoff: Date, limit: number): Promise<AssetRow[]>;
-  /** Ready or rejected, never attached to anything, older than cutoff; or marked for deletion (expires_at passed) and no longer used */
-  orphansToSweep(cutoff: Date, now: Date, excludePurposes: readonly string[], limit: number): Promise<AssetRow[]>;
-  generatedExpired(now: Date, purposes: readonly string[], limit: number): Promise<AssetRow[]>;
-  /** Deleted before cutoff whose storage objects still exist */
-  deletedToErase(cutoff: Date, limit: number): Promise<AssetRow[]>;
-  /** Removed evidence whose retention has passed */
-  removedPastRetention(now: Date, limit: number): Promise<AssetRow[]>;
-  /** Storage objects the assets know about, in pages (keyset on id) */
-  storageRefs(afterId: string | null, limit: number): Promise<{ id: string; status: string; bucket: string; key: string }[]>;
-
-  /* renditions */
-  renditionsOf(assetIds: readonly string[]): Promise<RenditionRow[]>;
-  saveRenditions(assetId: string, rows: readonly RenditionRow[]): Promise<void>;
-  deleteRenditions(assetId: string): Promise<void>;
-
-  /* uploads */
-  insertUpload(row: UploadRow): Promise<UploadRow>;
-  getUpload(id: string, opts?: { forUpdate?: boolean }): Promise<UploadRow | null>;
-  uploadOfAsset(assetId: string): Promise<UploadRow | null>;
-  completeUpload(id: string, at: Date): Promise<void>;
-
-  /* usages */
-  usagesOf(assetIds: readonly string[], opts?: { activeOnly?: boolean }): Promise<UsageRow[]>;
-  activeUsage(assetId: string, usage: { module: string; kind: string; refId: string }): Promise<UsageRow | null>;
-  insertUsage(row: UsageRow): Promise<UsageRow>;
-  updateUsage(id: string, patch: Partial<Pick<UsageRow, 'ref_label' | 'detached_at'>>): Promise<void>;
-
-  /* processing */
-  insertProcessingJob(row: ProcessingJobRow): Promise<void>;
-  /**
-   * Claims due jobs (queued and due, or running past their lease): marks them running until
-   * leaseUntil and counts the attempt
-   */
-  claimProcessingJobs(now: Date, leaseUntil: Date, limit: number): Promise<ProcessingJobRow[]>;
-  updateProcessingJob(id: string, patch: Partial<Omit<ProcessingJobRow, 'id' | 'asset_id'>>): Promise<void>;
-  processingJobByProviderRef(ref: string): Promise<ProcessingJobRow | null>;
-  processingJobsOf(assetId: string): Promise<ProcessingJobRow[]>;
-
-  /* counters */
-  uploadCount(owner: OwnerFilter, day: string): Promise<number>;
-  bumpUploadCounter(owner: OwnerFilter, day: string, bytes: number): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ storage */

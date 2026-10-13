@@ -73,6 +73,8 @@ export async function mediaApp(opts: { storage?: 'memory' | 'local'; dir?: strin
       },
     },
   });
+  // tokens are signed at real time: a clock fixed before a slow boot would make them "not yet valid"
+  clock.set(new Date());
   const media = app.kernel.boot.apis.get('media') as MediaService;
   const events: EventEnvelope[] = [];
   for (const name of ['media.asset.ready', 'media.asset.rejected', 'media.asset.removed', 'media.asset.restored', 'media.asset.deleted']) {

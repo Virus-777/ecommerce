@@ -8,7 +8,7 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { fileServer } from './http/files.js';
-import { createMongoMediaRepository } from './repository.js';
+import { MediaRepository } from './repository.js';
 import { createDevProcessor } from './providers/processing/dev.js';
 import { createDevScanner } from './providers/scanner.js';
 import { createLocalStorage } from './providers/storage/local.js';
@@ -30,7 +30,7 @@ export default defineModule({
     // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads
     // through PUT /uploads/{id}/content and serve downloads at GET /files/{bucket}/{key}, signed with
     // media's file-link key and verified by the auth middleware. Scanning and processing use deterministic
-    // dev adapters (no network); ClamAV and an image / transcoding service replace them behind the ports.
+    // dev providers (no network); ClamAV and an image / transcoding service can replace them (ports.ts).
     const links = { secret: fileLinkSecret(ctx.config, ctx.name), baseUrl: ctx.config.apiUrl };
     const storage =
       ctx.config.media.storage === 'local'
@@ -38,7 +38,7 @@ export default defineModule({
         : // acceptSignedPut (tests and tools) follows an upload ticket's API URL to a signed upload URL
           createMemoryStorage({ clock: ctx.clock, links, uploadSecret: secretFor(ctx.config, 'media.storage'), resolveUploadUrl: (url) => service.signedStorageUrlFor(url) });
     const providers = { storage, scanner: createDevScanner(), processor: createDevProcessor() };
-    const service = new MediaService({ repo: createMongoMediaRepository(ctx.mongo), ctx, providers });
+    const service = new MediaService({ repo: new MediaRepository(ctx.mongo), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     // GET /files/{bucket}/{key}: the middleware verifies the signed link (auth kind file-link) before this streams the file
