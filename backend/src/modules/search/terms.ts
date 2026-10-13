@@ -9,7 +9,7 @@
 import type { ModuleStore } from '../../kernel/mongo/index.js';
 import type { TermRow } from './ports.js';
 import { similarity } from './providers/opensearch/trigram.js';
-import { escapeRegExp } from './text.js';
+import { escapeRegExp } from '../../kernel/lib/text.js';
 
 export interface TermLookup {
   /** A suggestion term is exactly this word */

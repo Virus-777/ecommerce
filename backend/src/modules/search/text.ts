@@ -87,4 +87,3 @@ export function termsOf(t: DocTexts): { t: string; w: number }[] {
   return [...out].map(([term, w]) => ({ t: term, w }));
 }
 
-export const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

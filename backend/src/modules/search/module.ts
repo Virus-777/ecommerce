@@ -5,7 +5,7 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { createSearchAdapters } from './engine-select.js';
+import { selectSearchEngine } from './engine-select.js';
 import { SearchService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -22,7 +22,7 @@ export default defineModule({
   graphql: typeDefs,
   register(ctx) {
     // SEARCH_ENGINE: mongo (stemmed words and prefixes over the read model; development and tests) or opensearch (production)
-    const { repo, engine } = createSearchAdapters(ctx);
+    const { repo, engine } = selectSearchEngine(ctx);
     ctx.log.debug({ engine: engine.name }, 'search: engine');
     const service = new SearchService({ repo, engine, ctx });
     ctx.provide(service);

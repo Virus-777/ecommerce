@@ -13,7 +13,7 @@ import type { AppliedFilter, CategoryContext, EmptyGuidance, Facet, FacetValue, 
 import { chips, clearAll, fromRest, toQueryString, validateFilters, FilterError, type Chip, type Labels, type QueryState, type RestSearchParams } from '../domain/query.js';
 import { DEFAULT_FACTORS, FROM_PRICE_NOTE, OFFICIAL_BADGE, OFFICIAL_STORE_NAME, RANKING_NOTE, STORE_NOTE, weightsOf } from '../domain/ranking.js';
 import { attrKey, expandQuery, isUuid, normalizeQuery, plural, queryGtin, synonymTerms, tokens, type SynonymSet } from '../domain/text.js';
-import type { PageInfo, SearchFilters, SearchMatch, SearchQuery, SearchResultSet, SearchSession, SortKey, SponsoredSlot } from '../domain/types.js';
+import type { SearchFilters, SearchMatch, SearchQuery, SearchResultSet, SearchSession, SortKey, SponsoredSlot } from '../domain/types.js';
 import type { DocRow, EngineFilters, EngineHit, EngineQuery, FacetCounts, RecentRow } from '../ports.js';
 import type { CategoryNode, CategoryTree } from './base.js';
 import { SearchIndexer } from './indexer.js';

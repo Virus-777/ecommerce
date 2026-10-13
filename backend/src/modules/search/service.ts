@@ -8,7 +8,7 @@ import { SearchAdmin } from './service/admin.js';
 export type { SearchServiceDeps } from './service/base.js';
 
 /**
- * Search use cases. Depends only on ports (repository, search engine), the event bus, the clock and other
+ * Search use cases. Depends only on its repository, the search engine, the event bus, the clock and other
  * modules' public APIs. Each method maps to a publicApi function, an endpoint, a consumed event or a job
  * in docs/api/spec/modules/search.json. The use cases are layered in service/:
  * base → indexer (index, consumers, jobs) → queries (search, context, suggestions) → admin → this class.

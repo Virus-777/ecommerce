@@ -7,7 +7,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createOpenSearchClient, OsApi } from '../providers/opensearch/client.js';
 import { MAPPING_VERSION, productIndexBody } from '../providers/opensearch/mapping.js';
 import { ProductIndex } from '../providers/opensearch/products-index.js';
-import type { DocRow, IndexedDocument, SearchRepository } from '../ports.js';
+import type { DocRow, IndexedDocument } from '../ports.js';
+import type { SearchRepository } from '../repository.js';
 import { boot, newId, STORE, testOpenSearchConfig, type Kit } from './helpers.js';
 import { fakeClientOptions, FakeOpenSearch } from './opensearch-fake/connection.js';
 

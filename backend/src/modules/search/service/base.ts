@@ -9,7 +9,8 @@ import type * as audit from '../../../spec/audit.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import { FilterError } from '../domain/query.js';
-import type { SearchEngine, SearchRepository } from '../ports.js';
+import type { SearchEngine } from '../ports.js';
+import type { SearchRepository } from '../repository.js';
 
 export interface SearchServiceDeps {
   repo: SearchRepository;

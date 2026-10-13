@@ -20,7 +20,8 @@ import type { SortKey } from './domain/types.js';
 import type { DocRow, EngineFilters, EngineHit, EngineQuery, FacetCounts, FacetOmit, OfferRow, SearchEngine, TermKind, TermRow } from './ports.js';
 import { similarity, trigrams } from './providers/opensearch/trigram.js';
 import { rankSimilar, wordsStartingWith, type TermLookup } from './terms.js';
-import { escapeRegExp, stems } from './text.js';
+import { escapeRegExp } from '../../kernel/lib/text.js';
+import { stems } from './text.js';
 
 type Doc = Record<string, any>;
 type Stage = Record<string, unknown>;
@@ -178,7 +179,7 @@ const ORDER: Record<SortKey, Record<string, 1 | -1>> = {
   price_asc: { 'eo.price': 1, score: -1, _id: 1 },
   price_desc: { 'eo.price': -1, score: -1, _id: 1 },
   newest: { first_listed_at: -1, _id: 1 },
-  // MongoDB sorts null lowest: rating desc puts it last, as nulls last did
+  // MongoDB sorts null lowest: rating desc puts products without a rating last
   rating: { rating: -1, rating_count: -1, score: -1, _id: 1 },
   best_selling: { sales_30d: -1, score: -1, _id: 1 },
 };
