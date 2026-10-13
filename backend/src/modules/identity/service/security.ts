@@ -51,7 +51,17 @@ import type {
   TwoStepMethodRow,
 } from '../ports.js';
 import type { IdentityRepository } from '../repository.js';
-import { type Core, type ClientInfo, type Caller, type AccountSecurity, MIN, DAY, RECOVERY_CODES, isReauthPurpose, issue } from './core.js';
+import {
+  type Core,
+  type ClientInfo,
+  type Caller,
+  type AccountSecurity,
+  MIN,
+  DAY,
+  RECOVERY_CODES,
+  isReauthPurpose,
+  issue,
+} from './core.js';
 import type { Authentication } from './authentication.js';
 
 export class Security {
