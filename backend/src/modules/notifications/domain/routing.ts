@@ -302,7 +302,8 @@ export const ROUTES: Routes = {
         to: [{ kind: 'email', email: p.email, recipientKind: p.purpose === 'staff' ? 'staff_member' : 'seller_member' }],
         link: L('account', p.invitationId, 'accept-invitation', 'Accept invitation', p.contextRef, p.acceptUrl),
         context: { invite: { url: p.acceptUrl, context: p.contextLabel ?? 'Marketly', by: p.invitedBy.name ?? 'Marketly' }, recipient: { name: p.name } },
-        dedupe: `invite:${p.invitationId}`,
+        // a resend issues a new link with a new expiry: each send is its own email; a redelivered event is not
+        dedupe: `invite:${p.invitationId}:${p.expiresAt}`,
       },
     ],
   },

@@ -236,6 +236,20 @@ describe('order notices', () => {
 });
 
 describe('staff routing', () => {
+  it('emails a resent invitation again, but a redelivered event only once', async () => {
+    const email = `invitee-${newId()}@example.com`;
+    const invitationId = newId();
+    const sent = (expiresAt: string) => ({
+      invitationId, purpose: 'staff', email, name: 'Iris Novak', acceptUrl: `http://localhost:3002/accept#${expiresAt}`,
+      invitedBy: { kind: 'staff', id: newId(), name: 'Olivia Hart' }, expiresAt,
+    });
+    await publish(app, 'identity.invitation.created', sent('2026-10-20T10:00:00.000Z'));
+    await publish(app, 'identity.invitation.created', sent('2026-10-20T10:00:00.000Z')); // the same send, delivered twice
+    expect(emailsTo(email)).toHaveLength(1);
+    await publish(app, 'identity.invitation.created', sent('2026-10-21T09:30:00.000Z')); // resent: a new link
+    expect(emailsTo(email)).toHaveLength(2);
+  });
+
   it('routes role notices to the covering backup (the away lead keeps a copy) and resolves them', async () => {
     const lead = world.staff({ name: 'Theo Grant' });
     const backup = world.staff({ name: 'Ana Silva' });
