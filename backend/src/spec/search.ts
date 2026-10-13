@@ -1767,16 +1767,6 @@ export const spec = defineModuleSpec({
       "default": true,
       "desc": "Out-of-stock products appear only with 'Include out of stock'",
       "type": "bool"
-    },
-    "searchEngine": {
-      "default": "postgres",
-      "desc": "postgres | external (adapter added later)",
-      "type": "enum",
-      "choices": [
-        "postgres",
-        "external"
-      ],
-      "approval": "second_reviewer"
     }
   },
   errorCodes: {

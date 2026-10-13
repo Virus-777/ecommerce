@@ -470,8 +470,7 @@
     { "key": "newArrivalsWindowDays", "type": "duration", "default": 30, "desc": "'New arrivals' = first listed within this window", "unit": "days", "min": 1 },
     { "key": "bestSellingMinOrders", "type": "int", "default": 500, "desc": "Platform orders in 30 days before best-selling sort is offered", "min": 0 },
     { "key": "transitBusinessDays", "type": "duration", "default": 3, "desc": "Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate", "unit": "business days", "min": 0, "max": 15 },
-    { "key": "excludeOutOfStockByDefault", "type": "bool", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" },
-    { "key": "searchEngine", "type": "enum", "default": "postgres", "desc": "postgres | external (adapter added later)", "choices": ["postgres", "external"], "approval": "second_reviewer" }
+    { "key": "excludeOutOfStockByDefault", "type": "bool", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" }
   ],
   "integrations": [
     { "name": "MongoDB text matching (development and tests)", "purpose": "Stemmed word and prefix matching over the read model, ranking, misspelling correction and suggestions without a search cluster" },

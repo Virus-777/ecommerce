@@ -821,7 +821,6 @@ Indexes: `pk (product_id, day)`, `(day)`
 | bestSellingMinOrders | `500` | int, 0–… | Platform orders in 30 days before best-selling sort is offered |
 | transitBusinessDays | `3` | duration, business days, 0–15 | Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate |
 | excludeOutOfStockByDefault | `true` | bool | Out-of-stock products appear only with 'Include out of stock' |
-| searchEngine | `"postgres"` | enum (postgres \| external), approval: second reviewer | postgres | external (adapter added later) |
 
 ## Integrations
 - **MongoDB text matching (development and tests)**: Stemmed word and prefix matching over the read model, ranking, misspelling correction and suggestions without a search cluster

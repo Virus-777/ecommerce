@@ -94,7 +94,7 @@ export class SearchBase {
     return this.ctx.use('offers');
   }
 
-  protected async setting<K extends 'pageSize' | 'typoSimilarityThreshold' | 'autoCorrectBelowResults' | 'recentSearchesMax' | 'recentSearchRetentionDays' | 'newArrivalsWindowDays' | 'bestSellingMinOrders' | 'transitBusinessDays' | 'excludeOutOfStockByDefault' | 'searchEngine'>(key: K) {
+  protected async setting<K extends 'pageSize' | 'typoSimilarityThreshold' | 'autoCorrectBelowResults' | 'recentSearchesMax' | 'recentSearchRetentionDays' | 'newArrivalsWindowDays' | 'bestSellingMinOrders' | 'transitBusinessDays' | 'excludeOutOfStockByDefault'>(key: K) {
     return this.ctx.settings.get(key);
   }
 
