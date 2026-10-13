@@ -50,6 +50,10 @@ try {
   if (!deputy) console.log('No deputy: sensitive grants (e.g. Finance roles) need a second Business Owner to approve them.');
 } catch (err) {
   console.error((err as Error).message);
+  if ((err as { code?: string }).code === 'CONFLICT') {
+    console.error('A lost or expired link:  npm run staff-link -- --email <their email>   (prints a new one)');
+    console.error('A mistyped email:        npm run staff-link -- --email <that email> --revoke "Mistyped email", then run this command again');
+  }
   process.exitCode = 1;
 } finally {
   await app.close();

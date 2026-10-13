@@ -25,7 +25,8 @@
     "simulate": "tsx --env-file-if-exists=.env tools/simulate.ts",
     "check": "npm run gen:check && npm run typecheck && npm run check:boundaries && npm run check:api && npm test && npm run test:http",
     "token": "tsx --env-file-if-exists=.env tools/token.ts",
-    "bootstrap-owner": "tsx --env-file-if-exists=.env tools/bootstrap-owner.ts"
+    "bootstrap-owner": "tsx --env-file-if-exists=.env tools/bootstrap-owner.ts",
+    "staff-link": "tsx --env-file-if-exists=.env tools/staff-link.ts"
   },
   "dependencies": {
     "@fastify/swagger": "^9.9.1",

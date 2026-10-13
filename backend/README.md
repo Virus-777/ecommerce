@@ -48,7 +48,7 @@ src/
   modules/<module>/        one folder per business capability (below)
   integration/             whole flows across real modules (order lifecycle, Fulfilled by Marketly, aftercare …)
   testing/                 buildTestApp(), dev-token callers, clocks, flows (real end-to-end setup), the module contract suite
-tools/                     generate, check-api, check-boundaries, modules, migrate, module:new, token, test-http, bootstrap-owner
+tools/                     generate, check-api, check-boundaries, modules, migrate, module:new, token, test-http, bootstrap-owner, staff-link, simulate
 ```
 
 Inside a module:
@@ -98,6 +98,7 @@ Every module is built. A new module starts from its spec (`npm run module:new <n
 | `npm run check:api` | Boots all 33 modules and compares the server's OpenAPI with `docs/api/openapi.json`, field by field (`--verbose`) |
 | `npm run check:boundaries` | Modules import only kernel, spec and other modules' `contract.ts` |
 | `npm run bootstrap-owner -- --email … --name "…" [--deputy-email … --deputy-name "…"]` | Invites the first Business Owner (also Platform Administrator) and, recommended, a deputy with the same roles, on a persistent database (`MONGODB_URI` or `MONGO_DATA_DIR`), and prints the accept links. Refuses once a Business Owner exists or is invited |
+| `npm run staff-link -- --email … [--reset-two-step "…" \| --revoke "…"]` | Servers without email: prints a new invitation or password reset link for a staff member, resets their 2-step sign-in, or revokes an invitation not accepted yet ([docs/MAINTAINING.md](../docs/MAINTAINING.md) §7) |
 | `npm run test:http` | Boots all 33 modules on a real port and calls every endpoint over HTTP with input generated from the spec: no token, invalid token, another app's token, wrong caller, missing permission, missing step-up, right token. `-- --only a,b` limits it to modules; `-- --url http://localhost:4000` tests a running dev server (`RATE_LIMITS=false`); report in `.data/test-http-report.json` |
 | `npm run modules` | Phase, on/off, version, endpoints built, dependencies, load order; `--graph` (Mermaid), `--without <m>` |
 | `npm run module:new <name>` | Scaffold a module from a new spec file |

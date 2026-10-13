@@ -185,9 +185,38 @@ edit does none of that.
    instances with `JOBS_ENABLED=true` that run the scheduled jobs. Set `DEPLOY_ID` to the release (commit or
    tag) on all of them.
 5. Health: `GET /health` on `HEALTH_PORT` (internal; `PORT`+1 by default).
+6. On a new database only: create the first admins (next section).
 
 To roll back, deploy the previous build. Index changes are harmless both ways; a data migration that already
 ran stays applied, so write migrations the old code can live with.
+
+### The first admins, and staff links without email
+
+Nobody becomes an admin by signing up. The first two Business Owners are invited from the server:
+
+```bash
+npm run bootstrap-owner -- --email olivia@company.example --name "Olivia Hart" \
+  --deputy-email daniel@company.example --deputy-name "Daniel Reyes"
+```
+
+It prints one link per person. Hand each link over in person; it opens the Admin Center (`ADMIN_URL` must be an
+address their computer reaches), where they set a password and an authenticator app (works offline). Links last
+7 days (setting `identity.invitationTtlDays`). The command refuses once a Business Owner exists or is invited, so
+it can't be used to take over a running system. The owners then invite the other staff from Admin Center > Staff.
+
+The server sends no email when it has no internet access, so staff get their links from the server instead. Each
+run issues a new link and the previous one stops working (links are stored only as hashes, so an old one cannot be
+shown again):
+
+| Situation | Command |
+|---|---|
+| Someone was invited from the Admin Center, or lost or let their link expire | `npm run staff-link -- --email ana@company.example` (new invitation link) |
+| Someone forgot their password | the same command: once they have an account, it prints a password reset link |
+| Someone lost the phone with their authenticator | `npm run staff-link -- --email ana@company.example --reset-two-step "Lost phone, checked in person"` |
+| A Business Owner invitation went to a mistyped email | `npm run staff-link -- --email olivia@compnay.example --revoke "Mistyped email"`, then `bootstrap-owner` again |
+
+Every action is in the audit trail as "Server operator". Check who is asking before handing over a link: it signs
+them in.
 
 ## 8. When `npm run check` fails
 
