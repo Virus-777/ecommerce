@@ -29,7 +29,8 @@ import {
   overOf,
   shortageOf,
 } from './domain/rules.js';
-import type { ClaimRow, DeliveryRow, PerformanceRow, PoEventRow, PoLineRow, PoRow, PurchasingRepository, ReceiptLineRow, ReceiptRow, StockDirectory, SupplierItemRow, SupplierRow } from './ports.js';
+import type { ClaimRow, DeliveryRow, PerformanceRow, PoEventRow, PoLineRow, PoRow, ReceiptLineRow, ReceiptRow, StockDirectory, SupplierItemRow, SupplierRow } from './ports.js';
+import type { PurchasingRepository } from './repository.js';
 
 /** Location names are not available from inventory's public API (spec gap); the Official Store ships to its warehouse. */
 export const SHIP_TO_NAME = 'Marketly warehouse';

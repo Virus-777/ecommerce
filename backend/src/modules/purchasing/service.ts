@@ -71,7 +71,8 @@ import {
 } from './domain/rules.js';
 import { deliveryMachine, purchaseOrderMachine, receiptMachine, supplierClaimMachine } from './domain/state-machines.js';
 import { createInventoryStockDirectory } from './providers/stock-directory.js';
-import type { ClaimRow, PoEventRow, PoLineRow, PoRow, PurchasingRepository, ReceiptLineRow, ReceiptRow, StockDirectory, StockInfo, SupplierItemRow, SupplierRow } from './ports.js';
+import type { ClaimRow, PoEventRow, PoLineRow, PoRow, ReceiptLineRow, ReceiptRow, StockDirectory, StockInfo, SupplierItemRow, SupplierRow } from './ports.js';
+import type { PurchasingRepository } from './repository.js';
 import { PurchasingViews } from './views.js';
 
 export interface PurchasingServiceDeps {

@@ -1,8 +1,7 @@
 /**
- * What the purchasing service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts.
+ * The purchasing rows in domain terms (the repository maps the collections to them), the query shapes the
+ * repository (repository.ts) and the service share, and the stock directory (inventory's stock items).
  */
-import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type { ClaimLine } from '../../spec/purchasing.js';
 import type { ClaimKind, ClaimStatus, DeliveryStatus, PoStatus, ReceiptStatus } from './domain/rules.js';
@@ -201,77 +200,6 @@ export interface PerformanceInputs {
   received: number;
   shortage: number;
   damaged: number;
-}
-
-/** Persistence for this module's own tables: purchasing.suppliers, purchasing.supplier_items, purchasing.supplier_performance, purchasing.purchase_orders, purchasing.purchase_order_lines, purchasing.purchase_order_events, purchasing.deliveries, purchasing.receipts, purchasing.receipt_lines, purchasing.supplier_claims. */
-export interface PurchasingRepository {
-  transaction<T>(fn: (tx: PurchasingRepository) => Promise<T>): Promise<T>;
-
-  /* suppliers */
-  insertSupplier(row: SupplierRow): Promise<SupplierRow>;
-  updateSupplier(id: string, patch: Partial<Omit<SupplierRow, 'id' | 'createdAt'>>): Promise<SupplierRow>;
-  getSupplier(id: string, opts?: { forUpdate?: boolean }): Promise<SupplierRow | null>;
-  getSuppliers(ids: readonly string[]): Promise<SupplierRow[]>;
-  listSuppliers(filter: { q?: string; active?: boolean }, page: PageRequest): Promise<Page<SupplierRow>>;
-  openPurchaseOrderCounts(supplierIds: readonly string[]): Promise<Map<string, number>>;
-
-  /* price lists */
-  supplierItems(supplierId: string): Promise<SupplierItemRow[]>;
-  replaceSupplierItems(supplierId: string, rows: readonly SupplierItemRow[]): Promise<void>;
-  /** Unset preferred on other suppliers' rows for these stock items */
-  clearPreferred(stockItemIds: readonly string[], exceptSupplierId: string): Promise<void>;
-  /** Rows of active suppliers for these stock items (all stock items when omitted, preferred only when asked) */
-  itemsForStock(filter: { stockItemIds?: readonly string[]; preferredOnly?: boolean; supplierId?: string }): Promise<SupplierItemRow[]>;
-
-  /* performance */
-  performanceOf(supplierIds: readonly string[]): Promise<Map<string, PerformanceRow>>;
-  savePerformance(row: PerformanceRow): Promise<void>;
-  performanceInputs(since: Date): Promise<PerformanceInputs[]>;
-  supplierIds(): Promise<string[]>;
-
-  /* purchase orders */
-  insertPurchaseOrder(row: PoRow): Promise<PoRow>;
-  updatePurchaseOrder(id: string, patch: Partial<Omit<PoRow, 'id' | 'ref' | 'createdAt' | 'createdBy'>>): Promise<PoRow>;
-  getPurchaseOrder(id: string, opts?: { forUpdate?: boolean }): Promise<PoRow | null>;
-  getPurchaseOrders(ids: readonly string[]): Promise<PoRow[]>;
-  purchaseOrderByApproval(requestId: string, opts?: { forUpdate?: boolean }): Promise<PoRow | null>;
-  listPurchaseOrders(filter: PoFilter, page: PageRequest): Promise<Page<PoRow>>;
-  purchaseOrdersBy(filter: { statuses?: readonly PoStatus[]; supplierId?: string; locationId?: string; limit?: number }): Promise<PoRow[]>;
-  insertLines(rows: readonly PoLineRow[]): Promise<void>;
-  deleteLines(purchaseOrderId: string): Promise<void>;
-  linesOf(purchaseOrderIds: readonly string[]): Promise<PoLineRow[]>;
-  updateLine(id: string, patch: Partial<Pick<PoLineRow, 'qtyReceived' | 'qtyDamaged' | 'qtyClosed' | 'expectedDate'>>): Promise<void>;
-  /** Lines on purchase orders in these statuses for one stock item */
-  linesForStock(stockItemIds: readonly string[], statuses: readonly PoStatus[]): Promise<(PoLineRow & { ref: string; status: PoStatus; poExpectedDate: string | null })[]>;
-  addEvent(row: PoEventRow): Promise<void>;
-  eventsOf(purchaseOrderId: string): Promise<PoEventRow[]>;
-
-  /* deliveries */
-  insertDelivery(row: DeliveryRow): Promise<DeliveryRow>;
-  updateDelivery(id: string, patch: Partial<Omit<DeliveryRow, 'id' | 'purchaseOrderId'>>): Promise<DeliveryRow>;
-  getDelivery(id: string, opts?: { forUpdate?: boolean }): Promise<DeliveryRow | null>;
-  deliveriesOf(purchaseOrderIds: readonly string[]): Promise<DeliveryRow[]>;
-  listDeliveries(filter: DeliveryFilter, page: PageRequest): Promise<Page<DeliveryRow>>;
-  deliveriesBy(filter: { statuses?: readonly DeliveryStatus[]; from?: Date; to?: Date; windowToBefore?: Date; locationId?: string; limit?: number }): Promise<DeliveryRow[]>;
-  cancelPendingDeliveries(purchaseOrderId: string, reason: string): Promise<number>;
-
-  /* receipts */
-  insertReceipt(row: ReceiptRow, lines: readonly ReceiptLineRow[]): Promise<ReceiptRow>;
-  updateReceipt(id: string, patch: Partial<Omit<ReceiptRow, 'id' | 'ref' | 'purchaseOrderId' | 'deliveryId' | 'startedAt'>>): Promise<ReceiptRow>;
-  getReceipt(id: string, opts?: { forUpdate?: boolean }): Promise<ReceiptRow | null>;
-  receiptsBy(filter: { purchaseOrderIds?: readonly string[]; deliveryIds?: readonly string[]; statuses?: readonly ReceiptStatus[]; submittedFrom?: Date; locationId?: string }): Promise<ReceiptRow[]>;
-  inProgressReceipt(deliveryId: string): Promise<ReceiptRow | null>;
-  listReceipts(filter: ReceiptFilter, page: PageRequest): Promise<Page<ReceiptRow>>;
-  receiptsAfter(filter: ReceiptFilter, after: { startedAt: Date; id: string } | null, limit: number): Promise<ReceiptRow[]>;
-  receiptLines(receiptIds: readonly string[]): Promise<ReceiptLineRow[]>;
-  updateReceiptLine(receiptId: string, purchaseOrderLineId: string, patch: Partial<Pick<ReceiptLineRow, 'received' | 'damaged' | 'binCode' | 'photoIds' | 'note'>>): Promise<void>;
-
-  /* claims */
-  insertClaim(row: ClaimRow): Promise<ClaimRow>;
-  updateClaim(id: string, patch: Partial<Pick<ClaimRow, 'status' | 'settlement' | 'settledAmount' | 'supplierReference' | 'notes' | 'decidedAt'>>): Promise<ClaimRow>;
-  getClaim(id: string, opts?: { forUpdate?: boolean }): Promise<ClaimRow | null>;
-  claimsBy(filter: ClaimFilter): Promise<ClaimRow[]>;
-  listClaims(filter: ClaimFilter, page: PageRequest): Promise<Page<ClaimRow>>;
 }
 
 /* ------------------------------------------------------------------ stock items (inventory) */

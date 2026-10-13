@@ -1,7 +1,7 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/purchasing.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoPurchasingRepository } from './repository.js';
+import { PurchasingRepository } from './repository.js';
 import { PurchasingService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -16,7 +16,7 @@ export default defineModule({
   version: '2.0.0',
   schemas,
   register(ctx) {
-    const service = new PurchasingService({ repo: createMongoPurchasingRepository(ctx.mongo), ctx });
+    const service = new PurchasingService({ repo: new PurchasingRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
 
