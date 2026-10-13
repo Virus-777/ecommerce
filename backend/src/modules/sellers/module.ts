@@ -6,7 +6,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { createMongoSellersRepository } from './repository.js';
+import { SellersRepository } from './repository.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { devProviders } from './providers/dev.js';
 import { SellersService } from './service.js';
@@ -25,7 +25,7 @@ export default defineModule({
   graphql: typeDefs,
   register(ctx) {
     // KYC/KYB, payout tokenisation and address checks: deterministic dev adapters until real providers are wired
-    const service = new SellersService({ repo: createMongoSellersRepository(ctx.mongo), ctx, providers: devProviders });
+    const service = new SellersService({ repo: new SellersRepository(ctx.mongo), ctx, providers: devProviders });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

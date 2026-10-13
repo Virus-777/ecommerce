@@ -32,7 +32,8 @@ import { AGREEMENT_KEYS, type AgreementKey } from '../domain/catalogue.js';
 import { addDays, holderMatches, locationOf, payoutLabel, payoutProblems, type StoredPayout, type StoredPayoutDetails, type StoredVerification } from '../domain/rules.js';
 import { launchReadinessReviewMachine, payoutReadinessMachine, sellerAccountStatusMachine, verifiedSellerLabelMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
-import type { ApplicationRec, SellerListFilter, SellerRec, SellersRepository } from '../ports.js';
+import type { ApplicationRec, SellerListFilter, SellerRec } from '../ports.js';
+import type { SellersRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 const SELLING = ['approved', 'restricted', 'suspended'];

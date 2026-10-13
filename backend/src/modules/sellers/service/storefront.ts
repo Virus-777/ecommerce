@@ -10,7 +10,8 @@ import type { ChangeRequest, CollectionInput, ContactOptions, FeaturedCollection
 import { isWholeAccount, locationOf, normalizeScope, sameStoreName, type StoredVerification } from '../domain/rules.js';
 import { changeRequestMachine, publicClaimMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
-import type { ChangeRequestRec, ClaimRec, ProfileRec, SellerRec, SellersRepository } from '../ports.js';
+import type { ChangeRequestRec, ClaimRec, ProfileRec, SellerRec } from '../ports.js';
+import type { SellersRepository } from '../repository.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
 const TAGLINE_MAX = 80;

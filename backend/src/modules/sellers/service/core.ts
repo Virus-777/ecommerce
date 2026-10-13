@@ -20,7 +20,8 @@ import { AGREEMENT_KEYS, agreementDocument, DEFAULT_AGREEMENT_VERSION, type Agre
 import type { StoredPayout } from '../domain/rules.js';
 import { taxIdCipher, type TaxIdCipher } from '../crypto.js';
 import { actorText, type Refs } from '../mappers.js';
-import type { AccountEventRec, ApplicationRec, PayoutChangeRec, PendingChangeRec, SellerRec, SellersProviders, SellersRepository } from '../ports.js';
+import type { AccountEventRec, ApplicationRec, PayoutChangeRec, PendingChangeRec, SellerRec, SellersProviders } from '../ports.js';
+import type { SellersRepository } from '../repository.js';
 import type { AccountsPart } from './accounts.js';
 import type { ApplicationsPart } from './applications.js';
 import type { EnforcementPart } from './enforcement.js';

@@ -120,6 +120,8 @@ export async function boot(): Promise<Kit> {
       },
     },
   });
+  // the boot can take a while: the app's time must not stay behind the test tokens, signed at the real time
+  clock.set(new Date());
   const svc = app.kernel.boot.apis.get('sellers') as unknown as SellersService;
   const events: EventEnvelope[] = [];
   for (const name of Object.keys((await import('../../../spec/sellers.js')).spec.events.publishes)) app.kernel.events.subscribe('test', name, (e) => void events.push(e));

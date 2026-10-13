@@ -8,7 +8,8 @@ import { permissionCatalogue, ROLE_TEMPLATES, ROLE_TEXT } from '../domain/catalo
 import { TEMPLATE_GRANTS } from '../domain/seed.js';
 import { sellerMemberMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
-import type { MemberRec, SellerRec, SellersRepository } from '../ports.js';
+import type { MemberRec, SellerRec } from '../ports.js';
+import type { SellersRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 const OPEN = ['invited', 'active', 'suspended'];

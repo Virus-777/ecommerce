@@ -25,7 +25,7 @@ export type DataStep = (typeof DATA_STEPS)[number];
 
 export interface StoredOwner extends BusinessOwner {}
 
-/** applications.verification jsonb (the tax id is kept encrypted, never returned) */
+/** applications.verification (a stored object; the tax id is kept encrypted, never returned) */
 export interface StoredVerification {
   owners: StoredOwner[];
   registrationDocumentIds: string[];
@@ -37,7 +37,7 @@ export interface StoredVerification {
 }
 
 /**
- * applications.payout jsonb holds the destination collected in the application (current). The seller's payout
+ * applications.payout holds the destination collected in the application (current). The seller's payout
  * account itself is read from payout_changes and sellers.payout_blocked_reasons in the same shape (core.payoutState).
  */
 export interface StoredPayout {

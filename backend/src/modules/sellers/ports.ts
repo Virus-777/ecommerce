@@ -1,9 +1,8 @@
 /**
- * What the sellers service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts; providers (verification, payout tokenisation,
- * address checks) have deterministic dev adapters in providers/dev.ts.
+ * Row types and list filters of the sellers module (its collections are read and written by repository.ts), and the
+ * providers it calls (verification, payout tokenisation, address checks), with deterministic development versions
+ * in providers/dev.ts.
  */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type { SellersDb } from '../../spec/sellers.js';
 
@@ -38,16 +37,6 @@ export type PayoutChangeRec = Db['payout_changes'];
 export type PendingChangeRec = Db['pending_changes'];
 export type TemplateGrantRec = Db['template_grants'];
 
-/** A column condition: a value (=), a list (in), null (is null) or an operator */
-export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not'; value: V | null };
-export type Where<R> = { [K in keyof R]?: Cond<R[K]> };
-
-export interface FindOptions<R> {
-  orderBy?: [keyof R & string, 'asc' | 'desc'][];
-  limit?: number;
-  forUpdate?: boolean;
-}
-
 export interface SellerListFilter {
   q?: string;
   statuses?: string[];
@@ -71,57 +60,6 @@ export interface PerformanceFacts {
   kind: string;
   n: number;
   total: number;
-}
-
-export interface SellersRepository {
-  transaction<R>(fn: (tx: SellersRepository) => Promise<R>): Promise<R>;
-
-  /* generic table access */
-  get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Db[T] | undefined>;
-  getMany<T extends IdTable>(table: T, ids: readonly string[]): Promise<Db[T][]>;
-  find<T extends Table>(table: T, where: Where<Db[T]>, o?: FindOptions<Db[T]>): Promise<Db[T][]>;
-  findOne<T extends Table>(table: T, where: Where<Db[T]>, o?: FindOptions<Db[T]>): Promise<Db[T] | undefined>;
-  count<T extends Table>(table: T, where: Where<Db[T]>): Promise<number>;
-  insert<T extends Table>(table: T, row: Db[T]): Promise<Db[T]>;
-  update<T extends IdTable>(table: T, id: string, patch: Partial<Db[T]>): Promise<Db[T]>;
-  remove<T extends IdTable>(table: T, id: string): Promise<void>;
-  page<T extends Table>(table: T, where: Where<Db[T]>, page: PageRequest, order: { column: keyof Db[T] & string; direction: 'asc' | 'desc' }): Promise<common.Page<Db[T]>>;
-
-  /* store profiles */
-  getProfile(sellerId: string): Promise<ProfileRec | undefined>;
-  upsertProfile(row: ProfileRec): Promise<ProfileRec>;
-
-  /* sellers */
-  sellerBySlug(slug: string): Promise<SellerRec | undefined>;
-  sellersByStoreName(name: string): Promise<SellerRec[]>;
-  slugTaken(slug: string): Promise<boolean>;
-  listSellers(filter: SellerListFilter, page: PageRequest): Promise<common.Page<SellerRec>>;
-  allSellerIds(filter: SellerListFilter, limit: number): Promise<SellerRec[]>;
-  countSellersByStatus(): Promise<Record<string, number>>;
-  countSellersCreatedSince(since: Date): Promise<number>;
-  countBelowDispatch(): Promise<number>;
-
-  /* applications */
-  listApplications(filter: ApplicationListFilter, page: PageRequest): Promise<common.Page<ApplicationRec>>;
-  latestApplicationOf(accountId: string): Promise<ApplicationRec | undefined>;
-  /** Other applications (any state, so closed sellers too) sharing a work email, payout token, business or return address, or tax id hash */
-  applicationsMatching(signals: { emails: string[]; tokens: string[]; addresses: { line1: string; postalCode: string }[]; taxIdHashes?: string[] }, excludeId: string): Promise<ApplicationRec[]>;
-
-  /* members */
-  activeMember(sellerId: string, accountId: string): Promise<MemberRec | undefined>;
-
-  /* performance */
-  insertPerformanceEvent(row: PerfEventRec): Promise<boolean>;
-  performanceFacts(sellerId: string, since: Date): Promise<PerformanceFacts[]>;
-  unresolvedCasesPastDeadline(sellerId: string, nowMs: number): Promise<number>;
-  latestSnapshots(sellerIds: readonly string[], perSeller: number): Promise<SnapshotRec[]>;
-
-  /* members */
-  /** Seeds template grants (domain/seed.ts) that are not there yet, by (template, permission); safe on concurrent starts */
-  seedTemplateGrants(rows: readonly TemplateGrantRec[]): Promise<void>;
-
-  /* jobs */
-  deleteDocumentsDue(today: string, limit: number): Promise<DocumentRec[]>;
 }
 
 /* ------------------------------------------------------------------ providers */

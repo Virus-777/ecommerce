@@ -101,7 +101,7 @@ export function verificationLabel(s: SellerRec): VerificationLabel {
   };
 }
 
-/** sellers.launch_review jsonb: the LaunchReview plus the first product submission (setup checklist) */
+/** sellers.launch_review: the LaunchReview plus the first product submission (setup checklist) */
 export interface StoredLaunchReview {
   state: LaunchReview['state'];
   requestedAt?: string | null;

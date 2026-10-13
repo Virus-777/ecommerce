@@ -20,7 +20,8 @@ import {
 } from '../domain/rules.js';
 import { appealMachine, restrictionMachine, sellerAccountStatusMachine, sellerWarningMachine, suspensionMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
-import type { AppealRec, PendingChangeRec, RestrictionRec, SellerRec, SellersRepository, SuspensionRec } from '../ports.js';
+import type { AppealRec, PendingChangeRec, RestrictionRec, SellerRec, SuspensionRec } from '../ports.js';
+import type { SellersRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, TRUST_TEAM, type By } from './core.js';
 
 const ALL_SALES: Activity[] = ['new_listings', 'product_submissions', 'new_offers', 'offer_reactivation', 'sales', 'advertising', 'promotions'];

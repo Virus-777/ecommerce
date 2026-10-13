@@ -13,8 +13,8 @@ import { StorefrontPart } from './service/storefront.js';
 export type { SellersServiceDeps };
 
 /**
- * Sellers use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
- * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
+ * Sellers use cases. Depends only on its repository, its providers, the event bus, the clock and other modules'
+ * public APIs. The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class SellersService implements SellersPublicApi {
   readonly core: Core;

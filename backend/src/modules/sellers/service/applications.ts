@@ -57,7 +57,8 @@ import {
 } from '../domain/rules.js';
 import { sellerAccountStatusMachine, sellerApplicationMachine, sellerInvitationMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
-import type { ApplicationRec, CheckKind, CheckRec, CheckResult, CheckSubject, InfoRequestRec, SellerRec, SellersRepository } from '../ports.js';
+import type { ApplicationRec, CheckKind, CheckRec, CheckResult, CheckSubject, InfoRequestRec, SellerRec } from '../ports.js';
+import type { SellersRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 const OPEN_STATES = ['draft', 'submitted', 'under_review', 'information_required'];
