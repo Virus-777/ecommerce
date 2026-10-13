@@ -3,7 +3,8 @@
  * Idempotent: a schedule with the example's version is never inserted twice, and its state (superseded once staff
  * publish a real schedule) is left as it is.
  */
-import type { FulfillmentServiceRepository, ScheduleRec } from '../ports.js';
+import type { ScheduleRec } from '../ports.js';
+import type { FulfillmentServiceRepository } from '../repository.js';
 import { EXAMPLE_SCHEDULE } from './rules.js';
 
 /** The example fee schedule in force until staff publish a real one (FeeSchedule.isExample) */
@@ -17,5 +18,5 @@ export const exampleScheduleRow = (): ScheduleRec => ({
 });
 
 export async function seed(repo: FulfillmentServiceRepository): Promise<void> {
-  await repo.insertIfNew('fee_schedules', exampleScheduleRow());
+  await repo.insertIfAbsent('fee_schedules', exampleScheduleRow());
 }

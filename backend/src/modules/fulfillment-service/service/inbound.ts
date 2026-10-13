@@ -393,7 +393,7 @@ export class InboundPart extends Part {
         }
         const summary = discrepancySummary(current, skus);
         if (summary) {
-          await tx.insertIfNew('discrepancies', { id: newId(), inbound_id: id, summary, evidence_media_ids: body.evidenceIds ?? [], seller_response: 'pending', claim_note: null, decision: null, decided_by: null, decided_at: null });
+          await tx.insertIfAbsent('discrepancies', { id: newId(), inbound_id: id, summary, evidence_media_ids: body.evidenceIds ?? [], seller_response: 'pending', claim_note: null, decision: null, decided_by: null, decided_at: null });
         } else {
           patch.state = state = inboundShipmentMachine.next(state, 'close');
         }

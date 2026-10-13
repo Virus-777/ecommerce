@@ -10,7 +10,8 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type { ServiceTerms, SkuEnrollment, SkuEnrollmentInput } from '../../../spec/fulfillment-service.js';
 import { skuEnrollmentMachine } from '../domain/state-machines.js';
 import { dimensionIssues, restriction, sizeTier } from '../domain/rules.js';
-import type { FulfillmentServiceRepository, SkuRec } from '../ports.js';
+import type { SkuRec } from '../ports.js';
+import type { FulfillmentServiceRepository } from '../repository.js';
 import { invalid, notFound, Part, type By, type ServiceLocation } from './core.js';
 
 type State = SkuEnrollment['state'];
@@ -83,7 +84,7 @@ export class SkusPart extends Part {
       state: skuEnrollmentMachine.initial,
       inventory_item_id: item.id,
     };
-    if (!(await this.repo.insertIfNew('sku_enrollments', row))) throw new AppError('ILLEGAL_TRANSITION', 'This offer is already enrolled', { machine: 'SKU enrollment', from: 'pending', event: 'enroll' });
+    if (!(await this.repo.insertIfAbsent('sku_enrollments', row))) throw new AppError('ILLEGAL_TRANSITION', 'This offer is already enrolled', { machine: 'SKU enrollment', from: 'pending', event: 'enroll' });
     const names = await this.core.sellerNames([sellerId]);
     await this.core.raise({
       queueKey: 'fulfillment.enrollments',

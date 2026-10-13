@@ -15,7 +15,8 @@ import type { Principal } from '../../../spec/identity.js';
 import type { MovementRef, StockItem } from '../../../spec/inventory.js';
 import type { RaiseInput } from '../../../spec/workqueues.js';
 import { CHARGE_TYPE, EXAMPLE_SCHEDULE, feeAmount, monthOf, rateFor, shipsFromOf, SYSTEM } from '../domain/rules.js';
-import type { ChargeRec, FulfillmentServiceRepository, ScheduleRec, SkuRec, StockGroup } from '../ports.js';
+import type { ChargeRec, ScheduleRec, SkuRec, StockGroup } from '../ports.js';
+import type { FulfillmentServiceRepository } from '../repository.js';
 
 export interface FulfillmentServiceServiceDeps {
   repo: FulfillmentServiceRepository;
@@ -379,12 +380,12 @@ export class Core {
       reason: null,
       idempotency_key: a.key,
     };
-    return (await tx.insertIfNew('fee_charges', row)) ? row : null;
+    return (await tx.insertIfAbsent('fee_charges', row)) ? row : null;
   }
 
   /** A reimbursement to the seller (a negative charge, posted as a seller credit); idempotent per key */
   async accrueReimbursement(tx: FulfillmentServiceRepository, r: { sellerId: string; amount: common.Money; reference: string | null; reason: string; key: string }): Promise<boolean> {
-    return tx.insertIfNew('fee_charges', {
+    return tx.insertIfAbsent('fee_charges', {
       id: newId(),
       seller_id: r.sellerId,
       type: 'reimbursement',

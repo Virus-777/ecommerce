@@ -13,7 +13,8 @@ import type * as common from '../../../spec/common.js';
 import type { Capacity, Enrollment, EnrollmentInput } from '../../../spec/fulfillment-service.js';
 import { serviceEnrollmentMachine } from '../domain/state-machines.js';
 import { actorText, plural, SYSTEM } from '../domain/rules.js';
-import type { EnrollmentRec, FulfillmentServiceRepository, SkuRec } from '../ports.js';
+import type { EnrollmentRec, SkuRec } from '../ports.js';
+import type { FulfillmentServiceRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM_BY, type By } from './core.js';
 
 type State = Enrollment['state'];

@@ -3,7 +3,7 @@ import { spec } from '../../spec/fulfillment-service.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { seed } from './domain/seed.js';
-import { createMongoFulfillmentServiceRepository } from './repository.js';
+import { FulfillmentServiceRepository } from './repository.js';
 import { FulfillmentServiceService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -18,7 +18,7 @@ export default defineModule({
   version: '2.0.0',
   schemas,
   async register(ctx) {
-    const repo = createMongoFulfillmentServiceRepository(ctx.mongo);
+    const repo = new FulfillmentServiceRepository(ctx.mongo);
     // the example fee schedule (domain/seed.ts)
     await seed(repo);
     const service = new FulfillmentServiceService({ repo, ctx });

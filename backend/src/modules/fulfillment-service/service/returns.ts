@@ -49,7 +49,7 @@ export class ReturnsPart extends Part {
         const sku = skus.get(item.skuEnrollmentId);
         if (!sku) continue;
         const row: ServiceReturnRec = { id: newId(), return_id: e.returnId, return_ref: e.ref, order_item_id: l.orderItemId, seller_id: e.sellerId!, sku_enrollment_id: sku.id, quantity: l.quantity, outcome: 'pending', proposed_outcome: null, inspection_note: null, evidence_media_ids: [], inspected_at: null };
-        if (!(await tx.insertIfNew('service_returns', row))) continue; // redelivered
+        if (!(await tx.insertIfAbsent('service_returns', row))) continue; // redelivered
         // the movement that brings the units in carries the service return's id and the return ref
         await this.core.move(tx, { id: row.id, sellerId: e.sellerId!, skuEnrollmentId: sku.id, movement: 'returned', quantity: l.quantity, from: null, to: 'returned', reference: e.ref, reason: 'Customer return received', actor: SYSTEM });
         await this.core.accrue(tx, { sellerId: e.sellerId!, rateType: 'returns_processing_per_unit', sizeTier: sku.size_tier, units: l.quantity, reference: e.ref, key: `returns_processing:${e.returnId}:${l.orderItemId}` }, schedule.rates);

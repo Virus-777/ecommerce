@@ -12,7 +12,8 @@ import type * as common from '../../../spec/common.js';
 import type { RemovalInput, RemovalOrder } from '../../../spec/fulfillment-service.js';
 import { removalOrderMachine } from '../domain/state-machines.js';
 import { addDays, qty } from '../domain/rules.js';
-import type { Balances, FulfillmentServiceRepository, RemovalLineRec, RemovalRec, SkuRec } from '../ports.js';
+import type { Balances, RemovalLineRec, RemovalRec, SkuRec } from '../ports.js';
+import type { FulfillmentServiceRepository } from '../repository.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
 type State = RemovalOrder['state'];

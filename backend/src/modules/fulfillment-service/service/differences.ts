@@ -56,7 +56,7 @@ export class DifferencesPart extends Part {
   private async record(s: SkuRec, day: string, ledger: Levels, inventory: Levels): Promise<StockDifferenceRec | null> {
     const row: StockDifferenceRec = { id: newId(), seller_id: s.seller_id, sku_enrollment_id: s.id, day, ledger, inventory, state: 'open', decision: null, reason: null, amount: null, approval_request_id: null, decided_by: null, decided_at: null };
     let saved: StockDifferenceRec | null = row;
-    if (!(await this.repo.insertIfNew('stock_differences', row))) {
+    if (!(await this.repo.insertIfAbsent('stock_differences', row))) {
       const existing = await this.repo.findOne('stock_differences', { sku_enrollment_id: s.id, day });
       saved = existing?.state === 'open' && !existing.approval_request_id ? await this.repo.update('stock_differences', existing.id, { ledger, inventory }) : null;
     }
