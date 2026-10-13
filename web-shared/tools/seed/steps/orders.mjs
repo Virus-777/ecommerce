@@ -10,12 +10,12 @@ import { ORDERS, SELLERS } from '../data.mjs';
 
 const RETURN_URL = 'http://127.0.0.1:3000/checkout/confirmation';
 const SPECIAL = new Set([2, 3, 4, 5, 6, 7, 12, 13, 14, 15, 22, 23]);
-const money = (m) => `$${(m.amount / 100).toFixed(2)}`;
+export const money = (m) => `$${(m.amount / 100).toFixed(2)}`;
 
 const sellerKeyOf = (ctx, sellerId) => (sellerId ? (SELLERS.find((s) => ctx.state.section('sellers')[s.key]?.sellerId === sellerId)?.key ?? null) : 'official');
 
 /** Cart line ids anywhere in a CartView */
-function cartLineIds(cart) {
+export function cartLineIds(cart) {
   const out = [];
   const walk = (v) => {
     if (Array.isArray(v)) return v.forEach(walk);
@@ -27,13 +27,13 @@ function cartLineIds(cart) {
   return [...new Set(out)];
 }
 
-async function clearCart(ctx, t) {
+export async function clearCart(ctx, t) {
   const cart = await ctx.api.get('/api/store/cart/cart', t);
   for (const id of cartLineIds(cart)) await ctx.api.del(`/api/store/cart/cart/items/${id}`, t).catch(() => {});
 }
 
 /** Places one order; returns the stored record { orderId, ref, groups } */
-async function place(ctx, o) {
+export async function place(ctx, o) {
   const { api, state, log } = ctx;
   const orders = state.section('orders');
   if (orders[o.key]?.orderId) return orders[o.key];
@@ -65,6 +65,7 @@ async function place(ctx, o) {
   const offerKeyById = Object.fromEntries(Object.entries(state.data.ids).filter(([k, v]) => k.startsWith('offer.') && v?.id).map(([k, v]) => [v.id, k.slice(6)]));
   const rec = {
     orderId: order.id,
+    checkoutSessionId: session.id,
     ref: order.ref,
     customer: o.customer,
     total: order.totals.total.amount,
@@ -83,11 +84,11 @@ async function place(ctx, o) {
   return rec;
 }
 
-const groupOf = (rec, seller) => rec.groups.find((g) => g.seller === seller);
-const itemOf = (rec, offerKey) => rec.groups.flatMap((g) => g.items.map((i) => ({ ...i, group: g }))).find((i) => i.offerKey === offerKey);
+export const groupOf = (rec, seller) => rec.groups.find((g) => g.seller === seller);
+export const itemOf = (rec, offerKey) => rec.groups.flatMap((g) => g.items.map((i) => ({ ...i, group: g }))).find((i) => i.offerKey === offerKey);
 
 /** The carrier's scans for one parcel, signed like the carrier would */
-async function carrierEvents(ctx, carrier, tracking, codes) {
+export async function carrierEvents(ctx, carrier, tracking, codes) {
   const where = { accepted: 'Origin facility', in_transit: 'In transit', out_for_delivery: 'Portland, OR', delivered: 'Portland, OR' };
   for (const code of codes) {
     const body = { id: `evt-${tracking}-${code}`, trackingNumber: tracking, code, at: new Date().toISOString(), description: code.replace(/_/g, ' '), location: where[code] ?? 'Portland, OR' };
@@ -101,14 +102,14 @@ async function sellerToken(ctx, g) {
   return ctx.sellerToken(g.seller);
 }
 
-async function prepare(ctx, g) {
+export async function prepare(ctx, g) {
   const t = await sellerToken(ctx, g);
   await ctx.api.post(`/api/seller/orders/orders/${g.id}/start-preparing`, t, undefined).catch((err) => {
     if (!(err instanceof ApiError) || err.status !== 409) throw err;
   });
 }
 
-async function sellerShip(ctx, rec, g, { carrier = 'ups', service = 'UPS Ground' } = {}) {
+export async function sellerShip(ctx, rec, g, { carrier = 'ups', service = 'UPS Ground' } = {}) {
   const t = await sellerToken(ctx, g);
   await prepare(ctx, g);
   const detail = await ctx.api.get(`/api/seller/orders/orders/${g.id}`, t);
@@ -123,7 +124,7 @@ async function sellerShip(ctx, rec, g, { carrier = 'ups', service = 'UPS Ground'
 }
 
 /** Official Store package through the warehouse: wave → pick → package → label → pack */
-async function officialShip(ctx, rec) {
+export async function officialShip(ctx, rec) {
   const { api, state } = ctx;
   const t = ctx.staff;
   const row = await poll(`${rec.ref} in the warehouse queue`, async () => {
@@ -162,7 +163,7 @@ async function officialShip(ctx, rec) {
   return { carrier, tracking };
 }
 
-async function runGroupPlan(ctx, rec, seller, plan) {
+export async function runGroupPlan(ctx, rec, seller, plan) {
   const g = groupOf(rec, seller);
   if (!g) return ctx.log.warn(`${rec.ref}: no ${seller} package`);
   const what = typeof plan === 'string' ? plan : plan.do;
@@ -210,7 +211,7 @@ async function cancelAll(ctx, rec, a) {
   ctx.log.info(`${rec.ref}: cancelled by the customer`);
 }
 
-async function returnRequest(ctx, rec, a) {
+export async function returnRequest(ctx, rec, a) {
   const it = itemOf(rec, a.item);
   const t = ctx.customerToken(rec.customer);
   const created = await ctx.api.post('/api/store/returns/requests', t, { orderId: rec.orderId, items: [{ orderItemId: it.id, quantity: 1 }], reason: a.reason, details: a.details, remedy: 'refund' }, { idem: randomUUID() });

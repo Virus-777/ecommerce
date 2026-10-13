@@ -31,15 +31,21 @@ export const isTokenProblem = (status: number, body: unknown): boolean =>
   status === 401 && String((body as ErrorBody | undefined)?.error?.details?.reason ?? '').startsWith('token_');
 
 export async function toApiError(res: Response): Promise<ApiError> {
-  const requestId = res.headers.get('x-request-id');
-  let body: ErrorBody | undefined;
+  let body: unknown;
   try {
-    body = (await res.clone().json()) as ErrorBody;
+    body = await res.clone().json();
   } catch {
-    /* not JSON */
+    /* not JSON, or the body was already read */
   }
-  const e = body?.error;
-  return new ApiError(res.status, e?.code ?? (res.status >= 500 ? 'INTERNAL_ERROR' : 'HTTP_' + res.status), e?.message ?? res.statusText, e?.details ?? {}, requestId);
+  return apiErrorFrom(res, body);
+}
+
+/** An ApiError from a response whose body was already parsed (openapi-fetch reads it into `error`). */
+export function apiErrorFrom(res: Response, body: unknown): ApiError {
+  const requestId = res.headers.get('x-request-id');
+  const e = (body as ErrorBody | undefined)?.error;
+  const env = e && typeof e === 'object' ? e : undefined;
+  return new ApiError(res.status, env?.code ?? (res.status >= 500 ? 'INTERNAL_ERROR' : 'HTTP_' + res.status), env?.message ?? res.statusText, env?.details ?? {}, requestId);
 }
 
 /** A short, user-facing sentence for an error (the server's message, with a fallback for network failures). */

@@ -52,7 +52,7 @@ SEED_DEBUG=1 npm run seed -- --only verify    # log every request with its statu
 ```
 
 Steps, in order: `owners`, `taxonomy`, `media`, `official`, `sellers`, `promotions`, `content`, `customers`,
-`orders`, `reviews`, `verify`. A full run takes about **20–25 minutes**, mostly waiting for jobs: every upload
+`orders`, `reviews`, `design`, `verify`. A full run takes about **20–25 minutes**, mostly waiting for jobs: every upload
 waits for `media.process` (about 8–10 s each, ~70 uploads), refunds wait for `payments.process-refunds` (up to
 ~1 min), search waits for `search.process-dirty` (every 30 s).
 
@@ -75,6 +75,45 @@ delete `state.json` (or pass `--reset`) and run bootstrap-owner + the seed again
 | Customers | Jordan Lee (Home 2140 Alder St Apt 5, 97205, default; Work 815 SW 2nd Ave Floor 4, 97204; marketing consent), Mara Diaz, Devon Price, Ines Keller, Priya Kapoor, Sam Rivera |
 | Orders | Jordan: multi-seller order with WELCOME20 (Official Store delivered + return requested on the pour-over, Pixel & Port in transit, Casa Verde delayed), preparing (Trailhead), delivered skillet, backpack delivered → returned → refunded, cancelled shoes, speaker + cable kit with the cable kit cancelled by the seller, monitor in transit. Others: Aurora orders delivered for Mara, Devon, Ines, Priya; Sam's new and shipped orders. Payment with the dev adapter (`tok_visa`); seller shipments with carrier-format tracking numbers; Official Store packages through the warehouse (wave, pick, pack, label); deliveries by signed carrier webhooks |
 | Reviews | 6 reviews (Aurora 5★/4★/2★/5★, skillet, speaker), seller and Official Store responses, seller feedback, 6 questions with staff, seller and customer answers (one left unanswered) |
+| Design states (`design`) | The states the Customer Store design views show, for `/design/check` (see below): Jordan's cart (Aurora, pour-over, lamp, Pocket speaker, linen duvet: 3 packages); an order placed for the confirmation page; a cancellation requested (Casa Verde duvet); a failed delivery attempt (Pixel & Port SSDs, carrier `attempt_failed` webhook); a keyboard return received by Pixel & Port; a damaged kettle replaced by Casa Verde (replacement shipped, in transit); the pour-over return approved by the Official Store (QR drop-off) and a speaker return requested from Northwind; support cases open (duvet late, seller replied), decided (sheets never shipped: full refund) and two resolved; five conversations (Casa Verde, Pixel & Port, Northwind, Official Store, Marketly Support); Official Store out of Aurora Stone; coupons `HOMEWEEK15` and `NWA10` (clipped by Jordan); a review report by Jordan; a guest order (Taylor Brooks: skillet delivered, bottle in transit); checkouts with a declined payment, a payment being checked and a rejected coupon |
+
+## Design samples (`design` step)
+
+`npm run seed -- --only design` brings the live data to the states the store design shows and writes
+`web-shared/.seed/design-samples.json` (git-ignored, no secrets). `/design/check` in the store dev server reads it
+and opens every screen view on its record, in the right session (the `/design` index links to the same URLs):
+
+```json
+{
+  "customer": { "email": "jordan.lee@example.com", "first": "Jordan", "last": "Lee" },
+  "samples": {
+    "account/return@refund-sent": { "session": "customer", "params": { "ref": "RT-…" } },
+    "store/search-empty@": { "session": "visitor", "query": { "q": "halden aurora", "condition": "used", "priceMax": "10000" } },
+    "auth/guest-orders@found": {
+      "session": "visitor",
+      "query": { "ref": "MK-…" },
+      "before": [{ "method": "POST", "path": "/api/store/customers/guest-orders/lookup", "body": { "orderRef": "MK-…", "email": "…" } }]
+    }
+  }
+}
+```
+
+Keys are `<screenId>@<view>` (view `''` for the default). `params` and `query` build the URL with `href()` (the
+catalogue's `sample` fills missing params). `session` is `visitor` (signed out: a fresh guest session) or
+`customer` (dev Google sign-in as `customer`). `before` lists requests the check makes in that session first (a
+guest cart, a guest order look-up). The check runs the visitor rows first, then the customer rows, and ends signed
+in as Jordan. Views without a sample keep the catalogue example and are marked in the results.
+
+The step is re-runnable: finished stages are remembered in `state.json` → `design`, and records are looked up
+before they are made. Two kinds of state don't last, so **run the step again shortly before a check**:
+
+- Checkout sessions expire after 60 idle minutes (30 minutes after a declined payment). Jordan's cart and the
+  declined-payment and rejected-coupon checkouts are made again on every run (a declined payment creates no order).
+- The *payment being checked* checkout is made once only. The dev processor's uncertain answer is settled by the
+  `payments.check-uncertain` job (every 30 s), so the payment is pending for about a minute and then shows the
+  declined result. Each new attempt would be another (cancelled) order that counts against the Official Store's
+  purchase limit (3 per offer per customer in 30 days). That limit is also why Jordan's cart holds the Aurora in
+  Sage and the pour-over in Slate (the design shows Midnight black and Cream).
 
 ## Signing in
 
@@ -112,5 +151,5 @@ tools/seed/
   lib/files.mjs      PNG and PDF generators (zlib)
   lib/context.mjs    shared helpers: uploads, sign-in, tokens per person
   lib/state.mjs      state file
-  steps/*.mjs        one module per step
+  steps/*.mjs        one module per step (steps/design.mjs: design states + design-samples.json)
 ```

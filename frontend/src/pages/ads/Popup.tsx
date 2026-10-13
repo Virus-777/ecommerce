@@ -8,6 +8,9 @@ import { AdOverlay } from './data/overlay';
 // Design: pages/store/ads-popup.html: the category page with Marketly's welcome-coupon pop-up.
 // view "announcement" = the non-modal corner announcement (also queued after the coupon pop-up is closed,
 // since only one overlay shows at a time).
+// The page behind the pop-up is the design's Headphones category: /ads/popup has no :slug of its own, and an
+// empty slug asked GET /api/store/catalog/categories/ (not a category) and crashed on the missing `category`.
+const BEHIND = 'headphones';
 
 export default function Popup() {
   const [view, setView] = useView<'announcement'>();
@@ -18,7 +21,7 @@ export default function Popup() {
 
   return (
     <>
-      <Category />
+      <Category slug={BEHIND} />
       <AdOverlay open={!announcement} onClose={closeCoupon} className="shop-pop" labelledBy="pop-h" backdropCloses>
         <span className="x">
           <button type="button" className="icon-btn" aria-label="Close offer" data-dialog-close="" onClick={closeCoupon}>

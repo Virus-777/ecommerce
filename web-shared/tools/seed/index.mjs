@@ -19,6 +19,7 @@ import { contentStep } from './steps/content.mjs';
 import { customersStep } from './steps/customers.mjs';
 import { ordersStep } from './steps/orders.mjs';
 import { reviewsStep } from './steps/reviews.mjs';
+import { designStep } from './steps/design.mjs';
 import { verifyStep } from './steps/verify.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,7 @@ const STEPS = [
   ['customers', 'Customers with addresses', customersStep],
   ['orders', 'Orders: checkout, shipping, delivery, cancellations, returns', ordersStep],
   ['reviews', 'Reviews, seller feedback, questions and answers', reviewsStep],
+  ['design', 'States the store design shows, and the design check samples', designStep],
   ['verify', 'Check the store side with a visitor token', verifyStep],
 ];
 

@@ -42,14 +42,15 @@ function convert(node: Node, key: string): ReactNode {
   if (tag === 'br' || tag === 'hr') return tag === 'br' ? <br key={key} /> : <hr key={key} />;
   if (TABLE_TAGS.has(tag)) {
     if (tag === 'table') return <table key={key} className="table">{kids}</table>;
-    const props: Record<string, unknown> = { key };
+    // key goes to JSX directly: React warns when a spread props object carries it
+    const props: Record<string, unknown> = {};
     if (tag === 'th') props.scope = el.getAttribute('scope') === 'row' ? 'row' : el.closest('thead') ? 'col' : undefined;
     for (const a of ['colspan', 'rowspan'] as const) {
       const n = Number(el.getAttribute(a));
       if (Number.isInteger(n) && n > 1 && n < 50) props[a === 'colspan' ? 'colSpan' : 'rowSpan'] = n;
     }
     const T = tag as 'thead';
-    return <T {...props}>{kids.filter((k) => !(typeof k === 'string' && !k.trim() && tag !== 'td' && tag !== 'th'))}</T>;
+    return <T key={key} {...props}>{kids.filter((k) => !(typeof k === 'string' && !k.trim() && tag !== 'td' && tag !== 'th'))}</T>;
   }
   if (BLOCK_TAGS.has(tag) || INLINE_TAGS.has(tag)) {
     // h1 is the page's own heading; anything authored as h1/h5/h6 is folded into the allowed levels below.

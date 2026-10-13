@@ -5,6 +5,7 @@ import { ApiProvider } from '@marketly/web-shared/api';
 import { createAppRouter } from '@marketly/web-shared/routes';
 import '@marketly/web-shared/styles/marketly.css';
 import '@marketly/web-shared/styles/app.css';
+import { useDesignCheckSessions } from './app/design-check';
 import { SessionProvider } from './app/session';
 import { EMAIL_LINK_ROUTES } from './routes/email-links';
 import { PAGES } from './routes/pages';
@@ -20,6 +21,8 @@ const router = createAppRouter({
   notFound: PAGES['store/not-found']!,
   wrap: (children) => <SessionProvider>{children}</SessionProvider>,
   extraRoutes: EMAIL_LINK_ROUTES,
+  // /design/check (development only) opens each design sample as a visitor or as the sample customer
+  designCheck: import.meta.env.DEV ? { useSessions: useDesignCheckSessions } : undefined,
 });
 
 createRoot(document.getElementById('root')!).render(

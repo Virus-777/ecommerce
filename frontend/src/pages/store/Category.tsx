@@ -44,9 +44,11 @@ function CategoryTree({ ctx, name, total }: { ctx: SearchContext | undefined; na
   );
 }
 
-export default function Category() {
+/** `slug` overrides the route's :slug, for pages that show a category under their own URL (ads/popup). */
+export default function Category({ slug: fixedSlug }: { slug?: string } = {}) {
   const [view, setView] = useView<'filters-phone-sheet'>();
-  const { slug = '' } = useParams();
+  const params = useParams();
+  const slug = fixedSlug ?? params.slug ?? '';
   const { api } = useApi();
   const sheetOpen = view === 'filters-phone-sheet';
   const lp = useListingParams(['category']);

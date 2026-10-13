@@ -13,13 +13,13 @@ const iso = (ms) => new Date(ms).toISOString();
 
 const STACKING = { withSellerMarkdowns: true, withOtherCoupons: false, withFreeShipping: true, withFlashSalePrices: false };
 
-async function findCampaign(ctx, name) {
+export async function findCampaign(ctx, name) {
   const r = await ctx.api.get(`/api/admin/promotions/campaigns?q=${encodeURIComponent(name)}&limit=50`, ctx.staff);
   return (r.items ?? []).find((c) => c.name === name && !['cancelled', 'ended'].includes(c.status)) ?? null;
 }
 
 /** draft → in_review → approved → scheduled/live, from wherever the campaign is */
-async function launch(ctx, campaign) {
+export async function launch(ctx, campaign) {
   const { api } = ctx;
   let c = campaign;
   const step = async (path, token, body) => {
@@ -36,7 +36,7 @@ async function launch(ctx, campaign) {
   return c;
 }
 
-async function platformCampaign(ctx, key, body, after) {
+export async function platformCampaign(ctx, key, body, after) {
   const { api, state, log } = ctx;
   let c = state.get(`campaign.${key}`) ? await api.get(`/api/admin/promotions/campaigns/${state.get(`campaign.${key}`)}`, ctx.staff) : await findCampaign(ctx, body.name);
   if (!c) {

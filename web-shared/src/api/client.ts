@@ -1,5 +1,5 @@
 import createClient, { type Client } from 'openapi-fetch';
-import { ApiError, isTokenProblem, toApiError } from './errors';
+import { ApiError, apiErrorFrom, isTokenProblem, toApiError } from './errors';
 import type { paths } from './openapi';
 import type { Session } from './session';
 
@@ -42,7 +42,9 @@ export function createApi(session: Session, baseUrl = ''): Api {
  */
 export async function call<T>(p: Promise<{ data?: T; error?: unknown; response: Response }>): Promise<T> {
   const { data, error, response } = await p;
-  if (error !== undefined || !response.ok) throw await toApiError(response);
+  // openapi-fetch has already read the body into `error`: build the ApiError from it (the response can't be
+  // read or cloned again, so toApiError(response) would lose the code, message and details).
+  if (error !== undefined || !response.ok) throw error !== undefined ? apiErrorFrom(response, error) : await toApiError(response);
   return data as T;
 }
 

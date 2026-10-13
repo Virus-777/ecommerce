@@ -212,8 +212,9 @@ function OrderCard({ o }: { o: OrderListItem }) {
           </div>
           {/* Thumbnails carry no product id in the order list, so they open the order. */}
           <div className="acct-thumbs">
-            {o.thumbnails.map((t) => (
-              <Link key={t.id} to={to} aria-label={t.alt ?? o.ref}>
+            {/* Two lines can share a photo (a replacement line, the same product twice): key by position too. */}
+            {o.thumbnails.map((t, i) => (
+              <Link key={`${t.id}:${i}`} to={to} aria-label={t.alt ?? o.ref}>
                 <Img icon="package" tint="2" className="thumb" src={t.url} alt="" />
               </Link>
             ))}
