@@ -9,7 +9,8 @@ import { newId } from '../../../kernel/lib/ids.js';
 import type { ModuleContext } from '../../../kernel/module-system/index.js';
 import type * as common from '../../../spec/common.js';
 import { emptyTotals, type StoredAccount, type StoredCredit, type StoredPayment, type StoredQuote } from '../domain/rules.js';
-import type { CheckoutRepository, Owner, SessionRow } from '../ports.js';
+import type { Owner, SessionRow } from '../ports.js';
+import type { CheckoutRepository } from '../repository.js';
 
 export interface By {
   actor: common.Actor;

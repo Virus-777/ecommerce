@@ -28,7 +28,8 @@ import type {
 } from '../../spec/checkout.js';
 import { CONDITION_LABEL, emptyTotals, m, plural, type StoredAccount, type StoredQuote } from './domain/rules.js';
 import { checkoutSessionMachine } from './domain/state-machines.js';
-import type { CheckoutRepository, LineRow, Owner, SessionRow, TaxProvider } from './ports.js';
+import type { LineRow, Owner, SessionRow, TaxProvider } from './ports.js';
+import type { CheckoutRepository } from './repository.js';
 import { Core, SYSTEM, invalid, type By } from './service/core.js';
 import { Placement } from './service/placement.js';
 import { Quoter, included, type Draft } from './service/quote.js';
@@ -47,7 +48,7 @@ type Status = Parameters<typeof checkoutSessionMachine.next>[0];
 const EDITABLE_INFO = ['open', 'changes_pending', 'payment_failed'];
 
 /**
- * Checkout use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Checkout use cases. Depends only on its repository, the tax provider, the event bus, the clock and other modules' public APIs.
  * Each method maps to an endpoint, a publicApi function, a consumed event or a job in docs/api/spec/modules/checkout.json.
  */
 export class CheckoutService implements CheckoutPublicApi {
