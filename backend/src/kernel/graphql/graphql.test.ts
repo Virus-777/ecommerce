@@ -38,6 +38,7 @@ const fragment = /* GraphQL */ `
     demoHeavy: String @cost(weight: 400) @source(module: "demo", fn: "heavy")
     demoTree: DemoNode @source(module: "demo", fn: "tree")
     demoMe: String @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "demo", fn: "me")
+    demoPrices: [Money!]! @source(module: "demo", fn: "prices")
   }
 `;
 
@@ -51,6 +52,8 @@ const resolvers: ModuleResolvers = {
     demoHeavy: () => 'heavy',
     demoTree: () => node(1),
     demoMe: () => 'me',
+    // REST shapes, as most module resolvers return them; the second keeps a module's own text
+    demoPrices: () => [{ amount: 18900, currency: 'USD' }, { amount: 500, currency: 'USD', formatted: 'Five dollars' }],
   },
 };
 
@@ -214,6 +217,13 @@ describe('GraphQL kernel', () => {
       expect(itemOf(await post(app, 'admin', q, 'staff', 'demo.contact.view'))).toEqual(plain);
       expect(itemOf(await post(app, 'seller', q, 'seller', 'demo.contact.view'))).toEqual(plain);
       expect(itemOf(await post(app, 'store', q, 'customer'))).toEqual(plain);
+    });
+  });
+
+  describe('Money', () => {
+    it('formats every Money a resolver returns without its text, and keeps a text it gives', async () => {
+      const res = await post(app, 'store', { query: '{ demoPrices { amount currency formatted } }' });
+      expect(res.json()).toEqual({ data: { demoPrices: [{ amount: 18900, currency: 'USD', formatted: '$189.00' }, { amount: 500, currency: 'USD', formatted: 'Five dollars' }] } });
     });
   });
 

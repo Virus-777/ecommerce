@@ -39,6 +39,7 @@ import { forbidden, type Principal, type RequestAuth } from '../auth/index.js';
 import { maskValue } from '../auth/masking.js';
 import type { Config } from '../config/index.js';
 import { AppError, codeForStatus } from '../errors/index.js';
+import { format, type Money } from '../lib/money.js';
 import type { AuthKind } from '../spec/define.js';
 import { AREAS, composeSchema, directiveArg, parseFragments, type Fragment, type GraphQLArea } from './compose.js';
 import { costLimitRule } from './cost.js';
@@ -189,6 +190,8 @@ export function wireResolvers(schema: GraphQLSchema, resolvers: Map<string, Modu
         continue;
       }
       if (type.name === 'Query' && field.name === 'ping') field.resolve = () => 'pong';
+      // every Money in every module gets its display text here, so a resolver can return the REST { amount, currency }
+      if (type.name === 'Money' && field.name === 'formatted') field.resolve = (m: Money & { formatted?: string | null }) => m.formatted ?? format(m);
       const module = directiveArg(node, 'source', 'module') as string | undefined;
       if (module) {
         const fn = directiveArg(node, 'source', 'fn') as string;
