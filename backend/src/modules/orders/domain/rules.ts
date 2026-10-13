@@ -206,7 +206,7 @@ export function displayStatus(lifecycle: Lifecycle, items: readonly { state: str
 
 /* ------------------------------------------------------------------ money */
 
-/** Integer amount of a Money-like jsonb value */
+/** Integer amount of a Money-like json value */
 export const amountOf = (m: { amount?: number } | null | undefined) => m?.amount ?? 0;
 
 /** Sum of a line's discount allocations */

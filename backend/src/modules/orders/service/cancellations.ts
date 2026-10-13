@@ -11,7 +11,8 @@ import { newId } from '../../../kernel/lib/ids.js';
 import type { CancellableItem, CancellationLineInput, CancellationOptions, CancellationRequest, RefundPreview } from '../../../spec/orders.js';
 import { cancellationRequestMachine } from '../domain/state-machines.js';
 import { CANCELLABLE, fmt, is, marketlyFulfils, refundLines, respondBy, shortDate, SHIPPED_OR_LATER, sumMoney, type ItemState } from '../domain/rules.js';
-import type { CancellationRec, GroupRec, ItemRec, OrdersRepository, StoredCancellationLine } from '../ports.js';
+import type { CancellationRec, GroupRec, ItemRec, StoredCancellationLine } from '../ports.js';
+import type { OrdersRepository } from '../repository.js';
 import { Batch, invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import { Views } from './views.js';
 

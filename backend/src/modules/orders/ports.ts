@@ -1,8 +1,7 @@
 /**
- * What the orders service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts.
+ * Row types of the orders collections (typed json fields) and the list filters the repository
+ * (repository.ts) takes.
  */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as catalog from '../../spec/catalog.js';
 import type * as common from '../../spec/common.js';
 import type * as offers from '../../spec/offers.js';
@@ -86,17 +85,8 @@ export interface Recs {
   saved_filters: SavedFilterRec;
   order_facts: FactRec;
 }
-export type Table = keyof Recs;
-
-/** A column condition: a value (=), a list (in), null (is null) or an operator */
-export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not'; value: V | null };
-export type Where<R> = { [K in keyof R]?: Cond<R[K]> };
-
-export interface FindOptions<R> {
-  orderBy?: [keyof R & string, 'asc' | 'desc'][];
-  limit?: number;
-  forUpdate?: boolean;
-}
+/** The orders collections (spec tables) */
+export type TableName = keyof Recs;
 
 export interface CustomerOrderFilter {
   q?: string;
@@ -160,55 +150,4 @@ export interface ItemInfoRow {
   state: string;
   delivered_at: Date | null;
   return_window_ends_at: Date | null;
-}
-
-/** Persistence for this module's own tables: orders.orders, orders.seller_groups, orders.order_items, orders.item_state_log, orders.cancellations, orders.shipment_refs, orders.timeline, orders.notes, orders.documents, orders.saved_filters, orders.order_facts, orders.ref_sequences. */
-export interface OrdersRepository {
-  /** Runs fn in one transaction (nested calls join the outer one) */
-  transaction<T>(fn: (tx: OrdersRepository) => Promise<T>): Promise<T>;
-
-  /* generic table access (rows are mapped to typed jsonb at this boundary) */
-  get<T extends Table>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;
-  find<T extends Table>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]>;
-  count<T extends Table>(table: T, where: Where<Recs[T]>): Promise<number>;
-  insert<T extends Table>(table: T, row: Recs[T]): Promise<Recs[T]>;
-  insertMany<T extends Table>(table: T, rows: Recs[T][]): Promise<void>;
-  update<T extends Table>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
-  remove<T extends Table>(table: T, id: string): Promise<void>;
-
-  /** Inbox claim (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
-  claim(key: string): Promise<boolean>;
-  /** Inserts the order unless the (checkout session, attempt) pair already has one (then null) */
-  insertOrderIfNew(row: OrderRec): Promise<OrderRec | null>;
-  /** Inserts a fact unless the order already has one of that kind for the same source (then null) */
-  insertFactIfNew(row: FactRec): Promise<FactRec | null>;
-  upsertShipment(row: ShipmentRec): Promise<ShipmentRec>;
-
-  /* lists */
-  customerOrders(customerId: string, f: CustomerOrderFilter, page: PageRequest): Promise<common.Page<OrderRec>>;
-  customerTabCounts(customerId: string, placedFrom: Date | null): Promise<{ all: number; inProgress: number; delivered: number; returns: number; cancelled: number }>;
-  /** Packages (groups) of the customer's open orders that are delayed or past their dispatch deadline */
-  delayedGroupsOfCustomer(customerId: string, now: Date): Promise<GroupRec[]>;
-  sellerGroups(sellerId: string, f: SellerGroupFilter, page: PageRequest, now: Date): Promise<common.Page<GroupRec>>;
-  sellerCounts(sellerId: string, now: Date, endOfDay: Date): Promise<SellerCounts>;
-  sellerTiles(sellerIds: string[], now: Date, endOfDay: Date, since30d: Date): Promise<Map<string, { open: number; overdueDispatch: number; dueToday: number; cancellationRequests: number; cancellations30d: number }>>;
-  adminOrders(f: AdminOrderFilter, page: PageRequest, now: Date): Promise<common.Page<OrderRec>>;
-  adminCount(f: AdminOrderFilter, now: Date): Promise<number>;
-  guestOrdersByEmail(email: string): Promise<OrderRec[]>;
-  /** Whether the customer (or, without one, the contact email) has an order whose payment was accepted */
-  hasAcceptedOrder(who: { customerId?: string | null; email?: string | null }): Promise<boolean>;
-  /** Orders in a lifecycle, by id, in bounded batches (jobs) */
-  ordersInLifecycle(lifecycles: string[], afterId: string | null, limit: number): Promise<OrderRec[]>;
-  ordersWithOpenGroupsOfSeller(sellerId: string): Promise<GroupRec[]>;
-  countPurchased(customerId: string, offerId: string, since: Date): Promise<number>;
-  verifiedPurchase(customerId: string, productId: string): Promise<ItemRec | undefined>;
-  /** One item with its order, group and customer */
-  itemInfo(itemId: string): Promise<ItemInfoRow | undefined>;
-  /** Items delivered to the customer (delivered_at set), optionally since a time, newest delivery first */
-  deliveredItemsOf(customerId: string, since: Date | null): Promise<ItemInfoRow[]>;
-  itemCountsForProducts(productIds: string[]): Promise<{ product_id: string; open: number; past: number }[]>;
-  openInCategories(categoryIds: string[], placedBefore: Date): Promise<{ orders: number; items: number }>;
-  timelinePage(orderId: string, visibility: string | undefined, page: PageRequest): Promise<common.Page<TimelineRec>>;
-  dueCancellationRequests(now: Date, limit: number): Promise<CancellationRec[]>;
-  savedFiltersFor(staffId: string): Promise<SavedFilterRec[]>;
 }

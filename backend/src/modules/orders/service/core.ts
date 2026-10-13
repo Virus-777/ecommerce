@@ -13,7 +13,8 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import { orderItemMachine, orderLifecycleMachine } from '../domain/state-machines.js';
 import { displayStatus, groupStatus, is, OPEN_GROUP, paidOf, splitMoney, MINUTE, WAREHOUSE_STAGE_ENTRY, type ItemState, type Lifecycle } from '../domain/rules.js';
-import type { CancellationRec, DocumentRec, FactRec, FlagData, GroupRec, ItemRec, OrderRec, OrdersRepository, ShipmentRec, TimelineRec } from '../ports.js';
+import type { CancellationRec, DocumentRec, FactRec, FlagData, GroupRec, ItemRec, OrderRec, ShipmentRec, TimelineRec } from '../ports.js';
+import type { OrdersRepository } from '../repository.js';
 
 export interface OrdersServiceDeps {
   repo: OrdersRepository;
@@ -177,15 +178,14 @@ export class Core {
     const ids = [...new Set(orderIds)];
     const out = new Map<string, Agg>();
     if (!ids.length) return out;
-    const [orders, groups, items, cancellations, shipments, documents, facts] = await Promise.all([
-      repo.find('orders', { id: ids }),
-      repo.find('seller_groups', { order_id: ids }, { orderBy: [['position', 'asc']] }),
-      repo.find('order_items', { order_id: ids }, { orderBy: [['id', 'asc']] }),
-      repo.find('cancellations', { order_id: ids }, { orderBy: [['created_at', 'asc']] }),
-      repo.find('shipment_refs', { order_id: ids }, { orderBy: [['shipment_id', 'asc']] }),
-      repo.find('documents', { order_id: ids }, { orderBy: [['issued_at', 'asc']] }),
-      repo.find('order_facts', { order_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
-    ]);
+    // one read after another: inside a transaction (lockAndLoad) the session runs one operation at a time
+    const orders = await repo.find('orders', { id: ids });
+    const groups = await repo.find('seller_groups', { order_id: ids }, { orderBy: [['position', 'asc']] });
+    const items = await repo.find('order_items', { order_id: ids }, { orderBy: [['id', 'asc']] });
+    const cancellations = await repo.find('cancellations', { order_id: ids }, { orderBy: [['created_at', 'asc']] });
+    const shipments = await repo.find('shipment_refs', { order_id: ids }, { orderBy: [['shipment_id', 'asc']] });
+    const documents = await repo.find('documents', { order_id: ids }, { orderBy: [['issued_at', 'asc']] });
+    const facts = await repo.find('order_facts', { order_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
     for (const o of orders) out.set(o.id, { order: o, groups: [], items: [], cancellations: [], shipments: [], documents: [], factRows: [], facts: {} });
     for (const g of groups) out.get(g.order_id)?.groups.push(g);
     for (const i of items) out.get(i.order_id)?.items.push(i);
