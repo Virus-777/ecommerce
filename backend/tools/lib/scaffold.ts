@@ -38,7 +38,7 @@ export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields }:
     return `import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/${n}.js';
 ${hasFragment ? `import { resolvers } from './graphql/resolvers.js';\nimport { typeDefs } from './graphql/schema.js';\n` : ''}${areas.map((a) => `import { ${a}Routes } from './http/${a}.js';`).join('\n')}
-import { createMongo${P}Repository } from './repository.js';
+import { ${P}Repository } from './repository.js';
 import { schemas } from './schema.js';
 import { ${P}Service } from './service.js';
 
@@ -53,7 +53,7 @@ export default defineModule({
   version: '0.1.0',
   schemas,${hasFragment ? '\n  graphql: typeDefs,' : ''}
   register(ctx) {
-    const service = new ${P}Service({ repo: createMongo${P}Repository(ctx.mongo), ctx });
+    const service = new ${P}Service({ repo: new ${P}Repository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(${areas.map((a) => `${a}Routes(service)`).join(', ')});${hasFragment ? '\n    ctx.graphql.resolvers(resolvers(service));' : ''}${wiring.map((l) => (l ? `\n    ${l}` : '\n')).join('')}
   },
@@ -74,27 +74,24 @@ import { spec } from '../../spec/${n}.js';
 export const { permissions, approvalActions } = spec;
 `;
 
-  files['ports.ts'] = () => {
+  files['repository.ts'] = () => {
     const tables = (mod.tables ?? []).map((t) => `${n}.${t.name}`);
-    return `/**
- * What the ${n} service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts (backend/docs/BUILDING-MODULES.md §5b).
+    return `import type { ModuleStore } from '../../kernel/mongo/index.js';
+
+/**
+ * The ${n} module's collections: ${tables.join(', ') || '(none)'}. One Table per spec table
+ * (store.table(name)); the kernel helpers are listed in backend/docs/BUILDING-MODULES.md §5b.
  */
+export class ${P}Repository {
+  constructor(private readonly store: ModuleStore) {}
 
-/** Persistence for this module's own collections: ${tables.join(', ') || '(none)'}. */
-export interface ${P}Repository {}
-`;
-  };
-
-  files['repository.ts'] = () => `import type { ModuleStore } from '../../kernel/mongo/index.js';
-import type { ${P}Repository } from './ports.js';
-
-/** MongoDB adapter for ${P}Repository (backend/docs/BUILDING-MODULES.md §5b): one collection per spec table, store.table(name). */
-export function createMongo${P}Repository(store: ModuleStore): ${P}Repository {
-  void store;
-  return {};
+  /** fn with a repository bound to one transaction */
+  transaction<T>(fn: (tx: ${P}Repository) => Promise<T>): Promise<T> {
+    return this.store.transaction((tx) => fn(new ${P}Repository(tx)));
+  }
 }
 `;
+  };
 
   files['domain/state-machines.ts'] = () => {
     const machines = mod.stateMachines ?? [];
@@ -120,7 +117,7 @@ ${machines.map((m) => `\n${doc(`${m.name}: ${m.field}${m.notes ? `. ${m.notes}` 
     return `import { notImplemented } from '../../kernel/errors/index.js';
 ${consumes.length ? `import type { EventPayload } from '../../kernel/events/index.js';\n` : ''}import type { ModuleContext } from '../../kernel/module-system/index.js';
 ${specImports.map((m) => `import type * as ${camel(m)} from '../../spec/${m}.js';\n`).join('')}import type { ${[`${P}PublicApi`, ...ownTypes].join(', ')} } from '../../spec/${n}.js';
-import type { ${P}Repository } from './ports.js';
+import type { ${P}Repository } from './repository.js';
 
 export interface ${P}ServiceDeps {
   repo: ${P}Repository;
@@ -128,7 +125,7 @@ export interface ${P}ServiceDeps {
 }
 
 /**
- * ${mod.title} use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * ${mod.title} use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/${n}.json.
  */
 export class ${P}Service implements ${P}PublicApi {
