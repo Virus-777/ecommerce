@@ -4,7 +4,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { spec } from '../../../spec/catalog.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import { api, brand, category, catalogApp, newId, productInput, sellerProduct, uploadImage, type CatalogTestApp } from './helpers.js';
 
 const DAY = 86_400_000;

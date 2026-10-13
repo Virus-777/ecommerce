@@ -5,9 +5,9 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoSupportRepository } from './infra/mongo/repository.js';
+import { createMongoSupportRepository } from './repository.js';
 import { SupportService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Support: Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules.

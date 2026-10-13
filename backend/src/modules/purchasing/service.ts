@@ -70,7 +70,7 @@ import {
   type RefFormat,
 } from './domain/rules.js';
 import { deliveryMachine, purchaseOrderMachine, receiptMachine, supplierClaimMachine } from './domain/state-machines.js';
-import { createInventoryStockDirectory } from './infra/inventory/stock-directory.js';
+import { createInventoryStockDirectory } from './providers/stock-directory.js';
 import type { ClaimRow, PoEventRow, PoLineRow, PoRow, PurchasingRepository, ReceiptLineRow, ReceiptRow, StockDirectory, StockInfo, SupplierItemRow, SupplierRow } from './ports.js';
 import { PurchasingViews } from './views.js';
 

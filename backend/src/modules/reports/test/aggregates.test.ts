@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { spec } from '../../../spec/reports.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import type { OrderItemFact, ReportsRepository } from '../ports.js';
 import { harness, type Harness } from './harness.js';
 

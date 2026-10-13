@@ -8,13 +8,13 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { fileServer } from './http/files.js';
-import { createMongoMediaRepository } from './infra/mongo/repository.js';
-import { createDevProcessor } from './infra/processing/dev.js';
-import { createDevScanner } from './infra/scanner/dev.js';
-import { createLocalStorage } from './infra/storage/local.js';
-import { createMemoryStorage } from './infra/storage/memory.js';
+import { createMongoMediaRepository } from './repository.js';
+import { createDevProcessor } from './providers/processing/dev.js';
+import { createDevScanner } from './providers/scanner.js';
+import { createLocalStorage } from './providers/storage/local.js';
+import { createMemoryStorage } from './providers/storage/memory.js';
 import { MediaService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Media: Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted).

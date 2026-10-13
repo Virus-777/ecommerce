@@ -6,13 +6,13 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { createMongoNotificationsRepository } from './infra/mongo/repository.js';
+import { createMongoNotificationsRepository } from './repository.js';
 import { NotificationsService } from './service.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
-import { createDevEmailProvider } from './infra/email/dev.js';
-import { createDevSmsProvider } from './infra/sms/dev.js';
-import { createDevPushProvider } from './infra/push/dev.js';
-import { schemas } from './infra/mongo/schema.js';
+import { createDevEmailProvider } from './providers/email.js';
+import { createDevSmsProvider } from './providers/sms.js';
+import { createDevPushProvider } from './providers/push.js';
+import { schemas } from './schema.js';
 
 /**
  * Notifications: Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3).

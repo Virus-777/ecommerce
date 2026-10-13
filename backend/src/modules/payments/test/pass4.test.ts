@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { devWebhook } from '../infra/card-processor/dev.js';
+import { devWebhook } from '../providers/card-processor.js';
 import { authorizeInput, harness, placeOrder, tokens, type Harness } from './helpers.js';
 
 let h: Harness;

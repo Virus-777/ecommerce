@@ -24,7 +24,7 @@ import type * as trust from '../../../spec/trust.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
 import type { MessagingService } from '../service.js';
 import { spec } from '../../../spec/messaging.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 
 export const USD = (amount: number) => ({ amount, currency: 'USD' });
 

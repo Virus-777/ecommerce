@@ -4,9 +4,9 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoContentRepository } from './infra/mongo/repository.js';
+import { createMongoContentRepository } from './repository.js';
 import { ContentService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Content: Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.

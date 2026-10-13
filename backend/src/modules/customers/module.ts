@@ -5,10 +5,10 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
-import { devAddressProvider } from './infra/address/dev.js';
-import { createMongoCustomersRepository } from './infra/mongo/repository.js';
+import { devAddressProvider } from './providers/address.js';
+import { createMongoCustomersRepository } from './repository.js';
 import { CustomersService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Customers: The customer side of an account: profile, saved addresses, marketing consent, recently viewed products, the Account tab overview, guest order access, data export and account closure, and the staff view of customer accounts with notes and recorded account actions. Credentials, sessions and verification belong to identity.

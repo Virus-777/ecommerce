@@ -13,8 +13,8 @@ import type * as customers from '../../../spec/customers.js';
 import type * as identity from '../../../spec/identity.js';
 import { auth, buildTestApp, token } from '../../../testing/app.js';
 import { spec } from '../../../spec/notifications.js';
-import { devOutbox } from '../infra/dev-outbox.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { devOutbox } from '../providers/dev-outbox.js';
+import { schemas } from '../schema.js';
 import type { NotificationsService } from '../service.js';
 
 export interface Person {

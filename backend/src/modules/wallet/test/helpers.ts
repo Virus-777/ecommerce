@@ -22,7 +22,7 @@ import type { OrderDetail } from '../../../spec/orders.js';
 import type { BuildOptions } from '../../../app.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
 import { spec } from '../../../spec/wallet.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import type { WalletService } from '../service.js';
 
 /** A collection of the module, as its repository reads it (rows in spec shape) */

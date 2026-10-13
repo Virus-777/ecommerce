@@ -4,9 +4,9 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoWishlistRepository } from './infra/mongo/repository.js';
+import { createMongoWishlistRepository } from './repository.js';
 import { WishlistService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Wishlist: Saved shopping for customers: saved items in one or more lists, price-drop and back-in-stock alerts, and shareable lists. Alerts are delivered through notifications under the customer's promotional preferences.

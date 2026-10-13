@@ -16,7 +16,7 @@
  * is approximated; fuzzy scoring and the term suggester's ranking are simplified; no cluster behaviour
  * (replicas, timeouts, partial shard failures) beyond the faults a test injects.
  */
-import { SCRIPT_TWINS, type DocValues } from '../../infra/opensearch/scripts.js';
+import { SCRIPT_TWINS, type DocValues } from '../../providers/opensearch/scripts.js';
 import { analysisOf, autoEdits, editDistance, type Analysis, type Token } from './analysis.js';
 
 type Json = any;

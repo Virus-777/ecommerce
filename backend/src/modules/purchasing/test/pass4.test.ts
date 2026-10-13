@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { spec, type PurchasingPublicApi } from '../../../spec/purchasing.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import { api, LOCATION, makeStubs, purchasingApp, usd } from './helpers.js';
 
 const stubs = makeStubs();

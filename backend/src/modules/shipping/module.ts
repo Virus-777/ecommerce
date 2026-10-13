@@ -7,10 +7,10 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { devCarrierAdapter } from './infra/carriers/dev.js';
-import { createMongoShippingRepository } from './infra/mongo/repository.js';
+import { devCarrierAdapter } from './providers/carriers.js';
+import { createMongoShippingRepository } from './repository.js';
 import { ShippingService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Shipping: How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims.

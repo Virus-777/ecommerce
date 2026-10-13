@@ -1,7 +1,7 @@
 import { newId } from '../../../kernel/lib/ids.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { resolvers } from '../graphql/resolvers.js';
-import { devWebhook } from '../infra/card-processor/dev.js';
+import { devWebhook } from '../providers/card-processor.js';
 import { harness, idem, placeOrder, tokens, USD, type Harness } from './helpers.js';
 
 let h: Harness;

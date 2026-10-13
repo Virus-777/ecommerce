@@ -1,9 +1,9 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/purchasing.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoPurchasingRepository } from './infra/mongo/repository.js';
+import { createMongoPurchasingRepository } from './repository.js';
 import { PurchasingService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Purchasing: Buying stock for the Official Store: suppliers and their price lists, purchase orders (Draft, Sent, Partly received, Received, Cancelled) with buying costs and expected deliveries, receiving records (expected vs received, shortages, damage) that feed inventory, and supplier claims.

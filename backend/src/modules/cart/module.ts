@@ -4,8 +4,8 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoCartRepository } from './infra/mongo/repository.js';
-import { schemas } from './infra/mongo/schema.js';
+import { createMongoCartRepository } from './repository.js';
+import { schemas } from './schema.js';
 import { CartService } from './service.js';
 
 /**

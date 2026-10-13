@@ -14,7 +14,7 @@ import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
-import type { DevPayoutProvider } from '../infra/provider/dev.js';
+import type { DevPayoutProvider } from '../providers/payouts.js';
 import type { FinanceService } from '../service.js';
 
 export const SELLER = '/api/seller/finance';

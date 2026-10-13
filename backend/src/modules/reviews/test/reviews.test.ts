@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { spec } from '../../../spec/reviews.js';
 import { resolvers } from '../graphql/resolvers.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import { boot, DAY, type Kit, LONG, OFFICIAL_STORE_ID, order, product, reviewInput, seller, STORE, tokens } from './helpers.js';
 
 let k: Kit;

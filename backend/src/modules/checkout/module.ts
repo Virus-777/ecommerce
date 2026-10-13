@@ -4,10 +4,10 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoCheckoutRepository } from './infra/mongo/repository.js';
-import { createDevTaxProvider } from './infra/tax/dev.js';
+import { createMongoCheckoutRepository } from './repository.js';
+import { createDevTaxProvider } from './providers/tax.js';
 import { CheckoutService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Checkout: Turns a cart (or a Buy now offer) into an accepted order: identify the customer or guest, choose an address with a per-item shippability check, pick delivery options per package, apply coupons or credit with reasons and item coverage, choose payment, review sellers, return terms and totals, revalidate into a change set the customer must accept, and place the order idempotently with clear payment results.

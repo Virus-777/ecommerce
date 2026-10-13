@@ -14,9 +14,9 @@ import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
-import { readSearchEngineConfig, type OpenSearchConfig } from '../infra/config.js';
-import { createOpenSearchClient, OsApi } from '../infra/opensearch/client.js';
-import { openSearchTesting } from '../infra/select.js';
+import { readSearchEngineConfig, type OpenSearchConfig } from '../engine-config.js';
+import { createOpenSearchClient, OsApi } from '../providers/opensearch/client.js';
+import { openSearchTesting } from '../engine-select.js';
 import type { SearchService } from '../service.js';
 import { fakeClientOptions, FakeOpenSearch } from './opensearch-fake/connection.js';
 

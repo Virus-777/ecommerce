@@ -11,7 +11,7 @@ import { allSpecs, withDependencies } from '../../../kernel/module-system/loader
 import { auth, buildTestApp, movingClock, tokenClock } from '../../../testing/app.js';
 import { flows, type Flows, type Listing } from '../../../testing/flows.js';
 import { spec } from '../../../spec/wishlist.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import type { WishlistService } from '../service.js';
 
 const clock = movingClock();

@@ -4,9 +4,9 @@
  * for process-dirty). Runs on the in-memory fake (test/opensearch-fake).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createOpenSearchClient, OsApi } from '../infra/opensearch/client.js';
-import { MAPPING_VERSION, productIndexBody } from '../infra/opensearch/mapping.js';
-import { ProductIndex } from '../infra/opensearch/products-index.js';
+import { createOpenSearchClient, OsApi } from '../providers/opensearch/client.js';
+import { MAPPING_VERSION, productIndexBody } from '../providers/opensearch/mapping.js';
+import { ProductIndex } from '../providers/opensearch/products-index.js';
 import type { DocRow, IndexedDocument, SearchRepository } from '../ports.js';
 import { boot, newId, STORE, testOpenSearchConfig, type Kit } from './helpers.js';
 import { fakeClientOptions, FakeOpenSearch } from './opensearch-fake/connection.js';

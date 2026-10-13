@@ -3,9 +3,9 @@ import { spec } from '../../spec/warehouse.js';
 import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoWarehouseRepository } from './infra/mongo/repository.js';
+import { createMongoWarehouseRepository } from './repository.js';
 import { WarehouseService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Warehouse: Physical work for Official Store stock and Fulfilled by Marketly (seller-owned stock at the service location): bins, put-away of received goods, pick waves and pick lists by order with bin locations and scanning, packing stations (item checklist, box and weight, carrier label through shipping, packing slip), shortage and damage reports, and receipt of return parcels handed over to returns inspection.

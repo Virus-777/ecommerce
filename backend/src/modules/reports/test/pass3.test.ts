@@ -4,7 +4,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import { spec } from '../../../spec/reports.js';
 import { splitRefund } from '../domain/rules.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import { harness, usd, type Harness } from './harness.js';
 
 let h: Harness;

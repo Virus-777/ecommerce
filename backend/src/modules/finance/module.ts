@@ -7,10 +7,10 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { createMongoFinanceRepository } from './infra/mongo/repository.js';
-import { createDevPayoutProvider } from './infra/provider/dev.js';
+import { createMongoFinanceRepository } from './repository.js';
+import { createDevPayoutProvider } from './providers/payouts.js';
 import { FinanceService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Finance: Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.

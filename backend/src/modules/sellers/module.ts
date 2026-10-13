@@ -6,11 +6,11 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { createMongoSellersRepository } from './infra/mongo/repository.js';
+import { createMongoSellersRepository } from './repository.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
-import { devProviders } from './infra/providers/dev.js';
+import { devProviders } from './providers/dev.js';
 import { SellersService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Sellers: Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals.

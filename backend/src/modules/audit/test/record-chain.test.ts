@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
-import { normalizeIp } from '../infra/mongo/text.js';
+import { normalizeIp } from '../text.js';
 import { auditApi, auditTable, entry, staffActor, waitForEvents } from './helpers.js';
 
 const ROLES = [{ id: newId(), key: 'finance_manager', name: 'Finance Manager' }];

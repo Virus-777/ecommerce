@@ -3,8 +3,8 @@ import { spec } from '../../spec/access.js';
 import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoAccessRepository } from './infra/mongo/repository.js';
-import { schemas } from './infra/mongo/schema.js';
+import { createMongoAccessRepository } from './repository.js';
+import { schemas } from './schema.js';
 import { AccessService } from './service.js';
 
 /**

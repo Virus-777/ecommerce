@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { devClaims } from '../../../kernel/auth/dev.js';
 import { signWebhook, token } from '../../../testing/app.js';
-import { EICAR } from '../infra/scanner/dev.js';
+import { EICAR } from '../providers/scanner.js';
 import { auth, callers, jpeg, mediaApp, mediaTable, mp4, pdf, png, sha256, startUpload, uploadFile, type MediaTestApp } from './helpers.js';
 
 let t: MediaTestApp;

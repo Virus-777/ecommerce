@@ -3,9 +3,9 @@ import { spec } from '../../spec/fulfillment-service.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { seed } from './domain/seed.js';
-import { createMongoFulfillmentServiceRepository } from './infra/mongo/repository.js';
+import { createMongoFulfillmentServiceRepository } from './repository.js';
 import { FulfillmentServiceService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Fulfillment service: Platform storage and shipping for sellers: seller enrollment under service terms, SKU enrollment, inbound shipments to our warehouse, receiving into seller-owned stock, picking and shipping by us while the seller stays the seller of record, returns handling, removal of stock, and storage and handling fees with full seller visibility.

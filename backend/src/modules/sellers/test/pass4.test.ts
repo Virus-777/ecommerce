@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { spec } from '../../../spec/sellers.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import { ADMIN, approvedSeller, boot, type Kit, payoutInput, restrictionInput, SELLER, staff } from './helpers.js';
 
 let kit: Kit;

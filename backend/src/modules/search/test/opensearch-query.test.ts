@@ -1,14 +1,14 @@
 /** OpenSearch adapter, pure parts: query translation (exact request bodies), documents, scripts, configuration. */
 import { describe, expect, it } from 'vitest';
-import { readSearchEngineConfig } from '../infra/config.js';
-import { OsApi, createOpenSearchClient } from '../infra/opensearch/client.js';
-import { cardOrder, cutoffText, docOf, fieldsOf, sourceOf } from '../infra/opensearch/document.js';
-import { createOpenSearchEngine } from '../infra/opensearch/engine.js';
-import { MAPPING_VERSION, productIndexBody, TEXT_FIELDS } from '../infra/opensearch/mapping.js';
-import { ProductIndex } from '../infra/opensearch/products-index.js';
-import { countBody, facetsBody, offerConds, priceRangeBodies, priceStreamBodies, priceStreams, scoredQuery, searchBody, summaryBody, textMatch, textQuery, where, type Weights } from '../infra/opensearch/query.js';
-import { DOC_FACTORS, EO_FACTORS, EO_KEY, EO_MAX_RANK, SCRIPT_TWINS, TEXT_RELEVANCE, VERSIONED_WRITE, docFactors, eoFactors } from '../infra/opensearch/scripts.js';
-import { similarity } from '../infra/opensearch/trigram.js';
+import { readSearchEngineConfig } from '../engine-config.js';
+import { OsApi, createOpenSearchClient } from '../providers/opensearch/client.js';
+import { cardOrder, cutoffText, docOf, fieldsOf, sourceOf } from '../providers/opensearch/document.js';
+import { createOpenSearchEngine } from '../providers/opensearch/engine.js';
+import { MAPPING_VERSION, productIndexBody, TEXT_FIELDS } from '../providers/opensearch/mapping.js';
+import { ProductIndex } from '../providers/opensearch/products-index.js';
+import { countBody, facetsBody, offerConds, priceRangeBodies, priceStreamBodies, priceStreams, scoredQuery, searchBody, summaryBody, textMatch, textQuery, where, type Weights } from '../providers/opensearch/query.js';
+import { DOC_FACTORS, EO_FACTORS, EO_KEY, EO_MAX_RANK, SCRIPT_TWINS, TEXT_RELEVANCE, VERSIONED_WRITE, docFactors, eoFactors } from '../providers/opensearch/scripts.js';
+import { similarity } from '../providers/opensearch/trigram.js';
 import type { DocRow, EngineQuery, OfferRow } from '../ports.js';
 import { testOpenSearchConfig } from './helpers.js';
 import { fakeClientOptions, FakeOpenSearch } from './opensearch-fake/connection.js';

@@ -7,10 +7,10 @@ import type { EventEnvelope } from '../../../kernel/events/index.js';
 import type * as audit from '../../../spec/audit.js';
 import type { Table } from '../../../kernel/mongo/index.js';
 import { spec, type MediaAsset, type MediaDb, type UploadRequest, type UploadTicket } from '../../../spec/media.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
-import type { DevProcessor } from '../infra/processing/dev.js';
-import type { MemoryStorage } from '../infra/storage/memory.js';
+import type { DevProcessor } from '../providers/processing/dev.js';
+import type { MemoryStorage } from '../providers/storage/memory.js';
 import type { MediaService } from '../service.js';
 
 export { auth, callers };

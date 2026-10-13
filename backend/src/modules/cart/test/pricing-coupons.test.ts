@@ -8,7 +8,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import { spec } from '../../../spec/cart.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import type { CartDb } from '../../../spec/cart.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as promotions from '../../../spec/promotions.js';

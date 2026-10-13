@@ -20,7 +20,7 @@ import type * as audit from '../../../spec/audit.js';
 import { spec, type InventoryPublicApi, type StockItem } from '../../../spec/inventory.js';
 import type * as reports from '../../../spec/reports.js';
 import { auth, buildTestApp, token } from '../../../testing/app.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 
 export const INVENTORY_EVENTS = [
   'inventory.stock.changed',

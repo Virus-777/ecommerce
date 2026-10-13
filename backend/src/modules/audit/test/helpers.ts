@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { Table } from '../../../kernel/mongo/index.js';
 import { spec, type AuditDb, type AuditPublicApi, type RecordInput } from '../../../spec/audit.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 
 export const auditApi = (app: FastifyInstance) => app.kernel.boot.apis.get('audit') as AuditPublicApi;
 

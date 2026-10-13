@@ -10,7 +10,7 @@ import { withDependencies } from '../../../kernel/module-system/loader.js';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
 import type { Table } from '../../../kernel/mongo/index.js';
 import { spec, type AccessDb } from '../../../spec/access.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as identity from '../../../spec/identity.js';
 import type { AccessService } from '../service.js';

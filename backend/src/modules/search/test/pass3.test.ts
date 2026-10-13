@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dateInZone } from '../../../kernel/lib/clock.js';
 import { spec, type SearchDb } from '../../../spec/search.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import { boot, callers, newId, STORE, ADMIN, type Kit } from './helpers.js';
 
 let k: Kit;

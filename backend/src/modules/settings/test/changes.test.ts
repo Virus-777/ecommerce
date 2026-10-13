@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spec } from '../../../spec/settings.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 import { decided, draft, harness, inDays, inMinutes, staff, submit, type Harness } from './helpers.js';
 
 let h: Harness;

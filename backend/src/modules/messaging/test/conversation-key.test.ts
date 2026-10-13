@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { buildTestApp } from '../../../testing/app.js';
 import { spec } from '../../../spec/messaging.js';
-import { schemas } from '../infra/mongo/schema.js';
+import { schemas } from '../schema.js';
 
 let app: FastifyInstance;
 beforeAll(async () => {

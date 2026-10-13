@@ -10,9 +10,9 @@
  * their JavaScript twins, the analyzers, mapping and aggregations are accepted, aliases swap.
  */
 import { afterAll, describe, expect, it } from 'vitest';
-import { createOpenSearchClient, OsApi } from '../infra/opensearch/client.js';
-import { MAPPING_VERSION } from '../infra/opensearch/mapping.js';
-import { ProductIndex } from '../infra/opensearch/products-index.js';
+import { createOpenSearchClient, OsApi } from '../providers/opensearch/client.js';
+import { MAPPING_VERSION } from '../providers/opensearch/mapping.js';
+import { ProductIndex } from '../providers/opensearch/products-index.js';
 import { engineContract } from './engine-contract.js';
 import { dropLiveIndices, liveOpenSearchConfig } from './helpers.js';
 

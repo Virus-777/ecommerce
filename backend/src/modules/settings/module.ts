@@ -5,8 +5,8 @@ import { typeDefs } from './graphql/schema.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
-import { createMongoSettingsRepository } from './infra/mongo/repository.js';
-import { schemas } from './infra/mongo/schema.js';
+import { createMongoSettingsRepository } from './repository.js';
+import { schemas } from './schema.js';
 import { SettingsService } from './service.js';
 
 /**

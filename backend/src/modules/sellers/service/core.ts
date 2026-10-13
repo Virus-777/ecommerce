@@ -18,7 +18,7 @@ import type * as common from '../../../spec/common.js';
 import type { AgreementDocument } from '../../../spec/sellers.js';
 import { AGREEMENT_KEYS, agreementDocument, DEFAULT_AGREEMENT_VERSION, type AgreementKey } from '../domain/catalogue.js';
 import type { StoredPayout } from '../domain/rules.js';
-import { taxIdCipher, type TaxIdCipher } from '../infra/crypto.js';
+import { taxIdCipher, type TaxIdCipher } from '../crypto.js';
 import { actorText, type Refs } from '../mappers.js';
 import type { AccountEventRec, ApplicationRec, PayoutChangeRec, PendingChangeRec, SellerRec, SellersProviders, SellersRepository } from '../ports.js';
 import type { AccountsPart } from './accounts.js';

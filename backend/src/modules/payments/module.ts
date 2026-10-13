@@ -6,10 +6,10 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { createDevCardProcessor } from './infra/card-processor/dev.js';
-import { createMongoPaymentsRepository } from './infra/mongo/repository.js';
+import { createDevCardProcessor } from './providers/card-processor.js';
+import { createMongoPaymentsRepository } from './repository.js';
 import { PaymentsService } from './service.js';
-import { schemas } from './infra/mongo/schema.js';
+import { schemas } from './schema.js';
 
 /**
  * Payments: Charging customers through provider adapters (card, digital wallet): payment intents per checkout attempt, authorization and capture per order and seller group, declines with retry, uncertain results resolved by a status-check job, refund execution (Requested → Processing → Sent / Failed) capped at the remaining refundable amount, chargebacks and payment disputes, saved payment methods and provider webhooks.

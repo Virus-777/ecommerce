@@ -7,9 +7,9 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { SESSION_COOKIE_ENDPOINTS } from './http/client.js';
 import { publicRoutes } from './http/public.js';
-import { devExternalIdentityVerifier } from './infra/external-id/dev.js';
-import { createMongoIdentityRepository } from './infra/mongo/repository.js';
-import { schemas } from './infra/mongo/schema.js';
+import { devExternalIdentityVerifier } from './providers/external-id.js';
+import { createMongoIdentityRepository } from './repository.js';
+import { schemas } from './schema.js';
 import { IdentityService } from './service.js';
 
 /**
