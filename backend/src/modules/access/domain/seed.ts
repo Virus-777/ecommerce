@@ -199,7 +199,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Finance',
     description: 'Ledger, payouts, holds, adjustments, payments and refunds.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['finance.*', 'payments.*', 'returns.refunds.approve', 'reports.marketplace-finance.view', 'reports.trading.view', 'wallet.*', FS_FEES, OWNER_DECIDES, ...QUEUES],
+    permissions: ['finance.*', 'payments.*', 'returns.refunds.approve', 'returns.requests.view', 'reports.marketplace-finance.view', 'reports.trading.view', 'wallet.*', FS_FEES, OWNER_DECIDES, ...QUEUES],
     limits: {
       'finance.payouts.release': upTo(250_000, { secondReviewerAboveMoney: usd(50_000), secondReviewerRoleKeys: ['finance_manager', BUSINESS_OWNER] }),
       'finance.holds.place': upTo(50_000),
@@ -299,6 +299,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
       'finance.adjustments.record',
       'payments.refunds.view',
       'returns.refunds.approve',
+      'returns.requests.view', // to see the refund requests it approves
       ...QUEUES,
     ],
     limits: {

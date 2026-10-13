@@ -63,6 +63,12 @@ describe('registry sync and system roles', () => {
     expect(owner).not.toContain('access.roles.manage');
   });
 
+  it('lets every role that approves refunds see the refund requests (GET /api/admin/returns/refunds)', () => {
+    const approvers = SYSTEM_ROLES.filter((r) => r.permissions.includes('returns.refunds.approve'));
+    expect(approvers.map((r) => r.key)).toEqual(expect.arrayContaining(['finance_manager', 'finance_staff']));
+    for (const r of approvers) expect(r.permissions.some((p) => p === 'returns.requests.view' || p === 'returns.requests.*'), r.key).toBe(true);
+  });
+
   it('gives the Business Owner authority for every registered action, and seeds example limits', async () => {
     const actions = await f.table('approval_actions').find();
     const bo = await f.table('approval_limits').find({ role_id: await f.roleId('business_owner') });
