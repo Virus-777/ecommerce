@@ -4,7 +4,7 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoWalletRepository } from './repository.js';
+import { WalletRepository } from './repository.js';
 import { WalletService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -20,7 +20,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   register(ctx) {
-    const service = new WalletService({ repo: createMongoWalletRepository(ctx.mongo), ctx });
+    const service = new WalletService({ repo: new WalletRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

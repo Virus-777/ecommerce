@@ -12,7 +12,8 @@ import type { CreditCorrection, CustomerWalletAdmin, GoodwillGrant, GoodwillInpu
 import { creditCorrectionMachine, goodwillGrantMachine } from '../domain/state-machines.js';
 import { actorFrom, actorText, goodwillExpiry, m, SYSTEM } from '../domain/rules.js';
 import { allocationsOf, toCorrection, toGrant } from '../mappers.js';
-import type { AccountRow, CorrectionRow, GrantRow, WalletRepository } from '../ports.js';
+import type { AccountRow, CorrectionRow, GrantRow } from '../ports.js';
+import type { WalletRepository } from '../repository.js';
 import { invalid, notFound, Outbox, type By, type Issue, type WalletCore } from './core.js';
 import type { Ledger } from './ledger.js';
 

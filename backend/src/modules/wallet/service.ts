@@ -5,7 +5,7 @@ import type * as common from '../../spec/common.js';
 import type { CreditBalance, CreditHold, CustomerWalletAdmin, GoodwillGrant, GoodwillInput, LedgerEntry, LoyaltyAccount, WalletPublicApi } from '../../spec/wallet.js';
 import { isUuid } from '../../kernel/lib/ids.js';
 import { toLot } from './mappers.js';
-import type { WalletRepository } from './ports.js';
+import type { WalletRepository } from './repository.js';
 import { WalletCore } from './service/core.js';
 import { GiftCards } from './service/gift-cards.js';
 import { Ledger } from './service/ledger.js';
@@ -19,7 +19,7 @@ export interface WalletServiceDeps {
 }
 
 /**
- * Wallet use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Wallet use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/wallet.json.
  *
  *   ledger      accounts, lots, the append-only ledger, holds, refunds to credit, corrections applied, expiry, checks

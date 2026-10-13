@@ -18,7 +18,8 @@ import { creditHoldMachine } from '../domain/state-machines.js';
 import { allocate, daysLeft, dueReminder, HOW_TO_USE, m, reminderDays, RESERVATION_KINDS, SYSTEM, USABLE_ON, type EntryKind, type LotSource } from '../domain/rules.js';
 import { allocationsOf, toEntry, toHold, toLot, type EntryFacts } from '../mappers.js';
 import { dateInZone } from '../../../kernel/lib/clock.js';
-import type { AccountRow, BalanceSnapshot, EntryRow, HoldRow, LotAllocation, LotRow, WalletRepository } from '../ports.js';
+import type { AccountRow, BalanceSnapshot, EntryRow, HoldRow, LotAllocation, LotRow } from '../ports.js';
+import type { WalletRepository } from '../repository.js';
 import { conflict, invalid, notFound, Outbox, type By, type WalletCore } from './core.js';
 
 const DAY = 86_400_000;

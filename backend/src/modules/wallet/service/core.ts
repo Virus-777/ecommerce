@@ -12,7 +12,7 @@ import type * as common from '../../../spec/common.js';
 import type * as customers from '../../../spec/customers.js';
 import type * as identity from '../../../spec/identity.js';
 import { m } from '../domain/rules.js';
-import type { WalletRepository } from '../ports.js';
+import type { WalletRepository } from '../repository.js';
 
 /** Who acts: the actor for records and events, the principal for approval limits (HTTP calls carry one) */
 export interface By {
