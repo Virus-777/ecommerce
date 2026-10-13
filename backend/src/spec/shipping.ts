@@ -4559,29 +4559,6 @@ export const spec = defineModuleSpec({
       "meaning": "Marketly ships this package; you can't record shipments, buy labels, correct tracking or answer exceptions for it."
     }
   },
-  tenantTables: {
-    "profiles": {
-      "seller": "seller_id"
-    },
-    "seller_settings": {
-      "seller": "seller_id"
-    },
-    "closures": {
-      "seller": "seller_id"
-    },
-    "shipments": {
-      "seller": "seller_id"
-    },
-    "dispatch_watch": {
-      "seller": "seller_id"
-    },
-    "exceptions": {
-      "seller": "seller_id"
-    },
-    "claims": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "carriers": {
       "idField": "id",

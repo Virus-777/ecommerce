@@ -2659,17 +2659,6 @@ export const spec = defineModuleSpec({
       "meaning": "reports refused the export dataset: it is not in the export registry or catalog exports are switched off (raised by reports.requestExport)"
     }
   },
-  tenantTables: {
-    "correction_suggestions": {
-      "seller": "seller_id"
-    },
-    "brand_authorized_sellers": {
-      "seller": "seller_id"
-    },
-    "offer_index": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "categories": {
       "idField": "id",

@@ -2592,7 +2592,6 @@ export const spec = defineModuleSpec({
       "meaning": "No module executes this action: do it in the owning module's screen first and accept with externalRef (the hold, case, claim or approval reference)"
     }
   },
-  tenantTables: {},
   collections: {
     "reports": {
       "idField": "id",

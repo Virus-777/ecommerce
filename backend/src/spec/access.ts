@@ -2429,11 +2429,6 @@ export const spec = defineModuleSpec({
       "meaning": "Reviewers were reminded recently; try again after details.nextAllowedAt."
     }
   },
-  tenantTables: {
-    "approval_requests": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "roles": {
       "idField": "id",

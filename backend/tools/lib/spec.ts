@@ -55,7 +55,7 @@ export interface TableSpec {
   columns: Record<string, string>;
   /** "(a, b)", "unique (a) where …", "unique nulls not distinct (a, b)", "pk (a, b)", "gin(expr)" (lib/tables.ts, lib/mongo.ts) */
   indexes?: string[];
-  /** Tenant column override; false = not a tenant table */
+  /** Owner column, for readers of the spec (FORMAT.md rule 9); false = not a tenant table. Services filter by it. */
   tenant?: string | false;
 }
 

@@ -2621,17 +2621,6 @@ export const spec = defineModuleSpec({
       "meaning": "Broadcasts can only use promotional topics."
     }
   },
-  tenantTables: {
-    "notices": {
-      "seller": "seller_id"
-    },
-    "member_preferences": {
-      "seller": "seller_id"
-    },
-    "push_devices": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "topics": {
       "idField": "key",

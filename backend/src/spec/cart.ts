@@ -1391,19 +1391,6 @@ export const spec = defineModuleSpec({
       "meaning": "The chosen offer is for a different variant than the line."
     }
   },
-  tenantTables: {
-    "carts": {
-      "customer": "customer_id",
-      "visitor": "guest_session_id"
-    },
-    "cart_items": {
-      "seller": "seller_id"
-    },
-    "saved_items": {
-      "customer": "customer_id",
-      "visitor": "guest_session_id"
-    }
-  },
   collections: {
     "carts": {
       "idField": "id",

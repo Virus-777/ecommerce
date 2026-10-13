@@ -2372,38 +2372,6 @@ export const spec = defineModuleSpec({
       "meaning": "Not enough units in the requested stock group."
     }
   },
-  tenantTables: {
-    "enrollments": {
-      "seller": "seller_id"
-    },
-    "sku_enrollments": {
-      "seller": "seller_id"
-    },
-    "inbound_shipments": {
-      "seller": "seller_id"
-    },
-    "ownership_ledger": {
-      "seller": "seller_id"
-    },
-    "fulfillment_requests": {
-      "seller": "seller_id"
-    },
-    "service_returns": {
-      "seller": "seller_id"
-    },
-    "removal_orders": {
-      "seller": "seller_id"
-    },
-    "stock_differences": {
-      "seller": "seller_id"
-    },
-    "fee_charges": {
-      "seller": "seller_id"
-    },
-    "storage_snapshots": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "enrollments": {
       "idField": "id",

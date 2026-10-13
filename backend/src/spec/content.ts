@@ -3286,11 +3286,6 @@ export const spec = defineModuleSpec({
       "meaning": "The author cannot approve their own article or homepage draft."
     }
   },
-  tenantTables: {
-    "article_feedback": {
-      "customer": "customer_id"
-    }
-  },
   collections: {
     "home_sections": {
       "idField": "id",

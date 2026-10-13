@@ -3885,29 +3885,6 @@ export const spec = defineModuleSpec({
       "meaning": "The coupon code is already used by another active or scheduled campaign."
     }
   },
-  tenantTables: {
-    "campaigns": {
-      "seller": "seller_id"
-    },
-    "eligible_offers": {
-      "seller": "seller_id"
-    },
-    "participations": {
-      "seller": "seller_id"
-    },
-    "coupon_clips": {
-      "customer": "customer_id"
-    },
-    "redemptions": {
-      "customer": "customer_id"
-    },
-    "redemption_lines": {
-      "seller": "seller_id"
-    },
-    "event_reminders": {
-      "customer": "customer_id"
-    }
-  },
   collections: {
     "campaigns": {
       "idField": "id",

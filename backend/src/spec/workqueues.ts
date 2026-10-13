@@ -2125,12 +2125,6 @@ export const spec = defineModuleSpec({
       "meaning": "Some day-end items are not checked yet; details.items"
     }
   },
-  tenantTables: {
-    "items": {
-      "seller": "seller_id",
-      "customer": "customer_id"
-    }
-  },
   collections: {
     "queues": {
       "idField": "key",

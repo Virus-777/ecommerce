@@ -2022,32 +2022,6 @@ export const spec = defineModuleSpec({
       "meaning": "The unsubscribe link is invalid or expired"
     }
   },
-  tenantTables: {
-    "addresses": {
-      "customer": "customer_id"
-    },
-    "marketing_preferences": {
-      "customer": "customer_id"
-    },
-    "consent_log": {
-      "customer": "customer_id"
-    },
-    "account_restrictions": {
-      "customer": "customer_id"
-    },
-    "account_actions": {
-      "customer": "customer_id"
-    },
-    "customer_notes": {
-      "customer": "customer_id"
-    },
-    "data_requests": {
-      "customer": "customer_id"
-    },
-    "guest_lookup_attempts": {
-      "visitor": "guest_session_id"
-    }
-  },
   collections: {
     "customers": {
       "idField": "id",

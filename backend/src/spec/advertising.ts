@@ -3224,20 +3224,6 @@ export const spec = defineModuleSpec({
       "meaning": "The offer is not the seller's, not active or out of stock."
     }
   },
-  tenantTables: {
-    "campaigns": {
-      "seller": "seller_id"
-    },
-    "creatives": {
-      "seller": "seller_id"
-    },
-    "ad_events": {
-      "customer": "customer_id"
-    },
-    "ad_charges": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "placements": {
       "idField": "id",

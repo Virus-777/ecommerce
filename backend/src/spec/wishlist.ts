@@ -872,18 +872,6 @@ export const spec = defineModuleSpec({
       "meaning": "The saved offer's price or availability changed; details carry the current offer to confirm."
     }
   },
-  tenantTables: {
-    "lists": {
-      "customer": "customer_id"
-    },
-    "items": {
-      "customer": "customer_id"
-    },
-    "alerts": {
-      "seller": "seller_id",
-      "customer": "customer_id"
-    }
-  },
   collections: {
     "lists": {
       "idField": "id",

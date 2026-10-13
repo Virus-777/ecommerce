@@ -3020,35 +3020,6 @@ export const spec = defineModuleSpec({
       "meaning": "The seller has no offer on this product or did not sell this item."
     }
   },
-  tenantTables: {
-    "product_reviews": {
-      "seller": "seller_id",
-      "customer": "customer_id"
-    },
-    "seller_feedback": {
-      "seller": "seller_id",
-      "customer": "customer_id"
-    },
-    "seller_responses": {
-      "seller": "seller_id"
-    },
-    "questions": {
-      "customer": "customer_id"
-    },
-    "answers": {
-      "seller": "seller_id"
-    },
-    "helpful_votes": {
-      "customer": "customer_id"
-    },
-    "review_invites": {
-      "seller": "seller_id",
-      "customer": "customer_id"
-    },
-    "seller_feedback_summaries": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "product_reviews": {
       "idField": "id",

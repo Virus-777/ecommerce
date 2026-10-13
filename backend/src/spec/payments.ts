@@ -2502,23 +2502,6 @@ export const spec = defineModuleSpec({
       "meaning": "The provider signature did not verify."
     }
   },
-  tenantTables: {
-    "intents": {
-      "customer": "customer_id"
-    },
-    "allocations": {
-      "seller": "seller_id"
-    },
-    "refund_items": {
-      "seller": "seller_id"
-    },
-    "disputes": {
-      "seller": "seller_id"
-    },
-    "saved_methods": {
-      "customer": "customer_id"
-    }
-  },
   collections: {
     "intents": {
       "idField": "id",

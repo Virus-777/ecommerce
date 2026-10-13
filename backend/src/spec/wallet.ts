@@ -1312,30 +1312,6 @@ export const spec = defineModuleSpec({
       "meaning": "The batch's codes were already downloaded, have expired (giftCardCodesTtlHours) or the batch is not issued yet. Void the batch and issue a new one if the codes were lost."
     }
   },
-  tenantTables: {
-    "accounts": {
-      "customer": "customer_id"
-    },
-    "lots": {
-      "customer": "customer_id"
-    },
-    "ledger": {
-      "customer": "customer_id"
-    },
-    "holds": {
-      "customer": "customer_id"
-    },
-    "goodwill_grants": {
-      "seller": "seller_id",
-      "customer": "customer_id"
-    },
-    "credit_corrections": {
-      "customer": "customer_id"
-    },
-    "loyalty_entries": {
-      "customer": "customer_id"
-    }
-  },
   collections: {
     "accounts": {
       "idField": "customer_id",

@@ -2098,7 +2098,6 @@ export const spec = defineModuleSpec({
       "meaning": "Received exceeds ordered beyond the allowed over-receipt. details.lines"
     }
   },
-  tenantTables: {},
   collections: {
     "suppliers": {
       "idField": "id",

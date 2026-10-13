@@ -4345,47 +4345,6 @@ export const spec = defineModuleSpec({
       "meaning": "Open mismatches remain; explain or correct them first. details.openItems."
     }
   },
-  tenantTables: {
-    "seller_accounts": {
-      "seller": "seller_id"
-    },
-    "ledger_entries": {
-      "seller": "seller_id"
-    },
-    "earnings_lots": {
-      "seller": "seller_id"
-    },
-    "fee_charges": {
-      "seller": "seller_id"
-    },
-    "refund_allocations": {
-      "seller": "seller_id"
-    },
-    "holds": {
-      "seller": "seller_id"
-    },
-    "adjustments": {
-      "seller": "seller_id"
-    },
-    "seller_credits": {
-      "seller": "seller_id"
-    },
-    "amounts_owed": {
-      "seller": "seller_id"
-    },
-    "payout_destinations": {
-      "seller": "seller_id"
-    },
-    "destination_reviews": {
-      "seller": "seller_id"
-    },
-    "payouts": {
-      "seller": "seller_id"
-    },
-    "statements": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "seller_accounts": {
       "idField": "seller_id",

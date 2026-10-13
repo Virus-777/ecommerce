@@ -5670,62 +5670,6 @@ export const spec = defineModuleSpec({
       "meaning": "Payout verification and a first submission are needed first; details.missing"
     }
   },
-  tenantTables: {
-    "applications": {
-      "seller": "seller_id"
-    },
-    "application_documents": {
-      "seller": "seller_id"
-    },
-    "verification_checks": {
-      "seller": "seller_id"
-    },
-    "agreement_acceptances": {
-      "seller": "seller_id"
-    },
-    "store_profiles": {
-      "seller": "seller_id"
-    },
-    "featured_collections": {
-      "seller": "seller_id"
-    },
-    "public_claims": {
-      "seller": "seller_id"
-    },
-    "change_requests": {
-      "seller": "seller_id"
-    },
-    "members": {
-      "seller": "seller_id"
-    },
-    "performance_events": {
-      "seller": "seller_id"
-    },
-    "performance_snapshots": {
-      "seller": "seller_id"
-    },
-    "warnings": {
-      "seller": "seller_id"
-    },
-    "restrictions": {
-      "seller": "seller_id"
-    },
-    "suspensions": {
-      "seller": "seller_id"
-    },
-    "payout_changes": {
-      "seller": "seller_id"
-    },
-    "appeals": {
-      "seller": "seller_id"
-    },
-    "seller_notes": {
-      "seller": "seller_id"
-    },
-    "account_events": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "sellers": {
       "idField": "id",

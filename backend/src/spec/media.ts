@@ -1457,7 +1457,6 @@ export const spec = defineModuleSpec({
       "meaning": "Storage takes the bytes directly at its own ticket URL, not through this API: send them to the ticket URL."
     }
   },
-  tenantTables: {},
   collections: {
     "assets": {
       "idField": "id",

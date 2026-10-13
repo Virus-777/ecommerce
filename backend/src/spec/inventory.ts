@@ -2782,17 +2782,6 @@ export const spec = defineModuleSpec({
       "meaning": "Marketly holds and sells this item's stock; change it through the fulfillment service."
     }
   },
-  tenantTables: {
-    "locations": {
-      "seller": "seller_id"
-    },
-    "stock_items": {
-      "seller": "seller_id"
-    },
-    "inbound_receipts": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "locations": {
       "idField": "id",

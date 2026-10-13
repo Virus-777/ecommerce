@@ -1358,7 +1358,6 @@ export const spec = defineModuleSpec({
       "meaning": "The effective date is earlier than the setting's minimum notice (details.earliest)."
     }
   },
-  tenantTables: {},
   collections: {
     "definitions": {
       "idField": "key",

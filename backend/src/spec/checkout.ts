@@ -1972,18 +1972,6 @@ export const spec = defineModuleSpec({
       "meaning": "This checkout reached maxPaymentAttempts; start again from the cart (nothing was charged). details.max."
     }
   },
-  tenantTables: {
-    "sessions": {
-      "customer": "customer_id",
-      "visitor": "guest_session_id"
-    },
-    "session_lines": {
-      "seller": "seller_id"
-    },
-    "session_packages": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "sessions": {
       "idField": "id",

@@ -4581,20 +4581,6 @@ export const spec = defineModuleSpec({
       "meaning": "Seller terms are less generous than the platform baseline. details.fields."
     }
   },
-  tenantTables: {
-    "seller_terms": {
-      "seller": "seller_id"
-    },
-    "returns": {
-      "seller": "seller_id",
-      "customer": "customer_id",
-      "visitor": "guest_session_id"
-    },
-    "refund_requests": {
-      "seller": "seller_id",
-      "customer": "customer_id"
-    }
-  },
   collections: {
     "policy_versions": {
       "idField": "id",

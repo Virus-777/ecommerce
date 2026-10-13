@@ -2829,13 +2829,6 @@ export const spec = defineModuleSpec({
       "meaning": "The remedy is still driven by a refund request, wallet grant or replacement, or is already finished. details.status."
     }
   },
-  tenantTables: {
-    "cases": {
-      "seller": "seller_id",
-      "customer": "customer_id",
-      "visitor": "guest_session_id"
-    }
-  },
   collections: {
     "case_categories": {
       "idField": "key",

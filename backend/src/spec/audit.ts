@@ -865,11 +865,6 @@ export const spec = defineModuleSpec({
       "meaning": "Retention cannot be shorter than details.minimumYears."
     }
   },
-  tenantTables: {
-    "entries": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "entries": {
       "idField": "id",

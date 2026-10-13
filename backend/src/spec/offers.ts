@@ -3466,14 +3466,6 @@ export const spec = defineModuleSpec({
       "meaning": "The preview is older than the allowed window; upload again"
     }
   },
-  tenantTables: {
-    "offers": {
-      "seller": "seller_id"
-    },
-    "bulk_update_jobs": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "offers": {
       "idField": "id",

@@ -3557,14 +3557,6 @@ export const spec = defineModuleSpec({
       "meaning": "Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations."
     }
   },
-  tenantTables: {
-    "orders": {
-      "customer": "customer_id"
-    },
-    "seller_groups": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "orders": {
       "idField": "id",

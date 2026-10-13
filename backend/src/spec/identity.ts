@@ -2787,17 +2787,6 @@ export const spec = defineModuleSpec({
       "meaning": "The app proof (Play Integrity or bot challenge) is missing or failed."
     }
   },
-  tenantTables: {
-    "sessions": {
-      "seller": "seller_id"
-    },
-    "seller_access": {
-      "seller": "seller_id"
-    },
-    "guest_order_grants": {
-      "visitor": "guest_session_id"
-    }
-  },
   collections: {
     "accounts": {
       "idField": "id",

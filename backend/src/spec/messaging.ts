@@ -1477,16 +1477,6 @@ export const spec = defineModuleSpec({
       "meaning": "The caller cannot message about this order (not their order, or seller not in the order)."
     }
   },
-  tenantTables: {
-    "conversations": {
-      "seller": "seller_id",
-      "customer": "customer_id",
-      "visitor": "guest_session_id"
-    },
-    "reply_templates": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "conversations": {
       "idField": "id",

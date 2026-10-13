@@ -1787,11 +1787,6 @@ export const spec = defineModuleSpec({
       "meaning": "A term is already in another active equivalent set. details.synonymId"
     }
   },
-  tenantTables: {
-    "search_offers": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "search_documents": {
       "idField": "product_id",

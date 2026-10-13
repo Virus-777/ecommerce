@@ -187,7 +187,6 @@ export function emitModule(mod: ModuleSpec, common: CommonSpec, byName: Map<stri
   jobs: ${json(jobs)},
   settings: ${json(settings)},
   errorCodes: ${json(mod.errorCodes ?? {})},
-  tenantTables: ${json(tenantTables(plans))},
   collections: ${json(collectionDefs(mod, plans, ctx.problems))},
   endpoints,
 });
@@ -241,24 +240,6 @@ function scopeOf(ep: EndpointSpec): EndpointScope {
   if (ep.area === 'admin') return 'staff';
   if (ep.auth === 'customer' || ep.auth === 'account' || ep.auth === 'shopper') return 'own-customer'; // a visitor on a shopper endpoint gets the guest scope
   return 'public';
-}
-
-/** Tenant tables: which column holds the owning seller, customer or visitor session */
-function tenantTables(plans: ReturnType<typeof planTables>) {
-  const out: Record<string, Record<string, string>> = {};
-  for (const { table, columns } of plans) {
-    if (table.tenant === false) continue;
-    const has = (c: string) => columns.some((x) => x.name === c);
-    const t: Record<string, string> = {};
-    if (typeof table.tenant === 'string') t.seller = table.tenant;
-    else {
-      if (has('seller_id')) t.seller = 'seller_id';
-      if (has('customer_id')) t.customer = 'customer_id';
-      if (has('guest_session_id')) t.visitor = 'guest_session_id';
-    }
-    if (Object.keys(t).length) out[table.name] = t;
-  }
-  return out;
 }
 
 /** Paths to sensitive fields inside a response, following named types across modules ('*' = every array item or map value) */

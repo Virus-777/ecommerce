@@ -2271,29 +2271,6 @@ export const spec = defineModuleSpec({
       "meaning": "This read model is kept from events only and cannot be rebuilt until an event log exists"
     }
   },
-  tenantTables: {
-    "export_jobs": {
-      "seller": "seller_id"
-    },
-    "fact_order_items": {
-      "seller": "seller_id"
-    },
-    "fact_refunds": {
-      "seller": "seller_id"
-    },
-    "fact_returns": {
-      "seller": "seller_id"
-    },
-    "fact_marketplace_finance_daily": {
-      "seller": "seller_id"
-    },
-    "fact_service_daily": {
-      "seller": "seller_id"
-    },
-    "fact_marketly_fulfillment_daily": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "metric_definitions": {
       "idField": "key",

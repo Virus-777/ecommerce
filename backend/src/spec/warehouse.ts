@@ -2023,11 +2023,6 @@ export const spec = defineModuleSpec({
       "meaning": "This return parcel was already received. details.parcelId"
     }
   },
-  tenantTables: {
-    "fulfillments": {
-      "seller": "seller_id"
-    }
-  },
   collections: {
     "bins": {
       "idField": "id",
