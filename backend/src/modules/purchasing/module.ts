@@ -21,16 +21,16 @@ export default defineModule({
     ctx.http.routes(adminRoutes(service));
 
     // Events this module reacts to (spec events.consumes)
-    ctx.events.on("inventory.receipt.confirmed", (e) => service.onReceiptConfirmedFromInventory(e.payload, { at: e.at }));
-    ctx.events.on("inventory.stock.low", (e) => service.onStockLowFromInventory(e.payload));
-    ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload));
+    ctx.events.on("inventory.receipt.confirmed", (e) => service.receipts.onReceiptConfirmedFromInventory(e.payload, { at: e.at }));
+    ctx.events.on("inventory.stock.low", (e) => service.reorder.onStockLowFromInventory(e.payload));
+    ctx.events.on("access.approval.decided", (e) => service.purchaseOrders.onApprovalDecidedFromAccess(e.payload));
 
     // Background jobs (spec jobs)
-    ctx.jobs.handle("purchasing.flag-late-deliveries", () => service.flagLateDeliveries());
-    ctx.jobs.handle("purchasing.supplier-performance", () => service.supplierPerformance());
-    ctx.jobs.handle("purchasing.reorder-suggestions", () => service.reorderSuggestions());
+    ctx.jobs.handle("purchasing.flag-late-deliveries", () => service.deliveries.flagLateDeliveries());
+    ctx.jobs.handle("purchasing.supplier-performance", () => service.suppliers.supplierPerformance());
+    ctx.jobs.handle("purchasing.reorder-suggestions", () => service.reorder.reorderSuggestions());
 
     // reports reads the receiving export through exportRows
-    ctx.afterBoot(() => service.registerExportDataset());
+    ctx.afterBoot(() => service.receipts.registerExportDataset());
   },
 });
