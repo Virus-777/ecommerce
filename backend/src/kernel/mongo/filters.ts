@@ -15,6 +15,15 @@ import type { Filter } from './table.js';
  */
 export const contains = (text: string): { $regex: string; $options: 'i' } => ({ $regex: escapeRegExp(text.trim()), $options: 'i' });
 
+/** A case-insensitive "starts with" condition (a reference typed in part, `MK-2610…`): matched literally, trimmed */
+export const startsWith = (text: string): { $regex: string; $options: 'i' } => ({ $regex: `^${escapeRegExp(text.trim())}`, $options: 'i' });
+
+/**
+ * A case-insensitive "equals" condition (`lower(email) = lower(x)` in SQL). Prefer an index with the
+ * CASE_INSENSITIVE collation for lookups that must be fast; this one cannot use an ordinary index.
+ */
+export const equalsIgnoringCase = (text: string): { $regex: string; $options: 'i' } => ({ $regex: `^${escapeRegExp(text)}$`, $options: 'i' });
+
 /** SQL LIKE (case-sensitive; `%` any run of characters, `_` one character, `\` escapes the next) as an anchored regex */
 export function likePattern(pattern: string): { $regex: string } {
   let out = '';

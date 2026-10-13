@@ -12,6 +12,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { FILES_PREFIX } from '../auth/file-links.js';
 import type { Config } from '../config/index.js';
+import { escapeRegExp } from '../lib/text.js';
 
 type AppArea = 'store' | 'seller' | 'admin' | 'public';
 
@@ -34,7 +35,7 @@ export class CorsRoutes {
   add(url: string, rule: CorsRule) {
     const source = url
       .split(/(:\w+|\{\w+\})/)
-      .map((part, i) => (i % 2 ? '[^/]+' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      .map((part, i) => (i % 2 ? '[^/]+' : escapeRegExp(part)))
       .join('');
     this.#rules.push({ pattern: new RegExp(`^${source}/?$`), rule });
   }
