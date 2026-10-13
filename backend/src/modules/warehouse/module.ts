@@ -3,7 +3,7 @@ import { spec } from '../../spec/warehouse.js';
 import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoWarehouseRepository } from './repository.js';
+import { WarehouseRepository } from './repository.js';
 import { WarehouseService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -19,7 +19,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   register(ctx) {
-    const service = new WarehouseService({ repo: createMongoWarehouseRepository(ctx.mongo), ctx });
+    const service = new WarehouseService({ repo: new WarehouseRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

@@ -4,7 +4,8 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { Bin, BinAssignment, BinAssignmentInput, BoxType } from '../../../spec/warehouse.js';
 import { BIN_KINDS, binBarcode, normalizeCode, STORAGE_KINDS, validDimensions, zoneOf } from '../domain/rules.js';
-import type { BinRec, Where } from '../ports.js';
+import type { Where } from '../../../kernel/mongo/index.js';
+import type { BinRec } from '../ports.js';
 import { Batch, invalid, invalidField, notFound, type By, type Core } from './core.js';
 import { binView, boxView } from './views.js';
 

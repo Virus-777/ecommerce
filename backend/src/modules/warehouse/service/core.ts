@@ -12,7 +12,7 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { FileLink } from '../../../spec/warehouse.js';
 import { addDays, SYSTEM, upcoming } from '../domain/rules.js';
-import type { WarehouseRepository } from '../ports.js';
+import type { WarehouseRepository } from '../repository.js';
 
 export interface WarehouseServiceDeps {
   repo: WarehouseRepository;

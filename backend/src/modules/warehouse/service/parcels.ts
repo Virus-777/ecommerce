@@ -8,7 +8,8 @@ import type { ReturnDetail } from '../../../spec/returns.js';
 import type { ReceiveParcelInput, ReturnParcel } from '../../../spec/warehouse.js';
 import { actorText, addDays, comesToWarehouse, looksLikeReturnRef, NIL_UUID, normalizeCode } from '../domain/rules.js';
 import { returnParcelMachine } from '../domain/state-machines.js';
-import type { ParcelRec, Where } from '../ports.js';
+import type { Where } from '../../../kernel/mongo/index.js';
+import type { ParcelRec } from '../ports.js';
 import { invalidField, notFound, type By, type Core } from './core.js';
 import type { Views } from './views.js';
 

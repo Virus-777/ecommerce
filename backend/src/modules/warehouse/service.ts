@@ -12,7 +12,7 @@ import { Views } from './service/views.js';
 export type { WarehouseServiceDeps } from './service/core.js';
 
 /**
- * Warehouse use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Warehouse use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/warehouse.json;
  * the HTTP handlers call the use-case groups (bins, fulfillments, packing, putaway, parcels, summary) directly.
  */

@@ -10,7 +10,9 @@ import type * as common from '../../../spec/common.js';
 import type { Fulfillment, FulfillmentRow, PickConfirm, ShortageReport, DamageReport, Wave } from '../../../spec/warehouse.js';
 import { actorText, damageHold, deliveryChoiceLabel, itemMatches, NIL_UUID, parseActor, shortageHold, warehouseGroup, WAVE_DONE_STATUSES } from '../domain/rules.js';
 import { waveMachine, warehouseFulfillmentMachine } from '../domain/state-machines.js';
-import type { DiscrepancyNote, FulfillmentRec, LineRec, WarehouseRepository, WaveRec, Where } from '../ports.js';
+import type { Where } from '../../../kernel/mongo/index.js';
+import type { DiscrepancyNote, FulfillmentRec, LineRec, WaveRec } from '../ports.js';
+import type { WarehouseRepository } from '../repository.js';
 import type { Bins } from './bins.js';
 import { Batch, invalidField, notFound, type By, type Core } from './core.js';
 import type { Views } from './views.js';
@@ -150,7 +152,7 @@ export class Fulfillments {
       const id = newId();
       const shipBy = new Date(task.dispatchDeadline.dueAt || g.dispatchBy);
       const created = await this.repo.transaction(async (tx) => {
-        const inserted = await tx.insertIfNew('fulfillments', {
+        const inserted = await tx.insertIfAbsent('fulfillments', {
           id,
           order_id: task.orderId,
           order_ref: task.orderRef,
