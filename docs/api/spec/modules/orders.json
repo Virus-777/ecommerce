@@ -416,8 +416,7 @@
     { "name": "timeline", "desc": "Customer-visible events and staff action history", "columns": { "id": "uuid pk", "order_id": "uuid → orders", "group_id": "uuid?", "item_id": "uuid?", "visibility": "text (customer|seller|staff)", "label": "text", "detail": "text?", "reason": "text?", "actor_kind": "text", "actor_id": "text?", "actor_name": "text?", "at": "timestamptz" }, "indexes": ["(order_id, at desc)"] },
     { "name": "notes", "desc": "Internal staff notes", "columns": { "id": "uuid pk", "order_id": "uuid → orders", "text": "text", "author_id": "uuid", "author_name": "text", "at": "timestamptz" } },
     { "name": "documents", "desc": "Issued receipt and invoice numbers; PDFs render from the frozen order on request", "columns": { "id": "uuid pk", "order_id": "uuid → orders", "group_id": "uuid?", "kind": "text", "number": "text unique", "issued_at": "timestamptz" } },
-    { "name": "saved_filters", "columns": { "id": "uuid pk", "owner_staff_id": "uuid", "name": "text", "query": "jsonb", "shared": "bool", "cached_count": "int?", "counted_at": "timestamptz?", "created_at": "timestamptz" } },
-    { "name": "ref_sequences", "desc": "Daily counters for MK-YYMMDD-NNNNN", "columns": { "day": "date pk", "last_value": "int" } }
+    { "name": "saved_filters", "columns": { "id": "uuid pk", "owner_staff_id": "uuid", "name": "text", "query": "jsonb", "shared": "bool", "cached_count": "int?", "counted_at": "timestamptz?", "created_at": "timestamptz" } }
   ],
   "stateMachines": [
     {

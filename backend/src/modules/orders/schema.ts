@@ -6,7 +6,7 @@
  * (kernel/mongo/schema.ts); repositories reach them through ctx.mongo.table(name).
  */
 import { Schema } from 'mongoose';
-import { collectionOptions, DATE, integer } from '../../kernel/mongo/schemas.js';
+import { collectionOptions, integer } from '../../kernel/mongo/schemas.js';
 
 /** One per checkout */
 const orders = new Schema(
@@ -300,17 +300,6 @@ const saved_filters = new Schema(
   collectionOptions("orders.saved_filters"),
 );
 
-/** Daily counters for MK-YYMMDD-NNNNN */
-const ref_sequences = new Schema(
-  {
-    _id: { type: String, required: true, match: DATE }, // day
-    last_value: { type: Number, required: true, validate: integer },
-    /** lock-by-write counter (kernel/mongo/table.ts) */
-    _lock: Number,
-  },
-  collectionOptions("orders.ref_sequences"),
-);
-
 /** Table name → schema */
 export const schemas = {
   orders: orders,
@@ -324,5 +313,4 @@ export const schemas = {
   notes: notes,
   documents: documents,
   saved_filters: saved_filters,
-  ref_sequences: ref_sequences,
 };

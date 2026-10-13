@@ -2384,11 +2384,6 @@ export interface OrdersDb {
     counted_at: Date | null;
     created_at: Date;
   };
-  /** Daily counters for MK-YYMMDD-NNNNN */
-  ref_sequences: {
-    day: string;
-    last_value: number;
-  };
 }
 
 /* ------------------------------------------------------------------ endpoints */
@@ -5221,53 +5216,6 @@ export const spec = defineModuleSpec({
             },
             "created_at": {
               "bsonType": "date"
-            }
-          },
-          "additionalProperties": false
-        }
-      },
-      "indexes": [],
-      "unenforced": []
-    },
-    "ref_sequences": {
-      "idField": "day",
-      "key": [
-        "day"
-      ],
-      "columns": [
-        "day",
-        "last_value"
-      ],
-      "nullable": [],
-      "decimal": [],
-      "binary": [],
-      "dates": [],
-      "identity": null,
-      "validator": {
-        "$jsonSchema": {
-          "bsonType": "object",
-          "required": [
-            "_id",
-            "last_value"
-          ],
-          "properties": {
-            "_id": {
-              "bsonType": "string",
-              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-            },
-            "_lock": {
-              "bsonType": [
-                "int",
-                "long",
-                "double"
-              ]
-            },
-            "last_value": {
-              "bsonType": [
-                "int",
-                "long",
-                "double"
-              ]
             }
           },
           "additionalProperties": false

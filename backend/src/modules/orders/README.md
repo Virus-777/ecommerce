@@ -1196,13 +1196,6 @@ Indexes: `(order_id, at desc)`
 | counted_at | timestamptz? |
 | created_at | timestamptz |
 
-**ref_sequences**: Daily counters for MK-YYMMDD-NNNNN
-
-| Column | Type |
-|---|---|
-| day | date pk |
-| last_value | int |
-
 ## Events
 
 | Publishes | When | Payload | Consumed by |
