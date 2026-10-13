@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as catalog from '../../../spec/catalog.js';
+import type * as media from '../../../spec/media.js';
 import type * as offers from '../../../spec/offers.js';
 import type { OrderCreateInput, OrderGroupInput, OrderItemInput } from '../../../spec/orders.js';
 import type * as reports from '../../../spec/reports.js';
@@ -36,8 +37,10 @@ export interface Harness {
   /** catalog.getProduct category by product id (overrides the snapshot's, for snapshots without one) */
   productCategories: Map<string, string>;
   exports: { requested: any[]; registered: string[] };
-  /** media.attach calls (snapshot images kept for the order) */
-  attached: { assetId: string; usage: any }[];
+  /** media.attach calls (snapshot images kept for the order), with the owner orders expected */
+  attached: { assetId: string; usage: any; owner: media.MediaOwner }[];
+  /** media.getAsset answers: who uploaded each test image (unknown ids: no asset) */
+  assetOwners: Map<string, media.MediaOwner>;
   /** fulfillment-service.isServiceOffer answers (harness({ fulfillmentService: true })): offers Marketly fulfils */
   serviceOffers: Set<string>;
   call(method: string, url: string, token: string, body?: unknown, headers?: Record<string, string>): Promise<{ status: number; body: any }>;
@@ -62,7 +65,8 @@ export async function harness(o: { fulfillmentService?: boolean } = {}): Promise
     guestGrants: new Set<string>(),
     productCategories: new Map<string, string>(),
     exports: { requested: [] as any[], registered: [] as string[] },
-    attached: [] as { assetId: string; usage: any }[],
+    attached: [] as { assetId: string; usage: any; owner: media.MediaOwner }[],
+    assetOwners: new Map<string, media.MediaOwner>(),
     serviceOffers: new Set<string>(),
   };
   const job = (over: Partial<reports.ExportJob> = {}): reports.ExportJob => ({
@@ -109,8 +113,12 @@ export async function harness(o: { fulfillmentService?: boolean } = {}): Promise
         hasGuestOrderAccess: async (sessionId, orderId) => h.guestGrants.has(`${sessionId}:${orderId}`),
       },
       media: {
-        attach: async (assetId, usage) => {
-          h.attached.push({ assetId, usage });
+        getAsset: async (assetId) => {
+          const owner = h.assetOwners.get(assetId);
+          return owner ? ({ id: assetId, owner } as media.MediaAsset) : null;
+        },
+        attach: async (assetId, usage, owner) => {
+          h.attached.push({ assetId, usage, owner });
         },
       },
       audit: {

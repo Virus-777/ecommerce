@@ -322,7 +322,11 @@ export class Placement {
     }
     for (const assetId of assetIds) {
       try {
-        await media.attach(assetId, { module: 'orders', kind: 'order_evidence', refId: orderId, refLabel: ref }, { kind: 'platform', id: null, label: 'Orders' });
+        // the image belongs to whoever uploaded it to the catalog (the platform, the selling seller, or another seller
+        // of a shared product); the id comes from the catalog snapshot, not from the caller, so attach under its owner
+        const asset = await media.getAsset(assetId);
+        if (!asset) continue;
+        await media.attach(assetId, { module: 'orders', kind: 'order_evidence', refId: orderId, refLabel: ref }, asset.owner);
       } catch (err) {
         this.core.ctx.log.warn({ err, orderId, assetId }, 'orders: could not keep the snapshot image');
       }

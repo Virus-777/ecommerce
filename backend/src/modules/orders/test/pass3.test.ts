@@ -55,10 +55,12 @@ describe('orders per payment attempt', () => {
   it('keeps each item snapshot image for the order (media usage order_evidence) and shows checkoutLineId', async () => {
     const sellerId = newId();
     const imageId = newId();
+    // a seller's product image belongs to that seller, not to the platform
+    h.assetOwners.set(imageId, { kind: 'seller', id: sellerId });
     const p = product(h, { title: 'Lamp', price: 2000, sellerId, imageId });
     const l = line(p, 1);
     const order = await h.service.createOrder(checkout([group(h, [l], { sellerId })], { customerId: newId() }));
-    expect(h.attached).toContainEqual({ assetId: imageId, usage: expect.objectContaining({ module: 'orders', kind: 'order_evidence', refId: order.id }) });
+    expect(h.attached).toContainEqual({ assetId: imageId, usage: expect.objectContaining({ module: 'orders', kind: 'order_evidence', refId: order.id }), owner: { kind: 'seller', id: sellerId } });
     expect(order.groups[0]!.items[0]!.checkoutLineId).toBe(l.checkoutLineId);
   });
 });
