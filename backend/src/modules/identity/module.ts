@@ -8,7 +8,7 @@ import { adminRoutes } from './http/admin.js';
 import { SESSION_COOKIE_ENDPOINTS } from './http/client.js';
 import { publicRoutes } from './http/public.js';
 import { devExternalIdentityVerifier } from './providers/external-id.js';
-import { createMongoIdentityRepository } from './repository.js';
+import { IdentityRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { IdentityService } from './service.js';
 
@@ -26,7 +26,7 @@ export default defineModule({
   register(ctx) {
     // Google / Apple ID tokens: the deterministic dev verifier in development and tests; no provider is wired for production yet
     const externalIds = ctx.config.devTokens ? devExternalIdentityVerifier : undefined;
-    const service = new IdentityService({ repo: createMongoIdentityRepository(ctx.mongo), ctx, externalIds });
+    const service = new IdentityService({ repo: new IdentityRepository(ctx.mongo), ctx, externalIds });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), publicRoutes(service));
     // responses that set or clear the website's refresh cookie (http/client.ts send()): browsers call them with credentials

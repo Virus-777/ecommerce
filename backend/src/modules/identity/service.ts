@@ -80,13 +80,13 @@ import type {
   DeviceWithSessions,
   ExternalIdentityVerifier,
   GuestSessionRow,
-  IdentityRepository,
   InvitationRow,
   SecurityEventRow,
   SellerAccessRow,
   SessionRow,
   TwoStepMethodRow,
 } from './ports.js';
+import type { IdentityRepository } from './repository.js';
 
 export interface IdentityServiceDeps {
   repo: IdentityRepository;
@@ -168,7 +168,7 @@ const audienceOk = (v: unknown): v is Audience => v === 'store' || v === 'seller
 const issue = (path: string, message: string) => ({ issues: [{ path, message }] });
 
 /**
- * Identity use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Identity use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to an endpoint, a publicApi function, a consumed event or a job in
  * docs/api/spec/modules/identity.json.
  */

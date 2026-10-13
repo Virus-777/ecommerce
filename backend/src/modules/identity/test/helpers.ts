@@ -47,6 +47,8 @@ const WATCHED = [
 export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promise<TestKit> {
   const clock = fixedClock(new Date());
   const app = await buildTestApp({ only: ['identity'], clock, ...opts, config: { rateLimits: false, ...opts.config } });
+  // the boot can take a while: the app's time must not stay behind the test tokens, signed at the real time
+  clock.set(new Date());
   const events: EventEnvelope[] = [];
   for (const name of WATCHED) app.kernel.events.subscribe('test', name, (e) => void events.push(e));
   const kit: TestKit = {
