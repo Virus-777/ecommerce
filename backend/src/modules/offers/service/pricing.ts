@@ -12,7 +12,8 @@ import type { CompareAtInput, PriceChange, PriceChangeRequest, PriceChangeResult
 import { changePct, formatMoney, listPriceOnFile, lowestInWindow, verifyLowestBasis, type PriceSpan } from '../domain/rules.js';
 import { priceChangeMachine } from '../domain/state-machines.js';
 import { actorOf, iso, isoReq, money } from '../mappers.js';
-import type { OfferRec, OffersRepository, PriceChangeRec } from '../ports.js';
+import type { OfferRec, PriceChangeRec } from '../ports.js';
+import type { OffersRepository } from '../repository.js';
 import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
 
 export const APPROVAL_ACTION = 'offers.prices.change';

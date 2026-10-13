@@ -17,7 +17,8 @@ import type * as sellers from '../../../spec/sellers.js';
 import { reason, type IneligibilityCode, type OfferStatus } from '../domain/rules.js';
 import { offerStatusMachine } from '../domain/state-machines.js';
 import { OFFICIAL_NAME, SERVICE_INELIGIBLE, isoReq, money, offerTitle, ownFulfilment, serviceFulfilment, toOffer, type Fulfilment } from '../mappers.js';
-import type { BulkFileReader, EligibilityRec, OfferRec, OffersRepository } from '../ports.js';
+import type { BulkFileReader, EligibilityRec, OfferRec } from '../ports.js';
+import { DuplicateKeyError, type OffersRepository } from '../repository.js';
 import type { BulkPart } from './bulk.js';
 import type { EnforcementPart } from './enforcement.js';
 import type { FeaturedPart } from './featured.js';
@@ -265,16 +266,15 @@ export class Core {
   }
 
   /**
-   * Runs a write; a unique violation of the offers indexes (SKU per owner, one live New offer per owner and
-   * variant, one live offer per stock item; NULLS NOT DISTINCT covers the Official Store) is DUPLICATE_OFFER.
+   * Runs a write; a write refused by a unique index of offers (SKU per owner, one live New offer per owner and
+   * variant, one live offer per stock item; the Official Store's null seller_id counts as one owner) is DUPLICATE_OFFER.
    */
   async unique<R>(fn: () => Promise<R>, details: Record<string, unknown> = {}): Promise<R> {
     try {
       return await fn();
     } catch (err) {
-      if ((err as { code?: string }).code !== '23505') throw err;
-      const constraint = String((err as { constraint?: string }).constraint ?? '');
-      const reason = constraint.includes('stock_item') ? 'stock_item_in_use' : constraint.includes('sku') ? 'sku_in_use' : constraint.includes('variant') ? 'new_offer_exists' : 'duplicate';
+      if (!(err instanceof DuplicateKeyError)) throw err;
+      const reason = err.index.includes('stock_item') ? 'stock_item_in_use' : err.index.includes('sku') ? 'sku_in_use' : err.index.includes('variant') ? 'new_offer_exists' : 'duplicate';
       const message =
         reason === 'stock_item_in_use'
           ? 'Another live offer already sells this stock item'

@@ -26,20 +26,17 @@ export class FeaturedPart extends Part {
   async rules(): Promise<RuleRec[]> {
     let rows = await this.repo.rules();
     if (!rows.length && !this.#defaultEnsured) {
-      try {
-        await this.repo.insert('featured_rules', {
-          version: DEFAULT_RULE.version,
-          text: DEFAULT_RULE.text,
-          steps: DEFAULT_RULE.steps as never,
-          parameters: DEFAULT_RULE.parameters as never,
-          effective_from: new Date('2000-01-01T00:00:00Z'),
-          reason: DEFAULT_RULE.reason,
-          published_by: actorText(SYSTEM),
-          published_at: new Date('2000-01-01T00:00:00Z'),
-        });
-      } catch (err) {
-        if ((err as { code?: string }).code !== '23505') throw err; // another caller seeded it
-      }
+      // another caller may have seeded it meanwhile
+      await this.repo.insertIfAbsent('featured_rules', {
+        version: DEFAULT_RULE.version,
+        text: DEFAULT_RULE.text,
+        steps: DEFAULT_RULE.steps as never,
+        parameters: DEFAULT_RULE.parameters as never,
+        effective_from: new Date('2000-01-01T00:00:00Z'),
+        reason: DEFAULT_RULE.reason,
+        published_by: actorText(SYSTEM),
+        published_at: new Date('2000-01-01T00:00:00Z'),
+      });
       this.#defaultEnsured = true;
       rows = await this.repo.rules();
     }

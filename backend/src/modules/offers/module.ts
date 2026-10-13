@@ -6,7 +6,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { mediaBulkFileReader } from './providers/files.js';
-import { createMongoOffersRepository } from './repository.js';
+import { OffersRepository } from './repository.js';
 import { OffersService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -22,7 +22,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   register(ctx) {
-    const service = new OffersService({ repo: createMongoOffersRepository(ctx.mongo), ctx, files: mediaBulkFileReader(ctx) });
+    const service = new OffersService({ repo: new OffersRepository(ctx.mongo), ctx, files: mediaBulkFileReader(ctx) });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

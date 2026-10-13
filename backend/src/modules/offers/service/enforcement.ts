@@ -11,6 +11,7 @@ import type { StatusReason } from '../../../spec/offers.js';
 import { activityLabel, inScope, type ScopeLike } from '../domain/rules.js';
 import { enforcementIdOf, offerTitle, SERVICE_HOLD, strings } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
+import { DuplicateKeyError } from '../repository.js';
 import { Part, SYSTEM, type By, type ProductCache, type TransitionSpec } from './core.js';
 
 type Source = NonNullable<TransitionSpec['source']>;
@@ -241,7 +242,7 @@ export class EnforcementPart extends Part {
           await this.core.markDirty([r.variant_id, target.id]);
           if (r.published_at) this.core.publish('offers.offer.updated', { offerId: r.id, productId: kept.product.id, termsVersion: r.terms_version + 1, fields: ['productId', 'variantId'] });
         } catch (err) {
-          if ((err as { code?: string }).code !== '23505') throw err; // the seller already has a New offer there
+          if (!(err instanceof DuplicateKeyError)) throw err; // the seller already has a New offer there
         }
       }
       if (moved) continue;

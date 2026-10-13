@@ -1,90 +1,140 @@
-import type { ModuleStore } from '../../kernel/mongo/index.js';
+import type { PageRequest } from '../../kernel/lib/pagination.js';
+import { isDuplicateKey, whereFilter, contains, type ModuleStore, type Where } from '../../kernel/mongo/index.js';
 import type { Filter, Sort, Table as Collection } from '../../kernel/mongo/table.js';
-import type { OfferListFilter, OffersRepository, Table } from './ports.js';
+import type * as common from '../../spec/common.js';
+import type { BulkJobRec, BulkRowRec, Db, EligibilityRec, FeaturedRec, IdTable, OfferListFilter, OfferRec, PriceChangeRec, RuleRec, Table } from './ports.js';
 
-/** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
-const oneOf = (values: readonly unknown[]) => ({ $in: [...new Set(values)] });
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-const isOp = (v: unknown): v is { op: string; value: unknown } => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date) && 'op' in v;
-
-/** A Where (ports.ts) as a filter, with SQL's meaning: `<>` and `not in` skip nulls, an empty list matches nothing */
-function where(w: Record<string, unknown>): Filter {
-  const out: Filter = {};
-  for (const [col, v] of Object.entries(w)) {
-    if (v === undefined) continue;
-    if (v === null) out[col] = null;
-    else if (Array.isArray(v)) out[col] = oneOf(v);
-    else if (isOp(v)) {
-      const value = v.value;
-      switch (v.op) {
-        case '<':
-          out[col] = { $lt: value };
-          break;
-        case '<=':
-          out[col] = { $lte: value };
-          break;
-        case '>':
-          out[col] = { $gt: value };
-          break;
-        case '>=':
-          out[col] = { $gte: value };
-          break;
-        case '<>':
-          out[col] = value === null ? { $in: [] } : { $nin: [value, null] };
-          break;
-        case 'is not':
-          out[col] = value === null ? { $ne: null } : { $nin: [value, null] };
-          break;
-        case 'not in': {
-          const list = value as unknown[];
-          if (list.length) out[col] = { $nin: [...list, null] };
-          break;
-        }
-        default:
-          throw new Error(`offers repository: unknown operator ${v.op}`);
-      }
-    } else out[col] = v;
-  }
-  return out;
+export interface FindOptions<R> {
+  orderBy?: [keyof R & string, 'asc' | 'desc'][];
+  limit?: number;
+  forUpdate?: boolean;
 }
-
-const definedOnly = (row: Record<string, unknown>) => Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined));
 
 /**
- * A duplicate key as a unique violation error (code 23505, the index name as `constraint`): the service
- * tells DUPLICATE_OFFER reasons apart by the index name (stock_item, sku, variant).
+ * A write refused by a unique index of the collection. `index` is the index name: the service tells the
+ * DUPLICATE_OFFER reasons apart by it (it names the columns: stock_item, seller_sku, variant).
  */
-function uniqueViolation(err: unknown): unknown {
-  const e = err as { code?: unknown; message?: string; errmsg?: string; writeErrors?: { errmsg?: string }[] };
-  if (e?.code !== 11000) return err;
-  const text = e.writeErrors?.[0]?.errmsg ?? e.errmsg ?? e.message ?? '';
-  const constraint = /index: (\S+)/.exec(text)?.[1] ?? '';
-  return Object.assign(new Error(`duplicate key value violates unique constraint "${constraint}"`), { code: '23505', constraint, cause: err });
+export class DuplicateKeyError extends Error {
+  constructor(
+    readonly index: string,
+    options?: { cause?: unknown },
+  ) {
+    super(`a unique index refused the write: ${index}`, options);
+  }
 }
 
-async function unique<R>(fn: () => Promise<R>): Promise<R> {
+/** fn, with MongoDB's duplicate key error turned into DuplicateKeyError */
+async function refusingDuplicates<R>(fn: () => Promise<R>): Promise<R> {
   try {
     return await fn();
   } catch (err) {
-    throw uniqueViolation(err);
+    if (!isDuplicateKey(err)) throw err;
+    const e = err as { message?: string; errmsg?: string; writeErrors?: { errmsg?: string }[] };
+    const text = e.writeErrors?.[0]?.errmsg ?? e.errmsg ?? e.message ?? '';
+    throw new DuplicateKeyError(/index: (\S+)/.exec(text)?.[1] ?? '', { cause: err });
   }
 }
 
-/** MongoDB adapter for OffersRepository (docs/04-mongodb-migration.md): one collection per spec table. */
-export function createMongoOffersRepository(store: ModuleStore): OffersRepository {
-  const table = (name: Table) => store.table<any>(name) as Collection<any>;
-  const t = {
-    offers: table('offers'),
-    priceChanges: table('price_changes'),
-    eligibility: table('offer_eligibility'),
-    featured: table('featured_offers'),
-    rules: table('featured_rules'),
-    bulkJobs: table('bulk_update_jobs'),
-    bulkRows: table('bulk_update_rows'),
-  };
+/** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
+const oneOf = (values: readonly unknown[]) => ({ $in: [...new Set(values)] });
+const definedOnly = (row: object) => Object.fromEntries(Object.entries(row).filter(([, v]) => v !== undefined));
+const sortOf = (orderBy: [string, 'asc' | 'desc'][] | undefined): Sort | undefined =>
+  orderBy?.length ? Object.fromEntries(orderBy.map(([c, d]) => [c, d === 'desc' ? -1 : 1])) : undefined;
 
-  async function offerFilter(f: OfferListFilter): Promise<Filter> {
+/**
+ * offers.offers, offer_price_history, price_changes, offer_status_log, offer_eligibility, featured_offers,
+ * featured_rules, bulk_update_jobs, bulk_update_rows: generic access by table (get / find / insert / update with a
+ * Where of column conditions, kernel whereFilter) plus the offer list filters, featured decisions and bulk rows.
+ * Writes that a unique index refuses throw DuplicateKeyError.
+ */
+export class OffersRepository {
+  readonly #t;
+
+  constructor(private readonly store: ModuleStore) {
+    this.#t = {
+      offers: this.#table('offers'),
+      priceChanges: this.#table('price_changes'),
+      eligibility: this.#table('offer_eligibility'),
+      featured: this.#table('featured_offers'),
+      rules: this.#table('featured_rules'),
+      bulkJobs: this.#table('bulk_update_jobs'),
+      bulkRows: this.#table('bulk_update_rows'),
+    };
+  }
+
+  transaction<R>(fn: (tx: OffersRepository) => Promise<R>): Promise<R> {
+    return this.store.transaction((tx) => fn(new OffersRepository(tx)));
+  }
+
+  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; inside a transaction it commits with the effects */
+  claim(key: string): Promise<boolean> {
+    return this.store.claim(key);
+  }
+
+  // generic table access: the row types are checked by the method signatures
+  #table(name: Table): Collection<any> {
+    return this.store.table(name);
+  }
+
+  /* ---------------------------------------------------------------- generic */
+
+  get<T extends IdTable>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Db[T] | undefined> {
+    return this.#table(table).get(id, { forUpdate: o?.forUpdate });
+  }
+
+  getMany<T extends IdTable>(table: T, ids: readonly string[]): Promise<Db[T][]> {
+    return this.#table(table).getMany([...new Set(ids)]);
+  }
+
+  find<T extends Table>(table: T, where: Where<Db[T]>, o?: FindOptions<Db[T]>): Promise<Db[T][]> {
+    return this.#table(table).find(whereFilter(where), { sort: sortOf(o?.orderBy), limit: o?.limit, forUpdate: o?.forUpdate });
+  }
+
+  findOne<T extends Table>(table: T, where: Where<Db[T]>, o?: FindOptions<Db[T]>): Promise<Db[T] | undefined> {
+    return this.#table(table).findOne(whereFilter(where), { sort: sortOf(o?.orderBy), forUpdate: o?.forUpdate });
+  }
+
+  count<T extends Table>(table: T, where: Where<Db[T]>): Promise<number> {
+    return this.#table(table).count(whereFilter(where));
+  }
+
+  insert<T extends Table>(table: T, row: Db[T]): Promise<Db[T]> {
+    return refusingDuplicates(() => this.#table(table).insert(definedOnly(row)));
+  }
+
+  /** Inserts unless a unique key of the row is taken (on conflict do nothing): the row, or undefined */
+  insertIfAbsent<T extends Table>(table: T, row: Db[T]): Promise<Db[T] | undefined> {
+    return this.#table(table).insertIfAbsent(definedOnly(row));
+  }
+
+  async insertMany<T extends Table>(table: T, rows: Db[T][]): Promise<void> {
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500).map(definedOnly);
+      await refusingDuplicates(() => this.#table(table).insertMany(chunk));
+    }
+  }
+
+  async update<T extends IdTable>(table: T, id: string, patch: Partial<Db[T]>): Promise<Db[T]> {
+    const values = definedOnly(patch);
+    if (!Object.keys(values).length) return (await this.get(table, id))!;
+    const row = await refusingDuplicates(() => this.#table(table).update(id, values));
+    if (!row) throw new Error(`offers: ${table} ${id} not found`);
+    return row;
+  }
+
+  async updateWhere<T extends Table>(table: T, where: Where<Db[T]>, patch: Partial<Db[T]>): Promise<number> {
+    const values = definedOnly(patch);
+    if (!Object.keys(values).length) return 0;
+    return refusingDuplicates(() => this.#table(table).updateMany(whereFilter(where), values));
+  }
+
+  async deleteWhere<T extends Table>(table: T, where: Where<Db[T]>): Promise<void> {
+    await this.#table(table).deleteMany(whereFilter(where));
+  }
+
+  /* ---------------------------------------------------------------- offers */
+
+  async #offerFilter(f: OfferListFilter): Promise<Filter> {
     const and: Filter[] = [];
     if (f.ownerType) and.push({ owner_type: f.ownerType });
     if (f.sellerId) and.push({ seller_id: f.sellerId });
@@ -101,120 +151,104 @@ export function createMongoOffersRepository(store: ModuleStore): OffersRepositor
     if (q) {
       // title (substring, any case), seller SKU, or the exact offer id; misspellings are not matched here: search
       // proper is the search module's
-      const like = { $regex: escapeRegExp(q), $options: 'i' };
+      const like = contains(q);
       and.push({ $or: [{ title: like }, { seller_sku: like }, { id: q.toLowerCase() }] });
     }
     if (f.featuredEligible !== undefined) {
-      const eligible = await t.eligibility.distinct<string>('offer_id', { eligible: true });
+      const eligible = await this.#t.eligibility.distinct<string>('offer_id', { eligible: true });
       and.push({ id: f.featuredEligible ? oneOf(eligible) : { $nin: eligible } });
     }
-    if (f.ineligibilityCode) and.push({ id: oneOf(await t.eligibility.distinct<string>('offer_id', { 'reasons.code': f.ineligibilityCode })) });
+    if (f.ineligibilityCode) and.push({ id: oneOf(await this.#t.eligibility.distinct<string>('offer_id', { 'reasons.code': f.ineligibilityCode })) });
     return and.length ? { $and: and } : {};
   }
 
-  const sortOf = (orderBy: [string, 'asc' | 'desc'][] | undefined): Sort | undefined =>
-    orderBy?.length ? Object.fromEntries(orderBy.map(([c, d]) => [c, d === 'desc' ? -1 : 1])) : undefined;
+  async listOffers(filter: OfferListFilter, page: PageRequest, order?: { column: 'created_at' | 'updated_at'; direction: 'asc' | 'desc' }): Promise<common.Page<OfferRec>> {
+    return this.#t.offers.page(await this.#offerFilter(filter), page, order ?? { column: 'updated_at', direction: 'desc' });
+  }
 
-  const repo: OffersRepository = {
-    transaction: (fn) => store.transaction((tx) => fn(createMongoOffersRepository(tx))),
-    claim: (key) => store.claim(key),
+  async allOffers(filter: OfferListFilter, limit: number): Promise<OfferRec[]> {
+    return this.#t.offers.find(await this.#offerFilter(filter), { sort: { updated_at: -1, id: -1 }, limit });
+  }
 
-    /* ---------------------------------------------------------------- generic */
-    get: (name, id, o) => table(name).get(id, { forUpdate: o?.forUpdate }),
-    async getMany(name, ids) {
-      return table(name).getMany([...new Set(ids)]);
-    },
-    find: (name, w, o) => table(name).find(where(w as Record<string, unknown>), { sort: sortOf(o?.orderBy), limit: o?.limit, forUpdate: o?.forUpdate }),
-    findOne: (name, w, o) => table(name).findOne(where(w as Record<string, unknown>), { sort: sortOf(o?.orderBy), forUpdate: o?.forUpdate }),
-    count: (name, w) => table(name).count(where(w as Record<string, unknown>)),
-    insert: (name, row) => unique(() => table(name).insert(definedOnly(row as Record<string, unknown>))),
-    async insertMany(name, rows) {
-      for (let i = 0; i < rows.length; i += 500) {
-        const chunk = rows.slice(i, i + 500).map((r) => definedOnly(r as Record<string, unknown>));
-        await unique(() => table(name).insertMany(chunk));
-      }
-    },
-    async update(name, id, patch) {
-      const values = definedOnly(patch as Record<string, unknown>);
-      if (!Object.keys(values).length) return (await repo.get(name, id))!;
-      const row = await unique(() => table(name).update(id, values));
-      if (!row) throw new Error(`offers: ${name} ${id} not found`);
-      return row;
-    },
-    async updateWhere(name, w, patch) {
-      const values = definedOnly(patch as Record<string, unknown>);
-      if (!Object.keys(values).length) return 0;
-      return unique(() => table(name).updateMany(where(w as Record<string, unknown>), values));
-    },
-    async deleteWhere(name, w) {
-      await table(name).deleteMany(where(w as Record<string, unknown>));
-    },
+  async countByStatus(filter: OfferListFilter): Promise<Record<string, number>> {
+    const rows = await this.#t.offers.aggregate<{ _id: string; n: number }>([{ $match: this.#t.offers.filter(await this.#offerFilter(filter)) }, { $group: { _id: '$status', n: { $sum: 1 } } }]);
+    return Object.fromEntries(rows.map((r) => [r._id, r.n]));
+  }
 
-    /* ---------------------------------------------------------------- offers */
-    async listOffers(filter, page, order) {
-      return t.offers.page(await offerFilter(filter), page, order ?? { column: 'updated_at', direction: 'desc' });
-    },
-    async allOffers(filter, limit) {
-      return t.offers.find(await offerFilter(filter), { sort: { updated_at: -1, id: -1 }, limit });
-    },
-    async countByStatus(filter) {
-      const rows = await t.offers.aggregate<{ _id: string; n: number }>([{ $match: t.offers.filter(await offerFilter(filter)) }, { $group: { _id: '$status', n: { $sum: 1 } } }]);
-      return Object.fromEntries(rows.map((r) => [r._id, r.n]));
-    },
-    async featuredOfferIds(offerIds) {
-      if (!offerIds.length) return new Set();
-      return new Set(await t.featured.distinct<string>('offer_id', { offer_id: oneOf(offerIds) }));
-    },
+  /** Offers that are or were featured in any zone */
+  async featuredOfferIds(offerIds: readonly string[]): Promise<Set<string>> {
+    if (!offerIds.length) return new Set();
+    return new Set(await this.#t.featured.distinct<string>('offer_id', { offer_id: oneOf(offerIds) }));
+  }
 
-    /* ---------------------------------------------------------------- price changes */
-    async listPriceChanges(f, page) {
-      const and: Filter[] = [];
-      if (f.states?.length) and.push({ state: oneOf(f.states) });
-      if (f.offerId) and.push({ offer_id: f.offerId });
-      if (f.ownerType || f.sellerId) {
-        const ids = await t.offers.distinct<string>('id', { ...(f.ownerType ? { owner_type: f.ownerType } : {}), ...(f.sellerId ? { seller_id: f.sellerId } : {}) });
-        and.push({ offer_id: oneOf(ids) });
-      }
-      return t.priceChanges.page(and.length ? { $and: and } : {}, page, { column: 'created_at', direction: 'desc' });
-    },
+  /* ---------------------------------------------------------------- price changes */
 
-    /* ---------------------------------------------------------------- eligibility */
-    async getEligibility(offerIds) {
-      if (!offerIds.length) return [];
-      return t.eligibility.find({ offer_id: oneOf(offerIds) });
-    },
-    async upsertEligibility(row) {
-      await t.eligibility.upsert(definedOnly(row as never));
-    },
+  async listPriceChanges(f: { states?: string[]; offerId?: string; ownerType?: 'official' | 'seller'; sellerId?: string }, page: PageRequest): Promise<common.Page<PriceChangeRec>> {
+    const and: Filter[] = [];
+    if (f.states?.length) and.push({ state: oneOf(f.states) });
+    if (f.offerId) and.push({ offer_id: f.offerId });
+    if (f.ownerType || f.sellerId) {
+      const ids = await this.#t.offers.distinct<string>('id', { ...(f.ownerType ? { owner_type: f.ownerType } : {}), ...(f.sellerId ? { seller_id: f.sellerId } : {}) });
+      and.push({ offer_id: oneOf(ids) });
+    }
+    return this.#t.priceChanges.page(and.length ? { $and: and } : {}, page, { column: 'created_at', direction: 'desc' });
+  }
 
-    /* ---------------------------------------------------------------- featured */
-    getFeatured: (variantId, group, zone) => t.featured.findOne({ variant_id: variantId, condition_group: group, zone_key: zone }),
-    async upsertFeatured(row) {
-      await t.featured.upsert(definedOnly(row as never), { key: ['variant_id', 'condition_group', 'zone_key'] });
-    },
-    async markFeaturedDirty(w) {
-      if (w.all) return t.featured.updateMany({ dirty: false }, { dirty: true });
-      const or: Filter[] = [];
-      if (w.variantIds?.length) or.push({ variant_id: oneOf(w.variantIds) });
-      if (w.productIds?.length) or.push({ product_id: oneOf(w.productIds) });
-      if (w.olderThan) or.push({ computed_at: { $lt: w.olderThan } });
-      if (w.ruleVersionNot !== undefined) or.push({ rule_version: { $nin: [w.ruleVersionNot, null] } });
-      if (!or.length) return 0;
-      return t.featured.updateMany({ $or: or, dirty: false }, { dirty: true });
-    },
-    dirtyFeatured: (limit) => t.featured.find({ dirty: true }, { sort: { computed_at: 1 }, limit }),
+  /* ---------------------------------------------------------------- eligibility */
 
-    /* ---------------------------------------------------------------- rules */
-    rules: () => t.rules.find({}, { sort: { version: 1 } }),
+  async getEligibility(offerIds: readonly string[]): Promise<EligibilityRec[]> {
+    if (!offerIds.length) return [];
+    return this.#t.eligibility.find({ offer_id: oneOf(offerIds) });
+  }
 
-    /* ---------------------------------------------------------------- bulk */
-    listBulkJobs: (f, page) => t.bulkJobs.page({ owner_type: f.ownerType, ...(f.sellerId ? { seller_id: f.sellerId } : {}) }, page, { column: 'uploaded_at', direction: 'desc' }),
-    bulkRows: (jobId, result, page) => t.bulkRows.page({ job_id: jobId, ...(result ? { result } : {}) }, page, { column: 'row_no', direction: 'asc', id: 'row_no' }),
-    async updateBulkRow(jobId, rowNo, patch) {
-      const values = definedOnly(patch as Record<string, unknown>);
-      if (!Object.keys(values).length) return;
-      await t.bulkRows.updateMany({ job_id: jobId, row_no: rowNo }, values);
-    },
-  };
-  return repo;
+  async upsertEligibility(row: EligibilityRec): Promise<void> {
+    await this.#t.eligibility.upsert(definedOnly(row));
+  }
+
+  /* ---------------------------------------------------------------- featured decisions */
+
+  getFeatured(variantId: string, group: string, zoneKey: string): Promise<FeaturedRec | undefined> {
+    return this.#t.featured.findOne({ variant_id: variantId, condition_group: group, zone_key: zoneKey });
+  }
+
+  async upsertFeatured(row: FeaturedRec): Promise<void> {
+    await this.#t.featured.upsert(definedOnly(row), { key: ['variant_id', 'condition_group', 'zone_key'] });
+  }
+
+  async markFeaturedDirty(w: { variantIds?: readonly string[]; productIds?: readonly string[]; all?: boolean; olderThan?: Date; ruleVersionNot?: number }): Promise<number> {
+    if (w.all) return this.#t.featured.updateMany({ dirty: false }, { dirty: true });
+    const or: Filter[] = [];
+    if (w.variantIds?.length) or.push({ variant_id: oneOf(w.variantIds) });
+    if (w.productIds?.length) or.push({ product_id: oneOf(w.productIds) });
+    if (w.olderThan) or.push({ computed_at: { $lt: w.olderThan } });
+    if (w.ruleVersionNot !== undefined) or.push({ rule_version: { $nin: [w.ruleVersionNot, null] } });
+    if (!or.length) return 0;
+    return this.#t.featured.updateMany({ $or: or, dirty: false }, { dirty: true });
+  }
+
+  dirtyFeatured(limit: number): Promise<FeaturedRec[]> {
+    return this.#t.featured.find({ dirty: true }, { sort: { computed_at: 1 }, limit });
+  }
+
+  /* ---------------------------------------------------------------- rules */
+
+  rules(): Promise<RuleRec[]> {
+    return this.#t.rules.find({}, { sort: { version: 1 } });
+  }
+
+  /* ---------------------------------------------------------------- bulk */
+
+  listBulkJobs(f: { ownerType: 'official' | 'seller'; sellerId?: string }, page: PageRequest): Promise<common.Page<BulkJobRec>> {
+    return this.#t.bulkJobs.page({ owner_type: f.ownerType, ...(f.sellerId ? { seller_id: f.sellerId } : {}) }, page, { column: 'uploaded_at', direction: 'desc' });
+  }
+
+  bulkRows(jobId: string, result: string | undefined, page: PageRequest): Promise<common.Page<BulkRowRec>> {
+    return this.#t.bulkRows.page({ job_id: jobId, ...(result ? { result } : {}) }, page, { column: 'row_no', direction: 'asc', id: 'row_no' });
+  }
+
+  async updateBulkRow(jobId: string, rowNo: number, patch: Partial<BulkRowRec>): Promise<void> {
+    const values = definedOnly(patch);
+    if (!Object.keys(values).length) return;
+    await this.#t.bulkRows.updateMany({ job_id: jobId, row_no: rowNo }, values);
+  }
 }

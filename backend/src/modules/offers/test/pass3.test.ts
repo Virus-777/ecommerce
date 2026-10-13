@@ -88,13 +88,13 @@ describe('shipping profile ownership', () => {
 });
 
 describe('uniqueness (database indexes, Official Store included)', () => {
-  it('the database refuses a second Official Store offer with the same SKU, New variant or live stock item; 23505 maps to DUPLICATE_OFFER', async () => {
+  it('the database refuses a second Official Store offer with the same SKU, New variant or live stock item; the refusal maps to DUPLICATE_OFFER', async () => {
     const p = addProduct(h, { variants: 3 });
     const created = await asStaff(h, 'POST', '/official/offers', officialInput(p.id, p.variants[0]!));
     expect(created.statusCode, created.body).toBe(201);
     const row = (await svc.core.repo.get('offers', created.json().offer.id))!;
     const copy = (over: Record<string, unknown>) => svc.core.unique(() => svc.core.repo.insert('offers', { ...row, id: newId(), ...over } as never));
-    // seller_id is null for every Official Store row: without NULLS NOT DISTINCT these went through
+    // seller_id is null for every Official Store row: the unique indexes still count it as one owner
     await expect(copy({ variant_id: p.variants[1], stock_item_id: newId() })).rejects.toMatchObject({ code: 'DUPLICATE_OFFER', details: { reason: 'sku_in_use' } });
     await expect(copy({ seller_sku: sku('X'), stock_item_id: newId() })).rejects.toMatchObject({ code: 'DUPLICATE_OFFER', details: { reason: 'new_offer_exists' } });
     await expect(copy({ seller_sku: sku('X'), variant_id: p.variants[2], condition: 'refurbished' })).rejects.toMatchObject({ code: 'DUPLICATE_OFFER', details: { reason: 'stock_item_in_use' } });

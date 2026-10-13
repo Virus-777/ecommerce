@@ -15,7 +15,7 @@ import { isUuid } from '../../kernel/lib/ids.js';
 export type { OffersServiceDeps };
 
 /**
- * Offers use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Offers use cases. Depends only on its repository, the bulk file reader, the event bus, the clock and other modules' public APIs.
  * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class OffersService implements OffersPublicApi {
