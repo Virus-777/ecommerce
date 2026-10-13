@@ -185,12 +185,13 @@
     {
       "name": "verifyReauthToken",
       "signature": "(principal: Principal, token: string, purpose: string) => bool",
-      "desc": "True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. access checks approvals above stepUpAbove with it (purpose approval).",
+      "desc": "True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. access and returns check approvals above stepUpAbove with it (purpose approval).",
       "usedBy": [
         "access",
         "customers",
         "sellers",
-        "finance"
+        "finance",
+        "returns"
       ]
     },
     {
@@ -204,19 +205,21 @@
     {
       "name": "consumeReauthToken",
       "signature": "(token: string) => bool",
-      "desc": "Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs, and by access for approvals above stepUpAbove.",
+      "desc": "Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs, and by access and returns for approvals above stepUpAbove.",
       "usedBy": [
         "kernel",
-        "access"
+        "access",
+        "returns"
       ]
     },
     {
       "name": "releaseReauthToken",
       "signature": "(token: string) => void",
-      "desc": "Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel and by access.",
+      "desc": "Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel, access and returns.",
       "usedBy": [
         "kernel",
-        "access"
+        "access",
+        "returns"
       ]
     },
     {

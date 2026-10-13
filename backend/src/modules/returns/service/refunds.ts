@@ -439,7 +439,7 @@ export class Refunds {
   }
 
   /** Finance approves (POST /refunds/{id}/approve) */
-  async approve(id: string, body: { note?: string | null; stepUpCode?: string | null }, by: By): Promise<RefundRequest> {
+  async approve(id: string, body: { note?: string | null; reauthToken?: string | null }, by: By): Promise<RefundRequest> {
     const rr = await this.repo.get('refund_requests', id);
     if (!rr) throw notFound('Refund request');
     if (is(['processing', 'sent'], rr.status)) return this.viewOf(id);
@@ -449,16 +449,12 @@ export class Refunds {
     }
     refundRequestMachine.next(rr.status as RefundStatus, 'approve');
     if (rr.source === 'seller') throw new AppError('ILLEGAL_TRANSITION', 'The seller approves refunds for its own returns', { from: rr.status });
-    if (body.stepUpCode && by.principal?.accountId) {
-      const ok = await this.core.soft('identity', 'step-up', (i) => i.verifyStepUp(by.principal!.accountId!, { code: body.stepUpCode! }));
-      if (ok === false) throw new AppError('STEP_UP_REQUIRED', 'The 2-step code is not valid', { kind: 'code', purpose: APPROVE_ACTION });
-    }
     const access = this.core.ctx.tryUse('access');
     if (!access || !by.principal) throw new AppError('APPROVAL_REQUIRED', 'Refund approvals are unavailable right now', { action: APPROVE_ACTION, refundRequestId: rr.id });
     if (rr.approval_request_id) {
       const pending = await access.getApproval(rr.approval_request_id).catch(() => null);
       if (pending && ['pending', 'partially_approved'].includes(pending.status)) {
-        const decided = await access.decide(rr.approval_request_id, by.principal, { kind: 'approve', ...(body.note ? { note: body.note } : {}), ...(body.stepUpCode ? { stepUpCode: body.stepUpCode } : {}) });
+        const decided = await access.decide(rr.approval_request_id, by.principal, { kind: 'approve', ...(body.note ? { note: body.note } : {}), ...(body.reauthToken ? { reauthToken: body.reauthToken } : {}) });
         if (decided.status === 'approved') {
           await this.approveAndHandOver(rr.id, by.actor, by, { note: body.note ?? null });
           await this.auditApproval(rr, by, rr.approval_request_id, body.note ?? null);
@@ -470,8 +466,8 @@ export class Refunds {
     }
     const check = await access.check(by.principal, APPROVE_ACTION, { money: money(rr.total, rr.currency) });
     if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'You cannot approve refunds');
-    // above access stepUpAbove whoever approves gives a fresh 2-step code (verified above when given)
-    if (check.decision === 'allowed' && check.stepUpRequired && !body.stepUpCode) throw new AppError('STEP_UP_REQUIRED', 'Enter your current 2-step code to approve this refund', { kind: 'code', purpose: APPROVE_ACTION });
+    // above access stepUpAbove whoever approves confirms with their password again (a re-auth token, purpose approval)
+    const claimed = check.decision === 'allowed' && check.stepUpRequired ? await this.claimApprovalReauth(body.reauthToken, by) : null;
     if (check.decision === 'approval_required') {
       const req = await access.requestApproval({
         action: APPROVE_ACTION,
@@ -486,9 +482,25 @@ export class Refunds {
       // saved pending approval: the request stays under review with approval in the body (FORMAT.md, Approval responses)
       return this.viewOf(id);
     }
-    await this.approveAndHandOver(rr.id, by.actor, by, { note: body.note ?? check.reason });
+    try {
+      await this.approveAndHandOver(rr.id, by.actor, by, { note: body.note ?? check.reason });
+    } catch (err) {
+      // not approved: the re-auth token works again for the retry
+      if (claimed) await this.core.soft('identity', 'release re-auth token', (i) => i.releaseReauthToken(claimed));
+      throw err;
+    }
     await this.auditApproval(rr, by, null, check.reason);
     return this.viewOf(id);
+  }
+
+  /** Claims the approver's re-auth token (single use, issued for purpose approval to this session); STEP_UP_REQUIRED otherwise */
+  private async claimApprovalReauth(token: string | null | undefined, by: By): Promise<string> {
+    const refuse = () => new AppError('STEP_UP_REQUIRED', 'Enter your password again to approve this refund', { kind: 'reauth', purpose: 'approval' });
+    const identity = this.core.ctx.tryUse('identity');
+    if (!token || !identity || !by.principal) throw refuse();
+    if (!(await identity.verifyReauthToken(by.principal, token, 'approval'))) throw refuse();
+    if (!(await identity.consumeReauthToken(token))) throw refuse();
+    return token;
   }
 
   private async auditApproval(rr: RefundRec, by: By, approvalRequestId: string | null, note: string | null) {

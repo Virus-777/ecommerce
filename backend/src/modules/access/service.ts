@@ -82,7 +82,7 @@ export class AccessService implements AccessPublicApi {
   }
 
   /** Same rules as the admin approve/reject/return endpoints, for modules that show the decision inside their own screen (payout run approval) */
-  decide(requestId: string, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return'; note?: string; stepUpCode?: string }): Promise<ApprovalRequest> {
+  decide(requestId: string, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return'; note?: string; reauthToken?: string }): Promise<ApprovalRequest> {
     return this.approvals.decide(requestId, principal, decision);
   }
 

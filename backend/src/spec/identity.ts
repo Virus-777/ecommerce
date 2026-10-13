@@ -1112,13 +1112,13 @@ export interface IdentityPublicApi {
   sendPasswordReset(accountId: string, input: { reason: string, by: common.Actor, revokeSessions: boolean }): Promise<void>;
   /** Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. Used by: customers. */
   startPhoneVerification(accountId: string, phone: string): Promise<VerificationChallenge>;
-  /** True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. access checks approvals above stepUpAbove with it (purpose approval). Used by: access, customers, sellers, finance. */
+  /** True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. access and returns check approvals above stepUpAbove with it (purpose approval). Used by: access, customers, sellers, finance, returns. */
   verifyReauthToken(principal: Principal, token: string, purpose: string): Promise<boolean>;
   /** Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). Used by: graphql. */
   accountSecurityOf(accountIds: string[], opts?: { activityLimit?: number }): Promise<Map<string, unknown>>;
-  /** Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs, and by access for approvals above stepUpAbove. Used by: kernel, access. */
+  /** Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs, and by access and returns for approvals above stepUpAbove. Used by: kernel, access, returns. */
   consumeReauthToken(token: string): Promise<boolean>;
-  /** Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel and by access. Used by: kernel, access. */
+  /** Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel, access and returns. Used by: kernel, access, returns. */
   releaseReauthToken(token: string): Promise<void>;
   /** Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. Used by: kernel. */
   revocationsSince(cursor?: string): Promise<{ sessions: { sessionId: string, at: string }[], accounts: { accountId: string, validAfter: string }[], cursor: string }>;

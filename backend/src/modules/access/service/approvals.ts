@@ -146,9 +146,9 @@ export class Approvals {
   }
 
   /** Same rules as the admin approve/reject/return endpoints, for modules that show the decision inside their own screen (payout run approval) */
-  async decide(requestId: string, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return'; note?: string; stepUpCode?: string }): Promise<ApprovalRequest> {
+  async decide(requestId: string, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return'; note?: string; reauthToken?: string }): Promise<ApprovalRequest> {
     const caller: Caller = { principal, actor: { kind: principal.kind === 'staff' ? 'staff' : principal.kind, id: principal.accountId ?? null } };
-    return this.decideAs(caller, requestId, decision.kind, { note: decision.note, stepUpCode: decision.stepUpCode });
+    return this.decideAs(caller, requestId, decision.kind, { note: decision.note, reauthToken: decision.reauthToken });
   }
 
   /** The requesting module withdraws a request (record changed or deleted) */
@@ -285,7 +285,7 @@ export class Approvals {
     return view;
   }
 
-  async decideAs(caller: Caller, id: string, kind: 'approve' | 'reject' | 'return', input: { note?: string | null; stepUpCode?: string | null; reason?: string; comment?: string }): Promise<ApprovalRequest> {
+  async decideAs(caller: Caller, id: string, kind: 'approve' | 'reject' | 'return', input: { note?: string | null; reauthToken?: string | null; reason?: string; comment?: string }): Promise<ApprovalRequest> {
     await this.core.ready();
     const row = await this.core.repo.getRequest(id);
     if (!row) throw notFound('Approval request');
@@ -309,7 +309,7 @@ export class Approvals {
       const code = kind === 'approve' ? elig.code : elig.code === 'SELF_APPROVAL_NOT_ALLOWED' ? elig.code : 'NOT_ELIGIBLE_APPROVER';
       throw new AppError(code, elig.code === 'ALREADY_APPROVED_BY_YOU' ? 'The second approval must come from a different person' : elig.reason, { eligibleRoles: this.core.roleRefsOf(stepRoleKeys(snapshot, state), dir) });
     }
-    if (kind === 'approve') await this.requireStepUp(row, me, input.stepUpCode ?? null);
+    const claimedToken = kind === 'approve' ? await this.requireStepUp(row, caller.principal, input.reauthToken ?? null) : null;
 
     const now = this.core.now();
     const role = dir.roleByKey.get(elig.roleKey);
@@ -326,7 +326,7 @@ export class Approvals {
       via_delegation_from: elig.viaDelegationFrom ?? null,
       at: now,
     };
-    const after = await this.core.repo.transaction(async (tx) => {
+    const record = () => this.core.repo.transaction(async (tx) => {
       const locked = await tx.getRequest(row.id, { forUpdate: true });
       if (!locked || locked.version !== row.version) throw new AppError('CONFLICT', 'This request changed while you were deciding; reload and try again');
       await tx.insertDecision(decision);
@@ -345,6 +345,14 @@ export class Approvals {
       const status = approvalRequestMachine.next(locked.status as never, kind);
       return tx.updateRequest(row.id, { status, outcome_reason: note, ...(kind === 'reject' ? { decided_at: now } : {}), version: locked.version + 1 });
     });
+    let after: Awaited<ReturnType<typeof record>>;
+    try {
+      after = await record();
+    } catch (err) {
+      // the decision was not recorded: the re-auth token works again, so the approver can retry without re-entering the password
+      if (claimedToken) await this.core.ctx.use('identity').releaseReauthToken(claimedToken).catch(() => {});
+      throw err;
+    }
 
     const target = this.targetOf(after);
     const meta = { actor: caller.actor, requestId: caller.requestId };
@@ -625,7 +633,7 @@ export class Approvals {
     }
   }
 
-  /** The amount is above stepUpAbove (money in the same currency): acting or approving needs a fresh 2-step code */
+  /** The amount is above stepUpAbove (money in the same currency): acting or approving needs the password again (a re-auth token) */
   private async stepUpNeeded(amount: Amount): Promise<boolean> {
     const m = amount.money;
     if (!m) return false;
@@ -633,19 +641,26 @@ export class Approvals {
     return !!above && above.currency === m.currency && m.amount > above.amount;
   }
 
-  private async requireStepUp(row: RequestRow, accountId: string, code: string | null) {
-    if (row.amount_minor == null || !row.currency) return;
+  /**
+   * Approving above stepUpAbove: the approver confirms with their password again (owner decision 2026-10-14: staff
+   * have no 2-step), proven by a re-auth token for purpose approval issued to this session. The token is claimed here
+   * (single use) and returned, so the caller can give it back if the decision then fails; null when none was needed.
+   */
+  private async requireStepUp(row: RequestRow, principal: identity.Principal, token: string | null): Promise<string | null> {
+    if (row.amount_minor == null || !row.currency) return null;
     const above = (await this.core.ctx.settings.get('stepUpAbove')) as common.Money | null;
-    if (!above || above.currency !== row.currency || Number(row.amount_minor) <= above.amount) return;
-    const refuse = () => new AppError('STEP_UP_REQUIRED', `Approvals above ${amountText('money', { money: above })} need a fresh 2-step code`, { kind: 'code', purpose: 'approval' });
-    if (!code) throw refuse();
+    if (!above || above.currency !== row.currency || Number(row.amount_minor) <= above.amount) return null;
+    const refuse = () => new AppError('STEP_UP_REQUIRED', `Approvals above ${amountText('money', { money: above })} need your password again`, { kind: 'reauth', purpose: 'approval' });
+    if (!token) throw refuse();
+    const idp = this.core.ctx.use('identity');
     let ok = false;
     try {
-      ok = await this.core.ctx.use('identity').verifyStepUp(accountId, { code });
+      ok = (await idp.verifyReauthToken(principal, token, 'approval')) && (await idp.consumeReauthToken(token));
     } catch (err) {
       if (!isNotImplemented(err)) throw err; // identity not built yet: fail closed
     }
     if (!ok) throw refuse();
+    return token;
   }
 
   /** Limits in force for this action, the requester's best one and the special rules of access's own actions */

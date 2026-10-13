@@ -181,7 +181,8 @@ export class Members {
     if (issues.length) throw validation('The invitation cannot be sent', issues);
 
     const idp = this.core.ctx.use('identity');
-    const invitation = await idp.inviteStaff({ email: input.email, name: input.name, invitedBy: caller.actor });
+    // the pass code is not shown in the Admin Center: the operator prints a link and pass code with npm run staff-link
+    const { invitation } = await idp.inviteStaff({ email: input.email, name: input.name, invitedBy: caller.actor });
     const accountId = invitation.accountId ?? (await idp.findAccountByEmail(input.email, 'staff'))?.id;
     if (!accountId) throw new AppError('CONFLICT', 'The staff account could not be created; try again');
     const prefixes = await this.core.sensitivePrefixes();
@@ -257,12 +258,12 @@ export class Members {
     const system: common.Actor = { kind: 'system', name: 'bootstrap' };
     const idp = this.core.ctx.use('identity');
     // invite everyone first (identity's own writes), then seat them in one transaction
-    const invited: { email: string; name: string; accountId: string; invitationId: string; deputy: boolean }[] = [];
+    const invited: { email: string; name: string; accountId: string; invitationId: string; acceptUrl: string; passCode: string; deputy: boolean }[] = [];
     for (const p of people) {
-      const invitation = await idp.inviteStaff({ email: p.email.trim(), name: p.name.trim(), invitedBy: system });
-      const accountId = invitation.accountId ?? (await idp.findAccountByEmail(p.email.trim(), 'staff'))?.id;
+      const issued = await idp.inviteStaff({ email: p.email.trim(), name: p.name.trim(), invitedBy: system });
+      const accountId = issued.invitation.accountId ?? (await idp.findAccountByEmail(p.email.trim(), 'staff'))?.id;
       if (!accountId) throw new AppError('CONFLICT', 'The staff account could not be created; try again');
-      invited.push({ email: p.email.trim(), name: p.name.trim(), accountId, invitationId: invitation.id, deputy: p.path !== '' });
+      invited.push({ email: p.email.trim(), name: p.name.trim(), accountId, invitationId: issued.invitation.id, acceptUrl: issued.acceptUrl, passCode: issued.passCode, deputy: p.path !== '' });
     }
     const now = this.core.now();
     const seated = await this.core.repo.transaction(async (tx) => {
@@ -306,8 +307,10 @@ export class Members {
         { actor: system },
       );
     }
+    // the links and pass codes go back to npm run bootstrap-owner, which prints them for the operator
+    const invitee = (p: (typeof invited)[number]) => ({ accountId: p.accountId, invitationId: p.invitationId, acceptUrl: p.acceptUrl, passCode: p.passCode });
     const [owner, deputy] = invited;
-    return { accountId: owner!.accountId, invitationId: owner!.invitationId, deputy: deputy ? { accountId: deputy.accountId, invitationId: deputy.invitationId } : null };
+    return { ...invitee(owner!), deputy: deputy ? invitee(deputy) : null };
   }
 
   async assignRole(caller: Caller, input: { accountId: string; roleId: string; reason: string; expiresAt?: string | null }): Promise<RoleAssignment> {

@@ -49,11 +49,18 @@ export interface BootstrapOwnerInput {
   deputy?: { email: string; name: string } | null;
 }
 
-/** The staff accounts and identity invitations created; `deputy` is null without one */
-export interface BootstrapOwnerResult {
+/** An invited person: their staff account, invitation, link and pass code (the operator hands both over) */
+export interface BootstrapInvitee {
   accountId: string;
   invitationId: string;
-  deputy: { accountId: string; invitationId: string } | null;
+  acceptUrl: string;
+  /** Shown once (XXXX-XXXX); only its hash is stored */
+  passCode: string;
+}
+
+/** The staff accounts and identity invitations created; `deputy` is null without one. In-process only (npm run bootstrap-owner). */
+export interface BootstrapOwnerResult extends BootstrapInvitee {
+  deputy: BootstrapInvitee | null;
 }
 
 export type Accounts = Map<string, identity.AccountSummary>;

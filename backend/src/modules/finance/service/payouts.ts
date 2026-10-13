@@ -341,7 +341,7 @@ export class PayoutsPart extends Part {
     return this.runView((await this.repo.get('payout_runs', id))!, by);
   }
 
-  async approve(id: string, body: { confirmedReview: boolean; note?: string | null; stepUpCode?: string | null }, by: By): Promise<PayoutRun> {
+  async approve(id: string, body: { confirmedReview: boolean; note?: string | null; reauthToken?: string | null }, by: By): Promise<PayoutRun> {
     const run = await this.run(id);
     if (run.status !== 'pending_approval') this.core.step(payoutRunMachine, run.status, 'approve');
     if (!body.confirmedReview) throw invalid([{ path: 'confirmedReview', message: 'Confirm you reviewed held, failed and changed-destination payouts' }]);
@@ -356,7 +356,7 @@ export class PayoutsPart extends Part {
       // second reviewer: decided through access (limits, step-up, not the requester)
       const req = await access.getApproval(run.approval_request_id);
       if (req && me && req.requestedBy.id === me) throw this.ctx.error('SAME_APPROVER', 'You requested this approval; a different Finance reviewer approves it');
-      const decided = await access.decide(run.approval_request_id, this.core.principalOf(by), { kind: 'approve', ...(body.note ? { note: body.note } : {}), ...(body.stepUpCode ? { stepUpCode: body.stepUpCode } : {}) });
+      const decided = await access.decide(run.approval_request_id, this.core.principalOf(by), { kind: 'approve', ...(body.note ? { note: body.note } : {}), ...(body.reauthToken ? { reauthToken: body.reauthToken } : {}) });
       const slot = approvals.find((a) => a.status === 'pending') ?? { order: approvals.length + 1, role: 'Finance · second reviewer', status: 'pending' as const };
       Object.assign(slot, mine(slot.role, slot.order));
       if (!approvals.includes(slot as RunApproval)) approvals.push(slot as RunApproval);

@@ -32,7 +32,7 @@ export const adminRoutes = (service: AccessService) =>
     setRoleCoverage: async (i) => service.roles.setRoleCoverage(caller(i), i.params.id, i.body),
     /** GET /permissions: Permission registry grouped by work area */
     listPermissions: async (i) => service.roles.listPermissions(caller(i), i.query),
-    /** GET /members: Staff members with roles, lead/backup duties, away status and 2-step state */
+    /** GET /members: Staff members with roles, lead/backup duties and away status */
     listMembers: async (i) => service.members.listMembers(caller(i), i.query, i.page),
     /** GET /members/{accountId}: One staff member: assignments, effective permissions and limits, away periods */
     getMember: async (i) => service.members.getMember(caller(i), i.params.accountId),
@@ -59,10 +59,7 @@ export const adminRoutes = (service: AccessService) =>
     /** GET /approval-requests/{id}: One approval request with decisions and whether I can decide */
     getApprovalRequest: async (i) => service.approvals.getApprovalRequest(caller(i), i.params.id),
     /** POST /approval-requests/{id}/approve: Approve (first or second approval) */
-    approveRequest: async (i) => {
-      const header = i.request.headers['x-step-up-code'];
-      return service.approvals.decideAs(caller(i), i.params.id, 'approve', { note: i.body.note, stepUpCode: i.body.stepUpCode ?? (typeof header === 'string' ? header : null) });
-    },
+    approveRequest: async (i) => service.approvals.decideAs(caller(i), i.params.id, 'approve', { note: i.body.note, reauthToken: i.body.reauthToken }),
     /** POST /approval-requests/{id}/reject: Reject with a reason */
     rejectRequest: async (i) => service.approvals.decideAs(caller(i), i.params.id, 'reject', { reason: i.body.reason }),
     /** POST /approval-requests/{id}/return: Send back to the requester with a comment */
