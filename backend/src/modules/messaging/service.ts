@@ -3,6 +3,7 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import { zonedTimeToUtc } from '../../kernel/lib/clock.js';
 import { isUuid, newId } from '../../kernel/lib/ids.js';
 import { toPageRequest, type PageRequest } from '../../kernel/lib/pagination.js';
+import { isDuplicateKey } from '../../kernel/mongo/index.js';
 import type * as common from '../../spec/common.js';
 import type {
   AdminConversationRow,
@@ -37,8 +38,6 @@ const ROUND_LOOKBACK_MS = 14 * DAY;
 const JOB_BATCH = 100;
 const FORMER_CUSTOMER = 'Former customer';
 const MAX_BATCHES = 50;
-/** A unique index refused the write (MongoDB duplicate key, E11000) */
-const isDuplicateKey = (err: unknown) => (err as { code?: unknown })?.code === 11000 || /E11000 duplicate key/.test(String((err as Error)?.message ?? ''));
 
 /** A conversation as one viewer sees it, with the summary fields (GraphQL Conversation has both) */
 export interface ConversationView {
@@ -47,7 +46,7 @@ export interface ConversationView {
 }
 
 /**
- * Messaging use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Messaging use cases. Depends on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to an endpoint, a publicApi function, a consumed event or a job in docs/api/spec/modules/messaging.json.
  */
 export class MessagingService implements MessagingPublicApi {
@@ -256,7 +255,7 @@ export class MessagingService implements MessagingPublicApi {
     const me = meOf(v, c);
     const now = this.now();
     await this.repo.transaction(async (tx) => {
-      await tx.insertIgnore('participants', {
+      await tx.addParticipant({
         conversation_id: c.id,
         kind: me.kind,
         participant_id: me.id,
@@ -934,7 +933,7 @@ export class MessagingService implements MessagingPublicApi {
     const joined = await this.repo.transaction(async (tx) => {
       const already = await tx.findOne('participants', { conversation_id: c.id, kind: 'staff', joined_from_case_id: caseId });
       if (already) return false;
-      const added = await tx.insertIgnore('participants', {
+      const added = await tx.addParticipant({
         conversation_id: c.id,
         kind: 'staff',
         participant_id: staff.id,
@@ -1257,7 +1256,7 @@ export class MessagingService implements MessagingPublicApi {
         });
       }
       // people who were not participants yet (e.g. the customer of a seller-started guest thread) join
-      for (const p of participants) await this.repo.insertIgnore('participants', { ...p, conversation_id: existing.id, joined_at: this.now() });
+      for (const p of participants) await this.repo.addParticipant({ ...p, conversation_id: existing.id, joined_at: this.now() });
       return existing;
     }
     const now = this.now();
@@ -1303,7 +1302,7 @@ export class MessagingService implements MessagingPublicApi {
         last_message_at: now,
         archive_after: null,
       });
-      for (const p of participants) await tx.insertIgnore('participants', { ...p, conversation_id: row.id, joined_at: now });
+      for (const p of participants) await tx.addParticipant({ ...p, conversation_id: row.id, joined_at: now });
       return row;
     });
   }

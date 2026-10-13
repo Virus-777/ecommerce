@@ -33,7 +33,8 @@ import {
   type Redaction,
 } from '../domain/rules.js';
 import { sellerReplyMachine } from '../domain/state-machines.js';
-import type { ConversationRec, MessageLine, MessageRec, MessagingRepository, ParticipantRec } from '../ports.js';
+import type { ConversationRec, MessageLine, MessageRec, ParticipantRec } from '../ports.js';
+import type { MessagingRepository } from '../repository.js';
 
 export interface MessagingServiceDeps {
   repo: MessagingRepository;
@@ -577,7 +578,7 @@ export class Core {
         const c = await tx.get('conversations', conversationId, { forUpdate: true });
         if (!c) throw notFound();
         if (c.status !== 'open') throw this.error('CONVERSATION_LOCKED', c.status === 'locked' ? 'This conversation is locked' : 'This conversation is archived', { reason: c.status === 'locked' ? (c.locked_reason ?? 'locked') : 'archived' });
-        joined = await tx.insertIgnore('participants', {
+        joined = await tx.addParticipant({
           conversation_id: c.id,
           kind: author.kind,
           participant_id: author.id,

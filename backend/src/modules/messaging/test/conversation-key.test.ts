@@ -7,6 +7,7 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { isDuplicateKey } from '../../../kernel/mongo/index.js';
 import { buildTestApp } from '../../../testing/app.js';
 import { spec } from '../../../spec/messaging.js';
 import { schemas } from '../schema.js';
@@ -52,8 +53,8 @@ function conversation(over: Record<string, unknown>) {
 const insert = (over: Record<string, unknown>) => conversations().insert(conversation(over));
 const refused = async (over: Record<string, unknown>) => {
   const err = await insert(over).catch((e: unknown) => e);
-  expect(err, 'a duplicate key').toBeInstanceOf(Error);
-  expect((err as { code?: number }).code).toBe(11000);
+  expect(err).toBeInstanceOf(Error);
+  expect(isDuplicateKey(err), 'a duplicate key').toBe(true);
 };
 
 describe('conversation key', () => {
