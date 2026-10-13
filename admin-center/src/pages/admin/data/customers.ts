@@ -1,82 +1,67 @@
-// Sample data for the admin "Customers" screen (design: pages/admin/admin-customers.html and
-// admin-customers--customer-detail.html). Replaced by the customer search API later.
+// Types and labels for the admin "Customers" screen (design: pages/admin/admin-customers.html and
+// admin-customers--customer-detail.html), mapped from GET /api/admin/customers/customers, /customers/{id},
+// /guest-buyers and POST /customers/{id}/actions. useDebounced is shared with the cases queue search.
+import { useEffect, useState } from 'react';
+import type { components } from '@marketly/web-shared/api';
+import type { Tone } from '@marketly/web-shared/ui';
 
-export type AccountStatus = 'Active' | 'Restricted' | 'Under review' | 'Suspended' | 'Closed';
-export type Verification = 'Email and phone' | 'Email only' | 'Not verified';
+type S = components['schemas'];
+export type CustomerRow = S['customers.AdminCustomerRow'];
+export type CustomerDetail = S['customers.AdminCustomerDetail'];
+export type GuestBuyer = S['customers.GuestBuyerRow'];
+export type DataRequest = S['customers.DataRequest'];
+export type AccountActionInput = S['customers.AccountActionInput'];
+export type AccountStatus = CustomerRow['accountStatus'];
+export type Verification = CustomerRow['verification'];
 
-export interface CustomerRow {
-  id: string;
-  name: string;
-  email: string;
-  location: string;
-  orders: number;
-  spend: number;
-  openCases: number;
-  status: AccountStatus;
-  verified: Verification;
-  joined: string;
-  /** Filter tags for the chips. */
-  tags: Array<'abuse' | 'new' | 'guest'>;
-}
+export const STATUS_LABEL: Record<AccountStatus, string> = { active: 'Active', under_review: 'Under review', restricted: 'Restricted', suspended: 'Suspended', closed: 'Closed' };
+export const VERIFICATION_LABEL: Record<Verification, string> = { email_and_phone: 'Email and phone', email_only: 'Email only', not_verified: 'Not verified' };
+export const VERIFIED_TONE: Record<Verification, Tone> = { email_and_phone: 'success', email_only: 'outline', not_verified: 'warning' };
 
-export const CUSTOMERS: CustomerRow[] = [
-  { id: 'CU-208114', name: 'Jordan Lee', email: 'jordan.lee@example.com', location: 'Portland, OR', orders: 5, spend: 911.48, openCases: 1, status: 'Active', verified: 'Email and phone', joined: 'Aug 2026', tags: [] },
-  { id: 'CU-201377', name: 'Priya Kapoor', email: 'priya.k@example.com', location: 'Seattle, WA', orders: 12, spend: 1842.3, openCases: 0, status: 'Active', verified: 'Email and phone', joined: 'Jun 2026', tags: [] },
-  { id: 'CU-210552', name: 'Sam Rivera', email: 'sam.rivera@example.com', location: 'Oakland, CA', orders: 3, spend: 296, openCases: 1, status: 'Active', verified: 'Email only', joined: 'Sep 2026', tags: [] },
-  { id: 'CU-201902', name: 'Alex Morgan', email: 'alex.morgan@example.com', location: 'Boise, ID', orders: 7, spend: 1104.75, openCases: 1, status: 'Active', verified: 'Email and phone', joined: 'Jun 2026', tags: [] },
-  { id: 'CU-204418', name: 'Derek Mills', email: 'dmills@example.com', location: 'Tacoma, WA', orders: 4, spend: 612.4, openCases: 1, status: 'Restricted', verified: 'Email and phone', joined: 'Jul 2026', tags: ['abuse'] },
-  { id: 'CU-212930', name: 'Kyle Benson', email: 'kb.orders@example.com', location: 'Reno, NV', orders: 1, spend: 189.98, openCases: 1, status: 'Under review', verified: 'Email only', joined: 'Oct 2026', tags: ['new'] },
-  { id: 'CU-213004', name: 'Nina Okafor', email: 'nina.o@example.com', location: 'Eugene, OR', orders: 1, spend: 42, openCases: 1, status: 'Active', verified: 'Not verified', joined: 'Oct 2026', tags: ['new'] },
-  { id: 'CU-201655', name: 'Ella Fischer', email: 'ella.fischer@example.com', location: 'Spokane, WA', orders: 6, spend: 540.1, openCases: 0, status: 'Closed', verified: 'Email only', joined: 'Jun 2026', tags: [] },
+export type AccountAction = AccountActionInput['action'];
+export type ReasonCode = AccountActionInput['reasonCode'];
+
+/** The design's actions plus the API's other account actions. Security actions need customers.accounts.security. */
+export const ACCOUNT_ACTIONS: Array<{ value: AccountAction; label: string; security?: boolean }> = [
+  { value: 'send_password_reset', label: 'Send password reset link', security: true },
+  { value: 'sign_out_everywhere', label: 'Sign out of all devices', security: true },
+  { value: 'restrict_messaging', label: 'Restrict messaging' },
+  { value: 'restrict_ordering', label: 'Restrict ordering' },
+  { value: 'restrict_reviews', label: 'Restrict reviews' },
+  { value: 'restrict_account', label: 'Restrict account' },
+  { value: 'mark_under_review', label: 'Mark under review' },
+  { value: 'clear_review', label: 'Clear review' },
+  { value: 'suspend', label: 'Suspend account' },
+  { value: 'reinstate', label: 'Reinstate account' },
+  { value: 'close', label: 'Close account' },
 ];
 
-export const TOTAL_CUSTOMERS = 18406;
+export const ACTION_REASONS: Array<{ value: ReasonCode; label: string }> = [
+  { value: 'customer_request', label: 'Customer request' },
+  { value: 'suspected_takeover', label: 'Suspected account takeover' },
+  { value: 'abusive_messages', label: 'Abusive messages' },
+  { value: 'payment_fraud_review', label: 'Payment fraud review' },
+  { value: 'policy_violation', label: 'Policy violation' },
+  { value: 'other', label: 'Other' },
+];
 
-export interface CustomerOrder {
-  ref: string;
-  date: string;
-  sellers: number;
-  total: number;
-  status: string;
-}
-
-export interface CustomerDetail {
-  phone: string;
-  address: string;
-  signIn: string;
-  marketing: string;
-  orders: CustomerOrder[];
-  openCase?: { ref: string; summary: string; status: string };
-  messages: string;
-  notes: Array<{ who: string; date: string; text: string }>;
-  abuse: string;
-}
-
-/** Detail records by customer id (only the sample customer has a full record). */
-export const CUSTOMER_DETAIL: Record<string, CustomerDetail> = {
-  'CU-208114': {
-    phone: '(503) 555-0148',
-    address: '2140 Alder St, Apt 5, Portland, OR 97205',
-    signIn: 'Password + two-step code · last Oct 8, 7:02 AM',
-    marketing: 'Email offers on · essential updates always on',
-    orders: [
-      { ref: 'MK-261006-90127', date: 'Oct 6, 2026', sellers: 1, total: 88.5, status: 'Preparing' },
-      { ref: 'MK-260914-48213', date: 'Sep 14, 2026', sellers: 3, total: 513.98, status: 'Partly delivered' },
-      { ref: 'MK-260830-11764', date: 'Aug 30, 2026', sellers: 1, total: 58, status: 'Delivered' },
-      { ref: 'MK-260818-07352', date: 'Aug 18, 2026', sellers: 1, total: 139, status: 'Refunded' },
-      { ref: 'MK-260811-03309', date: 'Aug 11, 2026', sellers: 1, total: 112, status: 'Cancelled' },
-    ],
-    openCase: { ref: 'CS-104882', summary: 'Dispute · delayed duvet cover · Casa Verde Home', status: 'Waiting on seller' },
-    messages: '2 order conversations · last message Oct 6 to Casa Verde Home',
-    notes: [{ who: 'Isabel Cruz', date: 'Oct 6', text: 'Polite and clear. Delay is on the seller side. Offer refund if no scan by Oct 9.' }],
-    abuse: 'None filed by or against this customer.',
-  },
+export const DATA_REQUEST_LABEL: Record<string, string> = {
+  requested: 'Requested',
+  preparing: 'Preparing',
+  ready: 'Ready',
+  failed: 'Failed',
+  expired: 'Expired',
+  cancelled: 'Cancelled',
+  scheduled: 'Scheduled',
+  completed: 'Completed',
 };
 
-export const ACCOUNT_ACTIONS = ['Send password reset link', 'Sign out of all devices', 'Restrict messaging', 'Restrict account', 'Close account'] as const;
-export type AccountAction = (typeof ACCOUNT_ACTIONS)[number];
-
-/** Account status after an action (actions not listed leave the status unchanged). */
-export const ACTION_STATUS: Partial<Record<AccountAction, AccountStatus>> = { 'Restrict account': 'Restricted', 'Close account': 'Closed' };
-
-export const ACTION_REASONS = ['Customer request', 'Suspected account takeover', 'Abusive messages', 'Payment fraud review', 'Policy violation'];
+/** A value that settles after the user stops typing (search boxes). */
+export function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}

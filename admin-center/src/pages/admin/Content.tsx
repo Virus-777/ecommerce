@@ -1,199 +1,298 @@
 import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Breadcrumbs, Button, Card, Drawer, Field, Icon, IconButton, Img, SegmentedControl, Select, StatusBadge, TableWrap, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { LoadError, SkeletonLines, dateTime } from '@/app/parts';
 
-// Design: pages/admin/admin-content.html · view "edit-section" = edit drawer for "Featured products: Fall picks".
+// Design: pages/admin/admin-content.html · view "edit-section" = edit drawer for a homepage section.
+// Data: GET /api/admin/content/homepage (sections, draft and review state), /homepage/versions, /pages (campaign
+// pages), /homepage/sections/{id}/products (drawer). Writes: PUT /homepage/order (reorder = draft), POST
+// /homepage/submit | review | publish | discard-draft, /homepage/versions/{n}/restore, POST/PATCH /homepage/sections,
+// /sections/{id}/schedule, /sections/{id}/remove, POST /pages (new campaign page draft), /pages/{id}/publish.
+// The layout follows the API's review rule: when a review is required the author sends the draft for review and
+// someone else approves it (SAME_REVIEWER) before it is published.
 
-interface Product { name: string; meta: string; icon: IconName; tint: string }
+type S = components['schemas'];
+type Section = S['content.HomeSectionAdmin'];
+type SectionInput = S['content.SectionInput'];
+type SourceMode = 'manual' | 'collection' | 'rule';
+
+const KIND: Record<string, { icon: IconName; wire: string }> = {
+  campaign_banner: { icon: 'image', wire: 'w-hero' },
+  category_shortcuts: { icon: 'layout-grid', wire: 'w-cats' },
+  deals: { icon: 'tag', wire: 'w-deals' },
+  official_highlights: { icon: 'badge-check', wire: 'w-off' },
+  featured_products: { icon: 'sparkles', wire: 'w-feat' },
+  featured_sellers: { icon: 'store', wire: 'w-sell' },
+  new_arrivals: { icon: 'sparkles', wire: 'w-feat' },
+  popular_products: { icon: 'sparkles', wire: 'w-feat' },
+  brand_collections: { icon: 'tag', wire: 'w-feat' },
+  recently_viewed: { icon: 'clock', wire: 'w-feat' },
+  collection_teaser: { icon: 'gift', wire: 'w-feat' },
+  promise_strip: { icon: 'shield-check', wire: 'w-cats' },
+  ad_position: { icon: 'megaphone', wire: 'w-ad' },
+};
+const kindOf = (k: string) => KIND[k] ?? { icon: 'layout-grid' as IconName, wire: 'w-feat' };
+
+const STATUS: Record<string, string> = { draft: 'Draft', scheduled: 'Scheduled', published: 'Published', unpublished: 'Unpublished', removed: 'Removed', in_review: 'In review', approved: 'Approved' };
+
+const SOURCES: Array<{ value: SourceMode; label: string }> = [
+  { value: 'manual', label: 'Manual selection' },
+  { value: 'collection', label: 'Collection' },
+  { value: 'rule', label: 'Rule' },
+];
+const TIME_ZONES = [
+  { value: 'America/Los_Angeles', label: 'Pacific Time (PT)' },
+  { value: 'America/New_York', label: 'Eastern Time (ET)' },
+];
+const OWNER_ROLES = ['Content', 'Marketing', 'Official Store', 'Sellers'];
+const PRODUCT_KINDS = new Set(['featured_products', 'official_highlights', 'new_arrivals', 'popular_products', 'deals']);
+
 interface SectionEdit {
   heading: string;
   sub: string;
-  source: string;
-  products?: Product[];
-  moreProducts?: number;
+  source: SourceMode;
+  productIds: string[];
+  /** datetime-local, in tz */
   from: string;
   to: string;
   tz: string;
   owner: string;
 }
-interface Section {
-  id: string;
-  title: string;
-  icon: IconName;
-  status: 'Published' | 'Scheduled' | 'Draft' | 'Ad position';
-  summary: string;
-  owner: string;
-  when: string;
-  /** Wireframe block in the preview (none for drafts). */
-  wire: { cls: string; text: string };
-  ad?: boolean;
-  edit?: SectionEdit;
+
+/** Offset of a time zone from UTC at an instant, in minutes. */
+function tzOffset(tz: string, at: Date): number {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(at).map((x) => [x.type, x.value]));
+  return (Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second)) - at.getTime()) / 60000;
 }
+const wallToIso = (wall: string, tz: string) => {
+  const g = new Date(`${wall}:00Z`);
+  return new Date(g.getTime() - tzOffset(tz, g) * 60000).toISOString();
+};
+const isoToWall = (iso: string | null | undefined, tz: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return new Date(d.getTime() + tzOffset(tz, d) * 60000).toISOString().slice(0, 16);
+};
 
-const FALL_PRODUCTS: Product[] = [
-  { name: 'Mosswood Washed Linen Duvet Cover, Queen', meta: 'Casa Verde Home · 31 in stock', icon: 'bed-double', tint: '1' },
-  { name: 'Brightline Smart LED Desk Lamp with Wireless Charger', meta: 'Marketly Official · 9 in stock', icon: 'lamp-desk', tint: '5' },
-  { name: 'Mosswood Ceramic Pour-over Coffee Set', meta: 'Marketly Official · 58 in stock', icon: 'coffee', tint: '3' },
-  { name: 'Pellar Pre-seasoned Cast Iron Skillet 26 cm', meta: 'Marketly Official · 77 in stock', icon: 'cooking-pot', tint: '3' },
-];
+const editOf = (s?: Section): SectionEdit => {
+  const c = s?.config;
+  const tz = c?.timeZone ?? s?.schedule.timeZone ?? TIME_ZONES[0].value;
+  return {
+    heading: c?.heading ?? s?.title ?? '',
+    sub: c?.subheading ?? '',
+    source: (c?.productSource?.mode as SourceMode | undefined) ?? 'manual',
+    productIds: c?.productSource?.productIds ?? [],
+    from: isoToWall(c?.showFrom ?? s?.schedule.publishAt, tz),
+    to: isoToWall(c?.removeAt ?? s?.schedule.unpublishAt, tz),
+    tz,
+    owner: c?.ownerRole ?? s?.owner.role ?? 'Content',
+  };
+};
 
-const edit = (heading: string, owner: string, from = 'Always on', to = '', extra: Partial<SectionEdit> = {}): SectionEdit => ({ heading, sub: '', source: 'Manual selection', from, to, tz: 'Pacific Time (PT)', owner, ...extra });
-
-const SECTIONS: Section[] = [
-  { id: 'hero', title: 'Campaign banner', icon: 'image', status: 'Published', summary: 'Home Week: up to 30% off bedding, lighting and cookware', owner: 'Noor Aziz · Content', when: 'Oct 6 – Oct 19', wire: { cls: 'w-hero', text: 'Campaign banner · Home Week' }, edit: edit('Home Week: up to 30% off bedding, lighting and cookware', 'Noor Aziz · Content', 'Oct 6, 2026, 12:00 AM', 'Oct 19, 2026, 11:59 PM') },
-  { id: 'ad1', title: 'Opening full-screen ad', icon: 'app-window', status: 'Ad position', summary: 'Controlled by Advertising · Home Week opening ad', owner: 'Jamie Brooks · Advertising', when: 'Oct 6 – Oct 19', wire: { cls: 'w-ad', text: 'Ad · opening full-screen (Advertising)' }, ad: true },
-  { id: 'cats', title: 'Category shortcuts', icon: 'layout-grid', status: 'Published', summary: '8 categories', owner: 'Noor Aziz · Content', when: 'Always on', wire: { cls: 'w-cats', text: 'Category shortcuts' }, edit: edit('Shop by category', 'Noor Aziz · Content') },
-  { id: 'deals', title: 'Deals', icon: 'tag', status: 'Published', summary: 'Flash deals from live campaigns', owner: 'Jamie Brooks · Marketing', when: 'Follows campaigns', wire: { cls: 'w-deals', text: 'Deals' }, edit: edit("Today's deals", 'Jamie Brooks · Marketing', 'Follows campaigns', '', { source: 'Rule: top sellers in Home & Kitchen' }) },
-  { id: 'off', title: 'Official Store highlights', icon: 'badge-check', status: 'Published', summary: '4 products · chosen by Official Store', owner: 'Dana Ortiz · Official Store', when: 'Always on', wire: { cls: 'w-off', text: 'Official Store highlights' }, edit: edit('From the Official Store', 'Noor Aziz · Content') },
-  { id: 'ad2', title: 'Sponsored brand banner', icon: 'megaphone', status: 'Ad position', summary: 'Controlled by Advertising · Halden Aurora', owner: 'Jamie Brooks · Advertising', when: 'Oct 1 – Oct 10', wire: { cls: 'w-ad', text: 'Ad · sponsored brand (Advertising)' }, ad: true },
-  {
-    id: 'feat', title: 'Featured products: Fall picks', icon: 'sparkles', status: 'Scheduled', summary: '12 products · manual selection', owner: 'Noor Aziz · Content', when: 'Oct 9, 6:00 AM – Oct 31', wire: { cls: 'w-feat', text: 'Featured: Fall picks · from Oct 9' },
-    edit: { heading: 'Fall picks for home', sub: 'Warm layers, soft light and slow coffee', source: 'Manual selection', products: FALL_PRODUCTS, moreProducts: 8, from: 'Oct 9, 2026, 6:00 AM', to: 'Oct 31, 2026, 11:59 PM', tz: 'Pacific Time (PT)', owner: 'Noor Aziz · Content' },
-  },
-  { id: 'sell', title: 'Featured sellers', icon: 'store', status: 'Published', summary: '4 verified sellers', owner: 'Grace Kim · Sellers', when: 'Always on', wire: { cls: 'w-sell', text: 'Featured sellers' }, edit: edit('Sellers we love', 'Noor Aziz · Content') },
-  { id: 'gift', title: 'Holiday gift guide teaser', icon: 'gift', status: 'Draft', summary: 'Draft copy and 3 collections', owner: 'Noor Aziz · Content', when: 'From Nov 1', wire: { cls: 'w-feat', text: 'Holiday gift guide' }, edit: edit('Holiday gift guide', 'Noor Aziz · Content', 'Nov 1, 2026, 12:00 AM', 'Dec 24, 2026, 11:59 PM') },
-];
-
-interface CampaignPage { name: string; path: string; owner: string; publish: string; remove: string; status: 'Published' | 'Scheduled' | 'Unpublished' | 'Draft' }
-const PAGES: CampaignPage[] = [
-  { name: 'Home Week', path: '/campaign/home-week', owner: 'Noor Aziz', publish: 'Oct 6, 12:00 AM', remove: 'Oct 19, 11:59 PM', status: 'Published' },
-  { name: 'Fall Home Sale', path: '/campaign/fall-home-sale', owner: 'Noor Aziz', publish: 'Oct 16, 12:00 AM', remove: 'Oct 25, 11:59 PM', status: 'Scheduled' },
-  { name: 'Kestrel flash sale', path: '/campaign/kestrel-flash', owner: 'Jamie Brooks', publish: 'Oct 9, 9:00 AM', remove: 'Oct 9, 9:00 PM', status: 'Scheduled' },
-  { name: 'Back to campus', path: '/campaign/back-to-campus', owner: 'Noor Aziz', publish: 'Aug 15', remove: 'Removed Sep 16', status: 'Unpublished' },
-  { name: 'Holiday gift guide', path: '/campaign/holiday-gifts', owner: 'Noor Aziz', publish: 'Not set', remove: 'Not set', status: 'Draft' },
-];
-
-interface Version { n: number; when: string; who: string; what: string }
-const VERSIONS: Version[] = [
-  { n: 14, when: 'Oct 6, 9:02 AM', who: 'Noor Aziz', what: 'Published Home Week banner, moved Deals above Official Store' },
-  { n: 13, when: 'Oct 1, 8:15 AM', who: 'Jamie Brooks', what: 'Added Sponsored brand position' },
-  { n: 12, when: 'Sep 16, 12:01 AM', who: 'System', what: 'Removed Back to campus banner on schedule' },
-  { n: 11, when: 'Sep 2, 3:40 PM', who: 'Noor Aziz', what: 'Corrected category shortcut order' },
-];
-
-const SOURCES = ['Manual selection', 'Collection: Fall home', 'Rule: top sellers in Home & Kitchen'];
-const TIME_ZONES = ['Pacific Time (PT)', 'Eastern Time (ET)'];
-const OWNERS = ['Noor Aziz · Content', 'Jamie Brooks · Marketing'];
-
-/** "Oct 9, 2026, 6:00 AM" -> "Oct 9, 6:00 AM"; "Oct 31, 2026, 11:59 PM" -> "Oct 31" */
-const shortFrom = (s: string) => s.replace(/,\s*\d{4}/, '');
-const shortTo = (s: string) => s.replace(/,\s*\d{4}.*$/, '');
-const now = () => new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const actorName = (a: unknown) => (a as { name?: string; kind?: string } | null)?.name ?? ((a as { kind?: string } | null)?.kind === 'system' ? 'System' : 'Staff');
 
 export default function Content() {
-  const [view, setView] = useView<'edit-section'>();
-  const [sections, setSections] = useState(SECTIONS);
-  const [published, setPublished] = useState(SECTIONS.map((s) => s.id));
-  const [editId, setEditId] = useState<string | null>('feat');
-  const [draft, setDraft] = useState<SectionEdit>(SECTIONS.find((s) => s.id === 'feat')!.edit!);
-  const [position, setPosition] = useState(6);
-  const [headErr, setHeadErr] = useState('');
-  const [pages, setPages] = useState(PAGES);
-  const [versions, setVersions] = useState(VERSIONS);
-  const [device, setDevice] = useState<'desktop' | 'phone'>('desktop');
-  const [notice, setNotice] = useState('');
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const { can } = useStaffSession();
+  const canManage = can('content.homepage.manage');
+  const canPublish = can('content.homepage.publish');
+  const canPages = can('content.pages.manage');
+  const canPagesPublish = can('content.pages.publish');
 
+  const [view, setView] = useView<'edit-section'>();
+  const [editId, setEditId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<SectionEdit>(editOf());
+  const [position, setPosition] = useState(0);
+  const [headErr, setHeadErr] = useState('');
+  const [device, setDevice] = useState<'desktop' | 'phone'>('desktop');
+  const [notice, setNotice] = useState<{ tone: 'success' | 'info'; title: string } | null>(null);
+
+  const home = useQuery({ queryKey: ['content', 'homepage'], enabled: canManage, queryFn: () => call(api.GET('/api/admin/content/homepage')) });
+  const versions = useQuery({ queryKey: ['content', 'homepage', 'versions'], enabled: canManage, queryFn: () => call(api.GET('/api/admin/content/homepage/versions', { params: { query: { limit: 10 } } })) });
+  const pages = useQuery({ queryKey: ['content', 'pages'], enabled: canPages, queryFn: () => call(api.GET('/api/admin/content/pages', { params: { query: { limit: 50 } } })) });
+
+  const sections = [...(home.data?.sections ?? [])].sort((a, b) => a.position - b.position);
+  const h = home.data;
+  const review = h?.draftReview;
   const open = view === 'edit-section';
   const editing = sections.find((s) => s.id === editId);
-  const reordered = sections.map((s) => s.id).join() !== published.join();
-  const current = versions[0].n;
+  // Opening ?view=edit-section directly edits the first editable section.
+  const target = editing ?? (open && editId === null && !draft.heading ? sections.find((s) => !s.locked) : undefined);
+  const products = useQuery({
+    queryKey: ['content', 'section-products', target?.id],
+    enabled: open && !!target && PRODUCT_KINDS.has(target.kind),
+    queryFn: () => call(api.GET('/api/admin/content/homepage/sections/{id}/products', { params: { path: { id: target!.id }, query: { limit: 24 } } })),
+  });
 
-  const flash = (msg: string) => {
-    setNotice(msg);
-    announce(msg);
+  const flash = (title: string, tone: 'success' | 'info' = 'success') => {
+    setNotice({ tone, title });
+    announce(title);
   };
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['content'] });
+    void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+  };
+
+  const order = useMutation({
+    mutationFn: (ids: string[]) => call(api.PUT('/api/admin/content/homepage/order', { body: { sectionIds: ids } })),
+    onSuccess: (d) => qc.setQueryData(['content', 'homepage'], d),
+  });
+  const layout = useMutation({
+    mutationFn: async (kind: 'submit' | 'publish' | 'approve' | 'discard') => {
+      if (kind === 'submit') return call(api.POST('/api/admin/content/homepage/submit', { body: { summary: 'Homepage layout changes' } }));
+      if (kind === 'discard') return call(api.POST('/api/admin/content/homepage/discard-draft'));
+      if (kind === 'approve') await call(api.POST('/api/admin/content/homepage/review', { body: { approve: true } }));
+      return call(api.POST('/api/admin/content/homepage/publish', { body: { summary: 'Published homepage layout changes' } }));
+    },
+    onSuccess: (d, kind) => {
+      qc.setQueryData(['content', 'homepage'], d);
+      refresh();
+      flash(kind === 'submit' ? 'Sent for review. The layout is published after someone else approves it.' : kind === 'discard' ? 'Draft discarded' : `Published as version ${d.liveVersion ?? ''}`.trim(), kind === 'submit' ? 'info' : 'success');
+    },
+  });
+  const restore = useMutation({
+    mutationFn: (n: number) => call(api.POST('/api/admin/content/homepage/versions/{number}/restore', { params: { path: { number: n } }, body: { reason: `Restored v${n} from Version history`, publish: true } })),
+    onSuccess: (d, n) => {
+      qc.setQueryData(['content', 'homepage'], d);
+      refresh();
+      flash(`v${n} restored as version ${d.liveVersion ?? ''}`.trim());
+    },
+  });
+  const pageAct = useMutation({
+    mutationFn: (v: { kind: 'new' } | { kind: 'publish'; id: string }) =>
+      v.kind === 'new'
+        ? call(api.POST('/api/admin/content/pages', { body: { kind: 'campaign', title: 'Untitled campaign page', blocks: [] } }))
+        : call(api.POST('/api/admin/content/pages/{id}/publish', { params: { path: { id: v.id } } })),
+    onSuccess: (p, v) => {
+      void qc.invalidateQueries({ queryKey: ['content', 'pages'] });
+      announce(v.kind === 'new' ? 'Campaign page draft added' : `${p.summary.title} published again`);
+    },
+  });
+
+  const saveSection = useMutation({
+    mutationFn: async (mode: 'draft' | 'schedule') => {
+      const base = (target?.config ?? {}) as Partial<SectionInput>;
+      const body: SectionInput = {
+        ...base,
+        kind: (base.kind ?? target?.kind ?? 'featured_products') as SectionInput['kind'],
+        heading: draft.heading.trim(),
+        subheading: draft.sub.trim() || null,
+        productSource: base.productSource || !target ? { ...(base.productSource ?? {}), mode: draft.source, productIds: draft.productIds } : base.productSource,
+        showFrom: draft.from ? wallToIso(draft.from, draft.tz) : null,
+        removeAt: draft.to ? wallToIso(draft.to, draft.tz) : null,
+        timeZone: draft.tz,
+        ownerRole: draft.owner,
+        position: position + 1,
+      };
+      let s = target
+        ? await call(api.PATCH('/api/admin/content/homepage/sections/{id}', { params: { path: { id: target.id } }, body }))
+        : await call(api.POST('/api/admin/content/homepage/sections', { body }));
+      if (mode === 'schedule') s = await call(api.POST('/api/admin/content/homepage/sections/{id}/schedule', { params: { path: { id: s.id } }, body: { showFrom: wallToIso(draft.from, draft.tz), removeAt: draft.to ? wallToIso(draft.to, draft.tz) : null, timeZone: draft.tz } }));
+      return { s, mode };
+    },
+    onSuccess: ({ s, mode }) => {
+      refresh();
+      flash(mode === 'draft' ? `${s.title}: draft saved` : `${s.title} scheduled: ${s.schedule.label}`);
+      setView('');
+    },
+  });
+  const removeSection = useMutation({
+    mutationFn: (s: Section) => call(api.POST('/api/admin/content/homepage/sections/{id}/remove', { params: { path: { id: s.id } }, body: { kind: 'removal', reason: 'Removed from Homepage and pages', immediately: false } })),
+    onSuccess: (s) => {
+      refresh();
+      flash(`${s.title} removed. Restore it from Version history.`);
+      setView('');
+    },
+  });
+
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
     if (j < 0 || j >= sections.length) return;
-    setSections((l) => {
-      const next = [...l];
-      [next[i], next[j]] = [next[j], next[i]];
-      return next;
-    });
+    const ids = sections.map((s) => s.id);
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    order.mutate(ids);
     announce(`${sections[i].title} moved ${dir < 0 ? 'up' : 'down'}`);
-  };
-  const addVersion = (what: string) => {
-    const v = { n: current + 1, when: now(), who: 'Noor Aziz', what };
-    setVersions((vs) => [v, ...vs]);
-    return v.n;
-  };
-  const publishOrder = () => {
-    setPublished(sections.map((s) => s.id));
-    const n = addVersion('Published new section order');
-    flash(`Section order published as version ${n}`);
   };
 
   const openEdit = (s?: Section) => {
-    if (s) {
-      setEditId(s.id);
-      setDraft({ ...s.edit! });
-      setPosition(sections.findIndex((x) => x.id === s.id));
-    } else {
-      setEditId(null);
-      setDraft(edit('', 'Noor Aziz · Content', 'Oct 12, 2026, 12:00 AM', 'Oct 31, 2026, 11:59 PM', { products: [] }));
-      setPosition(sections.length);
-    }
+    setEditId(s?.id ?? null);
+    setDraft(editOf(s));
+    setPosition(s ? sections.findIndex((x) => x.id === s.id) : sections.length);
     setHeadErr('');
+    saveSection.reset();
     setView('edit-section');
   };
+  // Direct ?view=edit-section: fill the drawer from the first editable section once loaded.
+  if (open && editId === null && target && !draft.heading && !saveSection.isPending) {
+    setEditId(target.id);
+    setDraft(editOf(target));
+    setPosition(sections.findIndex((x) => x.id === target.id));
+  }
   const close = () => setView('');
   const set = <K extends keyof SectionEdit>(k: K, v: SectionEdit[K]) => {
     setDraft((d) => ({ ...d, [k]: v }));
     if (k === 'heading' && v) setHeadErr('');
   };
-
-  const save = (status: 'Draft' | 'Scheduled') => {
+  const save = (mode: 'draft' | 'schedule') => {
     if (!draft.heading.trim()) {
       setHeadErr('Enter a heading.');
       return;
     }
-    const when = draft.from === 'Always on' || draft.from === 'Follows campaigns' ? draft.from : `${shortFrom(draft.from)}${draft.to ? ` – ${shortTo(draft.to)}` : ''}`;
-    const nProducts = (draft.products?.length ?? 0) + (draft.moreProducts ?? 0);
-    setSections((l) => {
-      let next: Section[];
-      if (editing) {
-        const updated: Section = {
-          ...editing,
-          status: editing.status === 'Published' && status === 'Scheduled' ? 'Published' : status,
-          owner: draft.owner,
-          when,
-          summary: draft.products ? `${nProducts} products · ${draft.source.toLowerCase()}` : editing.summary,
-          wire: editing.id === 'feat' ? { cls: 'w-feat', text: `Featured: ${draft.heading} · from ${shortTo(draft.from)}` } : editing.wire,
-          edit: draft,
-        };
-        next = l.filter((s) => s.id !== editing.id);
-        next.splice(Math.min(position, next.length), 0, updated);
-      } else {
-        const created: Section = { id: `s${Date.now()}`, title: `Featured products: ${draft.heading}`, icon: 'sparkles', status, summary: `${nProducts} products · ${draft.source.toLowerCase()}`, owner: draft.owner, when, wire: { cls: 'w-feat', text: `Featured: ${draft.heading}` }, edit: draft };
-        next = [...l];
-        next.splice(Math.min(position, next.length), 0, created);
-      }
-      return next;
-    });
-    const n = addVersion(`${status === 'Draft' ? 'Saved draft of' : 'Scheduled'} ${editing?.title ?? draft.heading}`);
-    flash(status === 'Draft' ? `Draft saved as version ${n}` : `${draft.heading} scheduled for ${shortFrom(draft.from)} · version ${n}`);
-    close();
-  };
-  const removeSection = () => {
-    if (!editing) return close();
-    setSections((l) => l.filter((s) => s.id !== editing.id));
-    const n = addVersion(`Removed ${editing.title}`);
-    flash(`${editing.title} removed · version ${n}. Restore it from Version history.`);
-    close();
+    if (mode === 'schedule' && !draft.from) {
+      setHeadErr('');
+      saveSection.reset();
+      document.getElementById('ct-from')?.focus();
+      flash('Enter a “Show from” time to schedule the section.', 'info');
+      return;
+    }
+    saveSection.mutate(mode);
   };
 
   const posOpts = [
     { value: '0', label: '1 · top of the page' },
-    ...sections.filter((s) => s.id !== editId).map((s, i) => ({ value: String(i + 1), label: `${i + 2} · after ${s.title}` })),
+    ...sections.filter((s) => s.id !== target?.id).map((s, i) => ({ value: String(i + 1), label: `${i + 2} · after ${s.title}` })),
   ];
 
-  const wire = sections
-    .filter((s) => s.status !== 'Draft')
-    .map((s) => (open && s.id === editId && s.id === 'feat' ? { ...s.wire, text: `Featured: ${draft.heading || '…'} · from ${shortTo(draft.from)}` } : s.wire));
+  const wire = sections.filter((s) => s.status !== 'draft' && s.status !== 'removed').map((s) => ({ cls: kindOf(s.kind).wire, text: s.locked ? `Ad · ${s.title} (Advertising)` : open && s.id === target?.id ? `${draft.heading || '…'}` : s.title }));
+  const current = h?.liveVersion ?? versions.data?.items[0]?.number ?? 0;
+
+  // Publishing the layout follows the review state.
+  const st = review?.state ?? 'not_required';
+  const publishBtn = !h?.hasDraft
+    ? { label: 'Publish order', run: undefined as undefined | (() => void), note: 'Reordering saves a draft. Customers see it after you publish.' }
+    : st === 'not_submitted' || st === 'changes_requested'
+      ? { label: 'Send for review', run: () => layout.mutate('submit'), note: st === 'changes_requested' ? `Changes requested${review?.note ? `: ${review.note}` : ''}. Send it again when ready.` : 'Draft changes need a review before customers see them.' }
+      : st === 'in_review'
+        ? canPublish
+          ? { label: 'Approve and publish', run: () => layout.mutate('approve'), note: `Sent for review ${review?.submittedAt ? dateTime(review.submittedAt) : ''}. Someone other than the author approves it.` }
+          : { label: 'Waiting for review', run: undefined, note: 'Sent for review. A Content Manager approves it before it is published.' }
+        : canPublish
+          ? { label: 'Publish order', run: () => layout.mutate('publish'), note: 'Draft changes saved. Customers see them after you publish.' }
+          : { label: 'Publish order', run: undefined, note: 'Draft changes saved. A Content Manager publishes them.' };
+
+  if (!canManage) {
+    return (
+      <AdminLayout active="content">
+        <div className="page-head">
+          <div className="t">
+            <Breadcrumbs items={[{ label: 'Admin', to: href('admin/dashboard') }, { label: 'Marketing and content' }]} />
+            <h1 className="h1">Homepage and pages</h1>
+          </div>
+        </div>
+        <Alert tone="info" title="You don’t have access to the homepage editor">
+          Your role can’t manage homepage sections. Ask a Content Manager if you need changes.
+        </Alert>
+      </AdminLayout>
+    );
+  }
 
   return (
     <AdminLayout active="content">
@@ -201,7 +300,7 @@ export default function Content() {
         <div className="t">
           <Breadcrumbs items={[{ label: 'Admin', to: href('admin/dashboard') }, { label: 'Marketing and content' }]} />
           <h1 className="h1">Homepage and pages</h1>
-          <p className="sub small">Owner Noor Aziz, Content Manager · ad positions and timing belong to Advertising · times in PT</p>
+          <p className="sub small">Owner {h?.owner?.name ?? 'Content team'}{h?.owner?.role ? `, ${h.owner.role}` : ''} · ad positions and timing belong to Advertising · times in PT</p>
         </div>
         <div className="actions">
           <Button variant="secondary" size="sm" icon="eye" to={href('store/home')}>
@@ -213,7 +312,13 @@ export default function Content() {
         </div>
       </div>
 
-      {notice && <Alert tone="success" title={notice} />}
+      {notice && <Alert tone={notice.tone} title={notice.title} />}
+      {(order.isError || layout.isError || restore.isError) && (
+        <Alert tone="danger" title="That change wasn’t saved">
+          {errorMessage(order.error ?? layout.error ?? restore.error)}
+        </Alert>
+      )}
+      {home.isError && <LoadError error={home.error} onRetry={() => void home.refetch()} />}
 
       <div className="ab-main">
         <div className="stack gap-5">
@@ -221,39 +326,50 @@ export default function Content() {
             <div className="card-head">
               <div className="stack gap-0">
                 <h2 className="h4">Homepage sections</h2>
-                <span className="xs muted">Shown top to bottom · drag or use arrows to reorder · live version {current}</span>
+                <span className="xs muted">
+                  Shown top to bottom · use arrows to reorder · live version {current}
+                  {h?.draftVersion ? ` · draft version ${h.draftVersion}` : ''}
+                </span>
               </div>
             </div>
+            {home.isPending && (
+              <div className="card-body">
+                <SkeletonLines rows={6} />
+              </div>
+            )}
             {sections.map((s, i) => (
-              <div key={s.id} className={cx('ab-sec', s.ad && 'is-ad', open && s.id === editId && 'is-edit')}>
+              <div key={s.id} className={cx('ab-sec', s.locked && 'is-ad', open && s.id === target?.id && 'is-edit')}>
                 <span className="handle">
-                  <Icon name={s.ad ? 'lock' : 'grip-vertical'} className="ic-sm" />
+                  <Icon name={s.locked ? 'lock' : 'grip-vertical'} className="ic-sm" />
                 </span>
                 <span className="row gap-2">
                   <span className="xs muted num">{i + 1}</span>
-                  <Icon name={s.icon} className="ic-sm" />
+                  <Icon name={kindOf(s.kind).icon} className="ic-sm" />
                   <b className="small">{s.title}</b>
-                  {s.ad ? <Badge tone="outline">Ad position</Badge> : <StatusBadge status={s.status} />}
+                  {s.locked ? <Badge tone="outline">Ad position</Badge> : <StatusBadge status={STATUS[s.status] ?? s.status} />}
                 </span>
                 <span className="meta">
-                  <span>{s.summary}</span>
                   <span>
-                    <Icon name="user-round" className="ic-sm" /> {s.owner}
+                    {s.description}
+                    {s.unavailableHidden ? ` · ${s.unavailableHidden} unavailable hidden` : ''}
                   </span>
                   <span>
-                    <Icon name="calendar" className="ic-sm" /> {s.when}
+                    <Icon name="user-round" className="ic-sm" /> {s.owner.name} · {s.owner.role}
+                  </span>
+                  <span>
+                    <Icon name="calendar" className="ic-sm" /> {s.schedule.label}
                   </span>
                 </span>
                 <span className="acts">
-                  {s.ad ? (
+                  {s.locked ? (
                     <Link className="small strong" to={href('admin/ads')}>
-                      Managed in Advertisements
+                      {s.managedIn ?? 'Managed in Advertisements'}
                     </Link>
                   ) : (
                     <>
-                      <IconButton icon="arrow-up" label={`Move ${s.title} up`} disabled={i === 0} onClick={() => move(i, -1)} />
-                      <IconButton icon="arrow-down" label={`Move ${s.title} down`} disabled={i === sections.length - 1} onClick={() => move(i, 1)} />
-                      <IconButton icon="eye" label={`Preview ${s.title}`} onClick={() => announce(`${s.title}: ${s.summary}`)} />
+                      <IconButton icon="arrow-up" label={`Move ${s.title} up`} disabled={i === 0 || order.isPending} onClick={() => move(i, -1)} />
+                      <IconButton icon="arrow-down" label={`Move ${s.title} down`} disabled={i === sections.length - 1 || order.isPending} onClick={() => move(i, 1)} />
+                      <IconButton icon="eye" label={`Preview ${s.title}`} onClick={() => announce(`${s.title}: ${s.description}`)} />
                       <Button variant="ghost" size="sm" to={href('admin/content', 'edit-section')} onClick={(e) => (e.preventDefault(), openEdit(s))}>
                         Edit
                       </Button>
@@ -263,12 +379,12 @@ export default function Content() {
               </div>
             ))}
             <div className="card-foot">
-              <span className="ab-note grow">{reordered ? 'Order changed: saved as a draft. Customers see it after you publish.' : 'Reordering saves a draft. Customers see it after you publish.'}</span>
-              <Button variant="ghost" size="sm" disabled={!reordered} onClick={() => setSections((l) => published.map((id) => l.find((s) => s.id === id)).filter((s): s is Section => !!s).concat(l.filter((s) => !published.includes(s.id))))}>
+              <span className="ab-note grow">{publishBtn.note}</span>
+              <Button variant="ghost" size="sm" disabled={!h?.hasDraft || layout.isPending} onClick={() => layout.mutate('discard')}>
                 Discard draft
               </Button>
-              <Button size="sm" disabled={!reordered} onClick={publishOrder}>
-                Publish order
+              <Button size="sm" disabled={!publishBtn.run || layout.isPending} onClick={publishBtn.run}>
+                {publishBtn.label}
               </Button>
             </div>
           </section>
@@ -279,85 +395,101 @@ export default function Content() {
             sub="Each page has a publish time and a removal time"
             flush
             actions={
-              <Button
-                variant="secondary"
-                size="sm"
-                icon="plus"
-                onClick={() => {
-                  setPages((p) => [...p, { name: 'Untitled campaign page', path: '/campaign/untitled', owner: 'Noor Aziz', publish: 'Not set', remove: 'Not set', status: 'Draft' }]);
-                  announce('Campaign page draft added');
-                }}
-              >
-                New campaign page
-              </Button>
+              canPages ? (
+                <Button variant="secondary" size="sm" icon="plus" onClick={() => pageAct.mutate({ kind: 'new' })} disabled={pageAct.isPending}>
+                  New campaign page
+                </Button>
+              ) : undefined
             }
           >
-            <TableWrap label="Campaign pages table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Page</th>
-                    <th scope="col">Owner</th>
-                    <th scope="col">Publish</th>
-                    <th scope="col">Remove</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pages.map((p, i) => (
-                    <tr key={p.path + i}>
-                      <td>
-                        <span className="ab-cell">
-                          <span className="strong">{p.name}</span>
-                          <span className="xs muted">{p.path}</span>
-                        </span>
-                      </td>
-                      <td>{p.owner}</td>
-                      <td>{p.publish}</td>
-                      <td>{p.remove}</td>
-                      <td>
-                        <StatusBadge status={p.status} />
-                      </td>
-                      <td>
-                        {p.status === 'Unpublished' ? (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => {
-                              setPages((l) => l.map((x, j) => (j === i ? { ...x, status: 'Draft', publish: 'Not set', remove: 'Not set' } : x)));
-                              announce(`${p.name} restored as a draft`);
-                            }}
-                          >
-                            <Icon name="rotate-ccw" />
-                            <span>Restore</span>
-                            <span className="sr-only"> {p.name}</span>
-                          </button>
-                        ) : p.status === 'Draft' ? (
-                          <Link className="btn btn-ghost btn-sm" to={href('store/collection')}>
-                            <span>Edit</span>
-                            <span className="sr-only"> {p.name}</span>
-                          </Link>
-                        ) : (
-                          <Link className="btn btn-ghost btn-sm" to={href('store/collection')}>
-                            <Icon name="eye" />
-                            <span>Preview</span>
-                            <span className="sr-only"> {p.name}</span>
-                          </Link>
-                        )}
-                      </td>
+            {pageAct.isError && (
+              <div className="card-body">
+                <Alert tone="danger" title="The page wasn’t changed">
+                  {errorMessage(pageAct.error)}
+                </Alert>
+              </div>
+            )}
+            {!canPages ? (
+              <div className="card-body">
+                <span className="small muted">Your role can’t manage campaign pages.</span>
+              </div>
+            ) : pages.isError ? (
+              <div className="card-body">
+                <LoadError error={pages.error} onRetry={() => void pages.refetch()} />
+              </div>
+            ) : (
+              <TableWrap label="Campaign pages table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Page</th>
+                      <th scope="col">Owner</th>
+                      <th scope="col">Publish</th>
+                      <th scope="col">Remove</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
+                  </thead>
+                  <tbody>
+                    {pages.isPending && (
+                      <tr>
+                        <td colSpan={6}>
+                          <SkeletonLines rows={3} />
+                        </td>
+                      </tr>
+                    )}
+                    {(pages.data?.items ?? []).map((p) => {
+                      const storeUrl = href('store/home').replace(/\/$/, '') + p.url;
+                      return (
+                        <tr key={p.id}>
+                          <td>
+                            <span className="ab-cell">
+                              <span className="strong">{p.title}</span>
+                              <span className="xs muted">{p.url}</span>
+                            </span>
+                          </td>
+                          <td>{p.owner.name}</td>
+                          <td>{p.schedule.publishAt ? dateTime(p.schedule.publishAt) : p.status === 'published' ? 'Live' : 'Not set'}</td>
+                          <td>{p.schedule.unpublishAt ? dateTime(p.schedule.unpublishAt) : 'Not set'}</td>
+                          <td>
+                            <StatusBadge status={STATUS[p.status] ?? p.status} />
+                          </td>
+                          <td>
+                            {p.status === 'unpublished' && canPagesPublish && p.allowedActions.includes('publish') ? (
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => pageAct.mutate({ kind: 'publish', id: p.id })} disabled={pageAct.isPending}>
+                                <Icon name="rotate-ccw" />
+                                <span>Restore</span>
+                                <span className="sr-only"> {p.title}</span>
+                              </button>
+                            ) : (
+                              <a className="btn btn-ghost btn-sm" href={storeUrl}>
+                                <Icon name="eye" />
+                                <span>Preview</span>
+                                <span className="sr-only"> {p.title}</span>
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {pages.isSuccess && !pages.data.items.length && (
+                      <tr>
+                        <td colSpan={6} className="muted">
+                          No campaign pages yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
           </Card>
         </div>
 
         <div className="stack gap-5">
-          <Card title="Preview" titleAs="h3" sub={`${device === 'desktop' ? 'Desktop' : 'Phone'} homepage · draft`}>
+          <Card title="Preview" titleAs="h3" sub={`${device === 'desktop' ? 'Desktop' : 'Phone'} homepage · ${h?.hasDraft ? 'draft' : 'live'}`}>
             <div className="ab-wire" aria-label="Homepage layout preview" style={device === 'phone' ? { maxWidth: 220, marginInline: 'auto', width: '100%' } : undefined}>
               {wire.map((w, i) => (
                 <div key={i} className={w.cls}>
@@ -376,36 +508,38 @@ export default function Content() {
             />
           </Card>
           <Card title="Version history" titleAs="h3" flush foot={<span className="ab-note grow">Restoring creates a new version. Nothing is overwritten.</span>}>
-            <ul className="list pad">
-              {versions.map((v, i) => (
-                <li key={v.n}>
-                  <span className="grow stack gap-0">
-                    <span className="small strong">
-                      v{v.n}
-                      {i === 0 ? ' · live' : ''}
+            {versions.isPending ? (
+              <div className="card-body">
+                <SkeletonLines rows={3} />
+              </div>
+            ) : versions.isError ? (
+              <div className="card-body">
+                <LoadError error={versions.error} onRetry={() => void versions.refetch()} />
+              </div>
+            ) : (
+              <ul className="list pad">
+                {versions.data.items.map((v) => (
+                  <li key={v.id}>
+                    <span className="grow stack gap-0">
+                      <span className="small strong">
+                        v{v.number}
+                        {v.state === 'live' ? ' · live' : v.state === 'draft' ? ' · draft' : ''}
+                      </span>
+                      <span className="xs muted">
+                        {dateTime(v.publishedAt ?? v.createdAt)} · {actorName(v.author)} · {v.summary}
+                      </span>
                     </span>
-                    <span className="xs muted">
-                      {v.when} · {v.who} · {v.what}
-                    </span>
-                  </span>
-                  {i === 0 ? (
-                    <Badge tone="brand">Current</Badge>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      icon="rotate-ccw"
-                      onClick={() => {
-                        const n = addVersion(`Restored v${v.n}`);
-                        flash(`v${v.n} restored as version ${n}`);
-                      }}
-                    >
-                      Restore
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                    {v.state === 'live' ? (
+                      <Badge tone="brand">Current</Badge>
+                    ) : v.state === 'superseded' && canPublish ? (
+                      <Button variant="ghost" size="sm" icon="rotate-ccw" onClick={() => restore.mutate(v.number)} disabled={restore.isPending}>
+                        Restore
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </div>
       </div>
@@ -413,69 +547,72 @@ export default function Content() {
       <Drawer
         open={open}
         onClose={close}
-        title={editing ? `Edit section: ${editing.id === 'feat' ? 'Fall picks' : editing.title}` : 'Add section'}
+        title={target ? `Edit section: ${target.title}` : 'Add section'}
         foot={
           <>
-            <Button variant="danger-soft" size="sm" onClick={removeSection}>
-              {editing ? 'Remove section' : 'Discard'}
+            <Button variant="danger-soft" size="sm" onClick={() => (target ? removeSection.mutate(target) : close())} disabled={removeSection.isPending}>
+              {target ? 'Remove section' : 'Discard'}
             </Button>
             <span className="grow" />
-            <Button variant="ghost" size="sm" onClick={() => save('Draft')}>
+            <Button variant="ghost" size="sm" onClick={() => save('draft')} disabled={saveSection.isPending}>
               Save draft
             </Button>
-            <Button size="sm" onClick={() => save('Scheduled')}>
+            <Button size="sm" onClick={() => save('schedule')} disabled={saveSection.isPending}>
               Schedule
             </Button>
           </>
         }
       >
+        {(saveSection.isError || removeSection.isError) && (
+          <Alert tone="danger" title="The section wasn’t saved">
+            {errorMessage(saveSection.error ?? removeSection.error)}
+          </Alert>
+        )}
         <Field label="Heading" error={headErr}>
           <TextInput id="ct-head" value={draft.heading} error={!!headErr} onChange={(e) => set('heading', e.target.value)} />
         </Field>
         <Field label="Subheading" optional>
           <TextInput id="ct-sub" value={draft.sub} onChange={(e) => set('sub', e.target.value)} />
         </Field>
-        <Field label="Product source">
-          <Select id="ct-src" options={SOURCES} value={draft.source} onChange={(e) => set('source', e.target.value)} />
-        </Field>
-        {draft.products && (
+        {(!target || PRODUCT_KINDS.has(target.kind)) && (
+          <Field label="Product source" hint={target?.config?.productSource?.rule?.description ?? undefined}>
+            <Select id="ct-src" options={SOURCES} value={draft.source} disabled={!!target && draft.source !== 'manual'} onChange={(e) => set('source', e.target.value as SourceMode)} />
+          </Field>
+        )}
+        {target && PRODUCT_KINDS.has(target.kind) && draft.source === 'manual' && (
           <div className="stack gap-2">
-            <span className="label">Products ({draft.products.length + (draft.moreProducts ?? 0)})</span>
-            {draft.products.length > 0 && (
+            <span className="label">Products ({draft.productIds.length})</span>
+            {products.isPending ? (
+              <SkeletonLines rows={3} />
+            ) : (
               <ul className="list">
-                {draft.products.map((p) => (
-                  <li key={p.name}>
-                    <Img icon={p.icon} tint={p.tint} className="tiny" />
-                    <span className="grow stack gap-0">
-                      <span className="small truncate">{p.name}</span>
-                      <span className="xs muted">{p.meta}</span>
-                    </span>
-                    <IconButton icon="x" label={`Remove ${p.name}`} onClick={() => set('products', draft.products!.filter((x) => x !== p))} />
-                  </li>
-                ))}
+                {(products.data?.items ?? [])
+                  .filter((p) => draft.productIds.includes(p.productId))
+                  .slice(0, 4)
+                  .map((p) => (
+                    <li key={p.productId}>
+                      <Img icon="package" tint="1" className="tiny" src={p.image?.url} alt="" />
+                      <span className="grow stack gap-0">
+                        <span className="small truncate">{p.title}</span>
+                        <span className="xs muted">
+                          {p.sellerName ?? 'No seller'} · {p.available ? `${p.stock} in stock` : (p.hiddenReason ?? 'Hidden')}
+                        </span>
+                      </span>
+                      <IconButton icon="x" label={`Remove ${p.title}`} onClick={() => set('productIds', draft.productIds.filter((x) => x !== p.productId))} />
+                    </li>
+                  ))}
               </ul>
             )}
-            {(draft.moreProducts ?? 0) > 0 && <span className="xs muted">+ {draft.moreProducts} more · unavailable products are hidden automatically</span>}
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="plus"
-              onClick={() => {
-                const pool = FALL_PRODUCTS.filter((p) => !draft.products!.includes(p));
-                if (pool.length) set('products', [...draft.products!, pool[0]]);
-                else set('moreProducts', (draft.moreProducts ?? 0) + 1);
-              }}
-            >
-              Add products
-            </Button>
+            {draft.productIds.length > 4 && <span className="xs muted">+ {draft.productIds.length - 4} more · unavailable products are hidden automatically</span>}
+            <span className="xs muted">Adding products from the catalog isn’t available in this drawer yet.</span>
           </div>
         )}
         <div className="ab-form-grid">
-          <Field label="Show from">
-            <TextInput id="ct-from" icon="calendar" value={draft.from} onChange={(e) => set('from', e.target.value)} />
+          <Field label="Show from" optional>
+            <TextInput id="ct-from" type="datetime-local" icon="calendar" value={draft.from} onChange={(e) => set('from', e.target.value)} />
           </Field>
-          <Field label="Remove at">
-            <TextInput id="ct-to" icon="calendar" value={draft.to} onChange={(e) => set('to', e.target.value)} />
+          <Field label="Remove at" optional>
+            <TextInput id="ct-to" type="datetime-local" icon="calendar" value={draft.to} onChange={(e) => set('to', e.target.value)} />
           </Field>
         </div>
         <Field label="Time zone">
@@ -485,10 +622,10 @@ export default function Content() {
           <Select id="ct-pos" options={posOpts} value={String(Math.min(position, posOpts.length - 1))} onChange={(e) => setPosition(Number(e.target.value))} />
         </Field>
         <Field label="Owner">
-          <Select id="ct-own" options={OWNERS.includes(draft.owner) ? OWNERS : [draft.owner, ...OWNERS]} value={draft.owner} onChange={(e) => set('owner', e.target.value)} />
+          <Select id="ct-own" options={OWNER_ROLES.includes(draft.owner) ? OWNER_ROLES : [draft.owner, ...OWNER_ROLES]} value={draft.owner} onChange={(e) => set('owner', e.target.value)} />
         </Field>
-        <Alert tone="info" title={`Saved as version ${current + 1}`}>
-          Customers see this section at the scheduled time. Version {current} stays available to restore.
+        <Alert tone="info" title="Saved to the draft layout">
+          Customers see this section at the scheduled time once the layout is published. Version {current} stays available to restore.
         </Alert>
       </Drawer>
     </AdminLayout>

@@ -1,46 +1,45 @@
-import { useState } from 'react';
-import { Link } from 'react-router';
-import { STAFF } from '@marketly/web-shared/data/staff';
-import { sellers, type SellerId } from '@marketly/web-shared/data/fixtures';
+import { useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useParams } from 'react-router';
+import { call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import {
-  Alert, Avatar, Badge, Button, Card, Deadline, Dialog, Field, Icon, Img, KeyValue, LogoTile, PageHeader, Select, StatusBadge, SummaryRow, TableWrap, Textarea, TextInput, announce,
+  Alert, Avatar, Badge, Button, Card, Checkbox, Deadline, Dialog, EmptyState, Field, Icon, Img, KeyValue, LogoTile, PageHeader, Select, StatusBadge, SummaryRow, TableWrap, Textarea, TextInput, announce,
   type TimelineEvent,
 } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { LoadError, SkeletonLines, dateTime, deadlineTone, monthYear } from '@/app/parts';
+import { isStepUpCancel, useStepUp } from './data/step-up';
 import {
-  FEE_RATE, FUNDING, HISTORY, ITEMS, NOTES, ORDER_META as O, PACKAGES, REFUND_DESTINATIONS, REFUND_NOTE_SAMPLE, REFUND_ORDER, REFUND_REASONS,
-  type AdminOrderItem, type InternalNote, type ItemId,
+  ADMIN_ORDER, CANCELLABLE, CANCEL_REASONS, FUNDED_BY, REFUND_REASONS, defaultFunding, parseMinor, sum, toInput, toTimeline, usd, withinLimit,
+  type Amt, type HistoryRow, type MyLimit, type OrderAdmin, type OrderGroup, type OrderItem, type SellerLabel,
 } from './data/order';
 
-// Design: pages/admin/admin-order.html · view "issue-refund" = the refund dialog with the
-// pour-over and duvet selected. Submitting sends the refund to Finance for approval.
+// Design: pages/admin/admin-order.html · view "issue-refund" = the refund dialog. Submitting sends one refund request
+// per seller group (POST returns/refunds); within the staff member's refund limit it is approved at once, above it the
+// response carries the approval and the page shows "sent for approval".
+// Data: GraphQL AdminOrder(ref) (partial data allowed), GET orders/orders/{id}/history, GET access/me and
+// access/approval-actions (limits), POST orders/orders/{id}/cancel-items, …/notes, POST messaging/conversations.
 
 type View = 'issue-refund';
+type Mode = 'refund' | 'cancel';
 
-/** Refund dialog form: selected items, typed amounts, reason, destination and note. */
 interface RefundForm {
-  selected: Partial<Record<ItemId, boolean>>;
-  amounts: Partial<Record<ItemId, string>>;
+  selected: Record<string, boolean>;
+  amounts: Record<string, string>;
   reason: string;
-  dest: string;
+  funding: string;
   note: string;
+  notify: boolean;
 }
 
-const DESIGN_FORM: RefundForm = {
-  selected: { pourover: true, duvet: true },
-  amounts: { pourover: '34.65', duvet: '114.54' },
-  reason: 'Seller cannot fulfil',
-  dest: REFUND_DESTINATIONS[0],
-  note: REFUND_NOTE_SAMPLE,
-};
-const CANCEL_FORM: RefundForm = { selected: { duvet: true }, amounts: { duvet: '114.54' }, reason: 'Seller cannot fulfil', dest: REFUND_DESTINATIONS[0], note: '' };
-
-const parseAmount = (s: string | undefined) => (s && /^\d+(\.\d{1,2})?$/.test(s.trim()) ? Number(s.trim()) : NaN);
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const EMPTY_FORM: RefundForm = { selected: {}, amounts: {}, reason: '', funding: '', note: '', notify: true };
+const tintOf = (name: string) => String(((name.charCodeAt(0) || 0) % 6) + 1);
+const money = (m?: Amt | null) => formatMoney(m ?? { amount: 0, currency: 'USD' });
 
 /** Timeline with the design's "At risk:" note on warning events (shared Timeline lacks it). */
 function History({ events }: { events: TimelineEvent[] }) {
@@ -61,337 +60,481 @@ function History({ events }: { events: TimelineEvent[] }) {
   );
 }
 
-function SellerCell({ id }: { id: SellerId }) {
-  const s = sellers[id];
+function SellerCell({ s }: { s: SellerLabel }) {
   return (
     <span className="row nowrap gap-2">
-      <LogoTile initials={s.initials} tint={s.tint} size="sm" />
+      <LogoTile initials={initials(s.name)} tint={tintOf(s.name)} size="sm" />
       <span className="stack gap-0">
         <span className="small strong nowrap">{s.name}</span>
-        <span className="xs muted nowrap">{'official' in s && s.official ? 'Official Store' : 'Marketplace seller'}</span>
+        <span className="xs muted nowrap">{s.official ? 'Official Store' : 'Marketplace seller'}</span>
       </span>
     </span>
   );
 }
 
+const alertTone = (t: string) => (t.toLowerCase() === 'danger' ? 'danger' : t.toLowerCase() === 'warning' ? 'warning' : t.toLowerCase() === 'success' ? 'success' : 'info');
+
 export default function Order() {
+  const { ref = '' } = useParams();
+  const { api, gql } = useApi();
+  const qc = useQueryClient();
+  const { accountId, can } = useStaffSession();
+  const stepUp = useStepUp();
   const [view, setView] = useView<View>();
-  const [form, setForm] = useState<RefundForm>(DESIGN_FORM);
+  const [mode, setMode] = useState<Mode>('refund');
+  const [form, setForm] = useState<RefundForm>(EMPTY_FORM);
   const [attempted, setAttempted] = useState(false);
-  /** Refunds sent to Finance, per item (approval is not money arrived). */
-  const [requested, setRequested] = useState<Partial<Record<ItemId, number>>>({});
-  const [history, setHistory] = useState(HISTORY);
-  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
-  const [notes, setNotes] = useState<InternalNote[]>(NOTES);
+  const [submitError, setSubmitError] = useState('');
+  const [notice, setNotice] = useState<{ tone: 'success' | 'warning'; title: string; body: string } | null>(null);
   const [draftNote, setDraftNote] = useState('');
   const [noteError, setNoteError] = useState('');
+  const [contact, setContact] = useState<OrderGroup | null>(null);
+  const keys = useRef<Record<string, string>>({});
 
+  const q = useQuery({
+    queryKey: ['orders', 'admin-order', ref],
+    queryFn: async () => (await gql<{ orderAdmin: OrderAdmin | null }>(ADMIN_ORDER, { ref, historyPaging: { limit: 50 } }, 'AdminOrder')).data?.orderAdmin ?? null,
+    enabled: !!ref,
+  });
+  const o = q.data ?? null;
+  const history = useQuery({
+    queryKey: ['orders', 'admin-order', ref, 'history'],
+    queryFn: () => call(api.GET('/api/admin/orders/orders/{id}/history', { params: { path: { id: o!.id } } })),
+    enabled: !!o,
+  });
+  const me = useQuery({ queryKey: ['access', 'me', accountId], queryFn: () => call(api.GET('/api/admin/access/me')) });
+  const actions = useQuery({ queryKey: ['access', 'approval-actions'], queryFn: () => call(api.GET('/api/admin/access/approval-actions')), staleTime: 10 * 60_000, enabled: view === 'issue-refund' });
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['orders'] });
+    void qc.invalidateQueries({ queryKey: ['returns'] });
+    void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+  };
+
+  // ----- Derived order data -----
+  const groups = o?.groups ?? [];
+  const items: Array<OrderItem & { group: OrderGroup }> = groups.flatMap((g) => g.items.map((it) => ({ ...it, group: g })));
+  const itemById = new Map(items.map((it) => [it.id, it]));
+  const refundRows = o?.refundable?.items ?? [];
+  const refundRequests = o?.refundRequests ?? [];
+  const pendingReq = refundRequests.filter((r) => r.status === 'requested' || r.status === 'under_review');
+  const pending = sum(pendingReq.map((r) => r.breakdown?.total ?? usd(0)));
+  const requestFor = (itemId: string) => pendingReq.find((r) => r.orderItemIds.includes(itemId));
+  const canRefund = !!o?.allowedActions.includes('ISSUE_REFUND') && can('returns.exceptions.propose');
+  const canCancel = !!o?.allowedActions.includes('CANCEL_ITEMS') && can('orders.orders.cancel');
+  const canNote = can('orders.orders.manage');
+  const canContact = !!o?.allowedActions.includes('CONTACT_SELLER') && can('messaging.conversations.participate');
+  const cancellable = items.filter((it) => CANCELLABLE.has(it.state));
+  const firstCase = o?.cases[0];
+
+  // ----- Refund / cancel dialog -----
   const open = view === 'issue-refund';
-  const pending = round2(Object.values(requested).reduce((a, b) => a + (b ?? 0), 0));
-  const remaining = round2(O.total - pending);
-  const isCancelled = (id: ItemId) => ITEMS[id].request.kind === 'cancel' && requested[id] !== undefined;
-  const refundable = (it: AdminOrderItem) => !it.blocked && requested[it.id] === undefined;
-
-  // ----- Refund dialog -----
-  const chosen = REFUND_ORDER.map((id) => ITEMS[id]).filter((it) => refundable(it) && form.selected[it.id]);
-  const amountError = (it: AdminOrderItem) => {
-    const v = parseAmount(form.amounts[it.id]);
+  const rows = mode === 'cancel' ? cancellable.map((it) => ({ id: it.id, it, cap: it.paidAmount, blocked: null as string | null })) : refundRows.map((r) => ({ id: r.orderItemId, it: itemById.get(r.orderItemId), cap: r.remaining, blocked: r.blockedReason ?? (r.remaining.amount <= 0 ? 'Nothing left to refund for this item.' : requestFor(r.orderItemId) ? 'A refund for this item is already waiting for Finance.' : null) }));
+  const chosen = rows.filter((r) => !r.blocked && form.selected[r.id]);
+  const amountError = (r: (typeof rows)[number]) => {
+    if (mode === 'cancel') return '';
+    const v = parseMinor(form.amounts[r.id]);
     if (Number.isNaN(v) || v <= 0) return 'Enter an amount, like 34.65.';
-    if (v > it.paid) return `Enter ${money(it.paid)} or less. That's all that is still refundable for this item.`;
+    if (v > r.cap.amount) return `Enter ${money(r.cap)} or less. That's all that is still refundable for this item.`;
     return '';
   };
   const errors = {
-    items: chosen.length === 0 ? 'Choose at least one item to refund.' : '',
-    amounts: Object.fromEntries(chosen.map((it) => [it.id, amountError(it)])) as Partial<Record<ItemId, string>>,
-    reason: form.reason === REFUND_REASONS[0] ? 'Choose a reason for this refund.' : '',
+    items: chosen.length === 0 ? (mode === 'cancel' ? 'Choose at least one item to cancel.' : 'Choose at least one item to refund.') : '',
+    amounts: Object.fromEntries(chosen.map((r) => [r.id, amountError(r)])) as Record<string, string>,
+    reason: !form.reason ? (mode === 'cancel' ? 'Choose a reason for this cancellation.' : 'Choose a reason for this refund.') : '',
     note: form.note.trim() ? '' : 'Add a note for the record. Finance reads it before approving.',
   };
   const nErrors = (errors.items ? 1 : 0) + Object.values(errors.amounts).filter(Boolean).length + (errors.reason ? 1 : 0) + (errors.note ? 1 : 0);
-  const shown = attempted ? errors : { items: '', amounts: {} as Partial<Record<ItemId, string>>, reason: '', note: '' };
-  const valid = chosen.filter((it) => !amountError(it));
-  const refundTotal = round2(valid.reduce((a, it) => a + parseAmount(form.amounts[it.id]), 0));
+  const shown = attempted ? errors : { items: '', amounts: {} as Record<string, string>, reason: '', note: '' };
+  const valid = chosen.filter((r) => !amountError(r));
+  const refundTotal = mode === 'cancel' ? sum(valid.map((r) => r.cap)) : usd(valid.reduce((a, r) => a + parseMinor(form.amounts[r.id]), 0));
+  const officialOnly = valid.length > 0 && valid.every((r) => r.it?.group.seller.official);
 
-  // Effect per seller: the refunded share of the item price comes off earnings and fee; the coupon share goes back to the budget.
+  // Effect per seller: the refunded share of the item price comes off earnings and fee; the platform-funded discount share goes back to its budget.
   const effect = Object.values(
-    valid.reduce<Record<string, { seller: SellerId; refund: number; gross: number; coupon: number }>>((acc, it) => {
-      const amt = parseAmount(form.amounts[it.id]);
-      const ratio = amt / it.paid;
-      const row = (acc[it.seller] ??= { seller: it.seller, refund: 0, gross: 0, coupon: 0 });
+    valid.reduce<Record<string, { seller: SellerLabel; refund: number; gross: number; fee: number; coupon: number }>>((acc, r) => {
+      const it = r.it;
+      if (!it) return acc;
+      const amt = mode === 'cancel' ? r.cap.amount : parseMinor(form.amounts[r.id]);
+      const paid = it.paidAmount.amount || 1;
+      const ratio = amt / paid;
+      const mbs = o?.moneyBySeller.find((m) => m.groupId === it.group.id);
+      const feeRate = mbs?.marketplaceFee && mbs.items.amount ? mbs.marketplaceFee.amount / mbs.items.amount : 0;
+      const row = (acc[it.group.id] ??= { seller: it.group.seller, refund: 0, gross: 0, fee: 0, coupon: 0 });
       row.refund += amt;
-      row.gross += it.unit * it.qty * ratio;
-      row.coupon += (it.unit * it.qty - it.paid) * ratio;
+      row.gross += it.lineSubtotal.amount * ratio;
+      row.fee += it.lineSubtotal.amount * ratio * feeRate;
+      row.coupon += Math.max(0, it.lineSubtotal.amount - it.paidAmount.amount) * ratio;
       return acc;
     }, {}),
   );
 
-  const openRefund = (initial: RefundForm) => {
-    setForm({
-      ...initial,
-      selected: Object.fromEntries(Object.entries(initial.selected).filter(([id]) => requested[id as ItemId] === undefined)),
-    });
+  const refundLimits = ((me.data?.limits ?? []) as unknown as MyLimit[]).filter((l) => l.action.key === 'returns.refunds.approve');
+  const refundAction = (actions.data as Array<{ key: string; approvers: string }> | undefined)?.find((a) => a.key === 'returns.refunds.approve');
+  const inLimit = withinLimit(refundLimits, refundTotal.amount);
+
+  const openDialog = (m: Mode, preselect?: string[]) => {
+    const sel = Object.fromEntries((preselect ?? []).map((id) => [id, true]));
+    const amounts = Object.fromEntries(refundRows.filter((r) => sel[r.orderItemId]).map((r) => [r.orderItemId, toInput(r.remaining.amount)]));
+    setMode(m);
+    setForm({ ...EMPTY_FORM, selected: sel, amounts, reason: m === 'cancel' ? 'overdue_dispatch' : '' });
+    keys.current = {};
     setAttempted(false);
+    setSubmitError('');
     setView('issue-refund');
   };
   const close = () => setView('');
   const setField = <K extends keyof RefundForm>(k: K, v: RefundForm[K]) => setForm((f) => ({ ...f, [k]: v }));
-  const toggleItem = (id: ItemId) => setForm((f) => ({ ...f, selected: { ...f.selected, [id]: !f.selected[id] } }));
-  const setAmount = (id: ItemId, v: string) => setForm((f) => ({ ...f, amounts: { ...f.amounts, [id]: v }, selected: v.trim() ? { ...f.selected, [id]: true } : f.selected }));
+  const toggleItem = (id: string) => setForm((f) => ({ ...f, selected: { ...f.selected, [id]: !f.selected[id] } }));
+  const setAmount = (id: string, v: string) => setForm((f) => ({ ...f, amounts: { ...f.amounts, [id]: v }, selected: v.trim() ? { ...f.selected, [id]: true } : f.selected }));
+  const keyFor = (k: string) => (keys.current[k] ??= newIdempotencyKey());
+
+  const submitRefund = useMutation({
+    mutationFn: async () => {
+      const byGroup = new Map<string, typeof valid>();
+      for (const r of valid) if (r.it) byGroup.set(r.it.group.id, [...(byGroup.get(r.it.group.id) ?? []), r]);
+      const results = [];
+      for (const [gid, rs] of byGroup) {
+        const official = rs[0].it!.group.seller.official;
+        const body = {
+          orderId: o!.id,
+          items: rs.map((r) => ({ orderItemId: r.id, quantity: r.it!.quantity, amount: usd(parseMinor(form.amounts[r.id]), r.cap.currency) })),
+          reasonCode: form.reason as 'other',
+          reason: form.note.trim(),
+          fundedBy: (form.funding || defaultFunding(official, form.reason)) as 'seller',
+          destination: 'original_method' as const,
+          note: form.note.trim(),
+        };
+        const res = await stepUp.run((code) =>
+          call(api.POST('/api/admin/returns/refunds', { body, params: { header: { 'Idempotency-Key': keyFor(gid) } }, headers: code ? { 'X-Step-Up-Code': code } : undefined })),
+        );
+        results.push(res);
+      }
+      return results;
+    },
+    onSuccess: (results) => {
+      const total = sum(results.map((r) => r.breakdown?.total ?? usd(0)));
+      const waiting = results.filter((r) => r.status === 'requested' || r.status === 'under_review');
+      const approval = (waiting[0] as unknown as { approval?: { reason?: string | null; approvers?: string[] | string | null } } | undefined)?.approval;
+      const approvers = Array.isArray(approval?.approvers) ? approval.approvers.join(' or ') : approval?.approvers;
+      const title = waiting.length ? `Refund of ${money(total)} sent to Finance for approval` : `Refund of ${money(total)} approved and sent to payments`;
+      const body = waiting.length
+        ? `${approval?.reason ?? 'Above your refund limit.'}${approvers ? ` Approver: ${approvers}.` : ''} The customer sees "Refund requested" until Finance sends it; approval is not money arrived.`
+        : `It was within your refund limit. The money goes to ${o?.payment?.methodLabel ?? 'the original payment method'}; card refunds usually arrive 3–5 business days after we send them.`;
+      setNotice({ tone: waiting.length ? 'warning' : 'success', title, body });
+      announce(title);
+      refresh();
+      close();
+    },
+    onError: (e) => !isStepUpCancel(e) && setSubmitError(errorMessage(e)),
+  });
+
+  const submitCancel = useMutation({
+    mutationFn: () =>
+      call(
+        api.POST('/api/admin/orders/orders/{id}/cancel-items', {
+          params: { path: { id: o!.id }, header: { 'Idempotency-Key': keyFor('cancel') } },
+          body: { items: valid.map((r) => ({ itemId: r.id, quantity: r.it!.quantity })), reasonCode: form.reason as 'other', reason: form.note.trim(), notifyCustomer: form.notify },
+        }),
+      ),
+    onSuccess: () => {
+      const title = `${valid.length} item${valid.length === 1 ? '' : 's'} cancelled`;
+      setNotice({ tone: 'success', title, body: 'The refund for the cancelled items follows the cancellation policy and shows under Cancellations and refunds.' });
+      announce(title);
+      refresh();
+      close();
+    },
+    onError: (e) => setSubmitError(errorMessage(e)),
+  });
 
   const submit = () => {
     setAttempted(true);
     if (nErrors) return;
-    const add = Object.fromEntries(chosen.map((it) => [it.id, parseAmount(form.amounts[it.id])]));
-    setRequested((r) => ({ ...r, ...add }));
-    const cancels = chosen.filter((it) => it.request.kind === 'cancel');
-    const who = `${STAFF.admin.name}, ${STAFF.admin.role}`;
-    setHistory((h) => [
-      { t: `Refund of ${money(refundTotal)} sent to Finance for approval`, d: `Oct 8, 10:15 AM · ${who}`, state: 'current', body: `Reason: ${form.reason.toLowerCase()}. ${form.note.trim()}` },
-      ...h.map((e) => (e.state === 'current' ? { ...e, state: 'done' as const } : e)),
-    ]);
-    const title = `Refund of ${money(refundTotal)} sent to Finance for approval`;
-    const body = `${O.financeApprover.replace(' · ', ' ')} approves it, then the money goes to ${form.dest.startsWith('Store') ? 'store credit' : O.card}. The customer sees "Refund requested" until Finance sends it.${cancels.length ? ` ${cancels.map((c) => c.short).join(', ')} cancelled and the overdue task closed.` : ''}`;
-    setNotice({ title, body });
-    announce(title);
-    close();
+    setSubmitError('');
+    if (mode === 'cancel') submitCancel.mutate();
+    else submitRefund.mutate();
   };
+  const busy = submitRefund.isPending || submitCancel.isPending;
 
   // ----- Notes -----
+  const addNote = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/orders/orders/{id}/notes', { params: { path: { id: o!.id } }, body: { text: draftNote.trim() } })),
+    onSuccess: () => {
+      setDraftNote('');
+      setNoteError('');
+      announce('Note saved');
+      void qc.invalidateQueries({ queryKey: ['orders', 'admin-order', ref] });
+    },
+    onError: (e) => setNoteError(errorMessage(e)),
+  });
   const saveNote = () => {
     if (!draftNote.trim()) {
       setNoteError('Write a note before saving.');
       return;
     }
-    setNotes((n) => [{ who: STAFF.admin.name, when: 'Just now', text: draftNote.trim() }, ...n]);
-    setDraftNote('');
-    setNoteError('');
-    announce('Note saved');
+    addNote.mutate();
   };
 
-  // ----- Item display after refunds -----
-  const itemStatus = (it: AdminOrderItem) => (isCancelled(it.id) ? 'Cancelled' : it.status);
-  const pkgStatus = (p: (typeof PACKAGES)[number]) => (p.items.every(isCancelled) ? 'Cancelled' : p.status);
-  const package3Overdue = !isCancelled('duvet');
+  // ----- Loading / not found -----
+  if (q.isPending || q.isError || !o) {
+    return (
+      <AdminLayout active="orders">
+        <PageHeader crumbs={[{ label: 'Commerce' }, { label: 'Orders', to: href('admin/orders') }, { label: ref }]} title={<>Order <span className="mono">{ref}</span></>} />
+        {q.isPending ? (
+          <div className="aa-split">
+            <div className="stack gap-5">
+              <div className="sk sk-card" style={{ height: 240 }} aria-hidden="true" />
+              <div className="sk sk-card" style={{ height: 180 }} aria-hidden="true" />
+            </div>
+            <div className="stack gap-5">
+              <div className="sk sk-card" style={{ height: 200 }} aria-hidden="true" />
+            </div>
+          </div>
+        ) : q.isError ? (
+          <LoadError error={q.error} onRetry={() => void q.refetch()} />
+        ) : (
+          <EmptyState icon="search-x" title="We couldn’t find this order" as="h2" action={<Button variant="secondary" size="sm" to={href('admin/orders')}>Back to orders</Button>}>
+            No order has the reference {ref}. Check the reference and try again.
+          </EmptyState>
+        )}
+      </AdminLayout>
+    );
+  }
+
+  const t = o.totals;
+  const pay = o.payment;
+  const events = history.data ? toTimeline(history.data.items as HistoryRow[], (iso) => dateTime(iso)) : [];
+  const fundingTotals = o.moneyBySeller;
 
   return (
     <AdminLayout active="orders">
       <PageHeader
-        crumbs={[{ label: 'Commerce' }, { label: 'Orders', to: href('admin/orders') }, { label: O.ref }]}
+        crumbs={[{ label: 'Commerce' }, { label: 'Orders', to: href('admin/orders') }, { label: o.ref }]}
         title={
           <>
-            Order <span className="mono">{O.ref}</span>
+            Order <span className="mono">{o.ref}</span>
           </>
         }
         sub={
           <>
-            Placed {O.placed} · 3 sellers · 3 packages · <StatusBadge status={O.status} /> <StatusBadge status={O.payment} />
+            Placed {dateTime(o.placedAt)} PT · {o.sellerCount} seller{o.sellerCount === 1 ? '' : 's'} · {o.packageCount} package{o.packageCount === 1 ? '' : 's'} · <StatusBadge status={o.statusLabel} /> {pay && <StatusBadge status={pay.stateLabel} />}
           </>
         }
         actions={
           <>
-            <Button variant="secondary" size="sm" icon="circle-x" onClick={() => openRefund(CANCEL_FORM)} disabled={!package3Overdue}>
-              Cancel items
-            </Button>
-            <Button variant="secondary" size="sm" icon="undo-2" onClick={() => openRefund(DESIGN_FORM)}>
-              Issue refund
-            </Button>
-            <Button variant="secondary" size="sm" icon="message-square" onClick={() => announce('Message to sellers opened')}>
-              Contact seller
-            </Button>
-            <Button size="sm" icon="life-buoy" to={href('admin/case')}>
-              Open case
+            {canCancel && (
+              <Button variant="secondary" size="sm" icon="circle-x" onClick={() => openDialog('cancel')} disabled={!cancellable.length}>
+                Cancel items
+              </Button>
+            )}
+            {canRefund && (
+              <Button variant="secondary" size="sm" icon="undo-2" onClick={() => openDialog('refund')}>
+                Issue refund
+              </Button>
+            )}
+            {canContact && groups.some((g) => !g.seller.official && g.seller.id) && (
+              <Button variant="secondary" size="sm" icon="message-square" onClick={() => setContact(groups.find((g) => !g.seller.official && g.seller.id) ?? null)}>
+                Contact seller
+              </Button>
+            )}
+            <Button size="sm" icon="life-buoy" to={firstCase ? href('admin/case', '', { ref: firstCase.ref }) : href('admin/cases')}>
+              {firstCase ? 'Open case' : 'Cases'}
             </Button>
           </>
         }
       />
+      {!canRefund && !canCancel && (o.allowedActions.includes('ISSUE_REFUND') || o.allowedActions.includes('CANCEL_ITEMS')) && (
+        <p className="xs muted">Refunds and cancellations need the Returns or Order Manager role. Ask a colleague who has it.</p>
+      )}
       {notice && (
-        <Alert tone="success" title={notice.title}>
+        <Alert tone={notice.tone} title={notice.title}>
           {notice.body}
         </Alert>
       )}
-      {package3Overdue && (
-        <Alert tone="danger" title="Package 3 is 16 days past its dispatch deadline">
-          Casa Verde Home has not shipped the duvet cover. Case CS-261007-0412 is open with Isabel Cruz. Grace Kim set a final date of Oct 12; after that, cancel the item and refund it in full.
+      {o.alerts.map((a, i) => (
+        <Alert key={i} tone={alertTone(a.tone)} title={a.title}>
+          {a.message}
         </Alert>
-      )}
+      ))}
       <div className="aa-split">
         <div className="stack gap-5">
-          {PACKAGES.map((p, pi) => {
-            const s = sellers[p.seller];
-            const official = 'official' in s && s.official;
-            const status = pkgStatus(p);
+          {groups.map((g, gi) => {
+            const s = g.seller;
+            const ship = g.shipments[0];
+            const unshipped = !g.shipments.length;
+            const groupCancellable = g.items.filter((it) => CANCELLABLE.has(it.state)).map((it) => it.id);
             return (
               <Card
-                key={p.label}
-                titleAs={pi === 0 ? 'h2' : 'h3'}
+                key={g.id}
+                titleAs={gi === 0 ? 'h2' : 'h3'}
                 title={
                   <span className="row gap-2">
-                    <LogoTile initials={s.initials} tint={s.tint} size="sm" />
+                    <LogoTile initials={initials(s.name)} tint={tintOf(s.name)} size="sm" />
                     <span>{s.name}</span>
-                    {official ? (
+                    {s.official ? (
                       <Badge tone="brand" icon="badge-check">
                         Official
                       </Badge>
-                    ) : (
+                    ) : s.verified ? (
                       <Badge tone="info" icon="shield-check">
                         Verified
                       </Badge>
-                    )}
+                    ) : null}
                   </span>
                 }
-                sub={p.sub}
-                actions={<StatusBadge status={status} />}
+                sub={`${g.packageLabel} · ${g.fulfilledBy === 'SELLER' ? 'Seller ships' : 'Shipped by Marketly warehouse'} · ${g.shipsFrom}${g.totals ? ` · items ${money(g.totals.items)}` : ''}`}
+                actions={<StatusBadge status={g.statusLabel} />}
                 foot={
-                  p.foot === 'tracking' ? (
+                  ship?.trackingUrl ? (
+                    <Button variant="ghost" size="sm" icon="history" href={ship.trackingUrl}>
+                      Shipment history
+                    </Button>
+                  ) : unshipped && (canContact || (canCancel && groupCancellable.length)) ? (
                     <>
-                      <Button variant="ghost" size="sm" icon="history" onClick={() => announce(`Shipment history for ${p.label}`)}>
-                        Shipment history
-                      </Button>
-                      <Button variant="ghost" size="sm" icon="pencil" onClick={() => announce(`Correct tracking for ${p.label}`)}>
-                        Correct tracking
-                      </Button>
-                    </>
-                  ) : status !== 'Cancelled' ? (
-                    <>
-                      <Button variant="secondary" size="sm" icon="message-square" onClick={() => announce(`Message to ${s.name} opened`)}>
-                        Contact seller
-                      </Button>
-                      <Button variant="danger-soft" size="sm" icon="circle-x" onClick={() => openRefund(CANCEL_FORM)}>
-                        Cancel item
-                      </Button>
+                      {canContact && !s.official && s.id && (
+                        <Button variant="secondary" size="sm" icon="message-square" onClick={() => setContact(g)}>
+                          Contact seller
+                        </Button>
+                      )}
+                      {canCancel && groupCancellable.length > 0 && (
+                        <Button variant="danger-soft" size="sm" icon="circle-x" onClick={() => openDialog('cancel', groupCancellable)}>
+                          Cancel item
+                        </Button>
+                      )}
                     </>
                   ) : undefined
                 }
               >
-                {p.items.map((id) => {
-                  const it = ITEMS[id];
-                  const req = requested[id];
+                {g.alert && (
+                  <Alert tone={alertTone(g.alert.tone)} title={g.alert.title}>
+                    {g.alert.message}
+                  </Alert>
+                )}
+                {g.items.map((it) => {
+                  const req = requestFor(it.id);
+                  const as = it.afterSales;
                   return (
-                    <div key={id} className="aa-item">
-                      <Img icon={it.icon} tint={it.tint} />
+                    <div key={it.id} className="aa-item">
+                      <Img icon="package" src={it.image?.url} alt={it.image?.alt ?? ''} />
                       <div className="stack gap-1">
-                        <Link className="small strong" to={href('admin/catalog')}>
-                          {it.name}
-                        </Link>
+                        <span className="small strong">{it.title}</span>
                         <span className="xs muted">
-                          {it.variant} · SKU <span className="mono">{it.sku}</span> · Qty {it.qty} · {money(it.unit)} each
+                          {it.variantLabel}
+                          {it.offerTerms?.sellerSku && (
+                            <>
+                              {' '}
+                              · SKU <span className="mono">{it.offerTerms.sellerSku}</span>
+                            </>
+                          )}{' '}
+                          · Qty {it.quantity} · {money(it.unitPrice)} each
                         </span>
                         <div className="aa-item-r">
                           <span className="row gap-2">
-                            <StatusBadge status={itemStatus(it)} />
-                            {req !== undefined ? (
+                            <StatusBadge status={it.stateLabel} />
+                            {req ? (
                               <>
                                 <span className="xs muted">Refund</span>
                                 <StatusBadge status="Requested" />
                               </>
                             ) : (
-                              it.sub && (
+                              as?.refundStatus &&
+                              as.refundStatus !== 'NONE' && (
                                 <>
-                                  <span className="xs muted">{it.sub.label}</span>
-                                  <StatusBadge status={it.sub.status} />
+                                  <span className="xs muted">Refund</span>
+                                  <StatusBadge status={as.refundStatus.charAt(0) + as.refundStatus.slice(1).toLowerCase().replace(/_/g, ' ')} />
                                 </>
                               )
                             )}
                           </span>
                           <span className="small num">
-                            <span className="muted xs">Paid after coupon </span>
-                            <b>{money(it.paid)}</b>
+                            <span className="muted xs">Paid after discounts </span>
+                            <b>{money(it.paidAmount)}</b>
                           </span>
                         </div>
-                        <span className="xs sub">{req !== undefined ? `Refund of ${money(req)} requested · waiting for Finance approval` : it.note}</span>
+                        <span className="xs sub">{req ? `Refund of ${money(req.breakdown?.total)} requested · waiting for Finance approval` : it.stateNote}</span>
                       </div>
                     </div>
                   );
                 })}
                 <div className="aa-ship">
                   <Icon name="truck" className="ic-sm" />
-                  <span className="strong">{p.carrier}</span>
-                  {p.tracking ? <span className="mono">{p.tracking}</span> : <span className="muted">{p.trackingNote}</span>}
-                  <span className="muted">{p.eta}</span>
+                  <span className="strong">{ship ? (ship.serviceName ?? ship.carrierName) : 'No shipment yet'}</span>
+                  {ship?.trackingNumber ? <span className="mono">{ship.trackingNumber}</span> : <span className="muted">No tracking number</span>}
+                  <span className="muted">{ship ? (ship.deliveredAt ? `Delivered ${dateTime(ship.deliveredAt)}` : ship.estimateLabel) : g.estimateLabel}</span>
                   <span className="grow" />
-                  {status === 'Cancelled' ? <Deadline tone="ok">Item cancelled · overdue task closed</Deadline> : <Deadline tone={p.deadline.tone}>{p.deadline.text}</Deadline>}
+                  {g.deadlineLabel && <Deadline tone={g.dispatchResult || g.status === 'CANCELLED' ? 'ok' : deadlineTone(g.dispatchDeadline?.state)}>{g.deadlineLabel}</Deadline>}
                 </div>
               </Card>
             );
           })}
 
-          <Card titleAs="h3" title="Cancellations and refunds" sub={pending ? `Tracked per item · ${money(pending)} waiting for Finance approval` : 'Tracked per item · nothing refunded yet'} flush>
-            <TableWrap label="Cancellations and refunds table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Item</th>
-                    <th scope="col">Seller</th>
-                    <th scope="col">Request</th>
-                    <th className="r" scope="col">Amount</th>
-                    <th scope="col">Status</th>
-                    <th className="col-pin" scope="col">Owner</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {REFUND_ORDER.map((id) => {
-                    const it = ITEMS[id];
-                    const r = it.request;
-                    const req = requested[id];
-                    const edge = req === undefined && r.kind !== 'none' ? r.edge : undefined;
-                    return (
-                      <tr key={id} className={edge === 'flagged' ? 'is-flagged' : edge === 'warn' ? 'is-warn' : ''}>
-                        <td>
-                          {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
-                          <span className="row nowrap gap-2">
-                            <Img icon={it.icon} tint={it.tint} className="tiny" />
-                            <span className="small">{it.short}</span>
-                          </span>
-                        </td>
-                        <td>{sellers[it.seller].name}</td>
-                        <td>
-                          {req !== undefined ? (
-                            <>
-                              Refund requested
-                              <br />
-                              <span className="xs muted">Waiting for Finance · Priya Nair</span>
-                            </>
-                          ) : r.kind === 'return' ? (
-                            <>
-                              Return{' '}
-                              <Link className="mono nowrap" to={href('admin/returns')} title={r.ref}>
-                                {r.ref}
-                              </Link>
-                              <br />
-                              <span className="xs muted">{r.note}</span>
-                            </>
-                          ) : r.kind === 'cancel' ? (
-                            <>
-                              Cancellation eligible
-                              <br />
-                              <span className="xs muted">{r.note}</span>
-                            </>
-                          ) : (
-                            <span className="muted">None</span>
-                          )}
-                        </td>
-                        <td className="r">{req !== undefined ? money(req) : r.kind !== 'none' ? money(it.paid) : <span className="muted">—</span>}</td>
-                        <td>
-                          {req !== undefined ? (
-                            <span className="stack gap-1">
-                              <StatusBadge status={itemStatus(it)} />
-                              <StatusBadge status="Refund requested" tone="info" />
+          <Card titleAs="h3" title="Cancellations and refunds" sub={pending.amount ? `Tracked per item · ${money(pending)} waiting for Finance approval` : t?.refundedSoFar.amount ? `Tracked per item · ${money(t.refundedSoFar)} refunded` : 'Tracked per item · nothing refunded yet'} flush>
+            {o.afterSales.length === 0 ? (
+              <div className="card-body">
+                <p className="small muted">No cancellations, returns or refunds on this order.</p>
+              </div>
+            ) : (
+              <TableWrap label="Cancellations and refunds table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Item</th>
+                      <th scope="col">Seller</th>
+                      <th scope="col">Request</th>
+                      <th className="r" scope="col">Amount</th>
+                      <th scope="col">Status</th>
+                      <th className="col-pin" scope="col">Owner</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {o.afterSales.map((a, i) => {
+                      const it = itemById.get(a.itemId);
+                      const req = requestFor(a.itemId);
+                      const ret = o.returns.find((r) => r.items.some((x) => x.orderItemId === a.itemId));
+                      const edge = !req && ret?.nextDeadline ? deadlineTone(ret.nextDeadline.state) : 'ok';
+                      return (
+                        <tr key={`${a.itemId}-${i}`} className={edge === 'danger' ? 'is-flagged' : edge === 'warning' ? 'is-warn' : ''}>
+                          <td>
+                            {edge !== 'ok' && <span className="sr-only">{edge === 'danger' ? 'Urgent: ' : 'At risk: '}</span>}
+                            <span className="row nowrap gap-2">
+                              <Img icon="package" src={it?.image?.url} alt="" className="tiny" />
+                              <span className="small">{a.title}</span>
                             </span>
-                          ) : it.sub ? (
+                          </td>
+                          <td>{a.sellerName}</td>
+                          <td>
+                            {req ? (
+                              <>
+                                Refund requested
+                                <br />
+                                <span className="xs muted">Waiting for Finance{req.approvalRequest ? ` · ${req.approvalRequest.ref}` : ''}</span>
+                              </>
+                            ) : ret ? (
+                              <>
+                                Return{' '}
+                                <Link className="mono nowrap" to={href('admin/returns')} title={ret.ref}>
+                                  {ret.ref}
+                                </Link>
+                              </>
+                            ) : (
+                              a.request
+                            )}
+                          </td>
+                          <td className="r">{req ? money(req.breakdown?.total) : a.amount ? money(a.amount) : <span className="muted">—</span>}</td>
+                          <td>
                             <span className="stack gap-1">
-                              <StatusBadge status={it.status} />
-                              <StatusBadge status={it.sub.status} />
+                              {it && <StatusBadge status={it.stateLabel} />}
+                              {req ? <StatusBadge status="Refund requested" tone="info" /> : <span className="xs muted">{a.status}</span>}
                             </span>
-                          ) : (
-                            <StatusBadge status={it.status} />
-                          )}
-                        </td>
-                        <td className="col-pin">{r.kind !== 'none' ? r.owner : <span className="muted">—</span>}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </TableWrap>
+                          </td>
+                          <td className="col-pin">{a.owner ?? <span className="muted">—</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
             <p className="status-legend status-legend--edge">
               <span className="sr-only">Legend: </span>
               <span className="sl sl-danger">
@@ -405,7 +548,7 @@ export default function Order() {
             </p>
           </Card>
 
-          <Card titleAs="h3" title="Coupon funding and money by seller" sub={`${O.coupon} · −${money(O.discount)} · allocated by item value`} flush>
+          <Card titleAs="h3" title="Coupon funding and money by seller" sub={t && t.discounts.length ? `${t.discounts.map((d) => d.code ?? d.label).join(', ')} · −${money(t.discountTotal)} · allocated by item value` : 'No discounts on this order'} flush>
             <TableWrap label="Coupon funding and money by seller table">
               <table className="table">
                 <thead>
@@ -420,17 +563,17 @@ export default function Order() {
                   </tr>
                 </thead>
                 <tbody>
-                  {FUNDING.map((f) => (
-                    <tr key={f.seller}>
+                  {fundingTotals.map((f) => (
+                    <tr key={f.groupId}>
                       <td>
-                        <SellerCell id={f.seller} />
+                        <SellerCell s={f.seller} />
                       </td>
                       <td className="r">{money(f.items)}</td>
-                      <td className="r">{money(f.platform)}</td>
+                      <td className="r">{money(f.platformFunded)}</td>
                       <td className="r">{money(f.sellerFunded)}</td>
-                      <td className="r">{money(f.paid)}</td>
-                      <td className="r">{f.fee === null ? <span className="muted">—</span> : money(f.fee)}</td>
-                      <td className="r col-pin">{f.earnings === null ? <span className="xs muted">Company sales</span> : money(f.earnings)}</td>
+                      <td className="r">{money(f.customerPaid)}</td>
+                      <td className="r">{f.companySale || !f.marketplaceFee ? <span className="muted">—</span> : money(f.marketplaceFee)}</td>
+                      <td className="r col-pin">{f.companySale || !f.sellerEarnings ? <span className="xs muted">Company sales</span> : money(f.sellerEarnings)}</td>
                     </tr>
                   ))}
                   <tr>
@@ -438,27 +581,25 @@ export default function Order() {
                       <span className="strong">Order</span>
                     </td>
                     {[
-                      FUNDING.reduce((a, f) => a + f.items, 0),
-                      FUNDING.reduce((a, f) => a + f.platform, 0),
-                      FUNDING.reduce((a, f) => a + f.sellerFunded, 0),
-                      FUNDING.reduce((a, f) => a + f.paid, 0),
-                      FUNDING.reduce((a, f) => a + (f.fee ?? 0), 0),
+                      sum(fundingTotals.map((f) => f.items)),
+                      sum(fundingTotals.map((f) => f.platformFunded)),
+                      sum(fundingTotals.map((f) => f.sellerFunded)),
+                      sum(fundingTotals.map((f) => f.customerPaid)),
+                      sum(fundingTotals.map((f) => (f.companySale ? usd(0) : (f.marketplaceFee ?? usd(0))))),
                     ].map((v, i) => (
                       <td key={i} className="r">
                         <span className="strong">{money(v)}</span>
                       </td>
                     ))}
                     <td className="r col-pin">
-                      <span className="strong">{money(FUNDING.reduce((a, f) => a + (f.earnings ?? 0), 0))}</span>
+                      <span className="strong">{money(sum(fundingTotals.map((f) => (f.companySale ? usd(0) : (f.sellerEarnings ?? usd(0))))))}</span>
                     </td>
                   </tr>
                 </tbody>
               </table>
             </TableWrap>
             <div className="card-body u-pt-0">
-              <span className="xs muted">
-                Pixel &amp; Port's markdown on the SSD (was $119.99) is seller-funded and already in the item price. Example fee: 10% of item price after seller-funded discounts, excluding shipping. Final fees are in the seller agreement.
-              </span>
+              <span className="xs muted">{o.couponFundingNote ?? 'Seller-funded markdowns are already in the item price. Marketplace fees are charged on item price after seller-funded discounts, excluding shipping. Final fees are in the seller agreement.'}</span>
             </div>
           </Card>
 
@@ -467,12 +608,14 @@ export default function Order() {
             title="Action history"
             sub="Every change with staff name and reason"
             actions={
-              <Link className="small strong" to={href('admin/audit')}>
-                Full log
-              </Link>
+              can('audit.entries.view') ? (
+                <Link className="small strong" to={href('admin/audit')}>
+                  Full log
+                </Link>
+              ) : undefined
             }
           >
-            <History events={history} />
+            {history.isError ? <LoadError error={history.error} onRetry={() => void history.refetch()} /> : history.isPending ? <SkeletonLines rows={4} /> : events.length ? <History events={events} /> : <p className="small muted">No history yet.</p>}
           </Card>
         </div>
 
@@ -481,141 +624,177 @@ export default function Order() {
             titleAs="h3"
             title="Customer"
             actions={
-              <Link className="small strong" to={href('admin/customers')}>
-                Profile
-              </Link>
+              o.customer?.customerId ? (
+                <Link className="small strong" to={href('admin/customers', 'customer-detail', undefined, { id: o.customer.customerId })}>
+                  Profile
+                </Link>
+              ) : undefined
             }
           >
-            <div className="row gap-3">
-              <Avatar name="Jordan Lee" />
-              <div className="stack gap-0">
-                <span className="strong">Jordan Lee</span>
-                <span className="xs muted">Customer since Aug 2026 · 5 orders</span>
-              </div>
-            </div>
-            <KeyValue
-              pairs={[
-                ['Email', 'jordan.lee@example.com'],
-                ['Phone', '(503) 555-0148'],
-                ['Ship to', '2140 Alder St, Apt 5, Portland, OR 97205'],
-                [
-                  'Open cases',
-                  <Link key="c" to={href('admin/case')} className="mono">
-                    {O.caseRef}
-                  </Link>,
-                ],
-              ]}
-            />
+            {o.customer ? (
+              <>
+                <div className="row gap-3">
+                  <Avatar name={o.customer.name} />
+                  <div className="stack gap-0">
+                    <span className="strong">{o.customer.name}</span>
+                    <span className="xs muted">
+                      {o.customer.guest ? 'Guest checkout' : [o.customer.customerSince && `Customer since ${monthYear(o.customer.customerSince)}`, o.customer.orderCount != null && `${o.customer.orderCount} orders`].filter(Boolean).join(' · ')}
+                    </span>
+                  </div>
+                </div>
+                <KeyValue
+                  pairs={[
+                    ['Email', o.customer.email ?? '—'],
+                    ['Phone', o.customer.phone ?? '—'],
+                    ['Ship to', o.deliveryAddress ? `${o.deliveryAddress.line1}${o.deliveryAddress.line2 ? `, ${o.deliveryAddress.line2}` : ''}, ${o.deliveryAddress.city}, ${o.deliveryAddress.region} ${o.deliveryAddress.postalCode}` : '—'],
+                    [
+                      'Open cases',
+                      o.cases.length ? (
+                        <span key="c" className="stack gap-0">
+                          {o.cases.map((c) => (
+                            <Link key={c.id} to={href('admin/case', '', { ref: c.ref })} className="mono">
+                              {c.ref}
+                            </Link>
+                          ))}
+                        </span>
+                      ) : (
+                        'None'
+                      ),
+                    ],
+                  ]}
+                />
+              </>
+            ) : (
+              <p className="small muted">Customer details are not available.</p>
+            )}
           </Card>
 
-          <Card titleAs="h3" title="Payment" actions={<StatusBadge status={O.payment} />}>
-            <KeyValue
-              pairs={[
-                ['Method', O.card],
-                ['Authorized', O.authorized],
-                ['Captured', O.captured],
-                ['Processor ref', <span key="r" className="mono">{O.processorRef}</span>],
-              ]}
-            />
-            <div className="stack gap-2">
-              <SummaryRow k="Items" v={money(O.subtotal)} />
-              <SummaryRow k={`Coupon ${O.coupon}`} v={`−${money(O.discount)}`} className="discount" />
-              <SummaryRow k="Shipping" v="Free" />
-              <SummaryRow k="Sales tax" v="$0.00" />
-              <SummaryRow k="Captured" v={money(O.total)} className="total" />
-              {pending > 0 && <SummaryRow k="Refund requested" v={money(pending)} />}
-              <SummaryRow k="Refunded" v="$0.00" />
-            </div>
-            <span className="xs muted">Sales tax: Oregon has no sales tax.</span>
+          <Card titleAs="h3" title="Payment" actions={pay ? <StatusBadge status={pay.stateLabel} /> : undefined}>
+            {pay && (
+              <KeyValue
+                pairs={[
+                  ['Method', pay.methodLabel ?? '—'],
+                  ['Authorized', pay.authorizedAt ? dateTime(pay.authorizedAt) : '—'],
+                  ['Captured', pay.capturedAt ? dateTime(pay.capturedAt) : '—'],
+                  ['Processor ref', <span key="r" className="mono">{pay.providerRef ?? '—'}</span>],
+                ]}
+              />
+            )}
+            {t && (
+              <div className="stack gap-2">
+                <SummaryRow k="Items" v={money(t.items)} />
+                {t.discounts.map((d, i) => (
+                  <SummaryRow key={i} k={d.code ? `Coupon ${d.code}` : d.label} v={`−${money(d.amount)}`} className="discount" />
+                ))}
+                <SummaryRow k={t.shippingLabel ?? 'Shipping'} v={t.shippingTotal.amount ? money(t.shippingTotal) : 'Free'} />
+                <SummaryRow k={t.taxLabel ?? 'Sales tax'} v={money(t.tax)} />
+                <SummaryRow k="Captured" v={money(pay?.capturedAmount ?? t.total)} className="total" />
+                {pending.amount > 0 && <SummaryRow k="Refund requested" v={money(pending)} />}
+                <SummaryRow k="Refunded" v={money(t.refundedSoFar)} />
+              </div>
+            )}
           </Card>
 
           <Card titleAs="h3" title="Internal notes" sub="Staff only · never shown to customer or sellers">
-            {notes.map((n, i) => (
-              <div key={i} className="aa-note">
+            {o.notes.length === 0 && <p className="small muted">No notes yet.</p>}
+            {o.notes.map((n) => (
+              <div key={n.id} className="aa-note">
                 <span className="row between xs">
-                  <b>{n.who}</b>
-                  <span className="muted">{n.when}</span>
+                  <b>{n.author?.name ?? 'Staff'}</b>
+                  <span className="muted">{dateTime(n.at)}</span>
                 </span>
                 <span>{n.text}</span>
               </div>
             ))}
-            <Field label="Add a note" error={noteError}>
-              <Textarea id="aa-od-note" placeholder="Write a note for the team" value={draftNote} onChange={(e) => (setDraftNote(e.target.value), noteError && setNoteError(''))} />
-            </Field>
-            <Button variant="secondary" size="sm" onClick={saveNote}>
-              Save note
-            </Button>
+            {canNote ? (
+              <>
+                <Field label="Add a note" error={noteError}>
+                  <Textarea id="aa-od-note" placeholder="Write a note for the team" value={draftNote} onChange={(e) => (setDraftNote(e.target.value), noteError && setNoteError(''))} />
+                </Field>
+                <Button variant="secondary" size="sm" onClick={saveNote} disabled={addNote.isPending}>
+                  Save note
+                </Button>
+              </>
+            ) : (
+              <span className="xs muted">Adding notes needs the order management permission.</span>
+            )}
           </Card>
         </div>
       </div>
 
       <Dialog
-        open={open}
+        open={open && (mode === 'cancel' ? canCancel : canRefund)}
         onClose={close}
         size="lg"
-        title={`Issue refund · ${O.ref}`}
+        title={`${mode === 'cancel' ? 'Cancel items' : 'Issue refund'} · ${o.ref}`}
         foot={
           <>
             <Button variant="ghost" onClick={close}>
               Cancel
             </Button>
-            <Button icon="send" onClick={submit}>
-              Send {money(refundTotal)} to Finance for approval
-            </Button>
+            {mode === 'cancel' ? (
+              <Button variant="danger" icon="circle-x" onClick={submit} disabled={busy}>
+                Cancel {valid.length || ''} item{valid.length === 1 ? '' : 's'}
+              </Button>
+            ) : (
+              <Button icon="send" onClick={submit} disabled={busy}>
+                {inLimit ? `Refund ${money(refundTotal)}` : `Send ${money(refundTotal)} to Finance for approval`}
+              </Button>
+            )}
           </>
         }
       >
         <div className="row between small">
           <span className="sub">
-            Customer paid {money(O.total)} · refunded so far $0.00
-            {pending > 0 && ` · ${money(pending)} waiting for Finance`}
+            Customer paid {money(o.refundable?.captured ?? t?.total)} · refunded so far {money(o.refundable?.refunded)}
+            {pending.amount > 0 && ` · ${money(pending)} waiting for Finance`}
           </span>
-          <span className="strong">Remaining refundable {money(remaining)}</span>
+          <span className="strong">Remaining refundable {money(o.refundable?.remaining)}</span>
         </div>
+        {submitError && (
+          <Alert tone="danger" title="That didn’t work">
+            {submitError}
+          </Alert>
+        )}
         {attempted && nErrors > 0 && (
           <Alert tone="danger" title={`Check ${nErrors} field${nErrors > 1 ? 's' : ''}`}>
-            {errors.items || 'Fix the highlighted fields to send this refund.'}
+            {errors.items || (mode === 'cancel' ? 'Fix the highlighted fields to cancel these items.' : 'Fix the highlighted fields to send this refund.')}
           </Alert>
         )}
         <div className="stack gap-2">
-          <span className="label">Items and amounts</span>
-          {REFUND_ORDER.map((id) => {
-            const it = ITEMS[id];
-            const s = sellers[it.seller];
-            const sent = requested[id];
-            const disabled = !refundable(it);
-            const on = !disabled && !!form.selected[id];
+          <span className="label">{mode === 'cancel' ? 'Items not shipped yet' : 'Items and amounts'}</span>
+          {rows.length === 0 && <span className="xs muted">{mode === 'cancel' ? 'Every item has shipped or is already cancelled.' : 'Nothing on this order can be refunded.'}</span>}
+          {rows.map((r) => {
+            const it = r.it;
+            const disabled = !!r.blocked;
+            const on = !disabled && !!form.selected[r.id];
             return (
-              <div key={id} className={cx('aa-rf', on && 'is-selected', disabled && 'is-disabled')}>
+              <div key={r.id} className={cx('aa-rf', on && 'is-selected', disabled && 'is-disabled')}>
                 <div className="row nowrap top gap-3">
-                  <input type="checkbox" id={`aa-rf-${id}`} aria-label={`Refund ${it.name}`} className="check-input" checked={on} disabled={disabled} onChange={() => toggleItem(id)} />
-                  <Img icon={it.icon} tint={it.tint} className="tiny" />
-                  <label className="stack gap-0" htmlFor={`aa-rf-${id}`}>
-                    <span className="small strong">{it.name}</span>
+                  <input type="checkbox" id={`aa-rf-${r.id}`} aria-label={`${mode === 'cancel' ? 'Cancel' : 'Refund'} ${it?.title ?? ''}`} className="check-input" checked={on} disabled={disabled} onChange={() => toggleItem(r.id)} />
+                  <Img icon="package" src={it?.image?.url} alt="" className="tiny" />
+                  <label className="stack gap-0" htmlFor={`aa-rf-${r.id}`}>
+                    <span className="small strong">{it?.title}</span>
                     <span className="xs muted">
-                      {s.name} · {it.variant} · <StatusBadge status={itemStatus(it)} />
+                      {it?.group.seller.name} · {it?.variantLabel} · {it && <StatusBadge status={it.stateLabel} />}
                     </span>
-                    {sent !== undefined ? (
-                      <span className="xs t-warning-text strong">Refund of {money(sent)} already requested · a second refund for this item is blocked</span>
-                    ) : it.blocked ? (
-                      <span className="xs t-warning-text strong">{it.refundNote}</span>
-                    ) : (
-                      <span className="xs sub">{it.refundNote}</span>
-                    )}
+                    {r.blocked ? <span className="xs t-warning-text strong">{r.blocked}</span> : <span className="xs sub">{it?.stateNote ?? (mode === 'cancel' ? 'Not shipped · cancelling also refunds it under the cancellation policy' : '')}</span>}
                   </label>
                 </div>
-                {disabled ? (
-                  <span className="xs muted">Refundable remaining {money(sent !== undefined ? round2(it.paid - sent) : it.paid)}</span>
+                {mode === 'cancel' ? (
+                  <span className="xs muted">Qty {it?.quantity} · paid {money(r.cap)}</span>
+                ) : disabled ? (
+                  <span className="xs muted">Refundable remaining {money(r.cap)}</span>
                 ) : (
                   <Field
                     label={
                       <>
-                        Amount <span className="xs muted">· up to {money(it.paid)}</span>
+                        Amount <span className="xs muted">· up to {money(r.cap)}</span>
                       </>
                     }
-                    error={on ? shown.amounts[id] : undefined}
+                    error={on ? shown.amounts[r.id] : undefined}
                   >
-                    <TextInput id={`aa-rf-amt-${id}`} prefix="$" inputMode="decimal" value={form.amounts[id] ?? ''} error={on && !!shown.amounts[id]} onChange={(e) => setAmount(id, e.target.value)} />
+                    <TextInput id={`aa-rf-amt-${r.id}`} prefix="$" inputMode="decimal" value={form.amounts[r.id] ?? ''} error={on && !!shown.amounts[r.id]} onChange={(e) => setAmount(r.id, e.target.value)} />
                   </Field>
                 )}
               </div>
@@ -628,23 +807,36 @@ export default function Order() {
             </span>
           )}
         </div>
-        <Alert tone="info" title="Over-refund check">
-          Amounts are capped at what is still refundable per item, after the coupon share. A second refund for the same item and reason is blocked. Shipping was free, so there is no shipping to refund.
-        </Alert>
+        {mode === 'refund' && (
+          <Alert tone="info" title="Over-refund check">
+            Amounts are capped at what is still refundable per item, after discounts and earlier refunds. Items of different sellers are sent as one refund request per seller.
+          </Alert>
+        )}
         <div className="grid md2 gap-3">
           <Field label="Reason" hint={shown.reason ? undefined : 'Each item keeps its own reason in the record.'} error={shown.reason}>
-            <Select id="aa-rf-reason" options={REFUND_REASONS} value={form.reason} onChange={(e) => setField('reason', e.target.value)} />
+            <Select id="aa-rf-reason" options={mode === 'cancel' ? CANCEL_REASONS : REFUND_REASONS} value={form.reason} onChange={(e) => setField('reason', e.target.value)} />
           </Field>
-          <Field label="Refund to" hint="Card refunds usually arrive 3–5 business days after we send them.">
-            <Select id="aa-rf-dest" options={REFUND_DESTINATIONS} value={form.dest} onChange={(e) => setField('dest', e.target.value)} />
-          </Field>
+          {mode === 'refund' ? (
+            <Field label="Refund to" hint="Card refunds usually arrive 3–5 business days after we send them.">
+              <Select id="aa-rf-dest" options={[{ value: 'original_method', label: `Original payment${pay?.methodLabel ? ` · ${pay.methodLabel}` : ''}` }]} value="original_method" onChange={() => undefined} />
+            </Field>
+          ) : (
+            <Field label="Customer">
+              <Checkbox id="aa-rf-notify" label="Tell the customer" checked={form.notify} onChange={(e) => setField('notify', e.target.checked)} />
+            </Field>
+          )}
+          {mode === 'refund' && !officialOnly && (
+            <Field label="Paid by" hint="Who carries the refund. Official Store items are always paid by the Official Store.">
+              <Select id="aa-rf-fund" options={FUNDED_BY.filter((f) => f.value !== 'official_store')} value={form.funding || defaultFunding(false, form.reason)} onChange={(e) => setField('funding', e.target.value)} />
+            </Field>
+          )}
         </div>
         <Field label="Note for the record" hint="Required. Shown in Action history and to Finance." error={shown.note}>
           <Textarea id="aa-rf-note" placeholder="" value={form.note} onChange={(e) => setField('note', e.target.value)} />
         </Field>
         <div className="stack gap-2">
           <span className="label">Effect on seller earnings and fees</span>
-          <TableWrap label={`Issue refund · ${O.ref} table`}>
+          <TableWrap label={`${mode === 'cancel' ? 'Cancel items' : 'Issue refund'} · ${o.ref} table`}>
             <table className="table">
               <thead>
                 <tr>
@@ -663,41 +855,81 @@ export default function Order() {
                     </td>
                   </tr>
                 ) : (
-                  effect.map((e) => {
-                    const official = e.seller === 'official';
-                    return (
-                      <tr key={e.seller}>
-                        <td>
-                          <SellerCell id={e.seller} />
-                        </td>
-                        <td className="r">{money(e.refund)}</td>
-                        <td className="r">{official ? <span className="xs muted">Company sales −{money(e.gross)}</span> : `−${money(e.gross * (1 - FEE_RATE))}`}</td>
-                        <td className="r">{official ? <span className="muted">Not charged</span> : `−${money(e.gross * FEE_RATE)} reversed`}</td>
-                        <td className="r col-pin">{money(e.coupon)}</td>
-                      </tr>
-                    );
-                  })
+                  effect.map((e) => (
+                    <tr key={e.seller.id ?? e.seller.name}>
+                      <td>
+                        <SellerCell s={e.seller} />
+                      </td>
+                      <td className="r">{money(usd(e.refund))}</td>
+                      <td className="r">{e.seller.official ? <span className="xs muted">Company sales −{money(usd(e.gross))}</span> : `−${money(usd(e.gross - e.fee))}`}</td>
+                      <td className="r">{e.seller.official ? <span className="muted">Not charged</span> : `−${money(usd(e.fee))} reversed`}</td>
+                      <td className="r col-pin">{money(usd(e.coupon))}</td>
+                    </tr>
+                  ))
                 )}
               </tbody>
             </table>
           </TableWrap>
-          <span className="xs muted">
-            Example fee: 10% of item price after seller-funded discounts, excluding shipping. Final fees are in the seller agreement. Platform-funded coupon shares are returned to the WELCOME20 budget and never charged to sellers.
-          </span>
+          <span className="xs muted">Estimate from this order's fees. The final amounts are booked when the refund is sent. Platform-funded discount shares go back to their budget and are never charged to sellers.</span>
         </div>
-        <div className="well stack gap-2">
-          <div className="row between">
-            <span className="strong">Refund total</span>
-            <span className="h3 num">{money(refundTotal)}</span>
+        {mode === 'refund' && (
+          <div className="well stack gap-2">
+            <div className="row between">
+              <span className="strong">Refund total</span>
+              <span className="h3 num">{money(refundTotal)}</span>
+            </div>
+            <SummaryRow k="Approval route" v={inLimit ? 'Within your limit · approved when you send it' : (refundAction?.approvers ?? 'Finance approval')} />
+            <SummaryRow k="Your refund authority" v={refundLimits.length ? refundLimits.map((l) => `${l.summary} · ${l.role.name}`).join('; ') : `None${me.data?.roles?.[0] ? ` · ${me.data.roles[0].name} role` : ''}`} />
+            <span className="xs muted">The customer sees "Refund requested" until Finance sends it; approval is not money arrived.</span>
           </div>
-          <SummaryRow k="Approval route" v={refundTotal > O.financeLimit ? `${O.financeApprover} + second reviewer` : O.financeApprover} />
-          <SummaryRow k="Your refund authority" v="None · Platform Administrator role" />
-          <SummaryRow k="Finance limit" v={`Up to ${money(O.financeLimit)} · one approval`} />
-          <span className="xs muted">
-            Refunds above {money(O.financeLimit)} also need a second Finance reviewer. The customer sees "Refund requested" until Finance sends it; approval is not money arrived.
-          </span>
-        </div>
+        )}
       </Dialog>
+
+      <ContactDialog group={contact} orderId={o.id} orderRef={o.ref} onClose={() => setContact(null)} />
+      {stepUp.dialog}
     </AdminLayout>
+  );
+}
+
+/** Contact seller: a staff conversation about this order (POST messaging/conversations). */
+function ContactDialog({ group, orderId, orderRef, onClose }: { group: OrderGroup | null; orderId: string; orderRef: string; onClose: () => void }) {
+  const { api } = useApi();
+  const [body, setBody] = useState('');
+  const [err, setErr] = useState('');
+  const send = useMutation({
+    mutationFn: () =>
+      call(
+        api.POST('/api/admin/messaging/conversations', {
+          body: { sellerId: group!.seller.id, orderId, orderItemIds: group!.items.map((i) => i.id), subject: `Order ${orderRef}`, body: body.trim() },
+        }),
+      ),
+    onSuccess: () => {
+      announce(`Message sent to ${group?.seller.name}`);
+      setBody('');
+      onClose();
+    },
+    onError: (e) => setErr(errorMessage(e)),
+  });
+  return (
+    <Dialog
+      open={!!group}
+      onClose={onClose}
+      title={`Message ${group?.seller.name ?? 'the seller'}`}
+      foot={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button icon="send" disabled={body.trim().length < 2 || send.isPending} onClick={() => send.mutate()}>
+            Send
+          </Button>
+        </>
+      }
+    >
+      {err && <Alert tone="danger" title={err} />}
+      <Field label="Message" hint={`About order ${orderRef}. The seller replies in their Seller Center messages.`}>
+        <Textarea id="aa-contact" rows={4} value={body} onChange={(e) => setBody(e.target.value)} />
+      </Field>
+    </Dialog>
   );
 }

@@ -1,89 +1,58 @@
 import { Fragment, useState } from 'react';
 import { Link } from 'react-router';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { announce, BarChart, Badge, Breadcrumbs, Button, Card, Icon, SearchInput, Select, Stat, StatusBadge, TableWrap, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, BarChart, Badge, Breadcrumbs, Button, Card, Icon, SearchInput, Select, Stat, StatusBadge, TableWrap, type IconName } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
+import { ACTION_LABEL, ACTION_PERMISSION, CampaignActionDialog, NEEDS_INPUT, runCampaignAction, type CampaignAction, type PendingAction } from './data/ad-actions';
+import { CAMPAIGN_STATUS, isOwn, num, statusLabel, type AdCampaignSummary, type AdsDashboard, type CampaignStatus, type Page, type Placement } from './data/ads';
 
-// Design: pages/admin/admin-ads.html
+// Design: pages/admin/admin-ads.html. Data: GET /api/admin/advertising/dashboard (KPIs, side lists, billing,
+// performance), GET …/campaigns (table, filtered on the server), GET …/placements (type filter), and the
+// lifecycle actions POST …/campaigns/{id}/<action> from each row's allowedActions.
 
-type Status = 'Draft' | 'In review' | 'Approved' | 'Scheduled' | 'Live' | 'Paused' | 'Finished' | 'Archived';
-type Source = 'own' | 'seller' | 'brand';
-
-interface Campaign {
-  id: string;
-  name: string;
-  advertiser: string;
-  source: Source;
-  type: string;
-  placement: string;
-  period: string;
-  budget: string;
-  displays: string;
-  clicks: string;
-  status: Status;
-}
-
-const CAMPAIGNS: Campaign[] = [
-  { id: 'c1', name: 'Home Week opening ad', advertiser: 'Marketly', source: 'own', type: 'Opening full-screen', placement: 'Home, category entry', period: 'Oct 6 – Oct 19', budget: 'Internal', displays: '128,400', clicks: '3,210', status: 'Live' },
-  { id: 'c2', name: 'Halden Aurora banner', advertiser: 'Halden (brand)', source: 'brand', type: 'Banner', placement: 'Home, Electronics', period: 'Oct 1 – Oct 10', budget: '$1,240 of $3,000', displays: '86,200', clicks: '1,930', status: 'Live' },
-  { id: 'c3', name: 'Kestrel SSD sponsored products', advertiser: 'Pixel & Port', source: 'seller', type: 'Sponsored product', placement: 'Search, Computers', period: 'Oct 3 – Oct 31', budget: '$412 of $1,500', displays: '54,100', clicks: '1,480', status: 'Live' },
-  { id: 'c4', name: 'Free shipping weekend pop-up', advertiser: 'Marketly', source: 'own', type: 'Pop-up', placement: 'Home, cart page excluded', period: 'Oct 10 – Oct 18', budget: 'Internal', displays: '—', clicks: '—', status: 'Scheduled' },
-  { id: 'c5', name: 'Fall Home Sale opening ad', advertiser: 'Marketly', source: 'own', type: 'Opening full-screen', placement: 'Home, campaign page', period: 'Oct 16 – Oct 25', budget: 'Internal', displays: '—', clicks: '—', status: 'In review' },
-  { id: 'c6', name: 'Kestrel 27" monitor sponsored product', advertiser: 'Pixel & Port', source: 'seller', type: 'Sponsored product', placement: 'Search, Monitors', period: 'Oct 12 – Nov 8', budget: '$0 of $800', displays: '—', clicks: '—', status: 'In review' },
-  { id: 'c7', name: 'Trailhead Ridge store feature', advertiser: 'Trailhead Outfitters', source: 'seller', type: 'Sponsored store', placement: 'Home, Sports', period: 'Oct 1 – Oct 20', budget: '$96 of $600', displays: '12,800', clicks: '210', status: 'Paused' },
-  { id: 'c8', name: 'Fall picks banner', advertiser: 'Marketly', source: 'own', type: 'Banner', placement: 'Home & Kitchen', period: 'Oct 9 – Oct 31', budget: 'Internal', displays: '—', clicks: '—', status: 'Approved' },
-  { id: 'c9', name: 'Northwind Audio store feature', advertiser: 'Northwind Audio', source: 'seller', type: 'Sponsored store', placement: 'Electronics', period: 'Not set', budget: '$500 limit', displays: '—', clicks: '—', status: 'Draft' },
-  { id: 'c10', name: 'Back to campus opening ad', advertiser: 'Marketly', source: 'own', type: 'Opening full-screen', placement: 'Home', period: 'Aug 15 – Sep 15', budget: 'Internal', displays: '402,300', clicks: '8,870', status: 'Finished' },
-  { id: 'c11', name: 'Summer clearance banner', advertiser: 'Marketly', source: 'own', type: 'Banner', placement: 'Home, Deals', period: 'Jul 1 – Jul 31', budget: 'Internal', displays: '311,000', clicks: '6,020', status: 'Archived' },
-];
-
-const LIFECYCLE: Status[] = ['Draft', 'In review', 'Approved', 'Scheduled', 'Live', 'Paused', 'Finished', 'Archived'];
+const LIFECYCLE: CampaignStatus[] = ['draft', 'in_review', 'approved', 'scheduled', 'live', 'paused', 'finished', 'archived'];
 const SOURCES = [
   { value: '', label: 'Own and paid ads' },
   { value: 'own', label: 'Own promotions' },
   { value: 'seller', label: 'Seller paid ads' },
   { value: 'brand', label: 'Brand campaigns' },
 ];
-const TYPES = ['All ad types', 'Opening full-screen', 'Banner', 'Pop-up', 'Sponsored product', 'Sponsored store'];
-const AT_RISK: Status[] = ['In review', 'Paused'];
+const AT_RISK: CampaignStatus[] = ['in_review', 'paused'];
 
-const DAILY = { labels: ['Oct 1', 'Oct 2', 'Oct 3', 'Oct 4', 'Oct 5', 'Oct 6', 'Oct 7', 'Oct 8'], data: [24, 27, 31, 35, 34, 49, 52, 29] };
-const PERFORMANCE: Array<{ k: string; v: string; d?: string }> = [
-  { k: 'Displays', v: '281,500' },
-  { k: 'Clicks', v: '6,620', d: '2.4% of displays' },
-  { k: 'Dismissals', v: '41,300', d: 'Opening ad closed: 32%' },
-  { k: 'Attributed purchases', v: '186', d: '$21,940.00' },
-];
+const campaignHref = (c: { ref: string }, view = '') => href('admin/ad-campaign', view, undefined, { ref: c.ref });
 
-type Action = { label: string; icon?: IconName; variant?: 'ghost' | 'secondary'; to?: string; next?: Status };
-function actionsFor(c: Campaign): Action[] {
-  switch (c.status) {
-    case 'Live':
-      return [{ label: 'Pause', icon: 'pause', next: 'Paused' }, { label: 'Finish', next: 'Finished' }];
-    case 'Scheduled':
-      return [{ label: 'Pause', icon: 'pause', next: 'Paused' }, { label: 'Edit', to: href('admin/ad-campaign', 'schedule-limits') }];
-    case 'In review':
-      return [{ label: 'Review', variant: 'secondary', to: href('admin/ad-campaign', 'approval') }];
-    case 'Paused':
-      return [{ label: 'Resume', icon: 'play', next: 'Live' }, { label: 'Finish', next: 'Finished' }];
-    case 'Approved':
-      return [{ label: 'Schedule', variant: 'secondary', next: 'Scheduled' }];
-    case 'Draft':
-      return [{ label: 'Edit', to: href('admin/ad-campaign') }];
-    case 'Finished':
-      return [{ label: 'Archive', next: 'Archived' }, { label: 'Renew', to: href('admin/ad-campaign') }];
-    default:
-      return [{ label: 'View', to: href('admin/ad-campaign', 'creative-preview') }];
-  }
+type RowAction = { label: string; icon?: IconName; variant?: 'ghost' | 'secondary'; to?: string; action?: CampaignAction };
+/** Row buttons from the API's allowedActions (at most two, in the design's order). */
+function actionsFor(c: AdCampaignSummary, can: (p: string) => boolean): RowAction[] {
+  const allowed = new Set(c.allowedActions);
+  const out: RowAction[] = [];
+  const add = (a: CampaignAction, icon?: IconName, variant?: 'secondary') => {
+    if (allowed.has(a) && can(ACTION_PERMISSION[a])) out.push({ label: ACTION_LABEL[a], icon, variant, action: a });
+  };
+  if (allowed.has('review') && can('advertising.campaigns.review')) out.push({ label: 'Review', variant: 'secondary', to: campaignHref(c, 'approval') });
+  add('pause', 'pause');
+  add('resume', 'play');
+  add('schedule', undefined, 'secondary');
+  if (allowed.has('edit') && can('advertising.campaigns.manage')) out.push({ label: 'Edit', to: campaignHref(c) });
+  add('finish');
+  add('archive');
+  add('renew');
+  if (!out.length) out.push({ label: 'View', to: campaignHref(c, c.status === 'in_review' ? 'approval' : 'creative-preview') });
+  return out.slice(0, 2);
 }
 
-function SideList({ title, items }: { title: string; items: Array<{ name: string; to?: string; meta: string; status: string }> }) {
+function SideList({ title, items, empty }: { title: string; items: Array<{ key: string; name: string; to?: string; meta: string; status: string }>; empty: string }) {
   return (
     <Card title={title} titleAs="h3" flush>
       <ul className="list pad">
         {items.map((it) => (
-          <li key={it.name}>
+          <li key={it.key}>
             <span className="grow stack gap-0">
               {it.to ? (
                 <Link className="small strong" to={it.to}>
@@ -97,34 +66,61 @@ function SideList({ title, items }: { title: string; items: Array<{ name: string
             <StatusBadge status={it.status} />
           </li>
         ))}
+        {items.length === 0 && (
+          <li>
+            <span className="xs muted">{empty}</span>
+          </li>
+        )}
       </ul>
     </Card>
   );
 }
 
 export default function Ads() {
-  const [rows, setRows] = useState(CAMPAIGNS);
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const { can } = useStaffSession();
   const [q, setQ] = useState('');
   const [source, setSource] = useState('');
-  const [type, setType] = useState(TYPES[0]);
-  const [ending, setEnding] = useState<'' | 'renewed' | 'finish'>('');
+  const [type, setType] = useState('');
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [notice, setNotice] = useState('');
+  const [ending, setEnding] = useState<Record<string, 'finish'>>({});
 
-  const setStatus = (id: string, status: Status) => {
-    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, status } : r)));
-    const c = rows.find((r) => r.id === id);
-    if (c) announce(`${c.name}: ${status}`);
+  const dash = useQuery({ queryKey: ['advertising', 'dashboard'], queryFn: () => call(api.GET('/api/admin/advertising/dashboard')) as Promise<AdsDashboard> });
+  const placements = useQuery({ queryKey: ['advertising', 'placements'], queryFn: () => call(api.GET('/api/admin/advertising/placements')) as Promise<Placement[]> });
+  const needle = q.trim();
+  const list = useQuery({
+    queryKey: ['advertising', 'campaigns', { q: needle, source, type }],
+    queryFn: () =>
+      call(api.GET('/api/admin/advertising/campaigns', { params: { query: { q: needle || undefined, source: (source || undefined) as 'own' | undefined, placementKey: type || undefined, limit: 100 } } })) as Promise<Page<AdCampaignSummary>>,
+    placeholderData: keepPreviousData,
+  });
+
+  const act = useMutation({
+    mutationFn: ({ p, body }: { p: PendingAction; body?: Record<string, unknown> }) => runCampaignAction(api, p.id, p.action, body),
+    onSuccess: (c, { p }) => {
+      setPending(null);
+      const msg = p.action === 'renew' ? `Renewal draft ${c.ref} created. Set the details in the campaign.` : `${p.name}: ${statusLabel(c.status)}`;
+      setNotice(msg);
+      announce(msg);
+      void qc.invalidateQueries({ queryKey: ['advertising'] });
+      void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+    },
+  });
+  const start = (c: AdCampaignSummary, action: CampaignAction) => {
+    const p: PendingAction = { id: c.id, name: c.name, action, startsAt: c.startsAt, endsAt: c.endsAt };
+    act.reset();
+    if (NEEDS_INPUT[action]) setPending(p);
+    else act.mutate({ p });
   };
 
-  const needle = q.trim().toLowerCase();
-  const shown = rows.filter(
-    (r) =>
-      (!needle || r.name.toLowerCase().includes(needle) || r.advertiser.toLowerCase().includes(needle)) &&
-      (!source || r.source === source) &&
-      (type === TYPES[0] || r.type === type),
-  );
-  const live = rows.filter((r) => r.status === 'Live');
-  const liveOwn = live.filter((r) => r.source === 'own').length;
-  const inReview = rows.filter((r) => r.status === 'In review');
+  const d = dash.data;
+  const rows = list.data?.items ?? [];
+  const typeOptions = [{ value: '', label: 'All ad types' }, ...(placements.data ?? []).map((p) => ({ value: p.key, label: p.name }))];
+  const perf = d?.performance;
+  const perfRange = perf ? `${shortDate(perf.range.from)}–${shortDate(perf.range.to)}` : '';
+  const endingFirst = d?.endingSoonList[0];
 
   return (
     <AdminLayout active="ads">
@@ -132,37 +128,53 @@ export default function Ads() {
         <div className="t">
           <Breadcrumbs items={[{ label: 'Admin', to: href('admin/dashboard') }, { label: 'Advertisements' }]} />
           <h1 className="h1">Advertisements</h1>
-          <p className="sub small">Owner Jamie Brooks, Advertising Manager · own promotions and seller paid ads (pilot with 3 sellers) · Pacific Time</p>
+          <p className="sub small">Own promotions and seller paid ads · Pacific Time</p>
         </div>
         <div className="actions">
           <Button variant="secondary" size="sm" icon="settings-2" to={href('admin/ad-placements')}>
             Placements and rules
           </Button>
-          <Button size="sm" icon="plus" to={href('admin/ad-campaign')}>
-            Create campaign
-          </Button>
+          {can('advertising.campaigns.manage') && (
+            <Button size="sm" icon="plus" to={href('admin/ad-campaign')}>
+              Create campaign
+            </Button>
+          )}
         </div>
       </div>
 
+      {notice && <Alert tone="success" title={notice} />}
+      {act.error && !pending && <Alert tone="danger" title="That didn’t work">{errorMessage(act.error)}</Alert>}
+      {dash.error && <LoadError error={dash.error} onRetry={() => void dash.refetch()} />}
+
       <div className="ab-kpis k6">
-        <div className="card pad">
-          <Stat icon="radio" label="Live now" value={live.length} note={`${liveOwn} own · ${live.length - liveOwn} paid`} />
-        </div>
-        <div className="card pad">
-          <Stat icon="calendar" label="Starting in 7 days" value="2" note="Next: Oct 9, 6:00 AM" />
-        </div>
-        <div className="card pad">
-          <Stat icon="timer" label="Ending soon" value="1" note="Halden Aurora banner, Oct 10" />
-        </div>
-        <div className="card pad">
-          <Stat icon="list-checks" label="Waiting approval" value={inReview.length} note="Oldest 1 day" />
-        </div>
-        <div className="card pad">
-          <Stat icon="circle-dollar-sign" label="Spend this month" value="$1,748.00" note="Seller paid ads · billed separately from commission" />
-        </div>
-        <div className="card pad">
-          <Stat icon="shopping-bag" label="Attributed purchases" value="186" note="$21,940.00 · 7-day click window" />
-        </div>
+        {d ? (
+          <>
+            <div className="card pad">
+              <Stat icon="radio" label="Live now" value={d.liveNow.total} note={`${d.liveNow.own} own · ${d.liveNow.paid} paid`} />
+            </div>
+            <div className="card pad">
+              <Stat icon="calendar" label="Starting in 7 days" value={d.startingIn7Days} note={d.nextStartAt ? `Next: ${dateTime(d.nextStartAt)}` : 'Nothing scheduled'} />
+            </div>
+            <div className="card pad">
+              <Stat icon="timer" label="Ending soon" value={d.endingSoon} note={endingFirst ? `${endingFirst.name}${endingFirst.endsAt ? `, ${shortDate(endingFirst.endsAt)}` : ''}` : 'None'} />
+            </div>
+            <div className="card pad">
+              <Stat icon="list-checks" label="Waiting approval" value={d.waitingApproval} note={d.oldestWaitingDays != null ? `Oldest ${d.oldestWaitingDays} day${d.oldestWaitingDays === 1 ? '' : 's'}` : 'None waiting'} />
+            </div>
+            <div className="card pad">
+              <Stat icon="circle-dollar-sign" label="Spend this month" value={formatMoney(d.spendThisMonth)} note="Seller paid ads · billed separately from commission" />
+            </div>
+            <div className="card pad">
+              <Stat icon="shopping-bag" label="Attributed purchases" value={num(d.attributedOrders)} note={`${formatMoney(d.attributedSales)} · ${d.attributionDays}-day click window`} />
+            </div>
+          </>
+        ) : (
+          Array.from({ length: 6 }, (_, i) => (
+            <div className="card pad" key={i}>
+              <SkeletonLines rows={1} />
+            </div>
+          ))
+        )}
       </div>
 
       <div className="ab-main">
@@ -179,101 +191,114 @@ export default function Ads() {
                 {LIFECYCLE.map((s, i) => (
                   <Fragment key={s}>
                     {i > 0 && <Icon name="chevron-right" />}
-                    <StatusBadge status={s} />
+                    <StatusBadge status={CAMPAIGN_STATUS[s]} />
                   </Fragment>
                 ))}
               </div>
               <div className="toolbar">
                 <SearchInput id="ad-q" placeholder="Search campaign or advertiser" value={q} onChange={setQ} />
                 <Select id="ad-src" aria-label="Source" options={SOURCES} value={source} onChange={(e) => setSource(e.target.value)} />
-                <Select id="ad-type" aria-label="Placement type" options={TYPES} value={type} onChange={(e) => setType(e.target.value)} />
+                <Select id="ad-type" aria-label="Placement type" options={typeOptions} value={type} onChange={(e) => setType(e.target.value)} />
               </div>
             </div>
-            <TableWrap label="Campaigns table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Campaign</th>
-                    <th scope="col">Advertiser</th>
-                    <th scope="col">Type and placement</th>
-                    <th scope="col">Period</th>
-                    <th scope="col">Budget / spend</th>
-                    <th className="r" scope="col">Displays</th>
-                    <th className="r" scope="col">Clicks</th>
-                    <th scope="col">Status</th>
-                    <th className="col-pin" scope="col">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.map((c) => {
-                    const warn = AT_RISK.includes(c.status);
-                    return (
-                      <tr key={c.id} className={cx(warn && 'is-warn')}>
-                        <td>
-                          {warn && <span className="sr-only">At risk: </span>}
-                          <Link className="strong" to={href('admin/ad-campaign', 'creative-preview')}>
-                            {c.name}
-                          </Link>
-                        </td>
-                        <td>
-                          <span className="row nowrap gap-2">
-                            {c.advertiser}
-                            {c.source === 'own' ? <Badge tone="brand">Own</Badge> : <Badge tone="info">Paid</Badge>}
-                          </span>
-                        </td>
-                        <td>
-                          <span className="ab-cell">
-                            <span className="strong">{c.type}</span>
-                            <span className="xs muted">{c.placement}</span>
-                          </span>
-                        </td>
-                        <td>
-                          <span className="nowrap">{c.period}</span>
-                        </td>
-                        <td>{c.budget}</td>
-                        <td className="r">{c.displays}</td>
-                        <td className="r">{c.clicks}</td>
-                        <td>
-                          <StatusBadge status={c.status} />
-                        </td>
-                        <td className="col-pin">
-                          <span className="row nowrap gap-1">
-                            {actionsFor(c).map((a) => {
-                              const inner = (
-                                <>
-                                  {a.icon && <Icon name={a.icon} />}
-                                  <span>{a.label}</span>
-                                  <span className="sr-only"> {c.name}</span>
-                                </>
-                              );
-                              const cls = cx('btn', a.variant === 'secondary' ? 'btn-secondary' : 'btn-ghost', 'btn-sm');
-                              return a.to ? (
-                                <Link key={a.label} className={cls} to={a.to}>
-                                  {inner}
-                                </Link>
-                              ) : (
-                                <button key={a.label} type="button" className={cls} onClick={() => a.next && setStatus(c.id, a.next)}>
-                                  {inner}
-                                </button>
-                              );
-                            })}
-                          </span>
+            {list.error ? (
+              <div className="card-body">
+                <LoadError error={list.error} onRetry={() => void list.refetch()} />
+              </div>
+            ) : !list.data ? (
+              <div className="card-body">
+                <SkeletonLines rows={5} />
+              </div>
+            ) : (
+              <TableWrap label="Campaigns table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Campaign</th>
+                      <th scope="col">Advertiser</th>
+                      <th scope="col">Type and placement</th>
+                      <th scope="col">Period</th>
+                      <th scope="col">Budget / spend</th>
+                      <th className="r" scope="col">Displays</th>
+                      <th className="r" scope="col">Clicks</th>
+                      <th scope="col">Status</th>
+                      <th className="col-pin" scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((c) => {
+                      const warn = AT_RISK.includes(c.status);
+                      const shown = c.status === 'draft' || c.status === 'in_review' || c.status === 'approved' || (c.status === 'scheduled' && !c.displays);
+                      return (
+                        <tr key={c.id} className={cx(warn && 'is-warn')}>
+                          <td>
+                            {warn && <span className="sr-only">At risk: </span>}
+                            <Link className="strong" to={campaignHref(c, c.status === 'in_review' ? 'approval' : 'creative-preview')}>
+                              {c.name}
+                            </Link>
+                          </td>
+                          <td>
+                            <span className="row nowrap gap-2">
+                              {c.advertiser.name}
+                              {isOwn(c.advertiser) ? <Badge tone="brand">Own</Badge> : <Badge tone="info">Paid</Badge>}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="ab-cell">
+                              <span className="strong">{c.placementName}</span>
+                              <span className="xs muted">{c.pagesLabel}</span>
+                            </span>
+                          </td>
+                          <td>
+                            <span className="nowrap">{c.periodLabel}</span>
+                          </td>
+                          <td>{c.budgetLabel}</td>
+                          <td className="r">{shown ? '—' : num(c.displays)}</td>
+                          <td className="r">{shown ? '—' : num(c.clicks)}</td>
+                          <td>
+                            <span title={c.statusNote ?? undefined}>
+                              <StatusBadge status={statusLabel(c.status)} />
+                            </span>
+                          </td>
+                          <td className="col-pin">
+                            <span className="row nowrap gap-1">
+                              {actionsFor(c, can).map((a) => {
+                                const inner = (
+                                  <>
+                                    {a.icon && <Icon name={a.icon} />}
+                                    <span>{a.label}</span>
+                                    <span className="sr-only"> {c.name}</span>
+                                  </>
+                                );
+                                const cls = cx('btn', a.variant === 'secondary' ? 'btn-secondary' : 'btn-ghost', 'btn-sm');
+                                return a.to ? (
+                                  <Link key={a.label} className={cls} to={a.to}>
+                                    {inner}
+                                  </Link>
+                                ) : (
+                                  <button key={a.label} type="button" className={cls} disabled={act.isPending} onClick={() => a.action && start(c, a.action)}>
+                                    {inner}
+                                  </button>
+                                );
+                              })}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {rows.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="muted">
+                          {needle || source || type ? 'No campaigns match these filters.' : 'No campaigns yet. Create one to get started.'}
                         </td>
                       </tr>
-                    );
-                  })}
-                  {shown.length === 0 && (
-                    <tr>
-                      <td colSpan={9} className="muted">
-                        No campaigns match these filters.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </TableWrap>
+                    )}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
             <p className="status-legend status-legend--edge">
               <span className="sr-only">Legend: </span>
               <span className="sl sl-warning">
@@ -286,88 +311,139 @@ export default function Ads() {
             </div>
           </section>
 
-          <Card title="Performance" titleAs="h3" sub="Oct 1–8 · all live campaigns">
-            <div className="grid m2 md4 gap-3">
-              {PERFORMANCE.map((p) => (
-                <div className="panel" key={p.k}>
-                  <Stat label={p.k} value={p.v} note={p.d} />
-                </div>
-              ))}
-            </div>
-            <BarChart labels={DAILY.labels} data={DAILY.data} fmt={(v) => `${Math.round(v)}k`} label="Daily ad displays in thousands" />
-            <p className="ab-note">
-              <Icon name="info" className="ic-sm" /> Attribution period: a purchase counts when it happens within 7 days of a click on the ad. Paid campaigns never guarantee purchases. Oct 8 is partial.
-            </p>
-          </Card>
+          {can('advertising.reports.view') || can('advertising.campaigns.view') ? (
+            <Card title="Performance" titleAs="h3" sub={perf ? `${perfRange} · all live campaigns` : undefined}>
+              {perf ? (
+                <>
+                  <div className="grid m2 md4 gap-3">
+                    {[
+                      { k: 'Displays', v: num(perf.metrics.displays) },
+                      { k: 'Clicks', v: num(perf.metrics.clicks), d: `${perf.metrics.ctrPct.toFixed(1)}% of displays` },
+                      { k: 'Dismissals', v: num(perf.metrics.dismissals), d: perf.openingAdClosedPct != null ? `Opening ad closed: ${Math.round(perf.openingAdClosedPct)}%` : undefined },
+                      { k: 'Attributed purchases', v: num(perf.metrics.attributedOrders), d: formatMoney(perf.metrics.attributedSales) },
+                    ].map((p) => (
+                      <div className="panel" key={p.k}>
+                        <Stat label={p.k} value={p.v} note={p.d} />
+                      </div>
+                    ))}
+                  </div>
+                  {perf.daily.length > 0 && (
+                    <BarChart
+                      labels={perf.daily.map((x) => shortDate(x.date))}
+                      data={perf.daily.map((x) => x.displays / 1000)}
+                      fmt={(v) => (v >= 1 ? `${Math.round(v)}k` : `${Math.round(v * 1000)}`)}
+                      label="Daily ad displays in thousands"
+                    />
+                  )}
+                  <p className="ab-note">
+                    <Icon name="info" className="ic-sm" /> {perf.attributionNote}
+                    {perf.daily.some((x) => x.partial) ? ` ${shortDate(perf.daily.filter((x) => x.partial).slice(-1)[0].date)} is partial.` : ''}
+                  </p>
+                </>
+              ) : dash.isLoading ? (
+                <SkeletonLines rows={3} />
+              ) : null}
+            </Card>
+          ) : null}
         </div>
 
         <div className="stack gap-5">
           <SideList
             title="Waiting approval"
-            items={inReview.map((c) => ({
+            empty={d ? 'Nothing waiting for approval.' : 'Loading…'}
+            items={(d?.waitingList ?? []).map((c) => ({
+              key: c.id,
               name: c.name,
-              to: c.source === 'own' ? href('admin/ad-campaign', 'approval') : undefined,
-              meta: c.source === 'own' ? `${c.advertiser} · needs Content review · Noor Aziz` : `${c.advertiser} · paid · creative check`,
-              status: c.status,
+              to: campaignHref(c, 'approval'),
+              meta: `${c.advertiser.name}${isOwn(c.advertiser) ? '' : ' · paid'}${c.statusNote ? ` · ${c.statusNote}` : ''}`,
+              status: statusLabel(c.status),
             }))}
           />
           <SideList
             title="Upcoming starts"
-            items={[
-              { name: 'Fall picks banner', meta: 'Banner · Oct 9, 6:00 AM', status: rows.find((r) => r.id === 'c8')!.status },
-              { name: 'Free shipping weekend pop-up', meta: 'Pop-up · Oct 10, 12:00 AM', status: rows.find((r) => r.id === 'c4')!.status },
-            ]}
+            empty={d ? 'No campaigns start in the next 7 days.' : 'Loading…'}
+            items={(d?.upcomingStarts ?? []).map((c) => ({ key: c.id, name: c.name, to: campaignHref(c, 'creative-preview'), meta: `${c.placementName}${c.startsAt ? ` · ${dateTime(c.startsAt)}` : ''}`, status: statusLabel(c.status) }))}
           />
           <Card
             title="Ending soon"
             titleAs="h3"
             flush
             foot={
-              ending ? (
-                <span className="xs muted">{ending === 'renewed' ? 'Renewal draft created. Set new dates in the campaign.' : 'It finishes Oct 10, 11:59 PM as planned.'}</span>
-              ) : (
-                <>
-                  <Button variant="secondary" size="sm" onClick={() => (setEnding('renewed'), announce('Renewal draft created'))}>
-                    Renew
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => (setEnding('finish'), announce('Halden Aurora banner will finish as planned'))}>
-                    Let it finish
-                  </Button>
-                </>
-              )
+              endingFirst ? (
+                ending[endingFirst.id] ? (
+                  <span className="xs muted">{`It finishes ${endingFirst.endsAt ? dateTime(endingFirst.endsAt) : ''} as planned.`}</span>
+                ) : (
+                  <>
+                    {endingFirst.allowedActions.includes('renew') && can('advertising.campaigns.manage') && (
+                      <Button variant="secondary" size="sm" onClick={() => start(endingFirst, 'renew')}>
+                        Renew
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => (setEnding((e) => ({ ...e, [endingFirst.id]: 'finish' })), announce(`${endingFirst.name} will finish as planned`))}>
+                      Let it finish
+                    </Button>
+                  </>
+                )
+              ) : undefined
             }
           >
             <ul className="list pad">
-              <li>
-                <span className="grow stack gap-0">
-                  <span className="small strong">Halden Aurora banner</span>
-                  <span className="xs muted">Ends Oct 10, 11:59 PM · finish or renew deliberately</span>
-                </span>
-                <Badge tone="warning">Ending soon</Badge>
-              </li>
+              {(d?.endingSoonList ?? []).map((c) => (
+                <li key={c.id}>
+                  <span className="grow stack gap-0">
+                    <Link className="small strong" to={campaignHref(c, 'creative-preview')}>
+                      {c.name}
+                    </Link>
+                    <span className="xs muted">{c.endsAt ? `Ends ${dateTime(c.endsAt)} · finish or renew deliberately` : c.periodLabel}</span>
+                  </span>
+                  <Badge tone="warning">Ending soon</Badge>
+                </li>
+              ))}
+              {d && d.endingSoonList.length === 0 && (
+                <li>
+                  <span className="xs muted">No campaigns end in the next few days.</span>
+                </li>
+              )}
+              {!d && (
+                <li>
+                  <SkeletonLines rows={1} />
+                </li>
+              )}
             </ul>
           </Card>
-          <Card title="Seller ad billing" titleAs="h3" sub="Example model: fixed placement fee per week">
-            <div className="ab-sumlist">
-              <div>
-                <span>Billed this month</span>
-                <span>$1,748.00</span>
+          <Card title="Seller ad billing" titleAs="h3" sub={d ? `Example model: ${d.billing.modelLabel}` : undefined}>
+            {d ? (
+              <div className="ab-sumlist">
+                <div>
+                  <span>Billed this month</span>
+                  <span>{formatMoney(d.billing.billedThisMonth)}</span>
+                </div>
+                <div>
+                  <span>Unused budget returned</span>
+                  <span>{formatMoney(d.billing.unusedBudgetReturned)}</span>
+                </div>
+                <div>
+                  <span>Cancelled campaigns</span>
+                  <span>{d.billing.cancelledCampaigns}</span>
+                </div>
               </div>
-              <div>
-                <span>Unused budget returned</span>
-                <span>$312.00</span>
-              </div>
-              <div>
-                <span>Cancelled campaigns</span>
-                <span>0</span>
-              </div>
-            </div>
+            ) : (
+              <SkeletonLines rows={3} />
+            )}
             <p className="ab-note">
               <Icon name="info" className="ic-sm" /> Ad charges appear on seller statements as a separate line from sales commission.
             </p>
           </Card>
         </div>
       </div>
+
+      <CampaignActionDialog
+        pending={pending}
+        busy={act.isPending}
+        error={act.error}
+        onClose={() => setPending(null)}
+        onConfirm={(body) => pending && act.mutate({ p: pending, body })}
+      />
     </AdminLayout>
   );
 }

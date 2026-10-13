@@ -1,127 +1,45 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
-import { STAFF } from '@marketly/web-shared/data/staff';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { useElementWidth, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
+import { Alert, BarChart, Button, Card, Dialog, Drawer, EmptyState, Field, Icon, IconButton, KeyValue, Legend, LineChart, OptionCard, PageHeader, SegmentedControl, Select, Stat, StatusBadge, TableWrap, Textarea, announce } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { date, dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
+import { useReportExport } from './data/report-export';
 import {
-  Alert, BarChart, Button, Card, Checkbox, Dialog, Drawer, EmptyState, Field, Icon, IconButton, KeyValue, Legend, LineChart, OptionCard, PageHeader, SegmentedControl, Select, Stat, StatusBadge, TableWrap, announce,
-} from '@marketly/web-shared/ui';
-import {
-  aggregate, bucketsOf, compareRange, csvNumber, findReport, fmtValue, isoDay, OFFICIAL, PRESETS, rangeLabel, SELLERS, unitName, unitsOf,
-  type Compare, type Fmt, type Metric, type ReportDef,
+  ago, breakdownsOf, calloutsOf, DATE_BASIS, deltaOf, fmtCell, metaOf, pointsOf, PRESETS, SOLD_BY, tableOf,
+  type ExportJob, type MetricDefinition, type Preset, type ReportDefinition, type ReportGroup, type ReportQuery, type ReportResult,
 } from './data/reports';
 import './Report.css';
 
 // Report detail (admin/report): designed in React after the design export, following
 // reports/Best ecommerce site UX patterns.md, "Report detail and export flows".
 // Views: '' report · 'export' = export dialog · 'definitions' = metric definitions drawer.
-// Default period is last month (dates inclusive), Pacific Time. KPIs, chart, table and exports all
-// come from the same generated rows, so exported numbers match the screen.
-//
-// Rules applied here (blueprint "Create and edit forms"): the export button is never disabled
-// (errors show on submit); a toast appears only for a background export, which also leaves a
-// lasting record in the Exports list and in Action history. Instant downloads and errors stay inline.
+// Data: GET /api/admin/reports/reports/{key} (definition, filters, metric definitions), POST …/{key}/query
+// (meta, KPIs, series, table, breakdowns, callouts), GET/POST …/exports (background jobs, polled; the list
+// shows this report's exports), POST …/metrics/{key}/suggestions (Suggest a change). The URL key is the
+// report key (e.g. commerce.sales).
 
 type View = 'export' | 'definitions';
-type ExportScope = 'view' | 'all';
-type ExportFormat = 'excel' | 'plain';
+type ExportFormat = 'csv' | 'xlsx';
 
-/** Up to this many rows download straight away; bigger exports run in the background. */
-const INSTANT_ROWS = 250;
-const ME = STAFF.admin.name;
+const UNIT_LABEL: Record<string, string> = { money: 'Money (USD)', count: 'Count', percent: 'Percent', ratio: 'Ratio', duration_hours: 'Hours', days: 'Days' };
 
-interface ExportOpts {
-  scope: ExportScope;
-  columns: string[];
-  format: ExportFormat;
-  defs: boolean;
-  range: [number, number];
-  seller: string;
-}
-
-interface ExportRow {
-  id: string;
-  file: string;
-  detail: string;
-  rows: number;
-  requested: string;
-  status: 'Queued' | 'Ready' | 'Expired';
-  expires?: string;
-  opts?: ExportOpts;
-}
-
-const days = ([a, b]: [number, number]) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
-
-function chartFmt(f: Fmt) {
+function chartFmt(unit: string) {
   return (v: number) =>
-    f === 'percent' ? `${Math.round(v)}%` : f === 'hours' ? `${Math.round(v)} h` : f === 'money' ? (v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `$${Math.round(v)}`) : v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : String(Math.round(v));
+    unit === 'percent' ? `${Math.round(v)}%` : unit === 'duration_hours' ? `${Math.round(v)} h` : unit === 'money' ? (v >= 1000 ? `$${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : `$${Math.round(v)}`) : v >= 1000 ? `${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}k` : String(Math.round(v));
 }
 
-function scopeUnits(r: ReportDef, seller: string) {
-  return seller === 'all' ? unitsOf(r) : [seller];
-}
-
-function scopeOptions(r: ReportDef) {
-  if (r.scopes === 'official') return [{ value: OFFICIAL.id, label: OFFICIAL.name }];
-  return [{ value: 'all', label: 'All sellers' }, ...(r.scopes === 'all' ? [{ value: OFFICIAL.id, label: OFFICIAL.name }] : []), ...SELLERS.map((s) => ({ value: s.id, label: s.name }))];
-}
-
-const scopeLabel = (r: ReportDef, seller: string) => (seller === 'all' ? (r.scopes === 'all' ? 'All sellers and the Official Store' : 'All marketplace sellers') : unitName(seller));
-
-const rowCount = (r: ReportDef, o: Pick<ExportOpts, 'scope' | 'range' | 'seller'>) => (o.scope === 'view' ? bucketsOf(o.range).list.length + 1 : days(o.range).length * scopeUnits(r, o.seller).length);
-
-const fileName = (r: ReportDef, o: ExportOpts) => `${r.key}-${isoDay(o.range[0])}-to-${isoDay(o.range[1])}${o.scope === 'all' ? '-all-rows' : ''}.csv`;
-
-function buildCsv(r: ReportDef, o: ExportOpts): string {
-  const cols = r.metrics.filter((m) => o.columns.includes(m.key));
-  const cell = (c: string | number) => `"${String(c).replace(/"/g, '""')}"`;
-  const lines: Array<Array<string | number>> = [];
-  if (o.defs) {
-    lines.push([`# Report: ${r.name}`], [`# Period: ${isoDay(o.range[0])} to ${isoDay(o.range[1])}, dates inclusive, Pacific Time (PT)`], [`# Sellers: ${scopeLabel(r, o.seller)}`], [`# Definitions: ${r.definitionsVersion}, owner ${r.owner}`]);
-    for (const m of cols) lines.push([`# ${m.label}: ${m.def?.meaning ?? ''} Formula: ${m.def?.formula ?? ''}`]);
-    lines.push([]);
-  }
-  const units = scopeUnits(r, o.seller);
-  if (o.scope === 'view') {
-    const b = bucketsOf(o.range);
-    lines.push([b.unit, ...cols.map((m) => m.label)]);
-    for (const x of b.list) {
-      const a = aggregate(r, units, x.days);
-      lines.push([x.full, ...cols.map((m) => csvNumber(a[m.key], m.fmt))]);
-    }
-    const t = aggregate(r, units, days(o.range));
-    lines.push(['Total', ...cols.map((m) => csvNumber(t[m.key], m.fmt))]);
-  } else {
-    lines.push(['Date', 'Seller', ...cols.map((m) => m.label)]);
-    for (const d of days(o.range))
-      for (const u of units) {
-        const a = aggregate(r, [u], [d]);
-        lines.push([isoDay(d), unitName(u), ...cols.map((m) => csvNumber(a[m.key], m.fmt))]);
-      }
-  }
-  const eol = o.format === 'excel' ? '\r\n' : '\n';
-  const body = lines.map((l) => l.map(cell).join(',')).join(eol);
-  return (o.format === 'excel' ? '﻿' : '') + body + eol;
-}
-
-function download(name: string, csv: string) {
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-function delta(m: Metric, cur: number, cmp: number | undefined) {
-  if (cmp === undefined) return null;
-  const d = cur - cmp;
-  const text = m.fmt === 'percent' ? `${Math.abs(d).toFixed(1)} pts` : `${cmp ? Math.abs((d / cmp) * 100).toFixed(1) : '0.0'}%`;
-  return { text, dir: (d >= 0 ? 'up' : 'down') as 'up' | 'down', good: Math.abs(d) < 1e-9 ? undefined : (d >= 0) === m.up };
-}
+const EXPORT_STATE: Record<ExportJob['state'], { label: string; tone: 'success' | 'info' | 'danger' | '' }> = {
+  queued: { label: 'Queued', tone: 'info' },
+  running: { label: 'Preparing', tone: 'info' },
+  ready: { label: 'Ready', tone: 'success' },
+  failed: { label: 'Failed', tone: 'danger' },
+  expired: { label: 'Expired', tone: '' },
+};
 
 function NotFound({ k }: { k: string }) {
   return (
@@ -138,7 +56,7 @@ function NotFound({ k }: { k: string }) {
             </Button>
           }
         >
-          The link may be old or the report was renamed. All 23 launch reports are listed in the library.
+          The link may be old or the report was renamed. Every report is listed in the library.
         </EmptyState>
       </Card>
     </AdminLayout>
@@ -147,95 +65,147 @@ function NotFound({ k }: { k: string }) {
 
 export default function Report() {
   const { key = '' } = useParams();
-  const r = findReport(key);
-  if (!r) return <NotFound k={key} />;
-  return <ReportPage key={r.key} r={r} />;
+  const { api } = useApi();
+  const def = useQuery({
+    queryKey: ['reports', 'report', key],
+    queryFn: () => call(api.GET('/api/admin/reports/reports/{key}', { params: { path: { key } } })) as Promise<{ report: ReportDefinition; definitions: MetricDefinition[] }>,
+    retry: false,
+  });
+  const catalogue = useQuery({ queryKey: ['reports', 'catalogue'], queryFn: () => call(api.GET('/api/admin/reports/catalogue')) as Promise<ReportGroup[]> });
+  if (def.error instanceof ApiError && def.error.status === 404) return <NotFound k={key} />;
+  if (def.error)
+    return (
+      <AdminLayout active="reports">
+        <PageHeader crumbs={[{ label: 'Reports and settings' }, { label: 'Reports', to: href('admin/reports') }, { label: key }]} title="Report" />
+        <LoadError error={def.error} onRetry={() => void def.refetch()} />
+      </AdminLayout>
+    );
+  if (!def.data)
+    return (
+      <AdminLayout active="reports">
+        <PageHeader crumbs={[{ label: 'Reports and settings' }, { label: 'Reports', to: href('admin/reports') }, { label: key }]} title={<span className="sk sk-line" style={{ width: 240, display: 'inline-block' }} />} />
+        <Card pad>
+          <SkeletonLines rows={6} />
+        </Card>
+      </AdminLayout>
+    );
+  const group = catalogue.data?.find((g) => g.key === def.data.report.group);
+  return <ReportPage key={key} r={def.data.report} defs={def.data.definitions} group={group} />;
 }
 
-function ReportPage({ r }: { r: ReportDef }) {
+function ReportPage({ r, defs, group }: { r: ReportDefinition; defs: MetricDefinition[]; group?: ReportGroup }) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const { can } = useStaffSession();
   const [view, setView] = useView<View>();
   // Draw the chart at the card's real width so its text keeps the design's size in a full-width card.
   const [chartRef, measured] = useElementWidth<HTMLDivElement>();
   const chartWidth = Math.max(640, measured);
-  const [preset, setPreset] = useState(PRESETS[0].value);
-  const [compare, setCompare] = useState<Compare>('previous');
-  const [seller, setSeller] = useState(r.scopes === 'official' ? OFFICIAL.id : 'all');
-  const [chartKey, setChartKey] = useState(r.chartMetrics[0]);
+  const filter = (k: string) => r.filters.find((f) => f.key === k);
+  const [preset, setPreset] = useState<Preset>(((filter('range')?.default as string) ?? 'last_14_days') as Preset);
+  const [compare, setCompare] = useState<'previous_period' | 'none'>('previous_period');
+  const [seller, setSeller] = useState('all');
+  const [basis, setBasis] = useState(((filter('dateBasis')?.default as string) ?? 'placement') as string);
+  const [soldBy, setSoldBy] = useState(((filter('soldBy')?.default as string) ?? 'all') as string);
+  const [chartKey, setChartKey] = useState('');
   const [notice, setNotice] = useState<{ tone: 'success' | 'info'; title: string; body?: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const timers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  const exp = useReportExport();
 
-  const p = PRESETS.find((x) => x.value === preset) ?? PRESETS[0];
-  const cmpRange = compareRange(p, compare);
-  const units = scopeUnits(r, seller);
-  const total = aggregate(r, units, days(p.range));
-  const cmpTotal = cmpRange ? aggregate(r, units, days(cmpRange)) : null;
-  const b = bucketsOf(p.range);
-  const cb = cmpRange ? bucketsOf(cmpRange) : null;
-  const rows = b.list.map((x, i) => ({ bucket: x, v: aggregate(r, units, x.days), c: cb?.list[i] ? aggregate(r, units, cb.list[i].days) : null }));
-  const metric = (k: string) => r.metrics.find((m) => m.key === k)!;
-  const chartM = metric(chartKey);
-  const cmpText = cmpRange ? rangeLabel(cmpRange) : '';
-  const sameShape = !!cb && cb.list.length === b.list.length;
-
-  const initialExport = (): ExportRow[] => {
-    const q: ExportOpts = { scope: 'all', columns: r.metrics.map((m) => m.key), format: 'excel', defs: true, range: PRESETS[3].range, seller: r.scopes === 'official' ? OFFICIAL.id : 'all' };
-    return [
-      { id: 'EX-261007-0412', file: fileName(r, q), detail: 'All rows · all columns · CSV for Excel', rows: rowCount(r, q), requested: `Oct 7, 4:12 PM · ${ME}`, status: 'Ready', expires: 'Oct 14', opts: q },
-      { id: 'EX-260929-0388', file: `${r.key}-2026-08-01-to-2026-08-31-all-rows.csv`, detail: 'All rows · 4 columns · plain CSV', rows: 279, requested: 'Sep 29, 9:05 AM · Mei Lin', status: 'Expired', expires: 'Oct 6' },
-    ];
+  const query: ReportQuery = {
+    preset,
+    compare,
+    ...(filter('dateBasis') ? { dateBasis: basis as ReportQuery['dateBasis'] } : {}),
+    ...(filter('soldBy') ? { soldBy: soldBy as ReportQuery['soldBy'] } : {}),
+    ...(filter('sellerId') && seller !== 'all' ? { sellerId: seller } : {}),
   };
-  const [exports, setExports] = useState<ExportRow[]>(initialExport);
+  const result = useQuery({
+    queryKey: ['reports', 'query', r.key, query],
+    queryFn: () => call(api.POST('/api/admin/reports/reports/{key}/query', { params: { path: { key: r.key } }, body: query })) as Promise<ReportResult>,
+    placeholderData: keepPreviousData,
+  });
+  const sellers = useQuery({
+    queryKey: ['sellers', 'list', 'for-reports'],
+    queryFn: () => call(api.GET('/api/admin/sellers/sellers', { params: { query: { limit: 100 } } as never })) as Promise<{ items: Array<{ id: string; storeName: string }> }>,
+    enabled: !!filter('sellerId'),
+    retry: false,
+  });
+  const canExport = can('reports.exports.create');
+  const exportsList = useQuery({
+    queryKey: ['reports', 'exports'],
+    queryFn: () => call(api.GET('/api/admin/reports/exports', { params: { query: { limit: 50 } } })) as Promise<{ items: ExportJob[] }>,
+    enabled: canExport,
+    refetchInterval: (q) => (q.state.data?.items.some((e) => e.state === 'queued' || e.state === 'running') ? 3000 : false),
+  });
+
+  /* ----- Suggest a change ----- */
+  const [sugMetric, setSugMetric] = useState(defs[0]?.key ?? '');
+  const [sugText, setSugText] = useState('');
+  const [sugReason, setSugReason] = useState('');
+  const [sugOpen, setSugOpen] = useState(false);
+  const [sugErr, setSugErr] = useState('');
+  const suggest = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/reports/metrics/{key}/suggestions', { params: { path: { key: sugMetric } }, body: { proposed: sugText.trim(), reason: sugReason.trim() } })),
+    onSuccess: () => {
+      const owner = defs.find((d) => d.key === sugMetric)?.owner;
+      setView('');
+      setSugOpen(false);
+      setSugText('');
+      setSugReason('');
+      setNotice({ tone: 'info', title: `Suggestion sent to ${owner?.name ?? group?.ownerRole ?? 'the metric owner'}`, body: 'Definition changes get a new version number; exports made before the change keep the old definitions.' });
+    },
+  });
+  const sendSuggestion = () => {
+    if (!sugText.trim() || !sugReason.trim()) return setSugErr('Describe the change and why it is needed.');
+    setSugErr('');
+    suggest.mutate();
+  };
 
   /* ----- Export dialog ----- */
-  const [ex, setEx] = useState<{ scope: ExportScope; columns: string[]; format: ExportFormat; defs: boolean }>({ scope: 'view', columns: r.metrics.map((m) => m.key), format: 'excel', defs: true });
-  const [exTried, setExTried] = useState(false);
-  const exOpts: ExportOpts = { ...ex, range: p.range, seller };
-  const exRows = rowCount(r, exOpts);
-  const instant = exRows <= INSTANT_ROWS;
-  const colsError = exTried && ex.columns.length === 0 ? 'Choose at least one column.' : undefined;
-  const toggleCol = (k: string) => setEx((x) => ({ ...x, columns: x.columns.includes(k) ? x.columns.filter((c) => c !== k) : r.metrics.filter((m) => m.key === k || x.columns.includes(m.key)).map((m) => m.key) }));
-
+  const [format, setFormat] = useState<ExportFormat>('csv');
   const openExport = () => {
-    setExTried(false);
+    exp.reset();
     setView('export');
   };
-  const runExport = () => {
-    setExTried(true);
-    if (ex.columns.length === 0) return;
-    const o = exOpts;
-    const detail = `${o.scope === 'view' ? 'Current view' : 'All rows'} · ${o.columns.length === r.metrics.length ? 'all columns' : `${o.columns.length} columns`} · ${o.format === 'excel' ? 'CSV for Excel' : 'plain CSV'}`;
+  const runExport = async () => {
     setView('');
-    if (instant) {
-      download(fileName(r, o), buildCsv(r, o));
-      setNotice({ tone: 'success', title: `Downloaded ${fileName(r, o)}`, body: `${exRows.toLocaleString('en-US')} rows, ${scopeLabel(r, seller).toLowerCase()}, ${rangeLabel(p.range)}. The export is recorded in Action history.` });
-      announce('Export downloaded');
-      return;
-    }
-    const id = `EX-261008-${String(1047 + exports.length).padStart(4, '0')}`;
-    setExports((l) => [{ id, file: fileName(r, o), detail, rows: exRows, requested: `Just now · ${ME}`, status: 'Queued', opts: o }, ...l]);
-    setNotice(null);
-    setToast(`Export started: ${exRows.toLocaleString('en-US')} rows. It will be ready under Exports, and we will notify you.`);
+    setToast('Export started. It will be ready under Exports, and we will notify you.');
     announce('Export started in the background');
-    timers.current.push(
-      setTimeout(() => setToast(null), 8000),
-      setTimeout(() => {
-        setExports((l) => l.map((e) => (e.id === id ? { ...e, status: 'Ready', expires: 'Oct 15' } : e)));
-        announce(`Export ${id} is ready to download`);
-      }, 5000),
-    );
+    const j = await exp.start(r.key, query, format);
+    setToast(null);
+    void qc.invalidateQueries({ queryKey: ['reports', 'exports'] });
+    if (!j) return;
+    if (j.state === 'ready') {
+      setNotice({ tone: 'success', title: `Downloaded ${j.fileName ?? 'the export'}`, body: `${(j.rowCount ?? 0).toLocaleString('en-US')} rows${j.columnsExcluded.length ? `; ${j.columnsExcluded.length} columns left out for your permissions` : ''}. The export is recorded in Action history.` });
+      announce('Export downloaded');
+    } else if (j.state !== 'failed') setNotice({ tone: 'info', title: `Export ${j.ref} is still being prepared`, body: 'It appears under Exports on this page when it is ready.' });
   };
+  useEffect(() => () => setToast(null), []);
 
-  const kpis = r.kpis.map(metric);
-  const tableCols = r.metrics;
+  const res = result.data;
+  const meta = res ? metaOf(res) : null;
+  const series = res?.series ?? [];
+  const activeSeries = series.find((s) => s.key === chartKey) ?? series[0];
+  const breakdowns = res ? breakdownsOf(res) : [];
+  const table = res ? tableOf(res) : null;
+  const defList = res?.definitions.length ? res.definitions : defs;
+  const unitOfSeries = (k: string) => defList.find((d) => d.key.endsWith(`.${k}`))?.unit ?? (table?.columns.find((c) => k.startsWith(c.key))?.unit ?? 'count');
+  const seriesUnit = activeSeries ? unitOfSeries(activeSeries.key) : 'count';
+  const toY = (y: number) => (seriesUnit === 'money' ? y / 100 : y);
+  const rangeText = meta ? `${date(meta.range.from)} – ${date(meta.range.to)}` : '';
+  const cmpText = meta?.compareRange ? `${shortDate(meta.compareRange.from)} – ${date(meta.compareRange.to)}` : '';
+  const scopeText = seller !== 'all' ? (sellers.data?.items.find((s) => s.id === seller)?.storeName ?? 'One seller') : filter('soldBy') ? SOLD_BY[soldBy] : 'All sellers and the Official Store';
+  const owner = group ? (group.owner ? `${group.owner.name}` : group.ownerRole) : '';
+  const myExports = (exportsList.data?.items ?? []).filter((e) => e.reportKey === r.key);
+  const firstBreakdown = breakdowns[0];
+  const definitionsVersion = [...new Set(defList.map((d) => d.version))].map((v) => `Version ${v}`).join(', ');
 
   return (
     <AdminLayout active="reports">
       <PageHeader
-        crumbs={[{ label: 'Reports and settings' }, { label: 'Reports', to: href('admin/reports') }, { label: r.name }]}
-        eyebrow={`${r.group} · Owner ${r.owner}`}
-        title={r.name}
+        crumbs={[{ label: 'Reports and settings' }, { label: 'Reports', to: href('admin/reports') }, { label: r.title }]}
+        eyebrow={`${group?.label ?? r.group}${owner ? ` · Owner ${owner}` : ''}`}
+        title={r.title}
         sub={
           <>
             {r.description} ·{' '}
@@ -249,9 +219,11 @@ function ReportPage({ r }: { r: ReportDef }) {
             <Button variant="secondary" size="sm" icon="book-open" onClick={() => setView('definitions')}>
               Definitions
             </Button>
-            <Button size="sm" icon="download" onClick={openExport}>
-              Export
-            </Button>
+            {canExport && (
+              <Button size="sm" icon="download" onClick={openExport} disabled={exp.busy}>
+                Export
+              </Button>
+            )}
           </>
         }
       />
@@ -259,49 +231,70 @@ function ReportPage({ r }: { r: ReportDef }) {
       <section className="card" aria-label="Report filters">
         <div className="card-body">
           <div className="rpd-filters">
-            <Field label="Date range" hint={`${rangeLabel(p.range)} · dates inclusive`}>
-              <Select id="rp-range" options={PRESETS.map((x) => ({ value: x.value, label: x.label }))} value={preset} onChange={(e) => setPreset(e.target.value)} />
+            <Field label="Date range" hint={rangeText ? `${rangeText} · dates inclusive` : undefined}>
+              <Select id="rp-range" options={PRESETS} value={preset} onChange={(e) => setPreset(e.target.value as Preset)} />
             </Field>
-            <Field label="Compare to" hint={cmpRange ? rangeLabel(cmpRange) : 'Deltas hidden'}>
+            <Field label="Compare to" hint={cmpText || 'Deltas hidden'}>
               <Select
                 id="rp-compare"
                 options={[
-                  { value: 'previous', label: 'Previous period' },
-                  { value: 'last-year', label: 'Same period last year' },
+                  { value: 'previous_period', label: 'Previous period' },
                   { value: 'none', label: 'No comparison' },
                 ]}
                 value={compare}
-                onChange={(e) => setCompare(e.target.value as Compare)}
+                onChange={(e) => setCompare(e.target.value as 'previous_period' | 'none')}
               />
             </Field>
-            <Field label="Sellers" hint={r.scopes === 'official' ? 'This report covers the Official Store only' : r.scopes === 'sellers' ? 'Marketplace sellers only' : seller === 'all' ? 'Includes the Official Store' : undefined}>
-              <Select id="rp-seller" options={scopeOptions(r)} value={seller} onChange={(e) => setSeller(e.target.value)} />
-            </Field>
+            {filter('sellerId') ? (
+              <Field label="Sellers" hint={seller === 'all' && filter('soldBy') ? 'Includes the Official Store' : undefined}>
+                <Select id="rp-seller" options={[{ value: 'all', label: 'All sellers' }, ...(sellers.data?.items ?? []).map((s) => ({ value: s.id, label: s.storeName }))]} value={seller} onChange={(e) => setSeller(e.target.value)} />
+              </Field>
+            ) : null}
+            {filter('soldBy') && seller === 'all' ? (
+              <Field label="Sold by">
+                <Select id="rp-soldby" options={(filter('soldBy')?.options ?? Object.keys(SOLD_BY)).map((o) => ({ value: o, label: SOLD_BY[o] ?? o }))} value={soldBy} onChange={(e) => setSoldBy(e.target.value)} />
+              </Field>
+            ) : null}
+            {filter('dateBasis') ? (
+              <Field label="Date basis" hint={filter('dateBasis')?.hint ?? undefined}>
+                <Select id="rp-basis" options={(filter('dateBasis')?.options ?? []).map((o) => ({ value: o, label: DATE_BASIS[o] ?? o }))} value={basis} onChange={(e) => setBasis(e.target.value)} />
+              </Field>
+            ) : null}
             <Field label="Time zone" hint="Days run 12:00 AM to 11:59 PM PT">
               <Select id="rp-tz" options={['Pacific Time (PT)']} />
             </Field>
           </div>
-          <div className="panel xs sub rpd-scopeline">
-            <span>
-              <Icon name="info" />
+          {meta && (
+            <div className="panel xs sub rpd-scopeline">
               <span>
-                Showing <b>{rangeLabel(p.range)}</b> in Pacific Time, {scopeLabel(r, seller).toLowerCase()}
-                {cmpRange ? <>, compared with {cmpText}</> : null}. USD, tax excluded.
+                <Icon name="info" />
+                <span>
+                  Showing <b>{rangeText}</b> in Pacific Time, {scopeText.toLowerCase()}
+                  {cmpText ? <>, compared with {cmpText}</> : null}. USD, tax {meta.taxIncluded ? 'included' : 'excluded'}.
+                </span>
               </span>
-            </span>
-            <span className="rpd-fresh">
-              <Icon name="refresh-cw" />
-              <span>
-                Data updated {r.freshness.ago} <span className="muted">· {r.freshness.at}</span>
-              </span>
-            </span>
-          </div>
+              {meta.freshAsOf && (
+                <span className="rpd-fresh">
+                  <Icon name="refresh-cw" />
+                  <span>
+                    Data updated {ago(meta.freshAsOf)} <span className="muted">· {dateTime(meta.freshAsOf)} PT</span>
+                  </span>
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
-      {r.note && (
-        <Alert tone="info" title={r.note.title}>
-          {r.note.body}
+      {res &&
+        calloutsOf(res).map((c) => (
+          <Alert key={c.title} tone={c.kind === 'warning' ? 'warning' : 'info'} title={c.title}>
+            {c.body}
+          </Alert>
+        ))}
+      {res && res.unavailable.length > 0 && (
+        <Alert tone="warning" title="Some figures aren’t available">
+          {res.unavailable.join(', ')} can’t be shown right now because the module that supplies them is off.
         </Alert>
       )}
       {notice && (
@@ -309,231 +302,289 @@ function ReportPage({ r }: { r: ReportDef }) {
           {notice.body}
         </Alert>
       )}
+      {!!exp.error && (
+        <Alert tone="danger" title="The export didn’t start">
+          {errorMessage(exp.error)}
+        </Alert>
+      )}
+      {exp.job?.state === 'failed' && (
+        <Alert tone="danger" title="The export failed">
+          {exp.job.error}
+        </Alert>
+      )}
+      {result.error && <LoadError error={result.error} onRetry={() => void result.refetch()} />}
 
       <div className="ac-kpis">
-        {kpis.map((m) => {
-          const dlt = cmpTotal ? delta(m, total[m.key], cmpTotal[m.key]) : null;
-          return (
-            <div className="panel rpd-kpi" key={m.key}>
-              <Stat label={m.label} value={fmtValue(total[m.key], m.fmt, true)} {...(dlt ? { delta: dlt.text, dir: dlt.dir, good: dlt.good, note: `vs ${cmpText}` } : {})} />
-            </div>
-          );
-        })}
+        {res
+          ? res.kpis.map((k) => {
+              const dl = deltaOf(k);
+              return (
+                <div className="panel rpd-kpi" key={k.metricKey}>
+                  <Stat
+                    label={k.label}
+                    value={k.display}
+                    {...(dl && dl.direction !== 'flat' && compare !== 'none'
+                      ? { delta: `${Math.abs(dl.value).toFixed(1)}${dl.unit === 'pct' ? '%' : ' pts'}`, dir: dl.direction, good: dl.good, note: cmpText ? `vs ${cmpText}` : undefined }
+                      : { note: k.note ?? undefined })}
+                  />
+                </div>
+              );
+            })
+          : !result.error &&
+            Array.from({ length: 4 }, (_, i) => (
+              <div className="panel rpd-kpi" key={i}>
+                <SkeletonLines rows={1} />
+              </div>
+            ))}
       </div>
 
-      <Card
-        title={`${chartM.label} by ${b.unit.toLowerCase()}`}
-        sub={r.target ?? `${rangeLabel(p.range)} · ${scopeLabel(r, seller)}`}
-        actions={
-          r.chartMetrics.length > 1 ? (
-            <div className="rpd-seg">
-              <SegmentedControl label="Chart metric" items={r.chartMetrics.map((k) => ({ value: k, label: metric(k).label }))} active={chartKey} onChange={setChartKey} />
-            </div>
-          ) : undefined
-        }
-      >
-        <div className="rpd-chart-head">
-          <Legend items={r.chart === 'line' && sameShape ? [rangeLabel(p.range), cmpText] : [rangeLabel(p.range)]} />
-          <span className="xs muted">{r.chart === 'bar' && cmpRange ? 'Comparison is in the KPIs and the table' : cmpRange && !sameShape ? 'Periods have different week counts; comparison is in the table' : chartM.fmt === 'money' ? 'USD' : ''}</span>
-        </div>
-        <div ref={chartRef}>
-        {r.chart === 'line' ? (
-          <LineChart
-            width={chartWidth}
-            labels={rows.map((x) => x.bucket.label)}
-            series={[{ name: rangeLabel(p.range), data: rows.map((x) => x.v[chartKey]) }, ...(sameShape ? [{ name: cmpText, data: rows.map((x) => x.c![chartKey]) }] : [])]}
-            height={240}
-            fmt={chartFmt(chartM.fmt)}
-            label={`${chartM.label} by ${b.unit.toLowerCase()}, ${rangeLabel(p.range)}${sameShape ? ` compared with ${cmpText}` : ''}`}
-          />
-        ) : (
-          <BarChart width={chartWidth} labels={rows.map((x) => x.bucket.label)} data={rows.map((x) => x.v[chartKey])} height={220} fmt={chartFmt(chartM.fmt)} label={`${chartM.label} by ${b.unit.toLowerCase()}, ${rangeLabel(p.range)}`} />
-        )}
-        </div>
-      </Card>
-
-      <Card title="The same numbers as a table" sub={`${b.list.length} ${b.unit.toLowerCase()}s · ${scopeLabel(r, seller)}`} flush actions={<Button variant="ghost" size="sm" icon="download" onClick={openExport}>Export</Button>}>
-        <TableWrap label={`${r.name} table`}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">{b.unit}</th>
-                {tableCols.map((m) => (
-                  <th key={m.key} className="r" scope="col">
-                    {m.label}
-                  </th>
-                ))}
-                {cmpRange && (
-                  <th className="r" scope="col">
-                    {chartM.label}, {cmpText}
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((x) => (
-                <tr key={x.bucket.full}>
-                  <td className="nowrap">{x.bucket.full}</td>
-                  {tableCols.map((m) => (
-                    <td key={m.key} className="r nowrap">
-                      {m.key === chartKey ? <b>{fmtValue(x.v[m.key], m.fmt)}</b> : fmtValue(x.v[m.key], m.fmt)}
-                    </td>
-                  ))}
-                  {cmpRange && <td className="r nowrap muted">{x.c ? fmtValue(x.c[chartKey], chartM.fmt) : '—'}</td>}
-                </tr>
-              ))}
-              <tr className="ac-total">
-                <td>Total</td>
-                {tableCols.map((m) => (
-                  <td key={m.key} className="r nowrap">
-                    {fmtValue(total[m.key], m.fmt)}
-                  </td>
-                ))}
-                {cmpRange && cmpTotal && <td className="r nowrap">{fmtValue(cmpTotal[chartKey], chartM.fmt)}</td>}
-              </tr>
-            </tbody>
-          </table>
-        </TableWrap>
-      </Card>
-
-      <section className="card" id="rp-exports" aria-labelledby="rp-exports-h">
-        <div className="card-head">
-          <div className="stack gap-0">
-            <h2 className="h4" id="rp-exports-h">
-              Exports
-            </h2>
-            <span className="xs muted">Background exports of this report · download links last 7 days · every export is recorded in Action history</span>
+      {activeSeries ? (
+        <Card
+          title={`${activeSeries.label} by ${meta?.granularity ?? 'day'}`}
+          sub={`${rangeText} · ${scopeText}`}
+          actions={
+            series.length > 1 ? (
+              <div className="rpd-seg">
+                <SegmentedControl label="Chart metric" items={series.map((s) => ({ value: s.key, label: s.label }))} active={activeSeries.key} onChange={setChartKey} />
+              </div>
+            ) : undefined
+          }
+        >
+          <div className="rpd-chart-head">
+            <Legend items={[rangeText]} />
+            <span className="xs muted">{cmpText ? 'Comparison is in the KPIs' : seriesUnit === 'money' ? 'USD' : ''}</span>
           </div>
-        </div>
-        <TableWrap label="Exports table">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">File</th>
-                <th scope="col">Requested</th>
-                <th className="r" scope="col">
-                  Rows
-                </th>
-                <th scope="col">Status</th>
-                <th className="col-pin" scope="col">
-                  <span className="sr-only">Download</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {exports.map((e) => (
-                <tr key={e.id}>
-                  <td>
-                    <span className="ab-cell">
-                      <span className="small strong mono">{e.file}</span>
-                      <span className="xs muted">{e.detail}</span>
-                    </span>
-                  </td>
-                  <td>
-                    <span className="small nowrap">{e.requested}</span>
-                  </td>
-                  <td className="r">{e.rows.toLocaleString('en-US')}</td>
-                  <td>
-                    <span className="stack gap-1 items-start">
-                      <StatusBadge status={e.status} tone={e.status === 'Ready' ? 'success' : e.status === 'Queued' ? 'info' : ''} />
-                      <span className="xs muted nowrap">{e.status === 'Queued' ? 'Preparing…' : e.status === 'Ready' ? `Expires ${e.expires}` : `Expired ${e.expires}`}</span>
-                    </span>
-                  </td>
-                  <td className="col-pin">
-                    {e.status === 'Ready' && e.opts ? (
-                      <Button variant="secondary" size="sm" icon="download" srLabel={e.file} onClick={() => download(e.file, buildCsv(r, e.opts!))}>
-                        Download
-                      </Button>
-                    ) : e.status === 'Expired' ? (
-                      <Button variant="ghost" size="sm" icon="refresh-cw" srLabel={e.file} onClick={openExport}>
-                        Export again
-                      </Button>
-                    ) : null}
-                  </td>
+          <div ref={chartRef}>
+            {pointsOf(activeSeries).length > 1 ? (
+              <LineChart
+                width={chartWidth}
+                labels={pointsOf(activeSeries).map((p) => p.label ?? shortDate(p.x))}
+                series={[{ name: rangeText, data: pointsOf(activeSeries).map((p) => toY(p.y)) }]}
+                height={240}
+                fmt={chartFmt(seriesUnit)}
+                label={`${activeSeries.label}, ${rangeText}`}
+              />
+            ) : (
+              <p className="small muted">One day selected: see the table below.</p>
+            )}
+          </div>
+        </Card>
+      ) : firstBreakdown ? (
+        <Card title={firstBreakdown.label} sub={`${rangeText} · ${scopeText}`}>
+          <div ref={chartRef}>
+            <BarChart width={chartWidth} labels={firstBreakdown.rows.map((x) => x.label)} data={firstBreakdown.rows.map((x) => Number(x.requests ?? x.count ?? x.sharePct ?? 0))} height={220} fmt={chartFmt('count')} label={`${firstBreakdown.label}, ${rangeText}`} />
+          </div>
+        </Card>
+      ) : null}
+
+      {breakdowns.map((b) => (
+        <Card key={b.key} title={b.label} flush>
+          <TableWrap label={`${b.label} table`}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">{b.label.replace(/^.* by /i, '').replace(/^\w/, (c) => c.toUpperCase())}</th>
+                  {Object.keys(b.rows[0] ?? {})
+                    .filter((k) => k !== 'key' && k !== 'label')
+                    .map((k) => (
+                      <th key={k} className="r" scope="col">
+                        {k === 'sharePct' ? 'Share' : k[0].toUpperCase() + k.slice(1)}
+                      </th>
+                    ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </TableWrap>
-      </section>
+              </thead>
+              <tbody>
+                {b.rows.map((row) => (
+                  <tr key={row.key}>
+                    <td>{row.label}</td>
+                    {Object.entries(row)
+                      .filter(([k]) => k !== 'key' && k !== 'label')
+                      .map(([k, v]) => (
+                        <td key={k} className="r nowrap">
+                          {k === 'sharePct' ? `${Number(v).toFixed(1)}%` : fmtCell(v, 'count')}
+                        </td>
+                      ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableWrap>
+        </Card>
+      ))}
+
+      {table && (
+        <Card
+          title="The same numbers as a table"
+          sub={`${table.rows.length} rows · ${scopeText}`}
+          flush
+          actions={
+            canExport ? (
+              <Button variant="ghost" size="sm" icon="download" onClick={openExport}>
+                Export
+              </Button>
+            ) : undefined
+          }
+        >
+          <TableWrap label={`${r.title} table`}>
+            <table className="table">
+              <thead>
+                <tr>
+                  {table.columns.map((c) => (
+                    <th key={c.key} className={c.align === 'right' ? 'r' : undefined} scope="col">
+                      {c.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {table.rows.map((row, i) => (
+                  <tr key={String(row.period ?? row.productId ?? row.campaignId ?? row.sellerId ?? i)}>
+                    {table.columns.map((c) => (
+                      <td key={c.key} className={c.align === 'right' ? 'r nowrap' : 'nowrap'}>
+                        {c.key === 'period' ? String(row.label ?? row.period) : fmtCell(row[c.key], c.unit)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {table.rows.length === 0 && (
+                  <tr>
+                    <td colSpan={table.columns.length} className="muted">
+                      No records in this period.
+                    </td>
+                  </tr>
+                )}
+                {table.totals && (
+                  <tr className="ac-total">
+                    {table.columns.map((c, i) => (
+                      <td key={c.key} className={c.align === 'right' ? 'r nowrap' : undefined}>
+                        {i === 0 ? 'Total' : table.totals![c.key] !== undefined ? fmtCell(table.totals![c.key], c.unit) : ''}
+                      </td>
+                    ))}
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </TableWrap>
+        </Card>
+      )}
+
+      {canExport && (
+        <section className="card" id="rp-exports" aria-labelledby="rp-exports-h">
+          <div className="card-head">
+            <div className="stack gap-0">
+              <h2 className="h4" id="rp-exports-h">
+                Exports
+              </h2>
+              <span className="xs muted">Your exports of this report · download links expire · every export is recorded in Action history</span>
+            </div>
+          </div>
+          {exportsList.error ? (
+            <div className="card-body">
+              <LoadError error={exportsList.error} onRetry={() => void exportsList.refetch()} />
+            </div>
+          ) : !exportsList.data ? (
+            <div className="card-body">
+              <SkeletonLines rows={2} />
+            </div>
+          ) : (
+            <TableWrap label="Exports table">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th scope="col">File</th>
+                    <th scope="col">Requested</th>
+                    <th className="r" scope="col">
+                      Rows
+                    </th>
+                    <th scope="col">Status</th>
+                    <th className="col-pin" scope="col">
+                      <span className="sr-only">Download</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {myExports.map((e) => {
+                    const st = EXPORT_STATE[e.state];
+                    return (
+                      <tr key={e.id}>
+                        <td>
+                          <span className="ab-cell">
+                            <span className="small strong mono">{e.fileName ?? e.ref}</span>
+                            <span className="xs muted">
+                              {e.ref} · {e.format.toUpperCase()}
+                              {e.columnsExcluded.length ? ` · ${e.columnsExcluded.length} columns left out for permissions` : ''}
+                            </span>
+                          </span>
+                        </td>
+                        <td>
+                          <span className="small nowrap">{dateTime(e.createdAt)}</span>
+                        </td>
+                        <td className="r">{e.rowCount != null ? e.rowCount.toLocaleString('en-US') : '—'}</td>
+                        <td>
+                          <span className="stack gap-1 items-start">
+                            <StatusBadge status={st.label} tone={st.tone} />
+                            <span className="xs muted nowrap">{e.state === 'ready' && e.expiresAt ? `Expires ${dateTime(e.expiresAt)}` : e.state === 'failed' ? (e.error ?? '') : e.state === 'expired' && e.expiresAt ? `Expired ${shortDate(e.expiresAt)}` : e.state === 'ready' ? '' : 'Preparing…'}</span>
+                          </span>
+                        </td>
+                        <td className="col-pin">
+                          {e.state === 'ready' ? (
+                            <Button variant="secondary" size="sm" icon="download" srLabel={e.fileName ?? e.ref} onClick={() => void exp.fetchAndDownload(e.id)}>
+                              Download
+                            </Button>
+                          ) : e.state === 'expired' || e.state === 'failed' ? (
+                            <Button variant="ghost" size="sm" icon="refresh-cw" srLabel={e.fileName ?? e.ref} onClick={openExport}>
+                              Export again
+                            </Button>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {myExports.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="muted">
+                        No exports of this report yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </TableWrap>
+          )}
+        </section>
+      )}
 
       <Dialog
         open={view === 'export'}
         onClose={() => setView('')}
-        title={`Export ${r.name}`}
+        title={`Export ${r.title}`}
         size="lg"
         foot={
           <>
             <Button variant="ghost" onClick={() => setView('')}>
               Cancel
             </Button>
-            <Button icon="download" onClick={runExport}>
-              {instant ? 'Download CSV' : 'Start export'}
+            <Button icon="download" onClick={() => void runExport()} disabled={exp.busy}>
+              Start export
             </Button>
           </>
         }
       >
         <p className="small sub">
-          {rangeLabel(p.range)} (inclusive) · Pacific Time · {scopeLabel(r, seller)}
+          {rangeText} (inclusive) · Pacific Time · {scopeText}
         </p>
         <fieldset className="stack gap-2 fieldset-reset">
-          <legend className="label">Rows</legend>
-          <OptionCard id="rx-view" name="rx-scope" title={<span className="small strong">Current view</span>} body={`One row per ${b.unit.toLowerCase()} plus a total: ${b.list.length + 1} rows, as on screen`} checked={ex.scope === 'view'} onChange={() => setEx((x) => ({ ...x, scope: 'view' }))} />
-          <OptionCard
-            id="rx-all"
-            name="rx-scope"
-            title={<span className="small strong">All rows</span>}
-            body={`One row per day and seller: ${rowCount(r, { ...exOpts, scope: 'all' }).toLocaleString('en-US')} rows`}
-            checked={ex.scope === 'all'}
-            onChange={() => setEx((x) => ({ ...x, scope: 'all' }))}
-          />
-        </fieldset>
-        <fieldset className="stack gap-2 fieldset-reset">
-          <legend className="label">Columns</legend>
-          <span className="row gap-3 xs">
-            <button type="button" className="btn-bare tight strong" onClick={() => setEx((x) => ({ ...x, columns: r.metrics.map((m) => m.key) }))}>
-              Select all
-            </button>
-            <button type="button" className="btn-bare tight strong" onClick={() => setEx((x) => ({ ...x, columns: [] }))}>
-              Clear
-            </button>
-            <span className="muted">
-              {ex.columns.length} of {r.metrics.length} selected · date{ex.scope === 'all' ? ' and seller' : ''} always included
-            </span>
-          </span>
-          <div className="rpd-cols">
-            {r.metrics.map((m) => (
-              <Checkbox key={m.key} id={`rx-col-${m.key}`} label={m.label} checked={ex.columns.includes(m.key)} onChange={() => toggleCol(m.key)} />
-            ))}
-          </div>
-          {colsError && (
-            <span className="error-text" role="alert">
-              <Icon name="circle-alert" className="ic-sm" />
-              {colsError}
-            </span>
-          )}
-        </fieldset>
-        <fieldset className="stack gap-2 fieldset-reset">
           <legend className="label">Format</legend>
-          <OptionCard id="rx-excel" name="rx-format" title={<span className="small strong">CSV for Excel</span>} body="UTF-8 with a byte order mark and Windows line endings, so accents and symbols in seller names open correctly in Excel" checked={ex.format === 'excel'} onChange={() => setEx((x) => ({ ...x, format: 'excel' }))} />
-          <OptionCard id="rx-plain" name="rx-format" title={<span className="small strong">Plain CSV</span>} body="UTF-8 without a byte order mark, for Google Sheets, scripts and databases" checked={ex.format === 'plain'} onChange={() => setEx((x) => ({ ...x, format: 'plain' }))} />
+          <OptionCard id="rx-plain" name="rx-format" title={<span className="small strong">CSV</span>} body="UTF-8 text, for Excel, Google Sheets, scripts and databases" checked={format === 'csv'} onChange={() => setFormat('csv')} />
+          <OptionCard id="rx-excel" name="rx-format" title={<span className="small strong">Excel workbook (.xlsx)</span>} body="Opens in Excel with columns already typed" checked={format === 'xlsx'} onChange={() => setFormat('xlsx')} />
         </fieldset>
-        <Checkbox id="rx-defs" label="Start the file with the period, seller scope and metric definitions" checked={ex.defs} onChange={(e) => setEx((x) => ({ ...x, defs: e.target.checked }))} />
         <div className="panel rpd-delivery">
-          <Icon name={instant ? 'file-down' : 'hourglass'} />
+          <Icon name="hourglass" />
           <span>
-            {instant ? (
-              <>
-                <b>Downloads now.</b> {exRows.toLocaleString('en-US')} rows.
-              </>
-            ) : (
-              <>
-                <b>Runs in the background.</b> {exRows.toLocaleString('en-US')} rows is more than the {INSTANT_ROWS} that download straight away. The file appears under Exports on this page and you get a notification when it is ready.
-              </>
-            )}
+            <b>Runs in the background.</b> The file downloads when it is ready, usually within a minute, and stays under Exports on this page until the link expires. Columns your role may not see are left out.
           </span>
         </div>
-        <p className="xs muted">Exports of seller data are recorded in Action history with your name, the period, the seller scope and the columns.</p>
+        <p className="xs muted">Exports of seller data are recorded in Action history with your name, the period and the filters.</p>
       </Dialog>
 
       <Drawer
@@ -541,40 +592,58 @@ function ReportPage({ r }: { r: ReportDef }) {
         onClose={() => setView('')}
         title="Metric definitions"
         foot={
-          <>
-            <Button
-              variant="ghost"
-              icon="pencil"
-              onClick={() => {
-                setView('');
-                setNotice({ tone: 'info', title: `Suggestion sent to ${r.owner.split(',')[0]}`, body: 'Definition changes get a new version number; exports made before the change keep the old definitions in their header.' });
-              }}
-            >
-              Suggest a change
-            </Button>
-            <Button variant="secondary" onClick={() => setView('')}>
-              Close
-            </Button>
-          </>
+          sugOpen ? (
+            <>
+              <Button variant="ghost" onClick={() => setSugOpen(false)}>
+                Cancel
+              </Button>
+              <Button icon="send" onClick={sendSuggestion} disabled={suggest.isPending}>
+                Send suggestion
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" icon="pencil" onClick={() => setSugOpen(true)}>
+                Suggest a change
+              </Button>
+              <Button variant="secondary" onClick={() => setView('')}>
+                Close
+              </Button>
+            </>
+          )
         }
       >
         <p className="small sub">
-          {r.name} · {r.definitionsVersion} · owner {r.owner}. The same definitions are written at the top of every export.
+          {r.title} · {definitionsVersion} · owner {owner || 'not named yet'}. Every figure in the report and its exports uses these definitions.
         </p>
+        {sugOpen && (
+          <div className="panel stack gap-3">
+            <Field label="Metric">
+              <Select id="rd-sug-metric" options={defList.map((d) => ({ value: d.key, label: d.name }))} value={sugMetric} onChange={(e) => setSugMetric(e.target.value)} />
+            </Field>
+            <Field label="What should change" error={sugErr || (suggest.error ? errorMessage(suggest.error) : undefined)}>
+              <Textarea id="rd-sug-text" value={sugText} onChange={(e) => (setSugText(e.target.value), setSugErr(''))} />
+            </Field>
+            <Field label="Why">
+              <Textarea id="rd-sug-reason" value={sugReason} onChange={(e) => (setSugReason(e.target.value), setSugErr(''))} />
+            </Field>
+          </div>
+        )}
         <div className="rpd-defs">
-          {r.metrics.map((m) => (
+          {defList.map((m) => (
             <section className="rpd-def" key={m.key} aria-labelledby={`rd-${m.key}`}>
               <h3 className="h4" id={`rd-${m.key}`}>
-                {m.label}
+                {m.name}
               </h3>
-              <p className="small">{m.def?.meaning}</p>
+              <p className="small">{m.definition}</p>
               <KeyValue
                 pairs={[
-                  ['Formula', m.def?.formula],
-                  ['Includes', m.def?.includes],
-                  ['Excludes', m.def?.excludes],
-                  ['Owner', m.def?.owner],
-                  ['Version', m.def?.version],
+                  ['Formula', m.formula],
+                  ['Unit', UNIT_LABEL[m.unit] ?? m.unit],
+                  ['Includes', m.includes.length ? m.includes.join('; ') : '—'],
+                  ['Excludes', m.excludes.length ? m.excludes.join('; ') : '—'],
+                  ['Owner', m.owner ? `${m.owner.name}, ${m.owner.role}` : 'Not named yet'],
+                  ['Version', `Version ${m.version} · effective ${date(m.effectiveFrom)}${m.reviewedAt ? ` · reviewed ${date(m.reviewedAt)}` : ''}`],
                 ]}
               />
             </section>
@@ -597,4 +666,3 @@ function ReportPage({ r }: { r: ReportDef }) {
     </AdminLayout>
   );
 }
-

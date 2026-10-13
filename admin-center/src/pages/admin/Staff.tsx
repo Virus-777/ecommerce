@@ -1,281 +1,478 @@
-import { useRef, useState } from 'react';
-import { Link } from 'react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Avatar, Badge, Button, Card, Checkbox, Field, Icon, PageHeader, SearchInput, SegmentedControl, Select, StatusBadge, Switch, TableWrap, Textarea, TextInput } from '@marketly/web-shared/ui';
+import { Alert, announce, Avatar, Badge, Button, Card, Checkbox, Dialog, Field, Icon, PageHeader, SearchInput, SegmentedControl, Select, StatusBadge, Switch, TableWrap, Textarea, TextInput } from '@marketly/web-shared/ui';
+import { LoadError, SkeletonLines, date, dateTime, shortDate } from '@/app/parts';
+import { useStaffSession } from '@/app/session';
 import {
-  AUTHORITIES, AUTHORITY_OPTIONS, defaultDraft, FINANCE_DRAFT, GAPS, HOLDERS, LIMITS, MANAGERS, PERM_AREAS, ROLES, SECOND_REVIEWERS, STAFF, STAFF_ROLES,
-  type Role, type RoleDraft, type StaffMember,
+  areaIcon, AUTHORITY_OPTIONS, effectiveInstant, GAP_STATUS, GAP_TONE, grantedKeys, limitDraft, limitValue, MEMBER_STATUS, sameLimit, todayKey,
+  type AwayPeriod, type Coverage, type LimitChange, type LimitDraft, type Role, type RoleDetail, type StaffMember,
 } from './data/staff';
+import { isStepUpCancel, stepUpHeader, useStepUp } from './data/step-up';
 
-// Design: pages/admin/admin-staff.html · view "edit-role" = full-page role editor (Finance Manager).
+// Design: pages/admin/admin-staff.html · view "edit-role" = full-page role editor (?view=edit-role&role=<role id>;
+// without a role it opens the Finance Manager, the design's example).
+// Data: access roles, members, coverage, away periods, role detail; invitations and permission changes need a 2-step code.
 
 type StaffFilter = 'all' | 'active' | 'invited';
-interface Invite { name: string; email: string; role: string; manager: string; reason: string; requestLimits: boolean }
-const NO_ROLE = 'Choose a role';
-const EMPTY_INVITE: Invite = { name: '', email: '', role: NO_ROLE, manager: 'Ana Silva', reason: '', requestLimits: false };
+interface Invite { name: string; email: string; roleId: string; managerId: string; reason: string; requestLimits: boolean }
+const EMPTY_INVITE: Invite = { name: '', email: '', roleId: '', managerId: '', reason: '', requestLimits: false };
 
 function validateInvite(f: Invite) {
-  const e: Partial<Record<keyof Invite, string>> = {};
+  const e: Partial<Record<keyof Invite | 'role', string>> = {};
   if (!f.name.trim()) e.name = 'Enter the first and last name.';
-  if (!/^[^\s@]+@marketly\.example$/i.test(f.email.trim())) e.email = 'Enter a work email ending in @marketly.example.';
-  if (f.role === NO_ROLE) e.role = 'Choose a role.';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email.trim())) e.email = 'Enter a work email.';
+  if (!f.roleId) e.role = 'Choose a role.';
   if (!f.reason.trim()) e.reason = 'Enter why this person needs this role.';
   return e;
 }
 
-const copyDraft = (d: RoleDraft): RoleDraft => ({ ...d, perms: d.perms.map((a) => [...a]), limits: d.limits.map((l) => ({ ...l })), authorities: [...d.authorities] });
+const lastActive = (m: StaffMember) => {
+  if (m.status === 'invited') return 'Not signed in';
+  const at = m.account.lastActiveAt;
+  if (!at) return 'Not signed in';
+  const mins = (Date.now() - new Date(at).getTime()) / 60_000;
+  if (mins < 5) return 'Active now';
+  return mins < 24 * 60 ? `Today ${dateTime(at).split(', ')[1]}` : shortDate(at);
+};
+
+function SkeletonRows({ cols, rows = 4 }: { cols: number; rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }, (_, i) => (
+        <tr key={i} aria-hidden="true">
+          {Array.from({ length: cols }, (_, j) => (
+            <td key={j}>
+              <span className="sk sk-line" />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
 
 export default function Staff() {
   const [view, setView] = useView<'edit-role'>();
-  const roles = ROLES;
-  const [staff, setStaff] = useState<StaffMember[]>(STAFF);
+  const [params] = useSearchParams();
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const me = useStaffSession();
+  const canView = me.can('access.roles.view');
+  const canManage = me.can('access.roles.manage');
+  const canPropose = me.can('access.limits.propose');
+  const stepUp = useStepUp();
+
+  const rolesQ = useQuery({ queryKey: ['access', 'roles'], queryFn: () => call(api.GET('/api/admin/access/roles')), enabled: canView });
+  const membersQ = useQuery({ queryKey: ['access', 'members'], queryFn: () => call(api.GET('/api/admin/access/members', { params: { query: { limit: 100 } } })), enabled: canView });
+  const coverageQ = useQuery({ queryKey: ['access', 'coverage'], queryFn: () => call(api.GET('/api/admin/access/coverage')) as Promise<Coverage>, enabled: canView });
+  const awayQ = useQuery({ queryKey: ['access', 'away-periods'], queryFn: () => call(api.GET('/api/admin/access/away-periods', { params: { query: { limit: 50 } } })), enabled: canView });
+  const pendingQ = useQuery({
+    queryKey: ['access', 'limit-changes', 'pending_approval'],
+    queryFn: () => call(api.GET('/api/admin/access/limit-changes', { params: { query: { status: 'pending_approval', limit: 100 } } })),
+    enabled: canView,
+  });
+
+  const roles = useMemo(() => (rolesQ.data ?? []).filter((r) => !r.archived), [rolesQ.data]);
+  const members = membersQ.data?.items ?? [];
+  const owners = roles.find((r) => r.key === 'business_owner')?.people.map((p) => p.name) ?? [];
+  const ownerText = owners.length ? owners.join(' or ') : 'the Business Owner';
+  const pendingRoles = new Set((pendingQ.data?.items ?? []).map((c) => c.role.id));
+
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<StaffFilter>('all');
   const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
-
-  // Invite form
-  const [invite, setInvite] = useState<Invite>(EMPTY_INVITE);
-  const [inviteTried, setInviteTried] = useState(false);
-  const nameRef = useRef<HTMLInputElement>(null);
-  const inviteErr = inviteTried ? validateInvite(invite) : {};
-
-  // Role editor: the design's edit-role view is the Finance Manager draft.
-  const [editing, setEditing] = useState('Finance Manager');
-  const [saved, setSaved] = useState<Record<string, RoleDraft>>({ 'Finance Manager': FINANCE_DRAFT });
-  const [pending, setPending] = useState<string[]>([]);
-  const [draft, setDraft] = useState<RoleDraft>(() => copyDraft(FINANCE_DRAFT));
-  const [reasonErr, setReasonErr] = useState('');
-
   const flash = (title: string, text: string) => {
     setNotice({ title, text });
     announce(title);
   };
 
-  /* ---------- list ---------- */
+  /* ---------- invite ---------- */
 
-  const term = q.trim().toLowerCase();
-  const shownRoles = term ? roles.filter((r) => [r.role, r.area, ...r.people, r.backup].some((s) => s.toLowerCase().includes(term))) : roles;
-  const shownStaff = staff.filter((s) => filter === 'all' || s.status.toLowerCase() === filter);
-  const nActive = staff.filter((s) => s.status === 'Active').length;
-  const nInvited = staff.length - nActive;
-
-  const openRole = (name: string) => {
-    setEditing(name);
-    setDraft(copyDraft(saved[name] ?? defaultDraft()));
-    setReasonErr('');
-  };
-
+  const [invite, setInvite] = useState<Invite>(EMPTY_INVITE);
+  const [inviteTried, setInviteTried] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const inviteErr = inviteTried ? validateInvite(invite) : {};
   const setInv = <K extends keyof Invite>(k: K, v: Invite[K]) => setInvite((f) => ({ ...f, [k]: v }));
+
+  const inviteM = useMutation({
+    mutationFn: (f: Invite) =>
+      stepUp.run((code) =>
+        call(
+          api.POST('/api/admin/access/staff-invitations', {
+            params: { header: stepUpHeader(code) },
+            body: { email: f.email.trim(), name: f.name.trim(), roleIds: [f.roleId], reportsToAccountId: f.managerId || null, reason: f.reason.trim(), requestLimitReview: f.requestLimits },
+          }),
+        ),
+      ),
+    onSuccess: (m, f) => {
+      void qc.invalidateQueries({ queryKey: ['access'] });
+      setInvite(EMPTY_INVITE);
+      setInviteTried(false);
+      const roleName = roles.find((r) => r.id === f.roleId)?.name ?? 'staff';
+      const manager = members.find((x) => x.account.id === f.managerId)?.account.displayName;
+      const pendingGrant = m.roles.length === 0;
+      flash(
+        `Invitation sent to ${m.account.email}`,
+        `${m.account.displayName} is invited as ${roleName}${manager ? `, reporting to ${manager}` : ''}. The invitation expires after 7 days.` +
+          (pendingGrant ? ' The role carries sensitive permissions, so a second reviewer approves it before it applies.' : '') +
+          (f.requestLimits ? ` Approval limits were requested from ${ownerText}.` : ''),
+      );
+    },
+  });
   const sendInvite = () => {
     setInviteTried(true);
     if (Object.keys(validateInvite(invite)).length) return;
-    const member: StaffMember = { name: invite.name.trim(), email: invite.email.trim(), roles: [invite.role], lastActive: 'Not signed in', status: 'Invited', invited: 'Oct 10' };
-    setStaff((l) => [...l, member]);
-    setInvite(EMPTY_INVITE);
-    setInviteTried(false);
-    flash(
-      `Invitation sent to ${member.email}`,
-      `${member.name} is invited as ${invite.role}, reporting to ${invite.manager}. The invitation expires after 7 days.${invite.requestLimits ? ' Approval limits were requested from Morgan Hale.' : ''}`,
-    );
+    inviteM.mutate(invite);
   };
   const focusInvite = () => {
     nameRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     nameRef.current?.focus({ preventScroll: true });
   };
+  const inviteServerErr: unknown = inviteM.error && !isStepUpCancel(inviteM.error) ? inviteM.error : null;
+  const inviteFieldErr = inviteServerErr instanceof ApiError ? inviteServerErr.fieldErrors : {};
+
+  /* ---------- add role ---------- */
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [newRole, setNewRole] = useState({ name: '', workArea: '', reason: '' });
+  const [newRoleTried, setNewRoleTried] = useState(false);
+  const addRoleM = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/access/roles', { body: { name: newRole.name.trim(), workArea: newRole.workArea.trim(), kind: 'custom', reason: newRole.reason.trim() } })),
+    onSuccess: (r) => {
+      void qc.invalidateQueries({ queryKey: ['access', 'roles'] });
+      setAddOpen(false);
+      setNewRole({ name: '', workArea: '', reason: '' });
+      setNewRoleTried(false);
+      flash(`Role ${r.name} added`, 'It has no permissions yet. Open Edit role to choose what it can do.');
+    },
+  });
+  const newRoleErr = newRoleTried
+    ? { name: newRole.name.trim() ? undefined : 'Enter a role name.', workArea: newRole.workArea.trim() ? undefined : 'Enter the working area.', reason: newRole.reason.trim() ? undefined : 'Enter a reason.' }
+    : {};
+
+  /* ---------- list ---------- */
+
+  const term = q.trim().toLowerCase();
+  const shownRoles = term ? roles.filter((r) => [r.name, r.workArea, ...r.people.map((p) => p.name), ...r.backups.map((b) => b.name)].some((s) => s.toLowerCase().includes(term))) : roles;
+  const shownStaff = members.filter((s) => filter === 'all' || s.status === filter);
+  const nActive = members.filter((s) => s.status === 'active').length;
+  const nInvited = members.filter((s) => s.status === 'invited').length;
+  const away = (awayQ.data?.items ?? []) as AwayPeriod[];
 
   /* ---------- editor ---------- */
 
-  const role = roles.find((r) => r.role === editing) ?? roles[0];
-  const holders = HOLDERS[role.role] ?? Math.max(1, staff.filter((s) => s.roles.includes(role.role)).length);
-  const allowed = draft.perms.flat().filter(Boolean).length;
-  const total = draft.perms.flat().length;
+  const roleParam = params.get('role');
+  const editingId = roleParam ?? roles.find((r) => r.key === 'finance_manager')?.id ?? roles[0]?.id;
+  const detailQ = useQuery({
+    queryKey: ['access', 'role', editingId],
+    queryFn: () => call(api.GET('/api/admin/access/roles/{id}', { params: { path: { id: editingId! } } })) as Promise<RoleDetail>,
+    enabled: view === 'edit-role' && !!editingId && canView,
+  });
+  const detail = detailQ.data;
+  const [perms, setPerms] = useState<Set<string>>(new Set());
+  const [limits, setLimits] = useState<LimitDraft[]>([]);
+  const [reason, setReason] = useState('');
+  const [effective, setEffective] = useState(todayKey());
+  const [reasonErr, setReasonErr] = useState('');
+  const [editErr, setEditErr] = useState('');
+  useEffect(() => {
+    if (!detail) return;
+    setPerms(new Set(grantedKeys(detail.permissions)));
+    setLimits(detail.limits.map(limitDraft));
+    setReason('');
+    setEffective(todayKey());
+    setReasonErr('');
+    setEditErr('');
+  }, [detail]);
 
-  const setPerm = (a: number, i: number, on: boolean) => setDraft((d) => ({ ...d, perms: d.perms.map((row, ai) => (ai === a ? row.map((v, ii) => (ii === i ? on : v)) : row)) }));
-  const setArea = (a: number, on: boolean) => setDraft((d) => ({ ...d, perms: d.perms.map((row, ai) => (ai === a ? row.map(() => on) : row)) }));
-  const setLimit = (i: number, k: 'limit' | 'review', v: string) => setDraft((d) => ({ ...d, limits: d.limits.map((l, li) => (li === i ? { ...l, [k]: v } : l)) }));
-  const setAuthority = (i: number, v: string) => setDraft((d) => ({ ...d, authorities: d.authorities.map((x, xi) => (xi === i ? v : x)) }));
+  const original = useMemo(() => new Set(detail ? grantedKeys(detail.permissions) : []), [detail]);
+  const originalLimits = useMemo(() => (detail ? detail.limits.map(limitDraft) : []), [detail]);
+  const permsChanged = detail ? perms.size !== original.size || [...perms].some((k) => !original.has(k)) : false;
+  const changedLimits = limits.filter((l, i) => originalLimits[i] && !sameLimit(l, originalLimits[i]));
+
+  const saveRoleM = useMutation({
+    mutationFn: async () => {
+      if (!detail) throw new Error('Role not loaded.');
+      const id = detail.role.id;
+      let permResult: RoleDetail | null = null;
+      let limitResult: LimitChange | null = null;
+      if (permsChanged) {
+        permResult = (await stepUp.run((code) =>
+          call(api.PUT('/api/admin/access/roles/{id}/permissions', { params: { path: { id }, header: stepUpHeader(code) }, body: { permissionKeys: [...perms], reason: reason.trim() } })),
+        )) as RoleDetail;
+      }
+      if (changedLimits.length) {
+        const changes = changedLimits.map((l) => ({ actionKey: l.actionKey, value: limitValue(l) }));
+        limitResult = (await call(api.POST('/api/admin/access/limit-changes', { body: { roleId: id, changes, reason: reason.trim(), effectiveFrom: effectiveInstant(effective) } }))) as LimitChange;
+      }
+      return { permResult, limitResult, name: detail.role.name };
+    },
+    onSuccess: ({ permResult, limitResult, name }) => {
+      void qc.invalidateQueries({ queryKey: ['access'] });
+      void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+      const parts: string[] = [];
+      let waiting = false;
+      if (permResult) {
+        if (permResult.pendingPermissionApproval) {
+          waiting = true;
+          parts.push('The new permissions carry sensitive access, so a second reviewer approves them before they apply.');
+        } else parts.push('The new permissions apply now.');
+      }
+      if (limitResult) {
+        if (limitResult.status === 'pending_approval') {
+          waiting = true;
+          parts.push(`${ownerText}, Business Owner, reviews the new limits. If approved, they apply from ${date(limitResult.effectiveFrom)}. Requests already waiting for approval keep the old limit.`);
+        } else parts.push(`The new limits are ${limitResult.status === 'applied' ? 'in force' : `scheduled for ${date(limitResult.effectiveFrom)}`}.`);
+      }
+      setView('');
+      flash(waiting ? `${name} changes sent for approval` : `${name} changes saved`, parts.join(' '));
+    },
+    onError: (e) => {
+      if (!isStepUpCancel(e)) setEditErr(e instanceof ApiError ? errorMessage(e) : (e as Error).message);
+    },
+  });
 
   const sendForApproval = () => {
-    if (!draft.reason.trim()) {
+    setEditErr('');
+    if (!permsChanged && !changedLimits.length) {
+      setEditErr('Nothing has changed yet.');
+      return;
+    }
+    if (!reason.trim()) {
       setReasonErr('Enter a reason. It is saved in Action history with the request.');
       document.getElementById('er-reason')?.focus();
       return;
     }
-    setSaved((s) => ({ ...s, [role.role]: copyDraft(draft) }));
-    setPending((p) => (p.includes(role.role) ? p : [...p, role.role]));
-    setView('');
-    flash(
-      `${role.role} changes sent for approval`,
-      `Morgan Hale, Business Owner, reviews the new access and limits. If approved, they apply from ${draft.effective}. Requests already waiting for approval keep the old limit.`,
-    );
+    try {
+      changedLimits.forEach((l) => limitValue(l));
+    } catch (e) {
+      setEditErr((e as Error).message);
+      return;
+    }
+    saveRoleM.mutate();
   };
 
+  const setPerm = (key: string, on: boolean) => setPerms((s) => { const n = new Set(s); if (on) n.add(key); else n.delete(key); return n; });
+  const setArea = (keys: string[], on: boolean) => setPerms((s) => { const n = new Set(s); keys.forEach((k) => (on ? n.add(k) : n.delete(k))); return n; });
+  const setLimit = (i: number, patch: Partial<LimitDraft>) => setLimits((l) => l.map((x, xi) => (xi === i ? { ...x, ...patch } : x)));
+
+  if (!canView) {
+    return (
+      <AdminLayout active="staff">
+        <PageHeader crumbs={[{ label: 'Reports and settings' }, { label: 'Staff and roles' }]} title="Staff and roles" />
+        <Alert tone="info" title="You don’t have access to staff and roles">
+          Viewing roles and staff needs the “View roles” permission. Ask a Platform Administrator.
+        </Alert>
+      </AdminLayout>
+    );
+  }
+
   if (view === 'edit-role') {
+    const role = detail?.role ?? roles.find((r) => r.id === editingId);
+    const holders = role?.people.length ?? 0;
+    const groups = detail?.permissions ?? [];
+    const allowed = perms.size;
+    const total = groups.reduce((n, g) => n + g.permissions.length, 0);
+    const busy = saveRoleM.isPending || stepUp.waiting;
+    const pendingLimit = detail?.pendingLimitChange;
+    const pendingPerm = detail?.pendingPermissionApproval;
+    const sendBtn = (
+      <Button size="sm" icon="send" onClick={sendForApproval} disabled={busy || !(canManage || canPropose)}>
+        Send for approval
+      </Button>
+    );
     return (
       <AdminLayout active="staff">
         <PageHeader
-          crumbs={[{ label: 'Staff and roles', to: href('admin/staff') }, { label: role.role }]}
-          title={`Edit role: ${role.role}`}
-          sub={`Working area: ${role.area} · Lead ${role.people[0]} · Backup ${role.backup} · ${holders} ${holders === 1 ? 'person holds' : 'people hold'} this role`}
+          crumbs={[{ label: 'Staff and roles', to: href('admin/staff') }, { label: role?.name ?? 'Role' }]}
+          title={`Edit role: ${role?.name ?? ''}`}
+          sub={
+            role
+              ? `Working area: ${role.workArea} · Lead ${role.lead?.name ?? 'not set'} · Backup ${role.backups[0]?.name ?? 'not set'} · ${holders} ${holders === 1 ? 'person holds' : 'people hold'} this role`
+              : undefined
+          }
           actions={
             <>
               <Button variant="ghost" size="sm" to={href('admin/staff')}>
                 Cancel
               </Button>
-              <Button size="sm" icon="send" onClick={sendForApproval}>
-                Send for approval
-              </Button>
+              {sendBtn}
             </>
           }
         />
         <Alert tone="warning" title="Granting access is not financial authority">
-          You can change which screens this role can open. The approval limits below are proposals until Morgan Hale, Business Owner, approves them. Platform Administrators cannot approve their own financial limits.
+          You can change which screens this role can open. The approval limits below are proposals until {ownerText}, Business Owner, approves them. Platform Administrators cannot approve their own financial limits.
         </Alert>
-        <div className="ac-main">
-          <div className="stack gap-4">
-            <div className="row between">
-              <h2 className="h3">Permissions by area</h2>
-              <span className="xs muted">
-                {allowed} of {total} actions allowed
-              </span>
-            </div>
-            {PERM_AREAS.map((area, a) => {
-              const row = draft.perms[a];
-              const n = row.filter(Boolean).length;
-              const all = n === row.length;
-              return (
-                <Card
-                  key={area.title}
-                  titleAs="h3"
-                  title={
-                    <span className="row gap-2 nowrap">
-                      <Icon name={area.icon} className="ic-sm" />
-                      {area.title}
-                    </span>
-                  }
-                  sub={`${n} of ${row.length} allowed`}
-                  actions={<Switch id={`er-all-${a}`} label="All" checked={all} aria-checked={all} data-switch="" onChange={(e) => setArea(a, e.target.checked)} />}
-                >
-                  <div className="ac-perm">
-                    {area.actions.map((action, i) => (
-                      <Checkbox key={action} id={`er-p-${a}-${i}`} label={action} checked={row[i]} onChange={(e) => setPerm(a, i, e.target.checked)} />
-                    ))}
-                  </div>
-                  {area.note && (
-                    <span className="xs muted">
-                      <Icon name={area.note.icon} className="ic-sm" /> {area.note.text}
-                    </span>
-                  )}
+        {!(canManage || canPropose) && (
+          <Alert tone="info" title="View only">
+            Changing permissions needs “Manage roles”, and proposing limits needs “Propose limits”. You can see this role but not change it.
+          </Alert>
+        )}
+        {(pendingLimit || pendingPerm) && (
+          <Alert tone="info" title="Changes waiting for approval">
+            {pendingLimit && `Limit change proposed ${date(pendingLimit.createdAt)}, effective ${date(pendingLimit.effectiveFrom)}. `}
+            {pendingPerm && 'A permission change is waiting for a second reviewer.'}
+          </Alert>
+        )}
+        {editErr && (
+          <Alert tone="danger" title="The changes weren’t sent">
+            {editErr}
+          </Alert>
+        )}
+        {detailQ.isError ? (
+          <LoadError error={detailQ.error} onRetry={() => void detailQ.refetch()} />
+        ) : (
+          <div className="ac-main">
+            <div className="stack gap-4">
+              <div className="row between">
+                <h2 className="h3">Permissions by area</h2>
+                <span className="xs muted">
+                  {allowed} of {total} actions allowed
+                </span>
+              </div>
+              {!detail && (
+                <Card titleAs="h3" title={<span className="sk sk-line" />}>
+                  <SkeletonLines rows={4} />
                 </Card>
-              );
-            })}
-          </div>
-          <div className="stack gap-5">
-            <Card title="Approval limits" titleAs="h3" sub="Set by the Business Owner. Example values.">
-              {LIMITS.map((l, i) => (
-                <div className="ac-limit" key={l.title}>
-                  <div className="ac-limit-t stack gap-0">
-                    <span className="small strong">{l.title}</span>
-                    <span className="xs muted">{l.sub}</span>
+              )}
+              {groups.map((area, a) => {
+                const keys = area.permissions.map((p) => p.permission.key);
+                const n = keys.filter((k) => perms.has(k)).length;
+                const all = n === keys.length;
+                const unavailable = area.permissions.filter((p) => !p.permission.available).length;
+                return (
+                  <Card
+                    key={area.area}
+                    titleAs="h3"
+                    title={
+                      <span className="row gap-2 nowrap">
+                        <Icon name={areaIcon(area.area)} className="ic-sm" />
+                        {area.area}
+                      </span>
+                    }
+                    sub={`${n} of ${keys.length} allowed`}
+                    actions={<Switch id={`er-all-${a}`} label="All" checked={all} aria-checked={all} data-switch="" disabled={!canManage} onChange={(e) => setArea(keys, e.target.checked)} />}
+                  >
+                    <div className="ac-perm">
+                      {area.permissions.map((p, i) => (
+                        <Checkbox
+                          key={p.permission.key}
+                          id={`er-p-${a}-${i}`}
+                          label={p.permission.label}
+                          title={p.permission.desc}
+                          checked={perms.has(p.permission.key)}
+                          disabled={!canManage}
+                          onChange={(e) => setPerm(p.permission.key, e.target.checked)}
+                        />
+                      ))}
+                    </div>
+                    {area.permissions.some((p) => p.permission.sensitive) && (
+                      <span className="xs muted">
+                        <Icon name="lock" className="ic-sm" /> Sensitive permissions in this area need a second reviewer before they apply.
+                      </span>
+                    )}
+                    {unavailable > 0 && (
+                      <span className="xs muted">
+                        <Icon name="info" className="ic-sm" /> {unavailable} {unavailable === 1 ? 'permission belongs' : 'permissions belong'} to a module that is switched off.
+                      </span>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+            <div className="stack gap-5">
+              <Card title="Approval limits" titleAs="h3" sub={`Set by the Business Owner.${detail?.limits.length ? '' : ' This role has no approval limits.'}`}>
+                {!detail && <SkeletonLines rows={3} />}
+                {limits.map((l, i) => (
+                  <div className="ac-limit" key={l.id}>
+                    <div className="ac-limit-t stack gap-0">
+                      <span className="small strong">{l.title}</span>
+                      <span className="xs muted">{l.summary}</span>
+                    </div>
+                    <Field label="Authority">
+                      <Select id={`er-auth-${i}`} options={AUTHORITY_OPTIONS} value={l.authority} disabled={!canPropose} onChange={(e) => setLimit(i, { authority: e.target.value as LimitDraft['authority'] })} />
+                    </Field>
+                    {l.kind !== 'none' && (
+                      <>
+                        <Field label={l.kind === 'money' ? 'Limit' : l.kind === 'percent' ? 'Limit (%)' : 'Limit (units)'}>
+                          <TextInput id={`er-lim-${i}`} prefix={l.kind === 'money' ? '$' : undefined} value={l.limit} disabled={!canPropose} onChange={(e) => setLimit(i, { limit: e.target.value })} />
+                        </Field>
+                        <Field label="Second reviewer above">
+                          <TextInput id={`er-rev-${i}`} prefix={l.kind === 'money' ? '$' : undefined} value={l.review} disabled={!canPropose} onChange={(e) => setLimit(i, { review: e.target.value })} />
+                        </Field>
+                      </>
+                    )}
                   </div>
-                  <Field label={l.limitLabel}>
-                    <TextInput id={`er-lim-${i}`} prefix="$" value={draft.limits[i].limit} onChange={(e) => setLimit(i, 'limit', e.target.value)} />
-                  </Field>
-                  <Field label="Second reviewer above" hint="Morgan Hale, Business Owner">
-                    <TextInput id={`er-rev-${i}`} prefix="$" value={draft.limits[i].review} onChange={(e) => setLimit(i, 'review', e.target.value)} />
-                  </Field>
-                </div>
-              ))}
-              {AUTHORITIES.map((au, i) => (
-                <div className="ac-limit" key={au.id}>
-                  <div className="ac-limit-t stack gap-0">
-                    <span className="small strong">{au.title}</span>
-                    <span className="xs muted">{au.sub}</span>
-                  </div>
-                  <Field label="Authority" hint={au.hint}>
-                    <Select id={au.id} options={AUTHORITY_OPTIONS} value={draft.authorities[i]} onChange={(e) => setAuthority(i, e.target.value)} />
-                  </Field>
-                </div>
-              ))}
-            </Card>
+                ))}
+              </Card>
 
-            <Card title="Second reviewer" titleAs="h3">
-              <Switch
-                id="er-2nd"
-                label="Require a second reviewer for high-value adjustments"
-                checked={draft.second}
-                aria-checked={draft.second}
-                data-switch=""
-                onChange={(e) => setDraft((d) => ({ ...d, second: e.target.checked }))}
-              />
-              <span className="xs muted">A second Finance person or the Business Owner approves any action above the thresholds. The first person cannot approve their own request.</span>
-              <Field label="Default second reviewer">
-                <Select id="er-2nd-who" options={SECOND_REVIEWERS} value={draft.secondWho} onChange={(e) => setDraft((d) => ({ ...d, secondWho: e.target.value }))} />
-              </Field>
-            </Card>
-
-            <Card
-              title="Reason for change"
-              titleAs="h3"
-              foot={
-                <Button size="sm" icon="send" onClick={sendForApproval}>
-                  Send for approval
-                </Button>
-              }
-            >
-              <Field label="Reason (required)" error={reasonErr}>
-                <Textarea
-                  id="er-reason"
-                  value={draft.reason}
-                  onChange={(e) => {
-                    setDraft((d) => ({ ...d, reason: e.target.value }));
-                    if (e.target.value.trim()) setReasonErr('');
-                  }}
-                />
-              </Field>
-              <Field label="Effective from" hint="Requests already waiting for approval keep the old limit.">
-                <TextInput id="er-eff" icon="calendar" value={draft.effective} onChange={(e) => setDraft((d) => ({ ...d, effective: e.target.value }))} />
-              </Field>
-            </Card>
+              <Card title="Reason for change" titleAs="h3" foot={sendBtn}>
+                <Field label="Reason (required)" error={reasonErr}>
+                  <Textarea
+                    id="er-reason"
+                    value={reason}
+                    onChange={(e) => {
+                      setReason(e.target.value);
+                      if (e.target.value.trim()) setReasonErr('');
+                    }}
+                  />
+                </Field>
+                <Field label="Effective from" hint="Applies to limit changes. Requests already waiting for approval keep the old limit.">
+                  <TextInput id="er-eff" type="date" icon="calendar" min={todayKey()} value={effective} onChange={(e) => setEffective(e.target.value)} />
+                </Field>
+              </Card>
+            </div>
           </div>
-        </div>
+        )}
+        {stepUp.dialog}
       </AdminLayout>
     );
   }
 
   const editLink = (r: Role, text: string, className: string) => (
-    <Link className={className} to={href('admin/staff', 'edit-role')} onClick={() => openRole(r.role)}>
+    <Link className={className} to={href('admin/staff', 'edit-role', undefined, { role: r.id })}>
       {text}
     </Link>
   );
   const roleName = (r: Role, className: string) =>
-    pending.includes(r.role) ? (
+    pendingRoles.has(r.id) ? (
       <span className="row gap-2 nowrap">
-        <span className={className}>{r.role}</span>
+        <span className={className}>{r.name}</span>
         <Badge tone="warning">Approval pending</Badge>
       </span>
     ) : (
-      <span className={className}>{r.role}</span>
+      <span className={className}>{r.name}</span>
     );
-  const noRoles = <span className="small muted">No roles match “{q}”.</span>;
+  const noRoles = <span className="small muted">{term ? `No roles match “${q}”.` : 'No roles yet.'}</span>;
+  const peopleOf = (r: Role) => {
+    const lead = r.lead ? [r.lead] : [];
+    return [...lead, ...r.people.filter((p) => p.accountId !== r.lead?.accountId)];
+  };
+  const memberOptions = [{ value: '', label: 'No one' }, ...members.filter((m) => m.status === 'active').map((m) => ({ value: m.account.id, label: m.account.displayName }))];
+  const roleOptions = [{ value: '', label: 'Choose a role' }, ...roles.map((r) => ({ value: r.id, label: r.name }))];
 
   return (
     <AdminLayout active="staff">
       <PageHeader
         crumbs={[{ label: 'Reports and settings' }, { label: 'Staff and roles' }]}
         title="Staff and roles"
-        sub={`${roles.length} roles · ${nActive} active staff · ${nInvited} ${nInvited === 1 ? 'invitation' : 'invitations'}`}
+        sub={rolesQ.data && membersQ.data ? `${roles.length} roles · ${nActive} active staff · ${nInvited} ${nInvited === 1 ? 'invitation' : 'invitations'}` : 'Loading…'}
         actions={
-          <>
-            <Button variant="secondary" size="sm" icon="plus">
-              Add role
-            </Button>
-            <Button size="sm" icon="user-plus" onClick={focusInvite}>
-              Invite staff
-            </Button>
-          </>
+          canManage ? (
+            <>
+              <Button variant="secondary" size="sm" icon="plus" onClick={() => setAddOpen(true)}>
+                Add role
+              </Button>
+              <Button size="sm" icon="user-plus" onClick={focusInvite}>
+                Invite staff
+              </Button>
+            </>
+          ) : undefined
         }
       />
       {notice && (
@@ -284,76 +481,85 @@ export default function Staff() {
         </Alert>
       )}
       <Alert tone="warning" title="Access is not financial authority">
-        Assigning a role gives access to its screens. Approval limits for payouts, refunds, holds, restrictions and publication overrides are set by the Business Owner, Morgan Hale, and changes to them need her approval.
+        Assigning a role gives access to its screens. Approval limits for payouts, refunds, holds, restrictions and publication overrides are set by the Business Owner, {ownerText}, and changes to them need Business Owner approval.
       </Alert>
       <div className="ac-main">
         <div className="stack gap-5">
           <Card flush title="Roles" sub="A role is a set of responsibilities, not a person. One person can hold several roles." actions={<SearchInput id="st-q" placeholder="Search roles" value={q} onChange={setQ} />}>
-            <div className="no-phone">
-              <TableWrap label="Roles table">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Role</th>
-                      <th scope="col">Working area</th>
-                      <th scope="col">People</th>
-                      <th scope="col">Backup</th>
-                      <th scope="col">Approval limit</th>
-                      <th className="col-pin" scope="col">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shownRoles.map((r) => (
-                      <tr key={r.role}>
-                        <td>{roleName(r, 'small strong')}</td>
-                        <td>
-                          <span className="small">{r.area}</span>
-                        </td>
-                        <td>
-                          {r.people.map((p) => (
-                            <span className="ac-who" key={p}>
-                              <Avatar name={p} className="ac-av" />
-                              <span className="stack gap-0">
-                                <span className="small strong nowrap">{p}</span>
-                              </span>
-                            </span>
-                          ))}
-                        </td>
-                        <td>
-                          <span className="small">{r.backup}</span>
-                        </td>
-                        <td>
-                          <span className="small">{r.limit}</span>
-                        </td>
-                        <td className="col-pin">{editLink(r, 'Edit role', 'small strong nowrap')}</td>
-                      </tr>
-                    ))}
-                    {!shownRoles.length && (
-                      <tr>
-                        <td colSpan={6}>{noRoles}</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </TableWrap>
-            </div>
-            <div className="ac-mlist only-phone">
-              {shownRoles.map((r) => (
-                <div className="ac-mi" key={r.role}>
-                  <div className="row between gap-2 nowrap top">
-                    {roleName(r, 'small strong min-w-0')}
-                    {editLink(r, 'Edit', 'small strong')}
-                  </div>
-                  <div className="xs sub">
-                    {r.area} · {r.people.join(', ')} · backup {r.backup}
-                  </div>
-                  <div className="xs sub">Limit: {r.limit}</div>
+            {rolesQ.isError ? (
+              <LoadError error={rolesQ.error} onRetry={() => void rolesQ.refetch()} />
+            ) : (
+              <>
+                <div className="no-phone">
+                  <TableWrap label="Roles table">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Role</th>
+                          <th scope="col">Working area</th>
+                          <th scope="col">People</th>
+                          <th scope="col">Backup</th>
+                          <th scope="col">Approval limit</th>
+                          <th className="col-pin" scope="col">
+                            <span className="sr-only">Actions</span>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rolesQ.isPending && <SkeletonRows cols={6} />}
+                        {shownRoles.map((r) => (
+                          <tr key={r.id}>
+                            <td>{roleName(r, 'small strong')}</td>
+                            <td>
+                              <span className="small">{r.workArea}</span>
+                            </td>
+                            <td>
+                              {peopleOf(r).map((p) => (
+                                <span className="ac-who" key={p.accountId}>
+                                  <Avatar name={p.name} className="ac-av" />
+                                  <span className="stack gap-0">
+                                    <span className="small strong nowrap">{p.name}</span>
+                                  </span>
+                                </span>
+                              ))}
+                              {!r.people.length && <span className="small muted">No one yet</span>}
+                            </td>
+                            <td>
+                              <span className="small">{r.backups.map((b) => b.name).join(', ') || '—'}</span>
+                            </td>
+                            <td>
+                              <span className="small">{r.limitSummary}</span>
+                            </td>
+                            <td className="col-pin">{editLink(r, canManage || canPropose ? 'Edit role' : 'View role', 'small strong nowrap')}</td>
+                          </tr>
+                        ))}
+                        {!rolesQ.isPending && !shownRoles.length && (
+                          <tr>
+                            <td colSpan={6}>{noRoles}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </TableWrap>
                 </div>
-              ))}
-              {!shownRoles.length && <div className="ac-mi">{noRoles}</div>}
-            </div>
+                <div className="ac-mlist only-phone">
+                  {rolesQ.isPending && <SkeletonLines rows={4} />}
+                  {shownRoles.map((r) => (
+                    <div className="ac-mi" key={r.id}>
+                      <div className="row between gap-2 nowrap top">
+                        {roleName(r, 'small strong min-w-0')}
+                        {editLink(r, canManage || canPropose ? 'Edit' : 'View', 'small strong')}
+                      </div>
+                      <div className="xs sub">
+                        {r.workArea} · {r.people.map((p) => p.name).join(', ') || 'no one yet'} · backup {r.backups[0]?.name ?? 'not set'}
+                      </div>
+                      <div className="xs sub">Limit: {r.limitSummary}</div>
+                    </div>
+                  ))}
+                  {!rolesQ.isPending && !shownRoles.length && <div className="ac-mi">{noRoles}</div>}
+                </div>
+              </>
+            )}
           </Card>
 
           <Card
@@ -373,129 +579,233 @@ export default function Staff() {
               />
             }
           >
-            <div className="no-phone">
-              <TableWrap label="Staff members table">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Roles</th>
-                      <th scope="col">Last active</th>
-                      <th scope="col">Sign-in</th>
-                      <th className="col-pin" scope="col">
-                        Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shownStaff.map((s) => {
-                      const invited = s.status === 'Invited';
-                      const badges = s.roles.map((r) => (
-                        <Badge tone="outline" key={r}>
-                          {r}
-                        </Badge>
-                      ));
-                      return (
-                        <tr key={s.email}>
-                          <td>
-                            <span className="ac-who">
-                              <Avatar name={s.name} className="ac-av" />
-                              <span className="stack gap-0">
-                                <span className="small strong">{s.name}</span>
-                                <span className="xs muted">{s.email}</span>
-                              </span>
-                            </span>
-                          </td>
-                          <td>{invited ? badges : <span className="row gap-1">{badges}</span>}</td>
-                          <td>
-                            <span className={invited ? 'small muted' : 'small'}>{s.lastActive}</span>
-                          </td>
-                          <td>
-                            {invited ? (
-                              <Badge>Not set up</Badge>
-                            ) : (
-                              <Badge tone="success" icon="shield-check">
-                                2-step on
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="col-pin">
-                            <StatusBadge status={s.status} />
-                          </td>
+            {membersQ.isError ? (
+              <LoadError error={membersQ.error} onRetry={() => void membersQ.refetch()} />
+            ) : (
+              <>
+                <div className="no-phone">
+                  <TableWrap label="Staff members table">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Name</th>
+                          <th scope="col">Roles</th>
+                          <th scope="col">Last active</th>
+                          <th scope="col">Sign-in</th>
+                          <th className="col-pin" scope="col">
+                            Status
+                          </th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </TableWrap>
-            </div>
-            <div className="ac-mlist only-phone">
-              {shownStaff.map((s) => (
-                <div className="ac-mi" key={s.email}>
-                  <div className="row between gap-2 nowrap top">
-                    <span className="small strong min-w-0">{s.name}</span>
-                    <StatusBadge status={s.status} />
-                  </div>
-                  {s.status === 'Invited' ? (
-                    <div className="xs sub">
-                      {s.roles.join(', ')} · invitation sent {s.invited}
-                    </div>
-                  ) : (
-                    <>
-                      <div className="xs sub">{s.roles.join(', ')}</div>
-                      <div className="xs sub">Last active: {s.lastActive}</div>
-                    </>
-                  )}
+                      </thead>
+                      <tbody>
+                        {membersQ.isPending && <SkeletonRows cols={5} />}
+                        {shownStaff.map((s) => {
+                          const invited = s.status === 'invited';
+                          const badges = s.roles.map((r) => (
+                            <Badge tone="outline" key={r.id}>
+                              {r.name}
+                            </Badge>
+                          ));
+                          return (
+                            <tr key={s.account.id}>
+                              <td>
+                                <span className="ac-who">
+                                  <Avatar name={s.account.displayName} className="ac-av" />
+                                  <span className="stack gap-0">
+                                    <span className="small strong">{s.account.displayName}</span>
+                                    <span className="xs muted">{s.account.email}</span>
+                                  </span>
+                                </span>
+                              </td>
+                              <td>{invited ? badges : <span className="row gap-1">{badges}</span>}</td>
+                              <td>
+                                <span className={invited ? 'small muted' : 'small'}>{lastActive(s)}</span>
+                              </td>
+                              <td>
+                                {s.account.twoStepEnabled ? (
+                                  <Badge tone="success" icon="shield-check">
+                                    2-step on
+                                  </Badge>
+                                ) : (
+                                  <Badge>Not set up</Badge>
+                                )}
+                              </td>
+                              <td className="col-pin">
+                                <span className="row gap-1 nowrap">
+                                  <StatusBadge status={MEMBER_STATUS[s.status]} />
+                                  {s.away && <Badge tone="warning">Away until {shortDate(s.away.to)}</Badge>}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {!membersQ.isPending && !shownStaff.length && (
+                          <tr>
+                            <td colSpan={5}>
+                              <span className="small muted">{filter === 'invited' ? 'No open invitations.' : 'No staff members here.'}</span>
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </TableWrap>
                 </div>
-              ))}
-            </div>
+                <div className="ac-mlist only-phone">
+                  {membersQ.isPending && <SkeletonLines rows={4} />}
+                  {shownStaff.map((s) => (
+                    <div className="ac-mi" key={s.account.id}>
+                      <div className="row between gap-2 nowrap top">
+                        <span className="small strong min-w-0">{s.account.displayName}</span>
+                        <StatusBadge status={MEMBER_STATUS[s.status]} />
+                      </div>
+                      {s.status === 'invited' ? (
+                        <div className="xs sub">{s.roles.map((r) => r.name).join(', ') || 'Role waiting for approval'} · invitation sent</div>
+                      ) : (
+                        <>
+                          <div className="xs sub">{s.roles.map((r) => r.name).join(', ')}</div>
+                          <div className="xs sub">
+                            Last active: {lastActive(s)}
+                            {s.away ? ` · away until ${shortDate(s.away.to)}` : ''}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  {!membersQ.isPending && !shownStaff.length && <div className="ac-mi small muted">No staff members here.</div>}
+                </div>
+              </>
+            )}
           </Card>
         </div>
 
         <div className="stack gap-5">
-          <Card
-            title="Invite staff"
-            titleAs="h3"
-            sub="Invitations expire after 7 days"
-            foot={
-              <Button size="sm" icon="send" onClick={sendInvite}>
-                Send invitation
-              </Button>
-            }
-          >
-            <Field label="Full name" error={inviteErr.name}>
-              <TextInput id="st-name" ref={nameRef} placeholder="First and last name" value={invite.name} onChange={(e) => setInv('name', e.target.value)} />
-            </Field>
-            <Field label="Work email" error={inviteErr.email}>
-              <TextInput id="st-email" type="email" placeholder="name@marketly.example" value={invite.email} onChange={(e) => setInv('email', e.target.value)} />
-            </Field>
-            <Field label="Role" hint="You can add more roles after they accept." error={inviteErr.role}>
-              <Select id="st-role" options={[NO_ROLE, ...roles.map((r) => r.role), ...STAFF_ROLES]} value={invite.role} onChange={(e) => setInv('role', e.target.value)} />
-            </Field>
-            <Field label="Reports to">
-              <Select id="st-mgr" options={MANAGERS} value={invite.manager} onChange={(e) => setInv('manager', e.target.value)} />
-            </Field>
-            <Field label="Reason for access" hint="Required. Saved in Action history with the invitation." error={inviteErr.reason}>
-              <Textarea id="st-reason" placeholder="Why this person needs this role, e.g. new hire for the Reno, NV warehouse" value={invite.reason} onChange={(e) => setInv('reason', e.target.value)} />
-            </Field>
-            <Checkbox id="st-limit" label="Request approval limits from the Business Owner" checked={invite.requestLimits} onChange={(e) => setInv('requestLimits', e.target.checked)} />
-          </Card>
+          {canManage ? (
+            <Card
+              title="Invite staff"
+              titleAs="h3"
+              sub="Invitations expire after 7 days"
+              foot={
+                <Button size="sm" icon="send" onClick={sendInvite} disabled={inviteM.isPending}>
+                  Send invitation
+                </Button>
+              }
+            >
+              {inviteServerErr != null && (
+                <Alert tone="danger" title="The invitation wasn’t sent">
+                  {errorMessage(inviteServerErr)}
+                </Alert>
+              )}
+              <Field label="Full name" error={inviteErr.name ?? inviteFieldErr.name}>
+                <TextInput id="st-name" ref={nameRef} placeholder="First and last name" value={invite.name} onChange={(e) => setInv('name', e.target.value)} />
+              </Field>
+              <Field label="Work email" error={inviteErr.email ?? inviteFieldErr.email}>
+                <TextInput id="st-email" type="email" placeholder="name@marketly.example" value={invite.email} onChange={(e) => setInv('email', e.target.value)} />
+              </Field>
+              <Field label="Role" hint="You can add more roles after they accept." error={inviteErr.role}>
+                <Select id="st-role" options={roleOptions} value={invite.roleId} onChange={(e) => setInv('roleId', e.target.value)} />
+              </Field>
+              <Field label="Reports to">
+                <Select id="st-mgr" options={memberOptions} value={invite.managerId} onChange={(e) => setInv('managerId', e.target.value)} />
+              </Field>
+              <Field label="Reason for access" hint="Required. Saved in Action history with the invitation." error={inviteErr.reason ?? inviteFieldErr.reason}>
+                <Textarea id="st-reason" placeholder="Why this person needs this role, e.g. new hire for the Reno, NV warehouse" value={invite.reason} onChange={(e) => setInv('reason', e.target.value)} />
+              </Field>
+              <Checkbox id="st-limit" label="Request approval limits from the Business Owner" checked={invite.requestLimits} onChange={(e) => setInv('requestLimits', e.target.checked)} />
+            </Card>
+          ) : (
+            <Card title="Invite staff" titleAs="h3">
+              <span className="small muted">Inviting staff needs the “Manage roles” permission (Platform Administrator).</span>
+            </Card>
+          )}
 
           <Card title="Coverage gaps" titleAs="h3" sub="Every work queue needs a lead and a backup">
-            <ul className="list">
-              {GAPS.map((g) => (
-                <li key={g.title}>
-                  <span className="grow stack gap-0">
-                    <span className="small strong">{g.title}</span>
-                    <span className="xs muted">{g.sub}</span>
-                  </span>
-                  <Badge tone={g.tone}>{g.status}</Badge>
-                </li>
-              ))}
-            </ul>
+            {coverageQ.isError ? (
+              <LoadError error={coverageQ.error} onRetry={() => void coverageQ.refetch()} />
+            ) : coverageQ.isPending ? (
+              <SkeletonLines rows={3} />
+            ) : coverageQ.data.gaps.length ? (
+              <ul className="list">
+                {coverageQ.data.gaps.map((g, i) => (
+                  <li key={`${g.kind}-${i}`}>
+                    <span className="grow stack gap-0">
+                      <span className="small strong">{g.message}</span>
+                      <span className="xs muted">{[...g.roles.map((r) => r.name), ...g.people.map((p) => p.name)].join(' · ')}</span>
+                    </span>
+                    <Badge tone={GAP_TONE[g.severity]}>{GAP_STATUS[g.severity]}</Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="small muted">Every role has a lead and a backup.</span>
+            )}
+          </Card>
+
+          <Card title="Away periods" titleAs="h3" sub="Current and upcoming time away, and who covers">
+            {awayQ.isError ? (
+              <LoadError error={awayQ.error} onRetry={() => void awayQ.refetch()} />
+            ) : awayQ.isPending ? (
+              <SkeletonLines rows={2} />
+            ) : away.length ? (
+              <ul className="list">
+                {away.map((a) => (
+                  <li key={a.id}>
+                    <span className="grow stack gap-0">
+                      <span className="small strong">
+                        {a.account.name} · {shortDate(a.from)} – {shortDate(a.to)}
+                      </span>
+                      <span className="xs muted">{a.coverage.map((c) => `${c.role.name}: ${c.coveredBy.name}`).join(' · ') || 'No cover set'}</span>
+                    </span>
+                    <Badge tone={a.status === 'active' ? 'warning' : a.status === 'pending_approval' ? 'info' : undefined}>
+                      {a.status === 'pending_approval' ? 'Approval pending' : a.status === 'active' ? 'Away now' : 'Planned'}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="small muted">No one is away or planning time away.</span>
+            )}
           </Card>
         </div>
       </div>
+
+      <Dialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title="Add role"
+        foot={
+          <>
+            <Button variant="ghost" onClick={() => setAddOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              icon="plus"
+              disabled={addRoleM.isPending}
+              onClick={() => {
+                setNewRoleTried(true);
+                if (newRole.name.trim() && newRole.workArea.trim() && newRole.reason.trim()) addRoleM.mutate();
+              }}
+            >
+              Add role
+            </Button>
+          </>
+        }
+      >
+        {addRoleM.isError && (
+          <Alert tone="danger" title="The role wasn’t added">
+            {errorMessage(addRoleM.error)}
+          </Alert>
+        )}
+        <Field label="Role name" error={newRoleErr.name}>
+          <TextInput id="st-nr-name" value={newRole.name} onChange={(e) => setNewRole((r) => ({ ...r, name: e.target.value }))} />
+        </Field>
+        <Field label="Working area" hint="e.g. Finance, Orders and shipping" error={newRoleErr.workArea}>
+          <TextInput id="st-nr-area" value={newRole.workArea} onChange={(e) => setNewRole((r) => ({ ...r, workArea: e.target.value }))} />
+        </Field>
+        <Field label="Reason (required)" error={newRoleErr.reason}>
+          <Textarea id="st-nr-reason" value={newRole.reason} onChange={(e) => setNewRole((r) => ({ ...r, reason: e.target.value }))} />
+        </Field>
+      </Dialog>
+      {stepUp.dialog}
     </AdminLayout>
   );
 }

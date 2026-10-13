@@ -1,112 +1,134 @@
-import { useMemo, useState, type CSSProperties } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
+import { call, errorMessage, useApi, ApiError } from '@marketly/web-shared/api';
 import { OpsLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money, num } from '@marketly/web-shared/lib/format';
+import { formatMoney, num, type MoneyValue } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Dialog, Field, Icon, Img, PageHeader, SearchInput, Select, StatusBadge, SummaryRow, TableWrap, Textarea, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
-import type { Tint } from '@marketly/web-shared/data/fixtures';
-import { BeforeAfter, EDGE_RISK, EDGE_URGENT, OpsLegend } from './data/shared';
+import { Alert, Badge, Button, Card, Dialog, Field, Icon, Img, PageHeader, Pager, SearchInput, Select, StatusBadge, SummaryRow, TableWrap, Textarea, TextInput, announce } from '@marketly/web-shared/ui';
+import { LoadError, SkeletonLines, dateTime } from '@/app/parts';
+import { useStaffSession } from '@/app/session';
+import { BeforeAfter, EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
-// Design: pages/ops/ops-inventory.html · view "adjust-stock" = the Adjust stock dialog
-// (AST-VC30, 60 units Available → Damaged or held, over the 50-unit limit so it needs a second review).
+// Design: pages/ops/ops-inventory.html · view "adjust-stock" = the Adjust stock dialog.
+// API: GET inventory/summary (group tiles), GET inventory/stock-items (official, filters, pages), GET inventory/low-stock,
+// GET inventory/adjustments (history with second review), POST inventory/adjustments (applied, or pending_review when the
+// quantity is above the staff member's limit from access/me), GET access/me (the adjustment limit).
 
-type Group = 'Available' | 'Reserved' | 'Incoming' | 'Damaged or held' | 'Returned';
-type Target = 'Available' | 'Damaged or held' | 'Returned' | 'Remove from stock (write off)';
-const GROUP_KEY: Record<Group, keyof Counts> = { Available: 'available', Reserved: 'reserved', Incoming: 'incoming', 'Damaged or held': 'damaged', Returned: 'returned' };
+type Group = 'available' | 'reserved' | 'incoming' | 'damaged_held' | 'returned';
+type From = 'available' | 'incoming' | 'damaged_held' | 'returned' | 'outside';
+type To = 'available' | 'damaged_held' | 'returned' | 'outside';
 
-interface Counts {
+interface Quantities {
   available: number;
   reserved: number;
   incoming: number;
-  damaged: number;
+  damagedHeld: number;
   returned: number;
 }
-
-interface StockRow extends Counts {
+interface StockItem {
+  id: string;
   sku: string;
-  name: string;
-  icon: IconName;
-  tint: Tint;
-  bin: string;
-  reorder: number;
-  /** Unit cost, for the "at cost" group totals. */
-  cost: number;
+  label: string;
+  image: { url: string; alt?: string | null } | null;
+  quantities: Quantities;
+  state: string;
+  lowStockThreshold: number | null;
+  binCode: string | null;
+}
+interface Page<T> {
+  items: T[];
+  total?: number;
+  totalPages?: number;
+}
+interface Summary {
+  skuCount: number;
+  groups: Array<{ group: Group; label: string; meaning: string; units: number; valueAtCost: MoneyValue | null }>;
+  lowStockCount: number;
+  outOfStockCount: number;
+  lowStockHeadline: string;
+}
+interface LowStock {
+  item: StockItem;
+  incoming: { quantity?: number; reference?: string | null } | null;
+}
+interface Adjustment {
+  id: string;
+  sku: string;
+  fromGroup: string;
+  toGroup: string;
+  quantity: number;
+  reasonLabel: string;
+  note: string | null;
+  state: 'requested' | 'pending_review' | 'applied' | 'rejected' | 'cancelled';
+  approval: { approvers?: string[] | null; approverLabel?: string | null } | null;
+  requestedBy: { name?: string | null } | null;
+  decidedBy: { name?: string | null } | null;
+  createdAt: string;
+}
+interface AccessMe {
+  limits?: Array<{ action: { key: string }; value: { authority?: string; limitNumber?: number | null } | null }>;
 }
 
-const ROWS: StockRow[] = [
-  { sku: 'HAL-AUR-BLK', name: 'Halden Aurora ANC Headphones, Black', icon: 'headphones', tint: '2', bin: 'A-03-2', available: 142, reserved: 38, incoming: 120, damaged: 0, returned: 3, reorder: 40, cost: 128 },
-  { sku: 'HAL-AUR-SLV', name: 'Halden Aurora ANC Headphones, Silver', icon: 'headphones', tint: '2', bin: 'A-03-4', available: 0, reserved: 6, incoming: 80, damaged: 0, returned: 0, reorder: 25, cost: 128 },
-  { sku: 'BRL-LAMP-W', name: 'Brightline Smart LED Desk Lamp', icon: 'lamp-desk', tint: '5', bin: 'C-04-1', available: 9, reserved: 4, incoming: 0, damaged: 1, returned: 1, reorder: 20, cost: 22 },
-  { sku: 'PLR-CI26', name: 'Pellar Cast Iron Skillet 26 cm', icon: 'cooking-pot', tint: '3', bin: 'D-02-3', available: 77, reserved: 12, incoming: 120, damaged: 2, returned: 1, reorder: 30, cost: 24 },
-  { sku: 'NDV-MER-M-NVY', name: 'Nordvik Merino Crew, M, Navy', icon: 'shirt', tint: '4', bin: 'F-12-2', available: 52, reserved: 7, incoming: 0, damaged: 0, returned: 2, reorder: 15, cost: 31 },
-  { sku: 'NDV-MER-L-NVY', name: 'Nordvik Merino Crew, L, Navy', icon: 'shirt', tint: '4', bin: 'F-12-3', available: 11, reserved: 5, incoming: 40, damaged: 0, returned: 0, reorder: 15, cost: 31 },
-  { sku: 'MSW-PO-CRM', name: 'Mosswood Pour-over Coffee Set, Cream', icon: 'coffee', tint: '3', bin: 'C-07-1', available: 58, reserved: 9, incoming: 0, damaged: 1, returned: 1, reorder: 20, cost: 18 },
-  { sku: 'AST-VC30', name: 'Aster Daily Vitamin C Serum 30 ml', icon: 'droplet', tint: '5', bin: 'E-01-4', available: 140, reserved: 22, incoming: 0, damaged: 0, returned: 0, reorder: 50, cost: 9 },
+const GROUP_TONE: Record<Group, string> = { available: 'var(--success)', reserved: 'var(--info)', incoming: 'var(--border-strong)', damaged_held: 'var(--danger)', returned: 'var(--warning)' };
+const GROUP_LABEL: Record<string, string> = { available: 'Available', reserved: 'Reserved', incoming: 'Incoming', damaged_held: 'Damaged or held', returned: 'Returned', outside: 'Outside stock' };
+const Q_KEY: Record<Group, keyof Quantities> = { available: 'available', reserved: 'reserved', incoming: 'incoming', damaged_held: 'damagedHeld', returned: 'returned' };
+
+const FROM_GROUPS: Array<{ value: From; label: string }> = [
+  { value: 'available', label: 'Available' },
+  { value: 'incoming', label: 'Incoming' },
+  { value: 'damaged_held', label: 'Damaged or held' },
+  { value: 'returned', label: 'Returned' },
+  { value: 'outside', label: 'Found stock (into stock)' },
 ];
-
-/** Group tiles: the design's values at cost; adjustments move cost with the unit cost of the SKU. */
-const GROUP_TILES: Array<{ label: string; key: keyof Counts; tone: string; cost: number; note: string }> = [
-  { label: 'Available', key: 'available', tone: 'var(--success)', cost: 22479, note: 'Sellable to new customers' },
-  { label: 'Reserved', key: 'reserved', tone: 'var(--info)', cost: 6091, note: 'Allocated to accepted orders' },
-  { label: 'Incoming', key: 'incoming', tone: 'var(--border-strong)', cost: 27040, note: 'Expected from suppliers' },
-  { label: 'Damaged or held', key: 'damaged', tone: 'var(--danger)', cost: 88, note: 'Awaiting inspection or unsellable' },
-  { label: 'Returned', key: 'returned', tone: 'var(--warning)', cost: 474, note: 'Needs a condition decision' },
+const TO_GROUPS: Array<{ value: To; label: string }> = [
+  { value: 'available', label: 'Available' },
+  { value: 'damaged_held', label: 'Damaged or held' },
+  { value: 'returned', label: 'Returned' },
+  { value: 'outside', label: 'Remove from stock (write off)' },
 ];
-
-interface HistoryRow {
-  date: string;
-  sku: string;
-  from?: string;
-  to?: string;
-  /** Change label when the change is not a move between groups. */
-  label?: string;
-  qty: string;
-  reason: string;
-  staff: string;
-  review: string;
-}
-
-const HISTORY: HistoryRow[] = [
-  { date: 'Oct 8, 9:05 AM', sku: 'PLR-CI26', from: 'Available', to: 'Damaged or held', qty: '2', reason: 'Damaged in receiving, PUR-2610-0039', staff: 'Ana Silva', review: 'Not required' },
-  { date: 'Oct 7, 4:22 PM', sku: 'HAL-AUR-BLK', from: 'Returned', to: 'Available', qty: '1', reason: 'Return RT-261001-0161 inspected, like new', staff: 'Ana Silva', review: 'Not required' },
-  { date: 'Oct 7, 11:40 AM', sku: 'BRL-LAMP-W', label: 'Count correction', qty: '−3', reason: 'Cycle count correction, bin C-04-1', staff: 'Ana Silva', review: 'Not required' },
-  { date: 'Oct 6, 3:15 PM', sku: 'AST-VC30', from: 'Incoming', to: 'Available', qty: '120', reason: 'Received PUR-2610-0031', staff: 'Ana Silva', review: 'Dana Ortiz approved' },
-  { date: 'Oct 5, 10:02 AM', sku: 'MSW-PO-CRM', from: 'Available', to: 'Damaged or held', qty: '1', reason: 'Chipped cup found during packing', staff: 'Carlos Mendez', review: 'Not required' },
+const REASONS = [
+  { value: '', label: 'Choose a reason' },
+  { value: 'quality_hold', label: 'Quality hold: supplier notice' },
+  { value: 'damaged_in_warehouse', label: 'Damaged in warehouse' },
+  { value: 'count_correction', label: 'Count correction' },
+  { value: 'found_stock', label: 'Found stock' },
+  { value: 'theft_or_loss', label: 'Theft or loss' },
+  { value: 'write_off', label: 'Write off' },
+  { value: 'repair', label: 'Repair' },
+  { value: 'supplier_return', label: 'Return to supplier' },
+  { value: 'other', label: 'Other' },
 ];
-
-const FROM_GROUPS: Group[] = ['Available', 'Reserved', 'Incoming', 'Damaged or held', 'Returned'];
-const TO_GROUPS: Target[] = ['Available', 'Damaged or held', 'Returned', 'Remove from stock (write off)'];
-const REASONS = ['Choose a reason', 'Quality hold: supplier notice', 'Damaged in warehouse', 'Count correction', 'Found stock', 'Theft or loss'];
-const REVIEWERS = ['Dana Ortiz, Official Store Manager', 'Morgan Hale, Business Owner'];
-const LIMIT = 50;
-const NOW = 'Oct 8, 10:05 AM';
-
-const STOCK_FILTERS = ['All stock groups', 'Low or out of stock', 'Has damaged or held', 'Has returned'];
-const LOCATIONS = ['All locations', 'Zone A', 'Zone C', 'Zone D', 'Zone E', 'Zone F'];
+const STOCK_FILTERS = [
+  { value: '', label: 'All stock groups' },
+  { value: 'low_or_out', label: 'Low or out of stock' },
+  { value: 'has_damaged_or_held', label: 'Has damaged or held' },
+  { value: 'has_returned', label: 'Has returned' },
+  { value: 'has_incoming', label: 'Has incoming' },
+];
+const LIMIT = 24;
 
 interface Draft {
-  sku: string;
-  from: Group;
-  to: Target;
+  id: string;
+  from: From;
+  to: To;
   qty: string;
   reason: string;
   note: string;
-  reviewer: string;
+  reviewDate: string;
 }
+const blankDraft = (id: string): Draft => ({ id, from: 'available', to: 'damaged_held', qty: '', reason: '', note: '', reviewDate: '' });
 
-const DESIGN_DRAFT: Draft = { sku: 'AST-VC30', from: 'Available', to: 'Damaged or held', qty: '60', reason: 'Quality hold: supplier notice', note: 'Supplier recall notice for batch L2609 received Oct 8, 8:15 AM. Hold until lab result.', reviewer: REVIEWERS[0] };
-const blankDraft = (sku: string): Draft => ({ sku, from: 'Available', to: 'Damaged or held', qty: '', reason: REASONS[0], note: '', reviewer: REVIEWERS[0] });
-
-const statusOf = (r: StockRow) => (r.available === 0 ? 'Out of stock' : r.available <= r.reorder ? 'Low stock' : 'In stock');
+const statusOf = (r: StockItem) => (r.state === 'out_of_stock' || r.quantities.available === 0 ? 'Out of stock' : r.state === 'low_stock' ? 'Low stock' : 'In stock');
 
 function Num({ n, tone }: { n: number; tone?: 'danger' | 'warning' }) {
   if (!n) return <span className="muted">0</span>;
   return tone ? <span className={`t-${tone}-text strong`}>{n}</span> : <>{n}</>;
 }
 
-function Available({ r }: { r: StockRow }) {
+function Available({ r }: { r: StockItem }) {
   const s = statusOf(r);
   if (s === 'Out of stock')
     return (
@@ -114,60 +136,114 @@ function Available({ r }: { r: StockRow }) {
         0<span className="sr-only"> out of stock</span>
       </span>
     );
-  if (s === 'Low stock') return <span className="ac-low">{r.available}</span>;
-  return <span className="strong">{r.available}</span>;
+  if (s === 'Low stock') return <span className="ac-low">{r.quantities.available}</span>;
+  return <span className="strong">{r.quantities.available}</span>;
 }
 
-function validate(d: Draft, row: StockRow) {
-  const e: Partial<Record<'qty' | 'reason' | 'to', string>> = {};
+const have = (row: StockItem | undefined, g: From) => (!row || g === 'outside' ? Infinity : row.quantities[Q_KEY[g]]);
+
+function validate(d: Draft, row: StockItem | undefined) {
+  const e: Partial<Record<'qty' | 'reason' | 'to' | 'reviewDate' | 'id', string>> = {};
   const q = Number(d.qty);
-  const have = row[GROUP_KEY[d.from]];
+  if (!row) e.id = 'Choose a SKU.';
   if (!d.qty.trim() || !Number.isInteger(q) || q <= 0) e.qty = 'Enter a whole number of units, 1 or more.';
-  else if (q > have) e.qty = `Only ${have} units are in ${d.from}.`;
-  if (d.to === d.from) e.to = 'Choose a different group to move units to.';
-  if (d.reason === REASONS[0]) e.reason = 'Choose a reason. Every change is recorded with its reason.';
+  else if (q > have(row, d.from)) e.qty = `Only ${have(row, d.from)} units are in ${GROUP_LABEL[d.from]}.`;
+  if ((d.to as string) === (d.from as string)) e.to = 'Choose a different group to move units to.';
+  if (!d.reason) e.reason = 'Choose a reason. Every change is recorded with its reason.';
+  if (d.to === 'damaged_held' && !d.reviewDate) e.reviewDate = 'Choose when the hold is reviewed.';
   return e;
 }
 
+const reviewLabel = (a: Adjustment) =>
+  a.state === 'pending_review'
+    ? `Waiting for ${a.approval?.approverLabel ?? a.approval?.approvers?.join(' or ') ?? 'second review'}`
+    : a.state === 'rejected'
+      ? `Rejected${a.decidedBy?.name ? ` by ${a.decidedBy.name}` : ''}`
+      : a.state === 'cancelled'
+        ? 'Withdrawn'
+        : a.decidedBy?.name
+          ? `${a.decidedBy.name} approved`
+          : 'Not required';
+
 export default function Inventory() {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const staff = useStaffSession();
   const [view, setView] = useView<'adjust-stock'>();
-  const [rows, setRows] = useState(ROWS);
-  const [tileCost, setTileCost] = useState<Record<keyof Counts, number>>(() => Object.fromEntries(GROUP_TILES.map((t) => [t.key, t.cost])) as Record<keyof Counts, number>);
-  const [history, setHistory] = useState(HISTORY);
   const [q, setQ] = useState('');
-  const [grp, setGrp] = useState(STOCK_FILTERS[0]);
-  const [loc, setLoc] = useState(LOCATIONS[0]);
-  const [draft, setDraft] = useState<Draft>(DESIGN_DRAFT);
+  const [search, setSearch] = useState('');
+  const [grp, setGrp] = useState('');
+  const [zone, setZone] = useState('');
+  const [page, setPage] = useState(1);
+  const [draft, setDraft] = useState<Draft>(blankDraft(''));
   const [attempted, setAttempted] = useState(false);
-  const [done, setDone] = useState<{ title: string; body: string } | null>(null);
+  const [done, setDone] = useState<{ title: string; body: string; tone: 'success' | 'info' } | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearch(q.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const canAdjust = staff.can('inventory.stock.adjust-official');
+  const summary = useQuery({ queryKey: ['inventory', 'summary'], queryFn: () => call(api.GET('/api/admin/inventory/summary', { params: { query: { ownerType: 'official' } as never } })) as Promise<Summary> });
+  const params = { ownerType: 'official' as const, q: search || undefined, filter: (grp || undefined) as never, zone: zone || undefined, page, limit: LIMIT };
+  const items = useQuery({ queryKey: ['inventory', 'stock-items', params], queryFn: () => call(api.GET('/api/admin/inventory/stock-items', { params: { query: params } })) as Promise<Page<StockItem>>, placeholderData: keepPreviousData });
+  const low = useQuery({ queryKey: ['inventory', 'low-stock'], queryFn: () => call(api.GET('/api/admin/inventory/low-stock', { params: { query: { limit: 5 } as never } })) as Promise<Page<LowStock>> });
+  const history = useQuery({ queryKey: ['inventory', 'adjustments'], queryFn: () => call(api.GET('/api/admin/inventory/adjustments', { params: { query: { limit: 8 } as never } })) as Promise<Page<Adjustment>> });
+  // All official SKUs for the dialog's picker and the zone filter (the company catalog is small).
+  const allItems = useQuery({ queryKey: ['inventory', 'stock-items', 'all'], queryFn: () => call(api.GET('/api/admin/inventory/stock-items', { params: { query: { ownerType: 'official', limit: 100, page: 1 } } })) as Promise<Page<StockItem>> });
+  // Same query as the session's access/me (shared cache): the adjustment limit decides "Send for second review".
+  const access = useQuery({ queryKey: ['access', 'me', staff.accountId], queryFn: () => call(api.GET('/api/admin/access/me')) });
+
+  const limit = useMemo(() => {
+    const limits = (access.data as AccessMe | undefined)?.limits ?? [];
+    const l = limits.find((x) => x.action.key === 'inventory.adjustments.apply' && x.value?.authority !== 'not_permitted');
+    return l?.value?.limitNumber ?? null;
+  }, [access.data]);
+  const pickList = useMemo(() => allItems.data?.items ?? [], [allItems.data]);
+  const zones = useMemo(() => [...new Set(pickList.map((r) => r.binCode?.split('-')[0]).filter(Boolean) as string[])].sort(), [pickList]);
+  const rows = items.data?.items ?? [];
 
   const open = view === 'adjust-stock';
-  const row = rows.find((r) => r.sku === draft.sku) ?? rows[0];
+  const row = pickList.find((r) => r.id === draft.id) ?? rows.find((r) => r.id === draft.id);
   const errors = attempted ? validate(draft, row) : {};
   const qty = Number(draft.qty) || 0;
-  const needsReview = qty > LIMIT;
+  const needsReview = limit != null && qty > limit;
 
-  const totals = useMemo(() => {
-    const t: Counts = { available: 0, reserved: 0, incoming: 0, damaged: 0, returned: 0 };
-    rows.forEach((r) => (Object.keys(t) as Array<keyof Counts>).forEach((k) => (t[k] += r[k])));
-    return t;
-  }, [rows]);
-
-  const filtered = rows.filter((r) => {
-    const s = q.trim().toLowerCase();
-    if (s && ![r.sku, r.name, r.bin].some((x) => x.toLowerCase().includes(s))) return false;
-    if (grp === 'Low or out of stock' && statusOf(r) === 'In stock') return false;
-    if (grp === 'Has damaged or held' && !r.damaged) return false;
-    if (grp === 'Has returned' && !r.returned) return false;
-    if (loc !== LOCATIONS[0] && !r.bin.startsWith(loc.slice(-1))) return false;
-    return true;
+  const adjust = useMutation({
+    mutationFn: () =>
+      call(
+        api.POST('/api/admin/inventory/adjustments', {
+          body: {
+            stockItemId: draft.id,
+            fromGroup: draft.from,
+            toGroup: draft.to,
+            quantity: qty,
+            reasonCode: draft.reason,
+            note: draft.note.trim() || undefined,
+            reviewDate: draft.to === 'damaged_held' ? draft.reviewDate : undefined,
+          } as never,
+        }),
+      ) as Promise<Adjustment>,
+    onSuccess: (a) => {
+      const move = `${a.quantity} units of ${a.sku} ${a.state === 'pending_review' ? 'move' : 'moved'} from ${GROUP_LABEL[a.fromGroup] ?? a.fromGroup} to ${GROUP_LABEL[a.toGroup] ?? a.toGroup}`;
+      if (a.state === 'pending_review') setDone({ tone: 'info', title: 'Sent for second review', body: `${move} after ${a.approval?.approverLabel ?? 'a second reviewer'} approves. Nothing moves until then.` });
+      else setDone({ tone: 'success', title: 'Stock adjusted', body: `${move}. The change is in the adjustment history.` });
+      announce(a.state === 'pending_review' ? 'Adjustment sent for second review' : 'Stock adjusted');
+      void qc.invalidateQueries({ queryKey: ['inventory'] });
+      void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+      setView('');
+    },
   });
-  const lowCount = rows.filter((r) => statusOf(r) !== 'In stock').length;
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
-  const openAdjust = (sku?: string) => {
-    setDraft(blankDraft(sku ?? rows[0].sku));
+  const openAdjust = (id?: string) => {
+    setDraft(blankDraft(id ?? pickList[0]?.id ?? rows[0]?.id ?? ''));
     setAttempted(false);
+    adjust.reset();
     setView('adjust-stock');
   };
   const close = () => setView('');
@@ -175,35 +251,16 @@ export default function Inventory() {
   const submit = () => {
     setAttempted(true);
     if (Object.keys(validate(draft, row)).length) return;
-    const toGroup = draft.to === 'Remove from stock (write off)' ? null : (draft.to as Group);
-    const entry: HistoryRow = {
-      date: NOW,
-      sku: draft.sku,
-      from: draft.from,
-      to: toGroup ?? 'Written off',
-      qty: String(qty),
-      reason: draft.note.trim() ? `${draft.reason}. ${draft.note.trim()}` : draft.reason,
-      staff: 'Ana Silva',
-      review: needsReview ? `Waiting for ${draft.reviewer.split(',')[0]}` : 'Not required',
-    };
-    setHistory((h) => [entry, ...h]);
-    if (needsReview) {
-      setDone({ title: 'Sent for second review', body: `${qty} units of ${draft.sku} move from ${draft.from} to ${draft.to} after ${draft.reviewer.split(',')[0]} approves.` });
-    } else {
-      const fromKey = GROUP_KEY[draft.from];
-      const toKey = toGroup ? GROUP_KEY[toGroup] : null;
-      setRows((rs) => rs.map((r) => (r.sku === draft.sku ? { ...r, [fromKey]: r[fromKey] - qty, ...(toKey ? { [toKey]: r[toKey] + qty } : {}) } : r)));
-      setTileCost((c) => ({ ...c, [fromKey]: c[fromKey] - qty * row.cost, ...(toKey ? { [toKey]: c[toKey] + qty * row.cost } : {}) }));
-      setDone({ title: 'Stock adjusted', body: `${qty} units of ${draft.sku} moved from ${draft.from} to ${draft.to}. The change is in the adjustment history.` });
-    }
-    announce(needsReview ? 'Adjustment sent for second review' : 'Stock adjusted');
-    close();
+    adjust.mutate();
   };
 
-  const fromBefore = row[GROUP_KEY[draft.from]];
-  const toGroup = draft.to === 'Remove from stock (write off)' ? null : (draft.to as Group);
-  const toBefore = toGroup ? row[GROUP_KEY[toGroup]] : 0;
+  const fieldErrors = adjust.error instanceof ApiError ? adjust.error.fieldErrors : {};
+  const fromBefore = draft.from === 'outside' || !row ? 0 : row.quantities[Q_KEY[draft.from]];
+  const toBefore = draft.to === 'outside' || !row ? 0 : row.quantities[Q_KEY[draft.to]];
   const valid = !Object.keys(validate(draft, row)).length;
+  const lowItems = low.data?.items ?? [];
+  const s = summary.data;
+  const tiles = s?.groups ?? (Object.keys(GROUP_TONE) as Group[]).map((g) => ({ group: g, label: GROUP_LABEL[g], meaning: '', units: -1, valueAtCost: null as MoneyValue | null }));
 
   return (
     <OpsLayout active="inventory">
@@ -212,142 +269,188 @@ export default function Inventory() {
         sub="Reno, NV warehouse · company-owned stock only. Seller stock is never mixed in."
         actions={
           <>
-            <Button variant="secondary" size="sm" icon="download">
+            <Button variant="secondary" size="sm" icon="download" disabled title="Stock exports aren’t available yet">
               Export
             </Button>
-            <Button size="sm" icon="sliders-horizontal" onClick={() => openAdjust()}>
-              Adjust stock
-            </Button>
+            {canAdjust && (
+              <Button size="sm" icon="sliders-horizontal" onClick={() => openAdjust()} disabled={!pickList.length}>
+                Adjust stock
+              </Button>
+            )}
           </>
         }
       />
-      <div className="ac-groups">
-        {GROUP_TILES.map((t) => (
-          <div key={t.key} className="ac-grp" style={{ '--tone': t.tone } as CSSProperties}>
-            <span className="xs strong sub">{t.label}</span>
-            <span className="v">{num(totals[t.key])}</span>
-            <span className="xs muted">{money(tileCost[t.key])} at cost</span>
-            <span className="xs muted">{t.note}</span>
-          </div>
-        ))}
-      </div>
+      {summary.error ? (
+        <LoadError error={summary.error} onRetry={() => void summary.refetch()} />
+      ) : (
+        <div className="ac-groups">
+          {tiles.map((t) => (
+            <div key={t.group} className="ac-grp" style={{ '--tone': GROUP_TONE[t.group] ?? 'var(--border-strong)' } as CSSProperties}>
+              <span className="xs strong sub">{t.label}</span>
+              {t.units < 0 ? <span className="sk sk-line" /> : <span className="v">{num(t.units)}</span>}
+              <span className="xs muted">{t.valueAtCost && t.valueAtCost.amount > 0 ? `${formatMoney(t.valueAtCost)} at cost` : 'Cost not recorded'}</span>
+              <span className="xs muted">{t.meaning}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {done && (
-        <Alert tone="success" title={done.title}>
+        <Alert tone={done.tone} title={done.title}>
           {done.body}
         </Alert>
       )}
-      <Alert tone="warning" title={`${lowCount} SKUs at or below reorder point`}>
-        Halden Aurora Silver is out of stock, 80 incoming on PUR-2610-0042 (arrived today). Brightline desk lamp and Nordvik Merino L are low. Customers can buy only Available units.
-      </Alert>
+      {s && s.lowStockCount + s.outOfStockCount > 0 && (
+        <Alert tone="warning" title={s.lowStockHeadline}>
+          {lowItems
+            .map((l) => `${l.item.label} (${l.item.sku}) is ${l.item.quantities.available === 0 ? 'out of stock' : `low, ${l.item.quantities.available} left`}${l.incoming?.quantity ? `, ${l.incoming.quantity} incoming${l.incoming.reference ? ` on ${l.incoming.reference}` : ''}` : ''}.`)
+            .join(' ')}{' '}
+          Customers can buy only Available units.
+        </Alert>
+      )}
       <div className="toolbar">
         <SearchInput id="inv-q" placeholder="Search SKU, product or bin" value={q} onChange={setQ} />
         <label className="sr-only" htmlFor="inv-grp">
           Stock group
         </label>
-        <Select id="inv-grp" options={STOCK_FILTERS} value={grp} onChange={(e) => setGrp(e.target.value)} />
+        <Select
+          id="inv-grp"
+          options={STOCK_FILTERS}
+          value={grp}
+          onChange={(e) => {
+            setGrp(e.target.value);
+            setPage(1);
+          }}
+        />
         <label className="sr-only" htmlFor="inv-loc">
           Location
         </label>
-        <Select id="inv-loc" options={LOCATIONS} value={loc} onChange={(e) => setLoc(e.target.value)} />
+        <Select
+          id="inv-loc"
+          options={[{ value: '', label: 'All locations' }, ...zones.map((z) => ({ value: z, label: `Zone ${z}` }))]}
+          value={zone}
+          onChange={(e) => {
+            setZone(e.target.value);
+            setPage(1);
+          }}
+        />
       </div>
-      <Card title="Stock by SKU" sub={`${filtered.length} of 214 Official Store SKUs`} flush>
-        <div className="no-phone">
-          <TableWrap label="Stock by SKU table">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Product</th>
-                  <th scope="col">Location</th>
-                  <th className="r" scope="col">Available</th>
-                  <th className="r" scope="col">Reserved</th>
-                  <th className="r" scope="col">Incoming</th>
-                  <th className="r" scope="col">Damaged or held</th>
-                  <th className="r" scope="col">Returned</th>
-                  <th className="r" scope="col">Reorder at</th>
-                  <th scope="col">Status</th>
-                  <th className="col-pin" scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r) => {
-                  const s = statusOf(r);
-                  return (
-                    <tr key={r.sku} className={cx(s === 'Out of stock' && 'is-flagged', s === 'Low stock' && 'is-warn')}>
-                      <td>
-                        {s === 'Out of stock' && <span className="sr-only">Urgent: </span>}
-                        {s === 'Low stock' && <span className="sr-only">At risk: </span>}
-                        <div className="cell-main">
-                          <Img icon={r.icon} tint={r.tint} className="tiny" />
-                          <span className="stack gap-0">
-                            <span className="small strong">{r.name}</span>
-                            <span className="xs mono muted nowrap" title={r.sku}>
-                              {r.sku}
-                            </span>
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <span className="mono small nowrap" title={r.bin}>
-                          {r.bin}
-                        </span>
-                      </td>
-                      <td className="r">
-                        <Available r={r} />
-                      </td>
-                      <td className="r">{r.reserved}</td>
-                      <td className="r">
-                        <Num n={r.incoming} />
-                      </td>
-                      <td className="r">
-                        <Num n={r.damaged} tone="danger" />
-                      </td>
-                      <td className="r">
-                        <Num n={r.returned} tone="warning" />
-                      </td>
-                      <td className="r">
-                        <span className="muted">{r.reorder}</span>
-                      </td>
-                      <td>
-                        <StatusBadge status={s} />
-                      </td>
-                      <td className="col-pin">
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => openAdjust(r.sku)}>
-                          <span>Adjust</span>
-                          <span className="sr-only"> {r.sku}</span>
-                        </button>
-                      </td>
+      <Card title="Stock by SKU" sub={items.data ? `${items.data.total ?? rows.length} of ${s?.skuCount ?? items.data.total ?? rows.length} Official Store SKUs` : 'Loading…'} flush>
+        {items.error ? (
+          <div className="card-body">
+            <LoadError error={items.error} onRetry={() => void items.refetch()} />
+          </div>
+        ) : (
+          <>
+            <div className="no-phone">
+              <TableWrap label="Stock by SKU table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Product</th>
+                      <th scope="col">Location</th>
+                      <th className="r" scope="col">Available</th>
+                      <th className="r" scope="col">Reserved</th>
+                      <th className="r" scope="col">Incoming</th>
+                      <th className="r" scope="col">Damaged or held</th>
+                      <th className="r" scope="col">Returned</th>
+                      <th className="r" scope="col">Reorder at</th>
+                      <th scope="col">Status</th>
+                      <th className="col-pin" scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </TableWrap>
-          <OpsLegend items={[{ tone: 'danger', label: EDGE_URGENT }, { tone: 'warning', label: EDGE_RISK }]} />
-        </div>
-        <div className="ac-mlist only-phone">
-          {filtered.map((r) => {
-            const s = statusOf(r);
-            return (
-              <div key={r.sku} className={cx('ac-mi', s === 'Out of stock' && 'is-flagged', s === 'Low stock' && 'is-warn')}>
-                {s === 'Out of stock' && <span className="sr-only">Urgent: </span>}
-                {s === 'Low stock' && <span className="sr-only">At risk: </span>}
-                <div className="row between gap-2 nowrap top">
-                  <span className="small strong min-w-0">{r.name}</span>
-                  <StatusBadge status={s} />
-                </div>
-                <div className="xs sub">
-                  <span className="mono">{r.sku}</span> · bin <span className="mono">{r.bin}</span>
-                </div>
-                <div className="xs sub">
-                  Available <b>{r.available}</b> · Reserved {r.reserved} · Incoming {r.incoming} · Damaged {r.damaged} · Returned {r.returned}
-                </div>
+                  </thead>
+                  <tbody>
+                    {items.isPending && <SkeletonRows cols={10} />}
+                    {!items.isPending && !rows.length && <EmptyRow cols={10}>No SKUs match these filters.</EmptyRow>}
+                    {rows.map((r) => {
+                      const st = statusOf(r);
+                      return (
+                        <tr key={r.id} className={cx(st === 'Out of stock' && 'is-flagged', st === 'Low stock' && 'is-warn')}>
+                          <td>
+                            {st === 'Out of stock' && <span className="sr-only">Urgent: </span>}
+                            {st === 'Low stock' && <span className="sr-only">At risk: </span>}
+                            <div className="cell-main">
+                              <Img icon="package" src={r.image?.url} alt={r.image?.alt ?? ''} className="tiny" />
+                              <span className="stack gap-0">
+                                <span className="small strong">{r.label}</span>
+                                <span className="xs mono muted nowrap" title={r.sku}>
+                                  {r.sku}
+                                </span>
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <span className="mono small nowrap" title={r.binCode ?? ''}>
+                              {r.binCode ?? '—'}
+                            </span>
+                          </td>
+                          <td className="r">
+                            <Available r={r} />
+                          </td>
+                          <td className="r">{r.quantities.reserved}</td>
+                          <td className="r">
+                            <Num n={r.quantities.incoming} />
+                          </td>
+                          <td className="r">
+                            <Num n={r.quantities.damagedHeld} tone="danger" />
+                          </td>
+                          <td className="r">
+                            <Num n={r.quantities.returned} tone="warning" />
+                          </td>
+                          <td className="r">
+                            <span className="muted">{r.lowStockThreshold ?? '—'}</span>
+                          </td>
+                          <td>
+                            <StatusBadge status={st} />
+                          </td>
+                          <td className="col-pin">
+                            {canAdjust && (
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => openAdjust(r.id)}>
+                                <span>Adjust</span>
+                                <span className="sr-only"> {r.sku}</span>
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </TableWrap>
+              <OpsLegend items={[{ tone: 'danger', label: EDGE_URGENT }, { tone: 'warning', label: EDGE_RISK }]} />
+            </div>
+            <div className="ac-mlist only-phone">
+              {items.isPending && <SkeletonLines rows={4} />}
+              {!items.isPending && !rows.length && <div className="ac-mi xs sub">No SKUs match these filters.</div>}
+              {rows.map((r) => {
+                const st = statusOf(r);
+                return (
+                  <div key={r.id} className={cx('ac-mi', st === 'Out of stock' && 'is-flagged', st === 'Low stock' && 'is-warn')}>
+                    {st === 'Out of stock' && <span className="sr-only">Urgent: </span>}
+                    {st === 'Low stock' && <span className="sr-only">At risk: </span>}
+                    <div className="row between gap-2 nowrap top">
+                      <span className="small strong min-w-0">{r.label}</span>
+                      <StatusBadge status={st} />
+                    </div>
+                    <div className="xs sub">
+                      <span className="mono">{r.sku}</span> · bin <span className="mono">{r.binCode ?? '—'}</span>
+                    </div>
+                    <div className="xs sub">
+                      Available <b>{r.quantities.available}</b> · Reserved {r.quantities.reserved} · Incoming {r.quantities.incoming} · Damaged {r.quantities.damagedHeld} · Returned {r.quantities.returned}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <OpsLegend className="only-phone" items={[{ tone: 'danger', label: EDGE_URGENT }, { tone: 'warning', label: EDGE_RISK }]} />
+            {(items.data?.totalPages ?? 1) > 1 && (
+              <div className="card-foot">
+                <Pager page={page} total={items.data?.totalPages ?? 1} onPage={setPage} only="website" />
               </div>
-            );
-          })}
-        </div>
-        <OpsLegend className="only-phone" items={[{ tone: 'danger', label: EDGE_URGENT }, { tone: 'warning', label: EDGE_RISK }]} />
+            )}
+          </>
+        )}
       </Card>
       <div className="grid lg2 gap-5">
         <Card
@@ -361,66 +464,81 @@ export default function Inventory() {
             </Link>
           }
         >
-          <div className="no-phone">
-            <TableWrap label="Adjustment history table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Date</th>
-                    <th scope="col">SKU</th>
-                    <th scope="col">Change</th>
-                    <th className="r" scope="col">Qty</th>
-                    <th scope="col">Reason</th>
-                    <th scope="col">Staff</th>
-                    <th className="col-pin" scope="col">Second review</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((h, i) => (
-                    <tr key={`${h.date}-${h.sku}-${i}`}>
-                      <td>
-                        <span className="small nowrap">{h.date}</span>
-                      </td>
-                      <td>
-                        <span className="mono small nowrap" title={h.sku}>
-                          {h.sku}
-                        </span>
-                      </td>
-                      <td>{h.from && h.to ? <BeforeAfter b={h.from} a={h.to} /> : <span className="xs">{h.label}</span>}</td>
-                      <td className="r">
-                        <b>{h.qty}</b>
-                      </td>
-                      <td>
-                        <span className="small minw-180 cell-text">{h.reason}</span>
-                      </td>
-                      <td>
-                        <span className="small nowrap">{h.staff}</span>
-                      </td>
-                      <td className="col-pin">
-                        <span className="xs muted">{h.review}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
-          </div>
-          <div className="ac-mlist only-phone">
-            {history.map((h, i) => (
-              <div key={`${h.date}-${h.sku}-${i}`} className="ac-mi">
-                <div className="row between gap-2 nowrap top">
-                  <span className="small strong min-w-0">
-                    <span className="mono">{h.sku}</span> · {h.qty} units
-                  </span>
-                  <span className="xs muted nowrap">{h.date}</span>
-                </div>
-                <div className="xs sub">{h.from && h.to ? <BeforeAfter b={h.from} a={h.to} /> : h.label}</div>
-                <div className="xs sub">
-                  {h.reason} · {h.staff}
-                </div>
+          {history.error ? (
+            <div className="card-body">
+              <LoadError error={history.error} onRetry={() => void history.refetch()} />
+            </div>
+          ) : (
+            <>
+              <div className="no-phone">
+                <TableWrap label="Adjustment history table">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Date</th>
+                        <th scope="col">SKU</th>
+                        <th scope="col">Change</th>
+                        <th className="r" scope="col">Qty</th>
+                        <th scope="col">Reason</th>
+                        <th scope="col">Staff</th>
+                        <th className="col-pin" scope="col">Second review</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {history.isPending && <SkeletonRows cols={7} rows={3} />}
+                      {!history.isPending && !history.data?.items.length && <EmptyRow cols={7}>No adjustments yet.</EmptyRow>}
+                      {history.data?.items.map((h) => (
+                        <tr key={h.id}>
+                          <td>
+                            <span className="small nowrap">{dateTime(h.createdAt)}</span>
+                          </td>
+                          <td>
+                            <span className="mono small nowrap" title={h.sku}>
+                              {h.sku}
+                            </span>
+                          </td>
+                          <td>
+                            <BeforeAfter b={GROUP_LABEL[h.fromGroup] ?? h.fromGroup} a={GROUP_LABEL[h.toGroup] ?? h.toGroup} />
+                          </td>
+                          <td className="r">
+                            <b>{h.quantity}</b>
+                          </td>
+                          <td>
+                            <span className="small minw-180 cell-text">{h.note ? `${h.reasonLabel}. ${h.note}` : h.reasonLabel}</span>
+                          </td>
+                          <td>
+                            <span className="small nowrap">{h.requestedBy?.name ?? '—'}</span>
+                          </td>
+                          <td className="col-pin">
+                            <span className="xs muted">{reviewLabel(h)}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableWrap>
               </div>
-            ))}
-          </div>
+              <div className="ac-mlist only-phone">
+                {history.isPending && <SkeletonLines rows={3} />}
+                {history.data?.items.map((h) => (
+                  <div key={h.id} className="ac-mi">
+                    <div className="row between gap-2 nowrap top">
+                      <span className="small strong min-w-0">
+                        <span className="mono">{h.sku}</span> · {h.quantity} units
+                      </span>
+                      <span className="xs muted nowrap">{dateTime(h.createdAt)}</span>
+                    </div>
+                    <div className="xs sub">
+                      <BeforeAfter b={GROUP_LABEL[h.fromGroup] ?? h.fromGroup} a={GROUP_LABEL[h.toGroup] ?? h.toGroup} />
+                    </div>
+                    <div className="xs sub">
+                      {h.reasonLabel} · {h.requestedBy?.name ?? '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </Card>
         <div className="stack gap-5">
           <Card title="Stock rules" titleAs="h3">
@@ -435,7 +553,7 @@ export default function Inventory() {
               </li>
               <li>
                 <Icon name="user-check" className="ic-sm" />
-                <span className="small grow">Adjustments over 50 units need a second reviewer (Inventory Manager limit).</span>
+                <span className="small grow">{limit != null ? `Adjustments over ${limit} units need a second reviewer (your limit).` : 'Adjustments above your role’s limit need a second reviewer.'}</span>
               </li>
             </ul>
           </Card>
@@ -454,7 +572,7 @@ export default function Inventory() {
       </div>
 
       <Dialog
-        open={open}
+        open={open && canAdjust}
         onClose={close}
         title="Adjust stock"
         foot={
@@ -462,65 +580,68 @@ export default function Inventory() {
             <Button variant="ghost" onClick={close}>
               Cancel
             </Button>
-            <Button icon={needsReview ? 'send' : 'check'} onClick={submit}>
-              {needsReview ? 'Send for second review' : 'Apply adjustment'}
+            <Button icon={needsReview ? 'send' : 'check'} onClick={submit} disabled={adjust.isPending}>
+              {adjust.isPending ? 'Saving…' : needsReview ? 'Send for second review' : 'Apply adjustment'}
             </Button>
           </>
         }
       >
-        <Field label="SKU">
-          <Select id="adj-sku" options={rows.map((r) => ({ value: r.sku, label: `${r.sku} · ${r.name}` }))} value={draft.sku} onChange={(e) => set('sku', e.target.value)} />
+        {adjust.error && <Alert tone="danger">{errorMessage(adjust.error)}</Alert>}
+        <Field label="SKU" error={errors.id}>
+          <Select id="adj-sku" options={pickList.map((r) => ({ value: r.id, label: `${r.sku} · ${r.label}` }))} value={draft.id} onChange={(e) => set('id', e.target.value)} />
         </Field>
-        <div className="panel row gap-4 xs sub">
-          <span>
-            Available <b>{row.available}</b>
-          </span>
-          <span>
-            Reserved <b>{row.reserved}</b>
-          </span>
-          <span>
-            Damaged or held <b>{row.damaged}</b>
-          </span>
-          <span>
-            Bin <b className="mono">{row.bin}</b>
-          </span>
-        </div>
+        {row && (
+          <div className="panel row gap-4 xs sub">
+            <span>
+              Available <b>{row.quantities.available}</b>
+            </span>
+            <span>
+              Reserved <b>{row.quantities.reserved}</b>
+            </span>
+            <span>
+              Damaged or held <b>{row.quantities.damagedHeld}</b>
+            </span>
+            <span>
+              Bin <b className="mono">{row.binCode ?? '—'}</b>
+            </span>
+          </div>
+        )}
         <div className="ac-fgrid">
           <Field label="From group">
-            <Select id="adj-from" options={FROM_GROUPS} value={draft.from} onChange={(e) => set('from', e.target.value as Group)} />
+            <Select id="adj-from" options={FROM_GROUPS} value={draft.from} onChange={(e) => set('from', e.target.value as From)} />
           </Field>
-          <Field label="To group" error={errors.to}>
-            <Select id="adj-to" options={TO_GROUPS} value={draft.to} onChange={(e) => set('to', e.target.value as Target)} />
+          <Field label="To group" error={errors.to ?? fieldErrors.toGroup}>
+            <Select id="adj-to" options={TO_GROUPS} value={draft.to} onChange={(e) => set('to', e.target.value as To)} />
           </Field>
-          <Field label="Quantity" error={errors.qty}>
+          <Field label="Quantity" error={errors.qty ?? fieldErrors.quantity}>
             <TextInput id="adj-qty" type="number" min={1} value={draft.qty} error={!!errors.qty} suffix="units" onChange={(e) => set('qty', e.target.value)} />
           </Field>
-          <Field label="Reason (required)" error={errors.reason}>
+          <Field label="Reason (required)" error={errors.reason ?? fieldErrors.reasonCode}>
             <Select id="adj-reason" options={REASONS} value={draft.reason} onChange={(e) => set('reason', e.target.value)} aria-invalid={!!errors.reason || undefined} className={cx(errors.reason && 'is-error')} />
           </Field>
+          {draft.to === 'damaged_held' && (
+            <Field label="Review the hold on" error={errors.reviewDate ?? fieldErrors.reviewDate}>
+              <TextInput id="adj-review" type="date" value={draft.reviewDate} error={!!errors.reviewDate} onChange={(e) => set('reviewDate', e.target.value)} />
+            </Field>
+          )}
           <div className="full">
             <Field label="Note" optional>
               <Textarea id="adj-note" value={draft.note} onChange={(e) => set('note', e.target.value)} />
             </Field>
           </div>
         </div>
-        {qty > 0 && valid && (
+        {qty > 0 && valid && row && (
           <div className="well stack gap-2">
             <span className="small strong">After this change</span>
-            <SummaryRow k={draft.from} v={<BeforeAfter b={fromBefore} a={fromBefore - qty} />} />
-            {toGroup ? <SummaryRow k={toGroup} v={<BeforeAfter b={toBefore} a={toBefore + qty} />} /> : <SummaryRow k="Written off" v={`${qty} units`} />}
-            {draft.from === 'Available' && row.reserved > 0 && <span className="xs muted">{row.reserved} reserved units stay with their orders. Order Manager is notified to check them.</span>}
+            {draft.from === 'outside' ? <SummaryRow k="Found stock" v={`${qty} units`} /> : <SummaryRow k={GROUP_LABEL[draft.from]} v={<BeforeAfter b={fromBefore} a={fromBefore - qty} />} />}
+            {draft.to !== 'outside' ? <SummaryRow k={GROUP_LABEL[draft.to]} v={<BeforeAfter b={toBefore} a={toBefore + qty} />} /> : <SummaryRow k="Written off" v={`${qty} units`} />}
+            {draft.from === 'available' && row.quantities.reserved > 0 && <span className="xs muted">{row.quantities.reserved} reserved units stay with their orders. Order Manager is notified to check them.</span>}
           </div>
         )}
         {needsReview && (
-          <>
-            <Alert tone="warning" title="Second review needed">
-              {qty} units is above your {LIMIT}-unit adjustment limit. The change applies after {draft.reviewer}, approves it.
-            </Alert>
-            <Field label="Second reviewer">
-              <Select id="adj-rev" options={REVIEWERS} value={draft.reviewer} onChange={(e) => set('reviewer', e.target.value)} />
-            </Field>
-          </>
+          <Alert tone="warning" title="Second review needed">
+            {qty} units is above your {limit}-unit adjustment limit. The change applies after a second reviewer approves it.
+          </Alert>
         )}
       </Dialog>
     </OpsLayout>

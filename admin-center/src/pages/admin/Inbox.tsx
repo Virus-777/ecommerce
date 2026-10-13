@@ -1,111 +1,112 @@
 import { useState } from 'react';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
-import type { ScreenId } from '@marketly/web-shared/routes';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Badge, Button, Card, Checkbox, Deadline, EmptyState, Icon, IconButton, Select, TableWrap, Tabs, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Badge, Button, Card, Checkbox, Deadline, Dialog, EmptyState, Field, Icon, IconButton, KeyValue, Select, Switch, TableWrap, Tabs, Textarea, announce } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { LoadError, SkeletonLines, dateTime, deadlineLabel, deadlineTone, iconOf, time } from '@/app/parts';
+import { isStepUpCancel, useStepUp } from './data/step-up';
+import { ALL_AREAS, API_VIEW, APPROVAL_STATUS, byDay, needsMe, noticeHref, noticeTone, routeText, type ApprovalRequest, type InboxSummary, type Notice, type Tab } from './data/inbox';
 
-// Design: pages/admin/admin-inbox.html · view "needs-my-action" = tab filtered to the 3 notices routed to Riley.
+// Design: pages/admin/admin-inbox.html · view "needs-my-action" = the tab filtered to notices that need me.
 // "Mentions" links to "#" in the design; here it is a local tab that lists the mentions.
+// Data: GET notifications/inbox (view, area, unreadOnly, cursor), GET notifications/inbox/summary, POST inbox/{id}/read,
+// POST inbox/read-all, GET/PUT notifications/my-preferences (Notification settings dialog), approval notices open
+// the approval request (GET access/approval-requests/{id}, POST …/approve | …/reject; step-up code when asked).
+// The API has no "mark as unread", so read notices show no toggle.
 
-type Tab = '' | 'needs-my-action' | 'mentions';
+const LIMIT = 30;
 
-interface Notice {
-  id: string;
-  day: 'today' | 'week';
-  icon: IconName;
-  tone: 'danger' | 'warning' | 'info';
-  area: string;
-  needsMe?: boolean;
-  unread: boolean;
-  title: string;
-  body: string;
-  route: string;
-  due: string;
-  dueTone: 'ok' | 'warning' | 'danger';
-  action: string;
-  primary?: boolean;
-  to: string;
-}
-
-const NOTICES: Notice[] = [
-  { id: 'n1', day: 'today', icon: 'file-check', tone: 'warning', area: 'Sellers', needsMe: true, unread: true, title: '3 seller applications are past the 2-day review target', body: 'Oldest: Lumen & Loom Ceramics, waiting 3 days for a decision.', route: 'Routed to Seller Manager · Riley Chen (backup, Grace Kim away Oct 8–9)', due: 'Today 5:00 PM', dueTone: 'warning', action: 'Open applications', primary: true, to: href('admin/seller-application') },
-  { id: 'n2', day: 'today', icon: 'user-cog', tone: 'info', area: 'Staff and roles', needsMe: true, unread: true, title: 'Access request: Owen Price needs the payout second-reviewer role', body: 'Requested by Priya Nair for the Oct 9 run. Access does not set financial limits; Business Owner Morgan Hale sets those.', route: 'Routed to Platform Administrator · Riley Chen', due: 'Oct 9, 9:00 AM', dueTone: 'warning', action: 'Review request', primary: true, to: href('admin/staff') },
-  { id: 'n3', day: 'today', icon: 'life-buoy', tone: 'danger', area: 'Customer service', needsMe: true, unread: true, title: 'CS-104921 lost package is high priority and unassigned for over 1 hour', body: 'Escalation route: unassigned high-priority cases go to the on-duty administrator after 1 hour.', route: 'Routed to Customer Support Manager · Isabel Cruz → on-duty admin Riley Chen', due: 'Overdue 1 h', dueTone: 'danger', action: 'Open cases', primary: true, to: href('admin/cases') },
-  { id: 'n4', day: 'today', icon: 'truck', tone: 'danger', area: 'Shipping', unread: true, title: '9 items are past their dispatch deadline', body: '4 seller orders and 5 Official Store items. Oldest: Casa Verde Home, 16 days.', route: 'Routed to Shipping Manager · Theo Grant (lead)', due: 'Overdue', dueTone: 'danger', action: 'Open dispatch queue', to: href('ops/dispatch') },
-  { id: 'n5', day: 'today', icon: 'boxes', tone: 'warning', area: 'Inventory', unread: true, title: '12 Official Store SKUs are below reorder point', body: '2 will run out tomorrow at current sales: BRL-LAMP-W and KST-27UHD.', route: 'Routed to Inventory Manager · Ana Silva (lead)', due: 'Today 3:00 PM', dueTone: 'warning', action: 'Open stock', to: href('ops/inventory') },
-  { id: 'n6', day: 'today', icon: 'wallet', tone: 'warning', area: 'Finance', unread: false, title: 'Payout run of $78,420.55 needs a second Finance reviewer', body: 'First approval by Priya Nair at 8:52 AM. Release is Fri, Oct 9, 10:00 AM PT.', route: 'Routed to Finance Manager · Priya Nair (lead), Owen Price', due: 'Oct 9, 9:30 AM', dueTone: 'warning', action: 'Open payout run', to: href('admin/payouts') },
-  { id: 'n7', day: 'today', icon: 'circle-alert', tone: 'danger', area: 'Finance', unread: false, title: '2 payouts from the Oct 2 run failed', body: 'Rowan Leather Co. account closed. Moss & Mill name mismatch, corrected by seller.', route: 'Routed to Finance Manager · Priya Nair (lead)', due: 'Before Oct 9 run', dueTone: 'ok', action: 'Open payouts', to: href('admin/payouts') },
-  { id: 'n8', day: 'today', icon: 'scale', tone: 'danger', area: 'Finance', unread: false, title: 'Unusual financial activity: settlement for Oct 7 is $12.40 short', body: 'Also flagged: 6 new-account orders to one Reno address (TR-3402).', route: 'Routed to Finance Manager · Priya Nair · Trust and Risk · Sven Larsen', due: 'Today 12:00 PM', dueTone: 'warning', action: 'Open finance checks', to: href('ops/finance-checks') },
-  { id: 'n9', day: 'today', icon: 'arrow-up-right', tone: 'danger', area: 'Customer service', unread: false, title: 'CS-104915 escalated: damaged item return disputed by seller', body: 'Customer has waited 4 hours past the response target.', route: 'Routed to Returns Manager · Lena Park (lead)', due: 'Overdue 4 h', dueTone: 'danger', action: 'Open case', to: href('admin/cases') },
-  { id: 'n10', day: 'week', icon: 'megaphone', tone: 'info', area: 'Advertisements', unread: false, title: 'Fall Home Sale opening ad is waiting for Content approval', body: 'Advertising approved. Start date Oct 16.', route: 'Routed to Content Manager · Noor Aziz (lead)', due: 'Oct 12', dueTone: 'ok', action: 'Open campaign', to: href('admin/ad-campaign', 'approval') },
-  { id: 'n11', day: 'week', icon: 'shield-alert', tone: 'danger', area: 'Trust and risk', unread: false, title: 'Counterfeit report TR-3391 escalated, seller restricted', body: 'Gadget Grove listings in Home & Kitchen stopped. Open orders and returns continue.', route: 'Routed to Trust and Risk Manager · Sven Larsen (lead)', due: 'Appeal by Oct 14', dueTone: 'ok', action: 'Open report', to: href('admin/trust-report', '', { ref: 'TR-3391' }) },
-  { id: 'n12', day: 'week', icon: 'boxes', tone: 'warning', area: 'Inventory', unread: false, title: 'Receiving discrepancy on PUR-260930-0112: 24 units short', body: 'Supplier Halden Audio Supply. Stock was not added for missing units.', route: 'Routed to Purchasing Manager · Ken Watanabe (lead)', due: 'Resolved Oct 7', dueTone: 'ok', action: 'Open stock', to: href('ops/inventory') },
-];
-
-const DAYS: Array<{ key: Notice['day']; label: string }> = [
-  { key: 'today', label: 'Today · Thu, Oct 8' },
-  { key: 'week', label: 'Earlier this week' },
-];
-
-const AREAS = ['All areas', 'Shipping', 'Inventory', 'Finance', 'Customer service', 'Sellers', 'Advertisements', 'Trust and risk', 'Staff and roles'];
-
-interface Mention {
-  id: string;
-  who: string;
-  ref: string;
-  to: ScreenId;
-  quote: string;
-  time: string;
-}
-
-const MENTIONS: Mention[] = [
-  { id: 'm1', who: 'Isabel Cruz', ref: 'CS-104882', to: 'admin/case', quote: '"Riley, can you confirm the appeal deadline text in the decision notice?"', time: '9:12 AM' },
-  { id: 'm2', who: 'Priya Nair', ref: 'PO-RUN-261009', to: 'admin/payouts', quote: '"Owen needs the second-reviewer role before 9:30 AM tomorrow."', time: '8:55 AM' },
-];
-
-const ROUTING = [
-  { role: 'Seller Manager', name: 'Riley Chen', note: 'Backup until Oct 9', lead: 'Grace Kim · away', away: true },
-  { role: 'Shipping Manager', name: 'Theo Grant', lead: 'Theo Grant' },
-  { role: 'Inventory Manager', name: 'Ana Silva', lead: 'Ana Silva' },
-  { role: 'Finance Manager', name: 'Priya Nair', lead: 'Priya Nair' },
-  { role: 'Customer Support', name: 'Isabel Cruz', lead: 'Isabel Cruz' },
-];
-
-function MentionList({ items }: { items: Mention[] }) {
+function MentionList({ items }: { items: Notice[] }) {
+  if (!items.length) return <p className="small muted card-body">No one has mentioned you.</p>;
   return (
     <ul className="list pad">
-      {items.map((m) => (
-        <li key={m.id}>
-          <span className="grow stack gap-0">
-            <span className="small">
-              <b>{m.who}</b> in{' '}
-              <Link to={href(m.to)} className="link-inline">
-                {m.ref}
-              </Link>
+      {items.map((m) => {
+        const to = noticeHref(m);
+        return (
+          <li key={m.id}>
+            <span className="grow stack gap-0">
+              <span className="small">
+                <b>{m.title}</b>
+                {m.link.ref && (
+                  <>
+                    {' '}
+                    in{' '}
+                    {to ? (
+                      <Link to={to} className="link-inline">
+                        {m.link.ref}
+                      </Link>
+                    ) : (
+                      m.link.ref
+                    )}
+                  </>
+                )}
+              </span>
+              <span className="xs muted">
+                {m.body} · {time(m.createdAt)}
+              </span>
             </span>
-            <span className="xs muted">
-              {m.quote} · {m.time}
-            </span>
-          </span>
-        </li>
-      ))}
+          </li>
+        );
+      })}
     </ul>
   );
 }
 
 export default function Inbox() {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const { name, roles } = useStaffSession();
   const [view, setView] = useView<'needs-my-action'>();
   const [extraTab, setExtraTab] = useState<'' | 'mentions'>('');
   const tab: Tab = extraTab || view;
-  const [notices, setNotices] = useState(NOTICES);
-  const [area, setArea] = useState(AREAS[0]);
+  const [area, setArea] = useState(ALL_AREAS);
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [approvalId, setApprovalId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState('');
 
-  const needsMe = notices.filter((n) => n.needsMe);
-  const shown = notices.filter((n) => (tab !== 'needs-my-action' || n.needsMe) && (area === AREAS[0] || n.area === area) && (!unreadOnly || n.unread));
+  const summary = useQuery({ queryKey: ['notifications', 'summary', 'staff'], queryFn: () => call(api.GET('/api/admin/notifications/inbox/summary')) as Promise<InboxSummary> });
+  const params = { view: API_VIEW[tab], area: tab === 'mentions' || area === ALL_AREAS ? undefined : area, unreadOnly: tab !== 'mentions' && unreadOnly ? true : undefined };
+  const list = useInfiniteQuery({
+    queryKey: ['notifications', 'inbox', params],
+    queryFn: ({ pageParam }) => call(api.GET('/api/admin/notifications/inbox', { params: { query: { ...params, limit: LIMIT, cursor: pageParam } } })),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    placeholderData: keepPreviousData,
+  });
+  const mentions = useQuery({
+    queryKey: ['notifications', 'inbox', { view: 'mentions', side: true }],
+    queryFn: () => call(api.GET('/api/admin/notifications/inbox', { params: { query: { view: 'mentions', limit: 5 } } })),
+  });
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['notifications'] });
+  };
+  const markRead = useMutation({
+    mutationFn: (id: string) => call(api.POST('/api/admin/notifications/inbox/{id}/read', { params: { path: { id } } })),
+    onSuccess: refresh,
+    onError: (e) => setActionError(errorMessage(e)),
+  });
+  const markAll = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/notifications/inbox/read-all', { body: {} })),
+    onSuccess: () => {
+      refresh();
+      announce('All notices marked as read');
+    },
+    onError: (e) => setActionError(errorMessage(e)),
+  });
+
+  const notices = list.data?.pages.flatMap((p) => p.items as Notice[]) ?? [];
+  const s = summary.data;
+  const areas = [ALL_AREAS, ...Object.keys(s?.byArea ?? {}).sort(), ...(area !== ALL_AREAS && !(s?.byArea ?? {})[area] ? [area] : [])];
+  const mentionItems = (mentions.data?.items ?? []) as Notice[];
+  const unread = s?.unread ?? 0;
 
   const changeTab = (t: Tab) => {
     if (t === 'mentions') {
@@ -115,26 +116,25 @@ export default function Inbox() {
     setExtraTab('');
     setView(t);
   };
-  const toggleRead = (id: string) => {
-    setNotices((l) => l.map((n) => (n.id === id ? { ...n, unread: !n.unread } : n)));
-  };
-  const markAll = () => {
-    setNotices((l) => l.map((n) => ({ ...n, unread: false })));
-    announce('All notices marked as read');
-  };
+
+  const groups = byDay(notices);
 
   return (
     <AdminLayout active="inbox">
       <div className="page-head">
         <div className="t">
           <h1 className="h1">Notifications inbox</h1>
-          <p className="sub small">Riley Chen · Platform Administrator · backup Seller Manager on Oct 8–9</p>
+          <p className="sub small">
+            {name}
+            {roles.length ? ` · ${roles.join(', ')}` : ''}
+            {s?.coveringNote ? ` · ${s.coveringNote}` : ''}
+          </p>
         </div>
         <div className="actions">
-          <Button variant="ghost" size="sm" icon="check-check" onClick={markAll} disabled={!notices.some((n) => n.unread)}>
+          <Button variant="ghost" size="sm" icon="check-check" onClick={() => markAll.mutate()} disabled={!unread || markAll.isPending}>
             Mark all as read
           </Button>
-          <Button variant="secondary" size="sm" icon="settings" to={href('admin/notifications')}>
+          <Button variant="secondary" size="sm" icon="settings" onClick={() => setSettingsOpen(true)}>
             Notification settings
           </Button>
         </div>
@@ -144,72 +144,113 @@ export default function Inbox() {
         <div className="stack gap-3">
           <Tabs<Tab>
             items={[
-              { label: 'All', value: '', count: notices.length },
-              { label: 'Needs my action', value: 'needs-my-action', count: needsMe.length },
-              { label: 'Mentions', value: 'mentions', count: MENTIONS.length },
+              { label: 'All', value: '', count: unread || undefined },
+              { label: 'Needs my action', value: 'needs-my-action', count: s?.needsMyAction },
+              { label: 'Mentions', value: 'mentions', count: s?.mentions },
             ]}
             active={tab}
             onChange={changeTab}
           />
           {tab !== 'mentions' && (
             <div className="toolbar">
-              <Select id="in-area" aria-label="Area" options={AREAS} value={area} onChange={(e) => setArea(e.target.value)} />
+              <Select id="in-area" aria-label="Area" options={areas} value={area} onChange={(e) => setArea(e.target.value)} />
               <Checkbox id="in-unread" label="Unread only" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
             </div>
           )}
-          {tab === 'needs-my-action' && (
-            <Alert tone="brand" title={`${needsMe.length} notices need you today`}>
-              Two come from your own role. One reaches you as backup Seller Manager while Grace Kim is away.
+          {tab === 'needs-my-action' && s && s.needsMyAction > 0 && (
+            <Alert tone="brand" title={`${s.needsMyAction} notice${s.needsMyAction === 1 ? ' needs' : 's need'} you`}>
+              {s.coveringNote ?? 'They come from your roles, and from roles you cover as backup while a lead is away.'}
             </Alert>
           )}
-          {tab === 'mentions' ? (
+          {actionError && (
+            <Alert tone="danger" title="That didn’t work">
+              {actionError}
+            </Alert>
+          )}
+          {list.isError ? (
+            <LoadError error={list.error} onRetry={() => void list.refetch()} />
+          ) : tab === 'mentions' ? (
             <section className="card" aria-label="Mentions">
-              <MentionList items={MENTIONS} />
+              {list.isPending ? <SkeletonLines rows={3} /> : <MentionList items={notices} />}
             </section>
           ) : (
             <section className="card" aria-label="Notices">
-              {shown.length === 0 && (
-                <EmptyState icon="bell-off" title="No notices match">
-                  Change the area or turn off Unread only to see more notices.
-                </EmptyState>
-              )}
-              {DAYS.map((d) => {
-                const rows = shown.filter((n) => n.day === d.key);
-                if (!rows.length) return null;
-                return [
+              {list.isPending ? (
+                <SkeletonLines rows={5} />
+              ) : notices.length === 0 ? (
+                tab === 'needs-my-action' && area === ALL_AREAS && !unreadOnly ? (
+                  <EmptyState icon="circle-check" title="Nothing needs you">
+                    Notices that ask you to act show up here.
+                  </EmptyState>
+                ) : (
+                  <EmptyState icon="bell-off" title="No notices match">
+                    Change the area or turn off Unread only to see more notices.
+                  </EmptyState>
+                )
+              ) : (
+                groups.map((d) => [
                   <div className="ab-day" key={d.key}>
                     {d.label}
                   </div>,
-                  ...rows.map((n) => (
-                    <article key={n.id} className={cx('ab-ntc', n.unread && 'is-unread')}>
-                      <span className={`ic t-${n.tone}`}>
-                        <Icon name={n.icon} className="ic-sm" />
-                      </span>
-                      <div className="stack gap-1">
-                        <span className="row gap-2">
-                          <Badge tone="outline">{n.area}</Badge>
-                          {n.needsMe && <Badge tone="brand">Needs my action</Badge>}
-                          {n.unread && <span className="sr-only">Unread.</span>}
+                  ...d.rows.map((n) => {
+                    const tone = noticeTone(n.tone);
+                    const mine = needsMe(n);
+                    const isUnread = !n.readAt;
+                    const to = noticeHref(n);
+                    const approval = n.link.kind === 'approval' && !n.resolvedAt;
+                    const route = routeText(n);
+                    const label = n.link.label ?? 'Open';
+                    return (
+                      <article key={n.id} className={cx('ab-ntc', isUnread && 'is-unread')}>
+                        <span className={`ic t-${tone}`}>
+                          <Icon name={iconOf(n.icon)} className="ic-sm" />
                         </span>
-                        <span className="small strong">{n.title}</span>
-                        <span className="xs sub">{n.body}</span>
-                        <span className="meta">
-                          <span>
-                            <Icon name="route" className="ic-sm" /> {n.route}
+                        <div className="stack gap-1">
+                          <span className="row gap-2">
+                            <Badge tone="outline">{n.group}</Badge>
+                            {mine && <Badge tone="brand">Needs my action</Badge>}
+                            {n.resolvedAt && n.actionRequired && <Badge tone="success">Done</Badge>}
+                            {isUnread && <span className="sr-only">Unread.</span>}
                           </span>
-                          <Deadline tone={n.dueTone}>{n.due}</Deadline>
-                        </span>
-                      </div>
-                      <div className="acts">
-                        <Button variant={n.primary ? 'primary' : 'secondary'} size="sm" to={n.to}>
-                          {n.action}
-                        </Button>
-                        <IconButton icon={n.unread ? 'check' : 'mail'} label={n.unread ? 'Mark as read' : 'Mark as unread'} onClick={() => toggleRead(n.id)} />
-                      </div>
-                    </article>
-                  )),
-                ];
-              })}
+                          <span className="small strong">{n.title}</span>
+                          <span className="xs sub">{n.body}</span>
+                          <span className="meta">
+                            {route && (
+                              <span>
+                                <Icon name="route" className="ic-sm" /> {route}
+                              </span>
+                            )}
+                            {n.deadline?.dueAt && !n.resolvedAt ? (
+                              <Deadline tone={deadlineTone(n.deadline.state)}>{deadlineLabel(n.deadline.dueAt)}</Deadline>
+                            ) : (
+                              <span className="xs muted">{dateTime(n.createdAt)}</span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="acts">
+                          {approval ? (
+                            <Button variant={mine ? 'primary' : 'secondary'} size="sm" onClick={() => setApprovalId(n.link.id)}>
+                              {label}
+                            </Button>
+                          ) : to ? (
+                            <Button variant={mine ? 'primary' : 'secondary'} size="sm" to={to} onClick={() => isUnread && markRead.mutate(n.id)}>
+                              {label}
+                            </Button>
+                          ) : null}
+                          {isUnread && <IconButton icon="check" label="Mark as read" disabled={markRead.isPending && markRead.variables === n.id} onClick={() => markRead.mutate(n.id)} />}
+                        </div>
+                      </article>
+                    );
+                  }),
+                ])
+              )}
+              {list.hasNextPage && (
+                <div className="card-foot">
+                  <Button variant="ghost" size="sm" disabled={list.isFetchingNextPage} onClick={() => void list.fetchNextPage()}>
+                    {list.isFetchingNextPage ? 'Loading…' : 'Show older notices'}
+                  </Button>
+                </div>
+              )}
             </section>
           )}
           <p className="ab-note">
@@ -231,40 +272,235 @@ export default function Inbox() {
               </>
             }
           >
-            <TableWrap label="Routing today table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Role</th>
-                    <th scope="col">Receives now</th>
-                    <th scope="col">Lead</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ROUTING.map((r) => (
-                    <tr key={r.role}>
-                      <td>{r.role}</td>
-                      <td>
-                        <span className="row nowrap gap-2">
-                          <Avatar name={r.name} className="ab-av-sm" />
-                          <span className="ab-cell">
-                            <span className="strong">{r.name}</span>
-                            {r.note && <span className="xs muted">{r.note}</span>}
-                          </span>
-                        </span>
-                      </td>
-                      <td>{r.away ? <span className="xs t-warning-text strong">{r.lead}</span> : r.lead}</td>
+            {summary.isError ? (
+              <div className="card-body">
+                <LoadError error={summary.error} onRetry={() => void summary.refetch()} />
+              </div>
+            ) : !s ? (
+              <SkeletonLines rows={3} />
+            ) : (
+              <TableWrap label="Routing today table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Role</th>
+                      <th scope="col">Receives now</th>
+                      <th scope="col">Lead</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
+                  </thead>
+                  <tbody>
+                    {s.routingToday.map((r) => (
+                      <tr key={r.roleKey}>
+                        <td>{r.roleName}</td>
+                        <td>
+                          <span className="row nowrap gap-2">
+                            {r.receivingNow[0] && <Avatar name={r.receivingNow[0]} className="ab-av-sm" />}
+                            <span className="ab-cell">
+                              <span className="strong">{r.receivingNow.join(', ') || 'No one'}</span>
+                              {r.note && <span className="xs muted">{r.note}</span>}
+                            </span>
+                          </span>
+                        </td>
+                        <td>{r.leadAway ? <span className="xs t-warning-text strong">{r.lead ?? 'Not set'} · away</span> : (r.lead ?? 'Not set')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
           </Card>
-          <Card titleAs="h3" title="Mentions" sub={`${MENTIONS.length} unread`} flush>
-            <MentionList items={MENTIONS} />
+          <Card titleAs="h3" title="Mentions" sub={s ? `${s.mentions} unread` : undefined} flush>
+            {mentions.isPending ? <SkeletonLines rows={2} /> : <MentionList items={mentionItems} />}
           </Card>
         </div>
       </div>
+
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <ApprovalDialog id={approvalId} onClose={() => setApprovalId(null)} onDecided={refresh} />
     </AdminLayout>
+  );
+}
+
+/** My email preferences for staff notices (GET/PUT notifications/my-preferences). */
+function SettingsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const { can } = useStaffSession();
+  const prefs = useQuery({ queryKey: ['notifications', 'my-preferences'], queryFn: () => call(api.GET('/api/admin/notifications/my-preferences')), enabled: open });
+  const [draft, setDraft] = useState<{ emailByArea: Record<string, boolean>; emailForMentions: boolean; dailyDigest: boolean } | null>(null);
+  const current = draft ?? (prefs.data ? { emailByArea: prefs.data.emailByArea, emailForMentions: prefs.data.emailForMentions, dailyDigest: prefs.data.dailyDigest } : null);
+  const save = useMutation({
+    mutationFn: () => call(api.PUT('/api/admin/notifications/my-preferences', { body: current! })),
+    onSuccess: (data) => {
+      qc.setQueryData(['notifications', 'my-preferences'], data);
+      setDraft(null);
+      announce('Notification settings saved');
+      onClose();
+    },
+  });
+  const close = () => {
+    setDraft(null);
+    save.reset();
+    onClose();
+  };
+  return (
+    <Dialog
+      open={open}
+      onClose={close}
+      title="Notification settings"
+      foot={
+        <>
+          {can('notifications.topics.manage') && (
+            <Button variant="ghost" to={href('admin/notifications')}>
+              Topics and templates
+            </Button>
+          )}
+          <span className="grow" />
+          <Button variant="secondary" onClick={close}>
+            Cancel
+          </Button>
+          <Button onClick={() => save.mutate()} disabled={!current || !draft || save.isPending}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      {prefs.isError ? (
+        <LoadError error={prefs.error} onRetry={() => void prefs.refetch()} />
+      ) : !current ? (
+        <SkeletonLines rows={4} />
+      ) : (
+        <div className="stack gap-3">
+          <p className="small sub">Every notice shows here in the inbox. Choose which areas also send you an email.</p>
+          {save.isError && (
+            <Alert tone="danger" title="We couldn’t save your settings">
+              {errorMessage(save.error)}
+            </Alert>
+          )}
+          <div className="stack gap-2">
+            {Object.keys(current.emailByArea).map((k) => (
+              <Switch key={k} id={`pref-${k}`} label={`Email for ${k}`} checked={current.emailByArea[k]} onChange={(e) => setDraft({ ...current, emailByArea: { ...current.emailByArea, [k]: e.target.checked } })} />
+            ))}
+          </div>
+          <Switch id="pref-mentions" label="Email when someone mentions me" checked={current.emailForMentions} onChange={(e) => setDraft({ ...current, emailForMentions: e.target.checked })} />
+          <Switch id="pref-digest" label="Daily digest instead of single emails" checked={current.dailyDigest} onChange={(e) => setDraft({ ...current, dailyDigest: e.target.checked })} />
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+/** One approval request: what is asked, approvals so far, and approve / reject when I may decide. */
+function ApprovalDialog({ id, onClose, onDecided }: { id: string | null; onClose: () => void; onDecided: () => void }) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const stepUp = useStepUp();
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
+  const req = useQuery({
+    queryKey: ['access', 'approval-request', id],
+    queryFn: () => call(api.GET('/api/admin/access/approval-requests/{id}', { params: { path: { id: id! } } })) as Promise<ApprovalRequest>,
+    enabled: !!id,
+  });
+  const done = (r: ApprovalRequest, msg: string) => {
+    qc.setQueryData(['access', 'approval-request', id], r);
+    void qc.invalidateQueries({ queryKey: ['access', 'me'] });
+    void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+    void qc.invalidateQueries({ queryKey: ['reports', 'admin-dashboard'] });
+    onDecided();
+    announce(msg);
+    setRejecting(false);
+    setErr('');
+  };
+  const approve = useMutation({
+    mutationFn: () => stepUp.run((code) => call(api.POST('/api/admin/access/approval-requests/{id}/approve', { params: { path: { id: id! } }, body: { note: note.trim() || null, stepUpCode: code ?? null } }))),
+    onSuccess: (r) => done(r as ApprovalRequest, r.status === 'partially_approved' ? 'First approval recorded. A second reviewer must approve.' : 'Approved'),
+    onError: (e) => !isStepUpCancel(e) && setErr(errorMessage(e)),
+  });
+  const reject = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/access/approval-requests/{id}/reject', { params: { path: { id: id! } }, body: { reason: reason.trim() } })),
+    onSuccess: (r) => done(r as ApprovalRequest, 'Rejected'),
+    onError: (e) => setErr(errorMessage(e)),
+  });
+  const close = () => {
+    setRejecting(false);
+    setReason('');
+    setNote('');
+    setErr('');
+    onClose();
+  };
+  const r = req.data;
+  const open = r && (r.status === 'pending' || r.status === 'partially_approved');
+  const amount = r?.amount as { amount: number; currency: string } | null | undefined;
+  const approvals = (r?.approvals ?? []) as Array<{ step: number; decision: string; by: { name?: string | null }; at: string; note?: string | null }>;
+  return (
+    <Dialog
+      open={!!id}
+      onClose={close}
+      title={r ? `Approval ${r.ref}` : 'Approval request'}
+      foot={
+        r && open && r.canDecide ? (
+          rejecting ? (
+            <>
+              <Button variant="secondary" onClick={() => setRejecting(false)}>
+                Back
+              </Button>
+              <Button variant="danger" disabled={reason.trim().length < 3 || reject.isPending} onClick={() => reject.mutate()}>
+                Reject
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="secondary" onClick={() => setRejecting(true)}>
+                Reject
+              </Button>
+              <Button icon="check" disabled={approve.isPending} onClick={() => approve.mutate()}>
+                Approve
+              </Button>
+            </>
+          )
+        ) : (
+          <Button variant="secondary" onClick={close}>
+            Close
+          </Button>
+        )
+      }
+    >
+      {req.isError ? (
+        <LoadError error={req.error} onRetry={() => void req.refetch()} />
+      ) : !r ? (
+        <SkeletonLines rows={4} />
+      ) : (
+        <div className="stack gap-3">
+          <Alert tone={open ? 'warning' : r.status === 'approved' ? 'success' : 'info'} title={APPROVAL_STATUS[r.status]}>
+            {r.action.label}
+            {r.requiredApprovals > 1 ? ` · ${r.requiredApprovals} approvals needed` : ''}
+          </Alert>
+          <KeyValue
+            pairs={[
+              ['Request', r.summary],
+              ['Requested by', `${(r.requestedBy as { name?: string | null }).name ?? 'A colleague'} · ${dateTime(r.createdAt)}`],
+              ['Reason', r.reason],
+              ...(amount ? ([['Amount', formatMoney(amount)]] as Array<[string, string]>) : []),
+              ...approvals.map((a) => [`Step ${a.step}`, `${a.decision === 'approved' ? 'Approved' : a.decision} by ${a.by.name ?? 'staff'} · ${dateTime(a.at)}${a.note ? ` · ${a.note}` : ''}`] as [string, string]),
+            ]}
+          />
+          {open && !r.canDecide && <p className="small muted">{r.cannotDecideReason ?? 'You can’t decide this request.'}</p>}
+          {err && <Alert tone="danger" title={err} />}
+          {open && r.canDecide && (rejecting ? (
+            <Field label="Why are you rejecting it?" hint="The requester sees this.">
+              <Textarea id="ap-reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
+            </Field>
+          ) : (
+            <Field label="Note" optional>
+              <Textarea id="ap-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
+            </Field>
+          ))}
+        </div>
+      )}
+      {stepUp.dialog}
+    </Dialog>
   );
 }

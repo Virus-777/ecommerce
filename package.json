@@ -17,7 +17,8 @@
     "gen:icons": "npm run gen:icons -w @marketly/web-shared",
     "design:extract": "npm run design:extract -w @marketly/web-shared --",
     "gen:api": "npm run gen:api -w @marketly/web-shared --",
-    "seed": "npm run seed -w @marketly/web-shared --"
+    "seed": "npm run seed -w @marketly/web-shared --",
+    "staff-code": "npm run -s staff-code -w @marketly/web-shared --"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

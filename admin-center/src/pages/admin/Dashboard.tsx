@@ -1,176 +1,175 @@
 import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
+import ADMIN_DASHBOARD from '@marketly/web-shared/api/graphql/admin/AdminDashboard.graphql?raw';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { sales14 } from '@marketly/web-shared/data/fixtures';
-import type { ScreenId } from '@marketly/web-shared/routes';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Badge, Button, Card, Deadline, Icon, Legend, LineChart, SegmentedControl, SplitBar, Stat, StatusBadge, TableWrap, announce } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Badge, Button, Card, Deadline, EmptyState, Icon, Legend, LineChart, SegmentedControl, SplitBar, Stat, StatusBadge, TableWrap, announce } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { LoadError, SkeletonLines, deadlineLabel, deadlineTone, longDate, screenHref, time, weekdayDate } from '@/app/parts';
+import {
+  PERIOD, RANGES, compactMoney, deltaText, exceptionOf, greeting, nextRun,
+  type AdminDashboardData, type AttentionRow, type PayoutRun, type Range, type WorkItem, type WorkSummary,
+} from './data/dashboard';
 
 // Design: pages/admin/admin-dashboard.html (single view).
+// Data: GraphQL AdminDashboard (KPIs, sales split, ads, approvals waiting for me), GET workqueues/summary
+// (needs-attention tiles, overdue dispatch, team on shift), GET finance/payout-runs (next run),
+// POST shipping/exceptions/{id}/notify-seller (Remind), POST reports/exports (Export).
 
-type Range = 'today' | '7d' | '30d';
-
-interface Kpi {
-  label: string;
-  value: string;
-  delta?: string;
-  dir?: 'up' | 'down';
-  note?: string;
-}
-
-const RANGES: Array<{ value: Range; label: string }> = [
-  { value: 'today', label: 'Today' },
-  { value: '7d', label: '7 days' },
-  { value: '30d', label: '30 days' },
-];
-
-const KPIS: Record<Range, Kpi[]> = {
-  today: [
-    { label: 'Gross sales', value: '$36.7k', delta: '4.1%', dir: 'up', note: 'vs same day last week' },
-    { label: 'Orders', value: '512', delta: '3.0%', dir: 'up', note: 'avg $71.70' },
-    { label: 'Marketplace fee income', value: '$1.5k', note: 'on $16.1k seller sales' },
-    { label: 'Refunds', value: '$0.8k', delta: '0.2 pts', dir: 'down', note: '2.2% of gross' },
-  ],
-  '7d': [
-    { label: 'Gross sales', value: '$266.6k', delta: '8.2%', dir: 'up', note: 'vs prior 7 days' },
-    { label: 'Orders', value: '3,418', delta: '5.6%', dir: 'up', note: 'avg $71.20' },
-    { label: 'Marketplace fee income', value: '$10.9k', note: 'on $113.9k seller sales' },
-    { label: 'Refunds', value: '$6.1k', delta: '0.4 pts', dir: 'down', note: '2.1% of gross' },
-  ],
-  '30d': [
-    { label: 'Gross sales', value: '$1.08M', delta: '6.4%', dir: 'up', note: 'vs prior 30 days' },
-    { label: 'Orders', value: '14,206', delta: '4.9%', dir: 'up', note: 'avg $70.90' },
-    { label: 'Marketplace fee income', value: '$44.2k', note: 'on $462.5k seller sales' },
-    { label: 'Refunds', value: '$24.8k', delta: '0.3 pts', dir: 'down', note: '2.3% of gross' },
-  ],
-};
-
-interface DispatchRow {
-  ref: string;
-  seller: string;
-  item: string;
-  deadline: string;
-  urgent: boolean;
-  owner: string;
-  action: 'Remind' | 'Escalate' | 'View';
-}
-
-const DISPATCH: DispatchRow[] = [
-  { ref: 'MK-261007-10433', seller: 'Northwind Audio', item: 'Halden Pocket Speaker', deadline: 'Overdue 3 h', urgent: true, owner: 'Seller', action: 'Remind' },
-  { ref: 'MK-260914-48213', seller: 'Casa Verde Home', item: 'Linen Duvet Cover, Queen', deadline: 'Overdue 16 d', urgent: true, owner: 'Grace Kim', action: 'Escalate' },
-  { ref: 'MK-261007-10120', seller: 'Marketly Official', item: 'Kestrel 27" Monitor', deadline: 'Due in 1 h', urgent: false, owner: 'Warehouse', action: 'View' },
-  { ref: 'MK-261006-09977', seller: 'Gadget Grove', item: 'S2 Robot Vacuum', deadline: 'Overdue 1 d', urgent: true, owner: 'Seller', action: 'Remind' },
-];
-
-const ADS = [
-  { name: 'Home Week opening ad', meta: 'Full-screen · once per session · ends Oct 19', status: 'Live' },
-  { name: 'Halden Aurora banner', meta: 'Home banner · sponsored · $1,240 of $3,000', status: 'Live' },
-  { name: 'Free shipping pop-up', meta: 'Pop-up · new visitors · starts Oct 10', status: 'Scheduled' },
-];
-
-const PAYOUT_ROWS: Array<{ label: string; n: number; tone?: 'warning' | 'danger' }> = [
-  { label: 'Ready to pay', n: 38 },
-  { label: 'Held for review', n: 3, tone: 'warning' },
-  { label: 'Failed last run', n: 2, tone: 'danger' },
-];
-
-interface Queue {
-  n: number;
-  label: string;
-  sub: string;
-  tone?: 'danger' | 'warning';
-  to: ScreenId;
-}
-
-const QUEUES: Queue[] = [
-  { n: 9, label: 'Overdue dispatch', sub: 'Order & Shipping', tone: 'danger', to: 'ops/dispatch' },
-  { n: 5, label: 'Cases past response target', sub: 'Customer Support', tone: 'danger', to: 'admin/cases' },
-  { n: 2, label: 'Failed payouts', sub: 'Finance', tone: 'danger', to: 'admin/payouts' },
-  { n: 3, label: 'Payment mismatches', sub: 'Daily finance check', tone: 'warning', to: 'ops/finance-checks' },
-  { n: 12, label: 'Low stock, Official Store', sub: 'Inventory', tone: 'warning', to: 'ops/inventory' },
-  { n: 23, label: 'Products awaiting review', sub: 'Catalog · oldest 2 days', to: 'admin/product-review' },
-  { n: 7, label: 'Seller applications', sub: 'Seller Manager', to: 'admin/seller-application' },
-  { n: 4, label: 'Trust and risk reports', sub: 'Counterfeit, fake reviews', to: 'admin/trust' },
-  { n: 14, label: 'Returns to decide', sub: 'Returns Manager', to: 'admin/returns' },
-];
-
-const TEAM = [
-  { name: 'Theo Grant', team: 'Orders & Shipping', role: 'Lead' },
-  { name: 'Isabel Cruz', team: 'Customer Support', role: 'Lead' },
-  { name: 'Priya Nair', team: 'Finance', role: 'Lead' },
-  { name: 'Ana Silva', team: 'Inventory & Warehouse', role: 'Backup for Theo' },
-];
-
-const DONE_LABEL: Record<DispatchRow['action'], string> = { Remind: 'Reminded', Escalate: 'Escalated', View: 'View' };
+const TEAM_STATUS: Record<string, string> = { away: 'Away', off: 'Off shift' };
 
 export default function Dashboard() {
+  const { api, gql } = useApi();
+  const qc = useQueryClient();
+  const { name, can } = useStaffSession();
   const [range, setRange] = useState<Range>('7d');
   const [done, setDone] = useState<Record<string, boolean>>({});
+  const [actionError, setActionError] = useState('');
 
-  const act = (r: DispatchRow) => {
-    setDone((d) => ({ ...d, [r.ref]: true }));
-    announce(r.action === 'Remind' ? `Reminder sent to ${r.seller} for ${r.ref}` : `${r.ref} escalated to Orders & Shipping`);
-  };
+  const dash = useQuery({
+    queryKey: ['reports', 'admin-dashboard', range],
+    queryFn: async () => (await gql<AdminDashboardData>(ADMIN_DASHBOARD, { period: PERIOD[range], overdueLimit: 5, adListLimit: 3 }, 'AdminDashboard')).data,
+    placeholderData: (prev) => prev,
+  });
+  const work = useQuery({ queryKey: ['workqueues', 'summary'], queryFn: () => call(api.GET('/api/admin/workqueues/summary')) as Promise<WorkSummary>, refetchInterval: 60_000 });
+  const runs = useQuery({
+    queryKey: ['finance', 'payout-runs', 'next'],
+    queryFn: () => call(api.GET('/api/admin/finance/payout-runs', { params: { query: { limit: 20 } } })),
+    enabled: can('finance.ledger.view'),
+    retry: false,
+  });
+
+  const remind = useMutation({
+    mutationFn: async (w: WorkItem) => {
+      const id = exceptionOf(w);
+      if (!id) throw new Error('No delivery exception');
+      await call(api.POST('/api/admin/shipping/exceptions/{id}/notify-seller', { params: { path: { id } }, body: {} }));
+      return w;
+    },
+    onSuccess: (w) => {
+      setDone((d) => ({ ...d, [w.id]: true }));
+      setActionError('');
+      announce(`Reminder sent to ${w.sellerName ?? 'the seller'} for ${w.subject?.ref ?? w.ref}`);
+      void qc.invalidateQueries({ queryKey: ['workqueues'] });
+    },
+    onError: (e) => setActionError(errorMessage(e)),
+  });
+
+  const exportReport = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/reports/exports', { body: { reportKey: 'commerce.sales', format: 'csv' } })),
+    onSuccess: (x) => announce(`Export ${x.ref} started. The file downloads from Reports when it is ready.`),
+    onError: (e) => announce(errorMessage(e)),
+  });
+
+  const d = dash.data?.adminDashboard ?? null;
+  const ads = dash.data?.adDashboard ?? null;
+  const approvals = dash.data?.myApprovalSummary ?? null;
+  const w = work.data;
+  const attention = (w?.needsAttention ?? []) as AttentionRow[];
+  const dispatch = w?.overdueDispatch ?? [];
+  const team = w?.team ?? [];
+  const run: PayoutRun | undefined = runs.data ? nextRun(runs.data.items) : undefined;
+  const official = d?.series.find((s) => s.key === 'official');
+  const sellers = d?.series.find((s) => s.key !== 'official');
+  const splitOfficial = d?.split.find((s) => s.key === 'official');
+  const splitSellers = d?.split.find((s) => s.key !== 'official');
+  const firstName = name.split(' ')[0];
+  const adList = ads ? [...ads.live, ...ads.upcomingStarts].slice(0, 3) : [];
+  const canRemind = can('shipping.exceptions.manage');
 
   return (
     <AdminLayout active="dashboard">
       <div className="page-head">
         <div className="t">
-          <h1 className="h1">Good morning, Riley</h1>
-          <p className="sub small">Thursday, Oct 8, 2026 · figures through 9:40 AM PT · gross sales by order placement date</p>
+          <h1 className="h1">
+            {greeting()}
+            {firstName ? `, ${firstName}` : ''}
+          </h1>
+          <p className="sub small">{d ? `${longDate(d.asOf)} · figures through ${time(d.asOf)} PT · ${d.basisLabel.charAt(0).toLowerCase()}${d.basisLabel.slice(1)}` : <span className="sk sk-line" style={{ display: 'inline-block', width: 280 }} />}</p>
         </div>
         <div className="actions">
           <SegmentedControl items={RANGES} active={range} onChange={setRange} label="Date range" />
-          <Button variant="secondary" size="sm" icon="download" onClick={() => announce('Export started. The file downloads when it is ready.')}>
-            Export
-          </Button>
+          {can('reports.exports.create') ? (
+            <Button variant="secondary" size="sm" icon="download" disabled={exportReport.isPending} onClick={() => exportReport.mutate()}>
+              Export
+            </Button>
+          ) : null}
         </div>
       </div>
 
+      {dash.isError && <LoadError error={dash.error} onRetry={() => void dash.refetch()} title="We couldn’t load the figures" />}
+
       <div className="ad-kpis">
-        {KPIS[range].map((k) => (
-          <div className="card pad" key={k.label}>
-            <Stat label={k.label} value={k.value} delta={k.delta} dir={k.dir} good={k.dir ? true : undefined} note={k.note} />
-          </div>
-        ))}
+        {d
+          ? d.kpis.map((k) => {
+              const dt = deltaText(k.delta);
+              return (
+                <div className="card pad" key={k.metricKey}>
+                  <Stat label={k.label} value={k.display} delta={dt.text} dir={dt.dir} good={dt.good} note={k.note ?? undefined} />
+                </div>
+              );
+            })
+          : Array.from({ length: 4 }, (_, i) => (
+              <div className="card pad" key={i} aria-hidden="true">
+                <span className="sk sk-line short" />
+                <span className="sk sk-line" />
+              </div>
+            ))}
       </div>
 
       <div className="ad-main">
         <div className="stack gap-5">
           <Card
             title="Sales split"
-            sub="Last 14 days · USD"
+            sub={`Last ${official?.points.length ?? 14} days · ${d?.currency ?? 'USD'}`}
             actions={
-              <Link className="small strong" to={href('admin/report', '', { key: 'sales' })}>
+              <Link className="small strong" to={href('admin/report', '', { key: 'commerce.sales' })}>
                 Open report
               </Link>
             }
           >
-            <Legend items={['Official Store', 'Marketplace sellers']} />
-            <LineChart
-              labels={sales14.labels}
-              series={[
-                { name: 'Official', data: sales14.official },
-                { name: 'Sellers', data: sales14.sellers },
-              ]}
-              height={230}
-              fmt={(v) => `$${Math.round(v)}k`}
-              label="Daily sales, Official Store vs marketplace sellers"
-            />
-            <div className="stack gap-2">
-              <div className="row between xs sub">
-                <span>Official Store 57% · $152.7k</span>
-                <span>Sellers 43% · $113.9k</span>
-              </div>
-              <SplitBar a={57} b={43} />
-            </div>
+            {official && sellers ? (
+              <>
+                <Legend items={[official.label, sellers.label]} />
+                <LineChart
+                  labels={official.points.map((p) => p.label)}
+                  series={[
+                    { name: 'Official', data: official.points.map((p) => p.value) },
+                    { name: 'Sellers', data: sellers.points.map((p) => p.value) },
+                  ]}
+                  height={230}
+                  fmt={compactMoney}
+                  label="Daily sales, Official Store vs marketplace sellers"
+                />
+                {splitOfficial && splitSellers && (
+                  <div className="stack gap-2">
+                    <div className="row between xs sub">
+                      <span>
+                        Official Store {Math.round(splitOfficial.sharePct)}% · {formatMoney(splitOfficial.amount)}
+                      </span>
+                      <span>
+                        Sellers {Math.round(splitSellers.sharePct)}% · {formatMoney(splitSellers.amount)}
+                      </span>
+                    </div>
+                    <SplitBar a={Math.round(splitOfficial.sharePct)} b={100 - Math.round(splitOfficial.sharePct)} />
+                  </div>
+                )}
+              </>
+            ) : dash.isPending ? (
+              <div className="sk sk-card" style={{ height: 230 }} aria-hidden="true" />
+            ) : (
+              <p className="small muted">Sales figures are not available right now.</p>
+            )}
           </Card>
 
           <Card
             titleAs="h3"
             title="Overdue and at-risk dispatch"
-            sub="9 items past their dispatch deadline"
+            sub={w ? (dispatch.length ? `${dispatch.length} item${dispatch.length === 1 ? '' : 's'} past or near their dispatch deadline` : 'Nothing past its dispatch deadline') : undefined}
             actions={
               <Button variant="secondary" size="sm" to={href('ops/dispatch')}>
                 Open dispatch queue
@@ -178,67 +177,105 @@ export default function Dashboard() {
             }
             flush
           >
-            <TableWrap label="Overdue and at-risk dispatch table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Order</th>
-                    <th scope="col">Seller</th>
-                    <th scope="col">Item</th>
-                    <th scope="col">Deadline</th>
-                    <th scope="col">Owner</th>
-                    <th className="col-pin" scope="col">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {DISPATCH.map((r) => (
-                    <tr key={r.ref} className={r.urgent ? 'is-flagged' : 'is-warn'}>
-                      <td className="cell-id">
-                        <span className="sr-only">{r.urgent ? 'Urgent: ' : 'At risk: '}</span>
-                        <Link className="mono nowrap" to={href('admin/order', '', { ref: r.ref })} title={r.ref}>
-                          {r.ref}
-                        </Link>
-                      </td>
-                      <td className="cell-name">
-                        <span className="ellip" title={r.seller}>{r.seller}</span>
-                      </td>
-                      <td className="cell-name">
-                        <span className="ellip" title={r.item}>{r.item}</span>
-                      </td>
-                      <td>
-                        <Deadline tone={r.urgent ? 'danger' : 'warning'}>{r.deadline}</Deadline>
-                      </td>
-                      <td className="cell-name">
-                        <span className="ellip" title={r.owner}>{r.owner}</span>
-                      </td>
-                      <td className="col-pin">
-                        {r.action === 'View' ? (
-                          <Link className="btn btn-ghost btn-sm" to={href('admin/order', '', { ref: r.ref })}>
-                            <span>View</span>
-                            <span className="sr-only"> {r.ref}</span>
-                          </Link>
-                        ) : (
-                          <button type="button" className="btn btn-ghost btn-sm" disabled={done[r.ref]} onClick={() => act(r)}>
-                            <span>{done[r.ref] ? DONE_LABEL[r.action] : r.action}</span>
-                            <span className="sr-only"> {r.ref}</span>
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
-            <UrgencyLegend kind="edge" />
+            {work.isError ? (
+              <div className="card-body">
+                <LoadError error={work.error} onRetry={() => void work.refetch()} />
+              </div>
+            ) : !w ? (
+              <SkeletonLines rows={4} />
+            ) : dispatch.length === 0 ? (
+              <div className="card-body">
+                <EmptyState icon="package-check" title="No overdue dispatch">
+                  Every order is within its dispatch deadline.
+                </EmptyState>
+              </div>
+            ) : (
+              <>
+                {actionError && (
+                  <div className="card-body">
+                    <Alert tone="danger" title="That didn’t work">
+                      {actionError}
+                    </Alert>
+                  </div>
+                )}
+                <TableWrap label="Overdue and at-risk dispatch table">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Order</th>
+                        <th scope="col">Seller</th>
+                        <th scope="col">Item</th>
+                        <th scope="col">Deadline</th>
+                        <th scope="col">Owner</th>
+                        <th className="col-pin" scope="col">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dispatch.map((r) => {
+                        const ref = r.subject?.ref ?? r.ref;
+                        const urgent = deadlineTone(r.deadline?.state) === 'danger';
+                        const orderTo = r.subject?.ref ? href('admin/order', '', { ref: r.subject.ref }) : undefined;
+                        const owner = (r.assignee as { name?: string } | null)?.name ?? (r.waitingOn === 'seller' ? 'Seller' : r.ownerRole);
+                        const exc = exceptionOf(r);
+                        return (
+                          <tr key={r.id} className={urgent ? 'is-flagged' : 'is-warn'}>
+                            <td className="cell-id">
+                              <span className="sr-only">{urgent ? 'Urgent: ' : 'At risk: '}</span>
+                              {orderTo ? (
+                                <Link className="mono nowrap" to={orderTo} title={ref}>
+                                  {ref}
+                                </Link>
+                              ) : (
+                                <span className="mono nowrap">{ref}</span>
+                              )}
+                            </td>
+                            <td className="cell-name">
+                              <span className="ellip" title={r.sellerName ?? ''}>
+                                {r.sellerName ?? 'Official Store'}
+                              </span>
+                            </td>
+                            <td className="cell-name">
+                              <span className="ellip" title={r.summary ?? r.title}>
+                                {r.summary ?? r.title}
+                              </span>
+                            </td>
+                            <td>{r.deadline?.dueAt && <Deadline tone={urgent ? 'danger' : 'warning'}>{deadlineLabel(r.deadline.dueAt)}</Deadline>}</td>
+                            <td className="cell-name">
+                              <span className="ellip" title={owner}>
+                                {owner}
+                              </span>
+                            </td>
+                            <td className="col-pin">
+                              {exc && canRemind ? (
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={done[r.id] || (remind.isPending && remind.variables?.id === r.id)} onClick={() => remind.mutate(r)}>
+                                  <span>{done[r.id] ? 'Reminded' : 'Remind'}</span>
+                                  <span className="sr-only"> {ref}</span>
+                                </button>
+                              ) : orderTo ? (
+                                <Link className="btn btn-ghost btn-sm" to={orderTo}>
+                                  <span>View</span>
+                                  <span className="sr-only"> {ref}</span>
+                                </Link>
+                              ) : null}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </TableWrap>
+                <UrgencyLegend kind="edge" />
+              </>
+            )}
           </Card>
 
           <div className="grid lg2 gap-5">
             <Card
               titleAs="h3"
               title="Advertising today"
-              sub="3 live · 2 starting this week"
+              sub={ads ? `${ads.liveNow.total} live · ${ads.startingIn7Days} starting this week` : undefined}
               actions={
                 <Link className="small strong" to={href('admin/ads')}>
                   Manage
@@ -246,89 +283,173 @@ export default function Dashboard() {
               }
               flush
             >
-              <ul className="list pad">
-                {ADS.map((a) => (
-                  <li key={a.name}>
-                    <span className="grow stack gap-0">
-                      <span className="small strong">{a.name}</span>
-                      <span className="xs muted">{a.meta}</span>
-                    </span>
-                    <StatusBadge status={a.status} />
-                  </li>
-                ))}
-              </ul>
-            </Card>
-            <Card
-              titleAs="h3"
-              title="Next payout run"
-              sub="Friday, Oct 9 · 10:00 AM PT"
-              actions={
-                <Link className="small strong" to={href('admin/payouts')}>
-                  Review
-                </Link>
-              }
-            >
-              <div className="row between base">
-                <span className="h2 num">$78,420.55</span>
-                <span className="small muted">41 sellers</span>
-              </div>
-              <ul className="list">
-                {PAYOUT_ROWS.map((p) => (
-                  <li key={p.label}>
-                    <span className="grow small">{p.label}</span>
-                    {p.tone ? (
-                      <span className="row gap-2">
-                        <Badge tone={p.tone}>{p.n}</Badge>
+              {!ads ? (
+                dash.isPending ? (
+                  <SkeletonLines rows={3} />
+                ) : (
+                  <div className="card-body">
+                    <p className="small muted">Advertising figures are not available right now.</p>
+                  </div>
+                )
+              ) : adList.length === 0 ? (
+                <div className="card-body">
+                  <p className="small muted">No ads are live or starting this week.</p>
+                </div>
+              ) : (
+                <ul className="list pad">
+                  {adList.map((a) => (
+                    <li key={a.id}>
+                      <span className="grow stack gap-0">
+                        <span className="small strong">{a.name}</span>
+                        <span className="xs muted">{[a.placementName, a.deliveryLabel, a.budgetLabel ?? a.periodLabel].filter(Boolean).join(' · ')}</span>
                       </span>
-                    ) : (
-                      <span className="small strong num">{p.n}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <Alert tone="warning" title="Second review needed">
-                Runs over $50,000 need approval from a second Finance reviewer.
-              </Alert>
+                      <StatusBadge status={a.status.charAt(0) + a.status.slice(1).toLowerCase()} />
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Card>
+            <PayoutCard run={run} loading={runs.isPending && runs.fetchStatus !== 'idle'} error={runs.isError ? runs.error : null} onRetry={() => void runs.refetch()} hidden={runs.fetchStatus === 'idle' && !runs.data} />
           </div>
         </div>
 
         <div className="stack gap-5">
           <Card titleAs="h3" title="Needs attention" sub="Queues past or near their targets">
-            <div className="ad-queues">
-              {QUEUES.map((q) => (
-                <Link key={q.label} className={cx('queue-tile', q.tone && `t-${q.tone}`)} to={href(q.to)}>
-                  <span className="qn">
-                    {q.n}
-                    {q.tone && <span className="sr-only">{q.tone === 'danger' ? ' (urgent)' : ' (at risk)'}</span>}
-                  </span>
-                  <span className="stack gap-0 grow">
-                    <span className="small strong">{q.label}</span>
-                    <span className="xs muted">{q.sub}</span>
-                  </span>
-                  <Icon name="chevron-right" className="ic-sm" />
-                </Link>
-              ))}
-            </div>
+            {work.isError ? (
+              <LoadError error={work.error} onRetry={() => void work.refetch()} />
+            ) : !w ? (
+              <SkeletonLines rows={5} />
+            ) : attention.length === 0 && !approvals?.toDecide ? (
+              <EmptyState icon="circle-check" title="All clear">
+                No queue is past or near its target.
+              </EmptyState>
+            ) : (
+              <div className="ad-queues">
+                {approvals && approvals.toDecide > 0 && (
+                  <Link className={cx('queue-tile', approvals.overdue ? 't-danger' : approvals.dueSoon ? 't-warning' : undefined)} to={href('admin/inbox', 'needs-my-action')}>
+                    <span className="qn">
+                      {approvals.toDecide}
+                      {(approvals.overdue > 0 || approvals.dueSoon > 0) && <span className="sr-only">{approvals.overdue ? ' (urgent)' : ' (at risk)'}</span>}
+                    </span>
+                    <span className="stack gap-0 grow">
+                      <span className="small strong">Approvals waiting for you</span>
+                      <span className="xs muted">{approvals.overdue ? `${approvals.overdue} overdue` : approvals.dueSoon ? `${approvals.dueSoon} due soon` : 'Two-person approvals'}</span>
+                    </span>
+                    <Icon name="chevron-right" className="ic-sm" />
+                  </Link>
+                )}
+                {attention.map((q) => {
+                  const tone = q.tone === 'neutral' ? undefined : q.tone;
+                  const to = screenHref(q.screen, q.screenFilter) ?? screenHref(q.screen) ?? href('admin/dashboard');
+                  return (
+                    <Link key={q.queueKey} className={cx('queue-tile', tone && `t-${tone}`)} to={to}>
+                      <span className="qn">
+                        {q.count}
+                        {tone && <span className="sr-only">{tone === 'danger' ? ' (urgent)' : ' (at risk)'}</span>}
+                      </span>
+                      <span className="stack gap-0 grow">
+                        <span className="small strong">{q.name}</span>
+                        <span className="xs muted">{[q.areaLabel, q.oldestLabel].filter(Boolean).join(' · ')}</span>
+                      </span>
+                      <Icon name="chevron-right" className="ic-sm" />
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
             <UrgencyLegend kind="number" />
           </Card>
           <Card titleAs="h3" title="Team on shift" sub="Leads and backups" flush>
-            <ul className="list pad">
-              {TEAM.map((t) => (
-                <li key={t.name}>
-                  <Avatar name={t.name} />
-                  <span className="grow stack gap-0">
-                    <span className="small strong">{t.name}</span>
-                    <span className="xs muted">{t.team}</span>
-                  </span>
-                  <span className="xs muted">{t.role}</span>
-                </li>
-              ))}
-            </ul>
+            {!w ? (
+              work.isError ? null : <SkeletonLines rows={4} />
+            ) : team.length === 0 ? (
+              <div className="card-body">
+                <p className="small muted">No leads or backups are set for the work queues yet.</p>
+              </div>
+            ) : (
+              <ul className="list pad">
+                {team.map((t) => {
+                  const covering = (t.coveringFor as { name?: string } | null)?.name;
+                  return (
+                    <li key={`${t.staff.staffId}-${t.area}`}>
+                      <Avatar name={t.staff.name} />
+                      <span className="grow stack gap-0">
+                        <span className="small strong">{t.staff.name}</span>
+                        <span className="xs muted">{t.area}</span>
+                      </span>
+                      <span className="xs muted">{TEAM_STATUS[t.status] ?? (covering ? `Backup for ${covering.split(' ')[0]}` : t.role === 'lead' ? 'Lead' : 'Backup')}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </Card>
         </div>
       </div>
     </AdminLayout>
+  );
+}
+
+function PayoutCard({ run, loading, error, onRetry, hidden }: { run?: PayoutRun; loading: boolean; error: unknown; onRetry: () => void; hidden: boolean }) {
+  const rows: Array<{ label: string; n: number; tone?: 'warning' | 'danger' }> = run
+    ? [
+        { label: 'Ready to pay', n: run.readyCount },
+        { label: 'Held for review', n: run.heldCount, tone: 'warning' },
+        { label: 'Failed last run', n: run.failedLastRun, tone: 'danger' },
+      ]
+    : [];
+  const when = run?.scheduledRelease ? `${weekdayDate(run.scheduledRelease)} · ${time(run.scheduledRelease)} PT` : undefined;
+  return (
+    <Card
+      titleAs="h3"
+      title="Next payout run"
+      sub={hidden ? 'Your role doesn’t include payouts' : when}
+      actions={
+        hidden ? undefined : (
+          <Link className="small strong" to={href('admin/payouts')}>
+            Review
+          </Link>
+        )
+      }
+    >
+      {hidden ? (
+        <p className="small muted">Finance staff review and approve payout runs.</p>
+      ) : error ? (
+        <LoadError error={error} onRetry={onRetry} />
+      ) : loading ? (
+        <SkeletonLines rows={3} />
+      ) : !run ? (
+        <p className="small muted">No payout run is scheduled.</p>
+      ) : (
+        <>
+          <div className="row between base">
+            <span className="h2 num">{formatMoney(run.total)}</span>
+            <span className="small muted">
+              {run.sellerCount} seller{run.sellerCount === 1 ? '' : 's'}
+            </span>
+          </div>
+          <ul className="list">
+            {rows.map((p) => (
+              <li key={p.label}>
+                <span className="grow small">{p.label}</span>
+                {p.tone && p.n > 0 ? (
+                  <span className="row gap-2">
+                    <Badge tone={p.tone}>{p.n}</Badge>
+                  </span>
+                ) : (
+                  <span className="small strong num">{p.n}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+          {run.approval?.required && (
+            <Alert tone="warning" title={run.status === 'pending_approval' ? 'Second review needed' : 'Approval needed'}>
+              {run.approval.reason}
+            </Alert>
+          )}
+        </>
+      )}
+    </Card>
   );
 }
 

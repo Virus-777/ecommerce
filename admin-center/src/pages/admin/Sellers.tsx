@@ -1,117 +1,169 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money } from '@marketly/web-shared/lib/format';
+import { useIsPhone } from '@marketly/web-shared/lib/hooks';
+import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Dialog, EmptyState, Field, Icon, LogoTile, Meter, Pager, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, TextInput, announce } from '@marketly/web-shared/ui';
-import type { Tint } from '@marketly/web-shared/data/fixtures';
+import { useStaffSession } from '@/app/session';
+import { LoadError } from '@/app/parts';
+import { SELLER_STATUS, feedbackLabel, initialsOf, signedMoney, statusLabel, tintOf, useDebounced, useInView, type ApplicationRow, type SellerRow, type StatsBalances } from './data/seller';
 
 // Design: pages/admin/admin-sellers.html (single view). Status tabs link to "#" in the design;
 // here they filter the list, in sync with the Status filter.
+// Data: GET /api/admin/sellers/sellers (q, status, verified, onTimeBelow, categoryId, balance; page on the website,
+// cursor on the phone), …/sellers/stats (header, KPIs, tab counts), …/applications (open applications: the
+// Applications button and links for sellers still in review), …/performance-targets (dispatch target),
+// GET /api/admin/catalog/categories (main category filter). Writes: POST …/seller-invitations, POST …/sellers/exports.
 
-type Status = 'Approved' | 'Applied' | 'Information required' | 'Under review' | 'Restricted' | 'Suspended' | 'Closed';
+type ApiStatus = 'applied' | 'information_required' | 'under_review' | 'approved' | 'restricted' | 'suspended' | 'closed';
+const STATUSES = Object.keys(SELLER_STATUS) as ApiStatus[];
+const TAB_ORDER: ApiStatus[] = ['approved', 'applied', 'information_required', 'under_review', 'restricted', 'suspended', 'closed'];
+const OPEN_APP = new Set(['submitted', 'under_review', 'information_required']);
 
-interface SellerRow {
-  slug: string;
-  name: string;
-  initials: string;
-  tint: Tint;
-  city: string;
-  status: Status;
-  verified: boolean;
-  rating?: string;
-  onTime?: number;
-  cases: number;
-  balance: number;
-  held?: number;
-  category: string;
-  restriction?: string;
-  /** Restriction text styled as a warning (performance notices). */
-  restrictionWarn?: boolean;
-  /** Applications open the application review instead of the seller page. */
-  application?: boolean;
-}
-
-const ROWS: SellerRow[] = [
-  { slug: 'northwind-audio', name: 'Northwind Audio', initials: 'NA', tint: '2', city: 'Portland, OR', status: 'Approved', verified: true, rating: '98% · 4,812', onTime: 97.8, cases: 1, balance: 4862.1, category: 'Electronics' },
-  { slug: 'pixel-and-port', name: 'Pixel & Port', initials: 'PP', tint: '6', city: 'Austin, TX', status: 'Approved', verified: true, rating: '96% · 2,391', onTime: 95.1, cases: 2, balance: 3118.44, category: 'Computers' },
-  { slug: 'casa-verde-home', name: 'Casa Verde Home', initials: 'CV', tint: '1', city: 'Sacramento, CA', status: 'Approved', verified: true, rating: '97% · 1,730', onTime: 88.4, cases: 3, balance: 2240.9, category: 'Home & Kitchen', restriction: 'Performance warning sent Oct 2', restrictionWarn: true },
-  { slug: 'trailhead-outfitters', name: 'Trailhead Outfitters', initials: 'TO', tint: '5', city: 'Boulder, CO', status: 'Approved', verified: true, rating: '95% · 980', onTime: 96.2, cases: 0, balance: 1906.3, category: 'Sports & Outdoors' },
-  { slug: 'harbor-and-pine', name: 'Harbor & Pine', initials: 'HP', tint: '1', city: 'Portland, ME', status: 'Approved', verified: true, rating: '99% · 611', onTime: 99.1, cases: 0, balance: 812, category: 'Home & Kitchen' },
-  { slug: 'gadget-grove', name: 'Gadget Grove', initials: 'GG', tint: '3', city: 'Phoenix, AZ', status: 'Restricted', verified: false, rating: '89% · 412', onTime: 81.5, cases: 4, balance: 1372.15, held: 640, category: 'Electronics', restriction: 'Refurbished offers and new listings paused' },
-  { slug: 'bolt-street-supply', name: 'Bolt Street Supply', initials: 'BS', tint: '4', city: 'Newark, NJ', status: 'Suspended', verified: false, rating: '71% · 208', onTime: 64.0, cases: 2, balance: -212.4, category: 'Computers', restriction: 'All new sales stopped · appeal closed Sep 29' },
-  { slug: 'lumen-cycle-co', name: 'Lumen Cycle Co.', initials: 'LC', tint: '5', city: 'Bend, OR', status: 'Under review', verified: false, cases: 0, balance: 0, category: 'Sports & Outdoors', restriction: 'Application · decision due Oct 9', application: true },
-  { slug: 'fernhill-tea-co', name: 'Fernhill Tea Co.', initials: 'FT', tint: '3', city: 'Seattle, WA', status: 'Information required', verified: false, cases: 0, balance: 0, category: 'Home & Kitchen', restriction: 'Waiting on tax form · due Oct 15', application: true },
-  { slug: 'old-mill-goods', name: 'Old Mill Goods', initials: 'OM', tint: '2', city: 'Lancaster, PA', status: 'Closed', verified: false, rating: '94% · 120', cases: 0, balance: 0, category: 'Home & Kitchen', restriction: 'Closed by seller Aug 31' },
-];
-
-/** Account totals across all 48 sellers (the sample rows are one page of them). */
-const TAB_COUNTS: Array<{ status: '' | Status; label: string; count: number }> = [
-  { status: '', label: 'All', count: 48 },
-  { status: 'Approved', label: 'Approved', count: 38 },
-  { status: 'Applied', label: 'Applied', count: 4 },
-  { status: 'Information required', label: 'Information required', count: 1 },
-  { status: 'Under review', label: 'Under review', count: 2 },
-  { status: 'Restricted', label: 'Restricted', count: 1 },
-  { status: 'Suspended', label: 'Suspended', count: 1 },
-  { status: 'Closed', label: 'Closed', count: 1 },
-];
-
-const STATUS_OPTS = ['Any status', 'Applied', 'Information required', 'Under review', 'Approved', 'Restricted', 'Suspended', 'Closed'];
 const VER_OPTS = ['Any', 'Verified seller', 'Not verified'];
 const PERF_OPTS = ['Any', 'Below 95% target', 'Below 90%'];
-const CAT_OPTS = ['Any category', 'Electronics', 'Computers', 'Home & Kitchen', 'Sports & Outdoors'];
-const BAL_OPTS = ['Any balance', 'Has held amounts', 'Negative balance'];
+const BAL_OPTS = [
+  { value: '', label: 'Any balance' },
+  { value: 'has_held', label: 'Has held amounts' },
+  { value: 'negative', label: 'Negative balance' },
+];
+const LIMIT = 24;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const TARGET = 95;
-const signedMoney = (n: number) => (n < 0 ? `−${money(-n)}` : money(n));
-const rowEdge = (r: SellerRow) => (r.status === 'Suspended' ? 'flagged' : r.onTime !== undefined && r.onTime < TARGET ? 'warn' : '');
-const sellerTo = (r: SellerRow) => (r.application ? href('admin/seller-application') : href('admin/seller', '', { slug: r.slug }));
+interface Category {
+  id: string;
+  name: string;
+  parentId?: string | null;
+}
+interface Target {
+  metric: string;
+  threshold: number;
+}
 
 export default function Sellers() {
+  const { api } = useApi();
+  const { can } = useStaffSession();
+  const isPhone = useIsPhone();
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState<'' | Status>('');
+  const [status, setStatus] = useState<'' | ApiStatus>('');
   const [ver, setVer] = useState(VER_OPTS[0]);
   const [perf, setPerf] = useState(PERF_OPTS[0]);
-  const [cat, setCat] = useState(CAT_OPTS[0]);
-  const [bal, setBal] = useState(BAL_OPTS[0]);
+  const [cat, setCat] = useState('');
+  const [bal, setBal] = useState('');
   const [page, setPage] = useState(1);
   const [invite, setInvite] = useState(false);
   const [email, setEmail] = useState('');
+  const [business, setBusiness] = useState('');
   const [inviteTried, setInviteTried] = useState(false);
   const [invited, setInvited] = useState('');
+  const [exported, setExported] = useState('');
 
-  const term = q.trim().toLowerCase();
-  const rows = ROWS.filter(
-    (r) =>
-      (!term || `${r.name} ${r.city} ${r.slug}`.toLowerCase().includes(term)) &&
-      (!status || r.status === status) &&
-      (ver === VER_OPTS[0] || r.verified === (ver === 'Verified seller')) &&
-      (perf === PERF_OPTS[0] || (r.onTime !== undefined && r.onTime < (perf === 'Below 90%' ? 90 : TARGET))) &&
-      (cat === CAT_OPTS[0] || r.category === cat) &&
-      (bal === BAL_OPTS[0] || (bal === 'Negative balance' ? r.balance < 0 : !!r.held)),
+  const term = useDebounced(q.trim());
+  const targets = useQuery({ queryKey: ['sellers', 'performance-targets'], queryFn: () => call(api.GET('/api/admin/sellers/performance-targets')) as Promise<Target[]>, staleTime: 300_000 });
+  const TARGET = targets.data?.find((t) => t.metric === 'dispatch_reliability')?.threshold ?? 95;
+  const perfLabel = (o: string) => (o === PERF_OPTS[1] ? `Below ${TARGET}% target` : o);
+
+  const query = useMemo(
+    () => ({
+      q: term || undefined,
+      status: status || undefined,
+      verified: ver === VER_OPTS[0] ? undefined : ver === VER_OPTS[1],
+      onTimeBelow: perf === PERF_OPTS[0] ? undefined : perf === 'Below 90%' ? 90 : TARGET,
+      categoryId: cat || undefined,
+      balance: (bal || undefined) as 'has_held' | 'negative' | undefined,
+    }),
+    [term, status, ver, perf, cat, bal, TARGET],
   );
-  const filtered = !!(term || status || ver !== VER_OPTS[0] || perf !== PERF_OPTS[0] || cat !== CAT_OPTS[0] || bal !== BAL_OPTS[0]);
+  useEffect(() => setPage(1), [query]);
+
+  const stats = useQuery({ queryKey: ['sellers', 'stats'], queryFn: () => call(api.GET('/api/admin/sellers/sellers/stats')) });
+  const listQ = useQuery({
+    queryKey: ['sellers', 'list', query, page],
+    queryFn: () => call(api.GET('/api/admin/sellers/sellers', { params: { query: { ...query, page, limit: LIMIT } } })),
+    enabled: !isPhone,
+    placeholderData: keepPreviousData,
+  });
+  const phoneQ = useInfiniteQuery({
+    queryKey: ['sellers', 'list', 'phone', query],
+    queryFn: ({ pageParam }) => call(api.GET('/api/admin/sellers/sellers', { params: { query: { ...query, cursor: pageParam || undefined, limit: LIMIT } } })),
+    initialPageParam: '',
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    enabled: isPhone,
+  });
+  const active = isPhone ? phoneQ : listQ;
+  const loaded = isPhone ? !!phoneQ.data : !!listQ.data;
+  const rows: SellerRow[] = isPhone ? (phoneQ.data?.pages.flatMap((p) => p.items) ?? []) : (listQ.data?.items ?? []);
+  const totalPages = (listQ.data as { totalPages?: number } | undefined)?.totalPages ?? 1;
+  const more = useInView<HTMLDivElement>(() => void phoneQ.fetchNextPage(), isPhone && phoneQ.hasNextPage && !phoneQ.isFetchingNextPage);
+
+  const categories = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')) as Promise<Category[]>, staleTime: 300_000 });
+  const catOpts = [{ value: '', label: 'Any category' }, ...(categories.data ?? []).filter((c) => !c.parentId).map((c) => ({ value: c.id, label: c.name }))];
+
+  // Open applications: the Applications button and links for sellers whose account is still in review.
+  const canApps = can('sellers.applications.review');
+  const apps = useQuery({
+    queryKey: ['sellers', 'applications', 'list', 'all'],
+    queryFn: () => call(api.GET('/api/admin/sellers/applications', { params: { query: { limit: 100 } } })),
+    enabled: canApps,
+  });
+  const openApps: ApplicationRow[] = (apps.data?.items ?? []).filter((a) => OPEN_APP.has(a.state));
+  const appByStore = new Map((apps.data?.items ?? []).map((a) => [a.storeName.toLowerCase(), a.ref]));
+  const appsWaiting = stats.data?.applicationsWaiting ?? openApps.length;
+
+  const sellerTo = (r: SellerRow) => {
+    const appRef = ['applied', 'information_required', 'under_review'].includes(r.status) ? appByStore.get(r.storeName.toLowerCase()) : undefined;
+    return appRef ? href('admin/seller-application', '', { ref: appRef }) : href('admin/seller', '', { slug: r.ref });
+  };
+  const rowEdge = (r: SellerRow) => (r.status === 'suspended' ? 'flagged' : r.onTimeDispatchPct != null && r.onTimeDispatchPct < TARGET && r.status !== 'closed' ? 'warn' : '');
+
+  const filtered = !!(q.trim() || status || ver !== VER_OPTS[0] || perf !== PERF_OPTS[0] || cat || bal);
   const clear = () => {
     setQ('');
     setStatus('');
     setVer(VER_OPTS[0]);
     setPerf(PERF_OPTS[0]);
-    setCat(CAT_OPTS[0]);
-    setBal(BAL_OPTS[0]);
+    setCat('');
+    setBal('');
   };
 
-  const emailError = inviteTried && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ? 'Enter an email address, like owner@store.com.' : undefined;
-  const sendInvite = () => {
+  const byStatus = stats.data?.byStatus ?? {};
+  const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
+  const tabs: Array<{ value: '' | ApiStatus; label: string; count?: number }> = [
+    { value: '', label: 'All', count: stats.data ? total : undefined },
+    ...TAB_ORDER.map((s) => ({ value: s, label: SELLER_STATUS[s]!, count: stats.data ? (byStatus[s] ?? 0) : undefined })),
+  ];
+  const balances = (stats.data?.balances ?? null) as StatsBalances | null;
+
+  const sendInvite = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/sellers/seller-invitations', { body: { email: email.trim(), businessName: business.trim() } })),
+    onSuccess: (inv) => {
+      setInvited(inv.email);
+      setInvite(false);
+      setEmail('');
+      setBusiness('');
+      setInviteTried(false);
+      announce(`Invitation sent to ${inv.email}`);
+    },
+  });
+  const emailError = inviteTried && !EMAIL_RE.test(email.trim()) ? 'Enter an email address, like owner@store.com.' : undefined;
+  const businessError = inviteTried && !business.trim() ? 'Enter the business name.' : undefined;
+  const submitInvite = () => {
     setInviteTried(true);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return;
-    setInvited(email.trim());
-    setInvite(false);
-    setEmail('');
-    setInviteTried(false);
-    announce(`Invitation sent to ${email.trim()}`);
+    if (!EMAIL_RE.test(email.trim()) || !business.trim()) return;
+    sendInvite.mutate();
   };
+
+  const exportList = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/sellers/sellers/exports', { body: { filters: query, format: 'csv' } })),
+    onSuccess: () => {
+      setExported('Your seller list export has started. You will find it under Reports when it is ready.');
+      announce('Export started');
+    },
+  });
 
   const legend = (
     <p className="status-legend status-legend--edge">
@@ -126,11 +178,28 @@ export default function Sellers() {
       </span>
     </p>
   );
-  const empty = (
+  const empty = filtered ? (
     <EmptyState icon="search-x" title="No sellers match" action={<Button variant="secondary" size="sm" onClick={clear}>Clear filters</Button>}>
       Try another name or remove a filter.
     </EmptyState>
+  ) : (
+    <EmptyState icon="store" title="No sellers yet">
+      Invited businesses appear here once they apply.
+    </EmptyState>
   );
+  const skeleton = (
+    <div className="sk-list" aria-hidden="true">
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} className="sk-row">
+          <span className="sk sk-line" />
+          <span className="sk sk-line short" />
+        </div>
+      ))}
+    </div>
+  );
+  const kpi = (v: string | number | undefined) => (stats.isLoading ? <span className="sk sk-line short" /> : (v ?? '—'));
+
+  const onTime = (r: SellerRow) => (r.onTimeDispatchPct != null && r.status !== 'closed' ? r.onTimeDispatchPct : undefined);
 
   return (
     <AdminLayout active="sellers">
@@ -140,18 +209,24 @@ export default function Sellers() {
             <span>Sellers</span>
           </nav>
           <h1 className="h1">Sellers</h1>
-          <p className="sub small">48 seller accounts · owner Grace Kim, Seller Manager · Official Store is managed under Official store</p>
+          <p className="sub small">{stats.data ? `${total} seller account${total === 1 ? '' : 's'}` : 'Seller accounts'} · owner Seller Manager · Official Store is managed under Official store</p>
         </div>
         <div className="actions">
-          <Button variant="secondary" size="sm" icon="download" onClick={() => announce(`Exporting ${rows.length} sellers`)}>
-            Export
-          </Button>
-          <Button variant="secondary" size="sm" icon="file-check" to={href('admin/seller-application')}>
-            Applications · 7
-          </Button>
-          <Button size="sm" icon="send" onClick={() => setInvite(true)}>
-            Invite seller
-          </Button>
+          {can('sellers.accounts.export') && (
+            <Button variant="secondary" size="sm" icon="download" disabled={exportList.isPending} onClick={() => exportList.mutate()}>
+              Export
+            </Button>
+          )}
+          {canApps && (
+            <Button variant="secondary" size="sm" icon="file-check" to={openApps[0] ? href('admin/seller-application', '', { ref: openApps[0].ref }) : href('admin/seller-application')}>
+              {`Applications · ${appsWaiting}`}
+            </Button>
+          )}
+          {can('sellers.invitations.manage') && (
+            <Button size="sm" icon="send" onClick={() => setInvite(true)}>
+              Invite seller
+            </Button>
+          )}
         </div>
       </div>
 
@@ -160,40 +235,70 @@ export default function Sellers() {
           {invited} can now start a seller application. The link expires in 14 days.
         </Alert>
       )}
+      {exported && (
+        <Alert tone="success" title="Export started">
+          {exported}
+        </Alert>
+      )}
+      {exportList.isError && (
+        <Alert tone="danger" title="We couldn’t start the export">
+          {errorMessage(exportList.error)}
+        </Alert>
+      )}
+      {stats.isError && <LoadError error={stats.error} onRetry={() => void stats.refetch()} title="We couldn’t load the seller counts" />}
 
       <div className="aa-kpis">
         <div className="card pad">
-          <Stat label="Selling now" value="38" note="5 added this month" />
+          <Stat label="Selling now" value={kpi(stats.data?.sellingNow)} note={stats.data ? `${stats.data.addedThisMonth} added this month` : ' '} />
         </div>
         <div className="card pad">
-          <Stat label="Below dispatch target" value={<span className="t-warning-text">3</span>} note="Target 95% on time" />
+          <Stat label="Below dispatch target" value={stats.data?.belowDispatchTarget ? <span className="t-warning-text">{stats.data.belowDispatchTarget}</span> : kpi(stats.data?.belowDispatchTarget)} note={`Target ${TARGET}% on time`} />
         </div>
         <div className="card pad">
-          <Stat label="Restricted or suspended" value="2" note="1 appeal under review" />
+          <Stat
+            label="Restricted or suspended"
+            value={kpi(stats.data?.restrictedOrSuspended)}
+            note={stats.data ? `${stats.data.appealsUnderReview} appeal${stats.data.appealsUnderReview === 1 ? '' : 's'} under review` : ' '}
+          />
         </div>
         <div className="card pad">
-          <Stat label="Seller balances" value="$84,210.66" note="$2,140.00 held · 1 negative" />
+          <Stat
+            label="Seller balances"
+            value={stats.isLoading ? kpi(undefined) : balances?.total ? formatMoney(balances.total) : '—'}
+            note={
+              balances?.total
+                ? `${formatMoney(balances.held ?? ({ amount: 0, currency: balances.total.currency } as MoneyValue))} held · ${balances.negativeCount ?? 0} negative`
+                : stats.data
+                  ? 'Balance totals not available'
+                  : ' '
+            }
+          />
         </div>
       </div>
 
       <section className="card">
-        <Tabs<'' | Status> items={TAB_COUNTS.map((t) => ({ label: t.label, value: t.status, count: t.count }))} active={status} onChange={setStatus} label="Seller status" />
+        <Tabs<'' | ApiStatus> items={tabs} active={status} onChange={setStatus} label="Seller status" />
         <div className="card-body">
           <div className="toolbar">
             <SearchInput id="aa-sl-q" placeholder="Search seller name, legal name or contact email" value={q} onChange={setQ} />
           </div>
           <div className="aa-filters c5">
             <Field label="Status" className="aa-flt">
-              <Select id="aa-sl-st" options={STATUS_OPTS} value={status || STATUS_OPTS[0]} onChange={(e) => setStatus(e.target.value === STATUS_OPTS[0] ? '' : (e.target.value as Status))} />
+              <Select
+                id="aa-sl-st"
+                options={[{ value: '', label: 'Any status' }, ...STATUSES.map((s) => ({ value: s, label: SELLER_STATUS[s]! }))]}
+                value={status}
+                onChange={(e) => setStatus(e.target.value as '' | ApiStatus)}
+              />
             </Field>
             <Field label="Verification" className="aa-flt">
               <Select id="aa-sl-ver" options={VER_OPTS} value={ver} onChange={(e) => setVer(e.target.value)} />
             </Field>
             <Field label="On-time dispatch" className="aa-flt">
-              <Select id="aa-sl-perf" options={PERF_OPTS} value={perf} onChange={(e) => setPerf(e.target.value)} />
+              <Select id="aa-sl-perf" options={PERF_OPTS.map((o) => ({ value: o, label: perfLabel(o) }))} value={perf} onChange={(e) => setPerf(e.target.value)} />
             </Field>
             <Field label="Main category" className="aa-flt">
-              <Select id="aa-sl-cat" options={CAT_OPTS} value={cat} onChange={(e) => setCat(e.target.value)} />
+              <Select id="aa-sl-cat" options={catOpts} value={cat} onChange={(e) => setCat(e.target.value)} />
             </Field>
             <Field label="Balance" className="aa-flt">
               <Select id="aa-sl-bal" options={BAL_OPTS} value={bal} onChange={(e) => setBal(e.target.value)} />
@@ -201,141 +306,158 @@ export default function Sellers() {
           </div>
         </div>
 
-        <div className="no-phone">
-          {rows.length ? (
-            <>
-              <TableWrap label="Sellers table">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Seller</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Verified</th>
-                      <th scope="col">Rating</th>
-                      <th scope="col">On-time dispatch</th>
-                      <th className="r" scope="col">Open cases</th>
-                      <th className="r" scope="col">Balance</th>
-                      <th scope="col">Restrictions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
+        {active.isError && !loaded ? (
+          <div className="card-body">
+            <LoadError error={active.error} onRetry={() => void active.refetch()} title="We couldn’t load the sellers" />
+          </div>
+        ) : (
+          <>
+            <div className="no-phone">
+              {!loaded ? (
+                skeleton
+              ) : rows.length ? (
+                <>
+                  <TableWrap label="Sellers table">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Seller</th>
+                          <th scope="col">Status</th>
+                          <th scope="col">Verified</th>
+                          <th scope="col">Rating</th>
+                          <th scope="col">On-time dispatch</th>
+                          <th className="r" scope="col">Open cases</th>
+                          <th className="r" scope="col">Balance</th>
+                          <th scope="col">Restrictions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r) => {
+                          const edge = rowEdge(r);
+                          const pct = onTime(r);
+                          const below = pct !== undefined && pct < TARGET;
+                          const rating = feedbackLabel(r.feedback);
+                          const negative = r.negativeBalance || (r.balance?.amount ?? 0) < 0;
+                          return (
+                            <tr key={r.id} className={cx(edge && `is-${edge}`)}>
+                              <td>
+                                {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
+                                <Link className="row nowrap gap-2 link-inherit" to={sellerTo(r)}>
+                                  <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.id)} size="sm" />
+                                  <span className="stack gap-0">
+                                    <span className="small strong">{r.storeName}</span>
+                                    <span className="xs muted">{r.location ?? r.ref}</span>
+                                  </span>
+                                </Link>
+                              </td>
+                              <td>
+                                <StatusBadge status={statusLabel(r.status)} />
+                              </td>
+                              <td>
+                                {r.verified ? (
+                                  <Badge tone="info" icon="shield-check">
+                                    Verified
+                                  </Badge>
+                                ) : (
+                                  <span className="xs muted">Not verified</span>
+                                )}
+                              </td>
+                              <td>{rating ? <span className="small num">{rating}</span> : <span className="muted">—</span>}</td>
+                              <td>
+                                {pct !== undefined ? (
+                                  <span className="stack gap-1 minw-90">
+                                    <span className={cx('strong num', below && 't-danger-text')}>{pct.toFixed(1)}%</span>
+                                    <Meter pct={pct} tone={below ? 'danger' : 'success'} label={`On-time dispatch: ${r.storeName}`} />
+                                    {below && <span className="xs strong meter-note t-danger-text">Below target</span>}
+                                  </span>
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                              </td>
+                              <td className="r">{r.openCases ? <span className={cx('strong', r.openCases >= 3 && 't-warning-text')}>{r.openCases}</span> : 0}</td>
+                              <td className="r">
+                                <span className="stack gap-0">
+                                  <span className={cx('strong', negative && 't-danger-text')}>{signedMoney(r.balance)}</span>
+                                  {r.held?.amount ? <span className="xs t-warning-text strong">{formatMoney(r.held)} held</span> : null}
+                                  {negative && <Badge tone="danger">Negative</Badge>}
+                                </span>
+                              </td>
+                              <td>
+                                {r.restrictionSummary ? (
+                                  <span className="small u-maxw-28ch u-d-inline-block">{r.restrictionSummary}</span>
+                                ) : r.warningNote ? (
+                                  <span className="xs t-warning-text strong">{r.warningNote}</span>
+                                ) : (
+                                  <span className="xs muted">None</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </TableWrap>
+                  {legend}
+                </>
+              ) : (
+                empty
+              )}
+            </div>
+
+            <div className="only-phone card-pad-phone">
+              {!loaded ? (
+                skeleton
+              ) : rows.length ? (
+                <>
+                  <div className="aa-mlist">
                     {rows.map((r) => {
                       const edge = rowEdge(r);
-                      const below = r.onTime !== undefined && r.onTime < TARGET;
+                      const pct = onTime(r);
                       return (
-                        <tr key={r.slug} className={cx(edge && `is-${edge}`)}>
-                          <td>
-                            {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
-                            <Link className="row nowrap gap-2 link-inherit" to={sellerTo(r)}>
-                              <LogoTile initials={r.initials} tint={r.tint} size="sm" />
-                              <span className="stack gap-0">
-                                <span className="small strong">{r.name}</span>
-                                <span className="xs muted">{r.city}</span>
-                              </span>
-                            </Link>
-                          </td>
-                          <td>
-                            <StatusBadge status={r.status} />
-                          </td>
-                          <td>
-                            {r.verified ? (
+                        <Link key={r.id} className={cx('aa-mcard', edge && `is-${edge}`)} to={sellerTo(r)}>
+                          {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
+                          <span className="row nowrap gap-3">
+                            <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.id)} size="sm" />
+                            <span className="stack gap-0 grow">
+                              <span className="small strong">{r.storeName}</span>
+                              <span className="xs muted">{r.location ?? r.ref}</span>
+                            </span>
+                            <StatusBadge status={statusLabel(r.status)} />
+                          </span>
+                          <span className="row gap-3 xs">
+                            <span>
+                              On time <b>{pct !== undefined ? `${pct.toFixed(1)}%` : '—'}</b>
+                            </span>
+                            <span>
+                              Cases <b>{r.openCases}</b>
+                            </span>
+                            <span>
+                              Balance <b>{signedMoney(r.balance)}</b>
+                            </span>
+                            {r.verified && (
                               <Badge tone="info" icon="shield-check">
                                 Verified
                               </Badge>
-                            ) : (
-                              <span className="xs muted">Not verified</span>
                             )}
-                          </td>
-                          <td>{r.rating ? <span className="small num">{r.rating}</span> : <span className="muted">—</span>}</td>
-                          <td>
-                            {r.onTime !== undefined && r.status !== 'Closed' ? (
-                              <span className="stack gap-1 minw-90">
-                                <span className={cx('strong num', below && 't-danger-text')}>{r.onTime.toFixed(1)}%</span>
-                                <Meter pct={r.onTime} tone={below ? 'danger' : 'success'} label={`On-time dispatch: ${r.name}`} />
-                                {below && <span className="xs strong meter-note t-danger-text">Below target</span>}
-                              </span>
-                            ) : (
-                              <span className="muted">—</span>
-                            )}
-                          </td>
-                          <td className="r">{r.cases ? <span className={cx('strong', r.cases >= 3 && 't-warning-text')}>{r.cases}</span> : 0}</td>
-                          <td className="r">
-                            <span className="stack gap-0">
-                              <span className={cx('strong', r.balance < 0 && 't-danger-text')}>{signedMoney(r.balance)}</span>
-                              {r.held ? <span className="xs t-warning-text strong">{money(r.held)} held</span> : null}
-                              {r.balance < 0 && <Badge tone="danger">Negative</Badge>}
-                            </span>
-                          </td>
-                          <td>
-                            {!r.restriction ? (
-                              <span className="xs muted">None</span>
-                            ) : r.restrictionWarn ? (
-                              <span className="xs t-warning-text strong">{r.restriction}</span>
-                            ) : (
-                              <span className="small u-maxw-28ch u-d-inline-block">{r.restriction}</span>
-                            )}
-                          </td>
-                        </tr>
+                          </span>
+                          {r.restrictionSummary && <span className="xs sub">{r.restrictionSummary}</span>}
+                        </Link>
                       );
                     })}
-                  </tbody>
-                </table>
-              </TableWrap>
-              {legend}
-            </>
-          ) : (
-            empty
-          )}
-        </div>
-
-        <div className="only-phone card-pad-phone">
-          {rows.length ? (
-            <>
-              <div className="aa-mlist">
-                {rows.map((r) => {
-                  const edge = rowEdge(r);
-                  return (
-                    <Link key={r.slug} className={cx('aa-mcard', edge && `is-${edge}`)} to={sellerTo(r)}>
-                      {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
-                      <span className="row nowrap gap-3">
-                        <LogoTile initials={r.initials} tint={r.tint} size="sm" />
-                        <span className="stack gap-0 grow">
-                          <span className="small strong">{r.name}</span>
-                          <span className="xs muted">{r.city}</span>
-                        </span>
-                        <StatusBadge status={r.status} />
-                      </span>
-                      <span className="row gap-3 xs">
-                        <span>
-                          On time <b>{r.onTime !== undefined && r.status !== 'Closed' ? `${r.onTime.toFixed(1)}%` : '—'}</b>
-                        </span>
-                        <span>
-                          Cases <b>{r.cases}</b>
-                        </span>
-                        <span>
-                          Balance <b>{signedMoney(r.balance)}</b>
-                        </span>
-                        {r.verified && (
-                          <Badge tone="info" icon="shield-check">
-                            Verified
-                          </Badge>
-                        )}
-                      </span>
-                      {r.restriction && !r.restrictionWarn && <span className="xs sub">{r.restriction}</span>}
-                    </Link>
-                  );
-                })}
-              </div>
-              {legend}
-            </>
-          ) : (
-            empty
-          )}
-        </div>
+                  </div>
+                  <div ref={more} />
+                  {legend}
+                </>
+              ) : (
+                empty
+              )}
+            </div>
+          </>
+        )}
 
         <div className="card-foot between">
           <span className="xs muted">Balance is what we owe the seller after fees and refunds. It is not paid until a payout is sent.</span>
-          <Pager page={page} total={filtered ? 1 : 5} onPage={setPage} end={filtered} />
+          {isPhone ? loaded && rows.length > 0 && <Pager only="phone" end={!phoneQ.hasNextPage} /> : totalPages > 1 && <Pager page={page} total={totalPages} onPage={setPage} only="website" />}
         </div>
       </section>
 
@@ -349,15 +471,23 @@ export default function Sellers() {
             <Button variant="ghost" onClick={() => setInvite(false)}>
               Cancel
             </Button>
-            <Button icon="send" onClick={sendInvite}>
+            <Button icon="send" onClick={submitInvite} disabled={sendInvite.isPending}>
               Send invitation
             </Button>
           </>
         }
       >
         <p className="small sub">The seller gets a link to start an application. They still go through verification and review.</p>
+        {sendInvite.isError && (
+          <Alert tone="danger" title="We couldn’t send the invitation">
+            {errorMessage(sendInvite.error)}
+          </Alert>
+        )}
         <Field label="Contact email" error={emailError}>
           <TextInput id="aa-sl-invite" type="email" icon="mail" value={email} error={!!emailError} onChange={(e) => setEmail(e.target.value)} />
+        </Field>
+        <Field label="Business name" error={businessError}>
+          <TextInput id="aa-sl-invite-biz" value={business} error={!!businessError} onChange={(e) => setBusiness(e.target.value)} />
         </Field>
         <span className="xs muted">
           <Icon name="info" className="ic-sm" /> Invitations expire after 14 days.

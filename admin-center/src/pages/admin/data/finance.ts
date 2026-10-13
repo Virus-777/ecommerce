@@ -1,140 +1,96 @@
-// Sample data for the admin "Payments and fees" screen (design: pages/admin/admin-finance.html,
-// --disputes-and-chargebacks, --refunds-failing). Replaced by the finance reporting API later.
-import type { IconName } from '@marketly/web-shared/ui';
+// Types and helpers for the admin "Payments and fees" screen (design: pages/admin/admin-finance.html,
+// --disputes-and-chargebacks, --refunds-failing), mapped from GET /api/admin/finance/overview, /finance/fee-rules,
+// /finance/reconciliation/items, /payments/disputes and /payments/refunds. The approval and step-up helpers at
+// the bottom are shared by the other finance and support screens.
+import { ApiError, type components } from '@marketly/web-shared/api';
+import { dayKey } from '@/app/parts';
+
+type S = components['schemas'];
+export type FinanceOverview = S['finance.FinanceOverview'];
+export type FeeRules = S['finance.FeeRulesAdmin'];
+export type FeeRuleSet = S['finance.FeeRuleSet'];
+export type ReconItem = S['finance.ReconItem'];
+export type Dispute = S['payments.Dispute'];
+export type Refund = S['payments.Refund'];
+export type Money = { amount: number; currency: string };
 
 export type Edge = 'flagged' | 'warn' | '';
 export type Period = 'today' | '7d' | 'mtd';
 
-export const PERIODS: Array<{ value: Period; label: string; range: string }> = [
-  { value: 'today', label: 'Today', range: 'Oct 8, 2026' },
-  { value: '7d', label: '7 days', range: 'Oct 2–8, 2026' },
-  { value: 'mtd', label: 'Month to date', range: 'Oct 1–8, 2026' },
-];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-export interface FinanceKpi {
-  icon: IconName;
-  label: string;
-  value: string;
-  note: string;
+/** Pacific calendar days for a period: from and to (inclusive), and the label the header shows. */
+export function periodRange(period: Period, now = new Date()): { from: string; to: string; label: string } {
+  const to = dayKey(now);
+  const from = period === 'today' ? to : period === '7d' ? dayKey(new Date(now.getTime() - 6 * 86_400_000)) : `${to.slice(0, 8)}01`;
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  const label =
+    from === to
+      ? `${MONTHS[tm - 1]} ${td}, ${ty}`
+      : fm === tm && fy === ty
+        ? `${MONTHS[fm - 1]} ${fd}–${td}, ${ty}`
+        : `${MONTHS[fm - 1]} ${fd} – ${MONTHS[tm - 1]} ${td}, ${ty}`;
+  return { from, to, label };
 }
 
-export const FINANCE_KPIS: FinanceKpi[] = [
-  { icon: 'credit-card', label: 'Collected payments', value: '$412,860.20', note: '5,742 accepted payments' },
-  { icon: 'badge-check', label: 'Company product sales', value: '$236,410.00', note: 'Official Store · company trading' },
-  { icon: 'landmark', label: 'Marketplace fee income', value: '$16,902.75', note: 'on $171,480.30 seller sales' },
-  { icon: 'wallet', label: 'Owed to sellers', value: '$148,317.40', note: 'Pending $96,280.10 · available $52,037.30' },
-  { icon: 'undo-2', label: 'Refunds sent', value: '$9,842.15', note: '31 sent · 2 failing' },
-  { icon: 'hand-coins', label: 'Holds', value: '$12,640.00', note: '6 sellers · each with review date' },
+export const PERIODS: Array<{ value: Period; label: string }> = [
+  { value: 'today', label: 'Today' },
+  { value: '7d', label: '7 days' },
+  { value: 'mtd', label: 'Month to date' },
 ];
 
-export interface Person {
-  name: string;
-  role: string;
+const BASIS: Record<FeeRuleSet['basis'], string> = {
+  after_seller_discounts: 'Item price after seller-funded discounts',
+  before_discounts: 'Item price before discounts',
+};
+const CANCEL: Record<FeeRuleSet['treatment']['cancellationBeforeDispatch'], string> = { no_fee: 'No fee', fee_kept: 'Fee kept' };
+const RETURNS: Record<FeeRuleSet['treatment']['returns'], string> = {
+  fee_returned_pro_rata: 'Fee returned in proportion to the refunded item value',
+  fee_kept: 'Fee kept',
+};
+const DISPUTES: Record<FeeRuleSet['treatment']['paymentDisputes'], string> = {
+  fee_kept_returned_if_won: 'Fee kept while open; returned if we win',
+  fee_kept: 'Fee kept',
+  fee_returned: 'Fee returned',
+};
+
+/** The design's fee rule list, from the active rule set. */
+export function feeRulePairs(r: FeeRuleSet): Array<[string, string]> {
+  return [
+    ['Commission basis', BASIS[r.basis]],
+    ['Shipping', r.includeShipping ? 'Included in commission' : 'Not included in commission'],
+    ['Platform-funded discounts', r.platformDiscountsReduceFee ? 'Reduce the item price that commission is charged on' : 'Do not reduce seller proceeds. Platform pays the difference.'],
+    ['Seller-funded discounts', r.basis === 'after_seller_discounts' ? 'Reduce the item price that commission is charged on' : 'Do not reduce the commission basis'],
+    ['Cancellation before dispatch', CANCEL[r.treatment.cancellationBeforeDispatch]],
+    ['Returns and refunds', RETURNS[r.treatment.returns]],
+    ['Payment disputes', DISPUTES[r.treatment.paymentDisputes]],
+  ];
 }
 
-export interface UnexplainedRow {
-  ref: string;
-  /** The reference is an order number (links to the admin order page). */
-  isOrder?: boolean;
-  title: string;
-  detail: string;
-  /** Signed difference; negative amounts show in red. */
-  diff: number;
-  detected: string;
-  owner: Person;
-  action: string;
-  edge: Edge;
+/** A rate in basis points as the design prints it ("8", "12.5"). */
+export const pct = (bps: number) => String(Math.round(bps) / 100);
+
+export const refundEdge = (r: Refund): Edge => (r.status === 'failed' ? 'flagged' : r.outcomeUnknown ? 'warn' : '');
+
+/** "Why it failed" cell of a failing refund. */
+export function refundWhy(r: Refund): { why: string; detail: string } {
+  if (r.outcomeUnknown) return { why: 'Provider timed out, outcome unknown', detail: 'We check the provider before any retry' };
+  return { why: r.failureReason ?? r.statusLabel, detail: r.nextStep ?? r.destinationLabel };
 }
 
-export const UNEXPLAINED: UnexplainedRow[] = [
-  { ref: 'STL-261007-ADY', title: 'Provider settlement for Oct 7 is short', detail: '2,114 captured payments vs settlement batch', diff: -12.4, detected: 'Oct 8, 6:00 AM', owner: { name: 'Priya Nair', role: 'Finance Manager' }, action: 'Investigate', edge: 'warn' },
-  { ref: 'PAY-8F21C904', title: 'Payment captured with no order', detail: 'Checkout timed out. Duplicate check confirmed no order was created.', diff: 84.2, detected: 'Oct 7, 9:41 PM', owner: { name: 'Owen Price', role: 'Finance Specialist' }, action: 'Refund customer', edge: 'warn' },
-  { ref: 'MK-261006-09977', isOrder: true, title: 'Seller amount differs from order lines', detail: 'Gadget Grove · shipping counted twice in seller proceeds', diff: 6.99, detected: 'Oct 7, 6:00 AM', owner: { name: 'Owen Price', role: 'Finance Specialist' }, action: 'Correct with reason', edge: '' },
-];
+export const reconEdge = (i: ReconItem): Edge => (i.ageDays >= 3 ? 'flagged' : i.ageDays >= 1 ? 'warn' : '');
 
-export type EvidenceDue = { tone: 'ok' | 'warning'; text: string } | { note: string };
-export type BalanceEffect = { held: number } | { note: string; released?: boolean };
+/* ---------------- Approvals and step-up (shared by the finance and support screens) ---------------- */
 
-export interface DisputeRow {
-  ref: string;
-  order: string;
-  seller: string;
-  customer: string;
-  reason: string;
-  amount: number;
-  due: EvidenceDue;
-  effect: BalanceEffect;
-  status: 'Chargeback' | 'Disputed' | 'Under review' | 'Resolved';
-  action: 'Submit evidence' | 'Open';
-}
+/** STEP_UP_REQUIRED: the action needs a fresh 2-step code (X-Step-Up-Code). */
+export const needsStepUp = (e: unknown): boolean => e instanceof ApiError && e.code === 'STEP_UP_REQUIRED';
 
-export const DISPUTES: DisputeRow[] = [
-  { ref: 'CB-2210', order: 'MK-260921-33018', seller: 'Pixel & Port', customer: 'Marcus Webb', reason: 'Item not received (card issuer)', amount: 480, due: { tone: 'ok', text: 'Oct 14 · 6 days' }, effect: { held: 480 }, status: 'Chargeback', action: 'Submit evidence' },
-  { ref: 'CB-2214', order: 'MK-260928-40112', seller: 'Marketly Official', customer: 'Hannah Wu', reason: 'Unrecognized charge', amount: 189, due: { tone: 'warning', text: 'Oct 9 · tomorrow' }, effect: { note: 'Company sale. A loss is recorded in company trading.' }, status: 'Chargeback', action: 'Submit evidence' },
-  { ref: 'DP-0318', order: 'MK-261002-51207', seller: 'Trailhead Outfitters', customer: 'Leo Park', reason: 'Charged twice (wallet provider dispute)', amount: 139, due: { tone: 'ok', text: 'Oct 12 · 4 days' }, effect: { held: 139 }, status: 'Disputed', action: 'Open' },
-  { ref: 'CB-2201', order: 'MK-260919-28870', seller: 'Northwind Audio', customer: 'Tara Singh', reason: 'Item not as described', amount: 59, due: { note: 'Evidence sent Oct 5' }, effect: { held: 59 }, status: 'Under review', action: 'Open' },
-  { ref: 'CB-2189', order: 'MK-260911-17342', seller: 'Casa Verde Home', customer: 'Owen Hart', reason: 'Item not received', amount: 72, due: { note: 'Won Oct 6' }, effect: { note: 'Hold released Oct 6', released: true }, status: 'Resolved', action: 'Open' },
-];
+/** APPROVAL_REQUIRED: nothing was saved; an approval request was opened (details.approvalRequestId). */
+export const sentForApproval = (e: unknown): boolean => e instanceof ApiError && e.code === 'APPROVAL_REQUIRED';
 
-export interface RefundRow {
-  ref: string;
-  order: string;
-  customer: string;
-  amount: number;
-  why: string;
-  whyDetail: string;
-  attempts: string;
-  status: 'Failed' | 'Checking' | 'Waiting on customer' | 'Sent';
-  edge: Edge;
-  action: { kind: 'ask' | 'check'; label: string; icon?: IconName; srRef?: boolean } | null;
-}
+/** A step-up code header, or no header without a code. */
+export const stepUpHeader = (code: string) => (code.trim() ? { 'X-Step-Up-Code': code.trim() } : {});
 
-export const REFUNDS: RefundRow[] = [
-  { ref: 'RF-261006-0419', order: 'MK-260927-21877', customer: 'Ella Fischer', amount: 212.4, why: 'Card closed by the issuer', whyDetail: 'Visa •••• 9012 · Oct 6, 4:12 PM', attempts: '2 of 3', status: 'Failed', edge: 'flagged', action: { kind: 'ask', label: 'Ask customer for a new method' } },
-  { ref: 'RF-261007-0433', order: 'MK-261001-30554', customer: 'Sam Rivera', amount: 106, why: 'Provider timed out, outcome unknown', whyDetail: 'We check the provider before any retry', attempts: '1 of 3', status: 'Checking', edge: 'warn', action: { kind: 'check', label: 'Check status', icon: 'refresh-cw', srRef: true } },
-];
-
-export interface FlowRow {
-  label: string;
-  value: string;
-  pct: number;
-  tone?: 'warning';
-  note?: string;
-}
-
-export const MONEY_FLOW: FlowRow[] = [
-  { label: 'Company product sales (Official Store)', value: '$236,410.00', pct: 57 },
-  { label: 'Seller sales (marketplace)', value: '$171,480.30', pct: 42, tone: 'warning', note: 'Near target' },
-  { label: 'Shipping charges collected', value: '$4,969.90', pct: 1 },
-];
-
-export const MONEY_PANELS: Array<{ k: string; v: string; note: string }> = [
-  { k: 'From seller sales: fee income', v: '$16,902.75', note: 'Earned by the marketplace' },
-  { k: 'From seller sales: seller earnings', v: '$154,577.55', note: 'Before refunds and holds' },
-  { k: 'Paid out to sellers', v: '$61,340.80', note: 'Run of Oct 2 · 39 sellers' },
-];
-
-export const FEE_RULES: Array<[string, string]> = [
-  ['Commission basis', 'Item price after seller-funded discounts'],
-  ['Shipping', 'Not included in commission'],
-  ['Platform-funded discounts', 'Do not reduce seller proceeds. Platform pays the difference.'],
-  ['Seller-funded discounts', 'Reduce the item price that commission is charged on'],
-  ['Cancellation before dispatch', 'No fee'],
-  ['Returns and refunds', 'Fee returned in proportion to the refunded item value'],
-  ['Payment disputes', 'Fee kept while open; returned if we win'],
-];
-
-export const CATEGORY_RATES: Array<{ category: string; rate: number }> = [
-  { category: 'Electronics', rate: 8 },
-  { category: 'Computers', rate: 7 },
-  { category: 'Home & Kitchen', rate: 12 },
-  { category: 'Fashion', rate: 15 },
-  { category: 'Sports & Outdoors', rate: 10 },
-  { category: 'Beauty', rate: 12 },
-];
-
-export const DISCOUNT_FUNDING: Array<{ label: string; amount: number }> = [
-  { label: 'Platform-funded coupons', amount: 6420 },
-  { label: 'Seller-funded markdowns', amount: 4180 },
-  { label: 'Shared campaigns', amount: 1270 },
-];
+/** Step-up code hint: development dev-key tokens accept 000000; real sessions need the authenticator code. */
+export const STEP_UP_HINT = 'Enter the 6-digit code from your authenticator app. This action needs a fresh 2-step check.';

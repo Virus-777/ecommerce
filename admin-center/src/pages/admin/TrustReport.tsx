@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
-import { STAFF } from '@marketly/web-shared/data/staff';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useCountdown, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import {
   Alert, Avatar, Badge, Button, Card, Deadline, Dialog, EmptyState, Field, Icon, IconButton, Img, KeyValue, OptionCard, PageHeader, Select, StatusBadge, TableWrap, Tabs, Textarea, Timeline, announce,
-  type TimelineEvent, type Tone,
 } from '@marketly/web-shared/ui';
-import { ACTION_TONE, REPORT_TYPES, REPORTS, type RoutedAction } from './data/trust';
-import { actionDef, REVIEWERS, TRUST_ACTIONS, trustDetail, type CaseAction, type Reversible, type TrustActionKey, type TrustDetail } from './data/trust-reports';
+import { useStaffSession } from '@/app/session';
+import { LoadError, SkeletonLines, dateTime, shortDate } from '@/app/parts';
+import { REC_STATE, STATUS_LABEL, ownerLabel, reporterOutcomeFor, subjectHref, subjectIcon, subjectKind, typeOf, type ReportRow, type TrustReportDetail } from './data/trust';
+import {
+  TRUST_ACTIONS, actionDef, actionsFor, available, factorsOf, isClosed, paramsFor, reasonCode, recommendedFor, timelineOf,
+  type CaseAction, type Reversible, type TrustActionKey,
+} from './data/trust-reports';
 import './TrustReport.css';
 
 // Trust report (admin/trust-report): designed in React after the design export, following
@@ -19,6 +24,9 @@ import './TrustReport.css';
 // (status and timeline updated, success alert, next case prompt). J / K open the next / previous
 // report in the queue. Trust recommends; actions owned by other teams are sent to that team, as on
 // the Trust and risk queue.
+// Data: the URL carries the ref (TR-…): GET /api/admin/trust/reports?q=<ref> resolves the id, then
+// GET /reports/{id}. Actions: POST /reports/{id}/assign, /dismiss (Clear), /evidence-requests (Request info),
+// /recommendations + /recommendations/{id}/route (Restrict listing, Hold payouts, Suspend).
 //
 // Rules applied here (blueprint "Create and edit forms"): the dialog's submit button is never
 // disabled, errors show on submit; the result is an inline alert, not a toast (it is not a
@@ -27,34 +35,37 @@ import './TrustReport.css';
 type View = 'take-action' | 'decision-recorded';
 type EvTab = 'entities' | 'attachments' | 'history';
 
-const ME = STAFF.admin.name;
-const NOW = 'Oct 8, 10:47 AM';
-const NEW_ENTRY = 'AE-261008-1047';
-const BAND_CLASS = { High: 'high', Medium: 'med', Low: 'low' } as const;
+const BAND_CLASS = { high: 'high', medium: 'med', low: 'low' } as const;
+const BAND_LABEL = { high: 'High', medium: 'Medium', low: 'Low' } as const;
 const UNDO: Record<Reversible, { text: string; icon: 'undo-2' | 'lock'; cls: string }> = {
   yes: { text: 'Can be undone', icon: 'undo-2', cls: 't-success-text' },
   partly: { text: 'Only partly reversible', icon: 'lock', cls: 't-warning-text' },
   no: { text: 'Cannot be undone', icon: 'lock', cls: 't-danger-text' },
 };
+const RESULT_LABEL: Record<string, string> = { fail: 'Failed', warn: 'Warning', info: 'Info', ok: 'Passed' };
+const REQUEST_LABEL: Record<string, string> = { open: 'Waiting', answered: 'Answered', expired: 'Expired', cancelled: 'Cancelled' };
 
 const reportHref = (ref: string) => href('admin/trust-report', '', { ref });
-const reasonCode = (r: string) => r.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-const available = (c: CaseAction): c is Exclude<CaseAction, { unavailable: string }> => !('unavailable' in c);
+
+/** Which design action a recorded recommendation belongs to. */
+const KEY_OF: Record<string, TrustActionKey> = {
+  suspend_offer: 'restrict-listing',
+  suspend_product: 'restrict-listing',
+  hold_payout: 'hold-payouts',
+  suspend_seller: 'suspend',
+  restrict_customer_account: 'suspend',
+};
 
 interface Draft {
   action: TrustActionKey;
   reason: string;
-  reviewer: string;
   note: string;
 }
 
-/** Owner and button label of an action for this report (some reports route an action to another team). */
-function routing(d: TrustDetail, k: TrustActionKey) {
-  const def = actionDef(k);
-  const c = d.actions[k];
-  const owner = (available(c) && c.owner) || (k === 'suspend' && d.subject.kind === 'accounts' ? 'Support · Isabel Cruz' : def.owner);
-  const byTrust = owner === 'Trust and Risk';
-  return { def, c, owner, byTrust, submit: (available(c) && c.submit) || def.submit, reasons: (available(c) && c.reasons) || def.reasons };
+interface Recorded extends Draft {
+  at: string;
+  /** Owner actions: sent to the owner team (routed), or drafted and waiting for a decider to route it. */
+  routed?: boolean;
 }
 
 function Sla({ label, seconds }: { label: string; seconds: number }) {
@@ -69,6 +80,15 @@ function Sla({ label, seconds }: { label: string; seconds: number }) {
   );
 }
 
+function Frame({ refId, children }: { refId: string; children: React.ReactNode }) {
+  return (
+    <AdminLayout active="trust">
+      <PageHeader crumbs={[{ label: 'Customers and service' }, { label: 'Trust and risk', to: href('admin/trust') }, { label: refId }]} title={`Trust report ${refId}`} />
+      {children}
+    </AdminLayout>
+  );
+}
+
 function NotFound({ refId }: { refId: string }) {
   return (
     <AdminLayout active="trust">
@@ -76,7 +96,7 @@ function NotFound({ refId }: { refId: string }) {
       <Card pad>
         <EmptyState
           icon="search-x"
-          title={`There is no open trust report ${refId}`}
+          title={`There is no trust report ${refId}`}
           as="h2"
           action={
             <Button to={href('admin/trust')} icon="shield-alert">
@@ -84,7 +104,7 @@ function NotFound({ refId }: { refId: string }) {
             </Button>
           }
         >
-          Reports are numbered like TR-3391. The report may have been closed or merged into another one; closed reports are in Action history.
+          Reports are numbered like TR-0001. The report may have been merged into another one; closed reports are in Action history.
         </EmptyState>
       </Card>
     </AdminLayout>
@@ -93,27 +113,67 @@ function NotFound({ refId }: { refId: string }) {
 
 export default function TrustReport() {
   const { ref = '' } = useParams();
-  const d = trustDetail(ref);
-  if (!d) return <NotFound refId={ref} />;
+  const { api } = useApi();
+  const lookup = useQuery({
+    queryKey: ['trust', 'report-ref', ref],
+    queryFn: async () => {
+      const page = await call(api.GET('/api/admin/trust/reports', { params: { query: { q: ref, limit: 10 } } }));
+      return page.items.find((r) => r.ref.toLowerCase() === ref.toLowerCase())?.id ?? null;
+    },
+  });
+  const id = lookup.data ?? '';
+  const report = useQuery({ queryKey: ['trust', 'report', id], enabled: !!id, queryFn: () => call(api.GET('/api/admin/trust/reports/{id}', { params: { path: { id } } })) });
+
+  if (lookup.isError || report.isError) {
+    const e = lookup.error ?? report.error;
+    return (
+      <Frame refId={ref}>
+        <LoadError error={e} onRetry={() => void (lookup.isError ? lookup.refetch() : report.refetch())} />
+      </Frame>
+    );
+  }
+  if (lookup.isSuccess && !lookup.data) return <NotFound refId={ref} />;
+  if (!report.data) {
+    return (
+      <Frame refId={ref}>
+        <div className="ab-main wide">
+          <Card pad>
+            <SkeletonLines rows={6} />
+          </Card>
+          <Card pad>
+            <SkeletonLines rows={4} />
+          </Card>
+        </div>
+      </Frame>
+    );
+  }
   // Keyed by report so state resets when J/K moves to another report.
-  return <Investigation key={ref} d={d} />;
+  return <Investigation key={report.data.id} d={report.data} />;
 }
 
-function Investigation({ d }: { d: TrustDetail }) {
-  const r = d.report;
+function Investigation({ d }: { d: TrustReportDetail }) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const { accountId, name: me, can } = useStaffSession();
   const navigate = useNavigate();
   const [view, setView] = useView<View>();
-  const [assignee, setAssignee] = useState(d.assignee);
-  const [extra, setExtra] = useState<TimelineEvent[]>([]);
-  const [recorded, setRecorded] = useState<Draft | null>(null);
-  const [draft, setDraft] = useState<Draft>({ action: d.recommended.action, reason: '', reviewer: '', note: '' });
+  const [recorded, setRecorded] = useState<Recorded | null>(null);
+  const actions = actionsFor(d);
+  const recommended = recommendedFor(d, actions);
+  const [draft, setDraft] = useState<Draft>({ action: recommended.action, reason: '', note: '' });
   const [attempted, setAttempted] = useState(false);
   const [allFactors, setAllFactors] = useState(false);
   const [tab, setTab] = useState<EvTab>('entities');
 
-  const idx = REPORTS.findIndex((x) => x.id === r.id);
-  const prev = REPORTS[idx - 1];
-  const next = REPORTS[idx + 1];
+  const canInvestigate = can('trust.reports.investigate');
+  const canDecide = can('trust.reports.decide');
+  const allowed = (k: TrustActionKey) => (k === 'clear' ? canDecide : canInvestigate);
+
+  const queue = useQuery({ queryKey: ['trust', 'reports', 'queue'], queryFn: () => call(api.GET('/api/admin/trust/reports', { params: { query: { limit: 100 } } })) });
+  const rows: ReportRow[] = (queue.data?.items ?? []).filter((x) => ['open', 'under_review', 'escalated'].includes(x.status));
+  const idx = rows.findIndex((x) => x.id === d.id);
+  const prev = idx > 0 ? rows[idx - 1] : undefined;
+  const next = idx >= 0 ? rows[idx + 1] : rows[0]?.id !== d.id ? rows[0] : undefined;
 
   // J = next report, K = previous (as in Stripe Radar reviews and Gmail). Ignored while typing or in a dialog.
   useEffect(() => {
@@ -122,139 +182,174 @@ function Investigation({ d }: { d: TrustDetail }) {
       const t = e.target as HTMLElement;
       if (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || document.querySelector('[data-dialog]')) return;
       const k = e.key.toLowerCase();
-      if (k === 'j' && next) navigate(reportHref(next.id));
-      else if (k === 'k' && prev) navigate(reportHref(prev.id));
+      if (k === 'j' && next) navigate(reportHref(next.ref));
+      else if (k === 'k' && prev) navigate(reportHref(prev.ref));
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [next, prev, navigate]);
 
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['trust'] });
+    void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+    void qc.invalidateQueries({ queryKey: ['notifications', 'summary', 'staff'] });
+  };
+
+  const assign = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/trust/reports/{id}/assign', { params: { path: { id: d.id } }, body: { staffId: accountId } })),
+    onSuccess: (r) => {
+      qc.setQueryData(['trust', 'report', d.id], r);
+      refresh();
+      announce(`${d.ref} assigned to you`);
+    },
+  });
+
+  const submitM = useMutation({
+    mutationFn: async (v: Draft): Promise<Recorded> => {
+      const c = actions[v.action];
+      if (!available(c)) throw new Error('This action does not apply to the report.');
+      const text = v.note.trim() ? `${v.reason}. ${v.note.trim()}` : v.reason;
+      const at = new Date().toISOString();
+      if (v.action === 'clear') {
+        await call(api.POST('/api/admin/trust/reports/{id}/dismiss', { params: { path: { id: d.id } }, body: { reason: text, reporterOutcome: reporterOutcomeFor(v.reason) } }));
+        return { ...v, at };
+      }
+      if (v.action === 'request-info' && c.to) {
+        const to = { type: c.to.type, id: c.to.id, ref: c.to.ref, label: c.to.label };
+        await call(api.POST('/api/admin/trust/reports/{id}/evidence-requests', { params: { path: { id: d.id } }, body: { to, question: text, dueAt: new Date(Date.now() + 5 * 86_400_000).toISOString() } }));
+        return { ...v, at };
+      }
+      if (!c.rec) throw new Error('This action does not apply to the report.');
+      // Acting on an unassigned report makes you its assignee.
+      if (!d.assignee && canInvestigate) await call(api.POST('/api/admin/trust/reports/{id}/assign', { params: { path: { id: d.id } }, body: { staffId: accountId } }));
+      const rec = await call(
+        api.POST('/api/admin/trust/reports/{id}/recommendations', {
+          params: { path: { id: d.id } },
+          body: { action: c.rec.action, label: c.what, targets: c.rec.targets.map((t) => ({ type: t.type, id: t.id, ref: t.ref, label: t.label })), params: paramsFor(c.rec.action, v.reason, v.note), rationale: text },
+        }),
+      );
+      if (!canDecide) return { ...v, at, routed: false };
+      await call(api.POST('/api/admin/trust/recommendations/{id}/route', { params: { path: { id: rec.id } } }));
+      return { ...v, at, routed: true };
+    },
+    onSuccess: (r) => {
+      setRecorded(r);
+      setView('decision-recorded', { replace: true });
+      announce(`${actionDef(r.action).label} recorded for ${d.ref}`);
+      refresh();
+    },
+  });
+
   const decided = view === 'decision-recorded';
-  // Opening ?view=decision-recorded directly shows the recommended action as the recorded one.
-  const recCase = d.actions[d.recommended.action];
-  const fallback: Draft = { action: d.recommended.action, reason: d.recommended.reason, reviewer: available(recCase) && recCase.secondReviewer ? REVIEWERS[0].name : '', note: '' };
-  const shown: Draft | null = decided ? (recorded ?? fallback) : null;
+  // Opening ?view=decision-recorded directly shows the latest recorded decision on the report.
+  const latestRec = [...d.recommendations].reverse().find((x) => KEY_OF[x.action]);
+  const resolution = d.resolution as { summary?: string; decidedAt?: string } | null | undefined;
+  const fallback: Recorded | null = resolution
+    ? { action: 'clear', reason: resolution.summary ?? '', note: '', at: resolution.decidedAt ?? d.updatedAt }
+    : latestRec
+      ? { action: KEY_OF[latestRec.action], reason: latestRec.rationale, note: '', at: latestRec.routedAt ?? d.updatedAt, routed: latestRec.state !== 'pending' }
+      : null;
+  const shown = decided ? (recorded ?? fallback) : null;
 
   /* ----- Dialog ----- */
-  const sel = routing(d, draft.action);
-  const selCase = available(sel.c) ? sel.c : null;
-  const needsReviewer = !!selCase?.secondReviewer;
+  const sel = actionDef(draft.action);
+  const selC: CaseAction = actions[draft.action];
+  const selCase = available(selC) && allowed(draft.action) ? selC : null;
   const errors = attempted
     ? {
         action: selCase ? undefined : 'Choose an action that applies to this report.',
         reason: draft.reason ? undefined : 'Choose a reason code. It is written to Action history with this decision.',
-        reviewer: needsReviewer && !draft.reviewer ? 'Choose a second reviewer. This action does not go ahead until they approve.' : undefined,
       }
     : {};
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((x) => ({ ...x, [k]: v }));
 
-  const openAction = (k: TrustActionKey = d.recommended.action) => {
-    setDraft({ action: k, reason: '', reviewer: '', note: '' });
+  const openAction = (k: TrustActionKey = recommended.action) => {
+    setDraft({ action: k, reason: '', note: '' });
     setAttempted(false);
+    submitM.reset();
     setView('take-action');
   };
   const submit = () => {
     setAttempted(true);
-    if (!selCase || !draft.reason || (needsReviewer && !draft.reviewer)) return;
-    // Acting on an unassigned report makes you its assignee.
-    if (!assignee) assignToMe();
-    setRecorded(draft);
-    setView('decision-recorded', { replace: true });
-    announce(`${sel.def.label} recorded for ${r.id}`);
+    if (!selCase || !draft.reason) return;
+    submitM.mutate(draft);
   };
 
-  /* ----- Derived state after a decision ----- */
-  let status: { label: string; tone?: Tone } = { label: r.status };
-  let routed: RoutedAction[] = r.actions;
-  let timeline: TimelineEvent[] = [...d.timeline, ...extra];
-  let outcome: ReturnType<typeof routing> | null = null;
-  if (shown) {
-    const o = (outcome = routing(d, shown.action));
-    const oc = o.c as Exclude<CaseAction, { unavailable: string }>;
-    const reviewer = oc.secondReviewer ? shown.reviewer : '';
-    status =
-      shown.action === 'clear'
-        ? { label: 'Resolved' }
-        : shown.action === 'request-info' && o.byTrust
-          ? { label: d.subject.kind === 'seller' ? 'Waiting on seller' : 'Waiting on customer' }
-          : reviewer
-            ? { label: 'Waiting for second review', tone: 'warning' }
-            : o.byTrust
-              ? { label: 'Open' }
-              : { label: 'Sent to owner', tone: 'info' };
-    routed = [...r.actions, { title: oc.what, owner: o.owner, status: o.byTrust ? 'Completed' : reviewer ? 'Pending' : 'Sent to owner', reason: shown.reason }];
-    timeline = [
-      ...timeline.map((e) => (e.state === 'current' ? { ...e, state: 'done' as const } : e)),
-      { t: `${o.def.label}: ${oc.what}`, d: `${NOW} · by ${ME}`, state: 'done', body: `Reason code ${reasonCode(shown.reason)} written to Action history (${NEW_ENTRY}).${shown.note.trim() ? ` Note: ${shown.note.trim()}` : ''}` },
-      ...(reviewer ? [{ t: `Waiting for second review by ${reviewer}`, d: 'Requested just now', state: 'warn' as const }] : []),
-      ...(!o.byTrust ? [{ t: `Sent to ${o.owner}`, d: reviewer ? 'After approval' : 'Just now · in their queue', state: 'current' as const }] : []),
-      ...(shown.action === 'request-info' && o.byTrust ? [{ t: 'Waiting for the seller to reply', d: 'Due Oct 13 · SLA paused', state: 'current' as const }] : []),
-    ];
-  }
-
-  const assignToMe = () => {
-    const from = assignee;
-    setAssignee(ME);
-    setExtra((x) => [...x, { t: `Assigned to ${ME}`, d: `${NOW}${from ? ` · from ${from}` : ''}`, state: 'done' }]);
-    announce(`${r.id} assigned to you`);
-  };
+  const outcome = shown ? { def: actionDef(shown.action), c: actions[shown.action] } : null;
+  const outcomeOwner = outcome && available(outcome.c) ? outcome.c.owner : '';
 
   /* ----- Factors ----- */
-  const raising = d.factors.filter((f) => f.dir === 'raises');
-  const lowering = d.factors.filter((f) => f.dir === 'lowers');
+  const factors = factorsOf(d);
+  const raising = factors.filter((f) => f.dir === 'raises');
+  const lowering = factors.filter((f) => f.dir === 'lowers');
   const shownRaising = allFactors ? raising : raising.slice(0, 3);
   const shownLowering = allFactors ? lowering : lowering.slice(0, 2);
-  const hidden = d.factors.length - shownRaising.length - shownLowering.length;
+  const hidden = factors.length - shownRaising.length - shownLowering.length;
 
-  const type = REPORT_TYPES[r.type];
-  const band = BAND_CLASS[d.band];
-  const histLabel = d.subject.kind === 'seller' ? 'Seller history' : 'Account history';
+  const type = typeOf(d.type);
+  const band = BAND_CLASS[d.riskLevel];
+  const media = d.evidence.flatMap((e) => e.media.map((m) => ({ m, e })));
+  const reporter = (d.reporter ?? {}) as { name?: string | null; organization?: string | null };
+  const reporterName = reporter.organization ?? reporter.name ?? (d.source === 'automated' ? 'automated detection' : 'a reporter');
+  const meta = `${d.source === 'automated' ? 'Detected' : 'Reported'} ${shortDate(d.createdAt)} by ${reporterName}${d.reporterCount > 1 ? ` and ${d.reporterCount - 1} more` : ''}`;
+  const histLabel = 'Checks and requests';
   const tabs = [
-    { label: 'Related entities', value: 'entities' as const, count: d.entities.length },
-    { label: 'Attachments', value: 'attachments' as const, count: d.attachments.length },
-    { label: histLabel, value: 'history' as const },
+    { label: 'Related entities', value: 'entities' as const, count: d.subjects.length + d.linkedCaseRefs.length },
+    { label: 'Attachments', value: 'attachments' as const, count: media.length },
+    { label: histLabel, value: 'history' as const, count: d.evidence.length + d.evidenceRequests.length },
   ];
-  const recDef = actionDef(d.recommended.action);
+  const recDef = actionDef(recommended.action);
+  const recC = actions[recommended.action];
+  const assignee = d.assignee;
+  const secondsLeft = d.deadline ? Math.max(0, Math.round((new Date(d.deadline.dueAt).getTime() - Date.now()) / 1000)) : 0;
+  const override = d.riskOverride as { score?: number; reason?: string; at?: string } | null | undefined;
+  const timeline = timelineOf(d, dateTime);
 
   return (
     <AdminLayout active="trust">
       <PageHeader
-        crumbs={[{ label: 'Customers and service' }, { label: 'Trust and risk', to: href('admin/trust') }, { label: r.id }]}
+        crumbs={[{ label: 'Customers and service' }, { label: 'Trust and risk', to: href('admin/trust') }, { label: d.ref }]}
         eyebrow={`Trust report · ${type.label}`}
-        title={`Trust report ${r.id}`}
-        sub={r.title}
+        title={`Trust report ${d.ref}`}
+        sub={d.title}
         actions={
           <>
-            <StatusBadge status={status.label} tone={status.tone} />
+            <StatusBadge status={STATUS_LABEL[d.status] ?? d.status} />
             <nav className="trr-queue" aria-label="Queue">
-              {prev ? <IconButton icon="chevron-left" label={`Previous report, ${prev.id} (K)`} to={reportHref(prev.id)} /> : <IconButton icon="chevron-left" label="Previous report" disabled />}
-              <span className="pos">
-                {idx + 1} of {REPORTS.length}
-              </span>
-              {next ? <IconButton icon="chevron-right" label={`Next report, ${next.id} (J)`} to={reportHref(next.id)} /> : <IconButton icon="chevron-right" label="Next report" disabled />}
+              {prev ? <IconButton icon="chevron-left" label={`Previous report, ${prev.ref} (K)`} to={reportHref(prev.ref)} /> : <IconButton icon="chevron-left" label="Previous report" disabled />}
+              <span className="pos">{idx >= 0 ? `${idx + 1} of ${rows.length}` : `${rows.length} open`}</span>
+              {next ? <IconButton icon="chevron-right" label={`Next report, ${next.ref} (J)`} to={reportHref(next.ref)} /> : <IconButton icon="chevron-right" label="Next report" disabled />}
               <span className="no-phone xs muted row gap-1 nowrap" aria-hidden="true">
                 <span className="trr-kbd">J</span>
                 <span className="trr-kbd">K</span>
               </span>
             </nav>
-            <Button size="sm" icon="gavel" onClick={() => openAction()}>
-              Take action
-            </Button>
+            {(canInvestigate || canDecide) && !isClosed(d) && (
+              <Button size="sm" icon="gavel" onClick={() => openAction()}>
+                Take action
+              </Button>
+            )}
           </>
         }
       />
 
       <div className="card pad trr-strip">
         <span className="row gap-3">
-          {decided ? <Deadline>Decision recorded {NOW} · within SLA</Deadline> : <Sla label={d.sla.label} seconds={d.sla.seconds} />}
-          <span className="xs muted">{r.meta.split(' · assigned')[0]}</span>
+          {shown ? (
+            <Deadline>Decision recorded {dateTime(shown.at)}</Deadline>
+          ) : d.deadline && !isClosed(d) ? (
+            <Sla label={`Decision due ${dateTime(d.deadline.dueAt)} PT`} seconds={secondsLeft} />
+          ) : (
+            <span className="xs muted">{STATUS_LABEL[d.status] ?? d.status}</span>
+          )}
+          <span className="xs muted">{meta}</span>
         </span>
         <span className="who">
           {assignee ? (
             <>
-              <Avatar name={assignee} className="ab-av-sm" />
+              <Avatar name={assignee.name} className="ab-av-sm" />
               <span className="ab-cell">
-                <span className="small strong">{assignee === ME ? `${ME} (you)` : assignee}</span>
+                <span className="small strong">{assignee.staffId === accountId ? `${me || assignee.name} (you)` : assignee.name}</span>
                 <span className="xs muted">Assignee</span>
               </span>
             </>
@@ -264,31 +359,43 @@ function Investigation({ d }: { d: TrustDetail }) {
               <span className="xs muted">Nobody owns this report yet</span>
             </span>
           )}
-          {assignee !== ME && (
-            <Button variant="secondary" size="sm" icon="user-check" onClick={assignToMe}>
+          {assignee?.staffId !== accountId && canInvestigate && !isClosed(d) && (
+            <Button variant="secondary" size="sm" icon="user-check" onClick={() => assign.mutate()} disabled={assign.isPending}>
               Assign to me
             </Button>
           )}
         </span>
       </div>
+      {assign.isError && (
+        <Alert tone="danger" title="The report wasn’t assigned">
+          {errorMessage(assign.error)}
+        </Alert>
+      )}
 
       {decided && shown && outcome && (
         <>
-          <Alert tone="success" title={outcome.byTrust ? `${outcome.def.label} recorded` : `${outcome.def.label} sent to ${outcome.owner}`}>
-            Reason code <span className="mono">{reasonCode(shown.reason)}</span> was written to Action history as <span className="mono">{NEW_ENTRY}</span>.{' '}
-            {available(outcome.c) && outcome.c.secondReviewer && shown.reviewer ? `${shown.reviewer} is asked to approve before ${outcome.owner.split(' · ')[0]} acts. ` : ''}
-            {!outcome.byTrust && !(available(outcome.c) && outcome.c.secondReviewer) ? `${outcome.owner.split(' · ')[0]} carries it out and records it; the status updates here. ` : ''}
-            <Link to={href('admin/audit', '', undefined, { q: r.id })}>See it in Action history</Link>
+          <Alert
+            tone="success"
+            title={outcome.def.byTrust ? `${outcome.def.label} recorded` : shown.routed === false ? `${outcome.def.label} drafted` : `${outcome.def.label} sent to ${outcomeOwner || 'the owning team'}`}
+          >
+            {shown.reason && (
+              <>
+                Reason code <span className="mono">{reasonCode(shown.reason)}</span> was written to Action history.{' '}
+              </>
+            )}
+            {!outcome.def.byTrust && shown.routed === false ? `A Trust and Risk decider sends it to ${outcomeOwner.split(' · ')[0]}. ` : ''}
+            {!outcome.def.byTrust && shown.routed !== false ? `${(outcomeOwner || 'The owning team').split(' · ')[0]} carries it out and records it; the status updates here. ` : ''}
+            <Link to={href('admin/audit', '', undefined, { q: d.ref })}>See it in Action history</Link>
           </Alert>
           <div className="card pad trr-next">
             {next ? (
               <>
                 <span className="row gap-3 nowrap min-w-0">
-                  <span className={`ab-risk t-${next.level}`} aria-label={`Risk score ${next.score} of 100`}>
-                    {next.score}
+                  <span className={`ab-risk t-${next.riskLevel === 'high' ? 'high' : 'med'}`} aria-label={`Risk score ${next.riskScore} of 100`}>
+                    {next.riskScore}
                   </span>
                   <span className="ab-cell">
-                    <span className="xs muted">Next in queue · {next.id}</span>
+                    <span className="xs muted">Next in queue · {next.ref}</span>
                     <span className="small strong">{next.title}</span>
                   </span>
                 </span>
@@ -296,8 +403,8 @@ function Investigation({ d }: { d: TrustDetail }) {
                   <span className="no-phone xs muted">
                     or press <span className="trr-kbd">J</span>
                   </span>
-                  <Button size="sm" iconRight="arrow-right" to={reportHref(next.id)}>
-                    Open {next.id}
+                  <Button size="sm" iconRight="arrow-right" to={reportHref(next.ref)}>
+                    Open {next.ref}
                   </Button>
                 </span>
               </>
@@ -315,13 +422,13 @@ function Investigation({ d }: { d: TrustDetail }) {
 
       <div className="ab-main wide">
         <div className="stack gap-5">
-          <Card title="Verdict" sub={d.scoredAt}>
+          <Card title="Verdict" sub={override?.score != null ? `Score set to ${override.score} by hand: ${override.reason ?? ''}` : `Scored ${dateTime(d.updatedAt)}${d.detector ? ` by rule ${d.detector}` : ''}`}>
             <div className="trr-verdict">
               <div className={`trr-band t-${band}`}>
-                <span className="b">{d.band} risk</span>
-                <span className="s">Score {r.score} / 100</span>
+                <span className="b">{BAND_LABEL[d.riskLevel]} risk</span>
+                <span className="s">Score {d.riskScore} / 100</span>
               </div>
-              <p className="trr-why">{d.why}</p>
+              <p className="trr-why">{d.description || d.title}</p>
             </div>
           </Card>
 
@@ -329,9 +436,9 @@ function Investigation({ d }: { d: TrustDetail }) {
             title="Risk factors"
             sub="The signals that moved the score most. No single factor decides the band."
             foot={
-              d.factors.length > 5 || hidden > 0 || allFactors ? (
+              factors.length > 5 || hidden > 0 || allFactors ? (
                 <Button variant="ghost" size="sm" icon={allFactors ? 'chevrons-down-up' : 'chevrons-up-down'} aria-expanded={allFactors} onClick={() => setAllFactors((x) => !x)}>
-                  {allFactors ? 'Show fewer' : `Show all ${d.factors.length} factors`}
+                  {allFactors ? 'Show fewer' : `Show all ${factors.length} factors`}
                 </Button>
               ) : undefined
             }
@@ -349,7 +456,7 @@ function Investigation({ d }: { d: TrustDetail }) {
                   {g.list.length ? (
                     <ul className="trr-flist">
                       {g.list.map((f) => (
-                        <li key={f.title} className={`t-${f.dir}`}>
+                        <li key={f.title + f.detail} className={`t-${f.dir}`}>
                           <Icon name={f.dir === 'raises' ? 'arrow-up' : 'arrow-down'} />
                           <span className="strong">{f.title}</span>
                           <Badge tone={f.weight === 'Strong' ? 'outline' : ''}>{f.weight}</Badge>
@@ -383,24 +490,45 @@ function Investigation({ d }: { d: TrustDetail }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {d.entities.map((e) => (
-                        <tr key={e.kind + e.label}>
+                      {d.subjects.map((e) => (
+                        <tr key={e.type + e.id}>
                           <td>
                             <span className="trr-ent">
-                              <Icon name={e.icon} className="ic-sm" />
+                              <Icon name={subjectIcon(e.type)} className="ic-sm" />
                               <span className="ab-cell">
-                                <span className="xs muted">{e.kind}</span>
-                                <Link className="strong" to={href(e.to)}>
+                                <span className="xs muted">{subjectKind(e.type)}</span>
+                                <Link className="strong" to={subjectHref(e)}>
                                   {e.label}
                                 </Link>
-                                {e.sub && <span className="xs muted">{e.sub}</span>}
+                                {e.ref && !e.label.includes(e.ref) && <span className="xs muted">{e.ref}</span>}
                               </span>
                             </span>
                           </td>
                           <td>
-                            <span className="small minw-200 cell-text">{e.shared}</span>
+                            <span className="small minw-200 cell-text">{d.source === 'automated' && d.detector ? `Matched by rule ${d.detector}` : 'Named in the report'}</span>
                           </td>
-                          <td className="col-pin">{e.status ? <StatusBadge status={e.status} /> : <span className="xs muted">—</span>}</td>
+                          <td className="col-pin">{e.statusLabel ? <StatusBadge status={e.statusLabel} /> : <span className="xs muted">—</span>}</td>
+                        </tr>
+                      ))}
+                      {d.linkedCaseRefs.map((c) => (
+                        <tr key={c}>
+                          <td>
+                            <span className="trr-ent">
+                              <Icon name="life-buoy" className="ic-sm" />
+                              <span className="ab-cell">
+                                <span className="xs muted">Case</span>
+                                <Link className="strong" to={href('admin/case', '', { ref: c })}>
+                                  {c}
+                                </Link>
+                              </span>
+                            </span>
+                          </td>
+                          <td>
+                            <span className="small minw-200 cell-text">Linked support case</span>
+                          </td>
+                          <td className="col-pin">
+                            <span className="xs muted">—</span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -410,42 +538,56 @@ function Investigation({ d }: { d: TrustDetail }) {
             )}
             {tab === 'attachments' && (
               <div role="tabpanel" aria-label="Attachments" className="card-body">
-                <div className="ab-photos">
-                  {d.attachments.map((a) => (
-                    <figure key={a.name}>
-                      <Img icon={a.icon} tint={a.tint} className="r43" />
-                      <figcaption>
-                        <b>{a.name}</b>
-                        <br />
-                        {a.by} · {a.when}
-                      </figcaption>
-                    </figure>
-                  ))}
-                </div>
+                {media.length ? (
+                  <div className="ab-photos">
+                    {media.map(({ m, e }) => (
+                      <figure key={m.id}>
+                        <Img icon="file-text" tint="5" className="r43" src={m.url} alt={m.alt ?? ''} />
+                        <figcaption>
+                          <b>{m.alt || e.text}</b>
+                          <br />
+                          {e.source.replace(/_/g, ' ')} · {shortDate(e.addedAt)}
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="small muted">No photos or documents on this report yet.</span>
+                )}
               </div>
             )}
             {tab === 'history' && (
               <div role="tabpanel" aria-label={histLabel} className="card-body">
-                <KeyValue pairs={d.history.facts} />
+                <KeyValue
+                  pairs={[
+                    ['Reported by', `${reporterName}${d.reporterCount > 1 ? ` (${d.reporterCount} reports merged)` : ''}`],
+                    ['Source', d.source.replace(/_/g, ' ')],
+                    ['Linked cases', d.linkedCaseRefs.length ? d.linkedCaseRefs.join(', ') : 'None'],
+                    ['Merged reports', String(d.mergedReportIds.length)],
+                  ]}
+                />
                 <div className="divider" />
                 <ul className="trr-hist">
-                  {d.history.rows.map((h) => (
-                    <li key={h.when + h.what}>
+                  {d.evidenceRequests.map((q) => (
+                    <li key={q.id}>
                       <span className="ab-cell">
-                        <span className="small">{h.what}</span>
+                        <span className="small">
+                          Asked {q.to.label}: {q.question}
+                        </span>
+                        <span className="xs muted">Due {dateTime(q.dueAt)}{q.answer ? ` · Answer: ${q.answer}` : ''}</span>
+                      </span>
+                      <StatusBadge status={REQUEST_LABEL[q.state] ?? q.state} />
+                    </li>
+                  ))}
+                  {d.evidence.map((e) => (
+                    <li key={e.id}>
+                      <span className="ab-cell">
+                        <span className="small">{e.text}</span>
                         <span className="xs muted">
-                          {h.when}
-                          {h.entry && (
-                            <>
-                              {' · '}
-                              <Link className="mono" to={href('admin/audit-entry', '', { id: h.entry })}>
-                                {h.entry}
-                              </Link>
-                            </>
-                          )}
+                          {dateTime(e.addedAt)} · {e.source.replace(/_/g, ' ')}
                         </span>
                       </span>
-                      <StatusBadge status={h.outcome} />
+                      <StatusBadge status={RESULT_LABEL[e.result ?? 'info'] ?? 'Info'} />
                     </li>
                   ))}
                 </ul>
@@ -454,37 +596,47 @@ function Investigation({ d }: { d: TrustDetail }) {
           </Card>
 
           <Card title="Actions on this report" sub="Trust recommends; the owning team carries out the action and records its reason">
-            <ul className="ab-route">
-              {routed.map((a) => (
-                <li key={a.title}>
-                  <span className="stack gap-0">
-                    <span className="small strong">{a.title}</span>
-                    <span className="xs muted">{a.owner}</span>
-                  </span>
-                  <Badge tone={ACTION_TONE[a.status]}>{a.status}</Badge>
-                  {a.reason && <span className="xs sub">Reason recorded: {a.reason}</span>}
-                </li>
-              ))}
-            </ul>
+            {d.recommendations.length ? (
+              <ul className="ab-route">
+                {d.recommendations.map((a) => {
+                  const st = a.approvalRequestId && a.state === 'sent_to_owner' ? { label: 'Waiting for approval', tone: 'warning' as const } : (REC_STATE[a.state] ?? { label: a.state, tone: '' as const });
+                  return (
+                    <li key={a.id}>
+                      <span className="stack gap-0">
+                        <span className="small strong">{a.label}</span>
+                        <span className="xs muted">{ownerLabel(a)}</span>
+                      </span>
+                      <Badge tone={st.tone}>{st.label}</Badge>
+                      {(a.decisionReason || a.rationale) && <span className="xs sub">Reason recorded: {a.decisionReason ?? a.rationale}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <span className="small muted">No actions recommended yet.</span>
+            )}
           </Card>
         </div>
 
         <div className="stack gap-5">
-          {!decided && (
-            <Card title="Recommended next step" className="trr-rec" sub={`${recDef.label} · ${routing(d, recDef.key).byTrust ? 'done by Trust' : `sent to ${routing(d, recDef.key).owner}`}`}>
-              <p className="small">{d.recommended.text}</p>
-              <Button size="sm" icon={recDef.icon} onClick={() => openAction(recDef.key)}>
-                {recDef.label}: review and confirm
-              </Button>
+          {!decided && !isClosed(d) && (
+            <Card title="Recommended next step" className="trr-rec" sub={`${recDef.label} · ${recDef.byTrust ? 'done by Trust' : `sent to ${available(recC) ? recC.owner : 'the owning team'}`}`}>
+              <p className="small">{recommended.text}</p>
+              {allowed(recDef.key) ? (
+                <Button size="sm" icon={recDef.icon} onClick={() => openAction(recDef.key)}>
+                  {recDef.label}: review and confirm
+                </Button>
+              ) : (
+                <span className="xs muted">Your role can view this report but not take this action.</span>
+              )}
             </Card>
           )}
 
           <Card title="Actions" sub="Every action needs a reason code, which is written to Action history">
             <ul className="trr-acts">
               {TRUST_ACTIONS.map((a) => {
-                const ro = routing(d, a.key);
-                const c = ro.c;
-                if (!available(c)) {
+                const c = actions[a.key];
+                if (!available(c) || !allowed(a.key)) {
                   return (
                     <li key={a.key} className="is-off">
                       <span className="ic">
@@ -492,7 +644,7 @@ function Investigation({ d }: { d: TrustDetail }) {
                       </span>
                       <span className="ab-cell">
                         <span className="small strong">{a.label}</span>
-                        <span className="xs muted">Does not apply: {c.unavailable}</span>
+                        <span className="xs muted">{!available(c) ? `Does not apply: ${c.unavailable}` : 'Your role can’t take this action.'}</span>
                       </span>
                     </li>
                   );
@@ -506,12 +658,11 @@ function Investigation({ d }: { d: TrustDetail }) {
                     <span className="ab-cell">
                       <span className="small strong">{a.label}</span>
                       <span className="xs muted">
-                        {c.what} · {ro.byTrust ? 'done by Trust' : `sent to ${ro.owner}`}
+                        {c.what} · {a.byTrust ? 'done by Trust' : `sent to ${c.owner}`}
                       </span>
                       <span className={cx('trr-undo', u.cls)}>
                         <Icon name={u.icon} />
                         {u.text}
-                        {c.secondReviewer ? ' · second reviewer' : ''}
                       </span>
                     </span>
                     <Button variant="secondary" size="sm" onClick={() => openAction(a.key)} srLabel={a.label}>
@@ -532,26 +683,31 @@ function Investigation({ d }: { d: TrustDetail }) {
       <Dialog
         open={view === 'take-action'}
         onClose={() => setView('')}
-        title={`Take action on ${r.id}`}
+        title={`Take action on ${d.ref}`}
         size="lg"
         foot={
           <>
             <Button variant="ghost" onClick={() => setView('')}>
               Cancel
             </Button>
-            <Button variant={draft.action === 'suspend' ? 'danger' : 'primary'} onClick={submit}>
-              {needsReviewer ? 'Send for second review' : sel.submit}
+            <Button variant={draft.action === 'suspend' ? 'danger' : 'primary'} onClick={submit} disabled={submitM.isPending}>
+              {available(selC) ? selC.submit : sel.submit}
             </Button>
           </>
         }
       >
-        <p className="small sub">{r.title}</p>
+        <p className="small sub">{d.title}</p>
+        {submitM.isError && (
+          <Alert tone="danger" title="The action wasn’t recorded">
+            {errorMessage(submitM.error)}
+          </Alert>
+        )}
         <fieldset className="stack gap-2 fieldset-reset">
           <legend className="label">Action</legend>
           {TRUST_ACTIONS.map((a) => {
-            const ro = routing(d, a.key);
-            const c = ro.c;
+            const c = actions[a.key];
             const u = UNDO[a.reversible];
+            const ok = available(c) && allowed(a.key);
             return (
               <OptionCard
                 key={a.key}
@@ -560,14 +716,14 @@ function Investigation({ d }: { d: TrustDetail }) {
                 title={
                   <span className="row gap-2">
                     <span className="small strong">{a.label}</span>
-                    {a.key === d.recommended.action && <Badge tone="brand">Recommended</Badge>}
+                    {a.key === recommended.action && <Badge tone="brand">Recommended</Badge>}
                   </span>
                 }
-                body={available(c) ? `${c.what} · ${ro.byTrust ? 'done by Trust' : `sent to ${ro.owner}`}` : `Does not apply: ${c.unavailable}`}
-                right={available(c) ? <span className={cx('trr-undo', u.cls)}>{u.text}</span> : undefined}
+                body={!available(c) ? `Does not apply: ${c.unavailable}` : !allowed(a.key) ? 'Your role can’t take this action.' : `${c.what} · ${a.byTrust ? 'done by Trust' : `sent to ${c.owner}`}`}
+                right={ok ? <span className={cx('trr-undo', u.cls)}>{u.text}</span> : undefined}
                 checked={draft.action === a.key}
-                disabled={!available(c)}
-                onChange={() => setDraft((x) => ({ ...x, action: a.key, reason: '', reviewer: '' }))}
+                disabled={!ok}
+                onChange={() => setDraft((x) => ({ ...x, action: a.key, reason: '' }))}
               />
             );
           })}
@@ -586,12 +742,18 @@ function Investigation({ d }: { d: TrustDetail }) {
               <span>{selCase.consequence}</span>
             </span>
             <span className="r">
-              <Icon name={UNDO[sel.def.reversible].icon} />
-              <span>{sel.def.undo}</span>
+              <Icon name={UNDO[sel.reversible].icon} />
+              <span>{sel.undo}</span>
             </span>
             <span className="r">
               <Icon name="user-round" />
-              <span>{sel.byTrust ? 'Done by Trust and Risk as soon as you confirm.' : `Trust recommends; ${sel.owner} carries it out from their queue and records it.`}</span>
+              <span>
+                {sel.byTrust
+                  ? 'Done by Trust and Risk as soon as you confirm.'
+                  : canDecide
+                    ? `Trust recommends; ${selCase.owner} carries it out from their queue and records it. Above their approval limit it waits for approval.`
+                    : `Saved as a draft recommendation; a Trust and Risk decider sends it to ${selCase.owner}.`}
+              </span>
             </span>
             {selCase.done && (
               <span className="r">
@@ -604,12 +766,7 @@ function Investigation({ d }: { d: TrustDetail }) {
         <Field label="Reason code" hint={draft.reason ? <>Written to Action history as <span className="mono">{reasonCode(draft.reason)}</span></> : 'Written to Action history with your name and this report'} error={errors.reason}>
           <Select id="tra-reason" options={[{ value: '', label: 'Select a reason code' }, ...sel.reasons.map((x) => ({ value: x, label: x }))]} value={draft.reason} onChange={(e) => set('reason', e.target.value)} />
         </Field>
-        {needsReviewer && (
-          <Field label="Second reviewer" hint={`${selCase?.secondReviewer} They get it in their inbox; nothing changes until they approve.`} error={errors.reviewer}>
-            <Select id="tra-reviewer" options={[{ value: '', label: 'Select a reviewer' }, ...REVIEWERS.filter((p) => p.name !== ME).map((p) => ({ value: p.name, label: `${p.name}, ${p.role}` }))]} value={draft.reviewer} onChange={(e) => set('reviewer', e.target.value)} />
-          </Field>
-        )}
-        <Field label="Note for the record" optional hint="Staff only. Saved with the reason code.">
+        <Field label="Note for the record" optional hint={draft.action === 'request-info' ? 'Sent with the request, so write it for the person you are asking.' : 'Staff only. Saved with the reason code.'}>
           <Textarea id="tra-note" placeholder="What you checked and why" value={draft.note} onChange={(e) => set('note', e.target.value)} />
         </Field>
       </Dialog>

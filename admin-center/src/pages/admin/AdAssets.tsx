@@ -1,53 +1,62 @@
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { call, errorMessage, uploadMedia, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Breadcrumbs, Button, Drawer, Field, Icon, Img, KeyValue, SearchInput, SegmentedControl, Select, StatusBadge, TableWrap, Tabs, Textarea } from '@marketly/web-shared/ui';
-import { CHECK_STYLE, GROUPS, REASONS, type Creative, type CreativeGroup, type CreativeStatus, type LinkCheck } from './data/ad-assets';
+import { useStaffSession } from '@/app/session';
+import { dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
+import { CHECK_STYLE, fileLabel, groupCreatives, previewShape, REASONS, reasonLabel, ROLE_LABEL, sizeLine, type CreativeGroup } from './data/ad-assets';
+import { checkTone, CREATIVE_STATUS, reviewRolesOf, REVIEW_ROLE_LABEL, type ReviewRole, statusLabel, type AdCampaign, type Creative, type CreativeStatus, type CreativeSummary, type Page, type Placement } from './data/ads';
 
-// Design: pages/admin/admin-ad-assets.html · view "review-creative" = review drawer for the Fall Home Sale creatives.
+// Design: pages/admin/admin-ad-assets.html · view "review-creative" = review drawer for a campaign's creatives.
+// Data: GET /api/admin/advertising/creatives (+ /summary for the tab counts), GET …/campaigns/{id} for the
+// drawer's campaign facts, POST …/creatives/{id}/review per creative in review, uploads through media
+// (purpose ad_creative / ad_video) and POST …/creatives.
 
-const TAB_STATUSES: Array<CreativeStatus | ''> = ['', 'In review', 'Changes requested', 'Approved', 'Rejected'];
+const TAB_STATUSES: Array<CreativeStatus | ''> = ['', 'in_review', 'changes_requested', 'approved', 'rejected'];
+const TAB_COUNT: Record<string, keyof CreativeSummary> = { '': 'all', in_review: 'inReview', changes_requested: 'changesRequested', approved: 'approved', rejected: 'rejected' };
 const ADVERTISERS = [
   { value: '', label: 'Own and seller' },
   { value: 'own', label: 'Own promotions' },
   { value: 'seller', label: 'Seller paid' },
   { value: 'brand', label: 'Brand' },
 ];
-const FORMATS = ['All formats', 'Opening full-screen', 'Banner', 'Pop-up', 'Sponsored product', 'Sponsored store', 'Ad text', 'Video'];
-const LINKS: Array<{ value: '' | LinkCheck; label: string }> = [
+const LINKS = [
   { value: '', label: 'Any link check' },
   { value: 'ok', label: 'Link works' },
   { value: 'warn', label: 'Needs attention' },
-  { value: 'broken', label: 'Broken' },
+  { value: 'fail', label: 'Broken' },
 ];
-const REVIEWABLE: CreativeStatus[] = ['In review', 'Changes requested'];
 
 function Preview({ c }: { c: Creative }) {
-  const p = c.preview;
-  if (p.kind === 'txt') return <div className="pv"><span className="txt">{p.text}</span></div>;
-  if (p.kind === 'video') return <div className="pv"><Img icon="video" tint={p.tint} className="wide" /></div>;
+  if (c.kind === 'text') return <div className="pv"><span className="txt">{c.headline}</span></div>;
+  if (c.kind === 'video') return <div className="pv"><Img icon="video" tint="4" className="wide" /></div>;
   return (
     <div className="pv">
-      <span className="ab-adtag">{p.tag}</span>
-      <Img icon="image" tint={p.tint} className={p.shape} />
+      <span className="ab-adtag">{c.formatLabel.toLowerCase().includes('sponsored') ? 'Sponsored' : 'Ad'}</span>
+      <Img icon="image" tint="1" className={previewShape(c)} src={c.media?.url} alt={c.media?.alt ?? ''} />
     </div>
   );
 }
 
 function CheckLine({ c }: { c: Creative }) {
-  const s = CHECK_STYLE[c.check.state];
+  const s = CHECK_STYLE[c.linkCheck?.state ?? 'none'];
   return (
     <span className={cx('xs row nowrap gap-1', s.cls)}>
       <Icon name={s.icon} className="ic-sm" />
-      <span className="wrap">{c.check.text}</span>
+      <span className="wrap">{c.linkCheck?.detail ?? 'Add it to a campaign to run the checks'}</span>
     </span>
   );
 }
 
-function AdMock({ g, desk }: { g: NonNullable<CreativeGroup['review']>; desk?: boolean }) {
+interface AdCopy { headline: string; text: string; button: string; desk?: string; phone?: string }
+
+function AdMock({ g, desk }: { g: AdCopy; desk?: boolean }) {
+  const img = desk ? g.desk : g.phone;
   return (
     <div className="ab-scrim">
       <div className={cx('ab-ad', desk && 'desk')}>
@@ -55,10 +64,7 @@ function AdMock({ g, desk }: { g: NonNullable<CreativeGroup['review']>; desk?: b
         <button type="button" className="ab-adx" aria-label="Close advertisement">
           <Icon name="x" />
         </button>
-        <div className="art">
-          <Img icon="bed-double" tint="1" />
-          <Img icon="lamp-desk" tint="5" />
-        </div>
+        <div className="art">{img ? <Img icon="image" tint="1" src={img} /> : <Img icon="image" tint="1" />}</div>
         <div className="copy">
           <b>{g.headline}</b>
           <span>{g.text}</span>
@@ -69,87 +75,145 @@ function AdMock({ g, desk }: { g: NonNullable<CreativeGroup['review']>; desk?: b
   );
 }
 
-const today = () => new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+/** Reads an image's pixel size so the upload can name the device format it fits. */
+function imageSize(file: File): Promise<{ w: number; h: number } | null> {
+  if (!file.type.startsWith('image/')) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => (resolve({ w: img.naturalWidth, h: img.naturalHeight }), URL.revokeObjectURL(url));
+    img.onerror = () => (resolve(null), URL.revokeObjectURL(url));
+    img.src = url;
+  });
+}
 
 export default function AdAssets() {
+  const { api, session } = useApi();
+  const qc = useQueryClient();
+  const { can, roleKeys } = useStaffSession();
+  const myRoles = reviewRolesOf(roleKeys).filter((r, _, l) => !(r === 'marketing' && l.includes('content')));
+  const [reviewAs, setReviewAs] = useState<ReviewRole | ''>('');
+  const role = myRoles.includes(reviewAs as ReviewRole) ? (reviewAs as ReviewRole) : myRoles[0];
   const [view, setView] = useView<'review-creative'>();
-  const [groups, setGroups] = useState(GROUPS);
   const [tab, setTab] = useState<CreativeStatus | ''>('');
   const [q, setQ] = useState('');
   const [adv, setAdv] = useState('');
-  const [fmt, setFmt] = useState(FORMATS[0]);
-  const [link, setLink] = useState<'' | LinkCheck>('');
+  const [fmt, setFmt] = useState('');
+  const [link, setLink] = useState('');
   const [layout, setLayout] = useState<'grid' | 'list'>('grid');
-  const [sel, setSel] = useState<{ group: string; creative: string }>({ group: 'g1', creative: 'a1' });
+  const [sel, setSel] = useState<string | null>(null);
   const [decision, setDecision] = useState<'approve' | 'changes'>('approve');
-  const [reason, setReason] = useState(REASONS[0]);
-  const [comment, setComment] = useState(GROUPS[0].review?.comment ?? '');
+  const [reason, setReason] = useState(REASONS[0].code);
+  const [comment, setComment] = useState('');
   const [reasonErr, setReasonErr] = useState('');
   const [notice, setNotice] = useState('');
   const upload = useRef<HTMLInputElement>(null);
 
-  const all = groups.flatMap((g) => g.creatives);
-  const countFor = (s: CreativeStatus | '') => (s ? all.filter((c) => c.status === s).length : all.length);
-  const needle = q.trim().toLowerCase();
-  const visible = (g: CreativeGroup, c: Creative) =>
-    (!tab || c.status === tab) &&
-    (!adv || g.source === adv) &&
-    (fmt === FORMATS[0] || c.formatGroup === fmt) &&
-    (!link || c.check.state === link) &&
-    (!needle || [c.file, g.name, g.advertiser].some((t) => t.toLowerCase().includes(needle)));
-  const shown = groups.map((g) => ({ g, items: g.creatives.filter((c) => visible(g, c)) })).filter((x) => x.items.length);
+  const placements = useQuery({ queryKey: ['advertising', 'placements'], queryFn: () => call(api.GET('/api/admin/advertising/placements')) as Promise<Placement[]> });
+  const formatOptions = [{ value: '', label: 'All formats' }, ...(placements.data ?? []).map((p) => ({ value: `p:${p.key}`, label: p.name })), { value: 'k:text', label: 'Ad text' }, { value: 'k:video', label: 'Video' }];
+  const placementKey = fmt.startsWith('p:') ? fmt.slice(2) : undefined;
+  const kind = fmt.startsWith('k:') ? (fmt.slice(2) as 'text' | 'video') : undefined;
+  const needle = q.trim() || undefined;
+  const source = (adv || undefined) as 'own' | undefined;
 
-  const group = groups.find((g) => g.id === sel.group) ?? groups[0];
-  const review = group.review;
-  const open = view === 'review-creative' && !!review;
+  const filters = { q: needle, source, placementKey, kind, linkCheck: (link || undefined) as 'ok' | undefined };
+  const list = useQuery({
+    queryKey: ['advertising', 'creatives', { ...filters, tab }],
+    queryFn: () => call(api.GET('/api/admin/advertising/creatives', { params: { query: { ...filters, status: tab || undefined, limit: 100 } } })) as Promise<Page<Creative>>,
+    placeholderData: keepPreviousData,
+  });
+  const summary = useQuery({
+    queryKey: ['advertising', 'creatives', 'summary', { q: needle, source, placementKey, kind }],
+    queryFn: () => call(api.GET('/api/admin/advertising/creatives/summary', { params: { query: { q: needle, source, placementKey, kind } } })) as Promise<CreativeSummary>,
+    placeholderData: keepPreviousData,
+  });
 
-  const openReview = (g: CreativeGroup, c: Creative) => {
-    setSel({ group: g.id, creative: c.id });
-    setDecision(c.status === 'Changes requested' ? 'changes' : 'approve');
-    setReason(REASONS[0]);
-    setComment(g.review?.comment ?? '');
+  const groups = groupCreatives(list.data?.items ?? []);
+  const group: CreativeGroup | undefined = groups.find((g) => g.id === sel) ?? (view === 'review-creative' ? groups.find((g) => g.creatives.some((c) => c.status === 'in_review')) : undefined);
+  const open = view === 'review-creative' && !!group;
+  const inReview = group?.creatives.filter((c) => c.status === 'in_review') ?? [];
+
+  const campaign = useQuery({
+    queryKey: ['advertising', 'campaign', group?.campaignId],
+    queryFn: () => call(api.GET('/api/admin/advertising/campaigns/{id}', { params: { path: { id: group!.campaignId! } } })) as Promise<AdCampaign>,
+    enabled: open && !!group?.campaignId,
+  });
+
+  const review = useMutation({
+    mutationFn: async (d: 'approve' | 'changes') => {
+      for (const c of inReview) {
+        await call(
+          api.POST('/api/admin/advertising/creatives/{id}/review', {
+            params: { path: { id: c.id } },
+            body: { role: myRoles.length > 1 ? role : undefined, decision: d === 'approve' ? 'approved' : 'changes_requested', reasonCode: d === 'approve' ? (reason === 'no_changes' ? 'no_changes' : reason) : reason, comment: comment.trim() || undefined },
+          }),
+        );
+      }
+    },
+    onSuccess: (_, d) => {
+      const msg = d === 'approve' ? `${group?.name}: creative approved` : `${group?.name}: changes requested from the campaign owner`;
+      setNotice(msg);
+      announce(msg);
+      setView('');
+      void qc.invalidateQueries({ queryKey: ['advertising'] });
+      void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+    },
+  });
+
+  const add = useMutation({
+    mutationFn: async (f: File) => {
+      const isVideo = f.type.startsWith('video');
+      const key = isVideo ? 'video' : placementKey;
+      if (!key) throw new Error('Choose the format (placement) in the Format filter first, so the file is checked against its sizes.');
+      const p = placements.data?.find((x) => x.key === key);
+      const size = await imageSize(f);
+      const match = size && p?.formats.find((x) => x.width === size.w && x.height === size.h);
+      const asset = await uploadMedia(session, f, isVideo ? 'ad_video' : 'ad_creative');
+      return call(api.POST('/api/admin/advertising/creatives', { body: { kind: isVideo ? 'video' : 'image', device: match ? match.device : 'any', placementKey: key, mediaId: asset.id } })) as Promise<Creative>;
+    },
+    onSuccess: (c) => {
+      const msg = `${fileLabel(c)} uploaded as a draft`;
+      setNotice(msg);
+      announce(msg);
+      void qc.invalidateQueries({ queryKey: ['advertising', 'creatives'] });
+    },
+  });
+
+  const openReview = (g: CreativeGroup) => {
+    setSel(g.id);
+    setDecision(g.creatives.some((c) => c.status === 'changes_requested') && !g.creatives.some((c) => c.status === 'in_review') ? 'changes' : 'approve');
+    setReason(REASONS[0].code);
+    setComment('');
     setReasonErr('');
+    review.reset();
     setView('review-creative');
   };
   const close = () => setView('');
-
   const decide = (d: 'approve' | 'changes') => {
     setDecision(d);
-    if (d === 'changes' && reason === REASONS[0]) {
+    if (d === 'changes' && reason === 'no_changes') {
       setReasonErr('Choose what needs to change.');
       return;
     }
-    const status: CreativeStatus = d === 'approve' ? 'Approved' : 'Changes requested';
-    const note = d === 'approve' ? `Approved ${today()} by Noor Aziz.${comment.trim() ? ` ${comment.trim()}` : ''}` : `Noor Aziz: ${reason}.${comment.trim() ? ` ${comment.trim()}` : ''}`;
-    setGroups((gs) => gs.map((g) => (g.id === group.id ? { ...g, creatives: g.creatives.map((c) => (REVIEWABLE.includes(c.status) ? { ...c, status, note } : c)) } : g)));
-    const msg = d === 'approve' ? `${group.name}: creative approved` : `${group.name}: changes requested from the campaign owner`;
-    setNotice(msg);
-    announce(msg);
-    close();
+    review.mutate(d);
   };
 
-  const onUpload = (files: FileList | null) => {
-    const f = files?.[0];
-    if (!f) return;
-    const isVideo = f.type.startsWith('video');
-    const c: Creative = {
-      id: `u${Date.now()}`,
-      file: f.name,
-      status: 'Draft',
-      preview: isVideo ? { kind: 'video', tint: '4' } : { kind: 'img', shape: 'wide', tint: '3', tag: 'Ad' },
-      format: isVideo ? 'Video' : 'Not assigned to a placement',
-      formatGroup: isVideo ? 'Video' : '',
-      desc: '',
-      size: `${Math.round(f.size / 1024)} KB`,
-      check: { state: 'none', text: 'Add it to a campaign to run the checks' },
-    };
-    setGroups((gs) => {
-      const up = gs.find((g) => g.id === 'uploads');
-      if (up) return gs.map((g) => (g.id === 'uploads' ? { ...g, creatives: [c, ...g.creatives] } : g));
-      return [{ id: 'uploads', name: 'New uploads', advertiser: 'Marketly', source: 'own', usedIn: 'Not used', creatives: [c] }, ...gs];
-    });
-    announce(`${f.name} uploaded as a draft`);
+  const canReview = can('advertising.campaigns.review');
+  const canManage = can('advertising.campaigns.manage');
+  const text = group?.creatives.find((c) => c.kind === 'text');
+  const copy: AdCopy = {
+    headline: text?.headline ?? campaign.data?.creatives.find((c) => c.headline)?.headline ?? group?.name ?? '',
+    text: text?.body ?? '',
+    button: text?.buttonText ?? 'Learn more',
+    desk: group?.creatives.find((c) => c.kind === 'image' && c.device !== 'phone')?.media?.url,
+    phone: group?.creatives.find((c) => c.kind === 'image' && c.device !== 'desktop')?.media?.url,
   };
+  const checks = group
+    ? [...new Map(group.creatives.flatMap((c) => [...c.autoChecks, { state: c.linkCheck.state, label: c.linkCheck.detail, detail: null }]).map((x) => [x.label, x])).values()]
+    : [];
+  const notes = group ? group.creatives.flatMap((c) => c.reviews.map((r) => ({ ...r, file: fileLabel(c) }))).sort((a, b) => a.at.localeCompare(b.at)) : [];
+  const dedupNotes = [...new Map(notes.map((n) => [`${n.reviewer.name}|${n.at.slice(0, 16)}|${n.decision}`, n])).values()];
+  const c0 = campaign.data;
 
   return (
     <AdminLayout active="ad-assets">
@@ -160,20 +224,22 @@ export default function AdAssets() {
           <p className="sub small">Images, ad text, video and destination links for every campaign · reviewed by Advertising and Content</p>
         </div>
         <div className="actions">
-          <input ref={upload} type="file" hidden accept="image/jpeg,image/png,video/mp4" onChange={(e) => onUpload(e.target.files)} />
-          <Button size="sm" icon="upload" onClick={() => upload.current?.click()}>
-            Upload creative
-          </Button>
+          <input ref={upload} type="file" hidden accept="image/jpeg,image/png,image/webp,video/mp4" onChange={(e) => (e.target.files?.[0] && add.mutate(e.target.files[0]), (e.target.value = ''))} />
+          {canManage && (
+            <Button size="sm" icon="upload" onClick={() => (add.reset(), upload.current?.click())} disabled={add.isPending}>
+              {add.isPending ? 'Uploading…' : 'Upload creative'}
+            </Button>
+          )}
         </div>
       </div>
 
-      <Tabs items={TAB_STATUSES.map((s) => ({ label: s || 'All', value: s, count: countFor(s) }))} active={tab} onChange={setTab} />
+      <Tabs items={TAB_STATUSES.map((s) => ({ label: s ? CREATIVE_STATUS[s] : 'All', value: s, count: summary.data ? summary.data[TAB_COUNT[s]] : undefined }))} active={tab} onChange={setTab} />
 
       <div className="toolbar">
         <SearchInput id="aa-q" placeholder="Search file name, campaign or advertiser" value={q} onChange={setQ} />
         <Select id="aa-adv" aria-label="Advertiser" options={ADVERTISERS} value={adv} onChange={(e) => setAdv(e.target.value)} />
-        <Select id="aa-fmt" aria-label="Format" options={FORMATS} value={fmt} onChange={(e) => setFmt(e.target.value)} />
-        <Select id="aa-link" aria-label="Link type" options={LINKS} value={link} onChange={(e) => setLink(e.target.value as '' | LinkCheck)} />
+        <Select id="aa-fmt" aria-label="Format" options={formatOptions} value={fmt} onChange={(e) => setFmt(e.target.value)} />
+        <Select id="aa-link" aria-label="Link type" options={LINKS} value={link} onChange={(e) => setLink(e.target.value)} />
         <SegmentedControl
           items={[
             { label: 'Grid', value: 'grid', icon: 'layout-grid' },
@@ -185,19 +251,33 @@ export default function AdAssets() {
         />
       </div>
       <p className="ab-note">
-        <Icon name="info" className="ic-sm" /> Required sizes: opening ad 1600 × 900 desktop and 1080 × 1920 phone; banners 1440 × 360 and 750 × 500; JPG or PNG up to 1 MB. Video is stored but not shown until video placements are turned on.
+        <Icon name="info" className="ic-sm" />{' '}
+        {placements.data
+          ? `Required sizes: ${placements.data
+              .filter((p) => p.enabled)
+              .map((p) => `${p.name.toLowerCase()} ${p.formats.map((f) => `${f.width} × ${f.height}`).join(' and ')}`)
+              .join('; ')}; JPG or PNG up to 1 MB. Video is stored but not shown until video placements are turned on.`
+          : 'Video is stored but not shown until video placements are turned on.'}
       </p>
 
       {notice && <Alert tone="success" title={notice} />}
+      {add.error && <Alert tone="danger" title="Upload failed">{errorMessage(add.error)}</Alert>}
+      {list.error && <LoadError error={list.error} onRetry={() => void list.refetch()} />}
 
       <div className="stack gap-4">
-        {shown.length === 0 && (
+        {!list.data && !list.error && (
           <div className="card pad">
-            <p className="small muted">No creatives match these filters.</p>
+            <SkeletonLines rows={4} />
           </div>
         )}
-        {shown.map(({ g, items }, gi) => {
+        {list.data && groups.length === 0 && (
+          <div className="card pad">
+            <p className="small muted">{tab || needle || adv || fmt || link ? 'No creatives match these filters.' : 'No creatives yet. Upload one, or add creatives while creating a campaign.'}</p>
+          </div>
+        )}
+        {groups.map((g, gi) => {
           const H = gi === 0 ? 'h2' : 'h3';
+          const reviewable = g.creatives.some((c) => c.status === 'in_review' || c.status === 'changes_requested');
           return (
             <section className="card" key={g.id}>
               <div className="card-head">
@@ -205,8 +285,7 @@ export default function AdAssets() {
                   <H className="h4">{g.name}</H>
                   <span className="xs muted">
                     {g.advertiser} · used in: {g.usedIn}
-                    {g.campaignStatus ? ` · ${g.campaignStatus}` : ''}
-                    {g.extra ? ` · ${g.extra}` : ''}
+                    {g.campaignStatus ? ` · ${statusLabel(g.campaignStatus)}` : ''}
                   </span>
                 </div>
                 <div className="row gap-2">{g.source === 'own' ? <Badge tone="brand">Own</Badge> : <Badge tone="info">Paid</Badge>}</div>
@@ -214,29 +293,36 @@ export default function AdAssets() {
               {layout === 'grid' ? (
                 <div className="card-body">
                   <div className="ab-tiles">
-                    {items.map((c) => (
-                      <article key={c.id} className={cx('ab-tile', open && sel.creative === c.id && 'is-sel')}>
+                    {g.creatives.map((c) => (
+                      <article key={c.id} className={cx('ab-tile', open && group?.id === g.id && c.status === 'in_review' && 'is-sel')}>
                         <Preview c={c} />
                         <div className="bd">
                           <div className="row between gap-1-5">
-                            <span className="small strong truncate">{c.file}</span>
-                            <StatusBadge status={c.status} />
+                            <span className="small strong truncate">{fileLabel(c)}</span>
+                            <StatusBadge status={CREATIVE_STATUS[c.status]} />
                           </div>
-                          <span className="xs muted">{c.format}</span>
-                          <span className="xs num">{c.size}</span>
+                          <span className="xs muted">{c.formatLabel}</span>
+                          <span className="xs num">{sizeLine(c)}</span>
                           <CheckLine c={c} />
-                          {c.note && <span className="note">{c.note}</span>}
+                          {c.reviews.length > 0 && (
+                            <span className="note">
+                              {(() => {
+                                const r = c.reviews[c.reviews.length - 1];
+                                return `${r.reviewer.name ?? ROLE_LABEL[r.role]}: ${r.comment || reasonLabel(r.reasonCode) || CREATIVE_STATUS[c.status]}`;
+                              })()}
+                            </span>
+                          )}
                           <span className="row gap-2 mt-auto">
-                            {REVIEWABLE.includes(c.status) && g.review ? (
-                              <Button variant="secondary" size="sm" onClick={() => openReview(g, c)}>
+                            {reviewable && canReview ? (
+                              <Button variant="secondary" size="sm" onClick={() => openReview(g)}>
                                 Review
                               </Button>
                             ) : (
-                              <Button variant="ghost" size="sm" to={g.campaignStatus ? href('admin/ad-campaign', 'creative-preview') : undefined}>
+                              <Button variant="ghost" size="sm" to={g.campaignId && c.usedIn[0] ? href('admin/ad-campaign', 'creative-preview', undefined, { id: g.campaignId }) : undefined}>
                                 View
                               </Button>
                             )}
-                            <Button variant="ghost" size="sm" icon="download" label={`Download ${c.file}`} />
+                            {c.media?.url && <Button variant="ghost" size="sm" icon="download" label={`Download ${fileLabel(c)}`} href={c.media.url} />}
                           </span>
                         </div>
                       </article>
@@ -259,25 +345,25 @@ export default function AdAssets() {
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map((c) => (
+                      {g.creatives.map((c) => (
                         <tr key={c.id}>
-                          <td className="strong">{c.file}</td>
-                          <td>{c.format}</td>
-                          <td className="num nowrap">{c.size}</td>
+                          <td className="strong">{fileLabel(c)}</td>
+                          <td>{c.formatLabel}</td>
+                          <td className="num nowrap">{sizeLine(c)}</td>
                           <td>
                             <CheckLine c={c} />
                           </td>
                           <td>
-                            <StatusBadge status={c.status} />
+                            <StatusBadge status={CREATIVE_STATUS[c.status]} />
                           </td>
                           <td className="col-pin">
-                            {REVIEWABLE.includes(c.status) && g.review ? (
-                              <Button variant="secondary" size="sm" onClick={() => openReview(g, c)}>
+                            {reviewable && canReview ? (
+                              <Button variant="secondary" size="sm" onClick={() => openReview(g)}>
                                 Review
                               </Button>
-                            ) : (
-                              <Button variant="ghost" size="sm" icon="download" label={`Download ${c.file}`} />
-                            )}
+                            ) : c.media?.url ? (
+                              <Button variant="ghost" size="sm" icon="download" label={`Download ${fileLabel(c)}`} href={c.media.url} />
+                            ) : null}
                           </td>
                         </tr>
                       ))}
@@ -290,35 +376,48 @@ export default function AdAssets() {
         })}
       </div>
 
-      {review && (
+      {group && (
         <Drawer
           open={open}
           onClose={close}
           title={`Review creative: ${group.name}`}
           foot={
-            <>
-              <Button variant="secondary" size="sm" onClick={() => decide('changes')}>
-                Request changes
-              </Button>
-              <Button size="sm" icon="check" onClick={() => decide('approve')}>
-                Approve creative
-              </Button>
-            </>
+            inReview.length && canReview ? (
+              <>
+                <Button variant="secondary" size="sm" onClick={() => decide('changes')} disabled={review.isPending}>
+                  Request changes
+                </Button>
+                <Button size="sm" icon="check" onClick={() => decide('approve')} disabled={review.isPending}>
+                  Approve creative
+                </Button>
+              </>
+            ) : (
+              <span className="xs muted">{canReview ? 'Nothing in this campaign is waiting for review. The owner resubmits after changes.' : 'Reviewing creatives needs the campaign review permission.'}</span>
+            )
           }
         >
+          {review.error && (
+            <Alert tone="danger" title="The decision wasn’t saved">
+              {errorMessage(review.error)}
+            </Alert>
+          )}
           <KeyValue
             pairs={[
-              ['Advertiser', review.advertiser],
-              ['Files', group.creatives.map((c) => (c.file === 'Ad text' ? 'ad text' : c.file)).join(' · ')],
-              ['Destination', review.destination],
+              ['Advertiser', `${group.advertiser} · ${group.source === 'own' ? 'own promotion' : 'paid'}`],
+              ['Files', group.creatives.map((c) => (c.kind === 'text' ? 'ad text' : fileLabel(c))).join(' · ')],
+              ['Destination', c0?.destination.url ?? text?.link ?? group.creatives.find((c) => c.link)?.link ?? '—'],
               [
                 'Campaign',
-                <>
-                  <Link to={href('admin/ad-campaign', 'approval')} className="link-inline">
-                    {group.usedIn}
-                  </Link>{' '}
-                  · {review.period}
-                </>,
+                group.campaignId ? (
+                  <>
+                    <Link to={c0 ? href('admin/ad-campaign', 'approval', undefined, { ref: c0.ref }) : href('admin/ad-campaign', 'approval', undefined, { id: group.campaignId })} className="link-inline">
+                      {group.usedIn}
+                    </Link>
+                    {c0?.startsAt && c0.endsAt ? ` · ${shortDate(c0.startsAt)}–${shortDate(c0.endsAt)}` : ''}
+                  </>
+                ) : (
+                  'Not used yet'
+                ),
               ],
             ]}
           />
@@ -339,7 +438,7 @@ export default function AdAssets() {
                     <div className="sk h-46" />
                     <div className="sk u-h-12px" style={{ width: '60%' }} />
                     <div className="sk h-30" />
-                    <AdMock g={review} desk />
+                    <AdMock g={copy} desk />
                   </div>
                 </div>
               </div>
@@ -355,44 +454,55 @@ export default function AdAssets() {
                     <div className="sk h-30" />
                     <div className="sk h-30" />
                     <div className="sk h-18" />
-                    <AdMock g={review} />
+                    <AdMock g={copy} />
                   </div>
                 </div>
               </div>
             </div>
           )}
           <div className="panel stack gap-1">
-            <span className="small strong">{review.headline}</span>
+            <span className="small strong">{copy.headline}</span>
             <span className="xs sub">
-              {review.text} · button "{review.button}"
+              {copy.text} · button "{copy.button}"
             </span>
           </div>
           <span className="h4">Checks</span>
           <ul className="ab-checks">
-            {review.checks.map((c) => (
-              <li key={c.t} className={`t-${c.tone}`}>
-                <span className="sr-only">{c.tone === 'ok' ? 'Passed: ' : 'Warning: '}</span>
-                <Icon name={c.tone === 'ok' ? 'circle-check' : 'triangle-alert'} className="ic-sm" />
-                <span className="stack gap-0">
-                  <span>{c.t}</span>
-                  {c.d && <span className="xs muted">{c.d}</span>}
-                </span>
-              </li>
-            ))}
+            {checks.map((c) => {
+              const tone = checkTone(c.state);
+              return (
+                <li key={c.label} className={`t-${tone}`}>
+                  <span className="sr-only">{tone === 'ok' ? 'Passed: ' : tone === 'warn' ? 'Warning: ' : ''}</span>
+                  <Icon name={tone === 'ok' ? 'circle-check' : tone === 'warn' ? 'triangle-alert' : 'info'} className="ic-sm" />
+                  <span className="stack gap-0">
+                    <span>{c.label}</span>
+                    {c.detail && <span className="xs muted">{c.detail}</span>}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
           <span className="h4">Reviewer notes</span>
           <div className="ab-conv">
-            {review.notes.map((n) => (
-              <div key={n.who + n.when} className={cx('ab-msg', n.me ? 'is-note' : 'is-staff')}>
+            {dedupNotes.map((n) => (
+              <div key={`${n.reviewer.name}${n.at}${n.file}`} className={cx('ab-msg', n.role === 'content' ? 'is-note' : 'is-staff')}>
                 <span className="who">
-                  <b>{n.who}</b>
-                  <Badge tone={n.tone}>{n.team}</Badge>
-                  <span>{n.when}</span>
+                  <b>{n.reviewer.name ?? 'Reviewer'}</b>
+                  <Badge tone={n.role === 'advertising' ? 'brand' : 'warning'}>{ROLE_LABEL[n.role] ?? n.role}</Badge>
+                  <span>
+                    {dateTime(n.at)} · {n.decision === 'changes_requested' ? 'changes requested' : n.decision}
+                  </span>
                 </span>
-                <p>{n.text}</p>
+                <p>{n.comment || reasonLabel(n.reasonCode) || '—'}</p>
               </div>
             ))}
+            {dedupNotes.length === 0 && <p className="xs muted">No reviewer notes yet.</p>}
           </div>
+          {myRoles.length > 1 && (
+            <Field label="Review as" hint="Your roles cover more than one review step">
+              <Select id="aa-role" options={myRoles.map((r) => ({ value: r, label: REVIEW_ROLE_LABEL[r] }))} value={role} onChange={(e) => setReviewAs(e.target.value as ReviewRole)} />
+            </Field>
+          )}
           <fieldset className="stack gap-2 fieldset-reset">
             <legend className="label">Decision</legend>
             {(
@@ -411,7 +521,7 @@ export default function AdAssets() {
             ))}
           </fieldset>
           <Field label="Reason or note" error={reasonErr}>
-            <Select id="aa-reason" options={REASONS} value={reason} onChange={(e) => (setReason(e.target.value), setReasonErr(''))} />
+            <Select id="aa-reason" options={REASONS.map((r) => ({ value: r.code, label: r.label }))} value={reason} onChange={(e) => (setReason(e.target.value as typeof reason), setReasonErr(''))} />
           </Field>
           <Field label="Comment for the owner" optional>
             <Textarea id="aa-note" value={comment} onChange={(e) => setComment(e.target.value)} />

@@ -1,78 +1,92 @@
-import { Fragment, useState, type ReactNode } from 'react';
-import { Link } from 'react-router';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useSearchParams } from 'react-router';
+import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money, num } from '@marketly/web-shared/lib/format';
+import { formatMoney, num } from '@marketly/web-shared/lib/format';
 import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Checkbox, Field, Icon, Img, PageHeader, Price, Radio, Select, StatusBadge, TableWrap, Textarea, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, PageHeader, Price, Radio, Select, StatusBadge, TableWrap, Textarea, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { LoadError, SkeletonLines, dateTime, shortDate } from '@/app/parts';
+import { STATUS_LABEL, kindLabel, type Campaign, type CampaignInput } from './data/promotions';
 
 // Design: pages/admin/admin-promotion-new.html (step 1, set up) · view "finance-confirmation" = after "Send to Finance":
 // step 2, the setup locked (.ab-locked) and the Finance confirmation card. QA m-9 (locked text at 2.48:1) is fixed in
 // marketly.css (.ab-locked has no opacity); here the locked controls are read-only/disabled without dimming the text.
+// Data: ?id=<campaign id> opens a saved campaign (GET /api/admin/promotions/campaigns/{id}); without it the form starts
+// empty. Save draft = POST /campaigns (then PATCH); Send to Finance = save + POST /campaigns/{id}/submit; Finance
+// confirms with POST /confirm-funding or sends it back with /request-changes. Categories come from
+// GET /api/admin/catalog/categories; seller participation from /campaigns/{id}/participations; the price preview from
+// POST /campaigns/{id}/price-preview (once the campaign is saved).
 
 /* ---------------- Options ---------------- */
 
-const TYPES = ['Item markdown', 'Percentage coupon', 'Fixed-amount coupon', 'Minimum-spend discount', 'Free shipping', 'Flash sale'];
-const PERCENT_TYPES = ['Item markdown', 'Percentage coupon', 'Flash sale'];
-const CODE_TYPES = ['Percentage coupon', 'Fixed-amount coupon', 'Minimum-spend discount'];
-const TIME_ZONES = ['Pacific Time (PT)', 'Mountain Time (MT)', 'Central Time (CT)', 'Eastern Time (ET)'];
-
-const CATEGORIES = [
-  { name: 'Home & Kitchen › Bedding', offers: 132 },
-  { name: 'Home & Kitchen › Lighting', offers: 82 },
-  { name: 'Home & Kitchen › Cookware', offers: 96 },
-  { name: 'Home & Kitchen › Bath', offers: 54 },
+type Kind = 'markdown' | 'percent_coupon' | 'fixed_coupon' | 'min_spend' | 'free_shipping' | 'flash_sale';
+const TYPES: Array<{ value: Kind; label: string }> = [
+  { value: 'markdown', label: 'Item markdown' },
+  { value: 'percent_coupon', label: 'Percentage coupon' },
+  { value: 'fixed_coupon', label: 'Fixed-amount coupon' },
+  { value: 'min_spend', label: 'Minimum-spend discount' },
+  { value: 'free_shipping', label: 'Free shipping' },
+  { value: 'flash_sale', label: 'Flash sale' },
+];
+const typeLabel = (k: string) => TYPES.find((t) => t.value === k)?.label ?? kindLabel(k);
+const PERCENT_TYPES: Kind[] = ['markdown', 'percent_coupon', 'flash_sale'];
+const CODE_TYPES: Kind[] = ['percent_coupon', 'fixed_coupon', 'min_spend'];
+const TIME_ZONES = [
+  { value: 'America/Los_Angeles', label: 'Pacific Time (PT)', short: 'PT' },
+  { value: 'America/Denver', label: 'Mountain Time (MT)', short: 'MT' },
+  { value: 'America/Chicago', label: 'Central Time (CT)', short: 'CT' },
+  { value: 'America/New_York', label: 'Eastern Time (ET)', short: 'ET' },
 ];
 
-const CUSTOMERS = [
-  { label: 'All customers, including guests', short: 'Everyone' },
-  { label: 'Signed-in customers', short: 'Signed-in' },
-  { label: 'New customers (first order)', short: 'New customers' },
-  { label: 'Customers in selected regions', short: 'Selected regions' },
+type Audience = 'everyone' | 'signed_in' | 'new_customers' | 'regions';
+const CUSTOMERS: Array<{ value: Audience; label: string; short: string }> = [
+  { value: 'everyone', label: 'All customers, including guests', short: 'Everyone' },
+  { value: 'signed_in', label: 'Signed-in customers', short: 'Signed-in' },
+  { value: 'new_customers', label: 'New customers (first order)', short: 'New customers' },
+  { value: 'regions', label: 'Customers in selected regions', short: 'Selected regions' },
 ];
 
-type Funding = 'Platform' | 'Seller' | 'Shared';
-const FUNDING: Array<{ value: Funding; body: string; platformShare: number }> = [
-  { value: 'Platform', body: 'Marketly pays the full discount. Seller proceeds are unchanged.', platformShare: 1 },
-  { value: 'Seller', body: 'Each participating seller pays for its own offers.', platformShare: 0 },
-  { value: 'Shared', body: 'Platform 50% · sellers 50% of the discount on seller offers', platformShare: 0.5 },
+type Funding = 'platform' | 'seller' | 'shared';
+const FUNDING: Array<{ value: Funding; label: string; body: string; platformShare: number }> = [
+  { value: 'platform', label: 'Platform', body: 'Marketly pays the full discount. Seller proceeds are unchanged.', platformShare: 1 },
+  { value: 'seller', label: 'Seller', body: 'Each participating seller pays for its own offers.', platformShare: 0 },
+  { value: 'shared', label: 'Shared', body: 'Platform 50% · sellers 50% of the discount on seller offers', platformShare: 0.5 },
 ];
 
-type ComboKey = 'markdowns' | 'coupons' | 'freeShip' | 'flash';
+type ComboKey = 'withSellerMarkdowns' | 'withOtherCoupons' | 'withFreeShipping' | 'withFlashSalePrices';
 const COMBOS: Array<{ key: ComboKey; label: string; short: string }> = [
-  { key: 'markdowns', label: 'Combines with seller markdowns', short: 'markdowns' },
-  { key: 'coupons', label: 'Combines with other coupons', short: 'other coupons' },
-  { key: 'freeShip', label: 'Combines with free shipping offers', short: 'free shipping' },
-  { key: 'flash', label: 'Applies to items already in a flash sale', short: 'flash sales' },
+  { key: 'withSellerMarkdowns', label: 'Combines with seller markdowns', short: 'markdowns' },
+  { key: 'withOtherCoupons', label: 'Combines with other coupons', short: 'other coupons' },
+  { key: 'withFreeShipping', label: 'Combines with free shipping offers', short: 'free shipping' },
+  { key: 'withFlashSalePrices', label: 'Applies to items already in a flash sale', short: 'flash sales' },
 ];
 
-const EXCLUSIONS = ['Official Store clearance', 'Gadget Grove (restricted seller)', 'Brightline S2 (under review)'];
-
-const SELLERS = [
-  { name: 'Casa Verde Home', offers: 42, consent: 'Accepted' },
-  { name: 'Mosswood Living', offers: 18, consent: 'Accepted' },
-  { name: 'Trailhead Outfitters', offers: 6, consent: 'Pending' },
-];
-
-const COMMISSION = 0.12;
-const PREVIEW_PRICE = 119;
-const MARKETING_LIMIT = 10000;
 const STEPS = ['Set up', 'Finance confirmation', 'Content and pages', 'Scheduled'];
 
 /* ---------------- Form ---------------- */
 
+interface Cat {
+  id: string;
+  name: string;
+  offers: number;
+}
+
 interface Form {
   name: string;
-  type: string;
+  type: Kind;
   code: string;
   note: string;
+  /** datetime-local values (wall time in the campaign's time zone) */
   start: string;
   end: string;
   tz: string;
   scope: 'categories' | 'products';
-  cats: string[];
-  customers: number;
+  cats: Cat[];
+  customers: Audience;
   value: string;
   max: string;
   budget: string;
@@ -84,30 +98,32 @@ interface Form {
   invite: boolean;
 }
 
-const INITIAL: Form = {
-  name: 'Fall Home Sale',
-  type: 'Percentage coupon',
-  code: 'FALLHOME20',
-  note: 'Supports Home Week follow-up and Q4 bedding push',
-  start: 'Oct 16, 2026, 12:00 AM',
-  end: 'Oct 25, 2026, 11:59 PM',
-  tz: TIME_ZONES[0],
+const EMPTY: Form = {
+  name: '',
+  type: 'percent_coupon',
+  code: '',
+  note: '',
+  start: '',
+  end: '',
+  tz: TIME_ZONES[0].value,
   scope: 'categories',
-  cats: [CATEGORIES[0].name, CATEGORIES[1].name],
-  customers: 1,
-  value: '20',
-  max: '40.00',
-  budget: '12,000.00',
-  cap: '2,000',
+  cats: [],
+  customers: 'everyone',
+  value: '',
+  max: '',
+  budget: '',
+  cap: '',
   perCustomer: '1',
   perOrder: '1',
-  funding: 'Shared',
-  combos: { markdowns: true, coupons: false, freeShip: true, flash: false },
-  invite: true,
+  funding: 'platform',
+  combos: { withSellerMarkdowns: true, withOtherCoupons: false, withFreeShipping: true, withFlashSalePrices: false },
+  invite: false,
 };
 
 const toNum = (s: string) => Number(s.replace(/[$,\s]/g, ''));
 const isInt = (s: string) => /^\d[\d,]*$/.test(s.trim()) && toNum(s) > 0;
+const cents = (s: string) => Math.round(toNum(s) * 100);
+const usd = (amount: number) => ({ amount, currency: 'USD' });
 
 type Errors = Partial<Record<'name' | 'code' | 'start' | 'end' | 'cats' | 'value' | 'max' | 'budget' | 'cap' | 'perCustomer' | 'perOrder', string>>;
 
@@ -115,38 +131,109 @@ function validate(f: Form): Errors {
   const e: Errors = {};
   const pct = PERCENT_TYPES.includes(f.type);
   if (!f.name.trim()) e.name = 'Enter a campaign name.';
-  if (CODE_TYPES.includes(f.type) && !/^[A-Z0-9]{4,20}$/.test(f.code.trim())) e.code = 'Use 4–20 capital letters or digits, like FALLHOME20.';
+  if (CODE_TYPES.includes(f.type) && f.code.trim() && !/^[A-Z0-9]{4,20}$/.test(f.code.trim())) e.code = 'Use 4–20 capital letters or digits, like FALLHOME20.';
   if (!f.start.trim()) e.start = 'Enter a start date and time.';
   if (!f.end.trim()) e.end = 'Enter an end date and time.';
+  else if (f.start && f.end <= f.start) e.end = 'The end must be after the start.';
   if (f.scope === 'categories' && !f.cats.length) e.cats = 'Add at least one category.';
-  if (f.type !== 'Free shipping') {
+  if (f.type !== 'free_shipping') {
     const v = toNum(f.value);
     if (!f.value.trim() || Number.isNaN(v) || v <= 0) e.value = 'Enter the discount value.';
     else if (pct && v > 90) e.value = 'Enter a discount between 1% and 90%.';
   }
-  if (pct && f.max.trim() && (Number.isNaN(toNum(f.max)) || toNum(f.max) <= 0)) e.max = 'Enter an amount, or leave it empty for no maximum.';
+  if (f.max.trim() && (Number.isNaN(toNum(f.max)) || toNum(f.max) <= 0)) e.max = 'Enter an amount, or leave it empty for no maximum.';
   if (!(toNum(f.budget) > 0)) e.budget = 'Enter the total budget.';
-  if (!isInt(f.cap)) e.cap = 'Enter a whole number of redemptions.';
+  if (f.cap.trim() && !isInt(f.cap)) e.cap = 'Enter a whole number of redemptions, or leave it empty.';
   if (!isInt(f.perCustomer)) e.perCustomer = 'Enter a whole number.';
-  if (!isInt(f.perOrder)) e.perOrder = 'Enter a whole number.';
+  if (f.perOrder.trim() !== '1') e.perOrder = 'A campaign applies at most once per order: enter 1.';
   return e;
 }
 
-/** "Oct 16, 2026, 12:00 AM" → { m: 'Oct', d: '16', y: '2026' } */
-function parseDate(s: string) {
-  const m = /^([A-Z][a-z]{2})\w*\s+(\d{1,2}),?\s*(\d{4})?/.exec(s.trim());
-  return m ? { m: m[1], d: m[2], y: m[3] ?? '' } : null;
+/** Offset of a time zone from UTC at an instant, in minutes. */
+function tzOffset(tz: string, at: Date): number {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(at).map((x) => [x.type, x.value]));
+  const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+  return (asUtc - at.getTime()) / 60000;
 }
+/** "2026-10-16T00:00" in tz → ISO instant. */
+function wallToIso(wall: string, tz: string): string {
+  const guess = new Date(`${wall}:00Z`);
+  return new Date(guess.getTime() - tzOffset(tz, guess) * 60000).toISOString();
+}
+/** ISO instant → "2026-10-16T00:00" wall time in tz. */
+function isoToWall(iso: string, tz: string): string {
+  const d = new Date(iso);
+  return new Date(d.getTime() + tzOffset(tz, d) * 60000).toISOString().slice(0, 16);
+}
+
 function period(f: Form, withYear: boolean) {
-  const a = parseDate(f.start);
-  const b = parseDate(f.end);
-  const tz = /\((\w+)\)/.exec(f.tz)?.[1] ?? f.tz;
-  if (!a || !b) return `${f.start} – ${f.end}`;
-  const range = a.m === b.m ? `${a.m} ${a.d}–${b.d}` : `${a.m} ${a.d} – ${b.m} ${b.d}`;
-  return withYear ? `${range}, ${b.y} ${tz}` : `${range}, ${tz}`;
+  const tz = TIME_ZONES.find((t) => t.value === f.tz)?.short ?? f.tz;
+  if (!f.start || !f.end) return 'Not set';
+  const fmt = (w: string, o: Intl.DateTimeFormatOptions) => new Date(`${w}:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', ...o });
+  const a = fmt(f.start, { month: 'short', day: 'numeric' });
+  const b = fmt(f.end, { month: 'short', day: 'numeric' });
+  return `${a} – ${b}${withYear ? `, ${fmt(f.end, { year: 'numeric' })}` : ''} ${tz}`;
 }
 const fmtCap = (n: number) => `$${Number.isInteger(n) ? num(n) : n.toFixed(2)}`;
 const andList = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+function fromCampaign(c: Campaign, cats: Cat[]): Form {
+  const d = c.discount;
+  const pct = d.percentOffBps != null;
+  const included = c.scope.include.filter((t) => t.kind === 'category').map((t) => cats.find((x) => x.id === t.id) ?? { id: t.id, name: t.label ?? 'Category', offers: 0 });
+  return {
+    name: c.name,
+    type: (TYPES.some((t) => t.value === d.kind) ? d.kind : 'percent_coupon') as Kind,
+    code: c.code ?? '',
+    note: c.internalNote ?? '',
+    start: isoToWall(c.period.startsAt, c.period.timeZone),
+    end: isoToWall(c.period.endsAt, c.period.timeZone),
+    tz: c.period.timeZone,
+    scope: c.scope.mode === 'categories' || c.scope.mode === 'sitewide' ? 'categories' : 'products',
+    cats: included,
+    customers: c.eligibility.audience,
+    value: pct ? String((d.percentOffBps ?? 0) / 100) : d.amountOff ? String(d.amountOff.amount / 100) : '',
+    max: d.maxDiscountPerOrder ? String(d.maxDiscountPerOrder.amount / 100) : '',
+    budget: c.limits.budget ? String(c.limits.budget.amount / 100) : '',
+    cap: c.limits.usageCap != null ? String(c.limits.usageCap) : '',
+    perCustomer: c.limits.perCustomer != null ? String(c.limits.perCustomer) : '1',
+    perOrder: c.limits.perOrder != null ? String(c.limits.perOrder) : '1',
+    funding: c.funding.owner,
+    combos: {
+      withSellerMarkdowns: c.stacking.withSellerMarkdowns,
+      withOtherCoupons: c.stacking.withOtherCoupons,
+      withFreeShipping: c.stacking.withFreeShipping,
+      withFlashSalePrices: c.stacking.withFlashSalePrices,
+    },
+    invite: !!c.participation?.inviteSellers,
+  };
+}
+
+function toInput(f: Form, exclude: CampaignInput['scope']['exclude']): CampaignInput {
+  const pct = PERCENT_TYPES.includes(f.type);
+  const v = toNum(f.value);
+  return {
+    name: f.name.trim(),
+    internalNote: f.note.trim() || null,
+    code: CODE_TYPES.includes(f.type) && f.code.trim() ? f.code.trim() : null,
+    discount: {
+      kind: f.type,
+      percentOffBps: pct ? Math.round(v * 100) : null,
+      amountOff: !pct && f.type !== 'free_shipping' && f.type !== 'min_spend' ? usd(cents(f.value)) : f.type === 'min_spend' ? usd(cents(f.value)) : null,
+      maxDiscountPerOrder: f.max.trim() ? usd(cents(f.max)) : null,
+      freeShipping: f.type === 'free_shipping' ? true : null,
+    },
+    startsAt: wallToIso(f.start, f.tz),
+    endsAt: wallToIso(f.end, f.tz),
+    timeZone: f.tz,
+    scope: { mode: f.scope === 'categories' ? 'categories' : 'products', include: f.scope === 'categories' ? f.cats.map((c) => ({ kind: 'category' as const, id: c.id, label: c.name })) : [], exclude },
+    eligibility: { audience: f.customers },
+    limits: { budget: usd(cents(f.budget)), usageCap: f.cap.trim() ? toNum(f.cap) : null, perCustomer: toNum(f.perCustomer), perOrder: 1 },
+    funding: { owner: f.funding, platformShareBps: f.funding === 'shared' ? 5000 : null },
+    stacking: { ...f.combos },
+    participation: { inviteSellers: f.invite, rules: [] },
+  };
+}
 
 /* ---------------- Page-local helpers ---------------- */
 
@@ -221,150 +308,270 @@ function SumList({ rows }: { rows: Array<[string, ReactNode]> }) {
   );
 }
 
+const PARTICIPATION_LABEL: Record<string, string> = { invited: 'Pending', accepted: 'Accepted', declined: 'Declined', withdrawal_requested: 'Withdrawal requested', withdrawn: 'Withdrawn', removed: 'Removed', expired: 'Expired' };
+
 /* ---------------- Page ---------------- */
 
+interface CategoryNode {
+  id: string;
+  name: string;
+  offerCount: number;
+  children?: CategoryNode[];
+}
+
 export default function PromotionNew() {
+  const [params] = useSearchParams();
+  const id = params.get('id') ?? '';
+  const { api } = useApi();
+  const cats = useQuery({
+    queryKey: ['catalog', 'categories', 'admin'],
+    queryFn: async () => {
+      const tree = (await call(api.GET('/api/admin/catalog/categories'))) as unknown as CategoryNode[];
+      const out: Cat[] = [];
+      for (const top of tree) for (const c of top.children?.length ? top.children : [top]) out.push({ id: c.id, name: c === top ? top.name : `${top.name} › ${c.name}`, offers: c.offerCount });
+      return out;
+    },
+  });
+  const campaign = useQuery({ queryKey: ['promotions', 'campaign', id], enabled: !!id, queryFn: () => call(api.GET('/api/admin/promotions/campaigns/{id}', { params: { path: { id } } })) });
+
+  if (id && campaign.isError) {
+    const notFound = campaign.error instanceof ApiError && campaign.error.status === 404;
+    return (
+      <AdminLayout active="promotions">
+        <PageHeader crumbs={[{ label: 'Promotions and coupons', to: href('admin/promotions') }, { label: 'Campaign' }]} title={notFound ? 'Campaign not found' : 'Campaign'} />
+        {notFound ? (
+          <Card pad>
+            <EmptyState icon="search-x" title="This campaign doesn’t exist" as="h2" action={<Button to={href('admin/promotions')}>Back to promotions</Button>}>
+              It may have been removed. Open it again from Promotions and coupons.
+            </EmptyState>
+          </Card>
+        ) : (
+          <LoadError error={campaign.error} onRetry={() => void campaign.refetch()} />
+        )}
+      </AdminLayout>
+    );
+  }
+  if ((id && !campaign.data) || (cats.isPending && !cats.isError)) {
+    return (
+      <AdminLayout active="promotions">
+        <PageHeader crumbs={[{ label: 'Promotions and coupons', to: href('admin/promotions') }, { label: id ? 'Campaign' : 'New campaign' }]} title={id ? 'Campaign' : 'Create campaign'} />
+        <div className="ab-main wide">
+          <Card pad>
+            <SkeletonLines rows={8} />
+          </Card>
+          <Card pad>
+            <SkeletonLines rows={5} />
+          </Card>
+        </div>
+      </AdminLayout>
+    );
+  }
+  return <Editor key={campaign.data?.id ?? 'new'} campaign={campaign.data} categories={cats.data ?? []} categoriesError={cats.isError ? cats.error : null} />;
+}
+
+function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campaign; categories: Cat[]; categoriesError: unknown }) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const [, setParams] = useSearchParams();
+  const { can, name: me } = useStaffSession();
+  const canManage = can('promotions.campaigns.manage');
+  const canConfirm = can('promotions.funding.confirm');
+  const canPublish = can('promotions.campaigns.publish');
+
   const [view, setView] = useView<'finance-confirmation'>();
-  const [f, setF] = useState<Form>(INITIAL);
+  const [f, setF] = useState<Form>(() => (c ? fromCampaign(c, categories) : EMPTY));
   const [attempted, setAttempted] = useState(false);
-  const [saved, setSaved] = useState('9:41 AM');
   const [comment, setComment] = useState('');
   const [commentErr, setCommentErr] = useState('');
-  const [outcome, setOutcome] = useState<null | 'confirmed' | { changes: string }>(null);
+  const [notice, setNotice] = useState<{ tone: 'success' | 'info'; title: string; text: string } | null>(null);
 
-  const finance = view === 'finance-confirmation';
-  const confirmed = finance && outcome === 'confirmed';
-  const locked = finance;
-  const errors = attempted && !finance ? validate(f) : {};
+  const status = c?.status ?? 'draft';
+  const review = c?.fundingReview;
+  const editable = canManage && (!c || ((status === 'draft' || status === 'changes_requested') && !c.locked));
+  // The finance view follows the campaign: in review (or the view opened by hand on a campaign sent before).
+  const finance = status === 'in_review' || (view === 'finance-confirmation' && !!c && status !== 'draft' && status !== 'changes_requested');
+  const confirmed = !!c && ['approved', 'scheduled', 'live', 'paused', 'ended'].includes(status);
+  const locked = !editable;
+  const errors = attempted && editable ? validate(f) : {};
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((x) => ({ ...x, [k]: v }));
 
-  // Derived values (summary, seller earnings, price preview).
+  useEffect(() => {
+    // Opening ?view=finance-confirmation on a draft has nothing to show: stay on setup.
+    if (view === 'finance-confirmation' && (!c || status === 'draft' || status === 'changes_requested')) setView('', { replace: true });
+  }, [view, c, status, setView]);
+
+  const participations = useQuery({
+    queryKey: ['promotions', 'participations', c?.id],
+    enabled: !!c,
+    queryFn: () => call(api.GET('/api/admin/promotions/campaigns/{id}/participations', { params: { path: { id: c!.id }, query: { limit: 50 } } })),
+  });
+  const preview = useQuery({
+    queryKey: ['promotions', 'price-preview', c?.id, c?.version],
+    enabled: !!c,
+    retry: false,
+    queryFn: () => call(api.POST('/api/admin/promotions/campaigns/{id}/price-preview', { params: { path: { id: c!.id } }, body: {} })),
+  });
+
+  // Derived values (summary).
   const pct = PERCENT_TYPES.includes(f.type);
-  const value = f.type === 'Free shipping' ? 0 : toNum(f.value) || 0;
+  const value = f.type === 'free_shipping' ? 0 : toNum(f.value) || 0;
   const maxOff = toNum(f.max) || 0;
   const budget = toNum(f.budget) || 0;
   const cap = toNum(f.cap) || 0;
   const fund = FUNDING.find((x) => x.value === f.funding)!;
-  const covered = CATEGORIES.filter((c) => f.cats.includes(c.name));
-  const offers = covered.reduce((s, c) => s + c.offers, 0);
+  const offers = c?.eligible.offers ?? f.cats.reduce((s, x) => s + x.offers, 0);
   const typeSummary =
-    f.type === 'Percentage coupon' ? `${value}% coupon${maxOff ? `, max ${fmtCap(maxOff)}` : ''}`
-    : f.type === 'Item markdown' ? `${value}% markdown`
-    : f.type === 'Flash sale' ? `${value}% flash sale`
-    : f.type === 'Fixed-amount coupon' ? `${fmtCap(value)} coupon`
-    : f.type === 'Minimum-spend discount' ? `${fmtCap(value)} off a minimum spend`
+    f.type === 'percent_coupon' ? `${value}% coupon${maxOff ? `, max ${fmtCap(maxOff)}` : ''}`
+    : f.type === 'markdown' ? `${value}% markdown`
+    : f.type === 'flash_sale' ? `${value}% flash sale`
+    : f.type === 'fixed_coupon' ? `${fmtCap(value)} coupon`
+    : f.type === 'min_spend' ? `${fmtCap(value)} off a minimum spend`
     : 'Free shipping';
-  const fundSummary = f.funding === 'Shared' ? 'Shared 50/50' : f.funding;
-  const stacking = COMBOS.filter((c) => f.combos[c.key]).map((c) => c.short);
+  const fundSummary = f.funding === 'shared' ? 'Shared 50/50' : fund.label;
+  const stacking = COMBOS.filter((x) => f.combos[x.key]).map((x) => x.short);
+  const exclusions = c?.scope.exclude ?? [];
+  const sellers = participations.data?.items ?? [];
+  const example = sellers.find((s) => s.earningsExample)?.earningsExample;
 
-  // Seller earnings on a $100 sale.
-  const disc = Math.min(value, 100);
-  const sellerFund = disc * (1 - fund.platformShare);
-  const platformFund = disc - sellerFund;
-  const commission = COMMISSION * (100 - sellerFund);
-  const earns = 100 - sellerFund - commission;
-  const offLabel = pct ? `${disc}% off` : `${money(disc)} off`;
+  const refresh = (saved: Campaign) => {
+    qc.setQueryData(['promotions', 'campaign', saved.id], saved);
+    void qc.invalidateQueries({ queryKey: ['promotions'] });
+    void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+  };
 
-  // Price preview on the Mosswood duvet cover.
-  const rawOff = pct ? (PREVIEW_PRICE * value) / 100 : value;
-  const previewOff = Math.min(rawOff, pct && maxOff ? maxOff : rawOff, PREVIEW_PRICE);
-  const previewNow = PREVIEW_PRICE - previewOff;
-  const consented = SELLERS.filter((s) => s.consent === 'Accepted').length;
-  const pending = SELLERS.filter((s) => s.consent !== 'Accepted');
-  const platformMax = budget * fund.platformShare;
+  const save = useMutation({
+    mutationFn: async (submit: boolean) => {
+      const body = toInput(f, exclusions);
+      let saved = c ? await call(api.PATCH('/api/admin/promotions/campaigns/{id}', { params: { path: { id: c.id } }, body: { ...body, version: c.version } })) : await call(api.POST('/api/admin/promotions/campaigns', { body }));
+      if (submit) saved = await call(api.POST('/api/admin/promotions/campaigns/{id}/submit', { params: { path: { id: saved.id } }, body: {} }));
+      return { saved, submit };
+    },
+    onSuccess: ({ saved, submit }) => {
+      refresh(saved);
+      if (!c) setParams((p) => ({ ...Object.fromEntries(p), id: saved.id, ...(submit ? { view: 'finance-confirmation' } : {}) }), { replace: true });
+      else if (submit) setView('finance-confirmation');
+      announce(submit ? 'Sent to Finance' : 'Draft saved');
+      setNotice(submit ? null : { tone: 'success', title: 'Draft saved', text: `${saved.name} is saved as a draft.` });
+    },
+  });
+
+  const decide = useMutation({
+    mutationFn: async (kind: 'confirm' | 'changes' | 'schedule' | 'withdraw') => {
+      if (!c) throw new Error('Save the campaign first.');
+      const path = { params: { path: { id: c.id } } };
+      if (kind === 'confirm') return call(api.POST('/api/admin/promotions/campaigns/{id}/confirm-funding', { ...path, body: { comment: comment.trim() || null } }));
+      if (kind === 'changes') return call(api.POST('/api/admin/promotions/campaigns/{id}/request-changes', { ...path, body: { reason: comment.trim() } }));
+      if (kind === 'withdraw') return call(api.POST('/api/admin/promotions/campaigns/{id}/withdraw', path));
+      return call(api.POST('/api/admin/promotions/campaigns/{id}/schedule', path));
+    },
+    onSuccess: (saved, kind) => {
+      refresh(saved);
+      setComment('');
+      void qc.invalidateQueries({ queryKey: ['notifications', 'summary', 'staff'] });
+      if (kind === 'changes' || kind === 'withdraw') setView('');
+      const approval = saved.fundingReview?.approval;
+      if (kind === 'confirm' && approval?.required && saved.status === 'in_review') {
+        setNotice({ tone: 'info', title: 'Sent for approval', text: `${approval.reason ?? 'This budget is above your approval limit.'} ${approval.approvers.length ? `Approvers: ${approval.approvers.join(', ')}.` : ''}` });
+        announce('Funding confirmation sent for approval');
+      } else {
+        setNotice(null);
+        announce(kind === 'confirm' ? 'Funding confirmed' : kind === 'changes' ? 'Changes requested' : kind === 'withdraw' ? 'Taken back to draft' : 'Campaign scheduled');
+      }
+    },
+  });
 
   const send = () => {
     setAttempted(true);
     const e = validate(f);
     const first = Object.keys(e)[0];
     if (first) {
-      const id = { name: 'pn-name', code: 'pn-code', start: 'pn-start', end: 'pn-end', cats: 'pn-scope-1', value: 'pn-val', max: 'pn-max', budget: 'pn-bud', cap: 'pn-cap', perCustomer: 'pn-pc', perOrder: 'pn-po' }[first];
-      if (id) document.getElementById(id)?.focus();
+      const fid = { name: 'pn-name', code: 'pn-code', start: 'pn-start', end: 'pn-end', cats: 'pn-scope-1', value: 'pn-val', max: 'pn-max', budget: 'pn-bud', cap: 'pn-cap', perCustomer: 'pn-pc', perOrder: 'pn-po' }[first];
+      if (fid) document.getElementById(fid)?.focus();
       return;
     }
-    setOutcome(null);
-    setView('finance-confirmation');
-    announce('Sent to Finance');
+    save.mutate(true);
+  };
+  const saveDraft = () => {
+    if (!f.name.trim()) {
+      setAttempted(true);
+      document.getElementById('pn-name')?.focus();
+      return;
+    }
+    if (!f.start || !f.end || !(toNum(f.budget) > 0)) {
+      setAttempted(true);
+      return;
+    }
+    save.mutate(false);
   };
   const requestChanges = () => {
     if (!comment.trim()) {
       setCommentErr('Add a comment so Marketing knows what to change.');
       return;
     }
-    setOutcome({ changes: comment.trim() });
-    setComment('');
-    setView('');
-  };
-  const confirm = () => {
-    setOutcome('confirmed');
-    announce('Funding confirmed');
-  };
-  const saveDraft = () => {
-    setSaved(new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
-    announce('Draft saved');
+    decide.mutate('changes');
   };
 
-  const removeCat = (name: string) => !locked && set('cats', f.cats.filter((c) => c !== name));
-  const nextCat = CATEGORIES.find((c) => !f.cats.includes(c.name));
-  const lockedSub = locked ? (
+  const removeCat = (cid: string) => !locked && set('cats', f.cats.filter((x) => x.id !== cid));
+  const [adding, setAdding] = useState(false);
+  const choices = useMemo(() => categories.filter((x) => !f.cats.some((y) => y.id === x.id)), [categories, f.cats]);
+  const lockedSub = locked && c ? (
     <span className="xs muted">
-      <Icon name="lock" className="ic-sm" /> Locked while Finance reviews
+      <Icon name="lock" className="ic-sm" /> {status === 'in_review' ? 'Locked while Finance reviews' : !canManage ? 'Your role can view campaigns but not edit them' : `Locked: ${STATUS_LABEL[status] ?? status}`}
     </span>
   ) : undefined;
 
-  const financeChecks: Check[] = [
-    budget > MARKETING_LIMIT
-      ? { tone: 'warn', text: `Budget $${num(budget)} is above the Marketing limit of $${num(MARKETING_LIMIT)}`, sub: `Finance confirms the extra $${num(budget - MARKETING_LIMIT)} from the Q4 bedding fund` }
-      : { tone: 'ok', text: `Budget is within the Marketing limit of $${num(MARKETING_LIMIT)}` },
-    { tone: 'ok', text: 'Platform share does not reduce seller proceeds' },
-    { tone: 'ok', text: 'Seller share matches the consent each seller gave' },
-    ...pending.map((s): Check => ({ tone: 'warn', text: `${s.name} has not consented`, sub: `Its ${s.offers} offers stay out until it accepts` })),
-    { tone: 'ok', text: 'Cost center MKT-2026-Q4 has $18,400 left' },
-  ];
-
-  const setupChecks: Check[] = [
-    { tone: 'ok', text: 'Marketing: Jamie Brooks' },
-    { tone: 'info', text: 'Finance confirms funding: Priya Nair' },
-    { tone: 'info', text: 'Content prepares banner and campaign page: Noor Aziz' },
-    ...(f.invite ? [{ tone: 'info' as const, text: `Sellers consent: ${consented} of ${SELLERS.length}` }] : []),
-  ];
+  const financeChecks: Check[] = (review?.checks ?? []).map((x) => ({ tone: x.state === 'fail' ? 'warn' : x.state, text: x.label, sub: x.detail ?? undefined }));
+  const setupChecks: Check[] = (c?.readiness ?? []).map((r) => ({ tone: r.state === 'done' ? 'ok' : 'info', text: `${r.label}${r.owner ? `: ${r.owner}` : ''}` }));
+  const sentLine = review?.sentAt ? `Sent ${dateTime(review.sentAt)}` : 'Sent';
+  const reviewer = (review?.reviewer as { name?: string } | null | undefined)?.name;
+  const createdBy = (c?.createdBy as { name?: string } | undefined)?.name;
+  const step = confirmed ? (status === 'scheduled' || status === 'live' || status === 'paused' || status === 'ended' ? 3 : 2) : finance ? 1 : 0;
+  const card = preview.data?.productCard;
 
   return (
     <AdminLayout active="promotions">
       <PageHeader
-        crumbs={[{ label: 'Promotions and coupons', to: href('admin/promotions') }, { label: finance ? f.name : 'New campaign' }]}
-        title={finance ? f.name : 'Create campaign'}
-        sub={finance ? `${f.type} · ${period(f, true)} · created by Jamie Brooks` : 'Marketing sets up the campaign. Finance confirms funding before it can go live.'}
-        actions={finance ? <StatusBadge status={confirmed ? 'Approved' : 'In review'} /> : undefined}
+        crumbs={[{ label: 'Promotions and coupons', to: href('admin/promotions') }, { label: c ? c.name : 'New campaign' }]}
+        title={c ? c.name : 'Create campaign'}
+        sub={c ? `${typeLabel(c.discount.kind)} · ${c.period.display}${createdBy ? ` · created by ${createdBy}` : ''}` : 'Marketing sets up the campaign. Finance confirms funding before it can go live.'}
+        actions={c ? <StatusBadge status={STATUS_LABEL[status] ?? status} /> : undefined}
       />
-      <WizardSteps items={STEPS} current={confirmed ? 2 : finance ? 1 : 0} />
+      <WizardSteps items={STEPS} current={step} />
+      {notice && (
+        <Alert tone={notice.tone} title={notice.title}>
+          {notice.text}
+        </Alert>
+      )}
+      {categoriesError != null && <LoadError error={categoriesError} onRetry={() => void qc.invalidateQueries({ queryKey: ['catalog', 'categories', 'admin'] })} title="We couldn’t load the categories" />}
       {finance &&
-        (confirmed ? (
-          <Alert tone="success" title="Funding confirmed">
-            Priya Nair confirmed the funding. Noor Aziz can now prepare the banner and campaign page.
-          </Alert>
-        ) : (
+        (confirmed ? null : (
           <Alert tone="info" title="Waiting for Finance">
-            Edits are locked while Priya Nair reviews the funding. You get a notification when it is confirmed or sent back.
+            Edits are locked while Finance reviews the funding{reviewer ? ` (${reviewer})` : ''}. You get a notification when it is confirmed or sent back.
           </Alert>
         ))}
-      {!finance && outcome && outcome !== 'confirmed' && (
+      {confirmed && (
+        <Alert tone="success" title="Funding confirmed">
+          {review?.decidedAt ? `Finance confirmed the funding ${dateTime(review.decidedAt)}${reviewer ? ` (${reviewer})` : ''}. ` : 'Finance confirmed the funding. '}
+          {status === 'approved' ? 'Content can now prepare the banner and campaign page, then schedule it.' : `The campaign is ${STATUS_LABEL[status]?.toLowerCase() ?? status}.`}
+        </Alert>
+      )}
+      {status === 'changes_requested' && (
         <Alert tone="warning" title="Finance requested changes">
-          {outcome.changes}
+          {review?.comment ?? 'Finance sent the campaign back. Update it and send it again.'}
         </Alert>
       )}
       <div className="ab-main wide">
-        <div className={cx('stack gap-4', locked && 'ab-locked')}>
+        <div className={cx('stack gap-4', locked && c && 'ab-locked')}>
           <Section n={1} title="Basics" sub={lockedSub}>
             <div className="ab-form-grid">
               <Field label="Campaign name" error={errors.name}>
                 <TextInput id="pn-name" value={f.name} error={!!errors.name} readOnly={locked} onChange={(e) => set('name', e.target.value)} placeholder="" />
               </Field>
               <Field label="Promotion type">
-                <Select id="pn-type" options={TYPES} value={f.type} disabled={locked} onChange={(e) => set('type', e.target.value)} />
+                <Select id="pn-type" options={TYPES} value={f.type} disabled={locked} onChange={(e) => set('type', e.target.value as Kind)} />
               </Field>
-              <Field label="Coupon code" hint="Also applied automatically from the campaign page" error={errors.code}>
-                <TextInput id="pn-code" value={f.code} error={!!errors.code} readOnly={locked} onChange={(e) => set('code', e.target.value.toUpperCase())} placeholder="" />
+              <Field label="Coupon code" optional hint={CODE_TYPES.includes(f.type) ? 'Leave empty for a clip-only coupon' : 'Not used for this type'} error={errors.code}>
+                <TextInput id="pn-code" value={f.code} error={!!errors.code} readOnly={locked || !CODE_TYPES.includes(f.type)} onChange={(e) => set('code', e.target.value.toUpperCase())} placeholder="" />
               </Field>
               <Field label="Internal note" optional>
                 <TextInput id="pn-note" value={f.note} readOnly={locked} onChange={(e) => set('note', e.target.value)} placeholder="" />
@@ -374,10 +581,10 @@ export default function PromotionNew() {
           <Section n={2} title="Schedule">
             <div className="ab-form-grid c3">
               <Field label="Starts" error={errors.start}>
-                <TextInput id="pn-start" icon="calendar" value={f.start} error={!!errors.start} readOnly={locked} onChange={(e) => set('start', e.target.value)} placeholder="" />
+                <TextInput id="pn-start" type="datetime-local" icon="calendar" value={f.start} error={!!errors.start} readOnly={locked} onChange={(e) => set('start', e.target.value)} placeholder="" />
               </Field>
               <Field label="Ends" error={errors.end}>
-                <TextInput id="pn-end" icon="calendar" value={f.end} error={!!errors.end} readOnly={locked} onChange={(e) => set('end', e.target.value)} placeholder="" />
+                <TextInput id="pn-end" type="datetime-local" icon="calendar" value={f.end} error={!!errors.end} readOnly={locked} onChange={(e) => set('end', e.target.value)} placeholder="" />
               </Field>
               <Field label="Time zone">
                 <Select id="pn-tz" options={TIME_ZONES} value={f.tz} disabled={locked} onChange={(e) => set('tz', e.target.value)} />
@@ -391,31 +598,31 @@ export default function PromotionNew() {
             <fieldset className="stack gap-2 fieldset-reset">
               <legend className="sr-only">What the campaign covers</legend>
               <Radio id="pn-scope-1" name="pn-scope" label="Categories" checked={f.scope === 'categories'} disabled={locked} onChange={() => set('scope', 'categories')} />
-              <Radio id="pn-scope-2" name="pn-scope" label="Selected products or offers" checked={f.scope === 'products'} disabled={locked} onChange={() => set('scope', 'products')} />
+              <Radio id="pn-scope-2" name="pn-scope" label="Selected products or offers" checked={f.scope === 'products'} disabled />
             </fieldset>
             <div className="hscroll gap-2">
-              {f.cats.map((c) => (
+              {f.cats.map((x) => (
                 <a
-                  key={c}
+                  key={x.id}
                   className="chip is-active"
                   href="#"
                   aria-current="true"
                   onClick={(e) => {
                     e.preventDefault();
-                    removeCat(c);
+                    removeCat(x.id);
                   }}
                 >
-                  {c}
-                  <Icon name="x" className="ic-sm" />
+                  {x.name}
+                  {!locked && <Icon name="x" className="ic-sm" />}
                 </a>
               ))}
-              {!locked && nextCat && (
+              {!locked && choices.length > 0 && !adding && (
                 <a
                   className="chip"
                   href="#"
                   onClick={(e) => {
                     e.preventDefault();
-                    set('cats', [...f.cats, nextCat.name]);
+                    setAdding(true);
                   }}
                 >
                   <Icon name="plus" />
@@ -423,18 +630,35 @@ export default function PromotionNew() {
                 </a>
               )}
             </div>
+            {adding && !locked && (
+              <Select
+                id="pn-cat-add"
+                aria-label="Add category"
+                value=""
+                options={[{ value: '', label: 'Choose a category' }, ...choices.map((x) => ({ value: x.id, label: `${x.name} (${x.offers} offers)` }))]}
+                onChange={(e) => {
+                  const pick = choices.find((x) => x.id === e.target.value);
+                  if (pick) set('cats', [...f.cats, pick]);
+                  setAdding(false);
+                }}
+              />
+            )}
             {errors.cats && (
               <span className="error-text">
                 <Icon name="circle-alert" className="ic-sm" />
                 {errors.cats}
               </span>
             )}
-            <span className="xs muted">{offers} eligible offers · 6 sellers + Official Store</span>
+            <span className="xs muted">
+              {offers} eligible offers
+              {c ? ` · ${c.eligible.sellers} sellers${c.eligible.officialStore ? ' + Official Store' : ''}${c.eligible.excludedOffers ? ` · ${c.eligible.excludedOffers} excluded` : ''}` : ' · exact count after saving'}
+              {' · Selecting single products or offers is not available here yet.'}
+            </span>
           </Section>
           <Section n={4} title="Eligible customers">
             <div className="ab-checkgrid">
-              {CUSTOMERS.map((c, i) => (
-                <Radio key={c.label} id={`pn-cust-${i + 1}`} name="pn-cust" label={c.label} checked={f.customers === i} disabled={locked} onChange={() => set('customers', i)} />
+              {CUSTOMERS.map((x, i) => (
+                <Radio key={x.value} id={`pn-cust-${i + 1}`} name="pn-cust" label={x.label} checked={f.customers === x.value} disabled={locked || x.value === 'regions'} onChange={() => set('customers', x.value)} />
               ))}
             </div>
           </Section>
@@ -444,16 +668,16 @@ export default function PromotionNew() {
                 {pct ? (
                   <TextInput id="pn-val" suffix="% off" value={f.value} error={!!errors.value} inputMode="decimal" readOnly={locked} onChange={(e) => set('value', e.target.value)} placeholder="" />
                 ) : (
-                  <TextInput id="pn-val" prefix="$" value={f.value} error={!!errors.value} inputMode="decimal" readOnly={locked || f.type === 'Free shipping'} onChange={(e) => set('value', e.target.value)} placeholder="" />
+                  <TextInput id="pn-val" prefix="$" value={f.value} error={!!errors.value} inputMode="decimal" readOnly={locked || f.type === 'free_shipping'} onChange={(e) => set('value', e.target.value)} placeholder="" />
                 )}
               </Field>
-              <Field label="Maximum discount per order" error={errors.max}>
+              <Field label="Maximum discount per order" optional error={errors.max}>
                 <TextInput id="pn-max" prefix="$" value={f.max} error={!!errors.max} inputMode="decimal" readOnly={locked} onChange={(e) => set('max', e.target.value)} placeholder="" />
               </Field>
               <Field label="Total budget" hint="Campaign stops when the budget is used" error={errors.budget}>
                 <TextInput id="pn-bud" prefix="$" value={f.budget} error={!!errors.budget} inputMode="decimal" readOnly={locked} onChange={(e) => set('budget', e.target.value)} placeholder="" />
               </Field>
-              <Field label="Usage cap" error={errors.cap}>
+              <Field label="Usage cap" optional error={errors.cap}>
                 <TextInput id="pn-cap" suffix="redemptions" value={f.cap} error={!!errors.cap} inputMode="numeric" readOnly={locked} onChange={(e) => set('cap', e.target.value)} placeholder="" />
               </Field>
               <Field label="Per customer" error={errors.perCustomer}>
@@ -471,7 +695,7 @@ export default function PromotionNew() {
                 <label key={o.value} className={cx('opt-card', f.funding === o.value && 'is-selected')} htmlFor={`pn-fund-${i + 1}`}>
                   <input type="radio" name="pn-fund" id={`pn-fund-${i + 1}`} checked={f.funding === o.value} disabled={locked} onChange={() => set('funding', o.value)} />
                   <span className="stack gap-1 grow">
-                    <span className="small strong">{o.value}</span>
+                    <span className="small strong">{o.label}</span>
                     <span className="small sub">{o.body}</span>
                   </span>
                 </label>
@@ -481,157 +705,167 @@ export default function PromotionNew() {
           </Section>
           <Section n={7} title="Combination rules and exclusions">
             <div className="ab-checkgrid">
-              {COMBOS.map((c, i) => (
-                <Checkbox key={c.key} id={`pn-c${i + 1}`} label={c.label} checked={f.combos[c.key]} disabled={locked} onChange={(e) => set('combos', { ...f.combos, [c.key]: e.target.checked })} />
+              {COMBOS.map((x, i) => (
+                <Checkbox key={x.key} id={`pn-c${i + 1}`} label={x.label} checked={f.combos[x.key]} disabled={locked} onChange={(e) => set('combos', { ...f.combos, [x.key]: e.target.checked })} />
               ))}
             </div>
             <div className="field">
               <label className="label">Exclusions</label>
               <div className="row gap-2">
-                {EXCLUSIONS.map((x) => (
-                  <Badge key={x} tone="outline">
-                    {x}
+                {exclusions.map((x) => (
+                  <Badge key={x.kind + x.id} tone="outline">
+                    {x.label ?? x.kind}
                   </Badge>
                 ))}
-                {!locked && (
-                  <Button variant="link" size="sm" icon="plus">
-                    Add exclusion
-                  </Button>
-                )}
+                {!exclusions.length && <span className="xs muted">None. Restricted sellers and products under review are left out automatically.</span>}
               </div>
             </div>
           </Section>
           <Section n={8} title="Seller participation">
             <Checkbox id="pn-sp" label="Invite sellers to join. Each seller must consent before its offers are included." checked={f.invite} disabled={locked} onChange={(e) => set('invite', e.target.checked)} />
-            <TableWrap label="8 Seller participation table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Seller</th>
-                    <th scope="col">Offers</th>
-                    <th scope="col">Consent</th>
-                    <th className="r" scope="col">
-                      Seller earns per $100 sale
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {SELLERS.map((s) => (
-                    <tr key={s.name}>
-                      <td>{s.name}</td>
-                      <td>{s.offers}</td>
-                      <td>
-                        <StatusBadge status={s.consent} />
-                      </td>
-                      <td className="r">
-                        <span className="num">
-                          {money(earns)} <span className="xs muted">(was {money(100 - COMMISSION * 100)})</span>
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
-            <div className="panel small">
-              On a $100.00 sale at {offLabel} with {f.funding.toLowerCase()} funding: the customer pays {money(100 - disc)}, the seller funds {money(sellerFund)} and the platform funds {money(platformFund)}. Commission of 12% applies to {money(100 - sellerFund)} after the seller-funded part, which is {money(commission)}. The seller earns {money(earns)}.
-            </div>
-            <p className="ab-note">
-              <Icon name="info" className="ic-sm" /> Example rate for Home &amp; Kitchen. Sellers see this estimate on their invitation before they consent.
-            </p>
+            {c ? (
+              sellers.length ? (
+                <TableWrap label="8 Seller participation table">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Seller</th>
+                        <th scope="col">Offers</th>
+                        <th scope="col">Consent</th>
+                        <th className="r" scope="col">
+                          Seller earns per $100 sale
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sellers.map((s) => (
+                        <tr key={s.id}>
+                          <td>{s.sellerName}</td>
+                          <td>{s.offerCount}</td>
+                          <td>
+                            <StatusBadge status={PARTICIPATION_LABEL[s.state] ?? s.state} />
+                          </td>
+                          <td className="r">
+                            {s.earningsExample ? (
+                              <span className="num">
+                                {formatMoney(s.earningsExample.sellerEarns)} <span className="xs muted">(was {formatMoney(s.earningsExample.regularSellerEarns)})</span>
+                              </span>
+                            ) : (
+                              <span className="xs muted">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableWrap>
+              ) : participations.isPending ? (
+                <SkeletonLines rows={2} />
+              ) : (
+                <span className="xs muted">No sellers invited yet.{f.invite ? ' Invitations go out once Finance confirms the funding.' : ''}</span>
+              )
+            ) : (
+              <span className="xs muted">Sellers can be invited once the campaign is saved.</span>
+            )}
+            {example && <div className="panel small">{example.explanation}</div>}
+            {example && (
+              <p className="ab-note">
+                <Icon name="info" className="ic-sm" /> {example.isExample ? 'Example rate. ' : ''}Sellers see this estimate on their invitation before they consent.
+              </p>
+            )}
           </Section>
           <Section n={9} title="Price preview">
-            <div className="ab-pv">
-              <div>
-                <span className="pcap">Product card</span>
-                <Img icon="bed-double" tint="1" className="r43" />
-                <span className="small">Mosswood Washed Linen Duvet Cover, Queen</span>
-                <Price amount={previewNow} was={previewOff > 0 ? PREVIEW_PRICE : null} />
-                <span className="row gap-2">
-                  <Badge className="t-deal-soft">{`${f.name || 'Campaign'} ${pct ? `−${value}%` : `−${money(previewOff)}`}`}</Badge>
-                </span>
-                <span className="xs muted">Sold by Casa Verde Home</span>
-              </div>
-              <div>
-                <span className="pcap">Cart</span>
-                <span className="small strong">Casa Verde Home · Package 1</span>
-                <span className="small">Linen Duvet Cover, Queen</span>
-                <div className="sum-row">
-                  <span>Item</span>
-                  <span>{money(PREVIEW_PRICE)}</span>
-                </div>
-                <div className="sum-row discount">
-                  <span>
-                    {f.name || 'Campaign'}
-                    {CODE_TYPES.includes(f.type) && f.code ? ` (${f.code})` : ''}
+            {card && preview.data ? (
+              <div className="ab-pv">
+                <div>
+                  <span className="pcap">Product card</span>
+                  <Img icon="package" tint="1" className="r43" src={card.image?.url} alt={card.image?.alt ?? ''} />
+                  <span className="small">{card.productTitle}</span>
+                  <Price amount={card.price.amount / 100} was={card.wasPrice ? card.wasPrice.amount / 100 : null} />
+                  <span className="row gap-2">
+                    <Badge className="t-deal-soft">{card.badge}</Badge>
                   </span>
-                  <span>−{money(previewOff)}</span>
+                  <span className="xs muted">Sold by {card.sellerName}</span>
                 </div>
-                <div className="sum-row">
-                  <span>Shipping</span>
-                  <span>Free</span>
+                <div>
+                  <span className="pcap">Cart</span>
+                  <span className="small strong">{preview.data.cart.packageLabel}</span>
+                  {preview.data.cart.lines.map((l, i) => (
+                    <div key={i} className={cx('sum-row', l.kind === 'discount' && 'discount', l.kind === 'total' && 'total')}>
+                      <span>{l.label}</span>
+                      <span>{l.kind === 'discount' ? `−${formatMoney({ ...l.amount, amount: Math.abs(l.amount.amount) })}` : formatMoney(l.amount)}</span>
+                    </div>
+                  ))}
                 </div>
-              </div>
-              <div>
-                <span className="pcap">Checkout</span>
-                <div className="sum-row">
-                  <span>Items (1)</span>
-                  <span>{money(PREVIEW_PRICE)}</span>
-                </div>
-                <div className="sum-row discount">
-                  <span>Discounts</span>
-                  <span>−{money(previewOff)}</span>
-                </div>
-                <span className="xs muted">{f.name || 'Campaign'} applied to 1 item</span>
-                <div className="sum-row">
-                  <span>Shipping</span>
-                  <span>Free</span>
-                </div>
-                <div className="sum-row">
-                  <span>Tax</span>
-                  <span>$0.00</span>
-                </div>
-                <div className="sum-row total">
-                  <span>Total</span>
-                  <span>{money(previewNow)}</span>
+                <div>
+                  <span className="pcap">Checkout</span>
+                  {preview.data.checkout.lines.map((l, i) => (
+                    <div key={i} className={cx('sum-row', l.kind === 'discount' && 'discount', l.kind === 'total' && 'total')}>
+                      <span>{l.label}</span>
+                      <span>{l.kind === 'discount' ? `−${formatMoney({ ...l.amount, amount: Math.abs(l.amount.amount) })}` : formatMoney(l.amount)}</span>
+                    </div>
+                  ))}
+                  <span className="xs muted">{preview.data.checkout.appliedNote}</span>
                 </div>
               </div>
-            </div>
+            ) : c && preview.isPending ? (
+              <SkeletonLines rows={3} />
+            ) : (
+              <span className="xs muted">{c ? (preview.isError ? `No preview: ${errorMessage(preview.error)}` : 'No eligible offer to preview.') : 'Save the draft to preview the product card, cart and checkout with a real offer.'}</span>
+            )}
           </Section>
         </div>
         <div className="stack gap-4 ab-sticky">
-          {finance ? (
+          {finance || confirmed ? (
             <Card
               title="Finance confirmation"
               titleAs="h3"
-              sub={confirmed ? 'Confirmed by Priya Nair just now' : 'Sent Oct 8, 9:58 AM · waiting on Priya Nair'}
+              sub={confirmed ? `Confirmed${review?.decidedAt ? ` ${dateTime(review.decidedAt)}` : ''}${reviewer ? ` by ${reviewer}` : ''}` : `${sentLine} · waiting on Finance`}
               foot={
                 confirmed ? (
-                  <Button variant="secondary" size="sm" to={href('admin/promotions')}>
-                    Back to promotions
-                  </Button>
-                ) : (
                   <>
-                    <Button variant="secondary" size="sm" onClick={requestChanges}>
+                    <Button variant="secondary" size="sm" to={href('admin/promotions')}>
+                      Back to promotions
+                    </Button>
+                    {status === 'approved' && canPublish && (
+                      <Button size="sm" icon="calendar" onClick={() => decide.mutate('schedule')} disabled={decide.isPending}>
+                        Schedule
+                      </Button>
+                    )}
+                  </>
+                ) : canConfirm ? (
+                  <>
+                    <Button variant="secondary" size="sm" onClick={requestChanges} disabled={decide.isPending}>
                       Request changes
                     </Button>
-                    <Button size="sm" icon="check" onClick={confirm}>
+                    <Button size="sm" icon="check" onClick={() => decide.mutate('confirm')} disabled={decide.isPending}>
                       Confirm funding
                     </Button>
                   </>
-                )
+                ) : canManage ? (
+                  <Button variant="secondary" size="sm" onClick={() => decide.mutate('withdraw')} disabled={decide.isPending}>
+                    Take back to draft
+                  </Button>
+                ) : undefined
               }
             >
-              <Checks items={financeChecks} />
-              <SumList
-                rows={[
-                  ['Platform maximum', money(platformMax)],
-                  ['Sellers maximum', money(budget - platformMax)],
-                  ['Expected sales', '$64,000.00'],
-                  ['Official Store margin impact', '−3.1 pts'],
-                ]}
-              />
-              {!confirmed && (
+              {financeChecks.length > 0 && <Checks items={financeChecks} />}
+              {review && (
+                <SumList
+                  rows={[
+                    ['Platform maximum', formatMoney(review.platformMaximum)],
+                    ['Sellers maximum', formatMoney(review.sellersMaximum)],
+                    ['Expected sales', review.expectedSales ? formatMoney(review.expectedSales) : '—'],
+                    ['Official Store margin impact', review.officialMarginImpactPts != null ? `${review.officialMarginImpactPts < 0 ? '−' : ''}${Math.abs(review.officialMarginImpactPts)} pts` : '—'],
+                  ]}
+                />
+              )}
+              {decide.isError && (
+                <Alert tone="danger" title="That didn’t work">
+                  {errorMessage(decide.error)}
+                </Alert>
+              )}
+              {!confirmed && canConfirm && (
                 <Field label="Finance comment" error={commentErr || undefined}>
                   <Textarea
                     id="pn-fin"
@@ -645,37 +879,50 @@ export default function PromotionNew() {
                   />
                 </Field>
               )}
+              {!confirmed && !canConfirm && <span className="xs muted">Finance confirms the funding. Your role can’t confirm it.</span>}
             </Card>
           ) : (
             <Card
               title="Summary"
               titleAs="h3"
-              sub={`Draft · last saved ${saved}`}
+              sub={c ? `${STATUS_LABEL[status] ?? status} · last saved ${dateTime(c.updatedAt)}` : 'Not saved yet'}
               foot={
-                <>
-                  <Button variant="ghost" size="sm" onClick={saveDraft}>
-                    Save draft
-                  </Button>
-                  <Button size="sm" icon="send" onClick={send}>
-                    Send to Finance
-                  </Button>
-                </>
+                editable ? (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={saveDraft} disabled={save.isPending}>
+                      Save draft
+                    </Button>
+                    <Button size="sm" icon="send" onClick={send} disabled={save.isPending}>
+                      Send to Finance
+                    </Button>
+                  </>
+                ) : undefined
               }
             >
               <SumList
                 rows={[
                   ['Type', typeSummary],
                   ['Period', period(f, false)],
-                  ['Covers', f.scope === 'categories' ? `${offers} offers in ${covered.length} ${covered.length === 1 ? 'category' : 'categories'}` : 'Selected products or offers'],
-                  ['Customers', CUSTOMERS[f.customers].short],
-                  ['Budget', `${money(budget)} · ${num(cap)} uses`],
+                  ['Covers', f.scope === 'categories' ? `${offers} offers in ${f.cats.length} ${f.cats.length === 1 ? 'category' : 'categories'}` : 'Selected products or offers'],
+                  ['Customers', CUSTOMERS.find((x) => x.value === f.customers)?.short ?? f.customers],
+                  ['Budget', `${fmtCap(budget)}${cap ? ` · ${num(cap)} uses` : ''}`],
                   ['Funding', fundSummary],
                   ['Stacking', stacking.length ? `With ${andList(stacking)}` : 'Does not combine'],
                 ]}
               />
               <div className="divider" />
               <span className="small strong">Before publishing</span>
-              <Checks items={setupChecks} />
+              {setupChecks.length ? (
+                <Checks items={setupChecks} />
+              ) : (
+                <Checks items={[{ tone: 'ok', text: `Marketing: ${me || 'you'}` }, { tone: 'info', text: 'Finance confirms funding' }, { tone: 'info', text: 'Content prepares banner and campaign page' }]} />
+              )}
+              {!canManage && <span className="xs muted">Your role can view campaigns but not create or edit them.</span>}
+              {save.isError && (
+                <Alert tone="danger" title="The campaign wasn’t saved">
+                  {errorMessage(save.error)}
+                </Alert>
+              )}
               {attempted && Object.keys(errors).length > 0 && (
                 <Alert tone="danger" title="Fix the highlighted fields">
                   {`${Object.keys(errors).length} ${Object.keys(errors).length === 1 ? 'field needs' : 'fields need'} attention before Finance can review the campaign.`}
@@ -683,11 +930,12 @@ export default function PromotionNew() {
               )}
             </Card>
           )}
-          {confirmed && (
+          {status === 'approved' && (
             <p className="ab-note">
               <Icon name="info" className="ic-sm" /> Next: Content prepares the banner and campaign page. <Link to={href('admin/content')}>Open Homepage and pages</Link>
             </p>
           )}
+          {c && <span className="xs muted">{`${c.ref} · ${shortDate(c.createdAt)}`}</span>}
         </div>
       </div>
     </AdminLayout>

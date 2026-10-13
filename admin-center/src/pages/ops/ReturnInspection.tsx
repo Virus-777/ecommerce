@@ -1,57 +1,143 @@
-import { useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { call, errorMessage, newIdempotencyKey, useApi, useUploads } from '@marketly/web-shared/api';
 import { OpsLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money } from '@marketly/web-shared/lib/format';
+import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Breadcrumbs, Button, Card, Checkbox, Deadline, Field, Icon, Img, KeyValue, OptionCard, PageHeader, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, Textarea, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
-import { CONDITIONS, DESIGN_INSPECTION, RETURNS, newInspection, type Condition, type Inspection, type Outcome, type ReturnRow, type ReturnStage } from './data/returns';
-import { BeforeAfter, EDGE_RISK, EDGE_URGENT, OpsLegend } from './data/shared';
+import { Alert, Breadcrumbs, Button, Card, Checkbox, Deadline, EmptyState, Field, Icon, Img, KeyValue, OptionCard, PageHeader, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, Textarea, TextInput, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
+import { LoadError, SkeletonLines, dateTime, deadlineLabel, deadlineTone, shortDate } from '@/app/parts';
+import { useStaffSession } from '@/app/session';
+import { CONDITIONS, OUTCOMES, outcomeDisabled, stockMovement, type Grade, type Outcome } from './data/returns';
+import { BeforeAfter, EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
-// Design: pages/ops/ops-return-inspection.html (queue) · view "inspecting-rt-261005-0212" = the
-// inspection bench for RT-261005-0212 (like new, carry case missing, sell as Used – Like new).
-// Other returns open the same bench with ?view=inspecting&rt=<return>.
+// Design: pages/ops/ops-return-inspection.html (queue) · view "inspecting-<return ref>" (design: inspecting-rt-261005-0212)
+// = the inspection bench for one return.
+// API: GET returns/inspections (tab received | arriving | decided), GET returns/inspections/stats,
+// POST returns/requests/{id}/start-inspection, GET returns/requests/{id} (ReturnCase: checklist, draft, payment, timeline),
+// PUT returns/requests/{id}/inspection-draft, POST returns/requests/{id}/inspection, POST returns/requests/{id}/remedy
+// (idempotent; Returns Manager decides the refund, which then waits for Finance approval).
 
-const DESIGN_VIEW = 'inspecting-rt-261005-0212';
-const DESIGN_RT = 'RT-261005-0212';
-type View = typeof DESIGN_VIEW | 'inspecting';
 type Tab = 'received' | 'arriving' | 'decided';
 
-/** Items in each tab that are not on this page. */
-const HIDDEN: Record<Tab, number> = { received: 0, arriving: 6, decided: 17 };
-const TAB_STAGES: Record<Tab, ReturnStage[]> = {
-  // The Received tab is the design's working queue: everything at the bench plus the next arrival.
-  received: ['received', 'decided', 'arriving'],
-  arriving: ['arriving'],
-  decided: ['decided'],
-};
+interface QueueRow {
+  returnId: string;
+  ref: string;
+  orderRef: string;
+  item: { title: string; sku: string; imageUrl: string | null; quantity: number };
+  reason: string;
+  receivedAt: string | null;
+  expectedAt: string | null;
+  inspector: { name?: string | null } | null;
+  status: string;
+  target: { dueAt: string; state: string } | null;
+}
+interface Stats {
+  waiting: number;
+  overdue: number;
+  overdueRef: string | null;
+  arrivingThisWeek: number;
+  refundsWithFinance: number;
+  refundsWithFinanceAmount: MoneyValue;
+  tabCounts: { received: number; arriving: number; decidedThisWeek: number };
+}
+interface ChecklistItem {
+  key: string;
+  kind: 'contents' | 'serial' | 'functional' | 'hygiene' | 'condition';
+  label: string;
+  required: boolean;
+}
+interface ReturnCase {
+  detail: {
+    id: string;
+    ref: string;
+    orderRef: string;
+    status: string;
+    statusLabel: string;
+    items: Array<{ title: string; sku: string; imageUrl: string | null; quantity: number; unitPrice: MoneyValue }>;
+    reason: string;
+    details: string | null;
+    timeline: Array<{ at: string; label: string; detail?: string | null }>;
+    refund: { status?: string; amount?: MoneyValue } | null;
+  };
+  customer: { displayName: string };
+  payment: { itemPaid: MoneyValue; shippingPaid: MoneyValue; maxRefundable: MoneyValue; refundedSoFar: MoneyValue; methodLabel: string };
+  inspection: { inspectedBy?: { name?: string | null }; grade: Grade; proposedStockOutcome: Outcome; notes: string | null; media: Array<{ url: string }> } | null;
+  refundRequest: { status?: string; amount?: MoneyValue; approverLabel?: string | null } | null;
+  inspectionChecklist: { items: ChecklistItem[] } | null;
+  inspectionDraft: { inspection: Partial<DraftInput>; savedAt: string } | null;
+  inspector: { name?: string | null } | null;
+  deadlines: { inspectBy?: { dueAt: string; state: string } | null };
+}
+interface DraftInput {
+  grade: Grade;
+  checks: Array<{ key?: string; label: string; passed: boolean }>;
+  missingParts: string[];
+  notes: string;
+  mediaIds: string[];
+  proposedStockOutcome: Outcome;
+}
 
-const inspectHref = (rt: string) => (rt === DESIGN_RT ? href('ops/return-inspection', DESIGN_VIEW) : href('ops/return-inspection', 'inspecting', undefined, { rt }));
+const benchView = (ref: string) => `inspecting-${ref.toLowerCase()}`;
+const usd = (amount: number): MoneyValue => ({ amount, currency: 'USD' });
+const isUrgent = (r: QueueRow) => deadlineTone(r.target?.state) === 'danger';
+const isRisk = (r: QueueRow) => deadlineTone(r.target?.state) === 'warning';
 
 /* ---------------- Queue ---------------- */
 
-function Queue({ rows }: { rows: ReturnRow[] }) {
+function Queue() {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const staff = useStaffSession();
   const [tab, setTab] = useState<Tab>('received');
-  const list = rows.filter((r) => TAB_STAGES[tab].includes(r.stage));
-  const n = (s: ReturnStage) => rows.filter((r) => r.stage === s).length;
-  const waiting = rows.filter((r) => r.stage === 'received' && r.status !== 'Decision made').length;
-  const overdue = rows.filter((r) => r.edge === 'flagged' && r.stage === 'received');
-  const legend = [
-    ...(list.some((r) => r.edge === 'flagged') ? [{ tone: 'danger' as const, label: EDGE_URGENT }] : []),
-    ...(list.some((r) => r.edge === 'warn') ? [{ tone: 'warning' as const, label: EDGE_RISK }] : []),
-  ];
+  const canInspect = staff.can('returns.inspections.record');
+  const list = useQuery({ queryKey: ['returns', 'inspections', tab], queryFn: () => call(api.GET('/api/admin/returns/inspections', { params: { query: { tab, limit: 100 } } })) as Promise<{ items: QueueRow[] }> });
+  const stats = useQuery({ queryKey: ['returns', 'inspections', 'stats'], queryFn: () => call(api.GET('/api/admin/returns/inspections/stats')) as Promise<Stats> });
+  const start = useMutation({
+    mutationFn: (r: QueueRow) => call(api.POST('/api/admin/returns/requests/{id}/start-inspection', { params: { path: { id: r.returnId } }, body: {} })),
+    onSuccess: (_x, r) => {
+      void qc.invalidateQueries({ queryKey: ['returns'] });
+      void navigate(href('ops/return-inspection', benchView(r.ref)));
+    },
+  });
 
-  const action = (r: ReturnRow) => {
-    if (r.stage !== 'received') return null;
-    const cont = r.status === 'Inspecting';
+  const rows = list.data?.items ?? [];
+  const st = stats.data;
+  const legend = [...(rows.some(isUrgent) ? [{ tone: 'danger' as const, label: EDGE_URGENT }] : []), ...(rows.some(isRisk) ? [{ tone: 'warning' as const, label: EDGE_RISK }] : [])];
+  const target = (r: QueueRow) =>
+    r.target ? <Deadline tone={deadlineTone(r.target.state)}>{deadlineLabel(r.target.dueAt, 'Inspect by')}</Deadline> : <Deadline tone="ok">{tab === 'arriving' ? 'Not received' : r.status}</Deadline>;
+  const received = (r: QueueRow) => (r.receivedAt ? shortDate(r.receivedAt) : r.expectedAt ? `Arriving ${shortDate(r.expectedAt)}` : '—');
+
+  const action = (r: QueueRow) => {
+    if (tab !== 'received') return null;
+    const cont = !!r.inspector;
+    if (!canInspect)
+      return (
+        <Link className="btn btn-sm btn-ghost" to={href('ops/return-inspection', benchView(r.ref))}>
+          <span>View</span>
+          <span className="sr-only"> {r.ref}</span>
+        </Link>
+      );
     return (
-      <Link className={cx('btn btn-sm', cont ? 'btn-primary' : 'btn-secondary')} to={inspectHref(r.rt)}>
+      <button type="button" className={cx('btn btn-sm', cont ? 'btn-primary' : 'btn-secondary')} onClick={() => start.mutate(r)} disabled={start.isPending}>
         <span>{cont ? 'Continue' : 'Inspect'}</span>
-        <span className="sr-only"> {r.rt}</span>
-      </Link>
+        <span className="sr-only"> {r.ref}</span>
+      </button>
     );
   };
+  const refLink = (r: QueueRow) =>
+    tab === 'arriving' ? (
+      <span className="mono nowrap" title={r.ref}>
+        {r.ref}
+      </span>
+    ) : (
+      <Link className="mono nowrap" to={href('ops/return-inspection', benchView(r.ref))} title={r.ref}>
+        {r.ref}
+      </Link>
+    );
 
   return (
     <>
@@ -59,130 +145,119 @@ function Queue({ rows }: { rows: ReturnRow[] }) {
         title="Return inspection"
         sub="Official Store returns received at Reno, NV. Warehouse inspects, Inventory records the stock outcome, Finance approves the refund."
         actions={
-          <Button variant="secondary" size="sm" icon="download">
+          <Button variant="secondary" size="sm" icon="download" disabled title="Return exports aren’t available yet">
             Export
           </Button>
         }
       />
-      <div className="ac-kpis">
-        <div className="card pad">
-          <Stat label="Waiting for inspection" value={String(waiting)} note="target 2 business days" />
+      {start.error && <Alert tone="danger">{errorMessage(start.error)}</Alert>}
+      {stats.error ? (
+        <LoadError error={stats.error} onRetry={() => void stats.refetch()} />
+      ) : (
+        <div className="ac-kpis">
+          <div className="card pad">{st ? <Stat label="Waiting for inspection" value={String(st.waiting)} note="target 2 business days" /> : <span className="sk sk-line" />}</div>
+          <div className="card pad">{st ? <Stat label="Overdue" value={String(st.overdue)} note={st.overdueRef ?? 'none'} /> : <span className="sk sk-line" />}</div>
+          <div className="card pad">{st ? <Stat label="Arriving this week" value={String(st.arrivingThisWeek)} note="tracked separately from deliveries" /> : <span className="sk sk-line" />}</div>
+          <div className="card pad">{st ? <Stat label="Refunds with Finance" value={String(st.refundsWithFinance)} note={`${formatMoney(st.refundsWithFinanceAmount)} proposed`} /> : <span className="sk sk-line" />}</div>
         </div>
-        <div className="card pad">
-          <Stat label="Overdue" value={String(overdue.length)} note={overdue[0]?.rt ?? 'none'} />
-        </div>
-        <div className="card pad">
-          <Stat label="Arriving this week" value={String(n('arriving') + HIDDEN.arriving)} note="tracked separately from deliveries" />
-        </div>
-        <div className="card pad">
-          <Stat label="Refunds with Finance" value="3" note="$412.00 proposed" />
-        </div>
-      </div>
+      )}
       <Tabs
         items={[
-          { label: 'Received', value: 'received', count: rows.filter((r) => r.stage !== 'arriving').length },
-          { label: 'Arriving', value: 'arriving', count: n('arriving') + HIDDEN.arriving },
-          { label: 'Decided this week', value: 'decided', count: n('decided') + HIDDEN.decided },
+          { label: 'Received', value: 'received', count: st?.tabCounts.received },
+          { label: 'Arriving', value: 'arriving', count: st?.tabCounts.arriving },
+          { label: 'Decided this week', value: 'decided', count: st?.tabCounts.decidedThisWeek },
         ]}
         active={tab}
         onChange={setTab}
       />
       <Card title="Return queue" flush>
-        <div className="no-phone">
-          <TableWrap label="Return queue table">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th scope="col">Return</th>
-                  <th scope="col">Item</th>
-                  <th scope="col">Reason</th>
-                  <th scope="col">Received</th>
-                  <th scope="col">Inspector</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Target</th>
-                  <th className="col-pin" scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.map((r) => (
-                  <tr key={r.rt} className={cx(r.edge === 'flagged' && 'is-flagged', r.edge === 'warn' && 'is-warn')}>
-                    <td>
-                      {r.edge === 'flagged' && <span className="sr-only">Urgent: </span>}
-                      {r.edge === 'warn' && <span className="sr-only">At risk: </span>}
-                      <span className="stack gap-0">
-                        {r.stage === 'received' ? (
-                          <Link className="mono nowrap" to={inspectHref(r.rt)} title={r.rt}>
-                            {r.rt}
-                          </Link>
-                        ) : (
-                          <a className="mono nowrap" href="#" title={r.rt}>
-                            {r.rt}
-                          </a>
-                        )}
-                        <span className="xs mono muted nowrap" title={r.order}>
-                          {r.order}
-                        </span>
-                      </span>
-                    </td>
-                    <td>
-                      <div className="cell-main">
-                        <Img icon={r.icon} tint={r.tint} className="tiny" />
-                        <span className="small">{r.item}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="small">{r.reason}</span>
-                    </td>
-                    <td>
-                      <span className="small nowrap">{r.received}</span>
-                    </td>
-                    <td>
-                      <span className="small nowrap">{r.inspector}</span>
-                    </td>
-                    <td>
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td>
-                      <Deadline tone={r.target.tone}>{r.target.text}</Deadline>
-                    </td>
-                    <td className="col-pin">{action(r)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableWrap>
-          {legend.length > 0 && <OpsLegend items={legend} />}
-        </div>
-        <div className="ac-mlist only-phone">
-          {list.map((r) => (
-            <div key={r.rt} className={cx('ac-mi', r.edge === 'flagged' && 'is-flagged', r.edge === 'warn' && 'is-warn')}>
-              {r.edge === 'flagged' && <span className="sr-only">Urgent: </span>}
-              {r.edge === 'warn' && <span className="sr-only">At risk: </span>}
-              <div className="row between gap-2 nowrap top">
-                <span className="small strong min-w-0">
-                  {r.stage === 'received' ? (
-                    <Link className="mono nowrap" to={inspectHref(r.rt)}>
-                      {r.rt}
-                    </Link>
-                  ) : (
-                    <span className="mono nowrap">{r.rt}</span>
-                  )}
-                </span>
-                <StatusBadge status={r.status} />
-              </div>
-              <div className="xs sub">{r.item}</div>
-              <div className="xs sub">
-                {r.reason} · received {r.received}
-              </div>
-              <div className="xs sub">
-                <Deadline tone={r.target.tone}>{r.target.text}</Deadline>
-              </div>
+        {list.error ? (
+          <div className="card-body">
+            <LoadError error={list.error} onRetry={() => void list.refetch()} />
+          </div>
+        ) : (
+          <>
+            <div className="no-phone">
+              <TableWrap label="Return queue table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Return</th>
+                      <th scope="col">Item</th>
+                      <th scope="col">Reason</th>
+                      <th scope="col">Received</th>
+                      <th scope="col">Inspector</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Target</th>
+                      <th className="col-pin" scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.isPending && <SkeletonRows cols={8} />}
+                    {!list.isPending && !rows.length && <EmptyRow cols={8}>{tab === 'received' ? 'No returns are waiting at the inspection bench.' : tab === 'arriving' ? 'No returns on the way.' : 'No inspections decided this week.'}</EmptyRow>}
+                    {rows.map((r) => (
+                      <tr key={r.returnId} className={cx(isUrgent(r) && 'is-flagged', isRisk(r) && 'is-warn')}>
+                        <td>
+                          {isUrgent(r) && <span className="sr-only">Urgent: </span>}
+                          {isRisk(r) && <span className="sr-only">At risk: </span>}
+                          <span className="stack gap-0">
+                            {refLink(r)}
+                            <span className="xs mono muted nowrap" title={r.orderRef}>
+                              {r.orderRef}
+                            </span>
+                          </span>
+                        </td>
+                        <td>
+                          <div className="cell-main">
+                            <Img icon="package" src={r.item.imageUrl ?? undefined} className="tiny" />
+                            <span className="small">{r.item.title}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="small">{r.reason}</span>
+                        </td>
+                        <td>
+                          <span className="small nowrap">{received(r)}</span>
+                        </td>
+                        <td>
+                          <span className="small nowrap">{r.inspector?.name ?? (tab === 'arriving' ? '—' : 'Unassigned')}</span>
+                        </td>
+                        <td>
+                          <StatusBadge status={r.status} />
+                        </td>
+                        <td>{target(r)}</td>
+                        <td className="col-pin">{action(r)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableWrap>
+              {legend.length > 0 && <OpsLegend items={legend} />}
             </div>
-          ))}
-        </div>
-        {legend.length > 0 && <OpsLegend className="only-phone" items={legend} />}
+            <div className="ac-mlist only-phone">
+              {list.isPending && <SkeletonLines rows={3} />}
+              {rows.map((r) => (
+                <div key={r.returnId} className={cx('ac-mi', isUrgent(r) && 'is-flagged', isRisk(r) && 'is-warn')}>
+                  {isUrgent(r) && <span className="sr-only">Urgent: </span>}
+                  {isRisk(r) && <span className="sr-only">At risk: </span>}
+                  <div className="row between gap-2 nowrap top">
+                    <span className="small strong min-w-0">{refLink(r)}</span>
+                    <StatusBadge status={r.status} />
+                  </div>
+                  <div className="xs sub">{r.item.title}</div>
+                  <div className="xs sub">
+                    {r.reason} · received {received(r)}
+                  </div>
+                  <div className="xs sub">{target(r)}</div>
+                </div>
+              ))}
+              {!list.isPending && !rows.length && <div className="ac-mi xs sub">Nothing in this tab.</div>}
+            </div>
+            {legend.length > 0 && <OpsLegend className="only-phone" items={legend} />}
+          </>
+        )}
       </Card>
     </>
   );
@@ -190,160 +265,212 @@ function Queue({ rows }: { rows: ReturnRow[] }) {
 
 /* ---------------- Inspection bench ---------------- */
 
-const OUTCOMES: Array<{ id: Outcome; title: string; body: (i: Inspection, price: string) => string }> = [
-  { id: 'restock', title: 'Restock as new', body: () => 'Only for sealed, unused items' },
-  { id: 'repair', title: 'Repair', body: (i) => `Send to ${i.brand} service partner, ${i.serviceDays} business days` },
-  { id: 'regrade', title: 'Sell as different condition', body: (i, p) => `Used – Like new offer ${i.sku}-LN at ${p}` },
-  { id: 'supplier', title: 'Return to supplier', body: (i) => `${i.supplier}, return authorization needed` },
-  { id: 'writeoff', title: 'Write off', body: () => 'Not sellable. Records the cost as a return loss.' },
-];
-
-const grade = (c: Condition | '') => (c === 'good' ? { label: 'Used – Good', suffix: 'GD', factor: 0.75 } : { label: 'Used – Like new', suffix: 'LN', factor: 0.84 });
-
-function outcomeDisabled(o: Outcome, c: Condition | '') {
-  if (o === 'restock') return c !== 'new';
-  if (o === 'regrade') return c === 'damaged' || c === 'new';
-  return false;
-}
-
-function stockMovement(i: Inspection): { to: string; sku: string } | null {
-  const g = grade(i.condition);
-  switch (i.outcome) {
-    case 'restock':
-      return { to: 'Available · New', sku: i.sku };
-    case 'regrade':
-      return { to: `Available · ${g.label}`, sku: `${i.sku}-${g.suffix}` };
-    case 'repair':
-      return { to: 'Damaged or held · at repair partner', sku: i.sku };
-    case 'supplier':
-      return { to: 'Damaged or held · return to supplier', sku: i.sku };
-    case 'writeoff':
-      return { to: 'Removed · return loss', sku: i.sku };
-    default:
-      return null;
-  }
-}
-
-function Bench({ row, initial, onSave, onSent }: { row: ReturnRow; initial: Inspection; onSave: (i: Inspection) => void; onSent: (i: Inspection, refund: number) => void }) {
-  const [ins, setIns] = useState(initial);
-  const [tried, setTried] = useState(false);
-  const [sent, setSent] = useState(row.status === 'Decision made');
-  const [saved, setSaved] = useState(false);
+function Bench({ returnId }: { returnId: string }) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const staff = useStaffSession();
+  const canInspect = staff.can('returns.inspections.record');
+  const canDecide = staff.can('returns.requests.manage');
+  const rc = useQuery({ queryKey: ['returns', 'case', returnId], queryFn: () => call(api.GET('/api/admin/returns/requests/{id}', { params: { path: { id: returnId } } })) as Promise<ReturnCase> });
+  const c = rc.data;
+  const photos = useUploads('inspection_photo', { max: 10, accept: /^image\// });
   const fileRef = useRef<HTMLInputElement>(null);
+  const remedyKey = useRef(newIdempotencyKey());
 
-  const set = <K extends keyof Inspection>(k: K, v: Inspection[K]) => {
-    setSaved(false);
-    setIns((x) => ({ ...x, [k]: v }));
-  };
-  const chooseCondition = (c: Condition) => {
-    setSaved(false);
-    setIns((x) => ({ ...x, condition: c, outcome: x.outcome && outcomeDisabled(x.outcome, c) ? '' : x.outcome }));
-  };
+  const [grade, setGrade] = useState<Grade | ''>('');
+  const [checks, setChecks] = useState<Record<string, boolean>>({});
+  const [outcome, setOutcome] = useState<Outcome | ''>('');
+  const [why, setWhy] = useState('');
+  const [deduction, setDeduction] = useState('');
+  const [savedIds, setSavedIds] = useState<string[]>([]);
+  const [tried, setTried] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const loaded = useRef(false);
 
-  const missing = ins.checks.filter((c) => c.part && !c.ok && c.part.value > 0);
-  const failed = ins.checks.filter((c) => !c.part && !c.ok);
-  const deduction = missing.reduce((a, c) => a + (c.part?.value ?? 0), 0);
-  const refund = Math.max(0, row.price - deduction - row.labelCost);
-  const regradePrice = money(Math.round(row.price * grade(ins.condition).factor));
-  const move = stockMovement(ins);
+  useEffect(() => {
+    if (!c || loaded.current) return;
+    loaded.current = true;
+    const d = c.inspectionDraft?.inspection;
+    if (d) {
+      setGrade(d.grade ?? '');
+      setOutcome(d.proposedStockOutcome ?? '');
+      setWhy(d.notes ?? '');
+      setSavedIds(d.mediaIds ?? []);
+      setChecks(Object.fromEntries((d.checks ?? []).map((k) => [k.key ?? k.label, k.passed])));
+    }
+  }, [c]);
+
+  const items = c?.inspectionChecklist?.items ?? [];
+  const isChecked = (k: ChecklistItem) => checks[k.key] ?? false;
+  const missing = items.filter((k) => k.kind === 'contents' && !isChecked(k));
+  const failed = items.filter((k) => k.kind !== 'contents' && !isChecked(k));
+  const deductionMinor = Math.round((Number(deduction) || 0) * 100);
+  const maxRefundable = c?.payment.maxRefundable.amount ?? 0;
+  const refund = Math.max(0, maxRefundable - deductionMinor);
+  const move = stockMovement(outcome, grade);
+  const mediaIds = [...savedIds, ...photos.assetIds];
+  const done = !!c?.inspection;
+  const disabled = done || !canInspect;
 
   const errors = {
-    photos: ins.photos.length === 0 ? 'Add at least one photo of the returned item.' : '',
-    condition: !ins.condition ? 'Choose the condition of the item.' : '',
-    outcome: !ins.outcome ? 'Propose an outcome for the Returns Manager.' : '',
-    why: deduction > 0 && !ins.why.trim() ? 'Explain the deduction. The customer sees this reason.' : '',
+    photos: mediaIds.length === 0 ? 'Add at least one photo of the returned item.' : '',
+    condition: !grade ? 'Choose the condition of the item.' : '',
+    outcome: !outcome ? 'Propose an outcome for the Returns Manager.' : '',
+    why: deductionMinor > 0 && !why.trim() ? 'Explain the deduction. The customer sees this reason.' : deductionMinor > maxRefundable ? 'The deduction can’t be more than the refundable amount.' : '',
   };
   const shown = tried ? errors : { photos: '', condition: '', outcome: '', why: '' };
   const nErrors = Object.values(errors).filter(Boolean).length;
 
-  const send = () => {
-    setTried(true);
-    if (nErrors) return;
-    setSent(true);
-    onSent(ins, refund);
-    announce(`Inspection sent to Finance. Proposed refund ${money(refund)}`);
-  };
-  const save = () => {
-    onSave(ins);
-    setSaved(true);
-    announce('Inspection saved');
+  const input = (): DraftInput => ({
+    grade: grade as Grade,
+    checks: items.map((k) => ({ key: k.key, label: k.label, passed: isChecked(k) })),
+    missingParts: missing.map((k) => k.label),
+    notes: why.trim(),
+    mediaIds,
+    proposedStockOutcome: outcome as Outcome,
+  });
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ['returns'] });
+    void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
   };
 
+  const saveDraft = useMutation({
+    mutationFn: () => call(api.PUT('/api/admin/returns/requests/{id}/inspection-draft', { params: { path: { id: returnId } }, body: { inspection: input() } as never })),
+    onSuccess: () => {
+      setSaved(true);
+      announce('Inspection saved');
+    },
+  });
+  const send = useMutation({
+    mutationFn: async () => {
+      const i = input();
+      await call(
+        api.POST('/api/admin/returns/requests/{id}/inspection', {
+          params: { path: { id: returnId } },
+          body: { ...i, conditionOutcome: i.missingParts.length ? 'missing_parts' : 'as_described', regradeCondition: outcome === 'different_condition' ? (grade === 'good' ? 'Used – Good' : 'Used – Like new') : undefined } as never,
+        }),
+      );
+      if (!canDecide) return false;
+      await call(
+        api.POST('/api/admin/returns/requests/{id}/remedy', {
+          params: { path: { id: returnId }, header: { 'Idempotency-Key': remedyKey.current } },
+          body: (deductionMinor > 0
+            ? { kind: 'partial_refund', amount: usd(refund), deductions: [{ label: missing.length ? `Missing ${missing.map((m) => m.label).join(', ')}` : 'Deduction', amount: usd(deductionMinor), reason: why.trim() }], explanation: why.trim() }
+            : { kind: 'full_refund' }) as never,
+        } as never),
+      );
+      return true;
+    },
+    onSuccess: (decided) => {
+      announce(decided ? `Inspection sent to Finance. Proposed refund ${formatMoney(usd(refund))}` : 'Inspection recorded. The Returns Manager decides the refund.');
+      refresh();
+    },
+  });
+
+  if (rc.isPending) {
+    return (
+      <>
+        <div className="page-head">
+          <div className="t">
+            <Breadcrumbs items={[{ label: 'Return inspection', to: href('ops/return-inspection') }, { label: 'Loading' }]} />
+            <h1 className="h1">Inspecting</h1>
+          </div>
+        </div>
+        <SkeletonLines rows={6} />
+      </>
+    );
+  }
+  if (rc.error || !c) return <LoadError error={rc.error} onRetry={() => void rc.refetch()} />;
+
+  const d = c.detail;
+  const item = d.items[0];
+  const inspector = c.inspector?.name ?? c.inspection?.inspectedBy?.name ?? staff.name;
+  const refundState = c.refundRequest ?? d.refund;
   const events: TimelineEvent[] = [
-    { t: 'Return requested', d: ins.requested.d, state: 'done', body: ins.requested.note },
-    { t: 'Return approved', d: 'Oct 2 · automatic, within 30 days', state: 'done' },
-    { t: 'Received at Reno, NV', d: ins.receivedAt, state: 'done' },
-    { t: 'Inspection', d: `Today · ${row.inspector === 'Unassigned' ? 'Carlos Mendez' : row.inspector}`, state: sent ? 'done' : 'current' },
-    { t: 'Refund decision', d: 'Finance · Priya Nair', state: sent ? 'current' : '' },
+    ...d.timeline.map((e) => ({ t: e.label, d: dateTime(e.at), state: 'done' as const, body: e.detail ?? undefined })),
+    { t: 'Inspection', d: `${done ? 'Done' : 'Today'} · ${inspector}`, state: done ? 'done' : 'current' },
+    { t: 'Refund decision', d: 'Returns Manager, then Finance', state: refundState ? 'current' : '' },
   ];
-
-  const disabled = sent;
 
   return (
     <>
       <div className="page-head">
         <div className="t">
-          <Breadcrumbs items={[{ label: 'Return inspection', to: href('ops/return-inspection') }, { label: row.rt }]} />
-          <h1 className="h1">Inspecting {row.rt}</h1>
+          <Breadcrumbs items={[{ label: 'Return inspection', to: href('ops/return-inspection') }, { label: d.ref }]} />
+          <h1 className="h1">Inspecting {d.ref}</h1>
           <p className="sub small">
-            Order {row.order} · {row.item} · reason: {row.reason} · received {row.received} by {row.inspector === 'Unassigned' ? 'Carlos Mendez' : row.inspector}
+            Order {d.orderRef} · {item?.title} · reason: {d.reason} · inspector {inspector}
           </p>
         </div>
         <div className="actions">
-          <StatusBadge status={sent ? 'Decision made' : 'Inspecting'} />
+          <StatusBadge status={done ? 'Decision made' : d.statusLabel} />
         </div>
       </div>
-      {sent && (
-        <Alert tone="success" title={`Sent to Finance: ${money(refund)} proposed refund`}>
-          Priya Nair approves the refund. The customer sees "Refund under review" until then. <Link to={href('ops/return-inspection')}>Back to the return queue</Link>
+      {done && (
+        <Alert tone="success" title={refundState?.amount ? `Sent to Finance: ${formatMoney(refundState.amount)} proposed refund` : 'Inspection recorded'}>
+          {refundState ? 'Finance approves the refund. The customer sees "Refund under review" until then.' : 'The Returns Manager decides the refund next.'} <Link to={href('ops/return-inspection')}>Back to the return queue</Link>
         </Alert>
       )}
-      {tried && nErrors > 0 && !sent && (
+      {send.error && <Alert tone="danger">{errorMessage(send.error)}</Alert>}
+      {tried && nErrors > 0 && !done && (
         <Alert tone="danger" title={`Finish ${nErrors} step${nErrors > 1 ? 's' : ''} before sending`}>
           {Object.values(errors).filter(Boolean).join(' ')}
         </Alert>
       )}
       <div className="ac-main">
         <div className="stack gap-5">
-          <Card title="Photos" sub={`${ins.photos.length} taken at the inspection bench`}>
-            {ins.photos.length > 0 && (
+          <Card title="Photos" sub={`${mediaIds.length + (c.inspection?.media.length ?? 0)} taken at the inspection bench`}>
+            {(c.inspection?.media.length || photos.items.length || savedIds.length > 0) && (
               <div className="ac-photos">
-                {ins.photos.map((p, k) => (
-                  <div key={`${p.label}-${k}`} className="ac-photo">
-                    <Img icon={p.icon} tint={row.tint} />
-                    <span className="xs muted">{p.label}</span>
+                {c.inspection?.media.map((m, k) => (
+                  <div key={m.url} className="ac-photo">
+                    <Img icon="image" src={m.url} />
+                    <span className="xs muted">Photo {k + 1}</span>
+                  </div>
+                ))}
+                {savedIds.map((id, k) => (
+                  <div key={id} className="ac-photo">
+                    <Img icon="image" />
+                    <span className="xs muted">Saved photo {k + 1}</span>
+                  </div>
+                ))}
+                {photos.items.map((p) => (
+                  <div key={p.key} className="ac-photo">
+                    <Img icon="image" src={p.url} />
+                    <span className={cx('xs', p.status === 'failed' ? 't-danger-text' : 'muted')}>{p.status === 'uploading' ? 'Uploading…' : p.status === 'failed' ? (p.error ?? 'Upload failed') : p.name}</span>
                   </div>
                 ))}
               </div>
             )}
-            <div
-              className="dropzone"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                const files = Array.from(e.dataTransfer.files);
-                if (files.length && !disabled) set('photos', [...ins.photos, ...files.map((f) => ({ label: f.name, icon: 'image' as const }))]);
-              }}
-            >
-              <Icon name="image-plus" className="ic-lg" />
-              <span className="small strong u-c-text">Add more photos</span>
-              <span className="xs">JPG or PNG from the bench camera</span>
-              <input
-                ref={fileRef}
-                type="file"
-                hidden
-                accept="image/jpeg,image/png"
-                multiple
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  if (files.length) set('photos', [...ins.photos, ...files.map((f) => ({ label: f.name, icon: 'image' as const }))]);
-                  e.target.value = '';
+            {!disabled && (
+              <div
+                className="dropzone"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  photos.add(Array.from(e.dataTransfer.files));
                 }}
-              />
-              <Button variant="secondary" size="sm" disabled={disabled} onClick={() => fileRef.current?.click()}>
-                Browse files
-              </Button>
-            </div>
+              >
+                <Icon name="image-plus" className="ic-lg" />
+                <span className="small strong u-c-text">Add more photos</span>
+                <span className="xs">JPG or PNG from the bench camera</span>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  hidden
+                  accept="image/jpeg,image/png"
+                  multiple
+                  onChange={(e) => {
+                    photos.add(Array.from(e.target.files ?? []));
+                    e.target.value = '';
+                  }}
+                />
+                <Button variant="secondary" size="sm" onClick={() => fileRef.current?.click()}>
+                  Browse files
+                </Button>
+              </div>
+            )}
+            {photos.error && <span className="xs t-danger-text">{photos.error}</span>}
             {shown.photos && (
               <span className="error-text">
                 <Icon name="circle-alert" className="ic-sm" />
@@ -353,8 +480,21 @@ function Bench({ row, initial, onSave, onSent }: { row: ReturnRow; initial: Insp
           </Card>
           <Card title="Condition" titleAs="h3">
             <div className="grid md2 gap-2" role="radiogroup" aria-label="Condition">
-              {CONDITIONS.map((c, k) => (
-                <OptionCard key={c.id} id={`rq-c${k + 1}`} name="rq-cond" title={<span className="small strong">{c.title}</span>} body={c.body} checked={ins.condition === c.id} disabled={disabled} onChange={() => chooseCondition(c.id)} />
+              {CONDITIONS.map((o, k) => (
+                <OptionCard
+                  key={o.id}
+                  id={`rq-c${k + 1}`}
+                  name="rq-cond"
+                  title={<span className="small strong">{o.title}</span>}
+                  body={o.body}
+                  checked={(c.inspection?.grade ?? grade) === o.id}
+                  disabled={disabled}
+                  onChange={() => {
+                    setSaved(false);
+                    setGrade(o.id);
+                    if (outcome && outcomeDisabled(outcome, o.id)) setOutcome('');
+                  }}
+                />
               ))}
             </div>
             {shown.condition && (
@@ -364,25 +504,33 @@ function Bench({ row, initial, onSave, onSent }: { row: ReturnRow; initial: Insp
               </span>
             )}
             <span className="small strong">Contents and checks</span>
-            <div className="ac-perm">
-              {ins.checks.map((c, k) => (
-                <Checkbox
-                  key={c.label}
-                  id={`rq-k${k + 1}`}
-                  label={c.label}
-                  checked={c.ok}
-                  disabled={disabled}
-                  onChange={(e) => set('checks', ins.checks.map((x, j) => (j === k ? { ...x, ok: e.target.checked } : x)))}
-                />
+            {items.length ? (
+              <div className="ac-perm">
+                {items.map((k, i) => (
+                  <Checkbox
+                    key={k.key}
+                    id={`rq-k${i + 1}`}
+                    label={k.label}
+                    checked={isChecked(k)}
+                    disabled={disabled}
+                    onChange={(e) => {
+                      setSaved(false);
+                      setChecks((x) => ({ ...x, [k.key]: e.target.checked }));
+                    }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <span className="xs muted">The checklist appears once the return is received.</span>
+            )}
+            {!done &&
+              missing.map((k) => (
+                <Alert key={k.key} tone="warning" title={`Missing part: ${k.label}`}>
+                  The Returns Manager decides whether a deduction applies.
+                </Alert>
               ))}
-            </div>
-            {missing.map((c) => (
-              <Alert key={c.label} tone="warning" title={`Missing part: ${c.part!.name}`}>
-                Customer did not mention it in the return request. Lena Park, Returns Manager, decides whether a deduction applies.
-              </Alert>
-            ))}
-            {ins.condition && failed.length > 0 && (
-              <Alert tone="danger" title={`Check not passed: ${failed.map((c) => c.label).join(', ')}`}>
+            {!done && grade && failed.length > 0 && (
+              <Alert tone="danger" title={`Check not passed: ${failed.map((k) => k.label).join(', ')}`}>
                 Record what you found in the photos. Choose Repair, Return to supplier or Write off unless the Returns Manager says otherwise.
               </Alert>
             )}
@@ -395,10 +543,13 @@ function Bench({ row, initial, onSave, onSent }: { row: ReturnRow; initial: Insp
                   id={`rq-o${k}`}
                   name="rq-out"
                   title={<span className="small strong">{o.title}</span>}
-                  body={o.id === 'regrade' ? `${grade(ins.condition).label} offer ${ins.sku}-${grade(ins.condition).suffix} at ${regradePrice}` : o.body(ins, regradePrice)}
-                  checked={ins.outcome === o.id}
-                  disabled={disabled || outcomeDisabled(o.id, ins.condition)}
-                  onChange={() => set('outcome', o.id)}
+                  body={o.body}
+                  checked={(c.inspection?.proposedStockOutcome ?? outcome) === o.id}
+                  disabled={disabled || outcomeDisabled(o.id, grade)}
+                  onChange={() => {
+                    setSaved(false);
+                    setOutcome(o.id);
+                  }}
                 />
               ))}
             </div>
@@ -413,14 +564,9 @@ function Bench({ row, initial, onSave, onSent }: { row: ReturnRow; initial: Insp
                 <span className="small strong">Stock outcome, recorded by Inventory</span>
                 <KeyValue
                   pairs={[
-                    ['Movement', <BeforeAfter b="Returned · 1 unit" a={move.to} />],
-                    [
-                      'SKU',
-                      <>
-                        <span className="mono">{move.sku}</span> · bin {ins.bin}
-                      </>,
-                    ],
-                    ['Recorded by', `Ana Silva, Inventory Manager · ${sent ? 'notified' : 'waiting'}`],
+                    ['Movement', <BeforeAfter b={`Returned · ${item?.quantity ?? 1} unit`} a={move} />],
+                    ['SKU', <span className="mono">{item?.sku}</span>],
+                    ['Recorded by', `Inventory Manager · ${done ? 'notified' : 'waiting'}`],
                   ]}
                 />
               </div>
@@ -433,38 +579,49 @@ function Bench({ row, initial, onSave, onSent }: { row: ReturnRow; initial: Insp
             titleAs="h3"
             sub="Sent to Finance for approval"
             foot={
-              <>
-                <Button variant="ghost" size="sm" onClick={save} disabled={disabled}>
-                  {saved ? 'Saved' : 'Save inspection'}
-                </Button>
-                <Button size="sm" icon="send" onClick={send} disabled={disabled}>
-                  {sent ? 'Sent to Finance' : 'Send to Finance'}
-                </Button>
-              </>
+              canInspect ? (
+                <>
+                  <Button variant="ghost" size="sm" onClick={() => saveDraft.mutate()} disabled={disabled || saveDraft.isPending}>
+                    {saved ? 'Saved' : 'Save inspection'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    icon="send"
+                    onClick={() => {
+                      setTried(true);
+                      if (!nErrors && !photos.uploading) send.mutate();
+                    }}
+                    disabled={disabled || send.isPending}
+                  >
+                    {done ? 'Sent to Finance' : canDecide ? 'Send to Finance' : 'Record inspection'}
+                  </Button>
+                </>
+              ) : (
+                <span className="xs muted">Warehouse staff with inspection access record this.</span>
+              )
             }
           >
-            <SummaryRow k="Item price" v={money(row.price)} />
-            <SummaryRow k="Original shipping" v={money(0)} />
-            {missing.map((c) => (
-              <SummaryRow key={c.label} k={`Missing ${c.part!.name}`} v={`−${money(c.part!.value)}`} />
-            ))}
-            <SummaryRow k="Return shipping label (change of mind)" v={`−${money(row.labelCost)}`} />
+            {saveDraft.error && <span className="xs t-danger-text">{errorMessage(saveDraft.error)}</span>}
+            <SummaryRow k="Item price" v={formatMoney(c.payment.itemPaid)} />
+            <SummaryRow k="Original shipping" v={formatMoney(c.payment.shippingPaid)} />
+            {c.payment.refundedSoFar.amount > 0 && <SummaryRow k="Refunded so far" v={`−${formatMoney(c.payment.refundedSoFar)}`} />}
+            <SummaryRow k="Refundable" v={formatMoney(c.payment.maxRefundable)} />
+            {deductionMinor > 0 && <SummaryRow k={missing.length ? `Missing ${missing.map((m) => m.label).join(', ')}` : 'Deduction'} v={`−${formatMoney(usd(deductionMinor))}`} />}
             <div className="divider" />
-            <SummaryRow className="total" k="Proposed refund" v={money(refund)} />
-            {deduction > 0 && (
-              <span className="xs muted row gap-1 nowrap wrap">
-                <Icon name="info" className="ic-sm" />
-                <span>Example deduction for missing accessories, per the returns policy.</span>
-              </span>
+            <SummaryRow className="total" k="Proposed refund" v={formatMoney(refundState?.amount ?? usd(refund))} />
+            {canDecide && !done && (
+              <Field label="Deduction" optional hint="For missing parts or damage, per the returns policy">
+                <TextInput id="rq-ded" type="number" min={0} prefix="$" value={deduction} onChange={(e) => setDeduction(e.target.value)} />
+              </Field>
             )}
-            <Field label="Reason for deduction" error={shown.why || undefined}>
-              <Textarea id="rq-why" value={ins.why} disabled={disabled} onChange={(e) => set('why', e.target.value)} />
+            <Field label={canDecide ? 'Reason for deduction' : 'Inspection notes'} error={shown.why || undefined}>
+              <Textarea id="rq-why" value={c.inspection?.notes ?? why} disabled={disabled} onChange={(e) => setWhy(e.target.value)} />
             </Field>
             <div className="panel xs sub stack gap-1">
               <span>
-                <Icon name="landmark" className="ic-sm" /> Finance approver: <b>Priya Nair</b>, refunds up to $2,000
+                <Icon name="landmark" className="ic-sm" /> {c.refundRequest?.approverLabel ? `Finance approver: ${c.refundRequest.approverLabel}` : 'Finance approves the refund within its approval limits'}
               </span>
-              <span>Refund to {ins.payment} within 5 business days after approval.</span>
+              <span>Refund to {c.payment.methodLabel} within 5 business days after approval.</span>
             </div>
             <Alert tone="info" title="Approved is not paid">
               The customer sees "Refund under review" now, "Approved" after Finance, and "Sent" only when the payment provider confirms.
@@ -479,34 +636,44 @@ function Bench({ row, initial, onSave, onSent }: { row: ReturnRow; initial: Insp
   );
 }
 
+/** Resolves the return ref in the URL (inspecting-<ref>, or ?view=inspecting&rt=<ref>) to its id from the queue lists. */
+function BenchByRef({ refNo }: { refNo: string }) {
+  const { api } = useApi();
+  const found = useQuery({
+    queryKey: ['returns', 'inspections', 'find', refNo],
+    queryFn: async () => {
+      for (const tab of ['received', 'decided'] as const) {
+        const r = (await call(api.GET('/api/admin/returns/inspections', { params: { query: { tab, limit: 100 } } }))) as { items: QueueRow[] };
+        const hit = r.items.find((x) => x.ref.toLowerCase() === refNo.toLowerCase());
+        if (hit) return hit.returnId;
+      }
+      return null;
+    },
+  });
+  if (found.isPending) return <SkeletonLines rows={6} />;
+  if (found.error)
+    return (
+      <>
+        <h1 className="sr-only">Return inspection</h1>
+        <LoadError error={found.error} onRetry={() => void found.refetch()} />
+      </>
+    );
+  if (!found.data) {
+    return (
+      <>
+        <h1 className="sr-only">Return inspection</h1>
+        <EmptyState icon="rotate-ccw" title={`${refNo.toUpperCase()} is not at the inspection bench`} as="h2" action={<Button to={href('ops/return-inspection')}>Back to the return queue</Button>}>
+          It has not been received yet, or the return number is wrong.
+        </EmptyState>
+      </>
+    );
+  }
+  return <Bench key={found.data} returnId={found.data} />;
+}
+
 export default function ReturnInspection() {
-  const [view] = useView<View>();
+  const [view] = useView();
   const [params] = useSearchParams();
-  const [rows, setRows] = useState(RETURNS);
-  const [drafts, setDrafts] = useState<Record<string, Inspection>>({ [DESIGN_RT]: DESIGN_INSPECTION });
-
-  const rt = view === DESIGN_VIEW ? DESIGN_RT : view === 'inspecting' ? params.get('rt') : null;
-  const row = rt ? rows.find((r) => r.rt === rt && r.stage !== 'arriving') : undefined;
-
-  const save = (r: ReturnRow, i: Inspection) => {
-    setDrafts((d) => ({ ...d, [r.rt]: i }));
-    setRows((rs) => rs.map((x) => (x.rt === r.rt && x.status === 'Returned' ? { ...x, status: 'Inspecting', inspector: x.inspector === 'Unassigned' ? 'Carlos Mendez' : x.inspector } : x)));
-  };
-  const sent = (r: ReturnRow, i: Inspection) => {
-    setDrafts((d) => ({ ...d, [r.rt]: i }));
-    setRows((rs) => rs.map((x) => (x.rt === r.rt ? { ...x, status: 'Decision made', stage: 'decided', edge: '', target: { tone: 'ok', text: 'Refund with Finance' }, inspector: x.inspector === 'Unassigned' ? 'Carlos Mendez' : x.inspector } : x)));
-  };
-
-  return (
-    <OpsLayout active="return-inspection">
-      {row ? (
-        <Bench key={row.rt} row={row} initial={drafts[row.rt] ?? newInspection(row)} onSave={(i) => save(row, i)} onSent={(i) => sent(row, i)} />
-      ) : (
-        <>
-          {rt && <Alert tone="warning" title={`${rt} is not at the inspection bench`}>It has not been received yet, or the return number is wrong.</Alert>}
-          <Queue rows={rows} />
-        </>
-      )}
-    </OpsLayout>
-  );
+  const ref = view === 'inspecting' ? (params.get('rt') ?? '') : view.startsWith('inspecting-') ? view.slice('inspecting-'.length) : '';
+  return <OpsLayout active="return-inspection">{ref ? <BenchByRef refNo={ref} /> : <Queue />}</OpsLayout>;
 }

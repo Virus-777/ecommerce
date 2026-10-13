@@ -1,159 +1,159 @@
-// Sample data for the admin Seller detail screen (design: pages/admin/admin-seller.html).
-// Shapes follow what the seller-account API will return.
+// API helpers shared by the admin seller screens (Sellers list, Seller 360, Seller application review).
+// Data: GET /api/admin/sellers/sellers (+ /stats, /{id}), /applications (+ /{id}), the AdminSeller screen query.
+import { useEffect, useRef, useState } from 'react';
+import type { components } from '@marketly/web-shared/api';
+import type { Tint } from '@marketly/web-shared/data/fixtures';
+import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 
-export type ObKind = 'orders' | 'returns' | 'cases';
+type S = components['schemas'];
+export type SellerRow = S['sellers.SellerRow'];
+export type SellerStats = S['sellers.SellerStats'];
+export type SellerDetail = S['sellers.SellerAdminDetail'];
+export type Restriction = S['sellers.Restriction'];
+export type Appeal = S['sellers.Appeal'];
+export type SuspensionImpact = S['sellers.SuspensionImpact'];
+export type ApplicationAdmin = S['sellers.ApplicationAdmin'];
+export type ApplicationRow = S['sellers.ApplicationRow'];
+export type Actor = S['Actor'];
+export type TimelineEvent = S['TimelineEvent'];
+
 export type DeadlineTone = 'ok' | 'warning' | 'danger';
 
-export interface Metric {
-  label: string;
-  value: string;
-  target: string;
-  /** Meter fill, 0–100. */
-  pct: number;
-  tone: 'success' | 'warning' | 'danger';
-  /** Detail under the meter (not shown when within target). */
-  detail?: string;
-}
-
-export interface Obligation {
-  ref: string;
-  item: string;
-  status: string;
-  deadline: { tone: DeadlineTone; text: string };
-  /** Overdue or past target: red row edge and a Remind action. */
-  urgent?: boolean;
-}
-
-export interface Appeal {
-  ref: string;
-  submitted: string;
-  argument: string;
-  owner: string;
-  status: string;
-  /** Deadline chip while open, or the outcome once decided. */
-  due?: string;
-  outcome?: string;
-}
-
-export interface HistoryEvent {
-  t: string;
-  d: string;
-  state: 'done' | 'current' | 'warn' | 'danger';
-  body?: string;
-}
-
-export const SELLER_PROFILE = {
-  slug: 'gadget-grove',
-  since: 'Mar 2026',
-  owner: 'Raj Mehta',
-  manager: 'Grace Kim',
-  legalName: 'Gadget Grove Trading LLC',
-  contact: 'raj@gadgetgrove.example · (602) 555-0139',
-  offers: 31,
+/** API seller status -> the design's label. */
+export const SELLER_STATUS: Record<string, string> = {
+  applied: 'Applied',
+  information_required: 'Information required',
+  under_review: 'Under review',
+  approved: 'Approved',
+  restricted: 'Restricted',
+  suspended: 'Suspended',
+  closed: 'Closed',
 };
 
-export const RESTRICTION: Array<[string, string]> = [
-  ['Reason', 'On-time dispatch below 85% for 30 days, and 2 refurbished items described as "like new" with missing parts.'],
-  ['Affected activity', 'Refurbished offers (6) removed from sale. No new listings or product submissions. Weekly payouts held 14 days after delivery.'],
-  ['Not affected', 'New-condition offers (25) stay on sale. Open orders, returns, cases and messages work as normal.'],
-  ['To resolve', 'Reach 92% on-time dispatch for 21 days and add condition photos to every refurbished offer.'],
-  ['Appeal route', 'Seller Center › Account health › Appeal, by Oct 16. Decided by Grace Kim; a second appeal goes to Morgan Hale.'],
-  ['Set by', 'Grace Kim, Seller Manager · recommended by Sven Larsen, Trust and Risk'],
-];
+/** "partly_overturned" -> "Partly overturned" */
+export const cap = (s: string) => {
+  const t = s.replace(/_/g, ' ').toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+export const statusLabel = (s?: string | null) => (s ? (SELLER_STATUS[s.toLowerCase()] ?? cap(s)) : '');
 
-export const METRICS: Metric[] = [
-  { label: 'On-time dispatch', value: '81.5%', target: 'Target ≥ 95%', pct: 81.5, tone: 'danger', detail: '34 late of 186' },
-  { label: 'Cancellation rate', value: '4.8%', target: 'Target ≤ 2%', pct: 48, tone: 'danger', detail: '9 cancelled by seller' },
-  { label: 'Valid tracking', value: '96.2%', target: 'Target ≥ 98%', pct: 96.2, tone: 'warning', detail: '7 without carrier scan' },
-  { label: 'Return rate', value: '6.1%', target: 'Target ≤ 8%', pct: 61, tone: 'success' },
-  { label: 'Response time', value: '31 h', target: 'Target ≤ 24 h', pct: 77, tone: 'warning', detail: 'Median first reply' },
-  { label: 'Unresolved cases', value: '4', target: 'Target 0 over 3 days', pct: 60, tone: 'warning', detail: '2 older than 3 days' },
-];
+/** Store name -> logo tile initials and a stable tint (the API sends a logo image; the design shows tiles). */
+export const initialsOf = (name: string) =>
+  name
+    .replace(/[^A-Za-z0-9 ]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase())
+    .slice(0, 2)
+    .join('') || '?';
+export const tintOf = (id: string): Tint => String((id.split('').reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 7) % 6) + 1) as Tint;
 
-export const OBLIGATIONS: Record<ObKind, { tab: string; col: string; count: number; rows: Obligation[] }> = {
-  orders: {
-    tab: 'Orders',
-    col: 'Order',
-    count: 7,
-    rows: [
-      { ref: 'MK-261006-09977', item: 'Brightline S2 Robot Vacuum', status: 'Overdue', deadline: { tone: 'danger', text: 'Overdue 1 d' }, urgent: true },
-      { ref: 'MK-261006-09311', item: 'Brightline S2 Robot Vacuum', status: 'Overdue', deadline: { tone: 'danger', text: 'Overdue 1 d' }, urgent: true },
-      { ref: 'MK-261007-10291', item: 'Halden Aurora ANC (Refurbished)', status: 'Preparing', deadline: { tone: 'warning', text: 'Due Oct 9' } },
-      { ref: 'MK-261008-11730', item: 'Kestrel K75 Keyboard', status: 'New', deadline: { tone: 'ok', text: 'Due Oct 10' } },
-    ],
-  },
-  returns: {
-    tab: 'Returns',
-    col: 'Return',
-    count: 2,
-    rows: [
-      { ref: 'RT-261001-0158', item: 'Halden Aurora ANC (Refurbished)', status: 'Inspecting', deadline: { tone: 'warning', text: 'Decide by Oct 10' } },
-      { ref: 'RT-260927-0131', item: 'Kestrel K75 Keyboard', status: 'Return in transit', deadline: { tone: 'ok', text: 'Refund due Oct 14' } },
-    ],
-  },
-  cases: {
-    tab: 'Cases',
-    col: 'Case',
-    count: 4,
-    rows: [
-      { ref: 'CS-261004-0377', item: 'Halden Aurora ANC (Refurbished) · missing parts', status: 'Escalated', deadline: { tone: 'danger', text: 'Overdue 2 d' }, urgent: true },
-      { ref: 'CS-261005-0390', item: 'Brightline S2 Robot Vacuum · not received', status: 'Waiting on seller', deadline: { tone: 'danger', text: 'Overdue 1 d' }, urgent: true },
-      { ref: 'CS-261007-0401', item: 'Brightline S2 Robot Vacuum · late delivery', status: 'Open', deadline: { tone: 'warning', text: 'Reply by Oct 10' } },
-      { ref: 'CS-261008-0415', item: 'Kestrel K75 Keyboard · wrong switch type', status: 'Open', deadline: { tone: 'ok', text: 'Reply by Oct 11' } },
-    ],
-  },
+export const signedMoney = (m?: MoneyValue | null) => (!m ? '—' : m.amount < 0 ? `−${formatMoney({ ...m, amount: -m.amount })}` : formatMoney(m));
+
+/** { positivePct, ratingCount } from reviews (OpenAPI types it unknown, G20). */
+export interface Feedback {
+  positivePct?: number | null;
+  ratingCount?: number | null;
+}
+export const feedbackLabel = (f: unknown) => {
+  const v = (f ?? {}) as Feedback;
+  return v.positivePct != null && v.ratingCount ? `${Math.round(v.positivePct)}% · ${v.ratingCount.toLocaleString('en-US')}` : '';
 };
 
-export const APPEALS: Appeal[] = [
-  { ref: 'AP-261004-021', submitted: 'Oct 4', argument: 'Carrier missed 3 pickups in Phoenix in September. UPS pickup log attached.', owner: 'Grace Kim', status: 'Under review', due: 'Decide by Oct 11' },
-  { ref: 'AP-260821-007', submitted: 'Aug 21', argument: 'Listing warning for "like new" condition wording.', owner: 'Grace Kim', status: 'Decision made', outcome: 'Warning kept · Aug 25' },
-];
+/** sellers.SellerStats.balances (unknown in OpenAPI). */
+export interface StatsBalances {
+  total?: MoneyValue | null;
+  held?: MoneyValue | null;
+  negativeCount?: number | null;
+}
 
-export const HISTORY: HistoryEvent[] = [
-  { t: 'Appeal AP-261004-021 received', d: 'Oct 4, 2:10 PM · Raj Mehta, seller', state: 'current' },
-  { t: 'Restriction applied', d: 'Oct 2, 9:30 AM · Grace Kim', state: 'warn', body: 'Reason: on-time dispatch 79.8% over 30 days; 2 condition misdescriptions. Review date Oct 30.' },
-  { t: 'Payout hold set to 14 days after delivery', d: 'Oct 2, 9:31 AM · Priya Nair, Finance', state: 'warn', body: 'Reason: open cases may need refunds.' },
-  { t: 'Performance warning sent', d: 'Sep 15 · Grace Kim', state: 'done' },
-  { t: 'Approved to sell', d: 'Mar 18, 2026 · Grace Kim', state: 'done' },
-];
+/** sellers.SellerAdminDetail.owner */
+export interface Owner {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}
 
-export const ACCOUNT_KV: Array<[string, string]> = [
-  ['Verification', 'Identity and business passed · Verified label not granted: business license renewal expired Sep 30'],
-  ['Product approval', '31 approved · 0 waiting (submissions blocked)'],
-  ['Payout readiness', 'Bank account verified · payouts on hold rule'],
-  ['Legal name', 'Gadget Grove Trading LLC'],
-  ['Contact', 'raj@gadgetgrove.example · (602) 555-0139'],
-];
+/** sellers.SellerAdminDetail.payouts */
+export interface Payouts {
+  pending?: MoneyValue | null;
+  available?: MoneyValue | null;
+  held?: MoneyValue | null;
+  holds?: Array<{ amount?: MoneyValue | null; reason?: string | null; reviewDate?: string | null; setBy?: Actor | null }>;
+  nextPayout?: {
+    scheduledFor?: string | null;
+    estimatedAmount?: MoneyValue | null;
+    destination?: { label?: string | null; status?: string | null } | null;
+    arrivesNote?: string | null;
+    note?: string | null;
+  } | null;
+}
 
-export const PAYOUTS = {
-  pending: 1018.4,
-  available: 732.15,
-  held: 640,
-  holdNote: 'Reason: covers possible refunds on 4 open cases. Review date Oct 30. Set by Priya Nair.',
-  next: 'Fri, Oct 9',
-  bank: 'Chase •••• 2208',
-};
+/** sellers.SellerAdminDetail.obligations */
+export interface Obligations {
+  openOrders?: number;
+  overdueOrders?: Array<{ orderId: string; orderRef: string; itemTitle?: string | null; statusLabel?: string | null; deadline?: { dueAt: string; state?: string | null } | null }>;
+  openReturns?: Array<{ id: string; ref: string }>;
+  openCases?: Array<{ id: string; ref: string }>;
+}
 
-/** "What happens" rows in the suspend dialog. */
-export const SUSPEND_EFFECTS: Array<[string, string]> = [
-  ['Offers · 31', "Removed from sale now. Shared products stay live with other sellers' offers."],
-  ['Open orders · 7', 'Choose below. Customers are told about any change to their items.'],
-  ['Returns · 2', 'Stay open. Seller keeps access to respond. Lena Park takes over if a deadline is missed.'],
-  ['Cases · 4', "Stay open with Isabel Cruz's team. Seller can still reply and upload evidence."],
-  ['Payouts', 'Available $732.15 and pending $1,018.40 move to Held. Reason: cover refunds on open orders and cases. Review date Nov 7.'],
-  ['Seller Center', 'Read and fulfil only. Seller sees the reason and how to appeal.'],
-];
+type Due = { dueAt: string; state?: string | null } | null;
 
-export const SUSPEND_ORDER_OPTIONS = [
-  { id: 'aa-ss-o1', value: 'keep', title: 'Seller keeps fulfilling open orders', body: '5 orders are within their dispatch deadline' },
-  { id: 'aa-ss-o2', value: 'cancel', title: 'Cancel unshipped orders and refund customers', body: '7 orders · $1,284.00 · Finance approval needed' },
-] as const;
+/** AdminSeller screen query: the parts the seller page uses (orders, returns, cases). */
+export interface AdminSellerGql {
+  sellerAdmin: {
+    id: string;
+    returns?: { items: Array<{ id: string; ref: string; orderRef?: string | null; status: string; statusLabel?: string | null; nextDeadline?: Due }> } | null;
+    cases?: { items: Array<{ id: string; ref: string; subject?: string | null; status: string; statusLabel?: string | null; expectedResponse?: Due }> } | null;
+  } | null;
+  ordersAdmin?: {
+    items: Array<{
+      id: string;
+      ref: string;
+      groups: Array<{ id: string; seller?: { id: string } | null; status: string; statusLabel?: string | null; deadlineLabel?: string | null; dispatchDeadline?: Due; itemsSummary?: string | null }>;
+    }>;
+  } | null;
+}
 
-export const SUSPEND_REASONS = ['Repeated late dispatch after restriction', 'Counterfeit or unsafe products', 'Fraud or abuse', 'Failure to resolve cases'];
-export const SECOND_REVIEWERS = ['Grace Kim · Seller Manager', 'Morgan Hale · Business Owner'];
+/** The query text without Money.formatted: the running server answers null for it (G13/G37). */
+export const withoutFormatted = (q: string) => q.replace(/^\s*formatted\s*$/gm, '');
 
-export const SUSPEND_SAMPLE = {
-  reason: 'Repeated late dispatch after restriction',
-  date: 'Sat, Nov 7, 2026',
-  details: 'On-time dispatch stayed at 81.5% during the restriction (target 95%), with 2 more overdue orders this week. New sales are suspended until the review on Nov 7.',
-};
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Order group statuses that are finished (everything else still needs the seller). */
+export const CLOSED_GROUP = new Set(['DELIVERED', 'CANCELLED', 'COMPLETED', 'REFUNDED', 'RETURNED', 'CLOSED', 'SHIPPED', 'IN_TRANSIT']);
+/** Return statuses that are finished. */
+export const CLOSED_RETURN = new Set(['REJECTED', 'REFUNDED', 'CLOSED', 'CANCELLED', 'WITHDRAWN', 'COMPLETED', 'EXPIRED']);
+
+/** Input value that follows `value` after `ms` without changes. */
+export function useDebounced<T>(value: T, ms = 300): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+/** Calls `onVisible` when the returned element scrolls into view (phone "load more"). */
+export function useInView<T extends HTMLElement>(onVisible: () => void, enabled: boolean) {
+  const ref = useRef<T | null>(null);
+  const cb = useRef(onVisible);
+  cb.current = onVisible;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !enabled || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) cb.current();
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [enabled]);
+  return ref;
+}
+
+/** Today + n days as YYYY-MM-DD in Pacific time (date inputs). */
+export const isoDay = (daysFromToday: number) => new Date(Date.now() + daysFromToday * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+
+/** The Pacific calendar day of a YYYY-MM-DD date input as an end-of-day ISO instant (API datetimes). */
+export const endOfDayIso = (day: string) => new Date(`${day}T23:59:00-07:00`).toISOString();

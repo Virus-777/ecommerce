@@ -1,192 +1,135 @@
-import { staffRoles } from '@marketly/web-shared/data/fixtures';
+import type { components } from '@marketly/web-shared/api';
 import type { IconName } from '@marketly/web-shared/ui';
 
-// Design: pages/admin/admin-staff.html and admin-staff--edit-role.html.
+// Staff and roles (design: pages/admin/admin-staff.html and admin-staff--edit-role.html), from the access API:
+// roles, members, coverage, away periods, the role editor (permissions by area, approval limits) and limit changes.
 
-export interface Role {
-  role: string;
-  area: string;
-  /** Lead (first) and other holders. */
-  people: string[];
-  backup: string;
-  limit: string;
-}
+type S = components['schemas'];
+export type Role = S['access.Role'];
+export type RoleDetail = S['access.RoleDetail'];
+export type StaffMember = S['access.StaffMember'];
+export type Coverage = S['access.Coverage'];
+export type CoverageGap = S['access.CoverageGap'];
+export type AwayPeriod = S['access.AwayPeriod'];
+export type ApprovalLimit = S['access.ApprovalLimit'];
+export type LimitValue = S['access.LimitValue'];
+export type LimitChange = S['access.LimitChange'];
+export type PermissionGroup = S['access.PermissionGroup'];
 
-const BACKUP: Record<string, string> = {
-  'Business Owner': 'Dana Ortiz',
-  'Platform Administrator': 'Mei Lin',
-  'Official Store Manager': 'Ken Watanabe',
-  'Purchasing Manager': 'Dana Ortiz',
-  'Inventory Manager': 'Theo Grant',
-  'Warehouse Manager': 'Theo Grant',
-  'Order Manager': 'Ana Silva',
-  'Shipping Manager': 'Ana Silva',
-  'Returns Manager': 'Isabel Cruz',
-  'Catalog Manager': 'Noor Aziz',
-  'Seller Manager': 'Sven Larsen',
-  'Customer Support Manager': 'Lena Park',
-  'Finance Manager': 'Morgan Hale',
-  'Marketing Manager': 'Dana Ortiz',
-  'Advertising Manager': 'Noor Aziz',
-  'Content Manager': 'Jamie Brooks',
-  'Trust and Risk Manager': 'Grace Kim',
-  'Reports Analyst': 'Riley Chen',
+/** Permission areas on the role editor and the design's icon for each. */
+const AREA_ICON: Record<string, IconName> = {
+  Finance: 'landmark',
+  'Orders and shipping': 'truck',
+  'Returns and cases': 'undo-2',
+  Sellers: 'store',
+  'Catalog and offers': 'package',
+  Reports: 'chart-column',
+  Settings: 'settings',
+  'Staff and access': 'users',
+  Advertising: 'megaphone',
+  Audit: 'history',
+  'Customers and support': 'life-buoy',
+  'Inventory and warehouse': 'warehouse',
+  'Marketing and content': 'file-text',
+  Notifications: 'bell',
+  'Official store': 'shopping-bag',
+  'Trust and reviews': 'shield',
+  'Work queues': 'inbox',
+};
+export const areaIcon = (area: string): IconName => AREA_ICON[area] ?? 'settings';
+
+export const AUTHORITY_OPTIONS: Array<{ value: LimitValue['authority']; label: string }> = [
+  { value: 'not_permitted', label: 'Not permitted' },
+  { value: 'recommend_only', label: 'Recommend only' },
+  { value: 'permitted', label: 'Permitted' },
+  { value: 'permitted_with_second_review', label: 'Permitted with second review' },
+];
+
+export const MEMBER_STATUS: Record<StaffMember['status'], string> = { invited: 'Invited', active: 'Active', locked: 'Locked', disabled: 'Disabled' };
+
+export const GAP_TONE: Record<CoverageGap['severity'], 'danger' | 'warning' | 'success'> = { critical: 'danger', review: 'warning', ok: 'success' };
+export const GAP_STATUS: Record<CoverageGap['severity'], string> = { critical: 'Gap', review: 'Review', ok: 'OK' };
+
+/** Minor units → the text in a "$" field (1250000 → "12,500"). */
+export const moneyField = (amount?: number | null) => (amount == null ? '' : (amount / 100).toLocaleString('en-US', { maximumFractionDigits: 2 }));
+/** "$" field text → minor units (null when empty, NaN when not a number). */
+export const parseMoneyField = (s: string): number | null => {
+  const t = s.replace(/[,$\s]/g, '');
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : NaN;
+};
+export const numberField = (n?: number | null) => (n == null ? '' : String(n));
+export const parseNumberField = (s: string): number | null => {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 ? n : NaN;
 };
 
-export const ROLES: Role[] = staffRoles.map((r) => ({ ...r, backup: BACKUP[r.role] ?? '—' }));
-
-/** Roles that are not management roles but can be given in an invitation. */
-export const STAFF_ROLES = ['Warehouse worker', 'Finance staff', 'Support agent'];
-
-export interface StaffMember {
-  name: string;
-  email: string;
-  roles: string[];
-  lastActive: string;
-  status: 'Active' | 'Invited';
-  /** Invitations only. */
-  invited?: string;
-}
-
-const active = (name: string, roles: string[], lastActive: string): StaffMember => ({
-  name,
-  email: `${name.toLowerCase().replace(' ', '.')}@marketly.example`,
-  roles,
-  lastActive,
-  status: 'Active',
-});
-
-export const STAFF: StaffMember[] = [
-  active('Morgan Hale', ['Business Owner'], 'Today 9:41 AM'),
-  active('Riley Chen', ['Platform Administrator'], 'Active now'),
-  active('Dana Ortiz', ['Official Store Manager'], 'Today 8:55 AM'),
-  active('Ken Watanabe', ['Purchasing Manager'], 'Yesterday'),
-  active('Ana Silva', ['Inventory Manager', 'Warehouse Manager'], 'Active now'),
-  active('Theo Grant', ['Order Manager', 'Shipping Manager'], 'Active now'),
-  active('Lena Park', ['Returns Manager'], 'Today 7:58 AM'),
-  active('Omar Haddad', ['Catalog Manager'], 'Today 9:02 AM'),
-  active('Grace Kim', ['Seller Manager'], 'Today 8:47 AM'),
-  active('Isabel Cruz', ['Customer Support Manager'], 'Active now'),
-  active('Priya Nair', ['Finance Manager'], 'Active now'),
-  active('Jamie Brooks', ['Marketing Manager', 'Advertising Manager'], 'Yesterday'),
-  active('Noor Aziz', ['Content Manager'], 'Oct 6'),
-  active('Sven Larsen', ['Trust and Risk Manager'], 'Today 8:50 AM'),
-  active('Mei Lin', ['Reports Analyst'], 'Today 9:15 AM'),
-  { name: 'Carlos Mendez', email: 'carlos.mendez@marketly.example', roles: ['Warehouse worker'], lastActive: 'Not signed in', status: 'Invited', invited: 'Oct 7' },
-  { name: 'Hannah Wu', email: 'hannah.wu@marketly.example', roles: ['Finance staff'], lastActive: 'Not signed in', status: 'Invited', invited: 'Oct 7' },
-];
-
-export const MANAGERS = ['Theo Grant', 'Ana Silva', 'Priya Nair', 'Isabel Cruz', 'Lena Park'];
-
-export interface Gap {
-  title: string;
-  sub: string;
-  status: string;
-  tone: 'warning' | 'success' | 'info';
-}
-
-export const GAPS: Gap[] = [
-  { title: 'Theo Grant leads 2 roles', sub: 'Order Manager and Shipping Manager share one backup (Ana Silva)', status: 'Review', tone: 'warning' },
-  { title: 'Jamie Brooks leads 2 roles', sub: 'Marketing and Advertising, different backups', status: 'OK', tone: 'success' },
-  { title: 'Warehouse workers', sub: '1 active, 1 invited for Reno, NV', status: 'Invited', tone: 'info' },
-];
-
-/* ---------------- Edit role ---------------- */
-
-export interface PermArea {
-  title: string;
-  icon: IconName;
-  actions: string[];
-  note?: { icon: IconName; text: string };
-}
-
-export const PERM_AREAS: PermArea[] = [
-  {
-    title: 'Finance',
-    icon: 'landmark',
-    actions: ['View payments, balances and statements', 'Approve refunds within limit', 'Place and release seller holds', 'Release payout runs', 'Record financial corrections with a reason', 'Change seller payout destinations'],
-    note: { icon: 'lock', text: 'Payout destination changes always need verification by a second person and are not part of this role.' },
-  },
-  { title: 'Orders and shipping', icon: 'truck', actions: ['View orders, seller groups and shipments', 'Cancel items', 'Open carrier claims'] },
-  { title: 'Returns and cases', icon: 'undo-2', actions: ['View return and dispute cases', 'Decide return eligibility', 'Approve refund without return'] },
-  { title: 'Sellers', icon: 'store', actions: ['View seller accounts and statements', 'Restrict or suspend sellers'] },
-  { title: 'Catalog and content', icon: 'package', actions: ['View products and offers', 'Publish, hide or suspend products'] },
-  { title: 'Reports', icon: 'chart-column', actions: ['View finance and commerce reports', 'Export reports'] },
-  {
-    title: 'Settings and staff',
-    icon: 'settings',
-    actions: ['Change fee and payout settings', 'Manage staff accounts and roles'],
-    note: { icon: 'info', text: 'Fee and payout settings are proposed by the Platform Administrator and approved by the Business Owner.' },
-  },
-];
-
-export interface LimitDef {
-  title: string;
-  sub: string;
-  limitLabel: string;
-}
-
-export const LIMITS: LimitDef[] = [
-  { title: 'Payouts', sub: 'Release payout runs', limitLabel: 'Limit per run' },
-  { title: 'Refunds', sub: 'Approve customer refunds and refund overrides', limitLabel: 'Limit per refund' },
-  { title: 'Holds', sub: 'Place or release seller balance holds', limitLabel: 'Limit per hold' },
-];
-
-export interface AuthorityDef {
+/** The editable form of one approval limit. */
+export interface LimitDraft {
   id: string;
+  actionKey: string;
   title: string;
-  sub: string;
-  hint?: string;
+  summary: string;
+  kind: 'money' | 'units' | 'percent' | 'none';
+  authority: LimitValue['authority'];
+  limit: string;
+  review: string;
+  secondReviewerRoleKeys: string[];
 }
 
-export const AUTHORITIES: AuthorityDef[] = [
-  { id: 'er-restr', title: 'Seller restrictions', sub: 'Restrict or suspend a seller account', hint: 'Owned by Seller Manager' },
-  { id: 'er-pub', title: 'Publication overrides', sub: 'Publish or restore content against a review decision' },
-];
-
-export const AUTHORITY_OPTIONS = ['Not permitted', 'Recommend only', 'Permitted', 'Permitted with second review'];
-export const SECOND_REVIEWERS = ['Morgan Hale, Business Owner', 'Hannah Wu, Finance staff (after onboarding)'];
-
-export interface RoleDraft {
-  perms: boolean[][];
-  limits: Array<{ limit: string; review: string }>;
-  authorities: string[];
-  second: boolean;
-  secondWho: string;
-  reason: string;
-  effective: string;
+export function limitDraft(l: ApprovalLimit): LimitDraft {
+  const money = l.action.limit === 'money';
+  return {
+    id: l.id,
+    actionKey: l.action.key,
+    title: l.action.label,
+    summary: l.summary,
+    kind: l.action.limit,
+    authority: l.value.authority,
+    limit: money ? moneyField(l.value.limitMoney?.amount) : numberField(l.value.limitNumber),
+    review: money ? moneyField(l.value.secondReviewerAboveMoney?.amount) : numberField(l.value.secondReviewerAboveNumber),
+    secondReviewerRoleKeys: l.value.secondReviewerRoleKeys,
+  };
 }
 
-/** The Finance Manager draft shown in the design's edit-role view. */
-export const FINANCE_DRAFT: RoleDraft = {
-  perms: [
-    [true, true, true, true, true, false],
-    [true, false, false],
-    [true, false, true],
-    [true, false],
-    [true, false],
-    [true, true],
-    [false, false],
-  ],
-  limits: [
-    { limit: '50,000', review: '25,000' },
-    { limit: '2,000', review: '1,000' },
-    { limit: '10,000', review: '5,000' },
-  ],
-  authorities: ['Recommend only', 'Not permitted'],
-  second: true,
-  secondWho: SECOND_REVIEWERS[0],
-  reason: 'Raise refund limit from $1,500 to $2,000 to cover monitor and furniture returns without waiting for a second review.',
-  effective: 'Oct 12, 2026',
-};
+/** The LimitValue a draft row asks for (throws on a field that isn't a number). */
+export function limitValue(d: LimitDraft, currency = 'USD'): LimitValue {
+  const v: LimitValue = { authority: d.authority, secondReviewerRoleKeys: d.secondReviewerRoleKeys };
+  if (d.kind === 'none') return v;
+  if (d.kind === 'money') {
+    const lim = parseMoneyField(d.limit);
+    const rev = parseMoneyField(d.review);
+    if (Number.isNaN(lim) || Number.isNaN(rev)) throw new Error(`Enter amounts in dollars for “${d.title}”.`);
+    v.limitMoney = lim == null ? null : { amount: lim, currency };
+    v.secondReviewerAboveMoney = rev == null ? null : { amount: rev, currency };
+  } else {
+    const lim = parseNumberField(d.limit);
+    const rev = parseNumberField(d.review);
+    if (Number.isNaN(lim) || Number.isNaN(rev)) throw new Error(`Enter numbers for “${d.title}”.`);
+    v.limitNumber = lim;
+    v.secondReviewerAboveNumber = rev;
+  }
+  return v;
+}
 
-/** Starting point for roles the design does not detail: view access in every area, no limits changed. */
-export const defaultDraft = (): RoleDraft => ({
-  ...FINANCE_DRAFT,
-  perms: PERM_AREAS.map((a) => a.actions.map((_, i) => i === 0 && a.title !== 'Settings and staff')),
-  authorities: ['Not permitted', 'Not permitted'],
-  reason: '',
-});
+export const sameLimit = (a: LimitDraft, b: LimitDraft) => a.authority === b.authority && a.limit === b.limit && a.review === b.review;
 
-/** People holding a role, where the design states it (the lead plus staff covering it). */
-export const HOLDERS: Record<string, number> = { 'Finance Manager': 2 };
+/** Granted permission keys of a role detail. */
+export const grantedKeys = (groups: PermissionGroup[]) => groups.flatMap((g) => g.permissions.filter((p) => p.granted).map((p) => p.permission.key));
+
+/** Today in Pacific time, YYYY-MM-DD. */
+export const todayKey = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+
+/** An effective date (YYYY-MM-DD) as the instant the API takes: a minute from now for today, else the start of that Pacific day. */
+export function effectiveInstant(day: string): string {
+  if (day <= todayKey()) return new Date(Date.now() + 60_000).toISOString();
+  const probe = new Date(`${day}T12:00:00Z`);
+  const tz = probe.toLocaleString('en-US', { timeZone: 'America/Los_Angeles', timeZoneName: 'shortOffset' });
+  const m = /GMT([+-]\d+)/.exec(tz);
+  const off = m ? Number(m[1]) : -8;
+  const sign = off < 0 ? '-' : '+';
+  return new Date(`${day}T00:00:00${sign}${String(Math.abs(off)).padStart(2, '0')}:00`).toISOString();
+}

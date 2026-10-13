@@ -1,59 +1,50 @@
 import { useState } from 'react';
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { STAFF } from '@marketly/web-shared/data/staff';
-import { sellers } from '@marketly/web-shared/data/fixtures';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money, num } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Chip, Deadline, EmptyState, Field, Icon, LogoTile, PageHeader, Pager, SearchInput, Select, StatusBadge, TableWrap, announce } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { LoadError, SkeletonLines, dateTime } from '@/app/parts';
 import {
-  ADMIN_ORDERS, CHIP_PREFIX, DEFAULT_PAGE, FILTER_LABELS, FILTER_OPTIONS, FLAG_STYLE, NO_FILTERS, OVERDUE_FILTERS, SAVED_FILTERS, TOTAL_LAST_7_DAYS,
+  CHIP_PREFIX, FILTER_LABELS, FILTER_OPTIONS, NO_FILTERS, OVERDUE_FILTERS, PAYMENT_LABEL, QUICK_FILTERS, flagStyle, optLabel, orderQuery, rowEdge, rowFlags, rowSellers,
   type AdminOrderRow, type Edge, type OrderFilters, type OrderFlag,
 } from './data/orders';
 
 // Design: pages/admin/admin-orders.html · view "overdue-dispatch" = the saved filter with the
-// late-by/owner columns, the bulk bar (3 selected) and the applied-filter chips.
+// late-by/owner columns, the bulk bar and the applied-filter chips.
+// Data: GET orders/orders (filters, q, page), GET orders/saved-filters (+ POST to save), GET sellers/sellers (seller filter),
+// GET shipping/exceptions?kind=late_dispatch (exception ids behind the overdue rows), POST shipping/exceptions/bulk and
+// …/{id}/notify-seller (remind, assign, escalate), POST orders/exports (Export CSV).
 
 type View = 'overdue-dispatch';
 
+const LIMIT = 25;
 const FILTER_KEYS: Array<keyof OrderFilters> = ['type', 'seller', 'status', 'payment', 'date', 'flag'];
 /** Applied-chip order (design: Status, Flag, then the date range). */
 const CHIP_KEYS: Array<keyof OrderFilters> = ['type', 'seller', 'status', 'payment', 'flag', 'date'];
 const sameFilters = (a: OrderFilters, b: OrderFilters) => FILTER_KEYS.every((k) => a[k] === b[k]);
-const sellerName = (id: AdminOrderRow['sellers'][number]) => sellers[id].name;
-
-function matches(o: AdminOrderRow, f: OrderFilters, q: string) {
-  const names = o.sellers.map(sellerName);
-  if (f.type === 'Official Store' && !o.sellers.includes('official')) return false;
-  if (f.type === 'Marketplace sellers' && !o.sellers.some((s) => s !== 'official')) return false;
-  if (f.seller !== NO_FILTERS.seller && !names.includes(f.seller)) return false;
-  if (f.status !== NO_FILTERS.status) {
-    // "Overdue" also covers partly delivered orders with an overdue package.
-    const ok = f.status === 'Overdue' ? o.fulfilment === 'Overdue' || o.flags.includes('Overdue dispatch') : o.fulfilment === f.status;
-    if (!ok) return false;
-  }
-  if (f.payment !== NO_FILTERS.payment && o.payment !== f.payment) return false;
-  if (f.date === 'Today' && !o.placed.startsWith('Oct 8,')) return false;
-  if (f.flag !== NO_FILTERS.flag && !o.flags.includes(f.flag as OrderFlag)) return false;
-  const s = q.trim().toLowerCase();
-  if (s && ![o.ref, o.customer, o.city].some((v) => v.toLowerCase().includes(s))) return false;
-  return true;
-}
 
 const EDGE_SR: Record<Exclude<Edge, ''>, string> = { flagged: 'Urgent: ', warn: 'At risk: ' };
 const edgeClass = (e: Edge) => (e === 'flagged' ? 'is-flagged' : e === 'warn' ? 'is-warn' : '');
 const EdgeSr = ({ edge }: { edge: Edge }) => (edge ? <span className="sr-only">{EDGE_SR[edge]}</span> : null);
+const tintOf = (name: string): string => String(((name.charCodeAt(0) || 0) % 6) + 1);
 
 function Flags({ flags }: { flags: OrderFlag[] }) {
   return (
     <span className="aa-flags">
-      {flags.map((f) => (
-        <Badge key={f} tone={FLAG_STYLE[f].tone} icon={FLAG_STYLE[f].icon}>
-          {f}
-        </Badge>
-      ))}
+      {flags.map((f) => {
+        const st = flagStyle(f);
+        return (
+          <Badge key={f.kind} tone={st.tone} icon={st.icon}>
+            {f.label}
+          </Badge>
+        );
+      })}
     </span>
   );
 }
@@ -82,37 +73,81 @@ function EdgeLegend({ edges }: { edges: Edge[] }) {
 }
 
 export default function Orders() {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const { accountId, can } = useStaffSession();
   const [view, setView] = useView<View>();
   const overdue = view === 'overdue-dispatch';
   const [filters, setFilters] = useState<OrderFilters>(overdue ? OVERDUE_FILTERS : NO_FILTERS);
   const [syncedView, setSyncedView] = useState(view);
   const [query, setQuery] = useState('');
   const [showFilters, setShowFilters] = useState(true);
-  // The design's overdue view shows the first three rows selected.
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(overdue ? ADMIN_ORDERS.filter((o) => matches(o, OVERDUE_FILTERS, '')).slice(0, 3).map((o) => o.ref) : []));
-  const [owners, setOwners] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reminded, setReminded] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
   const [page, setPage] = useState(1);
 
   // Entering the saved-filter view (chip, link, back button) applies its filters; leaving it drops them.
   if (syncedView !== view) {
     setSyncedView(view);
+    setPage(1);
+    setSelected(new Set());
     if (overdue) setFilters(OVERDUE_FILTERS);
     else if (syncedView === 'overdue-dispatch' && sameFilters(filters, OVERDUE_FILTERS)) setFilters(NO_FILTERS);
   }
 
-  const unfiltered = sameFilters(filters, NO_FILTERS) && !query.trim();
-  const rows = unfiltered ? ADMIN_ORDERS.slice(0, DEFAULT_PAGE) : ADMIN_ORDERS.filter((o) => matches(o, filters, query));
+  const listQuery = orderQuery(filters, query);
+  const list = useQuery({
+    queryKey: ['orders', 'admin-list', listQuery, page],
+    queryFn: () => call(api.GET('/api/admin/orders/orders', { params: { query: { ...listQuery, page, limit: LIMIT } } })),
+    placeholderData: keepPreviousData,
+  });
+  const sellersQ = useQuery({
+    queryKey: ['sellers', 'admin-list', 'filter'],
+    queryFn: () => call(api.GET('/api/admin/sellers/sellers', { params: { query: { limit: 100, status: 'approved' } } })),
+    enabled: can('sellers.accounts.view'),
+    staleTime: 5 * 60_000,
+  });
+  const saved = useQuery({ queryKey: ['orders', 'saved-filters'], queryFn: () => call(api.GET('/api/admin/orders/saved-filters')) });
+  const quickCounts = useQueries({
+    queries: QUICK_FILTERS.map((s) => {
+      const q = orderQuery({ ...NO_FILTERS, ...s.filters }, '');
+      return { queryKey: ['orders', 'admin-list', q, 'count'], queryFn: () => call(api.GET('/api/admin/orders/orders', { params: { query: { ...q, page: 1, limit: 1 } } })), staleTime: 60_000 };
+    }),
+  });
+  const canManageExceptions = can('shipping.exceptions.manage');
+  const exceptions = useQuery({
+    queryKey: ['shipping', 'exceptions', 'late_dispatch', 'open'],
+    queryFn: async () => {
+      const [open, inProgress, escalated] = await Promise.all(
+        (['open', 'in_progress', 'escalated'] as const).map((status) => call(api.GET('/api/admin/shipping/exceptions', { params: { query: { kind: 'late_dispatch', status, limit: 100 } } }))),
+      );
+      return [...open.items, ...inProgress.items, ...escalated.items];
+    },
+    enabled: overdue && canManageExceptions,
+  });
+
+  const rows: AdminOrderRow[] = list.data?.items ?? [];
+  const total = list.data?.total ?? rows.length;
+  const totalPages = list.data?.totalPages ?? 1;
   const allOn = rows.length > 0 && rows.every((o) => selected.has(o.ref));
-  const picked = ADMIN_ORDERS.filter((o) => selected.has(o.ref));
+  const picked = rows.filter((o) => selected.has(o.ref));
   const applied = CHIP_KEYS.filter((k) => filters[k] !== NO_FILTERS[k]);
   const title = overdue ? 'Orders · Overdue dispatch' : 'All orders';
+  const sellerOpts = [{ value: '', label: 'Any seller' }, ...(sellersQ.data?.items ?? []).map((s) => ({ value: s.id, label: s.storeName }))];
+  const filterOpts = (k: keyof OrderFilters) => (k === 'seller' ? sellerOpts : FILTER_OPTIONS[k]);
+  const chipValue = (k: keyof OrderFilters) => optLabel(filterOpts(k), filters[k]);
+  /** Open late-dispatch exceptions per order ref. */
+  const excByRef = new Map<string, string[]>();
+  for (const x of exceptions.data ?? []) if (x.orderRef) excByRef.set(x.orderRef, [...(excByRef.get(x.orderRef) ?? []), x.id]);
+  const excIds = (refs: AdminOrderRow[]) => refs.flatMap((o) => excByRef.get(o.ref) ?? []);
 
   /** Any manual filter change leaves the saved filter. */
   const changeFilters = (next: OrderFilters) => {
     setFilters(next);
     setPage(1);
+    setSelected(new Set());
     if (overdue && !sameFilters(next, OVERDUE_FILTERS)) setView('');
   };
   const clearAll = () => {
@@ -128,44 +163,80 @@ export default function Orders() {
       return n;
     });
   const toggleAll = () => setSelected(allOn ? new Set() : new Set(rows.map((o) => o.ref)));
-  const ownerOf = (o: AdminOrderRow) => owners[o.ref] ?? o.owner ?? 'Seller';
   const say = (msg: string) => {
     setNotice(msg);
+    setError('');
     announce(msg);
   };
   const plural = (n: number) => `${n} order${n === 1 ? '' : 's'}`;
 
-  const remindSellers = () => {
-    setReminded((r) => new Set([...r, ...picked.map((o) => o.ref)]));
-    say(`Reminders sent to the sellers of ${plural(picked.length)}.`);
-    setSelected(new Set());
-  };
-  const assignOwner = (owner: string, msg: string) => {
-    setOwners((m) => ({ ...m, ...Object.fromEntries(picked.map((o) => [o.ref, owner])) }));
-    say(msg);
-    setSelected(new Set());
-  };
-  const remindOne = (ref: string) => {
-    setReminded((r) => new Set(r).add(ref));
-    say(`Reminder sent to the seller of ${ref}.`);
-  };
+  const bulk = useMutation({
+    mutationFn: async (a: { action: 'notify_seller' | 'assign' | 'escalate'; orders: AdminOrderRow[]; msg: string }) => {
+      const ids = excIds(a.orders);
+      if (!ids.length) throw new Error('none');
+      const body =
+        a.action === 'assign'
+          ? { ids, action: a.action, ownerStaffId: accountId }
+          : a.action === 'escalate'
+            ? { ids, action: a.action, to: 'seller_manager' as const, reason: 'Seller missed the dispatch deadline' }
+            : { ids, action: a.action };
+      const r = await call(api.POST('/api/admin/shipping/exceptions/bulk', { body }));
+      return { ...a, r };
+    },
+    onSuccess: ({ action, orders, msg, r }) => {
+      if (action === 'notify_seller') setReminded((s) => new Set([...s, ...orders.map((o) => o.ref)]));
+      say(r.failed.length ? `${msg} ${r.failed.length} could not be updated.` : msg);
+      setSelected(new Set());
+      void qc.invalidateQueries({ queryKey: ['orders', 'admin-list'] });
+      void qc.invalidateQueries({ queryKey: ['shipping', 'exceptions'] });
+      void qc.invalidateQueries({ queryKey: ['workqueues'] });
+    },
+    onError: (e) => setError(e instanceof Error && e.message === 'none' ? 'These orders have no open dispatch exception to act on.' : errorMessage(e)),
+  });
+
+  const exportCsv = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/orders/exports', { body: { filters: listQuery, format: 'csv' } })),
+    onSuccess: () => announce('Export started. It is logged in Action history.'),
+    onError: (e) => setError(errorMessage(e)),
+  });
+  const saveFilter = useMutation({
+    mutationFn: () => {
+      const name = applied.map((k) => `${CHIP_PREFIX[k]}${chipValue(k)}`).join(', ') || 'Last 7 days';
+      return call(api.POST('/api/admin/orders/saved-filters', { body: { name: query.trim() ? `${name} · “${query.trim()}”` : name, query: { filters, q: query.trim() } } }));
+    },
+    onSuccess: () => {
+      announce('Current filters saved');
+      void qc.invalidateQueries({ queryKey: ['orders', 'saved-filters'] });
+    },
+    onError: (e) => setError(errorMessage(e)),
+  });
+
+  const remindOne = (o: AdminOrderRow) => bulk.mutate({ action: 'notify_seller', orders: [o], msg: `Reminder sent to the seller of ${o.ref}.` });
+  const ownerOf = (o: AdminOrderRow) => o.owner ?? 'Seller';
+  const overdueCount = quickCounts[0]?.data?.total;
 
   return (
     <AdminLayout active="orders">
       <PageHeader
         crumbs={[{ label: 'Commerce' }, { label: 'Orders', to: href('admin/orders') }]}
         title={title}
-        sub={overdue ? 'Saved filter · items past their dispatch deadline · sellers and customers already notified' : `Company and marketplace seller orders · ${num(TOTAL_LAST_7_DAYS)} in the last 7 days · times in PT`}
+        sub={
+          overdue
+            ? 'Saved filter · items past their dispatch deadline · sellers and customers already notified'
+            : `Company and marketplace seller orders${list.data && sameFilters(filters, NO_FILTERS) && !query.trim() ? ` · ${num(total)} in the last 7 days` : ''} · times in PT`
+        }
         actions={
           <>
-            <span className="aa-tip" tabIndex={0}>
-              <Button variant="secondary" size="sm" icon="download" onClick={() => announce('Export started. It is logged in Action history.')}>
-                Export CSV
-              </Button>
-              <span className="aa-tipbox" role="tooltip">
-                Exports are logged in Action history with your name. Customer phone numbers are masked unless your role allows them.
+            {can('orders.orders.export') && (
+              <span className="aa-tip" tabIndex={0}>
+                <Button variant="secondary" size="sm" icon="download" disabled={exportCsv.isPending} onClick={() => exportCsv.mutate()}>
+                  Export CSV
+                </Button>
+                <span className="aa-tipbox" role="tooltip">
+                  Exports are logged in Action history with your name. Customer phone numbers are masked unless your role allows them.
+                </span>
               </span>
-            </span>
+            )}
             <Button variant="secondary" size="sm" icon="truck" to={href('ops/dispatch')}>
               Open dispatch queue
             </Button>
@@ -175,28 +246,44 @@ export default function Orders() {
       <div className="stack gap-2">
         <span className="xs strong muted">Saved filters</span>
         <div className="hscroll gap-2">
-          {SAVED_FILTERS.map((s) =>
-            s.view ? (
+          {QUICK_FILTERS.map((s, i) => {
+            const n = quickCounts[i]?.data?.total;
+            const label = n === undefined ? s.label : `${s.label} · ${n}`;
+            return s.view ? (
               <Chip key={s.label} icon={s.icon} active={overdue} to={href('admin/orders', s.view)}>
-                {s.label} · {s.count}
+                {label}
               </Chip>
             ) : (
-              <Chip key={s.label} icon={s.icon} active={!overdue && applied.length === 1 && sameFilters(filters, { ...NO_FILTERS, ...s.filters })} onClick={() => changeFilters({ ...NO_FILTERS, ...s.filters })}>
-                {s.label} · {s.count}
+              <Chip key={s.label} icon={s.icon} active={!overdue && sameFilters(filters, { ...NO_FILTERS, ...s.filters })} onClick={() => changeFilters({ ...NO_FILTERS, ...s.filters })}>
+                {label}
               </Chip>
-            ),
-          )}
-          <Chip icon="bookmark-plus" onClick={() => announce('Current filters saved')}>
+            );
+          })}
+          {(saved.data ?? []).map((s) => {
+            const sq = (s.query ?? {}) as { filters?: Partial<OrderFilters>; q?: string };
+            const next = { ...NO_FILTERS, ...(sq.filters ?? {}) };
+            return (
+              <Chip key={s.id} icon="bookmark" active={!overdue && sameFilters(filters, next) && query.trim() === (sq.q ?? '')} onClick={() => (changeFilters(next), setQuery(sq.q ?? ''))}>
+                {s.name} · {s.count ?? 0}
+              </Chip>
+            );
+          })}
+          <Chip icon="bookmark-plus" onClick={() => saveFilter.mutate()}>
             Save current filters
           </Chip>
         </div>
       </div>
-      {overdue && (
-        <Alert tone="danger" title="9 orders have items past their dispatch deadline">
-          Overdue tasks were created automatically. Each seller got a reminder and each customer got an update with a way to contact support. Escalate to Grace Kim (Seller Manager) when a seller misses a second deadline.
+      {overdue && overdueCount !== undefined && overdueCount > 0 && (
+        <Alert tone="danger" title={`${plural(overdueCount)} ${overdueCount === 1 ? 'has' : 'have'} items past their dispatch deadline`}>
+          Overdue tasks were created automatically. Each seller got a reminder and each customer got an update with a way to contact support. Escalate to the Seller Manager when a seller misses a second deadline.
         </Alert>
       )}
       {notice && <Alert tone="success" title={notice} />}
+      {error && (
+        <Alert tone="danger" title="That didn’t work">
+          {error}
+        </Alert>
+      )}
       <section className="card">
         <div className="card-body">
           <div className="toolbar">
@@ -206,9 +293,9 @@ export default function Orders() {
             </Button>
           </div>
           <div className="aa-filters" id="aa-o-filters" hidden={!showFilters}>
-            {FILTER_KEYS.map((k) => (
+            {FILTER_KEYS.filter((k) => k !== 'seller' || sellersQ.data).map((k) => (
               <Field key={k} label={FILTER_LABELS[k]} className="aa-flt">
-                <Select id={`aa-o-${k === 'payment' ? 'pay' : k}`} options={FILTER_OPTIONS[k]} value={filters[k]} onChange={(e) => changeFilters({ ...filters, [k]: e.target.value })} />
+                <Select id={`aa-o-${k === 'payment' ? 'pay' : k}`} options={filterOpts(k)} value={filters[k]} onChange={(e) => changeFilters({ ...filters, [k]: e.target.value })} />
               </Field>
             ))}
           </div>
@@ -218,7 +305,7 @@ export default function Orders() {
                 {applied.map((k) => (
                   <Chip key={k} removable onClick={() => changeFilters({ ...filters, [k]: NO_FILTERS[k] })}>
                     {CHIP_PREFIX[k]}
-                    {filters[k]}
+                    {chipValue(k)}
                   </Chip>
                 ))}
               </div>
@@ -228,28 +315,40 @@ export default function Orders() {
             </div>
           )}
         </div>
-        {picked.length > 0 && (
+        {overdue && picked.length > 0 && canManageExceptions && (
           <div className="u-p-0-sp-4-sp-3">
             <div className="bulk-bar">
               <span>{picked.length} selected</span>
               <span className="grow" />
-              <Button variant="ghost" icon="bell" onClick={remindSellers}>
+              <Button variant="ghost" icon="bell" disabled={bulk.isPending} onClick={() => bulk.mutate({ action: 'notify_seller', orders: picked, msg: `Reminders sent to the sellers of ${plural(picked.length)}.` })}>
                 Remind sellers
               </Button>
-              <Button variant="ghost" icon="user-plus" onClick={() => assignOwner(STAFF.admin.name, `${plural(picked.length)} assigned to you.`)}>
+              <Button variant="ghost" icon="user-plus" disabled={bulk.isPending} onClick={() => bulk.mutate({ action: 'assign', orders: picked, msg: `${plural(picked.length)} assigned to you.` })}>
                 Assign owner
               </Button>
-              <Button variant="ghost" icon="arrow-up-right" onClick={() => assignOwner('Grace Kim', `${plural(picked.length)} escalated to Grace Kim (Seller Manager).`)}>
+              <Button variant="ghost" icon="arrow-up-right" disabled={bulk.isPending} onClick={() => bulk.mutate({ action: 'escalate', orders: picked, msg: `${plural(picked.length)} escalated to the Seller Manager.` })}>
                 Escalate to Seller Manager
               </Button>
             </div>
           </div>
         )}
-        {rows.length === 0 ? (
+        {list.isError ? (
           <div className="card-body">
-            <EmptyState icon="search-x" title="No orders match these filters" action={<Button variant="secondary" size="sm" onClick={clearAll}>Clear all filters</Button>}>
-              Try removing a filter, or search by order ref, customer or tracking number.
-            </EmptyState>
+            <LoadError error={list.error} onRetry={() => void list.refetch()} />
+          </div>
+        ) : list.isPending ? (
+          <SkeletonLines rows={8} />
+        ) : rows.length === 0 ? (
+          <div className="card-body">
+            {overdue ? (
+              <EmptyState icon="package-check" title="No overdue dispatch">
+                Every order is within its dispatch deadline.
+              </EmptyState>
+            ) : (
+              <EmptyState icon="search-x" title="No orders match these filters" action={<Button variant="secondary" size="sm" onClick={clearAll}>Clear all filters</Button>}>
+                Try removing a filter, or search by order ref, customer or tracking number.
+              </EmptyState>
+            )}
           </div>
         ) : (
           <>
@@ -258,9 +357,11 @@ export default function Orders() {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th className="col-check">
-                        <input type="checkbox" aria-label="Select all" checked={allOn} onChange={toggleAll} />
-                      </th>
+                      {overdue && canManageExceptions && (
+                        <th className="col-check">
+                          <input type="checkbox" aria-label="Select all" checked={allOn} onChange={toggleAll} />
+                        </th>
+                      )}
                       <th scope="col">Order</th>
                       <th scope="col">Placed</th>
                       <th scope="col">Customer</th>
@@ -284,29 +385,37 @@ export default function Orders() {
                   </thead>
                   <tbody>
                     {rows.map((o) => {
-                      const names = o.sellers.map(sellerName).join(', ');
-                      const n = o.sellers.length;
+                      const ss = rowSellers(o);
+                      const names = ss.map((s) => s.name).join(', ');
+                      const n = ss.length;
+                      const edge = rowEdge(o);
+                      const flags = rowFlags(o);
+                      const hasExc = (excByRef.get(o.ref) ?? []).length > 0;
                       return (
-                        <tr key={o.ref} className={edgeClass(o.edge)}>
-                          <td className="col-check">
-                            <EdgeSr edge={o.edge} />
-                            <input type="checkbox" aria-label={`Select ${o.ref}`} checked={selected.has(o.ref)} onChange={() => toggle(o.ref)} />
-                          </td>
+                        <tr key={o.ref} className={edgeClass(edge)}>
+                          {overdue && canManageExceptions && (
+                            <td className="col-check">
+                              <EdgeSr edge={edge} />
+                              <input type="checkbox" aria-label={`Select ${o.ref}`} checked={selected.has(o.ref)} onChange={() => toggle(o.ref)} />
+                            </td>
+                          )}
                           <td className="cell-id">
+                            {!(overdue && canManageExceptions) && <EdgeSr edge={edge} />}
                             <Link className="mono strong nowrap" to={href('admin/order', '', { ref: o.ref })} title={o.ref}>
                               {o.ref}
                             </Link>
                           </td>
                           <td>
-                            <span className="small nowrap">{o.placed}</span>
+                            <span className="small nowrap">{dateTime(o.placedAt)}</span>
                           </td>
                           <td className="cell-name">
                             <span className="stack gap-0">
-                              <span className="small strong nowrap ellip" title={o.customer}>
-                                {o.customer}
+                              <span className="small strong nowrap ellip" title={o.customerName}>
+                                {o.customerName}
+                                {o.guest ? ' (guest)' : ''}
                               </span>
-                              <span className="xs muted ellip" title={o.city}>
-                                {o.city}
+                              <span className="xs muted ellip" title={o.customerCity}>
+                                {o.customerCity}
                               </span>
                             </span>
                           </td>
@@ -320,19 +429,19 @@ export default function Orders() {
                               </span>
                             </span>
                           </td>
-                          {!overdue && <td className="r">{o.items}</td>}
+                          {!overdue && <td className="r">{o.itemCount}</td>}
                           <td className="r">
-                            <span className="strong">{money(o.total)}</span>
+                            <span className="strong">{formatMoney(o.total)}</span>
                           </td>
                           {!overdue && (
                             <td>
-                              <StatusBadge status={o.payment} />
+                              <StatusBadge status={PAYMENT_LABEL[o.paymentState]} />
                             </td>
                           )}
                           <td>
                             <span className="stack gap-1">
-                              <StatusBadge status={o.fulfilment} />
-                              <span className="xs muted">{o.fulfilmentNote}</span>
+                              <StatusBadge status={o.fulfillmentStatus} />
+                              <span className="xs muted">{o.fulfillmentNote}</span>
                             </span>
                           </td>
                           {overdue ? (
@@ -344,12 +453,12 @@ export default function Orders() {
                                 </span>
                               </td>
                               <td className="col-pin">
-                                {reminded.has(o.ref) ? (
+                                {!canManageExceptions || !hasExc ? null : reminded.has(o.ref) ? (
                                   <Button variant="ghost" size="sm" icon="check" disabled>
                                     Reminded
                                   </Button>
                                 ) : (
-                                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => remindOne(o.ref)}>
+                                  <button type="button" className="btn btn-ghost btn-sm" disabled={bulk.isPending} onClick={() => remindOne(o)}>
                                     <Icon name="bell" />
                                     <span>Remind seller</span>
                                     <span className="sr-only"> {o.ref}</span>
@@ -358,7 +467,7 @@ export default function Orders() {
                               </td>
                             </>
                           ) : (
-                            <td className="col-pin">{o.flags.length ? <Flags flags={o.flags} /> : <span className="sr-only">None</span>}</td>
+                            <td className="col-pin">{flags.length ? <Flags flags={flags} /> : <span className="sr-only">None</span>}</td>
                           )}
                         </tr>
                       );
@@ -366,54 +475,50 @@ export default function Orders() {
                   </tbody>
                 </table>
               </TableWrap>
-              <EdgeLegend edges={rows.map((o) => o.edge)} />
+              <EdgeLegend edges={rows.map(rowEdge)} />
             </div>
             <div className="only-phone card-pad-phone">
               <div className="aa-mlist">
-                {rows.map((o) => (
-                  <Link key={o.ref} className={cx('aa-mcard', edgeClass(o.edge))} to={href('admin/order', '', { ref: o.ref })}>
-                    <EdgeSr edge={o.edge} />
-                    <span className="row between">
-                      <span className="mono strong">{o.ref}</span>
-                      <span className="strong num">{money(o.total)}</span>
-                    </span>
-                    <span className="xs muted">
-                      {o.placed} · {o.customer} · {o.items} item{o.items > 1 ? 's' : ''}
-                    </span>
-                    <span className="row gap-2">
-                      {o.sellers.map((s) => (
-                        <span key={s} className="row nowrap gap-1 xs">
-                          <LogoTile initials={sellers[s].initials} tint={sellers[s].tint} size="xs" />
-                          {sellers[s].name}
-                        </span>
-                      ))}
-                    </span>
-                    <span className="row gap-2">
-                      <StatusBadge status={o.payment} />
-                      <StatusBadge status={o.fulfilment} />
-                      {overdue && o.lateBy && <Deadline tone="danger">{o.lateBy}</Deadline>}
-                    </span>
-                    {o.flags.length > 0 && <Flags flags={o.flags} />}
-                  </Link>
-                ))}
+                {rows.map((o) => {
+                  const edge = rowEdge(o);
+                  const flags = rowFlags(o);
+                  return (
+                    <Link key={o.ref} className={cx('aa-mcard', edgeClass(edge))} to={href('admin/order', '', { ref: o.ref })}>
+                      <EdgeSr edge={edge} />
+                      <span className="row between">
+                        <span className="mono strong">{o.ref}</span>
+                        <span className="strong num">{formatMoney(o.total)}</span>
+                      </span>
+                      <span className="xs muted">
+                        {dateTime(o.placedAt)} · {o.customerName} · {o.itemCount} item{o.itemCount > 1 ? 's' : ''}
+                      </span>
+                      <span className="row gap-2">
+                        {rowSellers(o).map((s) => (
+                          <span key={s.id ?? s.name} className="row nowrap gap-1 xs">
+                            <LogoTile initials={initials(s.name)} tint={tintOf(s.name)} size="xs" />
+                            {s.name}
+                          </span>
+                        ))}
+                      </span>
+                      <span className="row gap-2">
+                        <StatusBadge status={PAYMENT_LABEL[o.paymentState]} />
+                        <StatusBadge status={o.fulfillmentStatus} />
+                        {overdue && o.lateBy && <Deadline tone="danger">{o.lateBy}</Deadline>}
+                      </span>
+                      {flags.length > 0 && <Flags flags={flags} />}
+                    </Link>
+                  );
+                })}
               </div>
-              <EdgeLegend edges={rows.map((o) => o.edge)} />
+              <EdgeLegend edges={rows.map(rowEdge)} />
             </div>
           </>
         )}
         <div className="card-foot between">
-          {unfiltered ? (
-            <>
-              <span className="xs muted">
-                Showing 1–{DEFAULT_PAGE} of {num(TOTAL_LAST_7_DAYS)} · Flags update every 5 minutes
-              </span>
-              <Pager page={page} total={Math.ceil(TOTAL_LAST_7_DAYS / 10)} onPage={setPage} />
-            </>
-          ) : (
-            <span className="xs muted">
-              {rows.length ? `Showing 1–${rows.length} of ${rows.length}` : 'No matching orders'} · Flags update every 5 minutes
-            </span>
-          )}
+          <span className="xs muted">
+            {rows.length ? `Showing ${(page - 1) * LIMIT + 1}–${(page - 1) * LIMIT + rows.length} of ${num(total)}` : 'No matching orders'} · Flags update every 5 minutes
+          </span>
+          {totalPages > 1 && <Pager page={page} total={totalPages} onPage={setPage} />}
         </div>
       </section>
     </AdminLayout>

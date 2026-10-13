@@ -1,42 +1,42 @@
-import { useState, type MouseEvent } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState, type MouseEvent } from 'react';
+import { useSearchParams } from 'react-router';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
-import { money, num } from '@marketly/web-shared/lib/format';
+import { formatMoney, money, num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Card, Dialog, Drawer, EmptyState, Field, Icon, KeyValue, PageHeader, SearchInput, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput } from '@marketly/web-shared/ui';
-import {
-  APPROVER, BUYER, ON_TIME_WARN, PO_LIMIT, PURCHASE_ORDERS, REORDER, SUPPLIER_ITEMS, SUPPLIERS,
-  type PoEvent, type PoLine, type PurchaseOrder, type Supplier,
-} from './data/purchasing';
+import { Alert, Button, Card, Dialog, Drawer, EmptyState, Field, Icon, KeyValue, PageHeader, Pager, SearchInput, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput } from '@marketly/web-shared/ui';
+import { useStaffSession } from '@/app/session';
+import { date, dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
+import { ON_TIME_WARN, PO_STATUS_LABEL, poLimit, poStatusLabel, STATUS_FILTERS, type PoStatusKey, type PurchaseOrder, type PurchaseOrderRow, type ReorderSuggestion, type Supplier } from './data/purchasing';
 
 // Design: pages/admin/admin-purchasing.html (purchase orders + suppliers) ·
-// view "purchase-order" = the PUR-2610-0042 drawer (partly received). Draft POs open the same
-// drawer with editable lines; "New purchase order" and reorder suggestions start a new draft.
+// view "purchase-order" = the purchase order drawer (?view=purchase-order&po=<ref>). Draft POs open the same
+// drawer with editable lines; "New purchase order" and reorder suggestions start a new draft (po=new).
+// API: GET /api/admin/purchasing/summary, /suppliers (+/{id} price list), /purchase-orders (+/{id}), /reorder-suggestions;
+// POST /purchase-orders, PATCH /purchase-orders/{id}, POST /{id}/send (approval above the buyer's limit), /{id}/cancel,
+// POST /claims, POST /suppliers.
 
 type View = 'purchase-order';
 type TabKey = 'pos' | 'suppliers' | 'reorder';
+const PAGE_SIZE = 20;
 
-const DESIGN_REF = 'PUR-2610-0042';
-const STATUS_FILTERS = ['All statuses', 'Draft', 'Sent', 'Partly received', 'Received'];
-const TODAY = 'Oct 10';
-
-const subtotalOf = (lines: PoLine[]) => lines.reduce((s, l) => s + l.ordered * l.unit, 0);
-const totalOf = (po: PurchaseOrder) => subtotalOf(po.lines) + po.freight;
-const unitsOf = (po: PurchaseOrder) => po.lines.reduce((s, l) => s + l.ordered, 0);
-const isDraftLike = (po: PurchaseOrder) => po.status === 'Draft' || po.status === 'In review';
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+const usd = (dollars: number) => ({ amount: Math.round(dollars * 100), currency: 'USD' });
 
 /* ---------- Draft editing ---------- */
 
 interface LineForm {
+  stockItemId: string;
   sku: string;
   name: string;
   qty: string;
   unit: string;
 }
 interface PoForm {
-  supplier: string;
+  supplierId: string;
   expected: string;
   freight: string;
   lines: LineForm[];
@@ -50,10 +50,10 @@ interface FormErrors {
 }
 
 const toForm = (po: PurchaseOrder): PoForm => ({
-  supplier: po.supplier,
-  expected: po.expected === 'Not set' ? '' : po.expected,
-  freight: po.freight.toFixed(2),
-  lines: po.lines.map((l) => ({ sku: l.sku, name: l.name, qty: String(l.ordered), unit: l.unit.toFixed(2) })),
+  supplierId: po.supplier.id,
+  expected: po.expectedDate?.slice(0, 10) ?? '',
+  freight: (po.freight.amount / 100).toFixed(2),
+  lines: po.lines.map((l) => ({ stockItemId: l.stockItemId, sku: l.sku, name: l.label, qty: String(l.quantityOrdered), unit: (l.unitCost.amount / 100).toFixed(2) })),
   addSku: '',
 });
 const n = (s: string) => (Number.isFinite(Number(s)) ? Number(s) : 0);
@@ -61,7 +61,7 @@ const formSubtotal = (f: PoForm) => f.lines.reduce((s, l) => s + n(l.qty) * n(l.
 
 function validateForm(f: PoForm): FormErrors {
   const e: FormErrors = { line: {} };
-  if (!f.supplier) e.supplier = 'Choose a supplier.';
+  if (!f.supplierId) e.supplier = 'Choose a supplier.';
   if (!f.lines.length) e.lines = 'Add at least one line.';
   f.lines.forEach((l, i) => {
     const le: { qty?: string; unit?: string } = {};
@@ -75,6 +75,8 @@ function validateForm(f: PoForm): FormErrors {
 const hasErrors = (e: FormErrors) => !!(e.supplier || e.lines || e.freight || Object.keys(e.line).length);
 
 /* ---------- Small blocks ---------- */
+
+type PoEvent = { t: string; d: string; state: 'done' | 'warn' | 'current' };
 
 function EventList({ events }: { events: PoEvent[] }) {
   return (
@@ -93,42 +95,42 @@ function EventList({ events }: { events: PoEvent[] }) {
   );
 }
 
-function ReceivedLine({ l, restDue }: { l: PoLine; restDue?: string }) {
-  const pct = Math.round((l.received / l.ordered) * 100);
-  const complete = l.received >= l.ordered;
-  const tone = complete ? 't-success' : l.received > 0 ? 't-warning' : '';
+function ReceivedLine({ l }: { l: PurchaseOrder['lines'][number] }) {
+  const pct = l.quantityOrdered ? Math.round((l.quantityReceived / l.quantityOrdered) * 100) : 0;
+  const complete = l.quantityReceived >= l.quantityOrdered;
+  const tone = complete ? 't-success' : l.quantityReceived > 0 ? 't-warning' : '';
   return (
     <div className="panel stack gap-2">
       <div className="row between top">
         <span className="stack gap-0">
-          <span className="small strong">{l.name}</span>
+          <span className="small strong">{l.label}</span>
           <span className="xs muted mono">{l.sku}</span>
         </span>
-        <span className="small num strong">{money(l.ordered * l.unit)}</span>
+        <span className="small num strong">{formatMoney(l.lineTotal)}</span>
       </div>
-      <div className={cx('meter', tone)} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={l.name}>
+      <div className={cx('meter', tone)} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={l.label}>
         {complete ? <i className="u-w-100pct" /> : <i style={{ width: `${pct}%` }} />}
       </div>
-      {!complete && l.received > 0 && <span className="xs strong meter-note t-warning-text">Near target</span>}
+      {!complete && l.quantityReceived > 0 && <span className="xs strong meter-note t-warning-text">Near target</span>}
       <div className="row between xs">
         <span>
-          <b className="num">{num(l.received)}</b> of <b className="num">{num(l.ordered)}</b> received
-          {l.damaged > 0 && (
+          <b className="num">{num(l.quantityReceived)}</b> of <b className="num">{num(l.quantityOrdered)}</b> received
+          {l.quantityDamaged > 0 && (
             <>
               {' · '}
-              <span className="t-danger-text strong">{l.damaged} damaged, held</span>
+              <span className="t-danger-text strong">{l.quantityDamaged} damaged, held</span>
             </>
           )}
         </span>
         <span className="muted">
-          {money(l.unit)} each · {complete ? 'Complete' : (restDue ?? 'Not received')}
+          {formatMoney(l.unitCost)} each · {complete ? 'Complete' : l.quantityClosed ? `${l.quantityClosed} closed short` : l.expectedDate ? `Due ${shortDate(l.expectedDate)}` : 'Not received'}
         </span>
       </div>
     </div>
   );
 }
 
-function SupplierTable({ suppliers, pos, label }: { suppliers: Supplier[]; pos: PurchaseOrder[]; label: string }) {
+function SupplierTable({ suppliers, label, loading }: { suppliers: Supplier[]; label: string; loading: boolean }) {
   return (
     <TableWrap label={label}>
       <table className="table">
@@ -142,24 +144,40 @@ function SupplierTable({ suppliers, pos, label }: { suppliers: Supplier[]; pos: 
           </tr>
         </thead>
         <tbody>
+          {loading && (
+            <tr>
+              <td colSpan={5}>
+                <SkeletonLines rows={3} />
+              </td>
+            </tr>
+          )}
           {suppliers.map((s) => (
-            <tr key={s.name}>
+            <tr key={s.id}>
               <td>
                 <span className="stack gap-0">
                   <span className="small strong">{s.name}</span>
-                  <span className="xs muted">{s.city}</span>
+                  <span className="xs muted">{s.location || (s.active ? '' : 'Inactive')}</span>
                 </span>
               </td>
               <td>
-                <span className="small">{s.contact || '—'}</span>
+                <span className="small">{s.contactName || s.email || '—'}</span>
               </td>
-              <td className="r">{plural(s.leadDays, 'day')}</td>
+              <td className="r">{plural(s.actualLeadTimeDays ?? s.leadTimeDays, 'day')}</td>
               <td className="r">
-                <span className={cx(s.onTime !== null && s.onTime < ON_TIME_WARN && 't-warning-text strong')}>{s.onTime === null ? 'New' : `${s.onTime}%`}</span>
+                <span className={cx(s.onTimePct != null && s.onTimePct < ON_TIME_WARN && 't-warning-text strong')}>{s.onTimePct == null ? 'New' : `${Math.round(s.onTimePct)}%`}</span>
               </td>
-              <td className="r">{pos.filter((p) => p.supplier === s.name && p.status !== 'Received').length}</td>
+              <td className="r">{s.openPurchaseOrders}</td>
             </tr>
           ))}
+          {!loading && suppliers.length === 0 && (
+            <tr>
+              <td colSpan={5}>
+                <EmptyState icon="truck" title="No suppliers yet">
+                  Add a supplier to start a purchase order.
+                </EmptyState>
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </TableWrap>
@@ -179,199 +197,273 @@ function validateSupplier(f: SupplierForm, existing: Supplier[]) {
   const e: Partial<Record<keyof SupplierForm, string>> = {};
   if (!f.name.trim()) e.name = "Enter the supplier's name.";
   else if (existing.some((s) => s.name.toLowerCase() === f.name.trim().toLowerCase())) e.name = 'This supplier is already in the list.';
-  if (!/^.+,\s*[A-Z]{2}$/.test(f.city.trim())) e.city = 'Enter a city and state, like Reno, NV.';
+  if (f.city.trim() && !/^.+,\s*[A-Z]{2}$/.test(f.city.trim())) e.city = 'Enter a city and state, like Reno, NV.';
   if (!/^\d+$/.test(f.lead.trim()) || Number(f.lead) < 1) e.lead = 'Enter a lead time in whole days, like 7.';
   return e;
 }
 
 export default function Purchasing() {
-  const [view, setView] = useView<View>();
-  const [pos, setPos] = useState(PURCHASE_ORDERS);
-  const [suppliers, setSuppliers] = useState(SUPPLIERS);
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const { accountId, can } = useStaffSession();
+  const canManage = can('purchasing.orders.manage');
+  const [view] = useView<View>();
+  const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState<TabKey>('pos');
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState(STATUS_FILTERS[0]);
-  const [supplierFilter, setSupplierFilter] = useState('All suppliers');
-  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  const [status, setStatus] = useState<'' | PoStatusKey>('');
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const [notice, setNotice] = useState<{ tone?: 'success' | 'danger'; title: string; body: string } | null>(null);
 
-  /* ----- KPIs ----- */
-  const open = pos.filter((p) => p.status !== 'Received');
-  const committed = open.reduce((s, p) => s + totalOf(p), 0);
+  const me = useQuery({ queryKey: ['access', 'me', accountId], queryFn: () => call(api.GET('/api/admin/access/me')) });
+  const limit = poLimit(me.data?.limits as Parameters<typeof poLimit>[0]);
+  const limitText = limit === null ? 'no limit' : limit === 0 ? 'no sending authority' : `POs up to ${formatMoney({ amount: limit, currency: 'USD' })}`;
+
+  const summary = useQuery({ queryKey: ['purchasing', 'summary'], queryFn: () => call(api.GET('/api/admin/purchasing/summary')) });
+  const suppliersQ = useQuery({ queryKey: ['purchasing', 'suppliers'], queryFn: () => call(api.GET('/api/admin/purchasing/suppliers', { params: { query: { limit: 100 } } })) });
+  const suppliers = suppliersQ.data?.items ?? [];
+  const reorderQ = useQuery({ queryKey: ['purchasing', 'reorder'], queryFn: () => call(api.GET('/api/admin/purchasing/reorder-suggestions', { params: { query: { limit: 50 } } })) });
+  const reorder: ReorderSuggestion[] = reorderQ.data?.items ?? [];
+  const locations = useQuery({ queryKey: ['inventory', 'locations'], queryFn: () => call(api.GET('/api/admin/inventory/locations')) });
+  const shipTo = (locations.data ?? []).find((l) => l.isDefault && l.active) ?? (locations.data ?? [])[0];
 
   /* ----- Purchase order table ----- */
-  const needle = q.trim().toLowerCase();
-  const rows = pos.filter((p) => {
-    if (status !== STATUS_FILTERS[0] && p.status !== status) return false;
-    if (supplierFilter !== 'All suppliers' && p.supplier !== supplierFilter) return false;
-    if (!needle) return true;
-    return p.ref.toLowerCase().includes(needle) || p.supplier.toLowerCase().includes(needle) || p.lines.some((l) => l.sku.toLowerCase().includes(needle));
+  const query = { q: q.trim() || undefined, status: status || undefined, supplierId: supplierFilter || undefined };
+  const list = useQuery({
+    queryKey: ['purchasing', 'purchase-orders', query, page],
+    queryFn: () => call(api.GET('/api/admin/purchasing/purchase-orders', { params: { query: { ...query, page, limit: PAGE_SIZE } } })),
+    placeholderData: keepPreviousData,
   });
+  const rows: PurchaseOrderRow[] = list.data?.items ?? [];
+  const pageInfo = list.data as { total?: number; totalPages?: number } | undefined;
 
-  /* ----- Drawer ----- */
-  const [selRef, setSelRef] = useState(DESIGN_REF);
-  const [newPo, setNewPo] = useState<PurchaseOrder | null>(null);
+  /* ----- Drawer: ?view=purchase-order&po=<ref|new> ----- */
+  const drawerOpen = view === 'purchase-order';
+  // Without ?po= the drawer opens the newest purchase order, or a new one when there are none yet.
+  const poRef = params.get('po') ?? (drawerOpen && list.isSuccess ? (rows[0]?.ref ?? 'new') : '');
+  const isNew = poRef === 'new';
+  const lookup = useQuery({
+    queryKey: ['purchasing', 'po-ref', poRef],
+    enabled: drawerOpen && !!poRef && !isNew && !rows.some((r) => r.ref === poRef),
+    queryFn: () => call(api.GET('/api/admin/purchasing/purchase-orders', { params: { query: { q: poRef, limit: 5 } } })),
+  });
+  const poId = rows.find((r) => r.ref === poRef)?.id ?? lookup.data?.items.find((r) => r.ref === poRef)?.id;
+  const detail = useQuery({
+    queryKey: ['purchasing', 'purchase-order', poId],
+    enabled: drawerOpen && !!poId,
+    queryFn: () => call(api.GET('/api/admin/purchasing/purchase-orders/{id}', { params: { path: { id: poId! } } })),
+  });
+  const po = isNew ? undefined : detail.data;
+
   const [form, setForm] = useState<PoForm | null>(null);
   const [tried, setTried] = useState(false);
-  const [claims, setClaims] = useState<string[]>([]);
-  const po = (newPo && newPo.ref === selRef ? newPo : pos.find((p) => p.ref === selRef)) ?? pos.find((p) => p.ref === DESIGN_REF)!;
-  const drawerOpen = view === 'purchase-order';
-  const editing = po.status === 'Draft' && form !== null;
+  const [drawerError, setDrawerError] = useState('');
+  const [newSupplierLocked, setNewSupplierLocked] = useState(false);
+  useEffect(() => {
+    if (po) setForm(po.status === 'draft' && canManage ? toForm(po) : null);
+  }, [po?.id, po?.status]);
+  const editing = form !== null && (isNew || po?.status === 'draft');
 
-  const openPo = (p: PurchaseOrder) => {
-    setSelRef(p.ref);
-    setForm(p.status === 'Draft' ? toForm(p) : null);
+  const supplierDetail = useQuery({
+    queryKey: ['purchasing', 'supplier', form?.supplierId],
+    enabled: drawerOpen && !!form?.supplierId,
+    queryFn: () => call(api.GET('/api/admin/purchasing/suppliers/{id}', { params: { path: { id: form!.supplierId } } })),
+  });
+
+  const setPo = (ref: string) => {
+    const next = new URLSearchParams(params);
+    next.set('view', 'purchase-order');
+    next.set('po', ref);
+    setParams(next);
+  };
+  const openPo = (p: PurchaseOrderRow) => {
     setTried(false);
-    setView('purchase-order');
+    setDrawerError('');
+    setPo(p.ref);
   };
-  const nextRef = () => {
-    const max = Math.max(...pos.map((p) => Number(p.ref.slice(-4))), newPo ? Number(newPo.ref.slice(-4)) : 0);
-    return `PUR-2610-${String(max + 1).padStart(4, '0')}`;
+  const startDraft = (supplierId = '', lines: LineForm[] = []) => {
+    setForm({ supplierId, expected: '', freight: '0.00', lines, addSku: '' });
+    setNewSupplierLocked(false);
+    setTried(false);
+    setDrawerError('');
+    setPo('new');
   };
-  const startDraft = (supplier = '', lines: PoLine[] = []) => {
-    const draft: PurchaseOrder = {
-      ref: nextRef(), supplier, status: 'Draft', expected: 'Not set', expectedDetail: 'Not set', created: TODAY, createdBy: BUYER,
-      shipTo: 'Marketly warehouse, Reno, NV', terms: 'Net 30 from invoice', freight: 0, lines,
-      events: [{ t: 'Draft created', d: `${TODAY} · ${BUYER}`, state: 'done' }],
-    };
-    setNewPo(draft);
-    openPo(draft);
+  const closeDrawer = () => {
+    const next = new URLSearchParams(params);
+    next.delete('view');
+    next.delete('po');
+    setParams(next);
   };
-  const closeDrawer = () => setView('');
 
   const errors: FormErrors = form && tried ? validateForm(form) : { line: {} };
   const setF = (patch: Partial<PoForm>) => setForm((f) => (f ? { ...f, ...patch } : f));
   const setLine = (i: number, patch: Partial<LineForm>) => setForm((f) => (f ? { ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) } : f));
   const removeLine = (i: number) => setForm((f) => (f ? { ...f, lines: f.lines.filter((_, j) => j !== i) } : f));
-  const catalogue = form ? (SUPPLIER_ITEMS[form.supplier] ?? []).filter((it) => !form.lines.some((l) => l.sku === it.sku)) : [];
+  const catalogue = form ? (supplierDetail.data?.items ?? []).filter((it) => !form.lines.some((l) => l.stockItemId === it.stockItemId)) : [];
   const addLine = () => {
     if (!form) return;
     const it = catalogue.find((c) => c.sku === form.addSku) ?? catalogue[0];
     if (!it) return;
-    setF({ lines: [...form.lines, { sku: it.sku, name: it.name, qty: '1', unit: it.unit.toFixed(2) }], addSku: '' });
+    setF({ lines: [...form.lines, { stockItemId: it.stockItemId, sku: it.sku, name: it.label, qty: String(it.minOrderQuantity ?? 1), unit: (it.unitCost.amount / 100).toFixed(2) }], addSku: '' });
   };
   const fSubtotal = form ? formSubtotal(form) : 0;
   const fTotal = fSubtotal + (form ? n(form.freight) : 0);
-  const overLimit = editing ? fTotal > PO_LIMIT : totalOf(po) > PO_LIMIT;
+  const overLimit = limit !== null && (editing ? Math.round(fTotal * 100) > limit : (po?.total.amount ?? 0) > limit);
 
-  const commit = (mode: 'save' | 'send') => {
+  const commit = useMutation({
+    mutationFn: async (mode: 'save' | 'send') => {
+      const f = form!;
+      const lines = f.lines.map((l) => ({ stockItemId: l.stockItemId, quantity: Number(l.qty), unitCost: usd(Number(l.unit)) }));
+      const common = { lines, freight: usd(Number(f.freight)), expectedDate: f.expected || null };
+      let saved: PurchaseOrder;
+      if (isNew || !po) {
+        if (!shipTo) throw new Error('No company stock location to ship to.');
+        saved = await call(api.POST('/api/admin/purchasing/purchase-orders', { body: { supplierId: f.supplierId, shipToLocationId: shipTo.id, ...common } }));
+      } else {
+        saved = await call(api.PATCH('/api/admin/purchasing/purchase-orders/{id}', { params: { path: { id: po.id } }, body: common }));
+      }
+      if (mode === 'save') return { mode, po: saved };
+      const sent = await call(api.POST('/api/admin/purchasing/purchase-orders/{id}/send', { params: { path: { id: saved.id } }, body: { emailSupplier: true } }));
+      return { mode, po: sent };
+    },
+    onSuccess: ({ mode, po: p }) => {
+      const total = formatMoney(p.total);
+      const pendingApproval = mode === 'send' && p.status === 'draft' && p.approval?.required;
+      setNotice(
+        mode === 'save'
+          ? { title: `${p.ref} saved as a draft`, body: `${plural(p.lines.length, 'line')} · ${total}. Nothing is sent to ${p.supplier.name} until you send it.` }
+          : pendingApproval
+            ? { title: `${p.ref} sent to ${p.approval?.approvers.join(' or ') || 'the approver'} for approval`, body: `${total} is over your limit. It goes to ${p.supplier.name} once it is approved.` }
+            : { title: `${p.ref} sent to ${p.supplier.name}`, body: `${total} committed. The warehouse sees it as incoming stock.` },
+      );
+      void qc.invalidateQueries({ queryKey: ['purchasing'] });
+      void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+      setForm(null);
+      closeDrawer();
+    },
+    onError: (e) => setDrawerError(errorMessage(e)),
+  });
+  const doCommit = (mode: 'save' | 'send') => {
     if (!form) return;
     setTried(true);
+    setDrawerError('');
     if (hasErrors(validateForm(form))) return;
-    const lines: PoLine[] = form.lines.map((l) => ({ sku: l.sku, name: l.name, ordered: Number(l.qty), unit: Number(l.unit), received: 0, damaged: 0 }));
-    const total = subtotalOf(lines) + Number(form.freight);
-    const toApprover = mode === 'send' && total > PO_LIMIT;
-    const expected = form.expected.trim() || 'Not set';
-    const next: PurchaseOrder = {
-      ...po,
-      supplier: form.supplier,
-      freight: Number(form.freight),
-      lines,
-      expected,
-      expectedDetail: expected,
-      restDue: expected === 'Not set' ? undefined : `Due ${expected}`,
-      status: mode === 'save' ? 'Draft' : toApprover ? 'In review' : 'Sent',
-      events:
-        mode === 'save'
-          ? po.events
-          : [{ t: toApprover ? `Sent to ${APPROVER} for approval` : 'Sent to supplier', d: `${TODAY} · ${BUYER}`, state: toApprover ? 'current' : 'done' }, ...po.events],
-    };
-    setPos((list) => (list.some((p) => p.ref === next.ref) ? list.map((p) => (p.ref === next.ref ? next : p)) : [next, ...list]));
-    if (newPo?.ref === next.ref) setNewPo(null);
-    setNotice(
-      mode === 'save'
-        ? { title: `${next.ref} saved as a draft`, body: `${plural(lines.length, 'line')} · ${money(total)}. Nothing is sent to ${next.supplier} until you send it.` }
-        : toApprover
-          ? { title: `${next.ref} sent to ${APPROVER} for approval`, body: `${money(total)} is over the ${money(PO_LIMIT)} limit. It goes to ${next.supplier} once the Business Owner approves.` }
-          : { title: `${next.ref} sent to ${next.supplier}`, body: `${money(total)} committed. The warehouse sees it as incoming stock.` },
-    );
-    setForm(null);
-    closeDrawer();
+    commit.mutate(mode);
   };
+
+  const cancelDraft = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/purchasing/purchase-orders/{id}/cancel', { params: { path: { id: po!.id } }, body: { reason: 'Draft deleted before sending' } })),
+    onSuccess: () => {
+      setNotice({ title: `${po!.ref} deleted`, body: 'The draft was not sent, so nothing changes for the supplier.' });
+      void qc.invalidateQueries({ queryKey: ['purchasing'] });
+      setForm(null);
+      closeDrawer();
+    },
+    onError: (e) => setDrawerError(errorMessage(e)),
+  });
   const deleteDraft = () => {
-    setPos((list) => list.filter((p) => p.ref !== po.ref));
-    if (newPo?.ref === po.ref) setNewPo(null);
-    setNotice({ title: `${po.ref} deleted`, body: 'The draft was not sent, so nothing changes for the supplier.' });
-    setSelRef(DESIGN_REF);
-    setForm(null);
-    closeDrawer();
+    if (isNew || !po) {
+      setForm(null);
+      closeDrawer();
+      return;
+    }
+    cancelDraft.mutate();
   };
-  const openClaim = () => {
-    setClaims((c) => [...c, po.ref]);
-  };
+
+  const damagedLines = (po?.lines ?? []).filter((l) => l.quantityDamaged > 0);
+  const damaged = damagedLines.reduce((s, l) => s + l.quantityDamaged, 0);
+  const claimValue = damagedLines.reduce((s, l) => s + l.quantityDamaged * l.unitCost.amount, 0);
+  const claimed = (po?.claims ?? []).some((c) => c.kind === 'damage');
+  const claim = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/purchasing/claims', { body: { purchaseOrderId: po!.id, kind: 'damage', lines: damagedLines.map((l) => ({ stockItemId: l.stockItemId, sku: l.sku, quantity: l.quantityDamaged, unitCost: l.unitCost })) } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['purchasing', 'purchase-order', poId] }),
+    onError: (e) => setDrawerError(errorMessage(e)),
+  });
 
   /* ----- Add supplier ----- */
   const [supOpen, setSupOpen] = useState(false);
   const [sup, setSup] = useState<SupplierForm>(EMPTY_SUPPLIER);
   const [supTried, setSupTried] = useState(false);
+  const [supError, setSupError] = useState('');
   const supErrors = supTried ? validateSupplier(sup, suppliers) : {};
+  const addSupplier = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/purchasing/suppliers', { body: { name: sup.name.trim(), contactName: sup.contact.trim() || null, leadTimeDays: Number(sup.lead), notes: sup.city.trim() ? `Location: ${sup.city.trim()}` : null } })),
+    onSuccess: (s) => {
+      setNotice({ title: `${s.name} added`, body: 'Add its price list before choosing it on a new purchase order.' });
+      void qc.invalidateQueries({ queryKey: ['purchasing', 'suppliers'] });
+      setSupOpen(false);
+    },
+    onError: (e) => setSupError(errorMessage(e)),
+  });
   const saveSupplier = () => {
     setSupTried(true);
+    setSupError('');
     if (Object.keys(validateSupplier(sup, suppliers)).length) return;
-    setSuppliers((s) => [...s, { name: sup.name.trim(), city: sup.city.trim(), contact: sup.contact.trim(), leadDays: Number(sup.lead), onTime: null }]);
-    setNotice({ title: `${sup.name.trim()} added`, body: 'You can now choose this supplier on a new purchase order.' });
-    setSupOpen(false);
+    addSupplier.mutate();
   };
 
-  const damaged = po.lines.reduce((s, l) => s + l.damaged, 0);
-  const claimValue = po.lines.reduce((s, l) => s + l.damaged * l.unit, 0);
-  const receivedValue = po.lines.reduce((s, l) => s + l.received * l.unit, 0);
-  const supplierInfo = suppliers.find((s) => s.name === po.supplier);
-  const claimed = claims.includes(po.ref);
+  const supplierInfo = po ? suppliers.find((s) => s.id === po.supplier.id) : undefined;
+  const isDraftLike = po?.status === 'draft';
+  const events: PoEvent[] = (po?.timeline ?? [])
+    .slice()
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .map((e, i) => ({ t: e.label, d: [dateTime(e.at), e.actor?.name, e.detail].filter(Boolean).join(' · '), state: i === 0 && po?.approval?.required && po.status === 'draft' ? 'current' : /short|late|damag|backorder/i.test(e.label) ? 'warn' : 'done' }));
+  if (isNew) events.push({ t: 'New draft', d: 'Not saved yet', state: 'current' });
+  const sm = summary.data;
+  const statusLabel = po ? poStatusLabel(po.status, po.approval) : 'Draft';
+  const approvalText = (total: number) => (limit === null || total <= limit ? `Within your limit (${limitText})` : `Over your limit: needs ${po?.approval?.approvers.join(' or ') || 'the Business Owner'}`);
 
   return (
     <AdminLayout active="purchasing">
       <PageHeader
         crumbs={[{ label: 'Official store' }, { label: 'Suppliers and purchasing' }]}
         title="Suppliers and purchasing"
-        sub="Owner Ken Watanabe, Purchasing Manager · POs up to $25,000 without extra approval"
+        sub={`Your sending authority: ${limitText}`}
         actions={
-          <>
-            <Button
-              variant="secondary"
-              size="sm"
-              icon="plus"
-              onClick={() => {
-                setSup(EMPTY_SUPPLIER);
-                setSupTried(false);
-                setSupOpen(true);
-              }}
-            >
-              Add supplier
-            </Button>
-            <Button size="sm" icon="file-plus" onClick={() => startDraft()}>
-              New purchase order
-            </Button>
-          </>
+          canManage && (
+            <>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="plus"
+                onClick={() => {
+                  setSup(EMPTY_SUPPLIER);
+                  setSupTried(false);
+                  setSupError('');
+                  setSupOpen(true);
+                }}
+              >
+                Add supplier
+              </Button>
+              <Button size="sm" icon="file-plus" onClick={() => startDraft()}>
+                New purchase order
+              </Button>
+            </>
+          )
         }
       />
 
       {notice && (
-        <Alert tone="success" title={notice.title}>
+        <Alert tone={notice.tone ?? 'success'} title={notice.title}>
           {notice.body}
         </Alert>
       )}
+      {summary.isError && <LoadError error={summary.error} onRetry={() => void summary.refetch()} />}
 
       <div className="aa-kpis">
-        <Card pad>
-          <Stat label="Open purchase orders" value={open.length} note={`${money(committed)} committed`} />
-        </Card>
-        <Card pad>
-          <Stat label="Incoming units" value="660" note="Next arrival Oct 13" />
-        </Card>
-        <Card pad>
-          <Stat label="Late or short" value={<span className="t-warning-text">1</span>} note="PUR-2610-0042 · 80 units" />
-        </Card>
-        <Card pad>
-          <Stat label="Low-stock items" value="12" note={`Reorder suggested for ${REORDER.length}`} />
-        </Card>
+        <Card pad>{sm ? <Stat label="Open purchase orders" value={sm.openPurchaseOrders} note={`${formatMoney(sm.committed)} committed`} /> : <SkeletonLines rows={1} />}</Card>
+        <Card pad>{sm ? <Stat label="Incoming units" value={num(sm.incomingUnits)} note={sm.nextArrival ? `Next arrival ${shortDate(sm.nextArrival)}` : 'No arrival scheduled'} /> : <SkeletonLines rows={1} />}</Card>
+        <Card pad>{sm ? <Stat label="Late or short" value={<span className={cx(sm.lateOrShort > 0 && 't-warning-text')}>{sm.lateOrShort}</span>} note={sm.lateOrShortNote ?? 'Nothing late'} /> : <SkeletonLines rows={1} />}</Card>
+        <Card pad>{sm ? <Stat label="Low-stock items" value={num(sm.lowStockItems)} note={`Reorder suggested for ${sm.reorderSuggested}`} /> : <SkeletonLines rows={1} />}</Card>
       </div>
 
       <section className="card">
         <Tabs<TabKey>
           items={[
-            { value: 'pos', label: 'Purchase orders', count: pos.length },
-            { value: 'suppliers', label: 'Suppliers', count: suppliers.length },
-            { value: 'reorder', label: 'Reorder suggestions', count: REORDER.length },
+            { value: 'pos', label: 'Purchase orders', count: pageInfo?.total ?? undefined },
+            { value: 'suppliers', label: 'Suppliers', count: suppliersQ.data ? suppliers.length : undefined },
+            { value: 'reorder', label: 'Reorder suggestions', count: reorderQ.data ? reorder.length : undefined },
           ]}
           active={tab}
           onChange={setTab}
@@ -380,11 +472,42 @@ export default function Purchasing() {
           <>
             <div className="card-body">
               <div className="toolbar">
-                <SearchInput id="aa-po-q" placeholder="Search PUR ref, supplier or SKU" value={q} onChange={setQ} />
-                <Select id="aa-po-st" aria-label="Status" options={STATUS_FILTERS} value={status} onChange={(e) => setStatus(e.target.value)} />
-                <Select id="aa-po-sup" aria-label="Supplier" options={['All suppliers', ...suppliers.map((s) => s.name)]} value={supplierFilter} onChange={(e) => setSupplierFilter(e.target.value)} />
+                <SearchInput
+                  id="aa-po-q"
+                  placeholder="Search PUR ref, supplier or SKU"
+                  value={q}
+                  onChange={(v) => {
+                    setQ(v);
+                    setPage(1);
+                  }}
+                />
+                <Select
+                  id="aa-po-st"
+                  aria-label="Status"
+                  options={STATUS_FILTERS}
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value as '' | PoStatusKey);
+                    setPage(1);
+                  }}
+                />
+                <Select
+                  id="aa-po-sup"
+                  aria-label="Supplier"
+                  options={[{ value: '', label: 'All suppliers' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
+                  value={supplierFilter}
+                  onChange={(e) => {
+                    setSupplierFilter(e.target.value);
+                    setPage(1);
+                  }}
+                />
               </div>
             </div>
+            {list.isError && (
+              <div className="card-body">
+                <LoadError error={list.error} onRetry={() => void list.refetch()} />
+              </div>
+            )}
             <TableWrap label="Suppliers and purchasing table">
               <table className="table">
                 <thead>
@@ -401,56 +524,62 @@ export default function Purchasing() {
                   </tr>
                 </thead>
                 <tbody>
+                  {list.isPending && (
+                    <tr>
+                      <td colSpan={7}>
+                        <SkeletonLines rows={4} />
+                      </td>
+                    </tr>
+                  )}
                   {rows.map((p) => {
-                    const total = totalOf(p);
-                    const needsApproval = isDraftLike(p) && total > PO_LIMIT;
-                    const warn = needsApproval || p.status === 'Partly received';
+                    const warn = !!p.approvalNote || p.lateOrShort || p.status === 'partly_received';
                     const onOpen = (e: MouseEvent) => {
                       e.preventDefault();
                       openPo(p);
                     };
+                    const link = href('admin/purchasing', 'purchase-order', undefined, { po: p.ref });
                     return (
-                      <tr key={p.ref} className={cx(warn && 'is-warn')}>
+                      <tr key={p.id} className={cx(warn && 'is-warn')}>
                         <td>
                           {warn && <span className="sr-only">At risk: </span>}
-                          <a className="mono strong nowrap" href={href('admin/purchasing', 'purchase-order')} title={p.ref} onClick={onOpen}>
+                          <a className="mono strong nowrap" href={link} title={p.ref} onClick={onOpen}>
                             {p.ref}
                           </a>
                         </td>
                         <td>
-                          <span className="small strong">{p.supplier}</span>
+                          <span className="small strong">{p.supplierName}</span>
                         </td>
                         <td>
                           <span className="small">
-                            {plural(p.lines.length, 'line')} · {num(unitsOf(p))} units
+                            {plural(p.lineCount, 'line')} · {num(p.units)} units
                           </span>
                         </td>
                         <td className="r">
                           <span className="stack gap-0">
-                            <span className="strong">{money(total)}</span>
-                            {needsApproval && <span className="xs t-warning-text strong">{p.status === 'In review' ? `Waiting for ${APPROVER}` : `Over $25,000: needs ${APPROVER}`}</span>}
+                            <span className="strong">{formatMoney(p.total)}</span>
+                            {p.approvalNote && <span className="xs t-warning-text strong">{p.approvalNote}</span>}
                           </span>
                         </td>
                         <td>
-                          <span className="small nowrap">{p.expected}</span>
+                          <span className="small nowrap">{p.expectedLabel}</span>
                         </td>
                         <td>
-                          <StatusBadge status={p.status} />
+                          <StatusBadge status={PO_STATUS_LABEL[p.status]} />
                         </td>
                         <td>
-                          <a className="btn btn-ghost btn-sm" href={href('admin/purchasing', 'purchase-order')} onClick={onOpen}>
-                            <span>{p.status === 'Partly received' ? 'Open' : 'View'}</span>
+                          <a className="btn btn-ghost btn-sm" href={link} onClick={onOpen}>
+                            <span>{p.status === 'partly_received' ? 'Open' : 'View'}</span>
                             <span className="sr-only"> {p.ref}</span>
                           </a>
                         </td>
                       </tr>
                     );
                   })}
-                  {!rows.length && (
+                  {list.isSuccess && !rows.length && (
                     <tr>
                       <td colSpan={7}>
-                        <EmptyState icon="search-x" title="No purchase orders match">
-                          Try another PUR ref, supplier or SKU, or clear the filters.
+                        <EmptyState icon="search-x" title={query.q || query.status || query.supplierId ? 'No purchase orders match' : 'No purchase orders yet'}>
+                          {query.q || query.status || query.supplierId ? 'Try another PUR ref, supplier or SKU, or clear the filters.' : 'Start one with New purchase order or from a reorder suggestion.'}
                         </EmptyState>
                       </td>
                     </tr>
@@ -458,16 +587,24 @@ export default function Purchasing() {
                 </tbody>
               </table>
             </TableWrap>
-            <p className="status-legend status-legend--edge">
-              <span className="sr-only">Legend: </span>
-              <span className="sl sl-warning">
-                <i aria-hidden="true" />
-                Amber edge = at risk: due soon or near target
-              </span>
-            </p>
+            {rows.some((p) => p.approvalNote || p.lateOrShort || p.status === 'partly_received') && (
+              <p className="status-legend status-legend--edge">
+                <span className="sr-only">Legend: </span>
+                <span className="sl sl-warning">
+                  <i aria-hidden="true" />
+                  Amber edge = at risk: late, short, partly received or waiting for approval
+                </span>
+              </p>
+            )}
+            {(pageInfo?.totalPages ?? 1) > 1 && (
+              <div className="card-foot between">
+                <span />
+                <Pager page={page} total={pageInfo?.totalPages ?? 1} onPage={setPage} />
+              </div>
+            )}
           </>
         )}
-        {tab === 'suppliers' && <SupplierTable suppliers={suppliers} pos={pos} label="Supplier list table" />}
+        {tab === 'suppliers' && <SupplierTable suppliers={suppliers} label="Supplier list table" loading={suppliersQ.isPending} />}
         {tab === 'reorder' && (
           <TableWrap label="Reorder suggestions table">
             <table className="table">
@@ -484,38 +621,57 @@ export default function Purchasing() {
                 </tr>
               </thead>
               <tbody>
-                {REORDER.map((r) => {
-                  const it = SUPPLIER_ITEMS[r.supplier].find((i) => i.sku === r.sku)!;
-                  return (
-                    <tr key={r.sku}>
-                      <td>
-                        <span className="stack gap-0">
-                          <span className="small strong">{r.name}</span>
-                          <span className="xs muted mono">{r.sku}</span>
-                        </span>
-                      </td>
-                      <td>
-                        <span className="small">{r.supplier}</span>
-                      </td>
-                      <td className="r">
-                        <span className="strong num t-warning-text">{r.available}</span>
-                      </td>
-                      <td className="r">{r.perDay}</td>
-                      <td className="r">
-                        <span className="stack gap-0">
-                          <span className="strong num">{num(r.suggested)}</span>
-                          <span className="xs muted">{money(r.suggested * it.unit)}</span>
-                        </span>
-                      </td>
-                      <td>
-                        <Button variant="ghost" size="sm" onClick={() => startDraft(r.supplier, [{ sku: r.sku, name: it.name, unit: it.unit, ordered: r.suggested, received: 0, damaged: 0 }])}>
+                {reorderQ.isPending && (
+                  <tr>
+                    <td colSpan={6}>
+                      <SkeletonLines rows={3} />
+                    </td>
+                  </tr>
+                )}
+                {reorder.map((r) => (
+                  <tr key={r.stockItemId}>
+                    <td>
+                      <span className="stack gap-0">
+                        <span className="small strong">{r.label}</span>
+                        <span className="xs muted mono">{r.sku}</span>
+                      </span>
+                    </td>
+                    <td>
+                      <span className="small">{r.supplier?.name ?? 'No preferred supplier'}</span>
+                    </td>
+                    <td className="r">
+                      <span className="strong num t-warning-text">{r.available}</span>
+                    </td>
+                    <td className="r">{r.avgDailySales != null ? r.avgDailySales.toFixed(1) : '—'}</td>
+                    <td className="r">
+                      <span className="stack gap-0">
+                        <span className="strong num">{num(r.suggestedQuantity)}</span>
+                        {r.estimatedCost && <span className="xs muted">{formatMoney(r.estimatedCost)}</span>}
+                      </span>
+                    </td>
+                    <td>
+                      {canManage && r.supplier && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => startDraft(r.supplier!.id, [{ stockItemId: r.stockItemId, sku: r.sku, name: r.label, qty: String(r.suggestedQuantity), unit: r.unitCost ? (r.unitCost.amount / 100).toFixed(2) : '' }])}
+                        >
                           Create draft PO
                           <span className="sr-only"> {r.sku}</span>
                         </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {reorderQ.isSuccess && reorder.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>
+                      <EmptyState icon="circle-check" title="Nothing to reorder">
+                        Stock is above the reorder point after incoming purchase orders.
+                      </EmptyState>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </TableWrap>
@@ -523,30 +679,30 @@ export default function Purchasing() {
       </section>
 
       <Card title="Suppliers" sub="Lead time and on-time arrival over the last 90 days" flush>
-        <SupplierTable suppliers={suppliers} pos={pos} label="Suppliers table" />
+        <SupplierTable suppliers={suppliers} label="Suppliers table" loading={suppliersQ.isPending} />
       </Card>
 
       <Drawer
-        open={drawerOpen}
+        open={drawerOpen && (isNew ? !!form : true)}
         onClose={closeDrawer}
-        title={po.ref}
+        title={isNew ? 'New purchase order' : po?.ref ?? poRef}
         foot={
           editing ? (
             <>
-              <Button variant="ghost" icon="trash-2" onClick={deleteDraft}>
+              <Button variant="ghost" icon="trash-2" onClick={deleteDraft} disabled={cancelDraft.isPending}>
                 Delete draft
               </Button>
-              <Button variant="secondary" onClick={() => commit('save')}>
+              <Button variant="secondary" onClick={() => doCommit('save')} disabled={commit.isPending}>
                 Save draft
               </Button>
-              <Button icon="send" onClick={() => commit('send')}>
-                {overLimit ? `Send to ${APPROVER} for approval` : 'Send to supplier'}
+              <Button icon="send" onClick={() => doCommit('send')} disabled={commit.isPending || limit === 0}>
+                {overLimit ? 'Send for approval' : 'Send to supplier'}
               </Button>
             </>
-          ) : po.status === 'Partly received' || po.status === 'Sent' ? (
+          ) : po && (po.status === 'partly_received' || po.status === 'sent') ? (
             <>
-              {damaged > 0 && (
-                <Button variant="ghost" onClick={openClaim} disabled={claimed}>
+              {damaged > 0 && can('purchasing.claims.manage') && (
+                <Button variant="ghost" onClick={() => claim.mutate()} disabled={claimed || claim.isPending}>
                   {claimed ? 'Supplier claim opened' : 'Open supplier claim'}
                 </Button>
               )}
@@ -561,157 +717,180 @@ export default function Purchasing() {
           )
         }
       >
-        <div className="row between">
-          <StatusBadge status={po.status} />
-          <span className="xs muted">
-            Created {po.created} by {po.createdBy}
-          </span>
-        </div>
-
-        {editing && form ? (
+        {drawerError && <Alert tone="danger" title={drawerError} />}
+        {!isNew && (detail.isPending || lookup.isPending) && !po && <SkeletonLines rows={5} />}
+        {!isNew && detail.isError && <LoadError error={detail.error} onRetry={() => void detail.refetch()} />}
+        {!isNew && lookup.isSuccess && !poId && (
+          <EmptyState icon="search-x" title="Purchase order not found">
+            {poRef} doesn't exist or was removed.
+          </EmptyState>
+        )}
+        {(isNew || po) && (
           <>
-            {newPo?.ref === po.ref && (
-              <Field label="Supplier" error={errors.supplier}>
-                <Select
-                  id="po-supplier"
-                  className={cx(errors.supplier && 'is-error')}
-                  options={[{ value: '', label: 'Choose a supplier' }, ...suppliers.map((s) => ({ value: s.name, label: s.name }))]}
-                  value={form.supplier}
-                  onChange={(e) => setF({ supplier: e.target.value, lines: form.supplier === e.target.value ? form.lines : [], addSku: '' })}
-                />
-              </Field>
-            )}
-            <KeyValue
-              pairs={[
-                ...(newPo?.ref === po.ref ? [] : [['Supplier', supplierInfo ? `${po.supplier}, ${supplierInfo.city}` : po.supplier] as [string, string]]),
-                ['Ship to', po.shipTo],
-                ['Approval', fTotal > PO_LIMIT ? `Over ${BUYER}'s limit: needs ${APPROVER} (Business Owner)` : `Within ${BUYER}'s limit (POs up to $25,000)`],
-                ['Payment terms', po.terms],
-              ]}
-            />
-            <div className="stack gap-2">
-              <span className="label">Lines · quantity and unit cost</span>
-              {form.lines.map((l, i) => (
-                <div className="panel stack gap-2" key={l.sku}>
-                  <div className="row between top">
-                    <span className="stack gap-0">
-                      <span className="small strong">{l.name}</span>
-                      <span className="xs muted mono">{l.sku}</span>
-                    </span>
-                    <span className="small num strong">{money(n(l.qty) * n(l.unit))}</span>
-                  </div>
-                  <div className="grid md2 gap-3">
-                    <Field label="Quantity" error={errors.line[i]?.qty}>
-                      <TextInput id={`po-qty-${i}`} ctl="sm" inputMode="numeric" value={l.qty} error={!!errors.line[i]?.qty} onChange={(e) => setLine(i, { qty: e.target.value })} />
-                    </Field>
-                    <Field label="Unit cost" error={errors.line[i]?.unit}>
-                      <TextInput id={`po-unit-${i}`} ctl="sm" prefix="$" inputMode="decimal" value={l.unit} error={!!errors.line[i]?.unit} onChange={(e) => setLine(i, { unit: e.target.value })} />
-                    </Field>
-                  </div>
-                  <div className="row">
-                    <Button variant="ghost" size="sm" icon="trash-2" onClick={() => removeLine(i)}>
-                      Remove line
-                      <span className="sr-only"> {l.sku}</span>
-                    </Button>
-                  </div>
-                </div>
-              ))}
-              {errors.lines && (
-                <span className="error-text">
-                  <Icon name="circle-alert" className="ic-sm" />
-                  {errors.lines}
+            <div className="row between">
+              <StatusBadge status={statusLabel} />
+              {po && (
+                <span className="xs muted">
+                  Created {date(po.createdAt)}
+                  {po.createdBy.name ? ` by ${po.createdBy.name}` : ''}
                 </span>
               )}
-              {form.supplier && catalogue.length > 0 && (
-                <div className="row gap-2">
-                  <Select
-                    id="po-add-sku"
-                    aria-label="Product to add"
-                    ctl="sm"
-                    options={catalogue.map((c) => ({ value: c.sku, label: `${c.name} · ${money(c.unit)}` }))}
-                    value={form.addSku || catalogue[0].sku}
-                    onChange={(e) => setF({ addSku: e.target.value })}
-                  />
-                  <Button variant="secondary" size="sm" icon="plus" onClick={addLine}>
-                    Add line
-                  </Button>
+            </div>
+
+            {editing && form ? (
+              <>
+                {isNew && !newSupplierLocked && (
+                  <Field label="Supplier" error={errors.supplier}>
+                    <Select
+                      id="po-supplier"
+                      className={cx(errors.supplier && 'is-error')}
+                      options={[{ value: '', label: 'Choose a supplier' }, ...suppliers.filter((s) => s.active).map((s) => ({ value: s.id, label: s.name }))]}
+                      value={form.supplierId}
+                      onChange={(e) => setF({ supplierId: e.target.value, lines: form.supplierId === e.target.value ? form.lines : [], addSku: '' })}
+                    />
+                  </Field>
+                )}
+                <KeyValue
+                  pairs={[
+                    ...(isNew ? [] : [['Supplier', supplierInfo?.location ? `${po!.supplier.name}, ${supplierInfo.location}` : po!.supplier.name] as [string, string]]),
+                    ['Ship to', po?.shipToName ?? shipTo?.name ?? '—'],
+                    ['Approval', approvalText(Math.round(fTotal * 100))],
+                    ['Payment terms', po?.paymentTerms ?? supplierDetail.data?.supplier.paymentTerms ?? '—'],
+                  ]}
+                />
+                <div className="stack gap-2">
+                  <span className="label">Lines · quantity and unit cost</span>
+                  {form.lines.map((l, i) => (
+                    <div className="panel stack gap-2" key={l.stockItemId}>
+                      <div className="row between top">
+                        <span className="stack gap-0">
+                          <span className="small strong">{l.name}</span>
+                          <span className="xs muted mono">{l.sku}</span>
+                        </span>
+                        <span className="small num strong">{money(n(l.qty) * n(l.unit))}</span>
+                      </div>
+                      <div className="grid md2 gap-3">
+                        <Field label="Quantity" error={errors.line[i]?.qty}>
+                          <TextInput id={`po-qty-${i}`} ctl="sm" inputMode="numeric" value={l.qty} error={!!errors.line[i]?.qty} onChange={(e) => setLine(i, { qty: e.target.value })} />
+                        </Field>
+                        <Field label="Unit cost" error={errors.line[i]?.unit}>
+                          <TextInput id={`po-unit-${i}`} ctl="sm" prefix="$" inputMode="decimal" value={l.unit} error={!!errors.line[i]?.unit} onChange={(e) => setLine(i, { unit: e.target.value })} />
+                        </Field>
+                      </div>
+                      <div className="row">
+                        <Button variant="ghost" size="sm" icon="trash-2" onClick={() => removeLine(i)}>
+                          Remove line
+                          <span className="sr-only"> {l.sku}</span>
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  {errors.lines && (
+                    <span className="error-text">
+                      <Icon name="circle-alert" className="ic-sm" />
+                      {errors.lines}
+                    </span>
+                  )}
+                  {form.supplierId && catalogue.length > 0 && (
+                    <div className="row gap-2">
+                      <Select
+                        id="po-add-sku"
+                        aria-label="Product to add"
+                        ctl="sm"
+                        options={catalogue.map((c) => ({ value: c.sku, label: `${c.label} · ${formatMoney(c.unitCost)}` }))}
+                        value={form.addSku || catalogue[0].sku}
+                        onChange={(e) => setF({ addSku: e.target.value })}
+                      />
+                      <Button variant="secondary" size="sm" icon="plus" onClick={addLine}>
+                        Add line
+                      </Button>
+                    </div>
+                  )}
+                  {form.supplierId && supplierDetail.isSuccess && supplierDetail.data.items.length === 0 && <span className="xs muted">This supplier has no price list yet, so there is nothing to add.</span>}
                 </div>
-              )}
-            </div>
-            <div className="grid md2 gap-3">
-              <Field label="Freight" error={errors.freight}>
-                <TextInput id="po-freight" prefix="$" inputMode="decimal" value={form.freight} error={!!errors.freight} onChange={(e) => setF({ freight: e.target.value })} />
-              </Field>
-              <Field label="Expected arrival" optional>
-                <TextInput id="po-expected" placeholder="Oct 20" value={form.expected} onChange={(e) => setF({ expected: e.target.value })} />
-              </Field>
-            </div>
-            <div className="well stack gap-2">
-              <SummaryRow k="Lines subtotal" v={money(fSubtotal)} />
-              <SummaryRow k="Freight" v={money(n(form.freight))} />
-              <SummaryRow k="PO total" v={money(fTotal)} className="total" />
-            </div>
-            {fTotal > PO_LIMIT && (
-              <Alert tone="warning" title={`Over the ${money(PO_LIMIT)} limit`}>
-                {BUYER} can send purchase orders up to $25,000. This one is {money(fTotal)}, so it goes to {APPROVER} (Business Owner) for approval before the supplier sees it.
-              </Alert>
-            )}
-          </>
-        ) : (
-          <>
-            <KeyValue
-              pairs={[
-                ['Supplier', supplierInfo ? `${po.supplier}, ${supplierInfo.city}` : po.supplier],
-                ['Ship to', po.shipTo],
-                ['Expected', po.expectedDetail],
-                ['Approval', totalOf(po) > PO_LIMIT ? (po.status === 'In review' ? `Waiting for ${APPROVER} (Business Owner)` : `Approved by ${APPROVER}`) : `Within ${BUYER}'s limit (POs up to $25,000)`],
-                ['Payment terms', po.terms],
-              ]}
-            />
-            <div className="stack gap-2">
-              <span className="label">{isDraftLike(po) ? 'Lines · ordered' : 'Lines · expected vs received'}</span>
-              {po.lines.map((l) =>
-                isDraftLike(po) ? (
-                  <div className="panel stack gap-2" key={l.sku}>
-                    <div className="row between top">
-                      <span className="stack gap-0">
-                        <span className="small strong">{l.name}</span>
-                        <span className="xs muted mono">{l.sku}</span>
-                      </span>
-                      <span className="small num strong">{money(l.ordered * l.unit)}</span>
-                    </div>
-                    <div className="row between xs">
-                      <span>
-                        <b className="num">{num(l.ordered)}</b> units
-                      </span>
-                      <span className="muted">{money(l.unit)} each</span>
-                    </div>
+                <div className="grid md2 gap-3">
+                  <Field label="Freight" error={errors.freight}>
+                    <TextInput id="po-freight" prefix="$" inputMode="decimal" value={form.freight} error={!!errors.freight} onChange={(e) => setF({ freight: e.target.value })} />
+                  </Field>
+                  <Field label="Expected arrival" optional>
+                    <TextInput id="po-expected" type="date" value={form.expected} onChange={(e) => setF({ expected: e.target.value })} />
+                  </Field>
+                </div>
+                <div className="well stack gap-2">
+                  <SummaryRow k="Lines subtotal" v={money(fSubtotal)} />
+                  <SummaryRow k="Freight" v={money(n(form.freight))} />
+                  <SummaryRow k="PO total" v={money(fTotal)} className="total" />
+                </div>
+                {overLimit && limit !== null && (
+                  <Alert tone="warning" title={`Over the ${formatMoney({ amount: limit, currency: 'USD' })} limit`}>
+                    You can send purchase orders up to {formatMoney({ amount: limit, currency: 'USD' })}. This one is {money(fTotal)}, so it goes to an approver before the supplier sees it.
+                  </Alert>
+                )}
+                {limit === 0 && (
+                  <Alert tone="info" title="You can prepare but not send">
+                    Your roles have no authority to send purchase orders. Save the draft for someone who can.
+                  </Alert>
+                )}
+              </>
+            ) : (
+              po && (
+                <>
+                  <KeyValue
+                    pairs={[
+                      ['Supplier', supplierInfo?.location ? `${po.supplier.name}, ${supplierInfo.location}` : po.supplier.name],
+                      ['Ship to', po.shipToName],
+                      ['Expected', po.expectedDate ? date(po.expectedDate) : 'Not set'],
+                      ['Approval', po.approval?.required ? (po.status === 'draft' ? `Waiting for ${po.approval.approvers.join(' or ') || 'approval'}` : `Approved${po.approval.approvers.length ? ` by ${po.approval.approvers.join(', ')}` : ''}`) : 'Within the sender’s limit'],
+                      ['Payment terms', po.paymentTerms],
+                    ]}
+                  />
+                  <div className="stack gap-2">
+                    <span className="label">{isDraftLike ? 'Lines · ordered' : 'Lines · expected vs received'}</span>
+                    {po.lines.map((l) =>
+                      isDraftLike ? (
+                        <div className="panel stack gap-2" key={l.id}>
+                          <div className="row between top">
+                            <span className="stack gap-0">
+                              <span className="small strong">{l.label}</span>
+                              <span className="xs muted mono">{l.sku}</span>
+                            </span>
+                            <span className="small num strong">{formatMoney(l.lineTotal)}</span>
+                          </div>
+                          <div className="row between xs">
+                            <span>
+                              <b className="num">{num(l.quantityOrdered)}</b> units
+                            </span>
+                            <span className="muted">{formatMoney(l.unitCost)} each</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <ReceivedLine key={l.id} l={l} />
+                      ),
+                    )}
                   </div>
-                ) : (
-                  <ReceivedLine key={l.sku} l={l} restDue={po.restDue} />
-                ),
-              )}
-            </div>
-            <div className="well stack gap-2">
-              <SummaryRow k="Lines subtotal" v={money(subtotalOf(po.lines))} />
-              <SummaryRow k="Freight" v={money(po.freight)} />
-              <SummaryRow k="PO total" v={money(totalOf(po))} className="total" />
-              {receivedValue > 0 && <SummaryRow k="Received value" v={money(receivedValue)} />}
-              {damaged > 0 && <SummaryRow k={`Supplier claim · ${damaged} damaged`} v={money(claimValue)} />}
-            </div>
-            {claimed && (
-              <Alert tone="success" title="Supplier claim opened">
-                Claim for {damaged} damaged units ({money(claimValue)}) sent to {supplierInfo?.contact ?? 'the supplier'} at {po.supplier}. The units stay held until it is settled.
-              </Alert>
+                  <div className="well stack gap-2">
+                    <SummaryRow k="Lines subtotal" v={formatMoney(po.linesSubtotal)} />
+                    <SummaryRow k="Freight" v={formatMoney(po.freight)} />
+                    <SummaryRow k="PO total" v={formatMoney(po.total)} className="total" />
+                    {po.receivedValue.amount > 0 && <SummaryRow k="Received value" v={formatMoney(po.receivedValue)} />}
+                    {damaged > 0 && <SummaryRow k={`Supplier claim · ${damaged} damaged`} v={formatMoney({ amount: claimValue, currency: po.total.currency })} />}
+                  </div>
+                  {claimed && (
+                    <Alert tone="success" title="Supplier claim opened">
+                      Claim for {damaged} damaged units sent to {supplierInfo?.contactName ?? 'the supplier'} at {po.supplier.name}. The units stay held until it is settled.
+                    </Alert>
+                  )}
+                  {po.receipts.length > 0 && (
+                    <Alert tone="info" title="Received at the warehouse">
+                      {plural(po.receipts.length, 'receiving record')} on this purchase order. Inventory makes received units sellable after counting.
+                    </Alert>
+                  )}
+                </>
+              )
             )}
-            {po.info && (
-              <Alert tone="info" title={po.info.title}>
-                {po.info.body}
-              </Alert>
-            )}
+            <EventList events={events} />
           </>
         )}
-        <EventList events={po.events} />
       </Drawer>
 
       <Dialog
@@ -723,17 +902,18 @@ export default function Purchasing() {
             <Button variant="ghost" onClick={() => setSupOpen(false)}>
               Cancel
             </Button>
-            <Button icon="check" onClick={saveSupplier}>
+            <Button icon="check" onClick={saveSupplier} disabled={addSupplier.isPending}>
               Add supplier
             </Button>
           </>
         }
       >
+        {supError && <Alert tone="danger" title={supError} />}
         <Field label="Supplier name" error={supErrors.name}>
           <TextInput id="sup-name" value={sup.name} error={!!supErrors.name} onChange={(e) => setSup({ ...sup, name: e.target.value })} />
         </Field>
         <div className="grid md2 gap-3">
-          <Field label="City and state" error={supErrors.city}>
+          <Field label="City and state" optional error={supErrors.city}>
             <TextInput id="sup-city" placeholder="Reno, NV" value={sup.city} error={!!supErrors.city} onChange={(e) => setSup({ ...sup, city: e.target.value })} />
           </Field>
           <Field label="Lead time" error={supErrors.lead}>
