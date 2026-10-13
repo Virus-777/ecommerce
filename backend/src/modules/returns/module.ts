@@ -5,7 +5,7 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoReturnsRepository } from './repository.js';
+import { ReturnsRepository } from './repository.js';
 import { seedBaselinePolicy } from './domain/seed.js';
 import { ReturnsService } from './service.js';
 import { schemas } from './schema.js';
@@ -22,7 +22,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   async register(ctx) {
-    const repo = createMongoReturnsRepository(ctx.mongo);
+    const repo = new ReturnsRepository(ctx.mongo);
     // seed data a fresh install starts with (baseline policy version 1.0)
     await seedBaselinePolicy(repo, ctx.clock.now());
     const service = new ReturnsService({ repo, ctx });

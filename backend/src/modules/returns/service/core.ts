@@ -12,7 +12,8 @@ import type * as common from '../../../spec/common.js';
 import type { ShippingResponsibility } from '../../../spec/returns.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import { DEFAULT_POLICY_ID, defaultResponsibilities, OFFICIAL_RETURN_ADDRESS } from '../domain/rules.js';
-import type { DraftRec, EventRec, EvidenceRec, InspectionRec, ItemRec, PolicyRec, RefundRec, ReplacementRec, ReturnRec, ReturnsRepository, ShipmentRec, TermsRec } from '../ports.js';
+import type { DraftRec, EventRec, EvidenceRec, InspectionRec, ItemRec, PolicyRec, RefundRec, ReplacementRec, ReturnRec, ShipmentRec, TermsRec } from '../ports.js';
+import type { ReturnsRepository } from '../repository.js';
 
 export interface ReturnsServiceDeps {
   repo: ReturnsRepository;

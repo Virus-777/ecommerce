@@ -1,14 +1,22 @@
+import type { Schema } from 'mongoose';
 import { newId } from '../../kernel/lib/ids.js';
-import type { ModuleStore, Table as Collection } from '../../kernel/mongo/index.js';
-import type { Filter } from '../../kernel/mongo/table.js';
+import { orThrow } from '../../kernel/lib/or-throw.js';
+import type { PageRequest } from '../../kernel/lib/pagination.js';
+import { contains, whereFilter, type Filter, type ModuleStore, type Table, type Where } from '../../kernel/mongo/index.js';
 import type * as common from '../../spec/common.js';
 import type { ReturnsDb } from '../../spec/returns.js';
-import type { DraftRec, RefundFilter, RefundItem, RefundRec, ReturnFilter, ReturnsRepository, Table } from './ports.js';
-import { containsText, encode, jsonColumns, sortOf, toFilter } from './generic.js';
+import type { DraftRec, RefundFilter, RefundItem, RefundRec, Recs, ReturnFilter, ReturnRec, TableName } from './ports.js';
 
 type Row = Record<string, unknown>;
 type ItemRow = ReturnsDb['refund_request_items'];
 type EventRow = ReturnsDb['refund_request_events'];
+
+/** Sort, limit and lock options of the generic find */
+export interface FindOptions<R> {
+  orderBy?: [keyof R & string, 'asc' | 'desc'][];
+  limit?: number;
+  forUpdate?: boolean;
+}
 
 const ACTIVE_REFUND = ['requested', 'under_review', 'approved', 'processing', 'failed'];
 /** matches no row (an empty IN) */
@@ -16,30 +24,187 @@ const NONE: Filter = { id: { $in: [] } };
 
 /** Refund request fields that live in refund_request_items / refund_request_events, not in the row */
 const REFUND_CHILDREN = ['items', 'order_item_ids', 'history'];
-const withoutChildren = (table: Table, row: Row) => (table === 'refund_requests' ? Object.fromEntries(Object.entries(row).filter(([k]) => !REFUND_CHILDREN.includes(k))) : row);
 
-/** MongoDB adapter for ReturnsRepository (docs/04-mongodb-migration.md): one collection per spec table. */
-export function createMongoReturnsRepository(store: ModuleStore): ReturnsRepository {
-  // generic table access: the row types are checked at the ReturnsRepository boundary
-  const t = (table: Table): Collection<any> => store.table(table);
-  const json = new Map<string, Set<string>>();
-  const enc = (table: Table, row: unknown) => {
-    let cols = json.get(table);
-    if (!cols) json.set(table, (cols = jsonColumns(store.schemas[table]!)));
-    return encode(cols, withoutChildren(table, row as Row));
-  };
-  const items = store.table<ItemRow>('refund_request_items');
-  const events = store.table<EventRow>('refund_request_events');
-  const returns = t('returns');
-  const coll = (table: string) => store.table(table).model.collection.collectionName;
+/** The json columns of a table (Mixed paths of its generated schema) */
+const jsonColumns = (schema: Schema) => new Set(Object.entries(schema.paths).filter(([, p]) => p.instance === 'Mixed').map(([k]) => k));
+
+/**
+ * returns.policy_versions, category_exceptions, seller_terms, returns, return_items, return_shipments,
+ * inspection_drafts, return_evidence, inspections, refund_requests (with refund_request_items and
+ * refund_request_events), replacements and return_events (MongoDB, docs/04-mongodb-migration.md).
+ */
+export class ReturnsRepository {
+  readonly #items: Table<ItemRow>;
+  readonly #events: Table<EventRow>;
+  readonly #returns: Table<ReturnRec>;
+  readonly #json = new Map<string, Set<string>>();
+
+  constructor(private readonly store: ModuleStore) {
+    this.#items = store.table<ItemRow>('refund_request_items');
+    this.#events = store.table<EventRow>('refund_request_events');
+    this.#returns = this.#t('returns');
+  }
+
+  /** The table's rows as the typed records (json columns typed by ports.ts) */
+  #t<T extends TableName>(table: T): Table<Recs[T]> {
+    return this.store.table<Recs[T]>(table);
+  }
+
+  /** Runs fn in one transaction (nested calls join the outer one) */
+  transaction<T>(fn: (tx: ReturnsRepository) => Promise<T>): Promise<T> {
+    return this.store.transaction((tx) => fn(new ReturnsRepository(tx)));
+  }
+
+  /* ---------------------------------------------------------------- generic table access */
+
+  async get<T extends TableName>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined> {
+    const row = await this.#t(table).get(id, o);
+    return row ? (await this.#hydrated(table, [row]))[0] : undefined;
+  }
+
+  async find<T extends TableName>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]> {
+    const sort = o?.orderBy?.length ? Object.fromEntries(o.orderBy.map(([c, d]) => [c, d === 'desc' ? -1 : 1] as const)) : undefined;
+    const rows = await this.#t(table).find(whereFilter(where), { sort, limit: o?.limit, forUpdate: o?.forUpdate });
+    return this.#hydrated(table, rows);
+  }
+
+  count<T extends TableName>(table: T, where: Where<Recs[T]>): Promise<number> {
+    return this.#t(table).count(whereFilter(where));
+  }
+
+  /** Inserts a row (a refund request with its items and history) */
+  async insert<T extends TableName>(table: T, row: Recs[T]): Promise<Recs[T]> {
+    const inserted = await this.#t(table).insert(this.#encode(table, row));
+    if (table !== 'refund_requests') return inserted;
+    const rr = row as RefundRec;
+    await this.#writeItems(rr.id, rr.items ?? []);
+    await this.#writeEvents(rr.id, rr.history ?? []);
+    return (await this.#hydrate([inserted as Row]))[0] as Recs[T];
+  }
+
+  async insertMany<T extends TableName>(table: T, rows: Recs[T][]): Promise<void> {
+    if (!rows.length) return;
+    if (table === 'refund_requests') {
+      for (const r of rows) await this.insert(table, r);
+      return;
+    }
+    await this.#t(table).insertMany(rows.map((r) => this.#encode(table, r)));
+  }
+
+  /** Sets the defined fields of patch (a refund request's items and history are left alone); the row after */
+  async update<T extends TableName>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]> {
+    const values = this.#encode(table, patch);
+    const row = orThrow(Object.keys(values).length ? await this.#t(table).update(id, values) : await this.#t(table).get(id), `returns: ${table} ${id}`);
+    return (await this.#hydrated(table, [row]))[0]!;
+  }
+
+  async remove(table: TableName, id: string): Promise<void> {
+    await this.#t(table).delete(id);
+  }
+
+  /** Replaces a refund request's items */
+  async setRefundItems(refundRequestId: string, items: RefundItem[]): Promise<void> {
+    await this.#writeItems(refundRequestId, items);
+  }
+
+  /** Appends to a refund request's history */
+  async addRefundEvents(refundRequestId: string, events: common.TimelineEvent[]): Promise<void> {
+    await this.#writeEvents(refundRequestId, events);
+  }
+
+  /** Inserts or replaces the draft of a return (on conflict (return_id) do update set every other column) */
+  upsertDraft(row: DraftRec): Promise<DraftRec> {
+    return this.#t('inspection_drafts').upsert(this.#encode('inspection_drafts', row));
+  }
+
+  /* ---------------------------------------------------------------- lists */
+
+  /** Returns matching a filter, newest first */
+  async listReturns(f: ReturnFilter, page: PageRequest): Promise<common.Page<ReturnRec>> {
+    return this.#returns.page(await this.#returnFilter(f), page, { column: 'requested_at', direction: 'desc' });
+  }
+
+  async countReturns(f: ReturnFilter): Promise<number> {
+    return this.#returns.count(await this.#returnFilter(f));
+  }
+
+  /** Refund requests matching a filter, newest first */
+  async listRefunds(f: RefundFilter, page: PageRequest): Promise<common.Page<RefundRec>> {
+    const conds: Filter[] = [];
+    if (f.status) conds.push({ status: f.status });
+    if (f.statuses) conds.push({ status: { $in: f.statuses } });
+    if (f.source) conds.push({ source: f.source });
+    if (f.sellerId) conds.push({ seller_id: f.sellerId });
+    if (f.orderId) conds.push({ order_id: f.orderId });
+    if (f.caseId) conds.push({ case_id: f.caseId });
+    if (f.returnIds) conds.push({ return_id: { $in: f.returnIds } });
+    if (f.customerIds) conds.push({ customer_id: { $in: f.customerIds } });
+    const p = await this.#t('refund_requests').page(conds.length ? { $and: conds } : {}, page, { column: 'created_at', direction: 'desc' });
+    return { ...p, items: await this.#hydrate(p.items as unknown as Row[]) };
+  }
+
+  /** Units per order item in returns that are not cancelled or rejected */
+  async usedQuantities(orderItemIds: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!orderItemIds.length) return out;
+    // units in returns that are not cancelled or rejected (join on the return)
+    const rows = await this.#t('return_items').aggregate<{ _id: string; n: unknown }>([
+      { $match: { order_item_id: { $in: orderItemIds } } },
+      { $lookup: { from: this.#returns.name, localField: 'return_id', foreignField: '_id', as: 'r' } },
+      { $addFields: { return_status: { $arrayElemAt: ['$r.status', 0] } } },
+      { $match: { return_status: { $nin: ['cancelled', 'rejected', null] } } },
+      { $group: { _id: '$order_item_id', n: { $sum: '$quantity' } } },
+    ]);
+    for (const r of rows) out.set(r._id, Number(r.n ?? 0));
+    return out;
+  }
+
+  /** Open returns per product (not completed, cancelled or rejected) */
+  async openReturnsPerProduct(productIds: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!productIds.length) return out;
+    // count(distinct return) per product, of returns not completed, cancelled or rejected
+    const rows = await this.#t('return_items').aggregate<{ _id: string; n: number }>([
+      { $match: { product_id: { $in: productIds } } },
+      { $lookup: { from: this.#returns.name, localField: 'return_id', foreignField: '_id', as: 'r' } },
+      { $addFields: { return_status: { $arrayElemAt: ['$r.status', 0] } } },
+      { $match: { return_status: { $nin: ['completed', 'cancelled', 'rejected', null] } } },
+      { $group: { _id: { product_id: '$product_id', return_id: '$return_id' } } },
+      { $group: { _id: '$_id.product_id', n: { $sum: 1 } } },
+    ]);
+    for (const r of rows) out.set(r._id, r.n);
+    return out;
+  }
+
+  /* ---------------------------------------------------------------- helpers */
+
+  /**
+   * A row or patch as stored: undefined fields dropped, a refund request's child fields left out, and json values
+   * as plain JSON (dates inside become strings, which is how the views read them back)
+   */
+  #encode(table: TableName, row: unknown): Row {
+    let json = this.#json.get(table);
+    if (!json) this.#json.set(table, (json = jsonColumns(this.store.schemas[table]!)));
+    const out: Row = {};
+    for (const [k, v] of Object.entries(row as Row)) {
+      if (v === undefined || (table === 'refund_requests' && REFUND_CHILDREN.includes(k))) continue;
+      out[k] = json.has(k) && v !== null ? JSON.parse(JSON.stringify(v)) : v;
+    }
+    return out;
+  }
+
+  /** Refund request rows with their items and history; other tables' rows as they are */
+  async #hydrated<T extends TableName>(table: T, rows: Recs[T][]): Promise<Recs[T][]> {
+    return table === 'refund_requests' ? ((await this.#hydrate(rows as unknown as Row[])) as Recs[T][]) : rows;
+  }
 
   /** Refund request rows with their items and history */
-  async function hydrate(rows: Row[]): Promise<RefundRec[]> {
-    if (!rows.length) return rows as never;
+  async #hydrate(rows: Row[]): Promise<RefundRec[]> {
+    if (!rows.length) return [];
     const ids = rows.map((r) => r.id as string);
     // one after the other: this may run in a transaction
-    const its = await items.find({ refund_request_id: { $in: ids } }, { sort: { refund_request_id: 1, position: 1 } });
-    const evs = await events.find({ refund_request_id: { $in: ids } }, { sort: { at: 1, id: 1 } });
+    const its = await this.#items.find({ refund_request_id: { $in: ids } }, { sort: { refund_request_id: 1, position: 1 } });
+    const evs = await this.#events.find({ refund_request_id: { $in: ids } }, { sort: { at: 1, id: 1 } });
     return rows.map((r) => {
       const mine: RefundItem[] = its.filter((i) => i.refund_request_id === r.id).map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity, amount: Number(i.amount) }));
       const history: common.TimelineEvent[] = evs
@@ -48,21 +213,23 @@ export function createMongoReturnsRepository(store: ModuleStore): ReturnsReposit
       return { ...r, items: mine, order_item_ids: mine.map((i) => i.orderItemId), history } as unknown as RefundRec;
     });
   }
-  const hydrated = async (table: Table, rows: Row[]) => (table === 'refund_requests' ? hydrate(rows) : rows);
 
-  async function writeItems(id: string, list: RefundItem[]) {
-    await items.deleteMany({ refund_request_id: id });
-    if (list.length) await items.insertMany(list.map((i, n) => ({ refund_request_id: id, order_item_id: i.orderItemId, position: n, quantity: i.quantity, amount: i.amount })));
+  async #writeItems(id: string, list: RefundItem[]): Promise<void> {
+    await this.#items.deleteMany({ refund_request_id: id });
+    if (list.length) await this.#items.insertMany(list.map((i, n) => ({ refund_request_id: id, order_item_id: i.orderItemId, position: n, quantity: i.quantity, amount: i.amount })));
   }
-  async function writeEvents(id: string, list: common.TimelineEvent[]) {
+
+  async #writeEvents(id: string, list: common.TimelineEvent[]): Promise<void> {
     if (!list.length) return;
-    await events.insertMany(list.map((e) => ({ id: newId(), refund_request_id: id, at: new Date(e.at), label: e.label, detail: e.detail ?? null, actor_kind: e.actor?.kind ?? null, actor_id: e.actor?.id ?? null, actor_name: e.actor?.name ?? null })));
+    await this.#events.insertMany(list.map((e) => ({ id: newId(), refund_request_id: id, at: new Date(e.at), label: e.label, detail: e.detail ?? null, actor_kind: e.actor?.kind ?? null, actor_id: e.actor?.id ?? null, actor_name: e.actor?.name ?? null })));
   }
 
   /** Return ids from another table (a subquery) */
-  const returnIdsWhere = (table: string, f: Filter) => store.table<Row>(table).distinct<string>('return_id', f);
+  #returnIdsWhere(table: TableName, f: Filter): Promise<string[]> {
+    return this.store.table<Row>(table).distinct<string>('return_id', f);
+  }
 
-  async function returnFilter(f: ReturnFilter): Promise<Filter> {
+  async #returnFilter(f: ReturnFilter): Promise<Filter> {
     const conds: Filter[] = [];
     if (f.customerId !== undefined || f.guestSessionId !== undefined) {
       const c = f.customerId ?? null;
@@ -93,117 +260,17 @@ export function createMongoReturnsRepository(store: ModuleStore): ReturnsReposit
     if (f.dueFrom) conds.push({ response_due_at: { $gte: f.dueFrom } });
     if (f.dueBefore) conds.push({ response_due_at: { $lt: f.dueBefore } });
     if (f.completedFrom) conds.push({ completed_at: { $gte: f.completedFrom } });
-    if (f.refundStatuses?.length) conds.push({ id: { $in: await returnIdsWhere('refund_requests', { status: { $in: f.refundStatuses } }) } });
+    if (f.refundStatuses?.length) conds.push({ id: { $in: await this.#returnIdsWhere('refund_requests', { status: { $in: f.refundStatuses } }) } });
     if (f.refundPending !== undefined) {
-      const ids = await returnIdsWhere('refund_requests', { status: { $in: ACTIVE_REFUND } });
+      const ids = await this.#returnIdsWhere('refund_requests', { status: { $in: ACTIVE_REFUND } });
       conds.push({ id: f.refundPending ? { $in: ids } : { $nin: ids } });
     }
-    if (f.productIds) conds.push(f.productIds.length ? { id: { $in: await returnIdsWhere('return_items', { product_id: { $in: f.productIds } }) } } : NONE);
+    if (f.productIds) conds.push(f.productIds.length ? { id: { $in: await this.#returnIdsWhere('return_items', { product_id: { $in: f.productIds } }) } } : NONE);
     if (f.q?.trim()) {
-      const term = containsText(f.q);
-      const byItem = await returnIdsWhere('return_items', { $or: [{ title: term }, { sku: term }] });
+      const term = contains(f.q);
+      const byItem = await this.#returnIdsWhere('return_items', { $or: [{ title: term }, { sku: term }] });
       conds.push({ $or: [{ ref: term }, { order_ref: term }, { id: { $in: byItem } }] });
     }
     return conds.length ? { $and: conds } : {};
   }
-
-  const repo: ReturnsRepository = {
-    transaction: (fn) => store.transaction((tx) => fn(tx === store ? repo : createMongoReturnsRepository(tx))),
-
-    async get(table, id, o) {
-      const row = await t(table).get(id, o);
-      return row ? ((await hydrated(table, [row]))[0] as never) : undefined;
-    },
-    async find(table, where, o) {
-      const rows = await t(table).find(toFilter(where as Row), { sort: sortOf(o?.orderBy as never), limit: o?.limit, forUpdate: o?.forUpdate });
-      return hydrated(table, rows) as never;
-    },
-    count: (table, where) => t(table).count(toFilter(where as Row)),
-    async insert(table, row) {
-      const inserted = await t(table).insert(enc(table, row));
-      if (table !== 'refund_requests') return inserted;
-      const rr = row as unknown as RefundRec;
-      await writeItems(rr.id, rr.items ?? []);
-      await writeEvents(rr.id, rr.history ?? []);
-      return (await hydrate([inserted]))[0] as never;
-    },
-    async insertMany(table, rows) {
-      if (!rows.length) return;
-      if (table === 'refund_requests') {
-        for (const r of rows) await repo.insert(table, r);
-        return;
-      }
-      await t(table).insertMany(rows.map((r) => enc(table, r)));
-    },
-    async update(table, id, patch) {
-      const values = enc(table, patch);
-      const row = Object.keys(values).length ? await t(table).update(id, values) : await t(table).get(id);
-      if (!row) throw new Error(`returns: ${table} ${id} not found`);
-      return (await hydrated(table, [row]))[0] as never;
-    },
-    async setRefundItems(id, list) {
-      await writeItems(id, list);
-    },
-    async addRefundEvents(id, list) {
-      await writeEvents(id, list);
-    },
-    async remove(table, id) {
-      await t(table).delete(id);
-    },
-
-    async upsertDraft(row) {
-      // on conflict (return_id) do update set every other column
-      return t('inspection_drafts').upsert(enc('inspection_drafts', row)) as Promise<DraftRec>;
-    },
-
-    async listReturns(f, page) {
-      return returns.page(await returnFilter(f), page, { column: 'requested_at', direction: 'desc' });
-    },
-    async countReturns(f) {
-      return returns.count(await returnFilter(f));
-    },
-    async listRefunds(f: RefundFilter, page) {
-      const conds: Filter[] = [];
-      if (f.status) conds.push({ status: f.status });
-      if (f.statuses) conds.push({ status: { $in: f.statuses } });
-      if (f.source) conds.push({ source: f.source });
-      if (f.sellerId) conds.push({ seller_id: f.sellerId });
-      if (f.orderId) conds.push({ order_id: f.orderId });
-      if (f.caseId) conds.push({ case_id: f.caseId });
-      if (f.returnIds) conds.push({ return_id: { $in: f.returnIds } });
-      if (f.customerIds) conds.push({ customer_id: { $in: f.customerIds } });
-      const p = await t('refund_requests').page(conds.length ? { $and: conds } : {}, page, { column: 'created_at', direction: 'desc' });
-      return { ...p, items: await hydrate(p.items) };
-    },
-    async usedQuantities(orderItemIds) {
-      const out = new Map<string, number>();
-      if (!orderItemIds.length) return out;
-      // units in returns that are not cancelled or rejected (join on the return)
-      const rows = await t('return_items').aggregate<{ _id: string; n: unknown }>([
-        { $match: { order_item_id: { $in: orderItemIds } } },
-        { $lookup: { from: coll('returns'), localField: 'return_id', foreignField: '_id', as: 'r' } },
-        { $addFields: { return_status: { $arrayElemAt: ['$r.status', 0] } } },
-        { $match: { return_status: { $nin: ['cancelled', 'rejected', null] } } },
-        { $group: { _id: '$order_item_id', n: { $sum: '$quantity' } } },
-      ]);
-      for (const r of rows) out.set(r._id, Number(r.n ?? 0));
-      return out;
-    },
-    async openReturnsPerProduct(productIds) {
-      const out = new Map<string, number>();
-      if (!productIds.length) return out;
-      // count(distinct return) per product, of returns not completed, cancelled or rejected
-      const rows = await t('return_items').aggregate<{ _id: string; n: number }>([
-        { $match: { product_id: { $in: productIds } } },
-        { $lookup: { from: coll('returns'), localField: 'return_id', foreignField: '_id', as: 'r' } },
-        { $addFields: { return_status: { $arrayElemAt: ['$r.status', 0] } } },
-        { $match: { return_status: { $nin: ['completed', 'cancelled', 'rejected', null] } } },
-        { $group: { _id: { product_id: '$product_id', return_id: '$return_id' } } },
-        { $group: { _id: '$_id.product_id', n: { $sum: 1 } } },
-      ]);
-      for (const r of rows) out.set(r._id, r.n);
-      return out;
-    },
-  };
-  return repo;
 }

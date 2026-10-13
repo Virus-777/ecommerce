@@ -1,8 +1,7 @@
 /**
- * What the returns service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts.
+ * Row types of the returns collections (typed json fields) and the list filters the repository
+ * (repository.ts) takes.
  */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type {
   EffectiveTerms,
@@ -157,17 +156,8 @@ export interface Recs {
   replacements: ReplacementRec;
   return_events: EventRec;
 }
-export type Table = keyof Recs;
-
-/** A column condition: a value (=), a list (in), null (is null) or an operator */
-export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not' | 'not in'; value: V | null | readonly V[] };
-export type Where<R> = { [K in keyof R]?: Cond<R[K]> };
-
-export interface FindOptions<R> {
-  orderBy?: [keyof R & string, 'asc' | 'desc'][];
-  limit?: number;
-  forUpdate?: boolean;
-}
+/** The returns collections (spec tables) */
+export type TableName = keyof Recs;
 
 /** Filters of the return lists (store, seller, admin, exports) */
 export interface ReturnFilter {
@@ -210,37 +200,4 @@ export interface RefundFilter {
   returnIds?: string[];
   /** The order customer (customer data export) */
   customerIds?: string[];
-}
-
-/** Persistence for this module's own tables: returns.policy_versions, returns.category_exceptions, returns.seller_terms, returns.returns, returns.return_items, returns.return_shipments, returns.inspection_drafts, returns.return_evidence, returns.inspections, returns.refund_requests (with refund_request_items and refund_request_events), returns.replacements, returns.return_events. */
-export interface ReturnsRepository {
-  /** Runs fn in one transaction (nested calls join the outer one) */
-  transaction<T>(fn: (tx: ReturnsRepository) => Promise<T>): Promise<T>;
-
-  /* generic table access (rows are mapped to typed jsonb at this boundary) */
-  get<T extends Table>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;
-  find<T extends Table>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]>;
-  count<T extends Table>(table: T, where: Where<Recs[T]>): Promise<number>;
-  insert<T extends Table>(table: T, row: Recs[T]): Promise<Recs[T]>;
-  insertMany<T extends Table>(table: T, rows: Recs[T][]): Promise<void>;
-  update<T extends Table>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
-  remove<T extends Table>(table: T, id: string): Promise<void>;
-
-  /** Replaces a refund request's items */
-  setRefundItems(refundRequestId: string, items: RefundItem[]): Promise<void>;
-  /** Appends to a refund request's history */
-  addRefundEvents(refundRequestId: string, events: common.TimelineEvent[]): Promise<void>;
-
-  /** Inserts or replaces the draft of a return */
-  upsertDraft(row: DraftRec): Promise<DraftRec>;
-
-  /** Returns matching a filter, newest first */
-  listReturns(f: ReturnFilter, page: PageRequest): Promise<common.Page<ReturnRec>>;
-  countReturns(f: ReturnFilter): Promise<number>;
-  /** Refund requests matching a filter, newest first */
-  listRefunds(f: RefundFilter, page: PageRequest): Promise<common.Page<RefundRec>>;
-  /** Units per order item in returns that are not cancelled or rejected */
-  usedQuantities(orderItemIds: string[]): Promise<Map<string, number>>;
-  /** Open returns per product (not completed, cancelled or rejected) */
-  openReturnsPerProduct(productIds: string[]): Promise<Map<string, number>>;
 }

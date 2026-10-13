@@ -13,7 +13,8 @@ import type * as common from '../../../spec/common.js';
 import type { ExceptionRefundInput, RefundBreakdown, RefundDeduction, RefundRequest, RemedyInput } from '../../../spec/returns.js';
 import { refundRequestMachine, returnMachine } from '../domain/state-machines.js';
 import { actorFrom, actorText, is, LIVE_REFUND, type BreakdownResult, type RefundStatus, type ReturnStatus } from '../domain/rules.js';
-import type { RefundItem, RefundRec, ReturnRec, ReturnsRepository } from '../ports.js';
+import type { RefundItem, RefundRec, ReturnRec } from '../ports.js';
+import type { ReturnsRepository } from '../repository.js';
 import { Batch, invalid, invalidField, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import type { Views } from './views.js';
 

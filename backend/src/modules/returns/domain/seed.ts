@@ -4,7 +4,7 @@
  * effective at install, so resolveTerms, eligibility and terms snapshots always have a policy version and a
  * policyVersionId. Nothing is inserted when a version exists.
  */
-import type { ReturnsRepository } from '../ports.js';
+import type { ReturnsRepository } from '../repository.js';
 import { defaultResponsibilities, SEEDED_POLICY_ID } from './rules.js';
 
 export async function seedBaselinePolicy(repo: ReturnsRepository, now: Date): Promise<void> {

@@ -25,7 +25,8 @@ import type {
 } from '../../../spec/returns.js';
 import { categoryExceptionMachine, policyVersionMachine } from '../domain/state-machines.js';
 import { actorFrom, actorText, isEmail, isFault, nextVersion, reasonGroupOf, responsibilityFor, shortDate, shortensWindow, termsSummary, type WindowFacts } from '../domain/rules.js';
-import type { CategoryExceptionRec, ReturnsRepository, TermsRec } from '../ports.js';
+import type { CategoryExceptionRec, TermsRec } from '../ports.js';
+import type { ReturnsRepository } from '../repository.js';
 import { invalid, invalidField, notFound, SYSTEM, type Baseline, type By, type Core } from './core.js';
 
 export const BASELINE_ACTION = 'returns.baseline.change';

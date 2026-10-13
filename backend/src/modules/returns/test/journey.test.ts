@@ -238,7 +238,7 @@ describe('seller decisions and the return parcel', () => {
     await h.publish('payments', 'payments.refund.sent', { refundId: newId(), ref: refund.body.refundRequest.ref, orderId: m.order.id, origin: 'return', originId: refund.body.refundRequest.id, amount: { amount: 12000, currency: 'USD' }, items: startRefund.items.map((i) => ({ ...i, title: 'Headphones', groupId: m.order.groups[0]!.id })), destination: 'Visa •••• 4417', sentAt: now() });
     expect(h.named('returns.return.completed').filter((e) => e.returnId === m.ret.id)).toHaveLength(1);
 
-    // pass 4: the receipt time, the refund's items and history are columns and tables, not jsonb or marker rows
+    // pass 4: the receipt time, the refund's items and history are columns and tables, not json or marker rows
     const repo = h.service.core.repo;
     expect((await repo.get('returns', m.ret.id))!.received_at).toBeInstanceOf(Date);
     expect(await repo.find('return_events', { return_id: m.ret.id, kind: 'received_at' })).toEqual([]);
