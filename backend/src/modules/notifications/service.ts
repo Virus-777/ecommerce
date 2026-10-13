@@ -17,7 +17,8 @@ import { Sender, type Target } from './app/sender.js';
 import { Webhooks } from './app/webhooks.js';
 import { topicDef } from './domain/catalog.js';
 import { effectiveGroups, hashAddress } from './domain/rules.js';
-import type { NotificationsRepository, Providers, ScheduledRow } from './ports.js';
+import type { Providers, ScheduledRow } from './ports.js';
+import type { NotificationsRepository } from './repository.js';
 
 export interface NotificationsServiceDeps {
   repo: NotificationsRepository;
@@ -56,7 +57,7 @@ function targetOf(r: Recipient, topic: string): Target {
 }
 
 /**
- * Notifications use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Notifications use cases. Depends only on its repository, the providers, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/notifications.json.
  * The work is done by the collaborators in app/: sender (routing to people, deliveries, retries,
  * suppressions), inbox, preferences, admin (topics, templates, delivery log, broadcasts), consumers

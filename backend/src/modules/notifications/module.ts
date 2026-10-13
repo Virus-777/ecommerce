@@ -6,7 +6,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { createMongoNotificationsRepository } from './repository.js';
+import { NotificationsRepository } from './repository.js';
 import { NotificationsService } from './service.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { createDevEmailProvider } from './providers/email.js';
@@ -28,7 +28,7 @@ export default defineModule({
   async register(ctx) {
     // Providers: deterministic development adapters (no network); real adapters plug in behind the same ports
     const providers = { email: createDevEmailProvider(), sms: createDevSmsProvider(), push: createDevPushProvider() };
-    const service = new NotificationsService({ repo: createMongoNotificationsRepository(ctx.mongo), ctx, providers });
+    const service = new NotificationsService({ repo: new NotificationsRepository(ctx.mongo), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));

@@ -1,5 +1,5 @@
 /**
- * Shared context of the notifications use cases: ports, settings, caches (topic channels, live
+ * Shared context of the notifications use cases: the repository and providers, settings, caches (topic channels, live
  * templates, marketing consent) and the lookups into other modules' public APIs.
  */
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
@@ -16,7 +16,8 @@ import type { NoticeLink, TemplateContent } from '../../../spec/notifications.js
 import { defaultContent, templateChannels, TOPICS, topicDef, topicVariables, type Audience, type Channel, type TopicDef } from '../domain/catalog.js';
 import { templateVersionMachine } from '../domain/state-machines.js';
 import { channelLive, defaultGroups, defaultMemberChannel, parseReplyToken, replyToken, signToken, verifyToken, type ChannelMap, type MemberAccessLike } from '../domain/rules.js';
-import type { MemberPrefRow, NotificationsRepository, Providers, TemplateRow, TopicRow, VersionRow } from '../ports.js';
+import type { MemberPrefRow, Providers, TemplateRow, TopicRow, VersionRow } from '../ports.js';
+import type { NotificationsRepository } from '../repository.js';
 
 export const LANGUAGE = 'en-US';
 export const SYSTEM: Actor = { kind: 'system' };
@@ -151,7 +152,7 @@ export class Core {
    * the default changed since they were seeded (e.g. the purchase order email's "Deliver to" line on installs
    * seeded before it), a new published system version replaces the live one and the old one is superseded.
    * A template with any staff version (draft, published or discarded) is left alone. Runs with the boot seed,
-   * idempotent: the defaults live in code and the senders setting, which a SQL migration cannot see.
+   * idempotent: the defaults live in code and the senders setting, which a data migration cannot see.
    */
   async refreshDefaultTemplates(): Promise<number> {
     const senders = (await this.setting('senders')) as Record<string, string>;

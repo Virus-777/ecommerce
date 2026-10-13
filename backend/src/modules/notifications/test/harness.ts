@@ -160,6 +160,8 @@ export async function bootWorld(opts: { launchPhase?: number; clock?: ReturnType
     ...(opts.clock ? { clock: opts.clock } : {}),
     apiStubs: world.stubs(),
   });
+  // a fixed clock starts at the time it was made: move it to now, after the boot (tokens are signed at the real time)
+  opts.clock?.set(new Date());
   const service = app.kernel.boot.apis.get('notifications') as NotificationsService;
   return { app, world, service };
 }

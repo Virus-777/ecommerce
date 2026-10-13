@@ -11,7 +11,7 @@ import { topicDef, type Audience, type DeliveryChannel, type TopicDef } from '..
 import { backoffMs, effectiveGroups, hashAddress, maskAddress, memberEmails, memberReceives, quietHoursEnd, defaultMemberChannel, addMonths } from '../domain/rules.js';
 import { deliveryMachine } from '../domain/state-machines.js';
 import { redact, render } from '../domain/templates.js';
-import type { DeliveryRow, NoticeRow, ProviderResult, ProviderSyncEvent, RecipientRow, SubjectKey } from '../ports.js';
+import type { DeliveryRow, NoticeRow, ProviderResult, ProviderSyncEvent, RecipientRow } from '../ports.js';
 import { actorText, Core, SYSTEM } from './core.js';
 
 import type { RecipientKind, RecipientReason, Target } from '../domain/routing.js';
