@@ -47,9 +47,9 @@ type Customer {
   totalSpend: Money! @areas(in: [ADMIN])
   verification: CustomerVerification! @areas(in: [ADMIN])
   "Internal notes, newest first. Never shown to the customer."
-  notes: [CustomerNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
+  notes: [CustomerNote!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
   "Recorded account actions (reset link, sign-out, restrict, suspend, close) with reason, newest first"
-  accountActions(limit: Int = 20): [CustomerAccountAction!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
+  accountActions(limit: Int = 20): [CustomerAccountAction!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
 }
 
 enum CustomerAccountStatus {
@@ -243,11 +243,11 @@ extend type Query {
   me: Customer @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "customers", fn: "getCustomerByUserId")
 
   "Recently viewed products for the customer or guest session (home page row, account). Default recentlyViewedShown (12), max 50."
-  recentlyViewed(limit: Int = 12): [RecentlyViewedItem!]! @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "customers", fn: "listRecentlyViewedItems")
+  recentlyViewed(limit: Int = 12): [RecentlyViewedItem!] @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "customers", fn: "listRecentlyViewedItems")
 
   "Customer 360 (Admin Center customer detail)"
   customer(id: UUID!): Customer @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "customers", fn: "getCustomer")
 
   "Admin customer list"
-  customers(filter: CustomerFilterInput, paging: PageInput): CustomerPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "customers", fn: "searchCustomers")
+  customers(filter: CustomerFilterInput, paging: PageInput): CustomerPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "customers", fn: "searchCustomers")
 }

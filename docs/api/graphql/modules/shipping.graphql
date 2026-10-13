@@ -501,7 +501,7 @@ type ShippingPackage @areas(in: [SELLER]) {
 
 extend type Query {
   "Carriers, services, label purchase and the default package for the record-shipment and buy-label forms (caller's own settings)"
-  myShippingSetup: ShippingSellerSetup! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "getSellerShippingSetup")
+  myShippingSetup: ShippingSellerSetup @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "getSellerShippingSetup")
 
   "Track one package (store: the customer's or guest's own order; seller: own shipments)"
   shipment(id: UUID!): Shipment @areas(in: [STORE, SELLER]) @source(module: "shipping", fn: "getShipment")
@@ -510,10 +510,10 @@ extend type Query {
   shipmentAdmin(id: UUID!): Shipment @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.shipments.view") @source(module: "shipping", fn: "getShipment")
 
   "Dispatch and delivery exceptions with owner, deadline and whether the customer was notified"
-  deliveryExceptions(filter: DeliveryExceptionFilter, paging: PageInput): DeliveryExceptionPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptions")
+  deliveryExceptions(filter: DeliveryExceptionFilter, paging: PageInput): DeliveryExceptionPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptions")
 
   "Open exceptions per kind (ops queue tiles, admin dashboard)"
-  deliveryExceptionCounts: DeliveryExceptionCounts! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "countOpenExceptions") @cost(weight: 3)
+  deliveryExceptionCounts: DeliveryExceptionCounts @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "countOpenExceptions") @cost(weight: 3)
 }
 
 extend type OrderGroup {
@@ -521,12 +521,12 @@ extend type OrderGroup {
   shipments(kinds: [ShipmentKind!]): [Shipment!]! @source(module: "shipping", fn: "listShipmentsForGroups")
 
   "Open and recent delivery exceptions on the seller's own group that need its response"
-  deliveryExceptions: [DeliveryException!]! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "listExceptionsForOrder")
+  deliveryExceptions: [DeliveryException!] @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "listExceptionsForOrder")
 }
 
 extend type Order {
   "Every delivery exception on the order, across sellers (order 360)"
-  deliveryExceptions: [DeliveryException!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptionsForOrder")
+  deliveryExceptions: [DeliveryException!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptionsForOrder")
 }
 
 extend type Offer {

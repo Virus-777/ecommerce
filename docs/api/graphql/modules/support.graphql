@@ -453,12 +453,12 @@ extend type Customer {
   "Open cases, most recently updated first, for the account overview"
   openCases(limit: Int = 3): CasePage! @areas(in: [STORE]) @source(module: "support", fn: "listOpenCasesForCustomer")
   "Customer 360: the customer's cases and disputes"
-  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForCustomer")
+  cases(open: Boolean, paging: PageInput): CasePage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForCustomer")
 }
 
 extend type Seller {
   "Seller 360: cases and disputes about the seller's orders"
-  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForSeller")
+  cases(open: Boolean, paging: PageInput): CasePage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForSeller")
 }
 
 extend type Query {
@@ -466,7 +466,7 @@ extend type Query {
   case(ref: String!): Case @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "support", fn: "getCaseForCustomer")
 
   "My cases with who handles them, the next action and the expected reply"
-  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "support", fn: "listCasesForCustomer")
+  cases(open: Boolean, paging: PageInput): CasePage @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "support", fn: "listCasesForCustomer")
 
   "A case about the caller's orders, or the caller's own support request (no internal notes)"
   sellerCase(ref: String!): Case @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "support", fn: "getCaseForSeller")

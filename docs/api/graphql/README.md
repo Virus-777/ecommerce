@@ -108,7 +108,7 @@ The HTTP status is 200 whenever some data came back; when nothing did and there 
 `node docs/api/tools/graphql.mjs` checks:
 - fragment syntax and ownership (no type defined twice);
 - `@source` points to the fragment's own module and to a function in its REST `publicApi`;
-- every `@auth` permission exists;
+- every `@auth` permission exists, and every `@auth` field is nullable (a refusal answers null; a non-null field would blank its parent, up to the whole screen);
 - every `@sensitive(permission, mask)` mirrors a sensitive field of the module's REST spec types (same field name, permission and mask), and every such spec field is marked `@sensitive` on at least one GraphQL field;
 - each composed schema is valid;
 - every screen query validates against its area's schema and stays within the depth and cost limits.

@@ -255,13 +255,13 @@ extend type Seller {
 
 extend type Query {
   "Inbox: conversations with sellers and Marketly Support, newest first"
-  conversations(unreadOnly: Boolean, paging: PageInput): ConversationPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "messaging", fn: "listInbox")
+  conversations(unreadOnly: Boolean, paging: PageInput): ConversationPage @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "messaging", fn: "listInbox")
 
   "One conversation with its messages"
   conversation(id: UUID!): Conversation @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "messaging", fn: "getConversation")
 
   "Order messages with reply deadlines, overdue first"
-  sellerConversations(replyState: ConversationReplyState, paging: PageInput): ConversationPage! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "listInbox")
+  sellerConversations(replyState: ConversationReplyState, paging: PageInput): ConversationPage @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "listInbox")
 
   "One conversation with the buyer, order status and dispatch warning"
   sellerConversation(id: UUID!): Conversation @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "getConversation")

@@ -1591,7 +1591,7 @@ extend type Query {
   "The signed-in customer: Account tab, profile and the AccountOverview screen query"
   me: Customer @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "customers", fn: "getCustomerByUserId")
   "Recently viewed products for the customer or guest session (home page row, account). Default recentlyViewedShown (12), max 50."
-  recentlyViewed(limit: Int = 12): [RecentlyViewedItem!]! @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "customers", fn: "listRecentlyViewedItems")
+  recentlyViewed(limit: Int = 12): [RecentlyViewedItem!] @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "customers", fn: "listRecentlyViewedItems")
 }
 
 # ---------------------------------------------------------------- module: finance
@@ -1845,7 +1845,7 @@ extend type Seller {
 
 extend type Query {
   "Inbox: conversations with sellers and Marketly Support, newest first"
-  conversations(unreadOnly: Boolean, paging: PageInput): ConversationPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "messaging", fn: "listInbox")
+  conversations(unreadOnly: Boolean, paging: PageInput): ConversationPage @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "messaging", fn: "listInbox")
   "One conversation with its messages"
   conversation(id: UUID!): Conversation @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "messaging", fn: "getConversation")
 }
@@ -2879,7 +2879,7 @@ extend type Query {
   "Order detail for the signed-in customer, or a guest session with access to this order (identity.hasGuestOrderAccess)"
   order(ref: String!): Order @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "orders", fn: "getOrderForViewer")
   "Order history with search, date range and status tab (OrderList, AccountOverview recent orders with paging.limit)"
-  orders(filter: OrderListFilter, paging: PageInput): OrderPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "orders", fn: "listOrdersForCustomer")
+  orders(filter: OrderListFilter, paging: PageInput): OrderPage @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "orders", fn: "listOrdersForCustomer")
 }
 
 extend type Customer {
@@ -4020,7 +4020,7 @@ extend type Query {
   "Return detail for the signed-in customer (or a guest order session)"
   return(ref: String!): Return @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "returns", fn: "getReturnForCustomer")
   "My returns, return status and refund status side by side"
-  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "returns", fn: "listForCustomer")
+  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "returns", fn: "listForCustomer")
 }
 
 # ---------------------------------------------------------------- module: reviews
@@ -4800,7 +4800,7 @@ type StoreInfoFeature {
 
 extend type Query {
   "Support hours, open now, closures, maintenance notice and public flags"
-  storeInfo: StoreInfo! @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
+  storeInfo: StoreInfo @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
 }
 
 # ---------------------------------------------------------------- module: shipping
@@ -5414,7 +5414,7 @@ extend type Query {
   "Case detail for the signed-in customer (or a guest order session)"
   case(ref: String!): Case @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "support", fn: "getCaseForCustomer")
   "My cases with who handles them, the next action and the expected reply"
-  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "support", fn: "listCasesForCustomer")
+  cases(open: Boolean, paging: PageInput): CasePage @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "support", fn: "listCasesForCustomer")
 }
 
 # ---------------------------------------------------------------- module: trust

@@ -97,7 +97,7 @@ type AdDashboardSummary @areas(in: [ADMIN]) {
 
 extend type PromotionCampaign {
   "Ads linked to this promotion (they stop when it ends or runs out of budget)"
-  adCampaigns: [AdCampaignSummary!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "advertising.campaigns.view") @source(module: "advertising", fn: "campaignsForPromotion")
+  adCampaigns: [AdCampaignSummary!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "advertising.campaigns.view") @source(module: "advertising", fn: "campaignsForPromotion")
 }
 
 # ------------------------------------------------------------------ queries

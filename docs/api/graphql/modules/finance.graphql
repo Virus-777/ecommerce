@@ -661,7 +661,7 @@ extend type Seller {
 
 extend type Case {
   "Finance holds placed because of this case (dispute review)"
-  holds: [Hold!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "holdsForReference")
+  holds: [Hold!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "holdsForReference")
 }
 
 extend type Query {
@@ -687,5 +687,5 @@ extend type Query {
   refundImpactPreview(orderRef: String!, items: [FinanceRefundImpactItemInput!], amount: Int, fundedBy: FinanceRefundFundedBy = SELLER): FinanceRefundImpact @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "previewRefundImpactForOrder") @cost(weight: 3)
 
   "Payout runs, newest first"
-  payoutRuns(status: PayoutRunStatus, paging: PageInput): PayoutRunPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "listPayoutRuns")
+  payoutRuns(status: PayoutRunStatus, paging: PageInput): PayoutRunPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "listPayoutRuns")
 }

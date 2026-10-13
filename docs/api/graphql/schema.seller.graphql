@@ -1106,12 +1106,12 @@ extend type Offer {
 
 extend type Variant {
   "Stock items for this variant. Seller Center: the caller's own items; Admin Center: company and seller items, never summed"
-  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
+  stock: [StockItem!] @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
 }
 
 extend type Query {
   "Seller dashboard stock tile"
-  myStockSummary: StockSellerSummary! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "inventory", fn: "getSellerStockSummary")
+  myStockSummary: StockSellerSummary @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "inventory", fn: "getSellerStockSummary")
 }
 
 # ---------------------------------------------------------------- module: messaging
@@ -1322,7 +1322,7 @@ extend type Seller {
 
 extend type Query {
   "Order messages with reply deadlines, overdue first"
-  sellerConversations(replyState: ConversationReplyState, paging: PageInput): ConversationPage! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "listInbox")
+  sellerConversations(replyState: ConversationReplyState, paging: PageInput): ConversationPage @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "listInbox")
   "One conversation with the buyer, order status and dispatch warning"
   sellerConversation(id: UUID!): Conversation @areas(in: [SELLER]) @auth(requires: SELLER, permission: "messaging.conversations.reply") @source(module: "messaging", fn: "getConversation")
 }
@@ -1814,7 +1814,7 @@ extend type Product {
   "Lowest and highest active offer price; 'from' prices name the offer they belong to"
   priceRange(condition: OfferConditionFilter = ALL): OfferPriceRange @source(module: "offers", fn: "getOfferStats")
   "This seller's own offers on the product, any status (Seller Center product detail)"
-  myOffers: [Offer!]! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "offers", fn: "listOwnOffersForProduct")
+  myOffers: [Offer!] @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "offers", fn: "listOwnOffersForProduct")
 }
 
 extend type SellerCollection
@@ -2242,9 +2242,9 @@ extend type Query {
   "One order as the calling seller sees it: only its own groups, items, money and timeline. Another seller's order returns null (NOT_FOUND)."
   sellerOrder(ref: String!): Order @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "getOrderForSeller")
   "The seller's orders by stage with dispatch deadlines (dashboard 'to ship' list, Orders page)"
-  sellerOrders(filter: OrderSellerFilter, paging: PageInput): OrderPage! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "listOrdersForSeller")
+  sellerOrders(filter: OrderSellerFilter, paging: PageInput): OrderPage @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "listOrdersForSeller")
   "Tab counts plus overdue and due today"
-  sellerOrderCounts: OrderSellerCounts! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "countSellerOrders")
+  sellerOrderCounts: OrderSellerCounts @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "countSellerOrders")
 }
 
 extend type Customer
@@ -4095,9 +4095,9 @@ type SettingsUpcomingChange @areas(in: [SELLER]) {
 
 extend type Query {
   "Support hours, open now, closures, maintenance notice and public flags"
-  storeInfo: StoreInfo! @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
+  storeInfo: StoreInfo @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
   "Scheduled platform changes that affect sellers, soonest first"
-  upcomingChanges: [SettingsUpcomingChange!]! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "settings", fn: "upcomingChangesForSellers")
+  upcomingChanges: [SettingsUpcomingChange!] @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "settings", fn: "upcomingChangesForSellers")
 }
 
 # ---------------------------------------------------------------- module: shipping
@@ -4479,7 +4479,7 @@ type ShippingPackage @areas(in: [SELLER]) {
 
 extend type Query {
   "Carriers, services, label purchase and the default package for the record-shipment and buy-label forms (caller's own settings)"
-  myShippingSetup: ShippingSellerSetup! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "getSellerShippingSetup")
+  myShippingSetup: ShippingSellerSetup @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "getSellerShippingSetup")
   "Track one package (store: the customer's or guest's own order; seller: own shipments)"
   shipment(id: UUID!): Shipment @areas(in: [STORE, SELLER]) @source(module: "shipping", fn: "getShipment")
 }
@@ -4488,7 +4488,7 @@ extend type OrderGroup {
   "Packages of this seller group (partial shipments give several). Default kinds: OUTBOUND and REPLACEMENT."
   shipments(kinds: [ShipmentKind!]): [Shipment!]! @source(module: "shipping", fn: "listShipmentsForGroups")
   "Open and recent delivery exceptions on the seller's own group that need its response"
-  deliveryExceptions: [DeliveryException!]! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "listExceptionsForOrder")
+  deliveryExceptions: [DeliveryException!] @areas(in: [SELLER]) @auth(requires: SELLER, permission: "shipping.seller-shipments.view") @source(module: "shipping", fn: "listExceptionsForOrder")
 }
 
 extend type Order

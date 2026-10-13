@@ -220,16 +220,16 @@ extend type Query {
   myApprovalLimit(actionKey: String!): ApprovalLimitView @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "myLimitFor")
 
   "Requests the caller may decide now, oldest due first (dashboard tile, inbox, approvals list)"
-  approvalsWaitingForMe(module: String, actionKey: String, overdue: Boolean, paging: PageInput): ApprovalRequestPage! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "listApprovalsToDecide")
+  approvalsWaitingForMe(module: String, actionKey: String, overdue: Boolean, paging: PageInput): ApprovalRequestPage @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "listApprovalsToDecide")
 
   "Counts for the dashboard and inbox: waiting for me, overdue, my open requests"
-  myApprovalSummary: ApprovalSummary! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalSummaryFor")
+  myApprovalSummary: ApprovalSummary @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalSummaryFor")
 
   "One request with decisions and steps. Visible to the requester, eligible approvers and holders of access.approvals.view-all."
   approvalRequest(id: UUID!): ApprovalRequest @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "getApprovalForViewer")
 
   "Leads, backups and who receives each role's work today (dashboard 'Team on shift')"
-  teamOnShift(workArea: String): [AccessRoleCoverage!]! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "coverageNow")
+  teamOnShift(workArea: String): [AccessRoleCoverage!] @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "coverageNow")
 }
 
 # ---- Approval requests on the records that wait for them (visible to whoever can read the parent record)
@@ -251,5 +251,5 @@ extend type RefundRequest {
 
 extend type Seller {
   "Open requests about this seller (restriction, suspension, payout destination change, holds) for AdminSeller"
-  pendingApprovals: [ApprovalRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF) @cost(weight: 5) @source(module: "access", fn: "approvalsForSellers")
+  pendingApprovals: [ApprovalRequest!] @areas(in: [ADMIN]) @auth(requires: STAFF) @cost(weight: 5) @source(module: "access", fn: "approvalsForSellers")
 }

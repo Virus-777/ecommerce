@@ -393,13 +393,13 @@ extend type Query {
   "The caller's approval limit and route for one action (e.g. returns.refunds.approve) on decision panels"
   myApprovalLimit(actionKey: String!): ApprovalLimitView @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "myLimitFor")
   "Requests the caller may decide now, oldest due first (dashboard tile, inbox, approvals list)"
-  approvalsWaitingForMe(module: String, actionKey: String, overdue: Boolean, paging: PageInput): ApprovalRequestPage! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "listApprovalsToDecide")
+  approvalsWaitingForMe(module: String, actionKey: String, overdue: Boolean, paging: PageInput): ApprovalRequestPage @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "listApprovalsToDecide")
   "Counts for the dashboard and inbox: waiting for me, overdue, my open requests"
-  myApprovalSummary: ApprovalSummary! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalSummaryFor")
+  myApprovalSummary: ApprovalSummary @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalSummaryFor")
   "One request with decisions and steps. Visible to the requester, eligible approvers and holders of access.approvals.view-all."
   approvalRequest(id: UUID!): ApprovalRequest @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "getApprovalForViewer")
   "Leads, backups and who receives each role's work today (dashboard 'Team on shift')"
-  teamOnShift(workArea: String): [AccessRoleCoverage!]! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "coverageNow")
+  teamOnShift(workArea: String): [AccessRoleCoverage!] @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "coverageNow")
 }
 
 extend type PayoutRun {
@@ -419,7 +419,7 @@ extend type RefundRequest {
 
 extend type Seller {
   "Open requests about this seller (restriction, suspension, payout destination change, holds) for AdminSeller"
-  pendingApprovals: [ApprovalRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF) @cost(weight: 5) @source(module: "access", fn: "approvalsForSellers")
+  pendingApprovals: [ApprovalRequest!] @areas(in: [ADMIN]) @auth(requires: STAFF) @cost(weight: 5) @source(module: "access", fn: "approvalsForSellers")
 }
 
 # ---------------------------------------------------------------- module: advertising
@@ -509,7 +509,7 @@ type AdDashboardSummary @areas(in: [ADMIN]) {
 
 extend type PromotionCampaign {
   "Ads linked to this promotion (they stop when it ends or runs out of budget)"
-  adCampaigns: [AdCampaignSummary!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "advertising.campaigns.view") @source(module: "advertising", fn: "campaignsForPromotion")
+  adCampaigns: [AdCampaignSummary!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "advertising.campaigns.view") @source(module: "advertising", fn: "campaignsForPromotion")
 }
 
 extend type Query {
@@ -648,28 +648,28 @@ type AuditEntryPage implements Paged @areas(in: [ADMIN]) {
 
 extend type Query {
   "The action history with filters, newest first"
-  auditEntries(filter: AuditFilterInput, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 10) @source(module: "audit", fn: "searchEntries")
+  auditEntries(filter: AuditFilterInput, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 10) @source(module: "audit", fn: "searchEntries")
   auditEntry(id: UUID!): AuditEntry @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @source(module: "audit", fn: "getEntry")
 }
 
 extend type Order {
   "Staff and system actions on this order, its items, packages, returns, refunds and cases"
-  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
 }
 
 extend type Seller {
   "Approval, restrictions, holds, payout destination and member changes for this seller"
-  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
 }
 
 extend type Customer {
   "Account actions by staff (restrictions, password resets, closures) and their reasons"
-  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
 }
 
 extend type PayoutRun {
   "Run creation, holds applied, approvals and release"
-  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
 }
 
 # ---------------------------------------------------------------- module: cart
@@ -722,7 +722,7 @@ type Product {
   "Possible duplicates found on submission"
   duplicateCandidates: [Product!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @cost(weight: 5)
   "Automated checks run on the latest submission (duplicates, imagery, category fit, claims, brand, restricted items, identifiers). Advisory: the reviewer decides."
-  checks: [ProductCheck!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @cost(weight: 3)
+  checks: [ProductCheck!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @cost(weight: 3)
 }
 
 type Spec {
@@ -977,7 +977,7 @@ extend type Query {
   "Product detail. In the store, only approved and active products resolve."
   product(id: UUID!): Product @source(module: "catalog", fn: "getProduct")
   "Submissions waiting for review, by review deadline (Product.submission carries kind, submittedAt and reviewDeadline)"
-  productReviewQueue(kind: ProductSubmissionKind, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
+  productReviewQueue(kind: ProductSubmissionKind, categoryId: UUID, paging: PageInput): ProductPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
   "Any product with review history (staff)"
   productAdmin(id: UUID!): Product @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "catalog", fn: "getProductAdmin")
 }
@@ -1309,9 +1309,9 @@ type Customer {
   totalSpend: Money! @areas(in: [ADMIN])
   verification: CustomerVerification! @areas(in: [ADMIN])
   "Internal notes, newest first. Never shown to the customer."
-  notes: [CustomerNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
+  notes: [CustomerNote!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
   "Recorded account actions (reset link, sign-out, restrict, suspend, close) with reason, newest first"
-  accountActions(limit: Int = 20): [CustomerAccountAction!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
+  accountActions(limit: Int = 20): [CustomerAccountAction!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
 }
 
 enum CustomerAccountStatus {
@@ -1502,7 +1502,7 @@ extend type Query {
   "Customer 360 (Admin Center customer detail)"
   customer(id: UUID!): Customer @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "customers", fn: "getCustomer")
   "Admin customer list"
-  customers(filter: CustomerFilterInput, paging: PageInput): CustomerPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "customers", fn: "searchCustomers")
+  customers(filter: CustomerFilterInput, paging: PageInput): CustomerPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view") @source(module: "customers", fn: "searchCustomers")
 }
 
 # ---------------------------------------------------------------- module: finance
@@ -2132,7 +2132,7 @@ extend type Seller {
 
 extend type Case {
   "Finance holds placed because of this case (dispute review)"
-  holds: [Hold!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "holdsForReference")
+  holds: [Hold!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "holdsForReference")
 }
 
 extend type Query {
@@ -2148,7 +2148,7 @@ extend type Query {
   """
   refundImpactPreview(orderRef: String!, items: [FinanceRefundImpactItemInput!], amount: Int, fundedBy: FinanceRefundFundedBy = SELLER): FinanceRefundImpact @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "previewRefundImpactForOrder") @cost(weight: 3)
   "Payout runs, newest first"
-  payoutRuns(status: PayoutRunStatus, paging: PageInput): PayoutRunPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "listPayoutRuns")
+  payoutRuns(status: PayoutRunStatus, paging: PageInput): PayoutRunPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "finance.ledger.view") @source(module: "finance", fn: "listPayoutRuns")
 }
 
 # ---------------------------------------------------------------- module: identity
@@ -2394,12 +2394,12 @@ extend type Offer {
 
 extend type Variant {
   "Stock items for this variant. Seller Center: the caller's own items; Admin Center: company and seller items, never summed"
-  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
+  stock: [StockItem!] @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
 }
 
 extend type Query {
   "Official Store stock by group (admin dashboard and stock overview)"
-  stockSummary(locationId: UUID): StockSummary! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "inventory.stock.view") @source(module: "inventory", fn: "getStockSummary") @cost(weight: 5)
+  stockSummary(locationId: UUID): StockSummary @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "inventory.stock.view") @source(module: "inventory", fn: "getStockSummary") @cost(weight: 5)
 }
 
 # ---------------------------------------------------------------- module: messaging
@@ -2693,7 +2693,7 @@ type Offer {
   "Status changes with reasons and who made them, newest first"
   statusLog(limit: Int = 20): [OfferStatusEntry!]! @areas(in: [SELLER, ADMIN])
   "Requested, pending, scheduled and recent price changes (Official Store approvals)"
-  priceChanges: [OfferPriceChange!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view")
+  priceChanges: [OfferPriceChange!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view")
   createdAt: DateTime! @areas(in: [SELLER, ADMIN])
   updatedAt: DateTime! @areas(in: [SELLER, ADMIN])
 }
@@ -3107,7 +3107,7 @@ extend type Query {
   "Any offer with status log, price history, price changes and eligibility reasons (staff)"
   offerAdmin(id: UUID!): Offer @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "getOfferAdmin")
   "All offers with filters (seller, product, status, featured eligibility and reason)"
-  offersAdmin(filter: OfferAdminFilter, paging: PageInput): OfferPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "listOffersAdmin")
+  offersAdmin(filter: OfferAdminFilter, paging: PageInput): OfferPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "listOffersAdmin")
 }
 
 # ---------------------------------------------------------------- module: orders
@@ -3165,13 +3165,13 @@ type Order {
   "Cancellations, returns and refunds per item with owner"
   afterSales: [OrderAdminAfterSales!]! @areas(in: [ADMIN])
   "Money split per seller group: who funded discounts, fee and earnings"
-  moneyBySeller: [OrderGroupMoney!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
+  moneyBySeller: [OrderGroupMoney!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
   "e.g. 'WELCOME20 is platform-funded; sellers receive their full price.'"
   couponFundingNote: String @areas(in: [ADMIN])
   "Internal notes, never shown to customers or sellers"
-  notes: [OrderInternalNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
+  notes: [OrderInternalNote!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
   "Staff action history with names and reasons (latest 20; full list via REST GET /orders/{id}/history)"
-  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @cost(weight: 5)
+  history: [TimelineEvent!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @cost(weight: 5)
   allowedActions: [OrderAdminAction!]! @areas(in: [ADMIN])
 }
 
@@ -3832,7 +3832,7 @@ extend type Query {
   "Order 360 across all sellers (staff)"
   orderAdmin(ref: String!): Order @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "getOrderAdmin")
   "Order list for staff; also feeds the customer 360 (filter.customerId) and seller 360 (filter.sellerId)"
-  ordersAdmin(filter: OrderAdminFilter, paging: PageInput): OrderPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "listOrdersAdmin") @cost(weight: 20)
+  ordersAdmin(filter: OrderAdminFilter, paging: PageInput): OrderPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "listOrdersAdmin") @cost(weight: 20)
 }
 
 extend type Customer {
@@ -3917,12 +3917,12 @@ type Payment @areas(in: [STORE, ADMIN]) {
   "Last decline on this checkout's attempts, if any"
   decline: PaymentDecline @areas(in: [ADMIN])
   "Share of the payment per seller group"
-  allocations: [PaymentAllocation!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
-  captures: [PaymentCapture!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  allocations: [PaymentAllocation!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  captures: [PaymentCapture!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
   "Every payment attempt of the checkout session (declines, retries)"
-  attempts: [PaymentAttempt!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  attempts: [PaymentAttempt!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
   "Provider calls (authorize, capture, refund, retrieve) with outcomes"
-  providerCalls: [PaymentProviderCall!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view") @cost(weight: 5)
+  providerCalls: [PaymentProviderCall!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view") @cost(weight: 5)
 }
 
 "How the customer paid, as recorded on the payment"
@@ -4024,7 +4024,7 @@ type Refund @areas(in: [STORE, ADMIN]) {
   providerRef: String @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
   reason: String @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
   requestedBy: Actor @areas(in: [ADMIN])
-  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
+  history: [TimelineEvent!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
 }
 
 type PaymentRefundItem @areas(in: [STORE, ADMIN]) {
@@ -4189,7 +4189,7 @@ extend type Order {
   "Paid, refunded, in-flight and remaining per item: the cap for the Issue refund dialog"
   refundable: PaymentRefundable @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view") @source(module: "payments", fn: "remainingRefundable") @cost(weight: 3)
   "Chargebacks and payment disputes on this order (order 360, dispute case)"
-  paymentDisputes: [PaymentDispute!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.disputes.manage") @source(module: "payments", fn: "listDisputesForOrder")
+  paymentDisputes: [PaymentDispute!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.disputes.manage") @source(module: "payments", fn: "listDisputesForOrder")
 }
 
 extend type Customer
@@ -5222,7 +5222,7 @@ extend type Order {
   "Returns on this order, newest first. Seller area: only the caller's own returns."
   returns: [Return!]! @source(module: "returns", fn: "listForOrder") @cost(weight: 5)
   "Refund requests for this order (returns, case decisions and exceptions) with Finance approval state"
-  refundRequests: [RefundRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForOrder")
+  refundRequests: [RefundRequest!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForOrder")
 }
 
 extend type OrderItem {
@@ -5232,24 +5232,24 @@ extend type OrderItem {
 
 extend type Customer {
   "Customer 360: the customer's returns"
-  returns(state: ReturnListState = ALL, paging: PageInput): ReturnPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForCustomer")
+  returns(state: ReturnListState = ALL, paging: PageInput): ReturnPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForCustomer")
 }
 
 extend type Seller {
   "Seller 360: the seller's returns"
-  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForSeller")
+  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForSeller")
 }
 
 extend type Case {
   "Refund requests created by this case's decision, with Finance approval state"
-  refundRequests: [RefundRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForCase")
+  refundRequests: [RefundRequest!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForCase")
 }
 
 extend type Query {
   "Any return with owner, exception record, refund request and action history (staff)"
   returnAdmin(ref: String!): Return @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "getReturnAdmin")
   "Refund approval queue for Finance"
-  refundRequests(status: RefundRequestStatus, source: RefundRequestSource, paging: PageInput): RefundRequestPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequests")
+  refundRequests(status: RefundRequestStatus, source: RefundRequestSource, paging: PageInput): RefundRequestPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequests")
   "One refund request with breakdown, funding, earnings impact and approval"
   refundRequest(ref: String!): RefundRequest @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "getRefundRequest")
 }
@@ -5637,9 +5637,9 @@ type Seller {
   restrictionSummary: String @areas(in: [ADMIN])
   "Open warning shown in lists, e.g. Dispatch below target"
   warningNote: String @areas(in: [ADMIN])
-  notes: [SellerNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
+  notes: [SellerNote!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
   "Account actions: approval, warnings, restrictions, suspensions, appeals, label changes (newest first)"
-  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
+  history: [TimelineEvent!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
 }
 
 enum SellerStatus @areas(in: [SELLER, ADMIN]) {
@@ -6004,7 +6004,7 @@ extend type Query {
   "Seller 360 (Admin Center seller detail)"
   sellerAdmin(id: UUID!): Seller @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "sellers", fn: "getSeller")
   "Admin seller list"
-  sellers(filter: SellerFilterInput, paging: PageInput): SellerPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "sellers", fn: "searchSellers")
+  sellers(filter: SellerFilterInput, paging: PageInput): SellerPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "sellers", fn: "searchSellers")
 }
 
 # ---------------------------------------------------------------- module: settings
@@ -6087,7 +6087,7 @@ type StoreInfoFeature {
 
 extend type Query {
   "Support hours, open now, closures, maintenance notice and public flags"
-  storeInfo: StoreInfo! @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
+  storeInfo: StoreInfo @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
 }
 
 # ---------------------------------------------------------------- module: shipping
@@ -6423,9 +6423,9 @@ extend type Query {
   "Shipment history with events, corrections, label and exceptions (staff)"
   shipmentAdmin(id: UUID!): Shipment @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.shipments.view") @source(module: "shipping", fn: "getShipment")
   "Dispatch and delivery exceptions with owner, deadline and whether the customer was notified"
-  deliveryExceptions(filter: DeliveryExceptionFilter, paging: PageInput): DeliveryExceptionPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptions")
+  deliveryExceptions(filter: DeliveryExceptionFilter, paging: PageInput): DeliveryExceptionPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptions")
   "Open exceptions per kind (ops queue tiles, admin dashboard)"
-  deliveryExceptionCounts: DeliveryExceptionCounts! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "countOpenExceptions") @cost(weight: 3)
+  deliveryExceptionCounts: DeliveryExceptionCounts @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "countOpenExceptions") @cost(weight: 3)
 }
 
 extend type OrderGroup {
@@ -6435,7 +6435,7 @@ extend type OrderGroup {
 
 extend type Order {
   "Every delivery exception on the order, across sellers (order 360)"
-  deliveryExceptions: [DeliveryException!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptionsForOrder")
+  deliveryExceptions: [DeliveryException!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "shipping.exceptions.view") @source(module: "shipping", fn: "listExceptionsForOrder")
 }
 
 extend type Offer
@@ -6881,12 +6881,12 @@ extend type Return {
 
 extend type Customer {
   "Customer 360: the customer's cases and disputes"
-  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForCustomer")
+  cases(open: Boolean, paging: PageInput): CasePage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForCustomer")
 }
 
 extend type Seller {
   "Seller 360: cases and disputes about the seller's orders"
-  cases(open: Boolean, paging: PageInput): CasePage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForSeller")
+  cases(open: Boolean, paging: PageInput): CasePage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "support.cases.view") @source(module: "support", fn: "listCasesForSeller")
 }
 
 extend type Query {
@@ -7791,6 +7791,6 @@ extend type Query {
   "Needs-attention tiles, overdue dispatch and team on shift (AdminDashboard)"
   workSummary: WorkQueueSummary @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "getWorkSummary") @cost(weight: 5)
   "Work items across the queues the caller may see"
-  workItems(filter: WorkItemFilterInput, paging: PageInput): WorkItemPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "listItems")
+  workItems(filter: WorkItemFilterInput, paging: PageInput): WorkItemPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "listItems")
   workItem(id: UUID!): WorkItem @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "getItem")
 }

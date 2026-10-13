@@ -118,6 +118,8 @@ for (const fr of fragments) {
       const auth = field.directives?.find((x) => x.name.value === 'auth');
       const perm = auth && strArg(auth, 'permission');
       if (perm && !permissions.has(perm)) err(where, `@auth permission "${perm}" is not declared in any REST spec`);
+      // a refused field answers null with FORBIDDEN (README "Errors": 200, partial); non-null would blank its parent, up to the whole screen
+      if (auth && field.type.kind === Kind.NON_NULL_TYPE) err(where, '@auth fields may be refused (answering null), so the field must be nullable');
       for (const a of areasOf(field) ?? []) if (!AREAS.includes(a)) err(where, `unknown area ${a}`);
       const sens = field.directives?.find((x) => x.name.value === 'sensitive');
       if (sens) {
