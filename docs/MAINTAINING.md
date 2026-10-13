@@ -28,6 +28,7 @@ From `backend/`:
 | `npm run dev` | the API on http://localhost:4000 with reload; API reference at `/docs`. Without `MONGODB_URI` it starts its own MongoDB in memory (set `MONGO_DATA_DIR=.data/mongo` to keep the data) |
 | `npm run token -- staff` | a development token (`visitor`, `customer`, `seller`, `staff`). Every endpoint needs a token: `curl -H "Authorization: Bearer <token>" …` |
 | `npx vitest run src/modules/<module>` | one module's tests (a minute or two). Use this while working |
+| `TEST_MONGODB_URI=mongodb://127.0.0.1:27017/?replicaSet=rs0 npx vitest run` | the tests on a real MongoDB instead of the in-memory one (after a MongoDB upgrade, for example). They create databases named `t<n>_<n>` and drop them at the end; never point it at a production server |
 | `npm run check` | everything, in order: spec freshness, types, module boundaries, API conformance, all tests, every endpoint over HTTP. About 8 minutes. Run it before every commit you keep |
 
 Requirements: Node 22 or newer; MongoDB 6.0 installed (`C:\Program Files\MongoDB\Server\6.0`) makes the

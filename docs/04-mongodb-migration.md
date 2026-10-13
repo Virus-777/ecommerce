@@ -1,6 +1,6 @@
 # Phase: MongoDB migration plan
 
-Status: **M1, M2 and M3 built.** The kernel and all 33 modules keep their data in MongoDB only; PostgreSQL, PGlite, Kysely and pg-boss are removed from the code, the tools, the tests and the packages (M3, 2026-10-13). What remains is **M4**: running against a real MongoDB 6.0 replica set (§6). The rest of this document is the plan as decided; where it names PostgreSQL it records where the design came from.
+Status: **M1–M4 done** (M4 on 2026-10-13: a local MongoDB 6.0.29 replica set `rs0`; `npm run migrate` created all 381 collections of the 30 launch modules with their validators and indexes, every endpoint passed `test:http --url` (5,954 checks), and the whole suite passed on it with `TEST_MONGODB_URI`: 7,650 tests). The kernel and all 33 modules keep their data in MongoDB only; PostgreSQL, PGlite, Kysely and pg-boss are removed from the code, the tools, the tests and the packages (M3, 2026-10-13). What remains is **M4**: running against a real MongoDB 6.0 replica set (§6). The rest of this document is the plan as decided; where it names PostgreSQL it records where the design came from.
 
 The database requirement changed: the backend must run on MongoDB. Decisions taken (2026-10-12):
 
@@ -112,7 +112,7 @@ Each phase ends with `npm run check` green and a report; the next starts after a
 | **M1 Foundations** (built) | Kernel MongoDB layer (client, naming, transactions with retry, lock-by-write, id mapping, keyset paging), schema setup and migrations, kernel collections, job queue, rate-limit store, inbox, refs, idempotency; generator (types, validators, indexes); test harness (in-memory replica set); contract suite on collections. Pilot: **settings** and **access** ported to `infra/mongo/` | kernel tests and the two pilot modules pass on MongoDB; the pattern is written into `backend/docs/BUILDING-MODULES.md` |
 | **M2 Modules, in tranches** (built; dependency order, parallel builders as before) | A: identity, audit, media, notifications · B: customers, catalog, inventory, sellers, purchasing, workqueues · C: offers, search, promotions, cart, orders, content · D: payments, shipping, checkout, messaging, reviews, finance, returns · E: support, trust, advertising, reports, warehouse · F: wishlist, wallet, fulfillment-service | each module's tests and its `test:http` pass on MongoDB |
 | **M3 Remove PostgreSQL** (built) | Delete `infra/postgres/`, PGlite, `pg`, `pg-boss`, Kysely; configuration (`MONGODB_URI`); docs 02, 03, README, FORMAT, .env.example | `npm run check` green with MongoDB only |
-| **M4 Real server** | Run against a local MongoDB 6.0 replica set: migrate, start, `test:http --url`, and the whole suite under real concurrency (as was done on PostgreSQL, where it found deadlocks and lost updates) | all green on the real server |
+| **M4 Real server** (done) | Run against a local MongoDB 6.0 replica set: migrate, start, `test:http --url`, and the whole suite under real concurrency (as was done on PostgreSQL, where it found deadlocks and lost updates) | all green on the real server |
 
 ## 7. Risks
 
