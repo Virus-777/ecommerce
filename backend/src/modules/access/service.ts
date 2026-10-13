@@ -73,7 +73,6 @@ import { approvalRequestMachine, awayPeriodMachine, limitChangeMachine, roleAssi
 import {
   OPEN_ASSIGNMENT,
   OPEN_REQUEST,
-  type AccessRepository,
   type ActionRow,
   type AssignmentRow,
   type AwayRow,
@@ -84,6 +83,7 @@ import {
   type RequestRow,
   type RoleRow,
 } from './ports.js';
+import type { AccessRepository } from './repository.js';
 
 export interface AccessServiceDeps {
   repo: AccessRepository;
@@ -140,7 +140,7 @@ const notFound = (what: string) => new AppError('NOT_FOUND', `${what} not found`
 const KIND_ORDER: Record<string, number> = { owner: 0, management: 1, task: 2, custom: 3 };
 
 /**
- * Access and approvals use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Access and approvals use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/access.json.
  */
 export class AccessService implements AccessPublicApi {

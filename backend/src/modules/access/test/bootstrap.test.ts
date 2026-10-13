@@ -27,6 +27,8 @@ beforeAll(async () => {
     config: { rateLimits: false },
     apiStubs: { audit: { record: async (e: audit.RecordInput) => (audits.push(e), 'entry-id') } },
   });
+  // the boot can take a while: start the app's time after it
+  clock.set(new Date());
   f = flows(app, clock);
   access = app.kernel.boot.apis.get('access') as AccessService;
   app.kernel.events.subscribe('test', 'access.approval.requested', (e) => void requested.push(e.payload));

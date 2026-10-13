@@ -4,7 +4,8 @@
  * Away cover is computed from now in [from, to), so it ends even when the job scheduler is off.
  */
 import { BUSINESS_OWNER } from './domain/seed.js';
-import type { AccessRepository, AssignmentRow, AwayCoverageRow, AwayRow, RoleRow } from './ports.js';
+import type { AssignmentRow, AwayCoverageRow, AwayRow, RoleRow } from './ports.js';
+import type { AccessRepository } from './repository.js';
 
 export interface Directory {
   now: Date;
