@@ -104,7 +104,10 @@ export async function reviewFlow(sim: Sim): Promise<void> {
   const s = o.customer!.session;
   const item = o.groups.find((g) => g.fulfilledBy === 'seller')!.items[0]!;
   const pending = await api.call(s, 'GET', '/api/store/reviews/me/pending');
-  run.check('the delivered item waits for a review', JSON.stringify(pending).includes(item.id), undefined);
+  // one entry per product (a product is reviewed once): a customer who bought it twice sees their latest delivery
+  const productId = o.seller.offers.find((x) => x.offerId === item.offerId)?.productId;
+  const waiting = (pending.products as { orderItemId: string; productId: string }[]).some((p) => p.orderItemId === item.id || p.productId === productId);
+  run.check('the delivered item waits for a review', waiting, pending.products);
   const text = sim.pick(REVIEW_TEXTS);
   const review = await api.call(s, 'POST', '/api/store/reviews/me/reviews', { orderItemId: item.id, rating: sim.pick([4, 5, 5]), headline: text.headline, text: text.text, showName: true });
   run.check('the review is published or waits for moderation', ['published', 'pending'].includes(review.status), review.status);
@@ -142,7 +145,8 @@ export async function trustFlow(sim: Sim): Promise<void> {
   if (!c || !offer) return run.fail({ step: 'a listing to report', message: 'no customer or offer' });
   const mine = await api.call(c.session, 'POST', '/api/store/trust/reports', { type: 'misleading_listing', subject: { type: 'offer', id: offer.offerId }, reason: 'photos_do_not_match', details: 'The photo shows a different colour from the one in the title.' });
   const tia = w.staff.trust!.session;
-  const reports = await api.call(tia, 'GET', '/api/admin/trust/reports?limit=50');
+  // the queue is sorted by risk and holds earlier runs' reports: look the listing up, as an analyst would
+  const reports = await api.call(tia, 'GET', `/api/admin/trust/reports?subjectType=offer&subjectId=${offer.offerId}&limit=50`);
   const report = (reports.items as { id: string; ref: string }[]).find((r) => r.ref === mine.ref || JSON.stringify(r).includes(offer.offerId));
   run.check('Trust and Risk see the report', Boolean(report), reports.items);
   await api.call(tia, 'POST', `/api/admin/trust/reports/${report!.id}/notes`, { body: 'Compared the photos: a lighting difference, not a different product.' });

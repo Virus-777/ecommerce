@@ -239,6 +239,8 @@ export class Sim {
 
   /** Runs a scheduled job now and waits for its events (JOBS_ENABLED is false on development servers) */
   async job(name: string): Promise<void> {
+    // what earlier requests set off must be processed first (an offer going live queues its product for search)
+    await this.app.kernel.events.drain();
     await this.app.kernel.jobs.runNow(name);
     await this.app.kernel.events.drain();
   }

@@ -218,6 +218,10 @@ export async function searchFlow(sim: Sim): Promise<void> {
   const { api, people, world: w, run } = sim;
   // the index catches up on its schedule; run it now (development servers run no jobs)
   await sim.job('search.process-dirty');
+  // the job takes 200 queued products at a time, every 30 s on a real server; a development server runs no jobs, so
+  // earlier runs leave a backlog: work through it as the schedule would
+  const dirty = () => sim.app.kernel.mongo.db.collection('search.dirty_documents').countDocuments();
+  for (let i = 0; i < 20 && (await dirty()) > 0; i++) await sim.job('search.process-dirty');
   const shopper: Session = await people.visitor('store', 'android', 'shopper (search)');
   const all = [...w.sellers.flatMap((s) => s.offers), ...w.official];
   const titles = [...new Set(all.map((o) => o.title.replace(/ \(.*\)$/, '')))];
