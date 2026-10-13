@@ -5,7 +5,7 @@ import { typeDefs } from './graphql/schema.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
-import { createMongoSettingsRepository } from './repository.js';
+import { SettingsRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { SettingsService } from './service.js';
 
@@ -22,7 +22,7 @@ export default defineModule({
   graphql: typeDefs,
   async register(ctx) {
     const service = new SettingsService({
-      repo: createMongoSettingsRepository(ctx.mongo),
+      repo: new SettingsRepository(ctx.mongo),
       ctx,
       // the kernel does not tell a module which modules run; this mirrors app.ts (spec gap, see report)
       enabledModules: ctx.modules,

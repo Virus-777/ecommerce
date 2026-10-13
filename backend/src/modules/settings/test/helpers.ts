@@ -62,6 +62,8 @@ export async function harness(): Promise<Harness> {
       },
     },
   });
+  // the boot can take a while: the app's time must not stay behind the test tokens, signed at the real time
+  clock.set(new Date());
   for (const name of PUBLISHED) app.kernel.events.subscribe('test', name, (e) => void h.events.push({ name, payload: e.payload }));
   return { ...h, app, api: app.kernel.boot.apis.get('settings') as SettingsPublicApi };
 }

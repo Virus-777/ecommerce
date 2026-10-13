@@ -1,8 +1,110 @@
 /**
- * Settings rows ↔ records, shared by the repositories: what a stored row means is independent of the database.
+ * Settings records (what the service works with), their stored rows, and the conversions between the two
+ * (used by repository.ts).
  */
-import type { SettingsDb } from '../../spec/settings.js';
-import type { ChangeMeta, ChangePatch, ChangeRecord, FlagRecord, ValueRecord } from './ports.js';
+import type { Actor, TimelineEvent } from '../../spec/common.js';
+import type { ChangeItem, ImpactPreview, SettingChange, SettingsDb } from '../../spec/settings.js';
+
+export type ChangeStatus = SettingChange['status'];
+export type ApplyScope = SettingChange['applyScope'];
+
+/** settings.definitions row (the persisted mirror of the catalogue, synced at boot) */
+export interface DefinitionRecord {
+  key: string;
+  module: string;
+  section: string;
+  label: string;
+  description: string;
+  valueType: string;
+  schema: { enumValues: string[]; min: number | null; max: number | null; unit: string | null; nullable: boolean };
+  default: unknown;
+  editable: boolean;
+  approval: string;
+  minLeadDays: number;
+  applyScopes: string[];
+  sellerVisible: boolean;
+  public: boolean;
+  exampleValue: boolean;
+  editPermission: string;
+}
+
+/** settings.values row: one effective-dated version of a key */
+export interface ValueRecord {
+  id: string;
+  key: string;
+  version: number;
+  value: unknown;
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  applyScope: ApplyScope;
+  changeId: string | null;
+  changedBy: { kind: string; id: string };
+  approvedById: string | null;
+  reason: string | null;
+  createdAt: Date;
+}
+
+/**
+ * What a change keeps beside its columns. Stored in changes.impact (jsonb) next to the preview,
+ * because the spec's changes table has no timeline or approver columns (spec gap, see report).
+ */
+export interface ChangeMeta {
+  preview: ImpactPreview;
+  timeline: TimelineEvent[];
+  /** Creator with name (the columns keep kind and id only) */
+  createdBy: Actor;
+  /** Who approved (access decision) */
+  approvedBy: Actor | null;
+  /** When it entered scheduled: a version never takes effect before it was scheduled */
+  scheduledAt: string | null;
+  /** Why no approval was needed, or why it was (access check reason) */
+  approvalNote: string | null;
+}
+
+/** settings.changes row */
+export interface ChangeRecord {
+  id: string;
+  ref: string;
+  status: ChangeStatus;
+  items: ChangeItem[];
+  effectiveAt: Date;
+  applyScope: ApplyScope;
+  reason: string;
+  meta: ChangeMeta;
+  createdByKind: string;
+  createdById: string;
+  createdAt: Date;
+  submittedAt: Date | null;
+  approvalRequestId: string | null;
+  appliedAt: Date | null;
+  cancelReason: string | null;
+  version: number;
+  announcedAt: Date | null;
+}
+
+export type ChangePatch = Partial<Omit<ChangeRecord, 'id' | 'ref' | 'createdAt' | 'createdByKind' | 'createdById' | 'version'>>;
+
+/** settings.feature_flags row */
+export interface FlagRecord {
+  key: string;
+  module: string;
+  label: string;
+  description: string;
+  enabled: boolean;
+  rollout: 'everyone' | 'staff_only' | 'percentage';
+  percentage: number | null;
+  public: boolean;
+  plannedPhase: number | null;
+  updatedBy: string | null;
+  updatedAt: Date | null;
+}
+
+export interface ChangeFilter {
+  status?: ChangeStatus;
+  key?: string;
+  /** Keys of a section (the service resolves section → keys) */
+  keys?: string[];
+}
 
 export type ValueRow = SettingsDb['values'];
 export type ChangeRow = SettingsDb['changes'];

@@ -41,8 +41,8 @@ import { APPROVER_LABELS, buildCatalogue, KNOWN_MODULE_SECTIONS, OWN_SECTIONS, s
 import { evaluateFlag, FLAG_CATALOGUE, type FlagState } from './domain/flags.js';
 import { settingChangeMachine } from './domain/state-machines.js';
 import { closedLabel, dateText, hoursLabel, sameValue, validateValue, valueText, type Issue } from './domain/values.js';
-import { SEED_ACTOR } from './records.js';
-import type { ChangeMeta, ChangeRecord, DefinitionRecord, FlagRecord, SettingsRepository, ValueRecord } from './ports.js';
+import { SEED_ACTOR, type ChangeMeta, type ChangeRecord, type DefinitionRecord, type FlagRecord, type ValueRecord } from './records.js';
+import type { SettingsRepository } from './repository.js';
 
 export interface SettingsServiceDeps {
   repo: SettingsRepository;
@@ -106,7 +106,7 @@ type Estimator = (change: { key: string; from: unknown; to: unknown; effectiveAt
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
 /**
- * Settings use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Settings use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/settings.json.
  */
 export class SettingsService implements SettingsPublicApi {
