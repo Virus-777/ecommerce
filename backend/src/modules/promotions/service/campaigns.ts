@@ -51,7 +51,8 @@ import {
   type Issue,
 } from '../domain/rules.js';
 import { decodeActor, encodeActor, iso, isoOrNull, periodOf, toCode, toFundingReview, toLogEntry, toRedemption, toSummary } from '../mappers.js';
-import type { CampaignRec, EligibleRec, FlashItemRec, FundingReviewRec, PromotionsRepository, ResultRec, TargetRec } from '../ports.js';
+import type { CampaignRec, EligibleRec, FlashItemRec, FundingReviewRec, ResultRec, TargetRec } from '../ports.js';
+import type { PromotionsRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, type By, type OfferCard } from './core.js';
 
 const CLOSED = ['ended', 'cancelled'];

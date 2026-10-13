@@ -357,7 +357,7 @@ export class StorefrontPart extends Part {
     const [card] = await this.cards([c], customerId);
     if (card!.state === 'used') throw new AppError('ILLEGAL_TRANSITION', "You've already used this coupon", { from: 'used', event: 'clip' });
     const code = await this.repo.findOne('coupon_codes', { campaign_id: campaignId, assigned_customer_id: customerId, active: true });
-    const inserted = await this.repo.insertIgnore('coupon_clips', { customer_id: customerId, campaign_id: campaignId, code_id: code?.id ?? null, clipped_at: now });
+    const inserted = await this.repo.insertIfAbsent('coupon_clips', { customer_id: customerId, campaign_id: campaignId, code_id: code?.id ?? null, clipped_at: now });
     if (!inserted) throw new AppError('ILLEGAL_TRANSITION', 'This coupon is already clipped', { from: 'clipped', event: 'clip' });
     return (await this.cards([c], customerId))[0]!;
   }
@@ -489,7 +489,7 @@ export class StorefrontPart extends Part {
     if (!row || row.owner_kind !== 'platform' || !['scheduled', 'live'].includes(row.status)) throw notFound('Event');
     const [c] = await this.core.models([row]);
     if (c!.startsAt.getTime() <= this.now().getTime()) throw invalid([{ path: 'campaignId', message: 'This event has already started' }], 'This event has already started');
-    await this.repo.insertIgnore('event_reminders', { customer_id: customerId, campaign_id: campaignId, created_at: this.now(), sent_at: null });
+    await this.repo.insertIfAbsent('event_reminders', { customer_id: customerId, campaign_id: campaignId, created_at: this.now(), sent_at: null });
     return this.event(c!, true);
   }
 

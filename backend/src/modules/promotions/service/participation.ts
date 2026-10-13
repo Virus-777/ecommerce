@@ -16,7 +16,6 @@ import type { ParticipationRec } from '../ports.js';
 import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 const OPEN_CAMPAIGN = ['draft', 'in_review', 'changes_requested', 'approved', 'scheduled', 'live', 'paused'];
-const ACTIVE_STATES = ['invited', 'accepted', 'withdrawal_requested'];
 
 export class ParticipationPart extends Part {
   /* ---------------------------------------------------------------- views */

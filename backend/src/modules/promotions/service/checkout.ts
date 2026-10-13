@@ -6,16 +6,15 @@
 import { createHash } from 'node:crypto';
 import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
-import { newId } from '../../../kernel/lib/ids.js';
-import { isUuid } from '../../../kernel/lib/ids.js';
-import type * as common from '../../../spec/common.js';
+import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type { CartEvaluation, CartEvaluationInput, FundingSplit, Redemption, RedemptionReservation, RefundShare, RejectedCode } from '../../../spec/promotions.js';
 import { evaluate, type CouponCandidate, type EvalLine, type Hold, type PriceOption } from '../domain/evaluate.js';
 import { flashItemMachine, redemptionMachine } from '../domain/state-machines.js';
 import { COUPON_KINDS, m, moneyLabel, needsConsent, PRICE_KINDS, SHIPPING_KINDS, type CampaignModel } from '../domain/rules.js';
-import { iso, toRedemption } from '../mappers.js';
-import type { FlashItemRec, PromotionsRepository, RedemptionLineRec, RedemptionRec } from '../ports.js';
+import { toRedemption } from '../mappers.js';
+import type { FlashItemRec, RedemptionLineRec, RedemptionRec } from '../ports.js';
+import type { PromotionsRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 /** What an evaluation row keeps: the input, the answer and the holds a reservation takes */
