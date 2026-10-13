@@ -42,7 +42,7 @@ const toPage = (p: common.PageInput | undefined) => {
 };
 
 /**
- * Shipping use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Shipping use cases. Depends on its repository, the carrier port, the event bus, the clock and other modules' public APIs.
  * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class ShippingService implements ShippingPublicApi {

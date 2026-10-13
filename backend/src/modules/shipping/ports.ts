@@ -1,8 +1,7 @@
 /**
- * What the shipping service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts; carriers sit behind CarrierPort (dev adapter in providers/carriers.ts).
+ * Row types of the shipping collections (typed json fields; the repository is repository.ts) and the carrier
+ * interface, CarrierPort (the dev carrier is providers/carriers.ts).
  */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type {
   CarrierContact,
@@ -117,43 +116,8 @@ export interface Recs {
   claims: ClaimRec;
   webhook_events: WebhookRec;
 }
-export type Table = keyof Recs;
-
-/** A column condition: a value (=), a list (in), null (is null) or an operator */
-export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not'; value: V | null };
-export type Where<R> = { [K in keyof R]?: Cond<R[K]> };
-
-export interface FindOptions<R> {
-  orderBy?: [keyof R & string, 'asc' | 'desc'][];
-  limit?: number;
-  forUpdate?: boolean;
-}
-
-export interface PageOptions<R> {
-  order: { column: keyof R & string; direction: 'asc' | 'desc' };
-  /** Case-insensitive contains over these text columns */
-  search?: { columns: (keyof R & string)[]; term: string };
-}
-
-/** Persistence for this module's own tables (schema shipping). */
-export interface ShippingRepository {
-  /** Runs fn in one transaction (nested calls join the outer one) */
-  transaction<T>(fn: (tx: ShippingRepository) => Promise<T>): Promise<T>;
-
-  get<T extends Table>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;
-  find<T extends Table>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]>;
-  count<T extends Table>(table: T, where: Where<Recs[T]>): Promise<number>;
-  insert<T extends Table>(table: T, row: Recs[T]): Promise<Recs[T]>;
-  insertMany<T extends Table>(table: T, rows: Recs[T][]): Promise<void>;
-  /** Inserts unless the row conflicts with a unique key; returns whether it was inserted */
-  insertIfNew<T extends Table>(table: T, row: Recs[T]): Promise<boolean>;
-  update<T extends Table>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
-  updateWhere<T extends Table>(table: T, where: Where<Recs[T]>, patch: Partial<Recs[T]>): Promise<number>;
-  removeWhere<T extends Table>(table: T, where: Where<Recs[T]>): Promise<void>;
-  page<T extends Table>(table: T, where: Where<Recs[T]>, page: PageRequest, o: PageOptions<Recs[T]>): Promise<common.Page<Recs[T]>>;
-  /** Open exceptions per kind and open exceptions whose customer was not notified */
-  exceptionCounts(): Promise<{ kinds: Record<string, number>; notNotified: number }>;
-}
+/** The shipping collections (spec tables) */
+export type TableName = keyof Recs;
 
 /* ---------------------------------------------------------------- carriers */
 

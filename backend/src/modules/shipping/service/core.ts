@@ -16,7 +16,8 @@ import { MON_FRI } from '../domain/calendar.js';
 import { CONTIGUOUS_48_DC, MILITARY, TERRITORIES } from '../domain/geo.js';
 import { carrierSeedId, carrierServiceSeedId } from '../domain/seed.js';
 import { CARRIER_CATALOG, DEFAULT_CARRIERS } from '../domain/tracking.js';
-import type { CarrierPort, ShippingRepository, TargetsRec } from '../ports.js';
+import type { CarrierPort, TargetsRec } from '../ports.js';
+import type { ShippingRepository } from '../repository.js';
 
 export interface ShippingServiceDeps {
   repo: ShippingRepository;
@@ -251,7 +252,7 @@ export class Core {
     const services = new Map<string, string>();
     for (const code of DEFAULT_CARRIERS) {
       const def = CARRIER_CATALOG[code]!;
-      await repo.insertIfNew('carriers', {
+      await repo.insertIfAbsent('carriers', {
         id: carrierSeedId(code),
         code,
         name: def.name,
@@ -265,7 +266,7 @@ export class Core {
       });
       const carrier = (await repo.find('carriers', { code }))[0]!;
       for (const s of def.services) {
-        await repo.insertIfNew('carrier_services', {
+        await repo.insertIfAbsent('carrier_services', {
           id: carrierServiceSeedId(code, s.code),
           carrier_id: carrier.id,
           code: s.code,
@@ -286,7 +287,7 @@ export class Core {
       { code: 'express', name: 'Express', customer_label: '1–2 business days', transit_min: 1, transit_max: 2, carrier_service_ids: ids('ups:next_day_air', 'usps:priority_express', 'fedex:standard_overnight'), position: 3 },
       { code: 'large_items', name: 'Large items', customer_label: '5–10 business days', transit_min: 5, transit_max: 10, carrier_service_ids: ids('fedex:freight'), position: 4 },
     ];
-    for (const m of methods) await repo.insertIfNew('methods', { id: newId(), active: true, ...m });
+    for (const m of methods) await repo.insertIfAbsent('methods', { id: newId(), active: true, ...m });
 
     if (!(await repo.count('zones', {}))) {
       const zone = (name: string, kind: 'served' | 'excluded', regions: string[], extra: { address_kinds?: string[]; transit?: Record<string, { min: number; max: number }>; message?: string; status?: string } = {}) => ({

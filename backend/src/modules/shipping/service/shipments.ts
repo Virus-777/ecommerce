@@ -870,7 +870,7 @@ export class Shipments {
       if (e.source === 'staff' && !path && ['in_transit', 'out_for_delivery', 'delivered', 'attempt_failed', 'held_for_pickup', 'returning', 'returned'].includes(e.code)) {
         throw new AppError('ILLEGAL_TRANSITION', `A ${statusLabel(s.status, s.tracking_state, s.kind).toLowerCase()} package cannot move to ${EVENT_LABELS[e.code].toLowerCase()}`, { machine: 'Shipment', from: s.status, event: e.code, allowed: shipmentMachine.eventsFrom(s.status as never) });
       }
-      const inserted = await tx.insertIfNew('tracking_events', { id: newId(), shipment_id: s.id, code: e.code, label: EVENT_LABELS[e.code], detail: e.detail, location: e.location, source: e.source, carrier_event_id: e.carrierEventId, at: e.at });
+      const inserted = await tx.insertIfAbsent('tracking_events', { id: newId(), shipment_id: s.id, code: e.code, label: EVENT_LABELS[e.code], detail: e.detail, location: e.location, source: e.source, carrier_event_id: e.carrierEventId, at: e.at });
       if (!inserted) return { s, changed: false, duplicate: true, scanned: false, from: s.status };
       const carrierScan = e.source === 'carrier_webhook' || e.source === 'carrier_poll';
       const scanned = carrierScan && ['accepted', 'in_transit', 'out_for_delivery', 'delivered', 'attempt_failed', 'held_for_pickup', 'returning', 'returned'].includes(e.code);
@@ -962,12 +962,12 @@ export class Shipments {
     const scans = this.core.carriers.parseWebhook(code, body, eventId);
     const now = this.core.now();
     if (!scans.length) {
-      await this.repo.insertIfNew('webhook_events', { id: newId(), carrier_code: code, external_id: eventId ?? `raw:${newId()}`, payload: body ?? null, received_at: now, processed_at: now, error: 'No tracking events in the payload' });
+      await this.repo.insertIfAbsent('webhook_events', { id: newId(), carrier_code: code, external_id: eventId ?? `raw:${newId()}`, payload: body ?? null, received_at: now, processed_at: now, error: 'No tracking events in the payload' });
       return { received: true };
     }
     for (const scan of scans) {
       const id = newId();
-      if (!(await this.repo.insertIfNew('webhook_events', { id, carrier_code: code, external_id: scan.id, payload: scan, received_at: now, processed_at: null, error: null }))) continue;
+      if (!(await this.repo.insertIfAbsent('webhook_events', { id, carrier_code: code, external_id: scan.id, payload: scan, received_at: now, processed_at: null, error: null }))) continue;
       await this.processStored(id, code, scan);
     }
     return { received: true };

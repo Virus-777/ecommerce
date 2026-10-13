@@ -8,7 +8,7 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { devCarrierAdapter } from './providers/carriers.js';
-import { createMongoShippingRepository } from './repository.js';
+import { ShippingRepository } from './repository.js';
 import { ShippingService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -25,7 +25,7 @@ export default defineModule({
   graphql: typeDefs,
   register(ctx) {
     // carriers sit behind a port; the deterministic dev adapter until real carrier accounts are connected
-    const service = new ShippingService({ repo: createMongoShippingRepository(ctx.mongo), ctx, carriers: devCarrierAdapter() });
+    const service = new ShippingService({ repo: new ShippingRepository(ctx.mongo), ctx, carriers: devCarrierAdapter() });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     // carrier webhooks: HMAC per carrier ({carrier} in the URL names the secret)

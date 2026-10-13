@@ -84,7 +84,7 @@ export class Exceptions {
     // Fulfilled by Marketly: the Shipping Manager's exception; the seller is never notified or asked to respond
     const marketly = byMarketly(o.group.fulfilledBy);
     const created = await this.repo.transaction(async (tx) => {
-      const ok = await tx.insertIfNew('exceptions', {
+      const ok = await tx.insertIfAbsent('exceptions', {
         id,
         kind: o.kind,
         order_id: o.group.orderId,
@@ -517,7 +517,7 @@ export class Exceptions {
       let due = new Date(g.dispatchBy);
       const fulfilledBy = fulfilledByOf(g.ownerType, g.fulfilledBy);
       const sellerId = g.ownerType === 'official' ? null : (g.sellerId ?? null);
-      const inserted = await this.repo.insertIfNew('dispatch_watch', { group_id: g.groupId, order_id: e.orderId, owner_type: g.ownerType, seller_id: sellerId, fulfilled_by: fulfilledBy, due_at: due, open_item_ids: g.itemIds, overdue_since: null });
+      const inserted = await this.repo.insertIfAbsent('dispatch_watch', { group_id: g.groupId, order_id: e.orderId, owner_type: g.ownerType, seller_id: sellerId, fulfilled_by: fulfilledBy, due_at: due, open_item_ids: g.itemIds, overdue_since: null });
       if (!inserted) continue;
       placedAt ??= await this.orders.getOrder(e.orderId).then((o) => (o ? new Date(o.placedAt) : null), () => null);
       if (!placedAt || this.core.today(acceptedAt) <= this.core.today(placedAt)) continue;
@@ -758,7 +758,7 @@ export class Exceptions {
     const plan = await this.estimates.plan(await this.estimates.world(), scheduleOwner(owner, fulfilledBy), { businessDays: null });
     const existing = await this.repo.get('dispatch_watch', group.id);
     if (!existing) {
-      await this.repo.insertIfNew('dispatch_watch', { group_id: group.id, order_id: e.orderId, owner_type: e.ownerType, seller_id: owner.sellerId, fulfilled_by: fulfilledBy, due_at: plan.dueAt, open_item_ids: [`replacement:${e.replacementId}`], overdue_since: null });
+      await this.repo.insertIfAbsent('dispatch_watch', { group_id: group.id, order_id: e.orderId, owner_type: e.ownerType, seller_id: owner.sellerId, fulfilled_by: fulfilledBy, due_at: plan.dueAt, open_item_ids: [`replacement:${e.replacementId}`], overdue_since: null });
     } else if (!existing.open_item_ids.includes(`replacement:${e.replacementId}`)) {
       await this.repo.update('dispatch_watch', group.id, { open_item_ids: [...existing.open_item_ids, `replacement:${e.replacementId}`], ...(existing.overdue_since ? { due_at: plan.dueAt, overdue_since: null } : {}) });
     }
