@@ -1,0 +1,81 @@
+# screens: store/offers
+# replaces: GET catalog/products/{id}, GET offers/products/{productId}/offers, GET offers/featured-offer-rule, GET promotions/products/{productId}, GET shipping/estimates, GET returns/terms, GET sellers/stores/{slug}, GET reviews/sellers/{sellerId}/feedback-summary, GET reviews/rating-summaries
+# why: Comparing every offer by total cost needs price, shipping, delivery date, condition, seller quality and return terms per offer from seven modules; one query per sort or condition change.
+query OffersPage($id: UUID!, $variantId: UUID, $condition: OfferConditionFilter = ALL, $sort: OfferSort = TOTAL_COST, $postalCode: String) {
+  product(id: $id) {
+    id
+    slug
+    title
+    categoryPath
+    images { ...ImageFields }
+    reviewSummary { hasReviews average ratingCount }
+    variants {
+      id
+      options { name value }
+    }
+    offers(variantId: $variantId, condition: $condition, postalCode: $postalCode, sort: $sort) {
+      productId
+      variantId
+      sort
+      condition
+      featuredOfferId
+      taxNote
+      deliverTo { postalCode label source }
+      conditionCounts { all new used refurbished }
+      rule { version steps notes }
+      items {
+        id
+        official
+        sellerName
+        seller {
+          id
+          slug
+          verified
+        }
+        sellerRating { official positivePct count onTimeDispatchPct }
+        condition
+        conditionLabel
+        conditionNotes
+        missingItems
+        complete
+        price { ...MoneyFields }
+        deal {
+          price { ...MoneyFields }
+          badges { label kind }
+        }
+        availability { state label maxPerOrder }
+        dispatch { label shipsFrom }
+        deliveryEstimate(postalCode: $postalCode) { shipsToLocation reason arrivalLabel carrierService }
+        quote(postalCode: $postalCode) {
+          featured
+          featuredEligible
+          ineligibleNote
+          freeShipping
+          price { ...MoneyFields }
+          shippingCost { ...MoneyFields }
+          total { ...MoneyFields }
+          automaticDiscount {
+            label
+            amount { ...MoneyFields }
+          }
+        }
+        returnTerms { summary }
+        warranty { summary }
+      }
+    }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}

@@ -38,11 +38,12 @@ const GO_LIVE = [
   { name: 'Ferro HD-60 Studio Monitor Headphones', note: 'Stays unpublished', status: 'Changes requested' },
 ];
 
-const HELP: Array<{ icon: IconName; label: string }> = [
-  { icon: 'book-open', label: 'Fees and payout timing' },
-  { icon: 'image', label: 'Product image standards' },
-  { icon: 'truck', label: 'Dispatch deadlines and late shipments' },
-  { icon: 'file-pen', label: 'Fixing a rejected or returned submission' },
+/** Help articles (seller/help-article slugs). */
+const HELP: Array<{ icon: IconName; label: string; slug: string }> = [
+  { icon: 'book-open', label: 'Fees and payout timing', slug: 'payout-schedule-and-cutoffs' },
+  { icon: 'image', label: 'Product image standards', slug: 'photo-and-title-rules' },
+  { icon: 'truck', label: 'Dispatch deadlines and late shipments', slug: 'dispatch-deadline-rules' },
+  { icon: 'file-pen', label: 'Fixing a rejected or returned submission', slug: 'fix-a-rejected-or-changes-requested-product' },
 ];
 
 export default function Setup() {
@@ -167,7 +168,7 @@ export default function Setup() {
             <ul className="stack gap-2 small">
               {HELP.map((h) => (
                 <li key={h.label}>
-                  <Link to={href('seller/help')}>
+                  <Link to={href('seller/help-article', '', { slug: h.slug })}>
                     <Icon name={h.icon} className="ic-sm" /> {h.label}
                   </Link>
                 </li>

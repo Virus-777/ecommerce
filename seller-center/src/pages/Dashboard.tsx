@@ -61,9 +61,9 @@ const NEWS: Array<{ icon: IconName; title: string; tag?: string; body: string; f
     foot: (
       <>
         Effective Nov 1, 2026 ·{' '}
-        <a href="#" className="link-inline">
+        <Link to={href('seller/help-article', '', { slug: 'responding-to-a-return-request' })} className="link-inline">
           Read the change
-        </a>
+        </Link>
       </>
     ),
     strong: true,

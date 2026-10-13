@@ -1,0 +1,77 @@
+# screens: store/confirmation
+# replaces: GET checkout/sessions/{id}/confirmation, GET orders/orders/{id}/documents
+# why: The confirmation shows the charged total, packages with their own estimates, next steps and the receipt reference from checkout and orders; it is read once per order right after payment, so it uses the same persisted query on web and Android. The receipt file itself downloads over REST.
+query OrderConfirmation($id: UUID!) {
+  checkoutSession(id: $id) {
+    id
+    status
+    orderId
+    orderRef
+    confirmation {
+      orderId
+      orderRef
+      greetingName
+      email
+      paymentLabel
+      packagesNote
+      termsNote
+      receiptDocumentId
+      offerAccountCreation
+      charged { ...MoneyFields }
+      deliveryAddress { name line1 line2 city region postalCode country phone }
+      packages {
+        label
+        shipsFrom
+        arrivalLabel
+        shippingLabel
+        seller {
+          id
+          name
+          slug
+          official
+          verified
+          logo { ...ImageFields }
+        }
+        items {
+          title
+          variantLabel
+          condition
+          quantity
+          status
+          image { ...ImageFields }
+          price { ...MoneyFields }
+        }
+      }
+      totals {
+        itemCount
+        taxNote
+        items { ...MoneyFields }
+        discounts {
+          code
+          label
+          amount { ...MoneyFields }
+        }
+        discountTotal { ...MoneyFields }
+        shippingTotal { ...MoneyFields }
+        taxTotal { ...MoneyFields }
+        creditApplied { ...MoneyFields }
+        total { ...MoneyFields }
+      }
+      nextSteps { title when body }
+    }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}

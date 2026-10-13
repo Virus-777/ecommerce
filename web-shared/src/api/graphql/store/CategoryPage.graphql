@@ -1,0 +1,105 @@
+# screens: store/category
+# replaces: GET catalog/categories/{slug}, GET search/products, GET search/facets, GET search/ranking-policy, GET promotions/offer-prices, GET reviews/rating-summaries, GET shipping/estimates, GET wishlist/saved
+# why: A category page needs the breadcrumb, subcategory chips, facets with counts, sorts and priced product cards with ratings and delivery cues, which come from five modules; one query per page or filter change. Sponsored cards and the banner ad stay on REST (advertising decisions).
+query CategoryPage($slug: String!, $filters: SearchFilterInput, $sort: SearchSort = RECOMMENDED, $postalCode: String, $searchId: String, $paging: PageInput) {
+  categoryProducts(slug: $slug, filters: $filters, sort: $sort, postalCode: $postalCode, searchId: $searchId, paging: $paging) {
+    searchId
+    total
+    totalLabel
+    page
+    totalPages
+    nextCursor
+    category {
+      sellerCount
+      category { id name slug }
+      breadcrumb { id name slug }
+      subcategories { ...CategoryCountFields }
+    }
+    appliedFilters { ...AppliedFilterFields }
+    clearAllQuery
+    facets { ...FacetFields }
+    sorts { key label available selected }
+    sponsoredSlots { placement kind positions maxItems }
+    items { ...ResultCardFields }
+    fromPriceNote
+    rankingNote
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
+
+fragment CategoryCountFields on SearchCategoryCount {
+  id
+  name
+  slug
+  count
+  comingSoon
+}
+
+fragment AppliedFilterFields on SearchAppliedFilter {
+  key
+  value
+  label
+  removeQuery
+}
+
+fragment FacetFields on SearchFacet {
+  key
+  label
+  group
+  groupLabel
+  kind
+  multiSelect
+  unit
+  moreCount
+  collapsed
+  values { value label count selected note }
+  range {
+    min { ...MoneyFields }
+    max { ...MoneyFields }
+    selectedMin { ...MoneyFields }
+    selectedMax { ...MoneyFields }
+  }
+}
+
+fragment ResultCardFields on Product {
+  id
+  slug
+  title
+  saved
+  images { ...ImageFields }
+  reviewSummary { hasReviews average ratingCount }
+  searchMatch {
+    position
+    variantId
+    variantCue
+    priceIsFrom
+    badges
+    offer {
+      id
+      official
+      sellerName
+      seller { id slug verified }
+      price { ...MoneyFields }
+      deal {
+        percentOffBps
+        price { ...MoneyFields }
+        wasPrice { ...MoneyFields }
+        badges { label kind }
+      }
+      deliveryEstimate(postalCode: $postalCode) { free arrivalLabel }
+    }
+  }
+}

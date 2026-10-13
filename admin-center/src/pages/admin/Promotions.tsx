@@ -168,7 +168,7 @@ export default function Promotions() {
           foot={
             <>
               <span className="ab-note grow">Margin uses landed cost for Official Store items. Seller-funded discounts do not change company margin.</span>
-              <Link className="small strong" to={href('admin/reports')}>
+              <Link className="small strong" to={href('admin/report', '', { key: 'campaign-results' })}>
                 Full report
               </Link>
             </>

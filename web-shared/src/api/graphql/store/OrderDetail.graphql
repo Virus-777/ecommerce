@@ -1,0 +1,272 @@
+# screens: account/order, account/tracking, account/cancel
+# replaces: GET orders/orders/{id}, GET orders/orders/{id}/cancellations/{cancellationId}, GET orders/orders/{id}/documents, GET shipping/orders/{orderId}/shipments, GET shipping/shipments/{id}/tracking, GET shipping/notices, GET returns/orders/{orderId}/returnable-items, GET returns/requests, GET payments/refunds, GET payments/refunds/{id}, GET support/cases, GET reviews/me/pending
+# why: A multi-seller order shows packages, item-level states and actions, shipments with tracking, cancellations with refund previews, returns, refunds, payment, cases and documents from seven modules; the order, tracking and cancel screens read the same response.
+query OrderDetail($ref: String!) {
+  order(ref: $ref) {
+    id
+    ref
+    placedAt
+    acceptedAt
+    paymentAccepted
+    status
+    statusFlags
+    statusLabel
+    summaryLine
+    itemCount
+    sellerCount
+    packageCount
+    canCancelSomething
+    addressNote
+    deliveryAddress { name line1 line2 city region postalCode country phone }
+    progress {
+      payment {
+        state
+        label
+        chargedAt
+        methodLabel
+        note
+        amountCharged { ...MoneyFields }
+      }
+      delivery { state label packagesTotal packagesDelivered packageStates }
+      returns { state label openReturns note }
+    }
+    totals {
+      itemCount
+      shippingLabel
+      taxLabel
+      paidWith
+      items { ...MoneyFields }
+      discounts {
+        code
+        label
+        fundedBy
+        amount { ...MoneyFields }
+      }
+      discountTotal { ...MoneyFields }
+      shippingTotal { ...MoneyFields }
+      tax { ...MoneyFields }
+      total { ...MoneyFields }
+      refundedSoFar { ...MoneyFields }
+      expectedRefunds {
+        label
+        ref
+        status
+        amount { ...MoneyFields }
+      }
+    }
+    groups {
+      id
+      packageLabel
+      shipsFrom
+      fulfilledBy
+      status
+      statusLabel
+      estimateLabel
+      returnTermsSummary
+      handlingNote
+      seller {
+        id
+        name
+        slug
+        official
+        verified
+        logo { ...ImageFields }
+      }
+      delivery {
+        methodName
+        carrier
+        service
+        free
+        arrivalFrom
+        arrivalTo
+        dispatchBy
+        price { ...MoneyFields }
+      }
+      dispatchDeadline { dueAt state }
+      alert { tone title message caseRef }
+      items { ...OrderItemFields }
+      shipments { ...ShipmentFields }
+      cancellations { ...CancellationFields }
+    }
+    payment {
+      id
+      state
+      stateLabel
+      methodLabel
+      chargedAt
+      amount { ...MoneyFields }
+      refundedAmount { ...MoneyFields }
+      refundsInFlight { ...MoneyFields }
+    }
+    refunds {
+      id
+      ref
+      origin
+      originRef
+      destinationLabel
+      status
+      statusLabel
+      steps
+      currentStep
+      sentAt
+      arrivalNote
+      explanation
+      amount { ...MoneyFields }
+      failure { reason action }
+      items {
+        orderItemId
+        groupId
+        title
+        amount { ...MoneyFields }
+      }
+    }
+    returns {
+      id
+      ref
+      status
+      statusLabel
+      nextStep
+      nextDeadline { dueAt state }
+      items { orderItemId }
+      refund { status statusLabel }
+    }
+    cases {
+      id
+      ref
+      subject
+      status
+      statusLabel
+      open
+      expectedReply
+      items { orderItemId }
+    }
+    documents { id kind label groupId number format issuedAt }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
+
+fragment OrderItemFields on OrderItem {
+  id
+  productId
+  variantId
+  offerId
+  title
+  variantLabel
+  quantity
+  state
+  stateLabel
+  stateNote
+  shipmentId
+  deliveredAt
+  returnWindowEndsAt
+  splitFromItemId
+  replacementOfItemId
+  actions
+  image { ...ImageFields }
+  unitPrice { ...MoneyFields }
+  lineSubtotal { ...MoneyFields }
+  paidAmount { ...MoneyFields }
+  offerTerms { conditionLabel }
+  afterSales {
+    cancellationId
+    returnId
+    returnRef
+    refundStatus
+    caseRef
+    refundedAmount { ...MoneyFields }
+  }
+  returnEligibility {
+    eligible
+    ineligibleReason
+    message
+    quantityReturnable
+    returnBy
+    latestReturn { returnId ref status statusLabel refundStatus }
+  }
+  reviewStatus { canReview reviewBy reviewId status statusLabel rating feedbackEligible feedbackGiven }
+}
+
+fragment ShipmentFields on Shipment {
+  id
+  kind
+  packageLabel
+  sellerName
+  shipFrom
+  carrierName
+  serviceName
+  trackingNumber
+  trackingUrl
+  status
+  statusLabel
+  steps
+  currentStep
+  shippedAt
+  estimateLabel
+  deliveredAt
+  headline
+  estimateNote
+  helpNote
+  contents { orderItemId title variantLabel quantity }
+  events { at code label detail location }
+  failedDelivery {
+    reason
+    heldAt
+    chooseBy
+    defaultIfNoChoice
+    chosen { choice redeliveryDate chosenAt }
+    options {
+      choice
+      title
+      description
+      dates
+      pickupLocation
+      cost { ...MoneyFields }
+      costIfNoChoice { ...MoneyFields }
+    }
+  }
+  notices { id title message from to }
+}
+
+fragment CancellationFields on OrderCancellation {
+  id
+  initiatedBy
+  reasonCode
+  reason
+  status
+  createdAt
+  decidedAt
+  declineReason
+  refundStatus
+  respondBy { dueAt state }
+  items { itemId title variantLabel quantity shipped }
+  refundPreview {
+    destination
+    timingNote
+    statusNote
+    itemAmount { ...MoneyFields }
+    discountShare { ...MoneyFields }
+    shippingRefund { ...MoneyFields }
+    taxRefund { ...MoneyFields }
+    total { ...MoneyFields }
+    lines {
+      itemId
+      title
+      quantity
+      refund { ...MoneyFields }
+    }
+  }
+  timeline { at label detail }
+}

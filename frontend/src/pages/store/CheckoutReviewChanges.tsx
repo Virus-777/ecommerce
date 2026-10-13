@@ -1,110 +1,158 @@
-import { Fragment, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Fragment, useState, type ReactNode } from 'react';
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckoutLayout } from '@/layouts';
-import { money } from '@marketly/web-shared/lib/format';
-import type { Tint } from '@marketly/web-shared/data/fixtures';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Dialog, Icon, Img, OptionCard, SummaryRow, type IconName } from '@marketly/web-shared/ui';
-import { BuyMini, CheckoutSteps, SecN } from './data/purchase';
+import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { Alert, Badge, Button, Card, Dialog, Icon, OptionCard, SummaryRow } from '@marketly/web-shared/ui';
+import { BuyMini, CheckoutSteps, ItemImg, PurchaseSkeleton, SecN } from './data/purchase';
+import { checkoutHref, checkoutKey, reviewChangesHref, useCheckoutSession, type Change, type ChangeDecision, type ChangeSet, type CheckoutLine, type CheckoutView } from './data/checkout-api';
 
-// Design: pages/store/store-checkout-review-changes.html: the checkout re-check found changes
-// before charging; the shopper picks what to do with each one and the new total updates live.
+// Design: pages/store/store-checkout-review-changes.html: the checkout re-check found changes before charging;
+// the shopper picks what to do with each one. URL: /checkout/review-changes?session=<checkout id>&changes=<change set id>
+// (changes defaults to the session's open change set). Data: GET …/sessions/{id}/changes/{changeSetId} (ChangeSet),
+// GET …/sessions/{id} (order behind the dialog); accept: POST …/changes/{changeSetId}/accept, then back to checkout.
+// The API prices the default choices only (effectOnTotal, newTotal); other choices are estimated here.
 
-interface Choice {
-  id: string;
-  label: string;
-  /** Change to the previous total if picked. */
-  delta: number;
-  /** Row in the "what changed" summary (omitted when the choice changes nothing). */
-  row?: string;
-  sub?: string;
-  /** Alternative offer shown under the choice. */
-  alt?: { seller: string; official?: boolean; line: string; note?: string };
-}
+type Choice = ChangeDecision['choice'];
+type Alternative = components['schemas']['checkout.AlternativeOffer'];
 
-interface Change {
+interface ChoiceItem {
   key: string;
-  icon: IconName;
-  tint: Tint;
-  kind: string;
-  name: string;
-  /** Background order line. */
-  line: { name: string; sub: string; amount: number };
-  delta: { from?: string; to?: string; text?: string; note: string };
-  explain?: string;
-  choices: Choice[];
+  choice: Choice;
+  offerId?: string;
+  label: string;
+  sub?: string;
+  alt?: Alternative;
 }
 
-const PREVIOUS_TOTAL = 370.38;
-
-const CHANGES: Change[] = [
-  {
-    key: 'ssd',
-    icon: 'hard-drive',
-    tint: '6',
-    kind: 'Price went up',
-    name: 'Kestrel 1 TB Portable SSD, USB 3.2',
-    line: { name: 'Kestrel 1 TB Portable SSD, USB 3.2', sub: 'Pixel & Port · Qty 1', amount: 94.99 },
-    delta: { from: '$94.99', to: '$99.99 each', note: '· Pixel & Port · Qty 1' },
-    choices: [
-      { id: 'a', label: 'Accept the new price, $99.99', delta: 5, row: 'Price change · SSD' },
-      { id: 'r', label: 'Remove this item', delta: -94.99, row: 'SSD removed' },
-      { id: 'o', label: 'Choose another offer', delta: 2.5, row: 'Other offer · SSD', alt: { seller: 'Marketly Official', official: true, line: 'New · $97.49 · Free shipping · Arrives Thu, Oct 15 · 30-day free returns', note: 'Different seller. Only switched if you pick this.' } },
-    ],
-  },
-  {
-    key: 'spk',
-    icon: 'speaker',
-    tint: '2',
-    kind: 'Less stock available',
-    name: 'Halden Pocket Bluetooth Speaker',
-    line: { name: 'Halden Pocket Bluetooth Speaker', sub: 'Northwind Audio · Qty 2', amount: 118 },
-    delta: { text: 'Qty 2', to: '1 available', note: '· Northwind Audio' },
-    choices: [
-      { id: 'a', label: 'Buy the 1 available from Northwind Audio', sub: 'Your total goes down by $59.00.', delta: -59, row: 'One fewer speaker' },
-      { id: 'r', label: 'Remove this item', delta: -118, row: 'Speakers removed' },
-      { id: 'o', label: 'Choose another offer for both', delta: 8.99, row: 'Other offer · speakers', alt: { seller: 'Pixel & Port', line: 'New · $61.00 each · 6 in stock · $4.99 shipping · Arrives Fri, Oct 16 · 30-day returns' } },
-    ],
-  },
-  {
-    key: 'duv',
-    icon: 'bed-double',
-    tint: '1',
-    kind: 'Delivery date moved',
-    name: 'Mosswood Washed Linen Duvet Cover, Queen',
-    line: { name: 'Mosswood Washed Linen Duvet Cover, Queen', sub: 'Casa Verde Home · Qty 1', amount: 119 },
-    delta: { from: 'Mon, Oct 19', to: 'Wed, Oct 21 – Thu, Oct 22', note: '· Casa Verde Home' },
-    explain: 'Casa Verde Home now ships in 4 business days because of a restock.',
-    choices: [
-      { id: 'a', label: 'Keep it with the new date', delta: 0 },
-      { id: 'r', label: 'Remove this item', delta: -119, row: 'Duvet cover removed' },
-    ],
-  },
-  {
-    key: 'po',
-    icon: 'coffee',
-    tint: '3',
-    kind: 'Coupon no longer covers this item',
-    name: 'Mosswood Ceramic Pour-over Coffee Set',
-    line: { name: 'Mosswood Ceramic Pour-over Coffee Set', sub: 'Marketly Official · Qty 1', amount: 36 },
-    delta: { text: 'HOMEWEEK10 ended at 12:00 PM PT', note: '· Pour-over set loses −$3.60' },
-    explain: 'Your other items keep their discounts. WELCOME20 still applies.',
-    choices: [
-      { id: 'a', label: 'Keep it at full price, $36.00', delta: 3.6, row: 'HOMEWEEK10 removed' },
-      { id: 'r', label: 'Remove this item', delta: -32.4, row: 'Pour-over set removed' },
-    ],
-  },
-];
-
+const money = (amount: number) => formatMoney({ amount, currency: 'USD' });
 const signed = (n: number) => `${n < 0 ? '−' : '+'}${money(Math.abs(n))}`;
 
-export default function CheckoutReviewChanges() {
-  const navigate = useNavigate();
-  const [picked, setPicked] = useState<Record<string, string>>(() => Object.fromEntries(CHANGES.map((c) => [c.key, 'a'])));
-  const chosen = CHANGES.map((c) => c.choices.find((x) => x.id === picked[c.key]) ?? c.choices[0]);
-  const newTotal = Math.round((PREVIOUS_TOTAL + chosen.reduce((s, x) => s + x.delta, 0)) * 100) / 100;
-  const keptAny = chosen.some((x) => x.id !== 'r');
+function acceptLabel(c: Change): string {
+  const cur = c.currentAmount ? formatMoney(c.currentAmount) : c.current;
+  switch (c.kind) {
+    case 'price_increased':
+    case 'price_decreased':
+      return `Accept the new price, ${cur}`;
+    case 'quantity_reduced':
+    case 'purchase_limit':
+      return `Buy the ${c.availableQuantity ?? 'quantity'} available from ${c.sellerName}`;
+    case 'delivery_date_changed':
+      return 'Keep it with the new date';
+    case 'shipping_cost_changed':
+      return `Accept the new shipping cost, ${cur}`;
+    case 'coupon_no_longer_applies':
+    case 'coupon_amount_changed':
+      return `Keep it at ${cur}`;
+    case 'terms_changed':
+      return 'Accept the new terms';
+    default:
+      return 'Accept this change';
+  }
+}
 
+function choicesOf(c: Change): ChoiceItem[] {
+  const out: ChoiceItem[] = [];
+  for (const choice of c.choices) {
+    if (choice === 'choose_offer') {
+      for (const alt of c.alternatives) out.push({ key: `choose_offer:${alt.offerId}`, choice, offerId: alt.offerId, label: 'Choose another offer', alt });
+      continue;
+    }
+    const label =
+      choice === 'accept'
+        ? acceptLabel(c)
+        : choice === 'remove'
+          ? 'Remove this item'
+          : choice === 'reduce_quantity'
+            ? `Buy the ${c.availableQuantity ?? 'quantity'} available from ${c.sellerName}`
+            : choice === 'keep_without_discount'
+              ? 'Keep it without the discount'
+              : 'Choose another delivery option';
+    const effect = c.effectOnTotal.amount;
+    out.push({ key: choice, choice, label, sub: choice === c.defaultChoice && effect ? `Your total goes ${effect > 0 ? 'up' : 'down'} by ${money(Math.abs(effect))}.` : undefined });
+  }
+  return out;
+}
+
+const defaultKey = (c: Change) => {
+  const items = choicesOf(c);
+  return (items.find((x) => x.choice === c.defaultChoice) ?? items[0])?.key ?? c.defaultChoice;
+};
+
+/** Change in total for one pick: exact for the default (API), estimated from the line otherwise. */
+function effectOf(c: Change, item: ChoiceItem | undefined, line: CheckoutLine | undefined): number {
+  if (!item || item.key === defaultKey(c)) return c.effectOnTotal.amount;
+  const disc = line ? line.discounts.reduce((s, d) => s + d.amount.amount, 0) : 0;
+  switch (item.choice) {
+    case 'remove':
+      return line ? -(line.lineTotal.amount - disc) : c.effectOnTotal.amount;
+    case 'choose_offer':
+      return line && item.alt ? (item.alt.price.amount - line.unitPrice.amount) * line.quantity : 0;
+    case 'reduce_quantity':
+      return line && c.availableQuantity != null ? -line.unitPrice.amount * Math.max(0, line.quantity - c.availableQuantity) : 0;
+    case 'keep_without_discount':
+      return disc;
+    default:
+      return 0;
+  }
+}
+
+export default function CheckoutReviewChanges() {
+  const [params] = useSearchParams();
+  const id = params.get('session');
+  const session = useCheckoutSession(id);
+  const csId = params.get('changes') ?? session.data?.openChangeSetId ?? null;
+  const { api } = useApi();
+  const changes = useQuery({
+    queryKey: ['checkout', 'changes', id ?? '', csId ?? ''],
+    queryFn: () => call(api.GET('/api/store/checkout/sessions/{id}/changes/{changeSetId}', { params: { path: { id: id!, changeSetId: csId! } } })),
+    enabled: !!id && !!csId,
+  });
+
+  if (!id) return <Navigate to={href('store/cart')} replace />;
+  if (session.data && !csId) return <Navigate to={checkoutHref(id)} replace />;
+  if (changes.data && changes.data.status !== 'open') return <Navigate to={session.data?.openChangeSetId ? reviewChangesHref(id, session.data.openChangeSetId) : checkoutHref(id)} replace />;
+
+  const err = session.error ?? changes.error;
+  if (err) {
+    const gone = err instanceof ApiError && (err.status === 404 || err.status === 410);
+    return (
+      <Shell>
+        <Alert tone={gone ? 'warning' : 'danger'} title={gone ? 'These changes are no longer open' : "We couldn't load the changes"}>
+          {errorMessage(err)}{' '}
+          {gone ? (
+            <Link to={checkoutHref(id)} className="link-inline">
+              Back to checkout
+            </Link>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                void session.refetch();
+                void changes.refetch();
+              }}
+            >
+              Try again
+            </Button>
+          )}
+        </Alert>
+      </Shell>
+    );
+  }
+  if (!session.data || !changes.data) {
+    return (
+      <Shell>
+        <PurchaseSkeleton label="the changes to your order" />
+      </Shell>
+    );
+  }
+  return <Review key={changes.data.id} c={session.data} cs={changes.data} />;
+}
+
+function Shell({ children }: { children: ReactNode }) {
   return (
     <CheckoutLayout>
       <div className="container page">
@@ -112,40 +160,93 @@ export default function CheckoutReviewChanges() {
           <h1 className="h1">Checkout</h1>
           <CheckoutSteps current={4} />
         </div>
-        <div className="split">
-          <div className="stack gap-4">
-            <section className="card">
-              <div className="card-head">
-                <div className="row gap-3 nowrap">
-                  <SecN n={6} />
-                  <h2 className="h4">Review your order</h2>
-                </div>
+        {children}
+      </div>
+    </CheckoutLayout>
+  );
+}
+
+function Review({ c, cs }: { c: CheckoutView; cs: ChangeSet }) {
+  const id = c.id;
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [picked, setPicked] = useState<Record<string, string>>(() => Object.fromEntries(cs.changes.map((ch) => [ch.id, defaultKey(ch)])));
+  const lines = c.packages.flatMap((p) => p.lines);
+  const lineOf = (ch: Change) => lines.find((l) => l.id === ch.lineId);
+
+  const rows = cs.changes.map((ch) => {
+    const items = choicesOf(ch);
+    const item = items.find((x) => x.key === picked[ch.id]) ?? items[0];
+    return { ch, item, effect: effectOf(ch, item, lineOf(ch)) };
+  });
+  const allDefault = rows.every((r) => r.item?.key === defaultKey(r.ch));
+  const newTotal = allDefault ? cs.newTotal.amount : cs.previousTotal.amount + rows.reduce((s, r) => s + r.effect, 0);
+  const removing = rows.filter((r) => r.item?.choice === 'remove');
+  const keptAny = removing.length < rows.length;
+
+  const accept = useMutation({
+    mutationFn: () =>
+      call(
+        api.POST('/api/store/checkout/sessions/{id}/changes/{changeSetId}/accept', {
+          params: { path: { id, changeSetId: cs.id } },
+          body: {
+            decisions: rows.map((r) => ({ changeId: r.ch.id, choice: r.item?.choice ?? r.ch.defaultChoice, offerId: r.item?.offerId ?? null, quantity: r.item?.choice === 'reduce_quantity' ? (r.ch.availableQuantity ?? null) : null })),
+            acceptPartialOrder: cs.partialOrder || removing.length > 0,
+          },
+        }),
+      ),
+    onSuccess: (v) => {
+      qc.setQueryData(checkoutKey(id), v);
+      navigate(checkoutHref(id));
+    },
+    onError: async (e) => {
+      if (e instanceof ApiError && e.code === 'CHANGESET_STALE') {
+        const fresh = await qc.fetchQuery({ queryKey: checkoutKey(id), queryFn: () => call(api.GET('/api/store/checkout/sessions/{id}', { params: { path: { id } } })) });
+        navigate(fresh.openChangeSetId ? reviewChangesHref(id, fresh.openChangeSetId) : checkoutHref(id), { replace: true });
+      }
+    },
+  });
+  const leave = useMutation({
+    mutationFn: () => call(api.DELETE('/api/store/checkout/sessions/{id}', { params: { path: { id } } })),
+    onSettled: () => navigate(href('store/cart')),
+  });
+
+  return (
+    <Shell>
+      <div className="split">
+        <div className="stack gap-4">
+          <section className="card">
+            <div className="card-head">
+              <div className="row gap-3 nowrap">
+                <SecN n={6} />
+                <h2 className="h4">Review your order</h2>
               </div>
-              <div className="card-body">
-                {CHANGES.map((c, i) => (
-                  <Fragment key={c.key}>
-                    {i > 0 && <hr />}
-                    <BuyMini icon={c.icon} tint={c.tint} name={c.line.name} sub={c.line.sub} amount={money(c.line.amount)} clamp={false} />
-                  </Fragment>
-                ))}
-              </div>
-            </section>
-          </div>
-          <aside>
-            <Card title="Order total" titleAs="h3">
-              <SummaryRow className="total" k="Total" v={money(PREVIOUS_TOTAL)} />
-              <Button size="lg" block disabled>
-                Place order · {money(PREVIOUS_TOTAL)}
-              </Button>
-            </Card>
-          </aside>
+            </div>
+            <div className="card-body">
+              {lines.map((l, i) => (
+                <Fragment key={l.id}>
+                  {i > 0 && <hr />}
+                  <BuyMini image={l.image} name={l.title} sub={`${c.packages.find((p) => p.lines.includes(l))?.seller.name ?? ''} · Qty ${l.quantity}`} amount={formatMoney(l.lineTotal)} clamp={false} />
+                </Fragment>
+              ))}
+            </div>
+          </section>
         </div>
+        <aside>
+          <Card title="Order total" titleAs="h3">
+            <SummaryRow className="total" k="Total" v={formatMoney(cs.previousTotal)} />
+            <Button size="lg" block disabled>
+              Place order · {formatMoney(cs.previousTotal)}
+            </Button>
+          </Card>
+        </aside>
       </div>
 
       <Dialog
         open
         size="lg"
-        onClose={() => navigate(href('store/checkout'))}
+        onClose={() => navigate(checkoutHref(id))}
         title="Some details changed before you placed your order"
         foot={
           <>
@@ -153,48 +254,48 @@ export default function CheckoutReviewChanges() {
               Back to cart
             </Button>
             {keptAny ? (
-              <Button to={href('store/checkout')}>Accept changes and continue · {money(newTotal)}</Button>
+              <Button onClick={() => accept.mutate()} disabled={accept.isPending}>
+                Accept changes and continue · {money(newTotal)}
+              </Button>
             ) : (
-              <Button to={href('store/cart')}>Remove all and go back to cart</Button>
+              <Button onClick={() => leave.mutate()} disabled={leave.isPending}>
+                Remove all and go back to cart
+              </Button>
             )}
           </>
         }
       >
-        <p className="small sub">We checked your order again before charging you. Nothing has been charged yet. Choose what to do with each change.</p>
-        {CHANGES.map((c) => (
-          <div className="buy-change" key={c.key}>
+        <p className="small sub">{cs.intro} Choose what to do with each change.</p>
+        {cs.changes.map((ch) => (
+          <div className="buy-change" key={ch.id}>
             <div className="buy-change-head">
-              <Img icon={c.icon} tint={c.tint} />
+              <ItemImg image={ch.image} />
               <div className="stack gap-1 grow">
-                <span className="xs strong t-warning-text">{c.kind}</span>
-                <span className="small strong">{c.name}</span>
+                <span className="xs strong t-warning-text">{ch.headline}</span>
+                <span className="small strong">{ch.title}</span>
                 <span className="buy-delta">
-                  {c.delta.from && <span className="buy-strike">{c.delta.from}</span>}
-                  {c.delta.text && !c.delta.to && (
+                  {ch.previous ? (
                     <>
-                      {c.delta.text} <span className="xs muted">{c.delta.note}</span>
-                    </>
-                  )}
-                  {c.delta.text && c.delta.to && <span>{c.delta.text}</span>}
-                  {c.delta.to && (
-                    <>
+                      <span className="buy-strike">{ch.previous}</span>
                       <Icon name="arrow-right" className="ic-sm" />
-                      <span>{c.delta.to}</span>
-                      <span className="xs muted">{c.delta.note}</span>
+                      <span>{ch.current}</span>
                     </>
+                  ) : (
+                    <span>{ch.current}</span>
                   )}
+                  <span className="xs muted">· {ch.sellerName}</span>
                 </span>
               </div>
             </div>
-            {c.explain && <span className="xs muted">{c.explain}</span>}
+            {ch.detail && <span className="xs muted">{ch.detail}</span>}
             <div className="buy-opts">
-              {c.choices.map((x) => (
+              {choicesOf(ch).map((x) => (
                 <OptionCard
-                  key={x.id}
-                  id={`rc-${c.key}-${x.id}`}
-                  name={`rc-${c.key}`}
-                  checked={picked[c.key] === x.id}
-                  onChange={() => setPicked((p) => ({ ...p, [c.key]: x.id }))}
+                  key={x.key}
+                  id={`rc-${ch.id}-${x.key}`}
+                  name={`rc-${ch.id}`}
+                  checked={picked[ch.id] === x.key}
+                  onChange={() => setPicked((p) => ({ ...p, [ch.id]: x.key }))}
                   title={
                     <>
                       <span className="small strong">{x.label}</span>
@@ -204,19 +305,30 @@ export default function CheckoutReviewChanges() {
                           {x.alt && (
                             <span className="buy-alt stack gap-1 mt-1-5 u-d-flex">
                               <span className="row gap-2">
-                                <b>{x.alt.seller}</b>
-                                {x.alt.official ? (
+                                <b>{x.alt.seller.name}</b>
+                                {x.alt.seller.official ? (
                                   <Badge tone="brand" icon="badge-check">
                                     Official
                                   </Badge>
-                                ) : (
+                                ) : x.alt.seller.verified ? (
                                   <Badge tone="info" icon="shield-check">
                                     Verified
                                   </Badge>
-                                )}
+                                ) : null}
                               </span>
-                              <span>{x.alt.line}</span>
-                              {x.alt.note && <span className="xs muted">{x.alt.note}</span>}
+                              <span>
+                                {[
+                                  x.alt.conditionLabel,
+                                  `${formatMoney(x.alt.price)} each`,
+                                  `${x.alt.available} in stock`,
+                                  x.alt.shipping ? (x.alt.shipping.amount ? `${formatMoney(x.alt.shipping)} shipping` : 'Free shipping') : null,
+                                  x.alt.arrivalLabel,
+                                  x.alt.returnTerms,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </span>
+                              {x.alt.differentSeller && x.alt.note && <span className="xs muted">{x.alt.note}</span>}
                             </span>
                           )}
                         </span>
@@ -228,15 +340,25 @@ export default function CheckoutReviewChanges() {
             </div>
           </div>
         ))}
-        <Alert tone="info" title="If you remove an item, the rest of your order can still go through">
-          You'll only be charged for the items you keep. We'll show the revised packages and total on the review step before you place the order.
-        </Alert>
+        {cs.partialNote && (
+          <Alert tone="info" title="If you remove an item, the rest of your order can still go through">
+            {cs.partialNote}
+          </Alert>
+        )}
+        {accept.isError && (
+          <Alert tone="danger" title="We couldn't apply your choices">
+            {errorMessage(accept.error)}
+          </Alert>
+        )}
         <div className="panel buy-sum">
-          <SummaryRow k="Previous total" v={<span className="buy-strike">{money(PREVIOUS_TOTAL)}</span>} />
-          {chosen.map((x, i) => (x.row && x.delta ? <SummaryRow key={CHANGES[i].key} k={x.row} v={signed(x.delta)} /> : null))}
+          <SummaryRow k="Previous total" v={<span className="buy-strike">{formatMoney(cs.previousTotal)}</span>} />
+          {allDefault
+            ? cs.deltas.map((d, i) => (d.amount.amount ? <SummaryRow key={i} k={d.label} v={signed(d.amount.amount)} /> : null))
+            : rows.map((r) => (r.effect ? <SummaryRow key={r.ch.id} k={`${r.ch.headline} · ${r.ch.title}`} v={signed(r.effect)} /> : null))}
           <SummaryRow className="total" k="New total" v={money(newTotal)} />
+          {!allDefault && <span className="xs muted">Estimated for the options you picked. The review step shows the exact total before you place the order.</span>}
         </div>
       </Dialog>
-    </CheckoutLayout>
+    </Shell>
   );
 }

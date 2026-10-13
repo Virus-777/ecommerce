@@ -1,128 +1,178 @@
-import { useState } from 'react';
-import { Link } from 'react-router';
-import { brands } from '@marketly/web-shared/data/fixtures';
+import { Link, useParams } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { StoreLayout } from '@/layouts';
+import NotFound from './NotFound';
+import { ApiError, call, useApi } from '@marketly/web-shared/api';
 import { num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Breadcrumbs, Chip, ChipRow, Icon, Img, LogoTile, Pager, ProductCard, type IconName } from '@marketly/web-shared/ui';
-import { SORT_OPTIONS, items, sortItems, type SortKey } from './data/collection';
+import { Breadcrumbs, Chip, ChipRow, EmptyState, Icon } from '@marketly/web-shared/ui';
+import { initialsOf, tintOf, useBrand } from '@/api/catalog';
+import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, LogoPic, Pic, SkLines } from '@/api/cards';
+import { SortSelect, useListingParams } from '@/api/listing';
+import { readPage, readQuery, shownRange, toCardProduct, useFacets, useListing, useSearchClick } from '@/api/search';
 
-// Design: pages/store/store-brand.html (Halden). Chips filter the grid, Sort re-sorts it, the pager pages it.
+// Design: pages/store/store-brand.html. Data: GET /api/store/catalog/brands/{slug} (header),
+// GET /api/store/content/collections?brandId&collectionKind=brand (collection cards),
+// GET /api/store/search/facets?brand={slug} (category chips with counts, tagline) and
+// GET /api/store/search/products?brand={slug}&category&sort (grid; page on the website, cursor on the phone).
 
-const BRAND = brands.find((b) => b.name === 'Halden') ?? brands[0];
-const PER_PAGE = 8;
+const PER_PAGE = 24;
 
-const COLLECTIONS: Array<{ name: string; icon: IconName; tint: string; count: number }> = [
-  { name: 'Aurora noise cancelling', icon: 'headphones', tint: '2', count: 6 },
-  { name: 'Pocket speakers', icon: 'speaker', tint: '2', count: 9 },
-  { name: 'Travel accessories', icon: 'briefcase', tint: '5', count: 8 },
-];
-
-/** Chip value = product `sub`; count = items in the whole brand catalogue. */
-const CHIPS: Array<{ value: string; label: string; count: number }> = [
-  { value: '', label: 'All', count: BRAND.products },
-  { value: 'Headphones', label: 'Headphones', count: 21 },
-  { value: 'Earbuds', label: 'Earbuds', count: 9 },
-  { value: 'Speakers', label: 'Speakers', count: 14 },
-  { value: 'Accessories', label: 'Accessories', count: 4 },
-];
-
-const PRODUCTS = items(['aurora', 'auroraBuds', 'aria', 'studio2', 'speaker', 'pocketMini', 'air', 'travelCase']);
+/** "Headphones, earbuds and speakers" from the brand's category facet. */
+const tagline = (labels: string[]) => {
+  const l = labels.slice(0, 3).map((x, i) => (i ? x.toLowerCase() : x));
+  return l.length > 1 ? `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}` : (l[0] ?? '');
+};
 
 export default function Brand() {
-  const [chip, setChip] = useState('');
-  const [sort, setSort] = useState<SortKey>('Recommended');
-  const [page, setPage] = useState(1);
+  const { slug = '' } = useParams();
+  const { api } = useApi();
+  const lp = useListingParams();
+  const brand = useBrand(slug);
+  const found = brand.isSuccess;
+  const b = brand.data;
 
-  const active = CHIPS.find((c) => c.value === chip) ?? CHIPS[0];
-  const pages = Math.max(1, Math.ceil(active.count / PER_PAGE));
-  const first = (page - 1) * PER_PAGE + 1;
-  const last = Math.min(page * PER_PAGE, active.count);
-  const list = sortItems(
-    PRODUCTS.filter((p) => !chip || p.sub === chip),
-    sort,
-  );
-  const pick = (v: string) => {
-    setChip(v);
-    setPage(1);
-  };
+  const collections = useQuery({
+    queryKey: ['content', 'collections', { brandId: b?.id, collectionKind: 'brand' }],
+    queryFn: () => call(api.GET('/api/store/content/collections', { params: { query: { brandId: b!.id, collectionKind: 'brand', limit: 12 } } })),
+    enabled: !!b,
+  });
+  const base = useFacets({ brand: [slug] }, { enabled: found });
+  const query = readQuery(lp.params, { brand: [slug] });
+  const facets = useFacets(query, { enabled: found });
+  const listing = useListing(query, readPage(lp.params), { limit: PER_PAGE, enabled: found });
+  const onOpen = useSearchClick(facets.data?.searchId);
+
+  if (brand.error instanceof ApiError && brand.error.status === 404) return <NotFound />;
+
+  const cats = base.data?.facets.find((f) => f.kind === 'category')?.values ?? [];
+  const chip = lp.params.get('category') ?? '';
+  const total = facets.data?.total ?? listing.total ?? 0;
+  const shown = shownRange(listing.page, PER_PAGE, listing.hits.length, total);
+  const pick = (v: string) =>
+    lp.update((q) => {
+      if (v) q.set('category', v);
+      else q.delete('category');
+    });
+  const error = brand.error ?? facets.error ?? listing.error;
+  const name = b?.name ?? '';
 
   return (
-    <StoreLayout nav="brands" appbar={{ title: BRAND.name }}>
+    <StoreLayout nav="brands" appbar={{ title: name || 'Brand' }}>
       <div className="container page gap-6">
-        <Breadcrumbs items={[{ label: 'Home', to: href('store/home') }, { label: 'Brands', to: href('store/brand') }, { label: BRAND.name }]} />
+        <Breadcrumbs items={[{ label: 'Home', to: href('store/home') }, { label: 'Brands' }, { label: name || 'Brand' }]} />
+        {error ? (
+          <LoadError
+            error={error}
+            onRetry={() => {
+              void brand.refetch();
+              void facets.refetch();
+              listing.refetch();
+            }}
+            title="We couldn’t load this brand"
+          />
+        ) : null}
         <section className="shop-hero" aria-labelledby="br-h">
           <div className="ban tint-2" aria-hidden="true">
-            <Icon name="headphones" />
-            <Icon name="speaker" />
-            <Icon name="ear" />
+            {b?.banner ? (
+              <img src={b.banner.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <>
+                <Icon name="tag" />
+                <Icon name="package" />
+              </>
+            )}
           </div>
           <div className="id">
-            <LogoTile initials={BRAND.initials} tint={BRAND.tint} className="lg" />
+            <LogoPic logo={b?.logo} initials={initialsOf(name || '?')} tint={tintOf(name)} className="lg" />
             <div className="stack gap-1 grow">
-              <h1 className="display d-lg" id="br-h">
-                {BRAND.name}
-              </h1>
-              <span className="small sub">Brand collection · {num(BRAND.products)} products · Headphones, earbuds and speakers</span>
+              {b ? (
+                <>
+                  <h1 className="display d-lg" id="br-h">
+                    {name}
+                  </h1>
+                  <span className="small sub">
+                    Brand collection · {num(b.productCount)} products{cats.length ? ` · ${tagline(cats.map((c) => c.label))}` : ''}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <h1 className="display d-lg sr-only" id="br-h">
+                    Brand
+                  </h1>
+                  <SkLines n={2} />
+                </>
+              )}
             </div>
           </div>
           <div className="stack gap-2 u-p-0-sp-5-sp-5">
             <p className="sub u-maxw-72ch">
-              Halden makes noise-cancelling headphones and compact speakers for travel and small homes. Products here come from the Official Store and from approved sellers. Each card names the seller, and the product page compares all offers.
+              {b?.description ? `${b.description} ` : ''}Products here come from the Official Store and from approved sellers. Each card names the seller, and the product page compares all offers.
             </p>
           </div>
         </section>
 
-        <section className="stack gap-3" aria-labelledby="br-col">
-          <h2 className="h3" id="br-col">
-            Collections
-          </h2>
-          <div className="shop-collections">
-            {COLLECTIONS.map((c) => (
-              <Link key={c.name} className="shop-coll" to={href('store/collection', 'best-sellers')}>
-                <Img icon={c.icon} tint={c.tint} />
-                <span className="stack gap-1">
-                  <span className="strong">{c.name}</span>
-                  <span className="xs muted">{c.count} products</span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
+        {(collections.data?.items.length ?? 0) > 0 && (
+          <section className="stack gap-3" aria-labelledby="br-col">
+            <h2 className="h3" id="br-col">
+              Collections
+            </h2>
+            <div className="shop-collections">
+              {collections.data!.items.map((c) => (
+                <Link key={c.id} className="shop-coll" to={href('store/collection', '', { slug: c.slug })}>
+                  <Pic image={c.image} icon="layout-grid" tint={tintOf(c.title)} />
+                  <span className="stack gap-1">
+                    <span className="strong">{c.title}</span>
+                    <span className="xs muted">{c.productCount} products</span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="stack gap-4" aria-labelledby="br-all">
           <h2 className="h3" id="br-all">
-            All {BRAND.name} products
+            All {name} products
           </h2>
-          <ChipRow>
-            {CHIPS.map((c) => (
-              <Chip key={c.value} active={chip === c.value} onClick={() => pick(c.value)}>
-                {c.label} ({c.count})
+          {cats.length > 1 && (
+            <ChipRow>
+              <Chip active={!chip} onClick={() => pick('')}>
+                All ({num(base.data?.total ?? 0)})
               </Chip>
-            ))}
-          </ChipRow>
+              {cats.map((c) => (
+                <Chip key={c.value} active={chip === c.value} onClick={() => pick(c.value)}>
+                  {c.label} ({num(c.count)})
+                </Chip>
+              ))}
+            </ChipRow>
+          )}
           <div className="shop-toolbar">
             <span className="small sub" aria-live="polite">
-              Showing {first}–{last} of {active.count}
+              {total ? `Showing ${shown.from}–${shown.to} of ${num(total)}` : ''}
             </span>
             <span className="shop-sort">
               <label className="small sub nowrap" htmlFor="br-sort">
                 Sort by
               </label>
-              <select className="select" id="br-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o}>{o}</option>
-                ))}
-              </select>
+              <SortSelect id="br-sort" ctx={facets.data} lp={lp} />
             </span>
           </div>
-          <div className="grid-products">
-            {list.map((p) => (
-              <ProductCard key={p.id} p={p} from showSeller />
-            ))}
-          </div>
+          {listing.isPending || brand.isPending ? (
+            <CardGridSkeleton n={8} />
+          ) : listing.hits.length ? (
+            <div className="grid-products" aria-busy={listing.isFetching || undefined}>
+              {listing.hits.map((h) => (
+                <ApiProductCard key={`${h.kind}-${h.position}-${h.product.productId}`} c={toCardProduct(h.product, h)} from showSeller onOpen={onOpen} />
+              ))}
+            </div>
+          ) : !error ? (
+            <EmptyState icon="package-search" title={`No ${name} products in stock right now`}>
+              New offers show up here as soon as sellers list them.
+            </EmptyState>
+          ) : null}
           <div className="row end">
-            <Pager page={page} total={pages} onPage={setPage} grid end={page >= pages} />
+            <ListingPager listing={listing} onPage={lp.setPage} />
           </div>
         </section>
       </div>

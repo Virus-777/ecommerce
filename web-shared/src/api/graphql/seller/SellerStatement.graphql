@@ -1,0 +1,85 @@
+# screens: seller/statement
+# replaces: GET finance/statements/{id}, GET finance/payouts/{id}
+# why: The itemised statement and the payout it reconciles to are shown together on one page.
+query SellerStatement($ref: String!) {
+  statement(ref: $ref) {
+    id
+    ref
+    sellerName
+    sellerCode
+    period {
+      from
+      to
+    }
+    status
+    issuedAt
+    ruleVersion
+    feeBasisNote
+    afterPayoutNotices
+    sections {
+      key
+      title
+      subtitle
+      totalLabel
+      total {
+        ...Amount
+      }
+      lines {
+        date
+        description
+        detail
+        units
+        reason
+        reference {
+          kind
+          id
+          ref
+        }
+        basis {
+          ...Amount
+        }
+        amount {
+          ...Amount
+        }
+      }
+    }
+    reconciliation {
+      openingAvailable {
+        ...Amount
+      }
+      lines {
+        label
+        amount {
+          ...Amount
+        }
+      }
+      payout {
+        ...Amount
+      }
+      closingAvailable {
+        ...Amount
+      }
+    }
+    payout {
+      id
+      ref
+      status
+      releasedAt
+      paidAt
+      arrivedOn
+      bankReference
+      amount {
+        ...Amount
+      }
+      destination {
+        label
+      }
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}

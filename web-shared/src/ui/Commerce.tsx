@@ -100,32 +100,39 @@ export interface CardProduct {
   offers?: number;
   delivery: string;
   free?: boolean;
+  /** Photo URL (API products); without it the card shows the icon tile. */
+  image?: string | null;
+  /** Seller shown under the card when the product doesn't use a fixture seller (API data). */
+  sellerName?: string;
+  sellerTo?: string;
+  /** Official Store offer (API data), for the Official badge. */
+  official?: boolean;
 }
 
 /** Product card (.pcard). Heart toggles the wishlist state locally. */
-export function ProductCard({ p, sponsored, compact, showSeller, from, to = href('store/product'), extra }: { p: CardProduct; sponsored?: boolean; compact?: boolean; showSeller?: boolean; from?: boolean; to?: string; extra?: ReactNode }) {
+export function ProductCard({ p, sponsored, compact, showSeller, from, to = href('store/product'), extra, noFav }: { p: CardProduct; sponsored?: boolean; compact?: boolean; showSeller?: boolean; from?: boolean; to?: string; extra?: ReactNode; /** Hide the wishlist heart (the wishlist module is off at launch). */ noFav?: boolean }) {
   const [saved, setSaved] = useState(false);
   const off = percentOff(p.price, p.was);
-  const official = p.seller ? 'official' in sellers[p.seller] : false;
+  const official = p.official ?? (p.seller ? 'official' in sellers[p.seller] : false);
   return (
     <article className="pcard">
       <div className="pcard-media">
         <Link to={to} aria-label={p.name}>
-          <Img icon={p.icon} tint={p.tint} />
+          <Img icon={p.icon} tint={p.tint} src={p.image ?? undefined} alt={p.image ? p.name : undefined} />
         </Link>
         <div className="tags">
           {off > 0 && <Badge tone="deal">−{off}%</Badge>}
           {official && !compact && <Badge tone="brand">Official</Badge>}
           {sponsored && <Badge tone="outline" className="sponsored-badge">Sponsored</Badge>}
         </div>
-        <button type="button" className={cx('fav', saved && 'is-active')} aria-label={`Save ${p.name} to wishlist`} aria-pressed={saved} onClick={() => setSaved((v) => !v)}>
+        {!noFav && <button type="button" className={cx('fav', saved && 'is-active')} aria-label={`Save ${p.name} to wishlist`} aria-pressed={saved} onClick={() => setSaved((v) => !v)}>
           <Icon name="heart" fill={saved ? 'currentColor' : 'none'} />
-        </button>
+        </button>}
       </div>
       <Link className="name" to={to}>
         {p.name}
       </Link>
-      <Stars rating={p.rating} count={p.reviews} />
+      {p.reviews > 0 && <Stars rating={p.rating} count={p.reviews} />}
       <Price amount={p.price} was={p.was} from={from && (p.offers ?? 1) > 1} noOff />
       <div className="meta">
         {p.free ? (
@@ -139,6 +146,13 @@ export function ProductCard({ p, sponsored, compact, showSeller, from, to = href
       {showSeller && p.seller && (
         <div className="meta">
           <SellerLine seller={p.seller} />
+        </div>
+      )}
+      {showSeller && !p.seller && p.sellerName && (
+        <div className="meta">
+          <span className="seller-line">
+            Sold by {p.sellerTo ? <Link to={p.sellerTo}><b>{p.sellerName}</b></Link> : <b>{p.sellerName}</b>}
+          </span>
         </div>
       )}
       {extra}

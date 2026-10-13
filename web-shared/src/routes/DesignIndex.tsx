@@ -48,7 +48,10 @@ export default function DesignIndex() {
                           <Link className="strong" to={href(s.id as never)}>
                             {s.title}
                           </Link>
-                          <span className="xs muted mono">{s.id}</span>
+                          <span className="xs muted mono">
+                            {s.id}
+                            {!s.file && <span className="badge t-info">Designed in React</span>}
+                          </span>
                         </span>
                         {s.views.length > 1 && (
                           <span className="row wrap gap-2">

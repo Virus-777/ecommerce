@@ -33,13 +33,15 @@ interface AppRouterOptions {
   notFound: ComponentType;
   /** App-wide providers (session, …) around every route. */
   wrap?: (children: ReactNode) => ReactNode;
+  /** Routes outside the screen catalogue (e.g. targets of emailed links that redirect to a screen). */
+  extraRoutes?: RouteObject[];
 }
 
 /**
  * The router every web app uses: one route per screen of this app (catalogue paths), /design (screen
  * index), /design/check (dev only: compares routes with the design export) and a catch-all not-found page.
  */
-export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c }: AppRouterOptions) {
+export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, extraRoutes = [] }: AppRouterOptions) {
   function Root() {
     return wrap(
       <>
@@ -74,6 +76,7 @@ export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c }: 
       errorElement: <RouteError />,
       children: [
         ...screenRoutes,
+        ...extraRoutes,
         { path: '/design', element: <DesignIndex /> },
         ...(import.meta.env.DEV ? [{ path: '/design/check', element: <DesignCheck /> }] : []),
         { path: '*', element: <NotFound /> },

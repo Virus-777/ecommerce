@@ -1,41 +1,38 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { AccountLayout } from '@/layouts';
+import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { href } from '@marketly/web-shared/routes';
 import { announce, Alert, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, TextInput } from '@marketly/web-shared/ui';
+import { cardExpiry } from './data/when';
 
 // Design: pages/store/account-payment-methods.html (one view): saved cards (default, remove,
 // update an expired card) and the "Add a card" form. Only type, last 4 and expiry are kept.
+// API: payments saved methods (GET/POST/PATCH/DELETE /api/store/payments/methods, make-default, setup).
+// Adding a card: POST …/methods/setup, then the provider's card fields return a setup token. With the
+// development provider (card-processor) the token is built from the typed card's brand, last 4 and expiry
+// (seti_<brand>_<last4>_<MMYY>); the card number never leaves the browser (gap G9: production needs the
+// provider's hosted fields).
 
-interface SavedCard {
-  id: string;
-  brand: 'VISA' | 'MC' | 'AMEX' | 'DISC';
-  label: string;
-  last4: string;
-  exp: string;
-  billing: string;
-  isDefault: boolean;
-}
+type SavedMethod = components['schemas']['payments.SavedPaymentMethod'];
+type BrandKey = 'visa' | 'mastercard' | 'amex' | 'discover';
 
-const BRAND_NAME: Record<SavedCard['brand'], string> = { VISA: 'Visa', MC: 'Mastercard', AMEX: 'American Express', DISC: 'Discover' };
+const BRAND_NAME: Record<string, string> = { visa: 'Visa', mastercard: 'Mastercard', amex: 'American Express', discover: 'Discover' };
+const BRAND_TILE: Record<string, string> = { visa: 'VISA', mastercard: 'MC', amex: 'AMEX', discover: 'DISC' };
+const brandName = (b: string) => BRAND_NAME[b.toLowerCase()] ?? b;
+const brandTile = (b: string) => BRAND_TILE[b.toLowerCase()] ?? b.slice(0, 4).toUpperCase();
 
-const CARDS: SavedCard[] = [
-  { id: 'c1', brand: 'VISA', label: 'Personal Visa', last4: '4417', exp: '08/29', billing: 'Home, Portland 97205', isDefault: true },
-  { id: 'c2', brand: 'MC', label: 'Work Mastercard', last4: '2051', exp: '11/27', billing: 'Work, Portland 97204', isDefault: false },
-  { id: 'c3', brand: 'VISA', label: 'Old debit card', last4: '9032', exp: '09/26', billing: 'Home, Portland 97205', isDefault: false },
-];
-
-const BILLING = [
-  { id: 'home', title: 'Home', body: '2140 Alder St, Apt 5, Portland, OR 97205', short: 'Home, Portland 97205' },
-  { id: 'work', title: 'Work', body: '815 SW 2nd Ave, Floor 4, Portland, OR 97204', short: 'Work, Portland 97204' },
-  { id: 'new', title: 'Use a different billing address', body: '', short: '' },
-] as const;
-
-/** Today is Oct 2026 in the sample data: a card is expired after the end of its month. */
-const NOW = { y: 26, m: 10 };
-const isExpired = (exp: string) => {
-  const [m, y] = exp.split('/').map(Number);
-  return y < NOW.y || (y === NOW.y && m < NOW.m);
+const now = new Date();
+const NOW = { y: now.getFullYear() % 100, m: now.getMonth() + 1 };
+const parseExp = (exp: string) => {
+  const m = /^(0[1-9]|1[0-2])\s?\/\s?(\d{2})$/.exec(exp.trim());
+  return m ? { m: Number(m[1]), y: Number(m[2]) } : null;
 };
-const validExp = (exp: string) => /^(0[1-9]|1[0-2])\s?\/\s?\d{2}$/.test(exp.trim()) && !isExpired(exp.replace(/\s/g, ''));
+const validExp = (exp: string) => {
+  const e = parseExp(exp);
+  return !!e && (e.y > NOW.y || (e.y === NOW.y && e.m >= NOW.m));
+};
 
 function luhn(num: string) {
   let sum = 0;
@@ -49,71 +46,102 @@ function luhn(num: string) {
   });
   return sum % 10 === 0;
 }
-const brandOf = (num: string): SavedCard['brand'] => (num.startsWith('4') ? 'VISA' : /^3[47]/.test(num) ? 'AMEX' : /^6/.test(num) ? 'DISC' : 'MC');
+const brandOf = (num: string): BrandKey => (num.startsWith('4') ? 'visa' : /^3[47]/.test(num) ? 'amex' : /^6/.test(num) ? 'discover' : 'mastercard');
 const groupDigits = (v: string) => v.replace(/\D/g, '').slice(0, 19).replace(/(\d{4})(?=\d)/g, '$1 ');
 const formatExp = (v: string) => {
   const d = v.replace(/\D/g, '').slice(0, 4);
   return d.length > 2 ? `${d.slice(0, 2)} / ${d.slice(2)}` : d;
 };
 
-const EMPTY = { num: '', exp: '', cvc: '', name: '', label: '', billing: 'home' as (typeof BILLING)[number]['id'], street: '', isDefault: false };
+const EMPTY = { num: '', exp: '', cvc: '', name: '', label: '', billing: '', isDefault: false };
 
 export default function PaymentMethods() {
-  const [cards, setCards] = useState(CARDS);
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const methods = useQuery({ queryKey: ['payments', 'methods'], queryFn: () => call(api.GET('/api/store/payments/methods')) });
+  const addresses = useQuery({ queryKey: ['customers', 'addresses'], queryFn: () => call(api.GET('/api/store/customers/addresses')) });
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['payments', 'methods'] });
+
   const [form, setForm] = useState(EMPTY);
   const [tried, setTried] = useState(false);
   const [notice, setNotice] = useState('');
-  const [editing, setEditing] = useState<SavedCard | null>(null);
+  const [editing, setEditing] = useState<SavedMethod | null>(null);
   const [newExp, setNewExp] = useState('');
   const [expTried, setExpTried] = useState(false);
 
+  const cards = methods.data ?? [];
+  const billingOptions = addresses.data ?? [];
+  const billing = form.billing || billingOptions.find((a) => a.isDefault)?.id || billingOptions[0]?.id || '';
   const digits = form.num.replace(/\D/g, '');
-  const amex = brandOf(digits) === 'AMEX';
+  const amex = brandOf(digits) === 'amex';
   const errors = tried
     ? {
         num: digits.length < 13 || !luhn(digits) ? 'Check the card number.' : undefined,
         exp: validExp(form.exp) ? undefined : 'Enter a future expiry date as MM / YY.',
         cvc: new RegExp(`^\\d{${amex ? 4 : 3}}$`).test(form.cvc) ? undefined : amex ? 'Enter the 4-digit code on the front.' : 'Enter the 3-digit code on the back.',
         name: form.name.trim() ? undefined : 'Enter the name as printed on the card.',
-        street: form.billing !== 'new' || form.street.trim() ? undefined : 'Enter the billing address.',
       }
     : {};
   const nErr = Object.values(errors).filter(Boolean).length;
-  const set = <K extends keyof typeof EMPTY>(k: K, v: (typeof EMPTY)[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const set = <K extends keyof typeof EMPTY>(k: K, v: (typeof EMPTY)[K]) => {
+    setForm((f) => ({ ...f, [k]: v }));
+    if (addCard.isError) addCard.reset();
+  };
+
+  const addCard = useMutation({
+    mutationFn: async () => {
+      const setup = await call(api.POST('/api/store/payments/methods/setup'));
+      if (setup.provider !== 'card-processor') {
+        throw new ApiError(501, 'PROVIDER_FIELDS_REQUIRED', 'Adding a card needs the payment provider’s secure card fields, which this version of the store doesn’t have yet. You can still pay with a new card at checkout.');
+      }
+      const e = parseExp(form.exp)!;
+      const setupToken = `seti_${brandOf(digits)}_${digits.slice(-4)}_${String(e.m).padStart(2, '0')}${String(e.y).padStart(2, '0')}`;
+      return call(api.POST('/api/store/payments/methods', { body: { setupToken, label: form.label.trim() || null, billingAddressId: billing || null, makeDefault: form.isDefault || !cards.length } }));
+    },
+    onSuccess: (card) => {
+      setForm(EMPTY);
+      setTried(false);
+      setNotice(`${card.label} saved.`);
+      announce(`${card.label} saved`);
+      refresh();
+    },
+  });
+  const makeDefault = useMutation({
+    mutationFn: (c: SavedMethod) => call(api.POST('/api/store/payments/methods/{id}/make-default', { params: { path: { id: c.id } } })),
+    onSuccess: (c) => {
+      setNotice(`${c.label} is now your default card.`);
+      refresh();
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (c: SavedMethod) => call(api.DELETE('/api/store/payments/methods/{id}', { params: { path: { id: c.id } } })),
+    onSuccess: (_, c) => {
+      setNotice(`${c.label} removed.`);
+      refresh();
+    },
+  });
+  const updateExp = useMutation({
+    mutationFn: ({ c, m, y }: { c: SavedMethod; m: number; y: number }) => call(api.PATCH('/api/store/payments/methods/{id}', { params: { path: { id: c.id } }, body: { expMonth: m, expYear: 2000 + y } })),
+    onSuccess: (c) => {
+      setNotice(`${c.label} updated.`);
+      setEditing(null);
+      refresh();
+    },
+  });
 
   const save = () => {
     setTried(true);
-    const ok = digits.length >= 13 && luhn(digits) && validExp(form.exp) && new RegExp(`^\\d{${amex ? 4 : 3}}$`).test(form.cvc) && form.name.trim() && (form.billing !== 'new' || form.street.trim());
+    const ok = digits.length >= 13 && luhn(digits) && validExp(form.exp) && new RegExp(`^\\d{${amex ? 4 : 3}}$`).test(form.cvc) && form.name.trim();
     if (!ok) return;
-    const brand = brandOf(digits);
-    const card: SavedCard = {
-      id: `c${Date.now()}`,
-      brand,
-      label: form.label.trim() || `${BRAND_NAME[brand]} ${digits.slice(-4)}`,
-      last4: digits.slice(-4),
-      exp: form.exp.replace(/\s/g, ''),
-      billing: form.billing === 'new' ? form.street.trim() : BILLING.find((b) => b.id === form.billing)!.short,
-      isDefault: form.isDefault,
-    };
-    setCards((cs) => [...(card.isDefault ? cs.map((c) => ({ ...c, isDefault: false })) : cs), card]);
-    setForm(EMPTY);
-    setTried(false);
-    setNotice(`${card.label} saved.`);
-    announce(`${card.label} saved`);
-  };
-  const makeDefault = (id: string) => setCards((cs) => cs.map((c) => ({ ...c, isDefault: c.id === id })));
-  const remove = (card: SavedCard) => {
-    const rest = cards.filter((c) => c.id !== card.id);
-    setCards(card.isDefault && rest.length ? rest.map((c, i) => ({ ...c, isDefault: i === 0 })) : rest);
-    setNotice(`${card.label} removed.`);
+    addCard.mutate();
   };
   const saveExp = () => {
     setExpTried(true);
-    if (!editing || !validExp(newExp)) return;
-    setCards((cs) => cs.map((c) => (c.id === editing.id ? { ...c, exp: newExp.replace(/\s/g, '') } : c)));
-    setNotice(`${editing.label} updated.`);
-    setEditing(null);
+    const e = parseExp(newExp);
+    if (!editing || !e || !validExp(newExp)) return;
+    updateExp.mutate({ c: editing, m: e.m, y: e.y });
   };
+  const rowError = makeDefault.error ?? remove.error;
 
   return (
     <AccountLayout active="payment" title="Payment methods">
@@ -123,7 +151,7 @@ export default function PaymentMethods() {
           <p className="small sub">Cards saved for faster checkout.</p>
         </div>
       </div>
-      {notice && <Alert tone="success" title={notice} />}
+      {rowError ? <Alert tone="danger" title="That didn't work">{errorMessage(rowError)}</Alert> : notice && <Alert tone="success" title={notice} />}
       <Card
         title="Saved cards"
         flush
@@ -133,43 +161,67 @@ export default function PaymentMethods() {
           </span>
         }
       >
+        {methods.isError && (
+          <div className="card-body">
+            <Alert tone="danger" title="We couldn't load your cards">
+              {errorMessage(methods.error)}{' '}
+              <Button variant="ghost" size="sm" onClick={() => void methods.refetch()}>
+                Try again
+              </Button>
+            </Alert>
+          </div>
+        )}
+        {methods.isPending && (
+          <div className="sk-list" aria-hidden="true">
+            {[0, 1].map((i) => (
+              <div className="sk-row" key={i}>
+                <span className="sk sk-thumb" />
+                <span className="sk-lines">
+                  <span className="sk sk-line" />
+                  <span className="sk sk-line short" />
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         {cards.map((c) => {
-          const expired = isExpired(c.exp);
+          const exp = cardExpiry(c.expMonth, c.expYear);
           return (
             <div key={c.id} className="acct-row">
               <span className="acct-cc" aria-hidden="true">
-                {c.brand}
+                {brandTile(c.brand)}
               </span>
               <span className="stack gap-1 grow">
                 <span className="row gap-2">
                   <span className="small strong">{c.label}</span>
                   {c.isDefault && <Badge tone="brand">Default</Badge>}
-                  {expired && <Badge>Expired</Badge>}
+                  {c.expired && <Badge>Expired</Badge>}
                 </span>
                 <span className="xs muted">
-                  {BRAND_NAME[c.brand]} ending in <span className="num">{c.last4}</span> · {expired ? 'Expired' : 'Expires'} {c.exp} · Billing: {c.billing}
+                  {brandName(c.brand)} ending in <span className="num">{c.last4}</span> · {c.expired ? 'Expired' : 'Expires'} {exp}
+                  {c.billingSummary && ` · Billing: ${c.billingSummary}`}
                 </span>
               </span>
               <span className="row gap-2">
-                {expired ? (
-                  <Button variant="secondary" size="sm" onClick={() => (setEditing(c), setNewExp(''), setExpTried(false))}>
+                {c.expired ? (
+                  <Button variant="secondary" size="sm" onClick={() => (setEditing(c), setNewExp(''), setExpTried(false), updateExp.reset())}>
                     Update expiry
                   </Button>
                 ) : (
                   !c.isDefault && (
-                    <Button variant="ghost" size="sm" onClick={() => makeDefault(c.id)}>
+                    <Button variant="ghost" size="sm" onClick={() => makeDefault.mutate(c)} disabled={makeDefault.isPending}>
                       Make default
                     </Button>
                   )
                 )}
-                <Button variant="ghost" size="sm" icon="trash-2" onClick={() => remove(c)}>
+                <Button variant="ghost" size="sm" icon="trash-2" onClick={() => remove.mutate(c)} disabled={remove.isPending}>
                   Remove
                 </Button>
               </span>
             </div>
           );
         })}
-        {cards.length === 0 && <p className="small muted u-p-sp-4">No saved cards. Add one below or enter a card at checkout.</p>}
+        {methods.isSuccess && cards.length === 0 && <p className="small muted u-p-sp-4">No saved cards. Add one below or enter a card at checkout.</p>}
       </Card>
       <Card
         title="Add a card"
@@ -177,14 +229,17 @@ export default function PaymentMethods() {
         sub="We accept Visa, Mastercard, American Express and Discover."
         foot={
           <>
-            <Button variant="ghost" onClick={() => (setForm(EMPTY), setTried(false))}>
+            <Button variant="ghost" onClick={() => (setForm(EMPTY), setTried(false), addCard.reset())}>
               Cancel
             </Button>
-            <Button onClick={save}>Save card</Button>
+            <Button onClick={save} disabled={addCard.isPending}>
+              {addCard.isPending ? 'Saving…' : 'Save card'}
+            </Button>
           </>
         }
       >
         {nErr > 0 && <Alert tone="danger" title={`Check ${nErr} field${nErr > 1 ? 's' : ''}`}>Fix the highlighted fields to save this card.</Alert>}
+        {addCard.isError && <Alert tone="danger" title="We couldn't save this card">{errorMessage(addCard.error)}</Alert>}
         <Field label="Card number" error={errors.num}>
           <TextInput id="pm-num" icon="credit-card" placeholder="Card number" inputMode="numeric" autoComplete="cc-number" value={form.num} error={!!errors.num} onChange={(e) => set('num', groupDigits(e.target.value))} />
         </Field>
@@ -205,16 +260,34 @@ export default function PaymentMethods() {
         <div className="field">
           <span className="label">Billing address</span>
           <div className="stack gap-2" role="radiogroup" aria-label="Billing address">
-            {BILLING.map((b) => (
-              <OptionCard key={b.id} id={`pm-bill-${b.id}`} name="pm-bill" checked={form.billing === b.id} onChange={() => set('billing', b.id)} title={<span className="strong">{b.title}</span>} body={b.body || undefined} />
+            {billingOptions.map((b) => (
+              <OptionCard
+                key={b.id}
+                id={`pm-bill-${b.id}`}
+                name="pm-bill"
+                checked={billing === b.id}
+                onChange={() => set('billing', b.id)}
+                title={<span className="strong">{b.label || 'Address'}</span>}
+                body={`${b.address.line1}${b.address.line2 ? `, ${b.address.line2}` : ''}, ${b.address.city}, ${b.address.region} ${b.address.postalCode}`}
+              />
             ))}
+            <OptionCard
+              id="pm-bill-new"
+              name="pm-bill"
+              disabled
+              title={<span className="strong">Use a different billing address</span>}
+              body={
+                <>
+                  Add it to your{' '}
+                  <Link to={href('account/addresses')} className="link-inline">
+                    addresses
+                  </Link>{' '}
+                  first, then choose it here.
+                </>
+              }
+            />
           </div>
         </div>
-        {form.billing === 'new' && (
-          <Field label="Billing address" error={errors.street}>
-            <TextInput id="pm-street" placeholder="Street, city, state and ZIP" autoComplete="billing street-address" value={form.street} error={!!errors.street} onChange={(e) => set('street', e.target.value)} />
-          </Field>
-        )}
         <Checkbox id="pm-default" label="Make this my default card" checked={form.isDefault} onChange={(e) => set('isDefault', e.target.checked)} />
         <span className="row gap-2 xs muted">
           <Icon name="lock" className="ic-sm" /> Card details go straight to our payment provider. Marketly only keeps the card type, last 4 digits and expiry.
@@ -231,13 +304,14 @@ export default function PaymentMethods() {
             <Button variant="ghost" onClick={() => setEditing(null)}>
               Cancel
             </Button>
-            <Button onClick={saveExp}>Save</Button>
+            <Button onClick={saveExp} disabled={updateExp.isPending}>
+              Save
+            </Button>
           </>
         }
       >
-        <p className="small sub">
-          {editing && `${BRAND_NAME[editing.brand]} ending in ${editing.last4}. Enter the expiry date from your replacement card.`}
-        </p>
+        <p className="small sub">{editing && `${brandName(editing.brand)} ending in ${editing.last4}. Enter the expiry date from your replacement card.`}</p>
+        {updateExp.isError && <Alert tone="danger" title="We couldn't update the card">{errorMessage(updateExp.error)}</Alert>}
         <Field label="New expiry date" error={expTried && !validExp(newExp) ? 'Enter a future expiry date as MM / YY.' : undefined}>
           <TextInput id="pm-new-exp" placeholder="MM / YY" inputMode="numeric" value={newExp} error={expTried && !validExp(newExp)} onChange={(e) => setNewExp(formatExp(e.target.value))} />
         </Field>

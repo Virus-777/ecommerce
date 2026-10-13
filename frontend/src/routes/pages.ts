@@ -13,6 +13,8 @@ export const PAGES: Partial<Record<ScreenId, LazyExoticComponent<ComponentType>>
   'store/search-empty': lazy(() => import('../pages/store/SearchEmpty')),
   'store/product': lazy(() => import('../pages/store/Product')),
   'store/offers': lazy(() => import('../pages/store/Offers')),
+  'store/reviews': lazy(() => import('../pages/store/Reviews')),
+  'store/questions': lazy(() => import('../pages/store/Questions')),
   'store/brand': lazy(() => import('../pages/store/Brand')),
   'store/seller': lazy(() => import('../pages/store/Seller')),
   'store/official': lazy(() => import('../pages/store/Official')),

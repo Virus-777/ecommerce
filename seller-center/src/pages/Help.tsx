@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { money } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Card, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, PageHeader, SearchInput, Select, StatusBadge, SummaryRow, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { articleSlug, getArticle, getCategory } from './data/help-articles';
 
 // Design: pages/seller/seller-help.html · view "contact-seller-support" = the support request form (a page state, not a dialog).
+// Article links open seller/help-article. The contact view reads ?topic=…&article=… (sent by an
+// article's "Contact seller support") to preselect the topic and prefill the subject.
+
+/** Link to the help article listed under this name. */
+const articleTo = (label: string) => href('seller/help-article', '', { slug: articleSlug(label) });
 
 interface Topic {
   icon: IconName;
@@ -221,6 +227,12 @@ export default function Help() {
   // Opening the view's URL directly shows the design's filled-in request; later visits start blank.
   const [prefill, setPrefill] = useState(view === 'contact-seller-support');
   const [sent, setSent] = useState<SupportRequest | null>(null);
+  // Sent from a help article: preselect its topic and prefill the subject.
+  const [params] = useSearchParams();
+  const fromArticle = getArticle(params.get('article') ?? undefined);
+  const topicParam = params.get('topic') ?? '';
+  const linkedTopic = SUPPORT_TOPICS.includes(topicParam) ? topicParam : fromArticle ? getCategory(fromArticle.category).supportTopic : '';
+  const linkedDraft: Draft | null = linkedTopic || fromArticle ? { ...BLANK_DRAFT, topic: linkedTopic || BLANK_DRAFT.topic, subject: fromArticle ? `Question about “${fromArticle.label}”` : '' } : null;
   useEffect(() => {
     if (view !== 'contact-seller-support') setSent(null);
   }, [view]);
@@ -267,7 +279,7 @@ export default function Help() {
             </Card>
           ) : (
             <ContactForm
-              initial={prefill ? DESIGN_DRAFT : BLANK_DRAFT}
+              initial={linkedDraft ?? (prefill ? DESIGN_DRAFT : BLANK_DRAFT)}
               onCancel={() => {
                 setPrefill(false);
                 setView('');
@@ -293,13 +305,13 @@ export default function Help() {
             <Card title="These may answer it now" titleAs="h3">
               <ul className="stack gap-2 small">
                 <li>
-                  <a href="#">Brand claims and proof documents</a>
+                  <Link to={articleTo('Brand claims and proof documents')}>Brand claims and proof documents</Link>
                 </li>
                 <li>
-                  <Link to={href('seller/performance')}>How to appeal a decision</Link>
+                  <Link to={articleTo('How to appeal a decision')}>How to appeal a decision</Link>
                 </li>
                 <li>
-                  <a href="#">What a restriction affects</a>
+                  <Link to={articleTo('What a restriction affects')}>What a restriction affects</Link>
                 </li>
               </ul>
             </Card>
@@ -372,7 +384,7 @@ export default function Help() {
                   <ul>
                     {t.articles.map((a) => (
                       <li key={a}>
-                        <a href="#">{a}</a>
+                        <Link to={articleTo(a)}>{a}</Link>
                       </li>
                     ))}
                   </ul>

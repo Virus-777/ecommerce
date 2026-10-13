@@ -1,30 +1,44 @@
-import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { StoreLayout } from '@/layouts';
+import NotFound from './NotFound';
+import { ApiError, call, useApi } from '@marketly/web-shared/api';
+import { num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Breadcrumbs, Button, Dialog, EmptyState, Icon, IconButton, Img, Pager, ProductCard, Radio, Select } from '@marketly/web-shared/ui';
-import { CHIPS, HEADPHONES, PAGE_SIZE, SORTS, TOTAL_RESULTS, TYPES, type Sort } from './data/category';
-import { Count, DEFAULT_FILTERS, FilterGroups, matches, sameFilters, sortListings, toggleIn, type Filters, type ListKey, type SetFilter } from './data/listing-filters';
+import { Breadcrumbs, Button, Dialog, EmptyState, Icon, IconButton } from '@marketly/web-shared/ui';
+import { findCategory, useCategoryTree } from '@/api/catalog';
+import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, SkLines } from '@/api/cards';
+import { ActiveFilters, Count, FacetFilters, SortRadios, SortSelect, useListingParams } from '@/api/listing';
+import { readPage, readQuery, shownRange, toCardProduct, useFacets, useListing, useSearchClick, type SearchContext } from '@/api/search';
 
 // Design: pages/store/store-category.html · view "filters-phone-sheet" = the phone filters & sort sheet.
+// Data: GET /api/store/catalog/categories/{slug} (header, 404), GET /api/store/search/facets and
+// GET /api/store/search/products with category={slug} plus the filters and sort in the URL (REST search
+// parameters), page on the website and cursor on the phone. The banner ad needs ad decisions (not wired).
 
-/** Category group of the filters: back to the parent, this category and its sub-categories. */
-function CategoryTree() {
+const PER_PAGE = 24;
+
+/** Category group of the filters: back to the parent, this category and its subcategories. */
+function CategoryTree({ ctx, name, total }: { ctx: SearchContext | undefined; name: string; total: number | null }) {
+  const crumbs = ctx?.category?.breadcrumb ?? [];
+  const parent = crumbs.length > 1 ? crumbs[crumbs.length - 2] : null;
   return (
     <>
-      <Link className="small" to={href('store/categories')}>
-        <Icon name="chevron-left" className="ic-sm" /> Electronics
+      <Link className="small" to={parent ? href('store/category', '', { slug: parent.slug }) : href('store/categories')}>
+        <Icon name="chevron-left" className="ic-sm" /> {parent ? parent.name : 'All categories'}
       </Link>
       <span className="small strong">
-        Headphones <Count n={TOTAL_RESULTS} />
+        {name} {total !== null && <Count n={total} />}
       </span>
       <div className="stack gap-1 u-pl-sp-3">
-        {TYPES.map((t) => (
-          <Link key={t.id} className="small" to={href('store/category', '', { slug: CHIPS.find((c) => c.label === t.label)?.slug ?? 'headphones' })}>
-            {t.label} <Count n={t.n} />
-          </Link>
-        ))}
+        {(ctx?.category?.subcategories ?? [])
+          .filter((s) => s.count > 0 && !s.comingSoon)
+          .map((s) => (
+            <Link key={s.id} className="small" to={href('store/category', '', { slug: s.slug })}>
+              {s.name} <Count n={s.count} />
+            </Link>
+          ))}
       </div>
     </>
   );
@@ -32,109 +46,133 @@ function CategoryTree() {
 
 export default function Category() {
   const [view, setView] = useView<'filters-phone-sheet'>();
-  const { slug = 'headphones' } = useParams();
-  const chip = CHIPS.find((c) => c.slug === slug) ?? CHIPS[0];
+  const { slug = '' } = useParams();
+  const { api } = useApi();
   const sheetOpen = view === 'filters-phone-sheet';
+  const lp = useListingParams(['category']);
+  const query = readQuery(lp.params, { category: slug });
+  const page = readPage(lp.params);
 
-  const [f, setF] = useState<Filters>(DEFAULT_FILTERS);
-  const [sort, setSort] = useState<Sort>('Recommended');
-  const [page, setPage] = useState(1);
+  const cat = useQuery({
+    queryKey: ['catalog', 'category', slug],
+    queryFn: () => call(api.GET('/api/store/catalog/categories/{slug}', { params: { path: { slug } } })),
+  });
+  const tree = useCategoryTree();
+  const found = cat.isSuccess;
+  const facets = useFacets(query, { enabled: found });
+  const listing = useListing(query, page, { limit: PER_PAGE, enabled: found });
+  const onOpen = useSearchClick(facets.data?.searchId);
 
-  const set: SetFilter = (k, v) => {
-    setF((prev) => ({ ...prev, [k]: v }));
-    setPage(1);
-  };
-  const toggle = (k: ListKey, v: string) => {
-    setF((prev) => ({ ...prev, [k]: toggleIn(prev[k] as string[], v) }));
-    setPage(1);
-  };
-  const clearAll = () => {
-    setF(DEFAULT_FILTERS);
-    setSort('Recommended');
-    setPage(1);
-  };
+  if (cat.error instanceof ApiError && cat.error.status === 404) return <NotFound />;
 
-  const filtered = !sameFilters(f, DEFAULT_FILTERS) || !!chip.match;
-  const results = useMemo(() => sortListings(HEADPHONES.filter((l) => matches(l, f) && (!chip.match || chip.match(l))), sort), [f, sort, chip]);
-  // The sample holds the first page of 128 results; once filtered, the sample is the whole result set.
-  const total = filtered ? results.length : TOTAL_RESULTS;
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const from = total ? (page - 1) * PAGE_SIZE + 1 : 0;
-  const to = Math.min(page * PAGE_SIZE, total);
+  const ctx = facets.data;
+  const name = cat.data?.category.name ?? '';
+  const crumbs = ctx?.category?.breadcrumb ?? cat.data?.breadcrumb ?? [];
+  const total = ctx?.total ?? listing.total;
+  const shown = shownRange(listing.page, PER_PAGE, listing.hits.length, total ?? 0);
+
+  // Chips: this category's subcategories, or a leaf's siblings, after an "All …" chip for the parent level.
+  const node = findCategory(tree.data, { slug });
+  const parentNode = node?.parentId ? findCategory(tree.data, { id: node.parentId }) : undefined;
+  const level = node && (node.children ?? []).length > 0 ? node : parentNode;
+  const chips = level ? [{ slug: level.slug, label: `All ${level.name.toLowerCase()}` }, ...(level.children ?? []).filter((c) => !c.comingSoon).map((c) => ({ slug: c.slug, label: c.name }))] : [];
+
+  const category = <CategoryTree ctx={ctx} name={name} total={total} />;
+  const filtersBody = (p: string) => (ctx ? <FacetFilters p={p} facets={ctx.facets} lp={lp} category={category} /> : <SkLines n={6} />);
+  const error = cat.error ?? facets.error ?? listing.error;
+  const retry = () => {
+    void cat.refetch();
+    void facets.refetch();
+    listing.refetch();
+  };
 
   return (
-    <StoreLayout
-      tab="categories"
-      appbar={{ title: 'Headphones', back: href('store/categories'), actions: <IconButton icon="search" label="Search" to={href('store/search')} /> }}
-    >
+    <StoreLayout tab="categories" appbar={{ title: name || 'Category', back: href('store/categories'), actions: <IconButton icon="search" label="Search" to={href('store/search')} /> }}>
       <div className="container page gap-5">
         <div className="stack gap-2">
-          <Breadcrumbs items={[{ label: 'Home', to: href('store/home') }, { label: 'Electronics', to: href('store/categories') }, { label: 'Headphones' }]} />
-          <h1 className="h1 acct-h1">Headphones</h1>
-          <p className="small muted">{TOTAL_RESULTS} results from 9 sellers, including the Official Store</p>
+          <Breadcrumbs
+            items={[
+              { label: 'Home', to: href('store/home') },
+              ...crumbs.slice(0, -1).map((c) => ({ label: c.name, to: href('store/category', '', { slug: c.slug }) })),
+              ...(name ? [{ label: name }] : []),
+            ]}
+          />
+          {cat.isPending ? (
+            <>
+              <h1 className="h1 acct-h1 sr-only">Category</h1>
+              <SkLines n={2} />
+            </>
+          ) : (
+            <>
+              <h1 className="h1 acct-h1">{name || 'Category'}</h1>
+              {ctx && <p className="small muted">{ctx.totalLabel}</p>}
+            </>
+          )}
         </div>
-        <div className="hscroll gap-2">
-          {CHIPS.map((c) => (
-            <Link key={c.slug} className={c.slug === chip.slug ? 'chip is-active' : 'chip'} to={href('store/category', '', { slug: c.slug })} aria-current={c.slug === chip.slug ? 'true' : undefined}>
-              {c.label}
-            </Link>
-          ))}
-        </div>
-        <Link className="shop-banner" to={href('store/product')} aria-label="Advertisement: Halden Aurora headphones at the Official Store">
-          <span className="ad-label">Ad</span>
-          <div className="copy">
-            <span className="eyebrow">Halden · at the Official Store</span>
-            <span className="h2">40 hours of quiet. Aurora ANC headphones, now $189.00.</span>
-            <span className="small sub">Sale ends Oct 19, 11:59 PM PT. Sold and shipped by Marketly Official.</span>
-            <span className="row gap-3">
-              <span className="btn btn-primary btn-sm">Shop Aurora</span>
-              <span className="xs muted">Advertiser: Halden Audio</span>
-            </span>
+        {chips.length > 1 && (
+          <div className="hscroll gap-2">
+            {chips.map((c) => (
+              <Link key={c.slug} className={c.slug === slug ? 'chip is-active' : 'chip'} to={href('store/category', '', { slug: c.slug })} aria-current={c.slug === slug ? 'true' : undefined}>
+                {c.label}
+              </Link>
+            ))}
           </div>
-          <div className="art" aria-hidden="true">
-            <Img icon="headphones" tint="2" />
-            <Img icon="ear" tint="2" />
-          </div>
-        </Link>
+        )}
+        {error && !(error instanceof ApiError && error.status === 404) ? <LoadError error={error} onRetry={retry} title="We couldn’t load this category" /> : null}
+        <ActiveFilters ctx={ctx} lp={lp} hide={['category']} />
         <div className="shop-listing">
           <aside className="only-desktop" aria-labelledby="cf-h">
             <h2 className="h4" id="cf-h">
               Filters
             </h2>
-            <FilterGroups p="cf" f={f} set={set} toggle={toggle} category={<CategoryTree />} />
+            {filtersBody('cf')}
           </aside>
           <div className="stack gap-4">
             <div className="shop-toolbar">
               <div className="row gap-2">
                 <Button variant="secondary" size="sm" icon="sliders-horizontal" className="no-desktop" onClick={() => setView('filters-phone-sheet')} aria-haspopup="dialog">
-                  Filters
+                  {lp.filterCount ? `Filters (${lp.filterCount})` : 'Filters'}
                 </Button>
-                <span className={sheetOpen ? 'small sub' : 'small sub no-phone'}>
-                  Showing {from}–{to} of {total}
-                </span>
+                {total !== null && (
+                  <span className={sheetOpen ? 'small sub' : 'small sub no-phone'}>
+                    {total ? `Showing ${shown.from}–${shown.to} of ${num(total)}` : 'No results'}
+                  </span>
+                )}
               </div>
               <span className="shop-sort">
                 <label className="small sub nowrap" htmlFor="cat-sort">
                   Sort by
                 </label>
-                <Select id="cat-sort" options={[...SORTS]} value={sort} onChange={(e) => setSort(e.target.value as Sort)} />
+                <SortSelect id="cat-sort" ctx={ctx} lp={lp} />
               </span>
             </div>
             <p className="shop-from">
               <Icon name="info" />
-              <span>A “from” price is the lowest eligible offer for that product, from one named seller. The product page shows that seller, the shipping cost and delivery date before you add it to your cart.</span>
+              <span>{ctx?.fromPriceNote ?? 'A “from” price is the lowest eligible offer for that product, from one named seller. The product page shows that seller, the shipping cost and delivery date before you add it to your cart.'}</span>
             </p>
-            {results.length ? (
-              <div className="grid-products">
-                {results.map((l) => (
-                  <ProductCard key={l.id} p={l} sponsored={l.sponsored} showSeller from />
+            {listing.isPending ? (
+              <CardGridSkeleton n={8} />
+            ) : listing.hits.length ? (
+              <div className="grid-products" aria-busy={listing.isFetching || undefined}>
+                {listing.hits.map((h) => (
+                  <ApiProductCard key={`${h.kind}-${h.position}-${h.product.productId}`} c={toCardProduct(h.product, h)} showSeller from onOpen={onOpen} />
                 ))}
               </div>
-            ) : (
-              <EmptyState icon="search-x" title="No headphones match these filters" action={<Button variant="secondary" onClick={clearAll}>Clear all filters</Button>}>
-                Try removing a filter or widening the price range.
+            ) : !error ? (
+              <EmptyState
+                icon="search-x"
+                title={`No ${name.toLowerCase() || 'products'} match these filters`}
+                action={
+                  lp.filterCount > 0 ? (
+                    <Button variant="secondary" onClick={lp.clearFilters}>
+                      Clear all filters
+                    </Button>
+                  ) : undefined
+                }
+              >
+                {lp.filterCount > 0 ? 'Try removing a filter or widening the price range.' : 'Nothing is in stock here right now. Check back soon.'}
               </EmptyState>
-            )}
+            ) : null}
             <div className="row between">
               <span className="xs muted">
                 Sponsored items are paid placements and are labeled.{' '}
@@ -142,7 +180,7 @@ export default function Category() {
                   How results are ranked
                 </Link>
               </span>
-              <Pager page={page} total={pages} onPage={setPage} grid end={pages === 1 || page === pages} />
+              <ListingPager listing={listing} onPage={lp.setPage} />
             </div>
           </div>
         </div>
@@ -154,22 +192,17 @@ export default function Category() {
         title="Filters and sort"
         foot={
           <>
-            <Button variant="ghost" onClick={clearAll}>
+            <Button variant="ghost" onClick={lp.clearFilters}>
               Clear all
             </Button>
             <Button className="grow" onClick={() => setView('')}>
-              Show {total} results
+              Show {num(total ?? 0)} results
             </Button>
           </>
         }
       >
-        <div className="stack gap-2">
-          <h3 className="h4">Sort by</h3>
-          {SORTS.map((s, i) => (
-            <Radio key={s} id={`cs-sort${i}`} name="cs-sort" checked={sort === s} onChange={() => setSort(s)} label={s} />
-          ))}
-        </div>
-        <FilterGroups p="cs" f={f} set={set} toggle={toggle} category={<CategoryTree />} />
+        <SortRadios p="cs" ctx={ctx} lp={lp} />
+        {filtersBody('cs')}
       </Dialog>
     </StoreLayout>
   );

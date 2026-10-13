@@ -1,95 +1,112 @@
-import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { order, P, sellers, type SellerId } from '@marketly/web-shared/data/fixtures';
+import { errorMessage } from '@marketly/web-shared/api';
 import { AccountLayout } from '@/layouts';
-import { money } from '@marketly/web-shared/lib/format';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Breadcrumbs, Button, Card, Icon, Img, LogoTile, SellerBadge, StatusBadge, SummaryRow, Track } from '@marketly/web-shared/ui';
+import { Alert, Breadcrumbs, Button, Card, Icon, Img, LogoTile, SellerBadge, StatusBadge, SummaryRow, Track } from '@marketly/web-shared/ui';
+import {
+  caseHref, fmtPhone, fmtPlaced, groupTone, humanize, plural, productHref, returnHref, returnTone, sellerInitials, stateTone, useOpenDocument, useOrderDetail,
+  type OrderDetail, type OrderGroup, type OrderItem,
+} from './data/orders';
+import { DetailSkeleton, LoadError, NotFoundCard } from './data/order-parts';
 
-// Design: pages/store/account-order.html (one view). Packages come from the shared order fixture;
-// per-item notes and actions are screen copy.
+// Design: pages/store/account-order.html (one view). Data: the OrderDetail screen query (order(ref))
+// for packages, item states and actions, payment, returns, refunds, cases and documents; documents
+// open through GET orders/orders/{id}/documents/{documentId} (short-lived PDF link).
 
-type ItemAction = 'review' | 'return' | 'view-return' | 'track' | 'cancel';
+/** Mini delivery track class per package state ("d" delivered, "i" on its way, "w" late or failed). */
+function miniClass(state: string): 'd' | 'i' | 'w' {
+  const s = state.toLowerCase();
+  if (s.startsWith('delivered')) return 'd';
+  if (s.includes('delay') || s.includes('fail') || s.includes('late') || s.includes('exception')) return 'w';
+  return 'i';
+}
+const MINI_LEGEND = { d: 'Delivered', i: 'In transit', w: 'Delayed' } as const;
 
-const ITEM_NOTES: Record<string, { note: ReactNode; actions: ItemAction[] }> = {
-  aurora: { note: 'Delivered Sep 17. Return by Sat, Oct 17.', actions: ['review', 'return'] },
-  pourover: {
-    note: (
-      <>
-        Return{' '}
-        <Link className="mono" to={href('account/return')}>
-          RT-260921-0457
-        </Link>{' '}
-        approved. Drop off by Oct 15. Refund after inspection.
-      </>
-    ),
-    actions: ['view-return'],
-  },
-  ssd1tb: { note: "Shipped Oct 6. Can't be cancelled now. You can return it after delivery.", actions: ['track'] },
-  duvet: { note: 'Not shipped yet. You can cancel it until Casa Verde ships it.', actions: ['cancel'] },
-};
-
-const PKG_META: Array<{ tone: 'success' | 'info' | 'warning'; labels: string[]; done: number; warn?: boolean; sub: ReactNode; foot: string }> = [
-  { tone: 'success', labels: ['Confirmed', 'Shipped', 'In transit', 'Delivered'], done: 4, sub: null, foot: 'Official Store item. Marketly handles returns.' },
-  { tone: 'info', labels: ['Confirmed', 'Shipped', 'In transit', 'Delivered'], done: 3, sub: null, foot: 'Pixel & Port handles this package. Marketly support can step in.' },
-  { tone: 'warning', labels: ['Confirmed', 'Preparing', 'Shipped', 'Delivered'], done: 2, warn: true, sub: "No tracking yet. The seller hasn't shipped this package.", foot: 'Casa Verde Home handles this package. Marketly support can step in.' },
-];
-
-const DOCUMENTS = [
-  { icon: 'receipt' as const, label: 'Order receipt' },
-  ...order.groups.map((g) => ({ icon: 'file-text' as const, label: `Invoice, ${sellers[g.seller as SellerId].name}` })),
-];
-
-/** Saves a plain-text document (receipts and invoices are PDFs once the API exists). */
-function download(name: string, body: string) {
-  const url = URL.createObjectURL(new Blob([body], { type: 'text/plain' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-  announce(`Downloading ${name}`);
+/** Package track: the shipment's own steps once shipped, otherwise the pre-shipping steps. */
+function packageTrack(g: OrderGroup): { labels: string[]; done: number; tone?: 'warning' | 'danger' } | null {
+  const s = g.status.toUpperCase();
+  if (s.includes('CANCELLED')) return null;
+  const sh = g.shipments.find((x) => x.kind.toUpperCase() === 'OUTBOUND') ?? g.shipments[0];
+  if (sh) {
+    const failed = sh.status.toUpperCase().includes('FAIL') || !!sh.failedDelivery;
+    return { labels: ['Confirmed', ...sh.steps], done: sh.currentStep + 2, tone: failed ? 'danger' : undefined };
+  }
+  const labels = ['Confirmed', 'Preparing', 'Shipped', 'Delivered'];
+  if (s === 'PREPARING' || s === 'DELAYED') return { labels, done: 2, tone: s === 'DELAYED' ? 'warning' : undefined };
+  return { labels, done: 1 };
 }
 
 export default function Order() {
-  const { ref = order.ref } = useParams();
-  const itemCount = order.groups.reduce((n, g) => n + g.items.reduce((m, i) => m + i.qty, 0), 0);
-  const receipt = () =>
-    download(
-      `${ref}-receipt.txt`,
-      [`Marketly order ${ref}`, `Placed ${order.placed} PT`, '', ...order.groups.flatMap((g) => g.items.map((i) => `${P[i.p].name} × ${i.qty}  ${money(i.price * i.qty)}`)), '', `Order total ${money(order.total)}`].join('\n'),
+  const { ref = '' } = useParams();
+  const q = useOrderDetail(ref);
+  const order = q.data;
+  const docs = useOpenDocument(order?.id);
+  const crumbs = <Breadcrumbs items={[{ label: 'Orders', to: href('account/orders') }, { label: ref }]} />;
+
+  if (q.isPending || q.isError || !order) {
+    return (
+      <AccountLayout active="orders" title="Order details">
+        {crumbs}
+        {q.isPending ? (
+          <DetailSkeleton cards={3} />
+        ) : q.isError ? (
+          <LoadError error={q.error} onRetry={() => void q.refetch()} />
+        ) : (
+          <NotFoundCard title={`We couldn't find order ${ref}`}>Check the order number in your confirmation email. Orders placed as a guest are found with the guest order lookup.</NotFoundCard>
+        )}
+      </AccountLayout>
     );
+  }
+
+  const receipt = order.documents.find((d) => d.kind.toUpperCase() === 'RECEIPT');
+  const openCase = order.cases.find((c) => c.open);
+  const latestReturn = order.returns[0];
+  const returnItem = latestReturn && order.groups.flatMap((g) => g.items).find((i) => latestReturn.items.some((r) => r.orderItemId === i.id));
+  const expected = latestReturn && order.totals.expectedRefunds.find((e) => e.ref === latestReturn.ref);
+  const pkgStates = order.progress.delivery.packageStates;
+  const legend = [...new Set(pkgStates.map(miniClass))];
 
   return (
     <AccountLayout active="orders" title="Order details">
-      <Breadcrumbs items={[{ label: 'Orders', to: href('account/orders') }, { label: ref }]} />
+      {crumbs}
       <div className="acct-head">
         <div className="stack gap-1">
           <h1 className="h1 acct-h1">
-            Order <span className="mono">{ref}</span>
+            Order <span className="mono">{order.ref}</span>
           </h1>
-          <p className="small sub only-phone mono">{ref}</p>
+          <p className="small sub only-phone mono">{order.ref}</p>
           <p className="small sub">
-            Placed {order.placed} PT · {itemCount} items from {order.groups.length} sellers · {money(order.total)}
+            Placed {fmtPlaced(order.placedAt)} PT · {order.summaryLine}
           </p>
         </div>
         <div className="acts">
-          <Button variant="secondary" size="sm" icon="download" onClick={receipt}>
-            Download receipt
-          </Button>
-          <Button variant="soft" size="sm" icon="life-buoy" to={href('help/order-problem')}>
+          {receipt && (
+            <Button variant="secondary" size="sm" icon="download" onClick={() => docs.mutate(receipt.id)} disabled={docs.isPending}>
+              Download receipt
+            </Button>
+          )}
+          <Button variant="soft" size="sm" icon="life-buoy" to={href('help/order-problem', '', undefined, { order: order.ref })}>
             Get help
           </Button>
         </div>
       </div>
+      {docs.isError && (
+        <Alert tone="danger" title="We couldn't open that document">
+          {errorMessage(docs.error)}
+        </Alert>
+      )}
 
       <section className="card pad stack gap-4" aria-label="Order status">
         <div className="row between">
           <span className="row gap-2">
             <span className="small sub">Overall</span>
-            <StatusBadge status={order.status} />
+            <StatusBadge status={order.statusLabel} tone={stateTone(order.status)} />
           </span>
-          <span className="xs muted">1 of 3 packages delivered · 1 return open</span>
+          <span className="xs muted">
+            {order.progress.delivery.label}
+            {order.progress.returns.openReturns ? ` · ${plural(order.progress.returns.openReturns, 'return')} open` : ''}
+          </span>
         </div>
         <div className="acct-ind">
           <div>
@@ -98,10 +115,10 @@ export default function Order() {
               Payment
             </span>
             <span className="row gap-2">
-              <StatusBadge status={order.paymentStatus} />
-              <span className="small strong num">{money(order.total)}</span>
+              <StatusBadge status={order.payment?.stateLabel ?? order.progress.payment.label} />
+              <span className="small strong num">{formatMoney(order.progress.payment.amountCharged ?? order.totals.total)}</span>
             </span>
-            <span className="xs sub">{order.payment} charged Sep 14. No refunds sent yet.</span>
+            {order.progress.payment.note && <span className="xs sub">{order.progress.payment.note}</span>}
           </div>
           <div>
             <span className="k">
@@ -109,235 +126,286 @@ export default function Order() {
               Delivery
             </span>
             <span className="row gap-2">
-              <StatusBadge status="Partly delivered" />
+              <StatusBadge status={humanize(order.progress.delivery.state)} tone={stateTone(order.progress.delivery.state)} />
             </span>
-            <div className="acct-mini-track" role="img" aria-label="Package 1 delivered, package 2 in transit, package 3 delayed">
-              <span className="d" />
-              <span className="i" />
-              <span className="w" />
-            </div>
-            <div className="legend acct-mini-legend">
-              <span>
-                <i className="mt-d" aria-hidden="true" />
-                Delivered
-              </span>
-              <span>
-                <i className="mt-i" aria-hidden="true" />
-                In transit
-              </span>
-              <span>
-                <i className="mt-w" aria-hidden="true" />
-                Delayed
-              </span>
-            </div>
-            <span className="xs sub">Delivered · In transit · Delayed</span>
+            {pkgStates.length > 0 && (
+              <>
+                <div className="acct-mini-track" role="img" aria-label={pkgStates.map((s, i) => `Package ${i + 1} ${s.toLowerCase()}`).join(', ')}>
+                  {pkgStates.map((s, i) => (
+                    <span key={i} className={miniClass(s)} />
+                  ))}
+                </div>
+                <div className="legend acct-mini-legend">
+                  {legend.map((c) => (
+                    <span key={c}>
+                      <i className={`mt-${c}`} aria-hidden="true" />
+                      {MINI_LEGEND[c]}
+                    </span>
+                  ))}
+                </div>
+                <span className="xs sub">{pkgStates.join(' · ')}</span>
+              </>
+            )}
           </div>
           <div>
             <span className="k">
               <Icon name="undo-2" className="ic-sm" />
               Returns and refunds
             </span>
-            <span className="row gap-2">
-              <StatusBadge status="Approved" />
-              <span className="xs muted">1 item</span>
-            </span>
-            <span className="xs sub">
-              Pour-over set,{' '}
-              <Link className="mono" to={href('account/return')}>
-                RT-260921-0457
-              </Link>
-              . Refund of about $34.65 after inspection.
-            </span>
+            {latestReturn ? (
+              <>
+                <span className="row gap-2">
+                  <StatusBadge status={latestReturn.statusLabel} tone={returnTone(latestReturn.status)} />
+                  <span className="xs muted">{plural(latestReturn.items.length, 'item')}</span>
+                </span>
+                <span className="xs sub">
+                  {returnItem ? `${returnItem.title}, ` : ''}
+                  <Link className="mono" to={returnHref(latestReturn.ref)}>
+                    {latestReturn.ref}
+                  </Link>
+                  {latestReturn.nextStep ? `. ${latestReturn.nextStep}.` : '.'}
+                  {expected ? ` Refund of about ${formatMoney(expected.amount)} after inspection.` : ''}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="row gap-2">
+                  <StatusBadge status={order.progress.returns.label} />
+                </span>
+                {order.progress.returns.note && <span className="xs sub">{order.progress.returns.note}</span>}
+              </>
+            )}
           </div>
         </div>
       </section>
 
       <div className="acct-split">
         <div className="stack gap-4">
-          {order.groups.map((g, gi) => {
-            const s = sellers[g.seller as SellerId];
-            const meta = PKG_META[gi];
-            const H = gi === 0 ? 'h2' : 'h3';
-            return (
-              <section key={g.pkg} className={`card acct-pkgcard t-${meta.tone}`}>
-                <div className="card-head">
-                  <div className="row gap-3 nowrap min-w-0">
-                    <LogoTile initials={s.initials} tint={s.tint} />
-                    <div className="stack gap-1">
-                      <span className="row gap-2">
-                        <H className="h4">{g.pkg}</H>
-                        <StatusBadge status={g.status} />
-                      </span>
-                      <span className="row gap-2 xs muted">
-                        Sold and shipped by <b className="sub">{s.name}</b>
-                        <SellerBadge seller={s} compact />
-                      </span>
-                    </div>
-                  </div>
-                  <div className="stack gap-0 right">
-                    <span className="small strong">{g.eta}</span>
-                    <span className="xs muted">
-                      {g.tracking ? (
-                        <>
-                          {g.carrier} · <span className="mono">{g.tracking}</span>
-                        </>
-                      ) : (
-                        meta.sub
-                      )}
-                    </span>
-                  </div>
-                </div>
-                <div className="card-body">
-                  <Track labels={meta.labels} done={meta.done} tone={meta.warn ? 'warning' : undefined} />
-                  {meta.warn && (
-                    <Alert tone="warning" title="This package is late">
-                      Casa Verde Home missed its dispatch date of Sep 18. New estimate: arrives Mon, Oct 12. If it hasn't shipped by Sat, Oct 10, Marketly support will cancel it for a full refund or arrange a replacement. Your case{' '}
-                      <Link className="mono" to={href('help/case')}>
-                        CS-261005-3381
-                      </Link>{' '}
-                      is open, next update by Fri, Oct 9, 12:00 PM PT.
-                    </Alert>
-                  )}
-                  <div>
-                    {g.items.map((it) => {
-                      const p = P[it.p];
-                      const extra = ITEM_NOTES[it.p];
-                      return (
-                        <div key={it.p} className="acct-item">
-                          <Link to={href('store/product')} aria-label={p.name}>
-                            <Img icon={p.icon} tint={p.tint} className="thumb" />
-                          </Link>
-                          <div className="stack gap-1">
-                            <Link className="small strong link-plain" to={href('store/product')}>
-                              {p.name}
-                            </Link>
-                            <span className="xs muted">
-                              {it.variant} · Qty {it.qty} · <span className="num">{money(it.price * it.qty)}</span>
-                            </span>
-                            <span className="row gap-2">
-                              <StatusBadge status={it.state} />
-                              <span className="xs sub">{extra?.note}</span>
-                            </span>
-                          </div>
-                          <div className="acts">
-                            {extra?.actions.includes('review') && (
-                              <Button variant="secondary" size="sm" icon="star" to={href('account/review')}>
-                                Write a review
-                              </Button>
-                            )}
-                            {extra?.actions.includes('return') && (
-                              <Button variant="secondary" size="sm" icon="undo-2" to={href('account/return-new', '', { ref })}>
-                                Return item
-                              </Button>
-                            )}
-                            {extra?.actions.includes('view-return') && (
-                              <Button variant="secondary" size="sm" icon="undo-2" to={href('account/return')}>
-                                View return
-                              </Button>
-                            )}
-                            {extra?.actions.includes('track') && (
-                              <Button variant="secondary" size="sm" icon="truck" to={href('account/tracking', '', { ref })}>
-                                Track package
-                              </Button>
-                            )}
-                            {extra?.actions.includes('cancel') && (
-                              <Button variant="secondary" size="sm" icon="x" to={href('account/cancel')}>
-                                Cancel item
-                              </Button>
-                            )}
-                            <Button variant="ghost" size="sm" to={href('help/order-problem')}>
-                              Report a problem
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="card-foot between">
-                  <span className="xs muted">{meta.foot}</span>
-                  <span className="row gap-2">
-                    <Button variant="ghost" size="sm" icon="message-square" to={href('account/messages')}>
-                      Contact seller
-                    </Button>
-                    {meta.warn && (
-                      <Button variant="soft" size="sm" icon="life-buoy" to={href('help/case')}>
-                        Get help with this package
-                      </Button>
-                    )}
-                  </span>
-                </div>
-              </section>
-            );
-          })}
+          {order.groups.map((g, gi) => (
+            <PackageCard key={g.id} order={order} g={g} index={gi} />
+          ))}
         </div>
         <aside>
           <Card title="Payment summary" titleAs="h3">
-            <SummaryRow k={`Items (${itemCount})`} v={money(order.subtotal)} />
-            <SummaryRow
-              className="discount"
-              k={
-                <>
-                  Coupon <span className="mono">{order.coupon}</span>
-                </>
-              }
-              v={`−${money(order.discount)}`}
-            />
-            <SummaryRow k={`Shipping (${order.groups.length} packages)`} v={order.shipping ? money(order.shipping) : 'Free'} />
-            <SummaryRow k="Sales tax (OR)" v={money(order.tax)} />
+            <SummaryRow k={`Items (${order.totals.itemCount})`} v={formatMoney(order.totals.items)} />
+            {order.totals.discounts.map((d, i) => (
+              <SummaryRow
+                key={i}
+                className="discount"
+                k={
+                  d.code ? (
+                    <>
+                      Coupon <span className="mono">{d.code}</span>
+                    </>
+                  ) : (
+                    d.label
+                  )
+                }
+                v={`−${formatMoney(d.amount)}`}
+              />
+            ))}
+            <SummaryRow k={order.totals.shippingLabel} v={order.totals.shippingTotal.amount ? formatMoney(order.totals.shippingTotal) : 'Free'} />
+            <SummaryRow k={order.totals.taxLabel} v={formatMoney(order.totals.tax)} />
             <hr />
-            <SummaryRow className="total" k="Order total" v={money(order.total)} />
-            <SummaryRow k="Paid with" v={order.payment} />
+            <SummaryRow className="total" k="Order total" v={formatMoney(order.totals.total)} />
+            {order.totals.paidWith && <SummaryRow k="Paid with" v={order.totals.paidWith} />}
             <hr />
-            <SummaryRow k="Refunded so far" v={money(0)} />
-            <SummaryRow k="Expected refund, RT-260921-0457" v={money(34.65)} />
+            <SummaryRow k="Refunded so far" v={formatMoney(order.totals.refundedSoFar)} />
+            {order.totals.expectedRefunds.map((e, i) => (
+              <SummaryRow key={i} k={e.ref ? `Expected refund, ${e.ref}` : e.label} v={formatMoney(e.amount)} />
+            ))}
             <span className="xs muted">Refunds return to the card you paid with. A partial refund only affects the items it covers.</span>
           </Card>
-          <Card title="Delivery address" titleAs="h3">
-            <address className="small u-fst-normal">
-              Jordan Lee
-              <br />
-              2140 Alder St, Apt 5
-              <br />
-              Portland, OR 97205
-              <br />
-              (503) 555-0148
-            </address>
-            <span className="xs muted">To change where a package goes, contact the seller before it ships. Address book changes don't affect this order.</span>
-          </Card>
-          <Card title="Documents" titleAs="h3" flush>
-            <div className="list pad">
-              {DOCUMENTS.map((d) => (
-                <a
-                  key={d.label}
-                  className="li"
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    download(`${ref}-${d.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.txt`, `${d.label}\nMarketly order ${ref}\nTotal ${money(order.total)}`);
-                  }}
-                >
-                  <Icon name={d.icon} className="ic-sm" />
-                  <span className="grow small">{d.label}</span>
-                  <span className="xs muted">PDF</span>
-                  <Icon name="download" className="ic-sm" />
-                </a>
-              ))}
-            </div>
-          </Card>
+          {order.deliveryAddress && (
+            <Card title="Delivery address" titleAs="h3">
+              <address className="small u-fst-normal">
+                {order.deliveryAddress.name}
+                <br />
+                {order.deliveryAddress.line1}
+                {order.deliveryAddress.line2 ? `, ${order.deliveryAddress.line2}` : ''}
+                <br />
+                {order.deliveryAddress.city}, {order.deliveryAddress.region} {order.deliveryAddress.postalCode}
+                {order.deliveryAddress.phone && (
+                  <>
+                    <br />
+                    {fmtPhone(order.deliveryAddress.phone)}
+                  </>
+                )}
+              </address>
+              {order.addressNote && <span className="xs muted">{order.addressNote}</span>}
+            </Card>
+          )}
+          {order.documents.length > 0 && (
+            <Card title="Documents" titleAs="h3" flush>
+              <div className="list pad">
+                {order.documents.map((d) => (
+                  <a
+                    key={d.id}
+                    className="li"
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      docs.mutate(d.id);
+                    }}
+                  >
+                    <Icon name={d.kind.toUpperCase() === 'RECEIPT' ? 'receipt' : 'file-text'} className="ic-sm" />
+                    <span className="grow small">{d.label}</span>
+                    <span className="xs muted">{d.format.toUpperCase()}</span>
+                    <Icon name="download" className="ic-sm" />
+                  </a>
+                ))}
+              </div>
+            </Card>
+          )}
           <Card title="Need help with this order?" titleAs="h3">
             <p className="small sub">Pick the item and tell us what happened. We'll bring in the seller if needed.</p>
             <div className="stack gap-2">
-              <Button variant="secondary" block icon="circle-alert" to={href('help/order-problem')}>
+              <Button variant="secondary" block icon="circle-alert" to={href('help/order-problem', '', undefined, { order: order.ref })}>
                 Report a problem
               </Button>
-              <Button variant="ghost" block to={href('help/case')}>
-                View case CS-261005-3381
-              </Button>
+              {openCase && (
+                <Button variant="ghost" block to={caseHref(openCase.ref)}>
+                  View case {openCase.ref}
+                </Button>
+              )}
             </div>
           </Card>
         </aside>
       </div>
     </AccountLayout>
+  );
+}
+
+function PackageCard({ order, g, index }: { order: OrderDetail; g: OrderGroup; index: number }) {
+  const tone = groupTone(g.status);
+  const track = packageTrack(g);
+  const sh = g.shipments.find((x) => x.kind.toUpperCase() === 'OUTBOUND') ?? g.shipments[0];
+  const H = index === 0 ? 'h2' : 'h3';
+  const cancelled = g.status.toUpperCase().includes('CANCELLED');
+  const canContact = g.items.some((i) => i.actions.includes('CONTACT_SELLER'));
+  return (
+    <section className={`card acct-pkgcard${tone ? ` t-${tone}` : ''}`}>
+      <div className="card-head">
+        <div className="row gap-3 nowrap min-w-0">
+          <LogoTile initials={sellerInitials(g.seller.name)} tint={String((index % 6) + 1)} />
+          <div className="stack gap-1">
+            <span className="row gap-2">
+              <H className="h4">{g.packageLabel}</H>
+              <StatusBadge status={g.statusLabel} tone={stateTone(g.status)} />
+            </span>
+            <span className="row gap-2 xs muted">
+              Sold and shipped by <b className="sub">{g.seller.name}</b>
+              <SellerBadge seller={g.seller} compact />
+            </span>
+          </div>
+        </div>
+        <div className="stack gap-0 right">
+          {g.estimateLabel && <span className="small strong">{g.estimateLabel}</span>}
+          <span className="xs muted">
+            {sh?.trackingNumber ? (
+              <>
+                {sh.carrierName ?? sh.serviceName} · <span className="mono">{sh.trackingNumber}</span>
+              </>
+            ) : cancelled ? null : (
+              "No tracking yet. The seller hasn't shipped this package."
+            )}
+          </span>
+        </div>
+      </div>
+      <div className="card-body">
+        {track && <Track labels={track.labels} done={track.done} tone={track.tone} />}
+        {g.alert && (
+          <Alert tone={g.alert.tone.toLowerCase() === 'danger' ? 'danger' : g.alert.tone.toLowerCase() === 'info' ? 'info' : 'warning'} title={g.alert.title}>
+            {g.alert.message}
+            {g.alert.caseRef && (
+              <>
+                {' '}
+                Your case{' '}
+                <Link className="mono" to={caseHref(g.alert.caseRef)}>
+                  {g.alert.caseRef}
+                </Link>{' '}
+                is open.
+              </>
+            )}
+          </Alert>
+        )}
+        <div>
+          {g.items.map((it) => (
+            <ItemRow key={it.id} order={order} it={it} />
+          ))}
+        </div>
+      </div>
+      <div className="card-foot between">
+        <span className="xs muted">{g.handlingNote ?? g.returnTermsSummary}</span>
+        <span className="row gap-2">
+          {canContact && (
+            <Button variant="ghost" size="sm" icon="message-square" to={href('account/messages', '', undefined, { order: order.ref })}>
+              Contact seller
+            </Button>
+          )}
+          {g.alert && (
+            <Button variant="soft" size="sm" icon="life-buoy" to={g.alert.caseRef ? caseHref(g.alert.caseRef) : href('help/order-problem', '', undefined, { order: order.ref })}>
+              Get help with this package
+            </Button>
+          )}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function ItemRow({ order, it }: { order: OrderDetail; it: OrderItem }) {
+  const product = productHref(it.productId, it.title);
+  const returnRef = it.afterSales?.returnRef ?? it.returnEligibility?.latestReturn?.ref ?? null;
+  return (
+    <div className="acct-item">
+      <Link to={product} aria-label={it.title}>
+        <Img icon="package" tint="2" className="thumb" src={it.image?.url} alt="" />
+      </Link>
+      <div className="stack gap-1">
+        <Link className="small strong link-plain" to={product}>
+          {it.title}
+        </Link>
+        <span className="xs muted">
+          {it.variantLabel ? `${it.variantLabel} · ` : ''}Qty {it.quantity} · <span className="num">{formatMoney(it.lineSubtotal)}</span>
+        </span>
+        <span className="row gap-2">
+          <StatusBadge status={it.stateLabel} tone={stateTone(it.state)} />
+          {it.stateNote && <span className="xs sub">{it.stateNote}</span>}
+        </span>
+      </div>
+      <div className="acts">
+        {it.actions.includes('REVIEW') && (
+          <Button variant="secondary" size="sm" icon="star" to={href('account/review', '', undefined, { item: it.id })}>
+            Write a review
+          </Button>
+        )}
+        {it.actions.includes('RETURN') && (
+          <Button variant="secondary" size="sm" icon="undo-2" to={href('account/return-new', '', { ref: order.ref }, { item: it.id })}>
+            Return item
+          </Button>
+        )}
+        {it.actions.includes('VIEW_RETURN') && returnRef && (
+          <Button variant="secondary" size="sm" icon="undo-2" to={returnHref(returnRef)}>
+            View return
+          </Button>
+        )}
+        {it.actions.includes('TRACK') && (
+          <Button variant="secondary" size="sm" icon="truck" to={href('account/tracking', '', { ref: order.ref }, it.shipmentId ? { shipment: it.shipmentId } : undefined)}>
+            Track package
+          </Button>
+        )}
+        {it.actions.includes('CANCEL') && (
+          <Button variant="secondary" size="sm" icon="x" to={href('account/cancel', '', { ref: order.ref }, { item: it.id })}>
+            Cancel item
+          </Button>
+        )}
+        {it.actions.includes('REPORT_PROBLEM') && (
+          <Button variant="ghost" size="sm" to={href('help/order-problem', '', undefined, { order: order.ref, item: it.id })}>
+            Report a problem
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }

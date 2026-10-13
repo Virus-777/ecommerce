@@ -1,20 +1,14 @@
 import { useState, type CSSProperties } from 'react';
+import { Link } from 'react-router';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { money, num } from '@marketly/web-shared/lib/format';
-import { Alert, announce, Breadcrumbs, Button, Field, Icon, Legend, LineChart, Select, SplitBar, Stat, SummaryRow, TableWrap, type IconName } from '@marketly/web-shared/ui';
+import { href } from '@marketly/web-shared/routes';
+import { Alert, announce, Breadcrumbs, Button, Field, Icon, Legend, LineChart, Select, SplitBar, Stat, SummaryRow, TableWrap } from '@marketly/web-shared/ui';
+import { LIBRARY, reportKey } from './data/reports';
 
-// Design: pages/admin/admin-reports.html (report library + Commerce: sales).
-
-interface LibGroup { name: string; icon: IconName; owner: string; reports: string[] }
-const LIBRARY: LibGroup[] = [
-  { name: 'Commerce', icon: 'shopping-bag', owner: 'Mei Lin, Reports Analyst', reports: ['Sales', 'Orders and average order value', 'Cancellations and refunds'] },
-  { name: 'Company trading', icon: 'badge-check', owner: 'Dana Ortiz, Official Store Manager', reports: ['Product sales and margin', 'Purchasing cost', 'Discounts and shipping expense', 'Returns cost'] },
-  { name: 'Marketplace finance', icon: 'landmark', owner: 'Priya Nair, Finance Manager', reports: ['Seller sales and earned fees', 'Discount funding', 'Amounts owed to sellers', 'Holds and completed payouts'] },
-  { name: 'Products and discovery', icon: 'package', owner: 'Omar Haddad, Catalog Manager', reports: ['Views, cart additions, purchases', 'Searches with no available result', 'Stockouts', 'Product return reasons'] },
-  { name: 'Service and sellers', icon: 'store', owner: 'Grace Kim, Seller Manager', reports: ['On-time dispatch', 'Delivery issues', 'Seller cancellations', 'Response time and case backlog', 'Complaint patterns'] },
-  { name: 'Customers, marketing and ads', icon: 'megaphone', owner: 'Jamie Brooks, Marketing and Advertising', reports: ['Returning buyers and repeat purchases', 'Campaign results', 'Ad displays, clicks, dismissals and spend'] },
-];
+// Design: pages/admin/admin-reports.html (report library + Commerce: sales). Library names open the
+// report detail (admin/report, keyed by the slugified name); the library lives in ./data/reports.
 
 interface Day { date: string; label: string; official: number; sellers: number; cancellations: number; refunds: number; orders: number }
 // Oldest first.
@@ -147,10 +141,10 @@ export default function Reports() {
               {g.reports.map((rep) => {
                 const on = g.name === 'Commerce' && rep === 'Sales';
                 return (
-                  <a key={rep} className={cx('ac-rl', on && 'is-active')} href="#" aria-current={on ? 'page' : undefined}>
+                  <Link key={rep} className={cx('ac-rl', on && 'is-active')} to={href('admin/report', '', { key: reportKey(rep) })} aria-current={on ? 'page' : undefined}>
                     <Icon name={on ? 'chart-line' : 'file-chart-column'} className="ic-sm" />
                     <span>{rep}</span>
-                  </a>
+                  </Link>
                 );
               })}
             </div>
@@ -168,6 +162,9 @@ export default function Reports() {
               <div className="row gap-2">
                 <Button variant="ghost" size="sm" icon="bookmark" onClick={() => flash('View saved to your reports')}>
                   Save view
+                </Button>
+                <Button variant="ghost" size="sm" icon="external-link" to={href('admin/report', '', { key: 'sales' })}>
+                  Open report
                 </Button>
                 <Button variant="secondary" size="sm" icon="download" onClick={exportCsv}>
                   Export

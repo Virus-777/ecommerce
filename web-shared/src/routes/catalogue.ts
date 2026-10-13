@@ -16,7 +16,7 @@ export interface Screen {
   path: string;
   /** Example values for the path params, used by href() and the design index. */
   sample?: Record<string, string>;
-  /** Design export file name (pages/<area>/<file>.html), for side-by-side review. */
+  /** Design export file name (pages/<area>/<file>.html), for side-by-side review. Empty for screens added after the design (designed in React). */
   file: string;
   /** Views (design states). The first is the default ('' slug). Empty when the screen has one view. */
   views: readonly ScreenView[];
@@ -39,8 +39,10 @@ export const SCREENS = [
   { id: 'store/category', app: 'store', area: 'store', group: "Shopping", title: "Category page", path: '/c/:slug', sample: { slug: 'headphones' }, file: 'store-category', views: [{ slug: '', name: "Default" }, { slug: 'filters-phone-sheet', name: "Filters (phone sheet)" }] },
   { id: 'store/search', app: 'store', area: 'store', group: "Shopping", title: "Search results", path: '/search', file: 'store-search', views: [{ slug: '', name: "Results" }, { slug: 'suggestions-open', name: "Suggestions open" }] },
   { id: 'store/search-empty', app: 'store', area: 'store', group: "Shopping", title: "No results and unavailable", path: '/search/empty', file: 'store-search-empty', views: [{ slug: '', name: "No results" }, { slug: 'product-unavailable', name: "Product unavailable" }] },
-  { id: 'store/product', app: 'store', area: 'store', group: "Shopping", title: "Product detail", path: '/p/:slug', sample: { slug: 'halden-aurora-anc' }, file: 'store-product', views: [{ slug: '', name: "Official Store offer" }, { slug: 'seller-offer-selected', name: "Seller offer selected" }, { slug: 'no-reviews-yet', name: "No reviews yet" }] },
-  { id: 'store/offers', app: 'store', area: 'store', group: "Shopping", title: "All offers", path: '/p/:slug/offers', sample: { slug: 'halden-aurora-anc' }, file: 'store-offers', views: [{ slug: '', name: "Total cost" }, { slug: 'fastest-delivery', name: "Fastest delivery" }] },
+  { id: 'store/product', app: 'store', area: 'store', group: "Shopping", title: "Product detail", path: '/p/:slug/:id', sample: { slug: 'halden-aurora-anc', id: '01a134ed-7f21-734a-b19b-40b3883d69d3' }, file: 'store-product', views: [{ slug: '', name: "Official Store offer" }, { slug: 'seller-offer-selected', name: "Seller offer selected" }, { slug: 'no-reviews-yet', name: "No reviews yet" }] },
+  { id: 'store/offers', app: 'store', area: 'store', group: "Shopping", title: "All offers", path: '/p/:slug/:id/offers', sample: { slug: 'halden-aurora-anc', id: '01a134ed-7f21-734a-b19b-40b3883d69d3' }, file: 'store-offers', views: [{ slug: '', name: "Total cost" }, { slug: 'fastest-delivery', name: "Fastest delivery" }] },
+  { id: 'store/reviews', app: 'store', area: 'store', group: "Shopping", title: "Product reviews", path: '/p/:slug/:id/reviews', sample: { slug: 'halden-aurora-anc', id: '01a134ed-7f21-734a-b19b-40b3883d69d3' }, file: '', views: [{ slug: '', name: "All reviews" }, { slug: 'photos', name: "Review photos" }, { slug: 'report-review', name: "Report a review" }] },
+  { id: 'store/questions', app: 'store', area: 'store', group: "Shopping", title: "Questions and answers", path: '/p/:slug/:id/questions', sample: { slug: 'halden-aurora-anc', id: '01a134ed-7f21-734a-b19b-40b3883d69d3' }, file: '', views: [{ slug: '', name: "All questions" }, { slug: 'ask', name: "Ask a question" }, { slug: 'no-match', name: "No matching questions" }] },
   { id: 'store/brand', app: 'store', area: 'store', group: "Shopping", title: "Brand page", path: '/brand/:slug', sample: { slug: 'halden' }, file: 'store-brand', views: [] },
   { id: 'store/seller', app: 'store', area: 'store', group: "Shopping", title: "Seller storefront", path: '/shop/:slug', sample: { slug: 'northwind-audio' }, file: 'store-seller', views: [] },
   { id: 'store/official', app: 'store', area: 'store', group: "Shopping", title: "Official Store", path: '/official', file: 'store-official', views: [] },
@@ -112,6 +114,7 @@ export const SCREENS = [
   { id: 'seller/staff', app: 'seller', area: 'seller', group: "Seller Center", title: "Staff and permissions", path: '/staff', file: 'seller-staff', views: [{ slug: '', name: "Staff" }, { slug: 'invite-staff', name: "Invite staff" }] },
   { id: 'seller/notifications', app: 'seller', area: 'seller', group: "Seller Center", title: "Notifications", path: '/notifications', file: 'seller-notifications', views: [] },
   { id: 'seller/help', app: 'seller', area: 'seller', group: "Seller Center", title: "Help and support", path: '/help', file: 'seller-help', views: [{ slug: '', name: "Help" }, { slug: 'contact-seller-support', name: "Contact seller support" }] },
+  { id: 'seller/help-article', app: 'seller', area: 'seller', group: "Seller Center", title: "Seller help article", path: '/help/articles/:slug', sample: { slug: 'what-a-restriction-affects' }, file: '', views: [{ slug: '', name: "Article" }, { slug: 'not-helpful', name: "Not helpful feedback" }] },
   { id: 'admin/dashboard', app: 'admin', area: 'admin', group: "Overview", title: "Admin dashboard", path: '/', file: 'admin-dashboard', views: [] },
   { id: 'admin/inbox', app: 'admin', area: 'admin', group: "Overview", title: "Notifications", path: '/inbox', file: 'admin-inbox', views: [{ slug: '', name: "All" }, { slug: 'needs-my-action', name: "Needs my action" }] },
   { id: 'admin/orders', app: 'admin', area: 'admin', group: "Commerce", title: "All orders", path: '/orders', file: 'admin-orders', views: [{ slug: '', name: "All orders" }, { slug: 'overdue-dispatch', name: "Overdue dispatch" }] },
@@ -133,6 +136,7 @@ export const SCREENS = [
   { id: 'admin/cases', app: 'admin', area: 'admin', group: "Customers and service", title: "Cases and disputes", path: '/cases', file: 'admin-cases', views: [{ slug: '', name: "Queue" }, { slug: 'bulk-assign', name: "Bulk assign" }] },
   { id: 'admin/case', app: 'admin', area: 'admin', group: "Customers and service", title: "Dispute CS-104882", path: '/cases/:ref', sample: { ref: 'CS-104882' }, file: 'admin-case', views: [{ slug: '', name: "Investigating" }, { slug: 'decision-recorded', name: "Decision recorded" }] },
   { id: 'admin/trust', app: 'admin', area: 'admin', group: "Customers and service", title: "Trust and risk", path: '/trust', file: 'admin-trust', views: [] },
+  { id: 'admin/trust-report', app: 'admin', area: 'admin', group: "Customers and service", title: "Trust report", path: '/trust/reports/:ref', sample: { ref: 'TR-3391' }, file: '', views: [{ slug: '', name: "Investigation" }, { slug: 'take-action', name: "Take action" }, { slug: 'decision-recorded', name: "Decision recorded" }] },
   { id: 'admin/promotions', app: 'admin', area: 'admin', group: "Marketing and content", title: "Promotions and coupons", path: '/promotions', file: 'admin-promotions', views: [] },
   { id: 'admin/promotion-new', app: 'admin', area: 'admin', group: "Marketing and content", title: "Create promotion campaign", path: '/promotions/new', file: 'admin-promotion-new', views: [{ slug: '', name: "Setup" }, { slug: 'finance-confirmation', name: "Finance confirmation" }] },
   { id: 'admin/content', app: 'admin', area: 'admin', group: "Marketing and content", title: "Homepage and pages", path: '/content', file: 'admin-content', views: [{ slug: '', name: "Sections" }, { slug: 'edit-section', name: "Edit section" }] },
@@ -142,10 +146,12 @@ export const SCREENS = [
   { id: 'admin/ad-assets', app: 'admin', area: 'admin', group: "Advertisements", title: "Ad creative library", path: '/ads/assets', file: 'admin-ad-assets', views: [{ slug: '', name: "Library" }, { slug: 'review-creative', name: "Review creative" }] },
   { id: 'admin/ad-placements', app: 'admin', area: 'admin', group: "Advertisements", title: "Ad placements and rules", path: '/ads/placements', file: 'admin-ad-placements', views: [] },
   { id: 'admin/reports', app: 'admin', area: 'admin', group: "Reports and settings", title: "Reports", path: '/reports', file: 'admin-reports', views: [] },
+  { id: 'admin/report', app: 'admin', area: 'admin', group: "Reports and settings", title: "Report detail", path: '/reports/:key', sample: { key: 'seller-sales-and-earned-fees' }, file: '', views: [{ slug: '', name: "Report" }, { slug: 'export', name: "Export" }, { slug: 'definitions', name: "Metric definitions" }] },
   { id: 'admin/staff', app: 'admin', area: 'admin', group: "Reports and settings", title: "Staff and roles", path: '/staff', file: 'admin-staff', views: [{ slug: '', name: "Roles and people" }, { slug: 'edit-role', name: "Edit role" }] },
   { id: 'admin/settings', app: 'admin', area: 'admin', group: "Reports and settings", title: "Settings", path: '/settings', file: 'admin-settings', views: [{ slug: '', name: "All settings" }, { slug: 'review-change', name: "Review change" }] },
   { id: 'admin/notifications', app: 'admin', area: 'admin', group: "Reports and settings", title: "Notifications", path: '/notifications', file: 'admin-notifications', views: [{ slug: '', name: "Matrix" }, { slug: 'edit-template', name: "Edit template" }] },
   { id: 'admin/audit', app: 'admin', area: 'admin', group: "Reports and settings", title: "Action history", path: '/audit', file: 'admin-audit', views: [] },
+  { id: 'admin/audit-entry', app: 'admin', area: 'admin', group: "Reports and settings", title: "Action history entry", path: '/audit/:id', sample: { id: 'AE-261008-0932' }, file: '', views: [] },
   { id: 'ops/queues', app: 'admin', area: 'ops', group: "Work queues", title: "My work queues", path: '/ops', file: 'ops-queues', views: [] },
   { id: 'ops/inventory', app: 'admin', area: 'ops', group: "Work queues", title: "Official Store stock", path: '/ops/inventory', file: 'ops-inventory', views: [{ slug: '', name: "Stock" }, { slug: 'adjust-stock', name: "Adjust stock" }] },
   { id: 'ops/receiving', app: 'admin', area: 'ops', group: "Work queues", title: "Receiving", path: '/ops/receiving', file: 'ops-receiving', views: [{ slug: '', name: "Expected" }, { slug: 'receiving-pur-2610-0042', name: "Receiving PUR-2610-0042" }] },

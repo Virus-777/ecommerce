@@ -27,4 +27,5 @@ export const PAGES: Partial<Record<ScreenId, LazyExoticComponent<ComponentType>>
   'seller/staff': lazy(() => import('../pages/Staff')),
   'seller/notifications': lazy(() => import('../pages/Notifications')),
   'seller/help': lazy(() => import('../pages/Help')),
+  'seller/help-article': lazy(() => import('../pages/HelpArticle')),
 };

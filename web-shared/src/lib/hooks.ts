@@ -96,3 +96,17 @@ export function useCountdown(totalSeconds: number): [string, string, string] {
   const pad = (n: number) => String(n).padStart(2, '0');
   return [pad(Math.floor(left / 3600)), pad(Math.floor((left % 3600) / 60)), pad(left % 60)];
 }
+
+/** Pixel width of an element, kept up to date (e.g. to draw a chart at its real size). */
+export function useElementWidth<T extends HTMLElement>(): [RefObject<T | null>, number] {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width];
+}

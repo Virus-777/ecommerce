@@ -1,0 +1,191 @@
+# screens: store/product
+# replaces: GET catalog/products/{id}, GET offers/products/{productId}/purchase-box, GET offers/products/{productId}/offers, GET promotions/products/{productId}, GET shipping/estimates, GET returns/terms, GET sellers/stores/{slug}, GET reviews/sellers/{sellerId}/feedback-summary, GET reviews/products/{productId}/rating-summary, GET reviews/products/{productId}/reviews, GET reviews/products/{productId}/questions, GET search/products/{productId}/similar, GET wishlist/saved
+# why: The purchase box, variant cues, reviews, Q&A and related products come from ten modules; one round trip on mobile. Pass offerId when the shopper picked another seller; without it the purchase box shows the featured offer.
+query ProductPage($id: UUID!, $variantId: UUID, $postalCode: String, $reviewsPaging: PageInput, $questionsPaging: PageInput, $relatedLimit: Int = 5, $offerId: UUID) {
+  product(id: $id) {
+    id
+    slug
+    title
+    categoryPath
+    description
+    keyFeatures
+    includedItems
+    modelNumber
+    listedAt
+    saved
+    bestSellerRank { rank categoryName label }
+    brand { id name slug }
+    category { id name slug }
+    specs { name value }
+    images { ...ImageFields }
+    video { ...ImageFields }
+    variants {
+      id
+      options { name value }
+      images { ...ImageFields }
+      offerSummary(postalCode: $postalCode) {
+        variantId
+        offerCount
+        inStock
+        summary
+        lowestPrice { ...MoneyFields }
+      }
+    }
+    offerCount
+    priceRange {
+      offerCount
+      lowestOfferId
+      lowestSellerName
+      lowest { ...MoneyFields }
+    }
+    offer(id: $offerId, variantId: $variantId, postalCode: $postalCode) { ...PurchaseBoxOffer }
+    reviewSummary {
+      hasReviews
+      average
+      ratingCount
+      writtenCount
+      answeredQuestions
+      withPhotos
+      distribution { stars count pct }
+    }
+    reviews(paging: $reviewsPaging) {
+      total
+      nextCursor
+      items {
+        id
+        variantLabel
+        rating
+        headline
+        text
+        reviewedAt
+        editedAt
+        helpfulCount
+        viewerVotedHelpful
+        media { ...ImageFields }
+        author { displayName verifiedPurchase }
+        soldBy { sellerId name }
+        response { fromName fromKind text publishedAt }
+      }
+    }
+    questions(paging: $questionsPaging) {
+      total
+      nextCursor
+      items {
+        id
+        text
+        askedBy
+        askedAt
+        answerCount
+        answerExpectation
+        answers {
+          id
+          text
+          label
+          answeredAt
+          helpfulCount
+          by { displayName }
+        }
+      }
+    }
+    related(limit: $relatedLimit) {
+      id
+      slug
+      title
+      offerCount
+      saved
+      images { ...ImageFields }
+      reviewSummary { hasReviews average ratingCount }
+      featuredOffer(postalCode: $postalCode) {
+        id
+        official
+        sellerName
+        seller { id slug verified }
+        price { ...MoneyFields }
+        deal {
+          percentOffBps
+          price { ...MoneyFields }
+          wasPrice { ...MoneyFields }
+          badges { label kind }
+        }
+        deliveryEstimate(postalCode: $postalCode) { free arrivalLabel }
+      }
+    }
+  }
+}
+
+fragment MoneyFields on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment ImageFields on MediaRef {
+  id
+  url
+  alt
+  width
+  height
+}
+
+fragment PurchaseBoxOffer on Offer {
+  id
+  ownerType
+  official
+  sellerName
+  seller {
+    id
+    slug
+    storeName
+    verified
+  }
+  sellerRating { official average positivePct count label onTimeDispatchPct }
+  condition
+  conditionLabel
+  conditionNotes
+  missingItems
+  complete
+  saleEndsAt
+  purchaseLimit
+  price { ...MoneyFields }
+  compareAt {
+    explanation
+    amount { ...MoneyFields }
+  }
+  deal {
+    wasPriceRule
+    percentOffBps
+    endsAt
+    purchaseLimit
+    price { ...MoneyFields }
+    wasPrice { ...MoneyFields }
+    badges { label kind }
+    flash { endsAt claimedPct dealStockLeft state }
+  }
+  availability { state quantity maxPerOrder purchaseLimit label expectedRestockDate }
+  dispatch { shipsFrom label }
+  deliveryEstimate(postalCode: $postalCode) {
+    shipsToLocation
+    reason
+    basis
+    locationLabel
+    methodName
+    carrierService
+    free
+    freeReason
+    arrivalLabel
+    dispatchLabel
+    cutoffAt
+    notices
+    otherOptions
+    price { ...MoneyFields }
+  }
+  quote(postalCode: $postalCode) {
+    featured
+    freeShipping
+    deliverTo { postalCode label source }
+    shippingCost { ...MoneyFields }
+    total { ...MoneyFields }
+  }
+  returnTerms { summary windowDays freeReturnShipping categoryException }
+  warranty { summary }
+}

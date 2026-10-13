@@ -12,3 +12,15 @@ export const percentOff = (price: number, was?: number | null) =>
 /** "Jordan Lee" -> "JL" */
 export const initials = (name: string) =>
   String(name).split(' ').map((w) => w[0]).slice(0, 2).join('');
+
+/** A money value as the API sends it: an integer amount in minor units (cents) plus the currency. */
+export interface MoneyValue {
+  amount: number;
+  currency: string;
+}
+
+/** Formats an API money value: { amount: 18900, currency: 'USD' } -> "$189.00". Empty for null. */
+export const formatMoney = (m?: MoneyValue | null): string => (m ? money(m.amount / 100) : '');
+
+/** Dollars of an API money value (for arithmetic in the UI). */
+export const dollars = (m?: MoneyValue | null): number => (m ? m.amount / 100 : 0);

@@ -66,7 +66,8 @@ function compare(a: Map<string, number>, b: Map<string, number>) {
 }
 
 const allRows = (): Row[] =>
-  SCREENS.filter((s) => s.app === CURRENT_APP).flatMap((s) => {
+  // Screens added after the design (no design file) have nothing to compare with.
+  SCREENS.filter((s) => s.app === CURRENT_APP && s.file).flatMap((s) => {
     const views = s.views.length ? s.views.map((v) => v.slug) : [''];
     return views.map((v) => ({
       key: `${s.id}@${v}`,

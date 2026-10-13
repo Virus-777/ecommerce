@@ -1,27 +1,23 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
+import { call, useApi } from '@marketly/web-shared/api';
+import { categoryArt, useCategoryTree } from '@/api/catalog';
 import { StoreLayout } from '@/layouts';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Icon, type IconName } from '@marketly/web-shared/ui';
 
 // Design: pages/store/store-not-found.html · view "something-went-wrong" = the server error page.
-// Also the catch-all 404 route.
+// Also the catch-all 404 route. Popular categories come from GET /api/store/catalog/categories; the error
+// view shows the service status from GET /api/public/settings/app-config (maintenance) and the failed
+// request's reference when the link carries it (?ref=<X-Request-Id>).
 
 const HELPFUL: Array<{ label: string; icon: IconName; to: string }> = [
   { label: 'Home', icon: 'house', to: href('store/home') },
   { label: 'Deals', icon: 'tag', to: href('store/deals') },
   { label: 'Track an order', icon: 'package', to: href('account/orders') },
   { label: 'Help Center', icon: 'life-buoy', to: href('help/center') },
-];
-
-const POPULAR: Array<{ slug: string; label: string; icon: IconName }> = [
-  { slug: 'electronics', label: 'Electronics', icon: 'headphones' },
-  { slug: 'computers', label: 'Computers', icon: 'monitor' },
-  { slug: 'home', label: 'Home & Kitchen', icon: 'cooking-pot' },
-  { slug: 'fashion', label: 'Fashion', icon: 'shirt' },
-  { slug: 'sports', label: 'Sports & Outdoors', icon: 'tent' },
-  { slug: 'beauty', label: 'Beauty', icon: 'sparkles' },
 ];
 
 function StoreSearch() {
@@ -53,6 +49,18 @@ export default function NotFound() {
   const [view] = useView<'something-went-wrong'>();
   const error = view === 'something-went-wrong';
   const [retrying, setRetrying] = useState(false);
+  const [params] = useSearchParams();
+  const ref = params.get('ref');
+  const { api } = useApi();
+  const tree = useCategoryTree();
+  const config = useQuery({
+    queryKey: ['settings', 'app-config'],
+    queryFn: () => call(api.GET('/api/public/settings/app-config')),
+    enabled: error,
+    staleTime: 60_000,
+  });
+  const maintenance = config.data?.maintenance;
+  const popular = (tree.data ?? []).filter((c) => !c.comingSoon && c.productCount > 0).slice(0, 6);
 
   const retry = () => {
     setRetrying(true);
@@ -77,12 +85,17 @@ export default function NotFound() {
                     Go to home page
                   </Button>
                 </div>
-                <Alert tone="warning" title="Service status: search and category pages are slow">
-                  Our team is working on it. Checkout and order tracking are working normally. Updated 6:12 PM PT.
-                </Alert>
-                <span className="xs muted">
-                  Error reference <span className="mono">ERR-7F3A-2210</span>. Quote it if you contact support.
-                </span>
+                {maintenance?.active && (
+                  <Alert tone="warning" title={maintenance.kind === 'maintenance' ? 'Service status: scheduled maintenance' : 'Service status: we are fixing a problem'}>
+                    {maintenance.message}
+                    {maintenance.updatedAt ? ` Updated ${new Date(maintenance.updatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' })} PT.` : ''}
+                  </Alert>
+                )}
+                {ref && (
+                  <span className="xs muted">
+                    Error reference <span className="mono">{ref}</span>. Quote it if you contact support.
+                  </span>
+                )}
               </div>
               <div className="art" aria-hidden="true">
                 <Icon name="server-crash" />
@@ -118,19 +131,21 @@ export default function NotFound() {
             ))}
           </div>
         </section>
+        {popular.length > 0 && (
         <section className="stack gap-3" aria-labelledby="nf-cats">
           <h2 className="h3" id="nf-cats">
             Popular categories
           </h2>
           <div className="hscroll gap-2">
-            {POPULAR.map((c) => (
-              <Link key={c.slug} className="chip" to={href('store/category', '', { slug: c.slug })}>
-                <Icon name={c.icon} />
-                {c.label}
+            {popular.map((c) => (
+              <Link key={c.id} className="chip" to={href('store/category', '', { slug: c.slug })}>
+                <Icon name={categoryArt(c.slug).icon} />
+                {c.name}
               </Link>
             ))}
           </div>
         </section>
+        )}
       </div>
     </StoreLayout>
   );

@@ -161,7 +161,7 @@ export default function Official() {
         actions={
           <>
             <SegmentedControl items={PERIOD_ITEMS} active={period} onChange={setPeriod} label="Period" />
-            <Button variant="secondary" size="sm" icon="chart-column" to={href('admin/reports')}>
+            <Button variant="secondary" size="sm" icon="chart-column" to={href('admin/report', '', { key: 'product-sales-and-margin' })}>
               Trading report
             </Button>
           </>

@@ -1,0 +1,38 @@
+/* admin/report (designed in React, no design file). Mobile-first; tokens from marketly.css. */
+
+.rpd-filters { display: grid; gap: var(--sp-3); grid-template-columns: minmax(0, 1fr); }
+@container app (min-width: 768px) { .rpd-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container app (min-width: 1180px) { .rpd-filters { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+.rpd-scopeline { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); align-items: center; justify-content: space-between; }
+.rpd-scopeline > span { display: inline-flex; gap: var(--sp-2); align-items: flex-start; }
+.rpd-scopeline svg.lucide { flex: none; margin-top: 2px; width: var(--ic-14); height: var(--ic-14); }
+.rpd-fresh { color: var(--text-2); font-weight: var(--fw-semibold); white-space: nowrap; }
+
+/* KPI tiles: the definitions link sits under the value. */
+.rpd-kpi { display: flex; flex-direction: column; gap: var(--sp-1); }
+
+.rpd-chart-head { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); align-items: center; justify-content: space-between; }
+.rpd-seg { max-width: 100%; overflow-x: auto; }
+.rpd-seg .seg { flex-wrap: nowrap; }
+.rpd-seg .seg button { white-space: nowrap; }
+
+/* Export dialog. */
+.rpd-cols { display: grid; gap: var(--sp-2); grid-template-columns: minmax(0, 1fr); }
+@container app (min-width: 768px) { .rpd-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rpd-delivery { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: var(--sp-2); align-items: start; font-size: var(--fs-sm); }
+.rpd-delivery > svg.lucide { margin-top: 2px; }
+
+/* Metric definitions drawer. */
+.rpd-defs { display: flex; flex-direction: column; }
+.rpd-def { padding: var(--sp-4) 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: var(--sp-2); }
+.rpd-def:first-child { padding-top: 0; }
+.rpd-def:last-child { border-bottom: 0; }
+.rpd-def > h3 { margin: 0; }
+.rpd-def .kv { grid-template-columns: minmax(80px, auto) minmax(0, 1fr); }
+
+/* Background export confirmation (a toast, because the export also leaves a lasting record in Exports). */
+.rpd-toast-wrap { position: fixed; inset-inline: 0; bottom: var(--sp-5); display: flex; justify-content: center; padding-inline: var(--sp-4); z-index: var(--z-overlay-top); pointer-events: none; }
+.rpd-toast-wrap .toast { pointer-events: auto; max-width: 560px; flex-wrap: wrap; }
+.rpd-toast-wrap .toast .btn-bare { color: inherit; text-decoration: underline; font-weight: var(--fw-bold); }
+.rpd-toast-wrap .toast .x { margin-left: var(--sp-1); color: inherit; opacity: 0.8; }

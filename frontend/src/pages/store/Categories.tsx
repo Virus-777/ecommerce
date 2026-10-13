@@ -1,75 +1,89 @@
 import { useState, type MouseEvent } from 'react';
 import { Link } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { StoreLayout } from '@/layouts';
-import { num } from '@marketly/web-shared/lib/format';
-import { brands, products } from '@marketly/web-shared/data/fixtures';
+import { call, useApi } from '@marketly/web-shared/api';
+import { dollars, num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Badge, Breadcrumbs, Icon, Img, LogoTile, Price } from '@marketly/web-shared/ui';
-import { CATEGORY_TREE, TOTAL_PRODUCTS, type TopCategory } from './data/categories';
+import { Badge, Breadcrumbs, Icon, Price } from '@marketly/web-shared/ui';
+import { categoryArt, initialsOf, tintOf, useCategoryTree, type Category } from '@/api/catalog';
+import { LoadError, LogoPic, Pic, SkLines } from '@/api/cards';
+import { productHref } from '@/api/search';
 
 // Design: pages/store/store-categories.html (phone: category rail + pane; website: category card grid).
+// Data: GET /api/store/catalog/categories (tree with in-stock counts); the phone pane adds the
+// category's popular brands (GET /api/store/catalog/brands?categorySlug&sort=popular) and one deal
+// (GET /api/store/search/products?category&onSale=true&limit=1).
 
-const slugify = (s: string) => s.toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const catHref = (slug: string) => href('store/category', '', { slug });
 
-/** Brands for the phone pane: the category's own brands first, topped up to three. */
-function paneBrands(cat: TopCategory) {
-  const own = new Set(products.filter((p) => p.cat === cat.id).map((p) => p.brand));
-  return [...brands.filter((b) => own.has(b.name)), ...brands.filter((b) => !own.has(b.name))].slice(0, 3);
-}
-
-function PhonePane({ cat }: { cat: TopCategory }) {
-  const soonSub = cat.subs.find((s) => s.soon);
-  const deal = products.find((p) => p.cat === cat.id && p.was);
+function PhonePane({ cat }: { cat: Category }) {
+  const { api } = useApi();
+  const art = categoryArt(cat.slug);
+  const brands = useQuery({
+    queryKey: ['catalog', 'brands', { categorySlug: cat.slug, sort: 'popular', limit: 3 }],
+    queryFn: () => call(api.GET('/api/store/catalog/brands', { params: { query: { categorySlug: cat.slug, sort: 'popular', limit: 3 } } })),
+  });
+  const deal = useQuery({
+    queryKey: ['search', 'products', { category: cat.slug, onSale: true }, { page: 1, limit: 1 }],
+    queryFn: () => call(api.GET('/api/store/search/products', { params: { query: { category: cat.slug, onSale: true, page: 1, limit: 1 } } })),
+    select: (r) => r.items[0]?.product,
+  });
+  const subs = cat.children ?? [];
+  const soonSub = subs.find((s) => s.comingSoon);
+  const d = deal.data;
   return (
     <div className="pane">
       <div className="row between base">
         <h2 className="h3">{cat.name}</h2>
-        <Link className="small strong" to={catHref(cat.id)}>
-          Shop all ({num(cat.count)})
+        <Link className="small strong" to={catHref(cat.slug)}>
+          Shop all ({num(cat.productCount)})
         </Link>
       </div>
       <div className="shop-tiles">
-        {cat.subs.map((s) =>
-          s.soon ? (
-            <span key={s.name} className="shop-tile is-soon">
-              <Img icon={s.icon} tint="surface-3" />
+        {subs.map((s) => {
+          const a = categoryArt(s.slug, cat.slug);
+          return s.comingSoon ? (
+            <span key={s.id} className="shop-tile is-soon">
+              <Pic image={s.image} icon={a.icon} tint="surface-3" />
               <span>{s.name}</span>
               <span className="n">Coming soon</span>
             </span>
           ) : (
-            <Link key={s.name} className="shop-tile" to={catHref(slugify(s.name))}>
-              <Img icon={s.icon} tint={cat.tint} />
+            <Link key={s.id} className="shop-tile" to={catHref(s.slug)}>
+              <Pic image={s.image} icon={a.icon} tint={art.tint} />
               <span>{s.name}</span>
-              <span className="n">{s.count} items</span>
+              <span className="n">{num(s.productCount)} items</span>
             </Link>
-          ),
-        )}
+          );
+        })}
       </div>
       {soonSub && (
         <p className="xs muted">
           <Icon name="info" className="ic-sm" /> {soonSub.name} has no sellers with stock yet, so it can't be opened. We list it so you know it's planned.
         </p>
       )}
-      <div className="stack gap-3">
-        <h2 className="h4">Popular brands</h2>
-        <div className="shop-tiles">
-          {paneBrands(cat).map((b) => (
-            <Link key={b.name} className="shop-tile" to={href('store/brand', '', { slug: slugify(b.name) })}>
-              <LogoTile initials={b.initials} tint={b.tint} />
-              <span>{b.name}</span>
-            </Link>
-          ))}
+      {(brands.data?.items.length ?? 0) > 0 && (
+        <div className="stack gap-3">
+          <h2 className="h4">Popular brands</h2>
+          <div className="shop-tiles">
+            {brands.data!.items.map((b) => (
+              <Link key={b.id} className="shop-tile" to={href('store/brand', '', { slug: b.slug })}>
+                <LogoPic logo={b.logo} initials={initialsOf(b.name)} tint={tintOf(b.name)} />
+                <span>{b.name}</span>
+              </Link>
+            ))}
+          </div>
         </div>
-      </div>
-      {deal && (
+      )}
+      {d && (
         <div className="stack gap-3">
           <h2 className="h4">{cat.name} deals</h2>
-          <Link className="row gap-3 nowrap card pad link-plain" to={href('store/product')}>
-            <Img icon={deal.icon} tint={deal.tint} className="tiny" />
+          <Link className="row gap-3 nowrap card pad link-plain" to={productHref({ id: d.productId, slug: d.slug })}>
+            <Pic image={d.image} className="tiny" />
             <span className="stack gap-0">
-              <span className="small strong truncate">{deal.name}</span>
-              <Price amount={deal.price} was={deal.was} />
+              <span className="small strong truncate">{d.title}</span>
+              <Price amount={dollars(d.price)} was={d.wasPrice ? dollars(d.wasPrice) : null} />
             </span>
           </Link>
         </div>
@@ -79,49 +93,66 @@ function PhonePane({ cat }: { cat: TopCategory }) {
 }
 
 export default function Categories() {
-  const open = CATEGORY_TREE.filter((c) => !c.soon);
-  const [activeId, setActiveId] = useState(open[0].id);
+  const tree = useCategoryTree();
+  const roots = tree.data ?? [];
+  const open = roots.filter((c) => !c.comingSoon);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const active = open.find((c) => c.id === activeId) ?? open[0];
+  const total = roots.reduce((n, c) => n + c.productCount, 0);
 
-  const pick = (e: MouseEvent, c: TopCategory) => {
+  const pick = (e: MouseEvent, c: Category) => {
     e.preventDefault();
-    if (!c.soon) setActiveId(c.id);
+    if (!c.comingSoon) setActiveId(c.id);
   };
 
   return (
     <StoreLayout tab="categories">
-      <div className="only-phone">
-        <div className="shop-rail">
-          <nav aria-label="Top categories">
-            {CATEGORY_TREE.map((c) => (
-              <a
-                key={c.id}
-                href="#"
-                className={c.soon ? 'is-soon' : c.id === active.id ? 'is-active' : ''}
-                aria-current={!c.soon && c.id === active.id ? 'true' : undefined}
-                aria-disabled={c.soon || undefined}
-                onClick={(e) => pick(e, c)}
-              >
-                <Icon name={c.icon} />
-                <span>{c.name}</span>
-                {c.soon && <span className="soon">Coming soon</span>}
-              </a>
-            ))}
-          </nav>
-          <PhonePane cat={active} />
+      {active && (
+        <div className="only-phone">
+          <div className="shop-rail">
+            <nav aria-label="Top categories">
+              {roots.map((c) => (
+                <a
+                  key={c.id}
+                  href="#"
+                  className={c.comingSoon ? 'is-soon' : c.id === active.id ? 'is-active' : ''}
+                  aria-current={!c.comingSoon && c.id === active.id ? 'true' : undefined}
+                  aria-disabled={c.comingSoon || undefined}
+                  onClick={(e) => pick(e, c)}
+                >
+                  <Icon name={categoryArt(c.slug).icon} />
+                  <span>{c.name}</span>
+                  {c.comingSoon && <span className="soon">Coming soon</span>}
+                </a>
+              ))}
+            </nav>
+            <PhonePane cat={active} />
+          </div>
         </div>
-      </div>
+      )}
       <div className="container page cat-page">
         <div className="stack gap-2">
           <Breadcrumbs className="no-phone" items={[{ label: 'Home', to: href('store/home') }, { label: 'All categories' }]} />
           <h1 className="h1 acct-h1">All categories</h1>
-          <p className="sub no-phone">{num(TOTAL_PRODUCTS)} products from the Official Store and approved sellers. Counts show items in stock now.</p>
+          {tree.isSuccess && <p className="sub no-phone">{num(total)} products from the Official Store and approved sellers. Counts show items in stock now.</p>}
         </div>
+        {tree.isError && <LoadError error={tree.error} onRetry={() => void tree.refetch()} title="We couldn’t load the categories" />}
+        {tree.isPending && (
+          <div className="shop-catgrid" aria-busy="true">
+            {Array.from({ length: 6 }, (_, i) => (
+              <section key={i} className="card shop-catcard" aria-hidden="true">
+                <span className="sk sk-img" />
+                <SkLines n={4} />
+              </section>
+            ))}
+          </div>
+        )}
         <div className="shop-catgrid no-phone">
-          {CATEGORY_TREE.map((c) =>
-            c.soon ? (
+          {roots.map((c) => {
+            const art = categoryArt(c.slug);
+            return c.comingSoon ? (
               <section key={c.id} className="card shop-catcard is-soon" aria-label={`${c.name}, coming soon`}>
-                <Img icon={c.icon} tint={c.tint} />
+                <Pic image={c.image} icon={art.icon} tint={art.tint} />
                 <div className="row between base">
                   <h2 className="h3">{c.name}</h2>
                   <Badge>Coming soon</Badge>
@@ -130,40 +161,40 @@ export default function Categories() {
               </section>
             ) : (
               <section key={c.id} className="card shop-catcard" aria-labelledby={`cat-${c.id}`}>
-                <Link to={catHref(c.id)} aria-hidden="true" tabIndex={-1}>
-                  <Img icon={c.icon} tint={c.tint} />
+                <Link to={catHref(c.slug)} aria-hidden="true" tabIndex={-1}>
+                  <Pic image={c.image} icon={art.icon} tint={art.tint} />
                 </Link>
                 <div className="row between base">
                   <h2 className="h3" id={`cat-${c.id}`}>
-                    <Link to={catHref(c.id)} className="link-plain">
+                    <Link to={catHref(c.slug)} className="link-plain">
                       {c.name}
                     </Link>
                   </h2>
-                  <span className="xs muted">{num(c.count)}</span>
+                  <span className="xs muted">{num(c.productCount)}</span>
                 </div>
                 <ul>
-                  {c.subs.map((s) => (
-                    <li key={s.name}>
-                      {s.soon ? (
+                  {(c.children ?? []).map((s) => (
+                    <li key={s.id}>
+                      {s.comingSoon ? (
                         <span>
                           <span className="muted">{s.name}</span>
                           <Badge>Coming soon</Badge>
                         </span>
                       ) : (
-                        <Link to={catHref(slugify(s.name))}>
+                        <Link to={catHref(s.slug)}>
                           <span>{s.name}</span>
-                          <span className="n">{s.count}</span>
+                          <span className="n">{num(s.productCount)}</span>
                         </Link>
                       )}
                     </li>
                   ))}
                 </ul>
-                <Link className="small strong" to={catHref(c.id)}>
+                <Link className="small strong" to={catHref(c.slug)}>
                   Shop all {c.name} <Icon name="arrow-right" className="ic-sm" />
                 </Link>
               </section>
-            ),
-          )}
+            );
+          })}
         </div>
         <div className="row gap-3 small sub no-phone">
           <Icon name="store" />

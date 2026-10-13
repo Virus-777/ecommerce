@@ -1,0 +1,45 @@
+{
+  "SellerDashboard": {
+    "id": "efc6992b5e574fa8b01c5b778633d0690ae3d953381e3a4a6438d3f57e975f58",
+    "screens": [
+      "seller/dashboard"
+    ]
+  },
+  "SellerFinanceOverview": {
+    "id": "9f8072bd0fff8451726f51ce8f773fa201e123be2819950bf702e5e630e3c7ff",
+    "screens": [
+      "seller/finance"
+    ]
+  },
+  "SellerOrderDetail": {
+    "id": "79421bcf0bd1a5c2652693569f82dbc66bc517efda93f11666983f3f2109ad92",
+    "screens": [
+      "seller/order"
+    ]
+  },
+  "SellerPerformance": {
+    "id": "d68dfcab1aacd45817215c38db890ff4c69dd1e0fab4d81854e91f7c8271418f",
+    "screens": [
+      "seller/performance"
+    ]
+  },
+  "SellerProductDetail": {
+    "id": "70702af64e22772184b314fa4af6ee236af34bd23a3a689b47778f9bedc2f388",
+    "screens": [
+      "seller/product-new",
+      "seller/offer"
+    ]
+  },
+  "SellerReturnDetail": {
+    "id": "f6313b26d08c99a804c51a2f5042ec4b293a44f4ad8801e8deb0d47cee27eeab",
+    "screens": [
+      "seller/return"
+    ]
+  },
+  "SellerStatement": {
+    "id": "2208f22ecbd4dec3300c9ed52d78c936a85aa7484208344c08d4677b19c59ab0",
+    "screens": [
+      "seller/statement"
+    ]
+  }
+}

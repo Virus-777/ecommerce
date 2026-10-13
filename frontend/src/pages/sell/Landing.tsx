@@ -1,81 +1,82 @@
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router';
+import { call, useApi } from '@marketly/web-shared/api';
 import { StoreLayout } from '@/layouts';
 import { money } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Badge, Button, Field, Icon, Select, SummaryRow, TableWrap, TextInput, Timeline, type IconName, type TimelineEvent } from '@marketly/web-shared/ui';
+import { humanize } from '../help/data/format';
+import { iconFor, LoadError, SkLines } from '../help/data/states';
+import { useSellerProgram } from './data/program';
 
 // Design: pages/store/sell-landing.html · the "How a sale works out" card is a live fee calculator
-// (its default, the 10% example on a $100 item, is the design's state).
+// (client-side, from the example rates).
+// Data: GET /api/store/sellers/program (categories, not allowed, requirements, example fees and notes, payout
+// timing, fulfilment models, service targets, FAQ, contact, estimated minutes, applicationsOpen);
+// GET /api/public/finance/fee-schedule (default commission rate for the calculator).
+// Static marketing copy (no API source): the hero headline and lead, the "How to join" steps (the API's
+// `steps` are the application form steps, used on sell/apply) and the payout timeline's step wording.
 
-const CATEGORIES: Array<{ icon: IconName; name: string }> = [
-  { icon: 'headphones', name: 'Electronics' },
-  { icon: 'monitor', name: 'Computers' },
-  { icon: 'cooking-pot', name: 'Home & Kitchen' },
-  { icon: 'shirt', name: 'Fashion' },
-  { icon: 'tent', name: 'Sports & Outdoors' },
-  { icon: 'sparkles', name: 'Beauty' },
-  { icon: 'puzzle', name: 'Toys & Games' },
-  { icon: 'paw-print', name: 'Pet Supplies' },
-];
-
-const REQUIREMENTS: Array<{ icon: IconName; title: string; body: string }> = [
-  { icon: 'building-2', title: 'A US business or sole proprietor', body: 'With an EIN or SSN for tax reporting.' },
-  { icon: 'landmark', title: 'A US bank account', body: "In the business or owner's name, for payouts." },
-  { icon: 'map-pin', title: 'A US return address', body: 'Street address that can receive returns.' },
-  { icon: 'truck', title: 'Ship with tracking', body: 'Within your stated dispatch time, at most 3 business days.' },
-  { icon: 'message-square', title: 'Answer customers', body: 'Within 1 business day, Monday to Friday.' },
-];
-
-const FEES: Array<{ category: string; rate: number }> = [
-  { category: 'Electronics', rate: 8 },
-  { category: 'Computers', rate: 7 },
-  { category: 'Home & Kitchen', rate: 12 },
-  { category: 'Fashion', rate: 15 },
-  { category: 'Sports & Outdoors', rate: 12 },
-  { category: 'Beauty', rate: 15 },
-];
 const EXAMPLE = 'example';
 
-const PAYOUT: TimelineEvent[] = [
-  { t: 'Customer receives the order', state: 'done', body: 'Earnings show as Pending in Seller Center.' },
-  { t: '7-day hold after delivery', state: 'done', body: 'Covers early returns and delivery problems.' },
-  { t: 'Earnings become Available', state: 'done' },
-  { t: 'Weekly payout every Tuesday', state: 'current', body: 'Sent to your verified bank account; arrives in 1–2 business days.' },
+const REQ_ICON: Array<[RegExp, IconName]> = [
+  [/bank/i, 'landmark'],
+  [/address/i, 'map-pin'],
+  [/tax|w-9/i, 'file-check'],
+  [/identity|owner|\bid\b/i, 'user-round-check'],
+  [/business|proprietor/i, 'building-2'],
+  [/ship|track/i, 'truck'],
+  [/answer|message|repl/i, 'message-square'],
 ];
+const reqIcon = (t: string): IconName => REQ_ICON.find(([re]) => re.test(t))?.[1] ?? 'circle-check';
 
-const SERVICE: Array<[string, string]> = [
-  ['Dispatch on time', 'At least 95% of orders shipped by the dispatch deadline'],
-  ['Tracking', 'Valid tracking on at least 95% of packages'],
-  ['Customer messages', 'Reply within 1 business day'],
-  ['Return requests', 'Answer within 2 business days'],
-  ['Seller cancellations', 'Below 2.5% of orders'],
-];
+const METRIC: Record<string, string> = {
+  dispatch_reliability: 'Dispatch on time',
+  valid_tracking: 'Tracking',
+  response_time: 'Customer messages',
+  cancellation_rate: 'Seller cancellations',
+  return_rate: 'Return rate',
+  unresolved_cases: 'Unresolved cases',
+  policy_violations: 'Policy violations',
+};
 
 const STEPS: Array<[string, string]> = [
   ['Create your seller account', 'Contact, business and store details.'],
   ['Verify your business', 'Identity, tax details, payout account and return address.'],
   ['Accept the agreement', 'Seller agreement, product rules, fee schedule and service standards.'],
-  ['We review your application', 'Usually 3–5 business days. We may ask for more information.'],
+  ['We review your application', 'We may ask for more information.'],
   ['Set up your store', 'Shipping coverage, store profile and your first products or offers.'],
   ['Go live', 'We check launch readiness. Only approved products and offers are published.'],
 ];
 
-const FAQ: Array<[string, string]> = [
-  ['Do I need my own product listings?', 'No. If the product is already in our catalog, you add an offer to it: your price, condition, stock and dispatch time. New products need catalog approval first.'],
-  ['Can I sell the same product as the Official Store?', 'Yes. Customers compare all offers on the product page. The main offer is chosen by a published rule based on eligibility, availability, delivery and total price.'],
-  ['What does Verified seller mean?', "We checked your business registration, owner identity, payout account and return address. It doesn't certify each product."],
-  ['What happens if I miss targets?', 'We contact you first. Repeated issues can lead to a restriction with a stated reason, the affected activity and an appeal route. Existing orders continue.'],
-  ['Who handles returns?', "You do, using your return address and our return baseline. We step in if a customer needs help and you haven't replied in time."],
-];
-
 export default function Landing() {
+  const { api } = useApi();
+  const program = useSellerProgram();
+  const fees = useQuery({ queryKey: ['finance', 'fee-schedule'], queryFn: () => call(api.GET('/api/public/finance/fee-schedule')), staleTime: 300_000 });
   const [price, setPrice] = useState('100.00');
   const [cat, setCat] = useState(EXAMPLE);
-  const rate = cat === EXAMPLE ? 10 : (FEES.find((f) => f.category === cat)?.rate ?? 10);
+
+  const p = program.data;
+  const examples = p?.feeExamples ?? [];
+  const defaultRate = fees.data?.current ? fees.data.current.defaultRateBps / 100 : (examples[0]?.ratePct ?? 10);
+  const rate = cat === EXAMPLE ? defaultRate : (examples.find((f) => f.categoryName === cat)?.ratePct ?? defaultRate);
   const amount = Number(price.replace(/[$,]/g, ''));
   const valid = price.trim() !== '' && Number.isFinite(amount) && amount >= 0;
   const commission = valid ? Math.round(amount * rate) / 100 : 0;
+  const rates = examples.map((f) => f.ratePct);
+  const rateRange = rates.length ? (Math.min(...rates) === Math.max(...rates) ? `${rates[0]}%` : `${Math.min(...rates)}–${Math.max(...rates)}%`) : '';
+  const noMonthlyFee = p?.feeNotes.some((n) => /no monthly fee/i.test(n));
+  const anyExample = examples.some((f) => f.isExample);
+  const pt = p?.payoutTiming;
+  const payout: TimelineEvent[] = pt
+    ? [
+        { t: 'Customer receives the order', state: 'done', body: 'Earnings show as Pending in Seller Center.' },
+        { t: `${pt.holdDaysAfterDelivery}-day hold after delivery`, state: 'done', body: 'Covers early returns and delivery problems.' },
+        { t: 'Earnings become Available', state: 'done' },
+        { t: `${pt.schedule} payout`, state: 'current', body: `Sent to your verified bank account; arrives ${pt.arrival.replace(/^./, (c) => c.toLowerCase())}.` },
+      ]
+    : [];
 
   return (
     <StoreLayout appbar={{ title: 'Sell on Marketly', back: href('store/home') }}>
@@ -84,7 +85,7 @@ export default function Landing() {
           <div className="stack gap-4">
             <span className="eyebrow u-c-text-inverse u-o-_7">Sell on Marketly</span>
             <h1 className="display d-xl">Reach shoppers in one store, next to our own products</h1>
-            <p className="h-sub">List your offers on our shared catalog, ship your own orders and get paid weekly. We review every seller so customers trust who they buy from.</p>
+            <p className="h-sub">List your offers on our shared catalog, ship your own orders and get paid {pt ? pt.schedule.toLowerCase() : 'regularly'}. We review every seller so customers trust who they buy from.</p>
             <div className="row gap-2">
               <Button size="lg" iconRight="arrow-right" to={href('sell/apply')}>
                 Start your application
@@ -101,7 +102,8 @@ export default function Landing() {
               </a>
             </div>
             <span className="xs u-o-_7">
-              Takes about 20 minutes. Save a draft anytime. Already applied?{' '}
+              {p && !p.applicationsOpen ? 'Applications are by invitation during our controlled launch: have your invitation code ready. ' : ''}
+              {p ? `Takes about ${p.estimatedMinutes} minutes. ` : ''}Save a draft anytime. Already applied?{' '}
               <Link to={href('sell/status')} className="link-inline u-c-text-inverse">
                 Check your status
               </Link>
@@ -110,48 +112,62 @@ export default function Landing() {
           <div className="buy-sell-stats">
             <div>
               <span className="xs u-o-_75">Launch categories</span>
-              <b>{CATEGORIES.length}</b>
+              <b>{p ? p.launchCategories.length : '–'}</b>
             </div>
             <div>
-              <span className="xs u-o-_75">Example commission</span>
-              <b>7–15%</b>
+              <span className="xs u-o-_75">{anyExample ? 'Example commission' : 'Commission'}</span>
+              <b>{rateRange || '–'}</b>
             </div>
             <div>
-              <span className="xs u-o-_75">Example payouts</span>
-              <b>Weekly</b>
+              <span className="xs u-o-_75">{pt?.isExample ? 'Example payouts' : 'Payouts'}</span>
+              <b>{pt?.schedule ?? '–'}</b>
             </div>
-            <div>
-              <span className="xs u-o-_75">Monthly fee at launch</span>
-              <b>$0</b>
-            </div>
+            {noMonthlyFee && (
+              <div>
+                <span className="xs u-o-_75">Monthly fee at launch</span>
+                <b>$0</b>
+              </div>
+            )}
           </div>
         </section>
+        {program.isError && <LoadError error={program.error} retry={() => void program.refetch()} title="We couldn’t load the seller programme" />}
         <div className="grid lg2 gap-6">
           <section className="stack gap-3">
             <h2 className="h2">What you can sell</h2>
-            <div className="grid m2 gap-2">
-              {CATEGORIES.map((c) => (
-                <div key={c.name} className="row gap-2 nowrap panel">
-                  <Icon name={c.icon} className="ic-sm" />
-                  <span className="small">{c.name}</span>
+            {!p ? (
+              <SkLines n={4} />
+            ) : (
+              <>
+                <div className="grid m2 gap-2">
+                  {p.launchCategories.map((c) => (
+                    <div key={c.id} className="row gap-2 nowrap panel">
+                      <Icon name={iconFor(c.icon, 'package')} className="ic-sm" />
+                      <span className="small grow">{c.name}</span>
+                      {c.needsExtraApproval && <Badge tone="warning">Extra approval</Badge>}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <p className="xs muted">New, used and refurbished physical goods in these categories. Not at launch: digital goods, subscriptions, gift cards, perishable food, weapons, recalled or restricted items.</p>
+                {p.notAllowed.length > 0 && <p className="xs muted">Physical goods in these categories. Not at launch: {p.notAllowed.join(', ').toLowerCase().replace(/^./, (c) => c.toUpperCase())}.</p>}
+              </>
+            )}
           </section>
           <section className="stack gap-3">
             <h2 className="h2">Seller requirements</h2>
-            <ul className="stack gap-3">
-              {REQUIREMENTS.map((r) => (
-                <li key={r.title} className="buy-feature">
-                  <Icon name={r.icon} />
-                  <span className="stack gap-0">
-                    <span className="small strong">{r.title}</span>
-                    <span className="xs muted">{r.body}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            {!p ? (
+              <SkLines n={5} />
+            ) : (
+              <ul className="stack gap-3">
+                {p.requirements.map((r) => (
+                  <li key={r.title} className="buy-feature">
+                    <Icon name={reqIcon(r.title)} />
+                    <span className="stack gap-0">
+                      <span className="small strong">{r.title}</span>
+                      <span className="xs muted">{r.detail}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         </div>
         <section className="stack gap-4" id="sell-fees">
@@ -164,24 +180,25 @@ export default function Landing() {
                     <tr>
                       <th scope="col">Category</th>
                       <th className="r" scope="col">
-                        Commission (example)
+                        Commission{anyExample ? ' (example)' : ''}
                       </th>
                       <th scope="col">Charged on</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {FEES.map((f) => (
-                      <tr key={f.category}>
-                        <td>{f.category}</td>
+                    {examples.map((f) => (
+                      <tr key={f.categoryName}>
+                        <td>{f.categoryName}</td>
                         <td className="r">
-                          <span className="strong">{f.rate}%</span>
+                          <span className="strong">{f.ratePct}%</span>
                         </td>
-                        <td>Item price after your discounts</td>
+                        <td>{f.basis}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </TableWrap>
+              {!p && <SkLines n={4} className="stack gap-2 pad" />}
             </div>
             <div className="card pad stack gap-3">
               <span className="small strong">How a sale works out</span>
@@ -190,47 +207,49 @@ export default function Landing() {
                   <TextInput id="fee-price" prefix="$" inputMode="decimal" ctl="sm" value={price} error={!valid} onChange={(e) => setPrice(e.target.value)} />
                 </Field>
                 <Field label="Category">
-                  <Select id="fee-cat" ctl="sm" options={[{ value: EXAMPLE, label: 'Example (10%)' }, ...FEES.map((f) => ({ value: f.category, label: `${f.category} (${f.rate}%)` }))]} value={cat} onChange={(e) => setCat(e.target.value)} />
+                  <Select
+                    id="fee-cat"
+                    ctl="sm"
+                    options={[{ value: EXAMPLE, label: `${anyExample ? 'Example' : 'Standard'} (${defaultRate}%)` }, ...examples.map((f) => ({ value: f.categoryName, label: `${f.categoryName} (${f.ratePct}%)` }))]}
+                    value={cat}
+                    onChange={(e) => setCat(e.target.value)}
+                  />
                 </Field>
               </div>
               <div className="buy-sum" aria-live="polite">
                 <SummaryRow k="Item sold" v={money(valid ? amount : 0)} />
-                <SummaryRow k={`Commission at ${rate}%${cat === EXAMPLE ? ' (example)' : ''}`} v={`−${money(commission)}`} />
+                <SummaryRow k={`Commission at ${rate}%${cat === EXAMPLE && anyExample ? ' (example)' : ''}`} v={`−${money(commission)}`} />
                 <SummaryRow className="total" k="Your earnings" v={money(valid ? amount - commission : 0)} />
               </div>
-              <span className="xs muted">Shipping you charge isn't commissioned. Discounts funded by Marketly don't reduce your earnings. No listing or monthly fees at launch.</span>
+              {fees.data?.current?.treatment?.text && <span className="xs muted">{fees.data.current.treatment.text}</span>}
             </div>
           </div>
-          <p className="xs muted">Example rates. Final fees are in the seller agreement and fee schedule you accept when you apply.</p>
+          {p && p.feeNotes.length > 0 && <p className="xs muted">{p.feeNotes.join(' ')}</p>}
         </section>
         <div className="grid lg2 gap-6">
           <section className="card pad stack gap-3">
             <h2 className="h3">When you get paid</h2>
-            <Timeline events={PAYOUT} />
-            <p className="xs muted">Example schedule. Final payout timing is in the seller agreement. Holds always show a reason and review date.</p>
+            {pt ? <Timeline events={payout} /> : <SkLines n={4} />}
+            {pt?.isExample && <p className="xs muted">Example schedule. Final payout timing is in the seller agreement. Holds always show a reason and review date.</p>}
           </section>
           <section className="card pad stack gap-3">
             <h2 className="h3">Who ships</h2>
-            <div className="buy-feature">
-              <Icon name="package" />
-              <span className="stack gap-1">
-                <span className="row gap-2">
-                  <span className="small strong">You ship your own orders</span>
-                  <Badge tone="success">At launch</Badge>
-                </span>
-                <span className="xs muted">Set your shipping rates, coverage and dispatch time. Pack, ship and add tracking in Seller Center by the dispatch deadline.</span>
-              </span>
-            </div>
-            <div className="buy-feature">
-              <Icon name="warehouse" />
-              <span className="stack gap-1">
-                <span className="row gap-2">
-                  <span className="small strong">Marketly fulfillment</span>
-                  <Badge>Later</Badge>
-                </span>
-                <span className="xs muted">Store stock in our warehouse and we ship for you. You stay the named seller and own the stock.</span>
-              </span>
-            </div>
+            {!p ? (
+              <SkLines n={3} />
+            ) : (
+              p.fulfillmentModels.map((m) => (
+                <div key={m.name} className="buy-feature">
+                  <Icon name={m.availability === 'launch' ? 'package' : 'warehouse'} />
+                  <span className="stack gap-1">
+                    <span className="row gap-2">
+                      <span className="small strong">{m.name}</span>
+                      {m.availability === 'launch' ? <Badge tone="success">At launch</Badge> : <Badge>{humanize(m.availability)}</Badge>}
+                    </span>
+                    <span className="xs muted">{m.detail}</span>
+                  </span>
+                </div>
+              ))
+            )}
           </section>
         </div>
         <section className="stack gap-4">
@@ -245,17 +264,20 @@ export default function Landing() {
                   </tr>
                 </thead>
                 <tbody>
-                  {SERVICE.map(([m, t]) => (
-                    <tr key={m}>
-                      <td>{m}</td>
-                      <td>{t}</td>
+                  {(p?.serviceTargets ?? []).map((t) => (
+                    <tr key={t.metric}>
+                      <td>{METRIC[t.metric] ?? humanize(t.metric)}</td>
+                      <td>
+                        {t.display} · over {t.windowDays} days
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </TableWrap>
+            {!p && <SkLines n={4} className="stack gap-2 pad" />}
           </div>
-          <p className="xs muted">Example targets. Final targets are in the service standards. You see your results in Seller Center under Account health.</p>
+          {p?.serviceTargets.some((t) => t.isExample) && <p className="xs muted">Example targets. Final targets are in the service standards. You see your results in Seller Center under Account health.</p>}
         </section>
         <section className="stack gap-4">
           <h2 className="h2">How to join</h2>
@@ -274,24 +296,34 @@ export default function Landing() {
           <div className="stack gap-3">
             <h2 className="h2">Questions sellers ask</h2>
             <div className="card pad buy-faq">
-              {FAQ.map(([q, a], i) => (
-                <details key={q} open={i === 0}>
-                  <summary>
-                    {q}
-                    <Icon name="chevron-down" className="ic-sm" />
-                  </summary>
-                  <p>{a}</p>
-                </details>
-              ))}
+              {!p ? (
+                <SkLines n={4} />
+              ) : (
+                p.faq.map((f, i) => (
+                  <details key={f.q} open={i === 0}>
+                    <summary>
+                      {f.q}
+                      <Icon name="chevron-down" className="ic-sm" />
+                    </summary>
+                    <p>{f.a}</p>
+                  </details>
+                ))
+              )}
             </div>
           </div>
           <aside className="card pad stack gap-3" style={{ alignSelf: 'start' }}>
             <h2 className="h3">Ready to apply?</h2>
-            <p className="small sub">Have your business registration, tax ID, bank details and return address ready.</p>
+            <p className="small sub">Have your business registration, tax ID, bank details and return address ready{p && !p.applicationsOpen ? ', and your invitation code' : ''}.</p>
             <Button block to={href('sell/apply')}>
               Start your application
             </Button>
-            <span className="xs muted">Questions first? Email sellers@marketly.example or call 1-800-555-0177, Mon–Fri 8 AM–5 PM PT.</span>
+            {p?.contact && (
+              <span className="xs muted">
+                Questions first? Email {p.contact.email}
+                {p.contact.phone ? ` or call ${p.contact.phone}` : ''}
+                {p.contact.hours ? `, ${p.contact.hours}` : ''}.
+              </span>
+            )}
           </aside>
         </section>
       </div>

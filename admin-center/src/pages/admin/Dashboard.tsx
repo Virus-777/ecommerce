@@ -142,7 +142,7 @@ export default function Dashboard() {
             title="Sales split"
             sub="Last 14 days · USD"
             actions={
-              <Link className="small strong" to={href('admin/reports')}>
+              <Link className="small strong" to={href('admin/report', '', { key: 'sales' })}>
                 Open report
               </Link>
             }

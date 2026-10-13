@@ -1,0 +1,233 @@
+# screens: admin/customers
+# replaces: GET customers/customers/{id}, GET identity/accounts/{id}, GET orders/orders, GET returns/requests, GET support/cases, GET messaging/conversations, GET trust/reports, GET wallet/customers/{customerId}, GET audit/targets/{type}/{id}
+# why: The customer detail drawer combines profile, sign-in security, orders, returns, cases, message activity (no message content), restrictions, reports and credit from nine modules.
+query AdminCustomer(
+  $id: UUID!
+  $openCasesOnly: Boolean
+  $orderPaging: PageInput
+  $returnPaging: PageInput
+  $casePaging: PageInput
+  $trustPaging: PageInput
+  $historyPaging: PageInput
+) {
+  customer(id: $id) {
+    id
+    ref
+    displayName
+    firstName
+    lastName
+    email
+    emailVerified
+    phone
+    phoneVerified
+    memberSince
+    accountStatus
+    canOrder
+    canMessage
+    location
+    verification
+    defaultAddress {
+      address {
+        line1
+        line2
+        city
+        region
+        postalCode
+      }
+    }
+    marketingPreferences {
+      emailPromotions
+      smsPromotions
+      pushPromotions
+      essentialAlwaysOn
+    }
+
+    security {
+      status
+      signInSummary
+      lastSignInAt
+      lockedUntil
+      twoStep {
+        enabled
+      }
+      warnings {
+        code
+        message
+      }
+    }
+
+    orderCounts {
+      all
+      inProgress
+      delivered
+      returns
+      cancelled
+      delayedPackages
+    }
+    totalSpend {
+      ...Amount
+    }
+
+    returns(paging: $returnPaging) {
+      total
+      items {
+        id
+        ref
+        orderRef
+        sellerName
+        status
+        statusLabel
+      }
+    }
+
+    cases(open: $openCasesOnly, paging: $casePaging) {
+      total
+      items {
+        id
+        ref
+        kind
+        subject
+        status
+        statusLabel
+        seller {
+          name
+        }
+      }
+    }
+
+    conversationSummary {
+      conversationCount
+      openCount
+      reportedCount
+      lastMessageAt
+      counterparties {
+        kind
+        sellerId
+        name
+        conversationCount
+        lastMessageAt
+      }
+    }
+
+    restrictions(includeEnded: true) {
+      id
+      scope
+      reasonCode
+      reason
+      state
+      startsAt
+      endsAt
+      appealRoute
+      setBy {
+        ...Who
+      }
+      trustReport {
+        ref
+      }
+    }
+
+    trustReportCounts {
+      filedBy
+      against
+      open
+    }
+    trustReports(paging: $trustPaging) {
+      total
+      items {
+        id
+        ref
+        type
+        title
+        status
+      }
+    }
+
+    walletAdmin {
+      balance {
+        available {
+          ...Amount
+        }
+        held {
+          ...Amount
+        }
+        nextExpiry {
+          amount {
+            ...Amount
+          }
+          expiresAt
+        }
+      }
+      goodwillLast30Days {
+        ...Amount
+      }
+      goodwillLimitPerCustomer {
+        ...Amount
+      }
+      pendingGrants {
+        id
+        state
+        reason
+        amount {
+          ...Amount
+        }
+      }
+    }
+
+    notes {
+      id
+      body
+      author {
+        ...Who
+      }
+      createdAt
+    }
+
+    auditTrail(paging: $historyPaging) {
+      total
+      nextCursor
+      items {
+        id
+        at
+        actor {
+          ...Who
+        }
+        actionLabel
+        reason
+        change {
+          before
+          after
+        }
+      }
+    }
+  }
+
+  ordersAdmin(filter: { customerId: $id }, paging: $orderPaging) {
+    total
+    nextCursor
+    items {
+      id
+      ref
+      placedAt
+      sellerCount
+      status
+      statusLabel
+      totals {
+        total {
+          ...Amount
+        }
+      }
+    }
+  }
+}
+
+fragment Amount on Money {
+  amount
+  currency
+  formatted
+}
+
+fragment Who on Actor {
+  kind
+  id
+  name
+}

@@ -6,7 +6,8 @@ import { Alert, Avatar, Badge, Button, Card, Deadline, Dialog, EmptyState, Field
 import { ACTION_TONE, APPEALS, DISMISS_REASONS, REPORT_TYPES, REPORTS, TRUST_KPIS, type Evidence, type ReportType, type TrustReport } from './data/trust';
 
 // Design: pages/admin/admin-trust.html (single view). Tabs filter the report list; "Dismiss with
-// reason" opens a dialog that needs a reason before the report leaves the queue.
+// reason" opens a dialog that needs a reason before the report leaves the queue. "Open report" and the
+// report ID open the report detail (admin/trust-report).
 
 type TabKey = 'all' | ReportType | 'appeals';
 
@@ -29,7 +30,9 @@ function ReportCard({ r, first, onDismiss }: { r: TrustReport; first: boolean; o
         </span>
         <div className="grow stack gap-1">
           <span className="row gap-2">
-            <span className="mono small">{r.id}</span>
+            <Link className="mono small" to={href('admin/trust-report', '', { ref: r.id })}>
+              {r.id}
+            </Link>
             <Badge icon={type.icon}>{type.label}</Badge>
             <StatusBadge status={r.status} />
           </span>
@@ -40,7 +43,7 @@ function ReportCard({ r, first, onDismiss }: { r: TrustReport; first: boolean; o
           <Button variant="ghost" size="sm" onClick={onDismiss}>
             Dismiss with reason
           </Button>
-          <Button variant="secondary" size="sm">
+          <Button variant="secondary" size="sm" to={href('admin/trust-report', '', { ref: r.id })} srLabel={r.id}>
             Open report
           </Button>
         </div>

@@ -1,47 +1,40 @@
-// Sample data for the All offers page (design: pages/store/store-offers*.html).
-// Base offers come from the shared fixtures (auroraOffers); this adds what the comparison shows.
-import { auroraOffers, type Offer } from '@marketly/web-shared/data/fixtures';
-import type { IconName } from '@marketly/web-shared/ui';
+// API access for the All offers page (store/offers): every offer for one variant, delivering to
+// the shopper's location, with condition counts and the featured-offer rule.
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { call, useApi, type components } from '@marketly/web-shared/api';
+import type { OfferView } from './product';
 
-export type ConditionGroup = 'New' | 'Used' | 'Refurbished';
+export type OfferComparison = components['schemas']['offers.OfferComparison'];
+export type ConditionGroup = 'new' | 'used' | 'refurbished';
+export type OfferSort = 'total_cost' | 'fastest_delivery';
 
-export interface OfferRow extends Offer {
-  /** Condition filter bucket ("Used – Like new" -> Used). */
-  group: ConditionGroup;
-  /** Delivery window shown to the shopper. */
-  window: string;
-  /** Earliest arrival as an ISO date: the "Fastest delivery" sort key. */
-  arrives: string;
-  carrier: string;
-  onTime: number;
-  /** Accessory/completeness note under the condition. */
-  kit?: { warn?: boolean; icon: IconName; text: string };
-  /** Why the offer can't be the featured offer. */
-  ineligible?: string;
+export const CONDITIONS: Array<{ value: ConditionGroup; label: string }> = [
+  { value: 'new', label: 'New' },
+  { value: 'used', label: 'Used' },
+  { value: 'refurbished', label: 'Refurbished' },
+];
+
+/** GET /offers/products/{id}/offers: up to 100 offers, not paged. */
+export function useOfferComparison(productId: string, opts: { variantId?: string; condition?: ConditionGroup | 'all'; sort?: OfferSort } = {}, enabled = true) {
+  const { api } = useApi();
+  const query = { variantId: opts.variantId, condition: opts.condition ?? 'all', sort: opts.sort ?? 'total_cost' };
+  return useQuery({
+    queryKey: ['offers', 'comparison', productId, query],
+    queryFn: () => call(api.GET('/api/store/offers/products/{productId}/offers', { params: { path: { productId }, query } })),
+    enabled: enabled && !!productId,
+    placeholderData: keepPreviousData,
+  });
 }
 
-const EXTRA: Record<string, Omit<OfferRow, keyof Offer | 'group'>> = {
-  official: { window: 'Thu, Oct 15', arrives: '2026-10-15', carrier: 'UPS Ground', onTime: 99 },
-  northwind: { window: 'Fri, Oct 16 – Mon, Oct 19', arrives: '2026-10-16', carrier: 'USPS Ground Advantage', onTime: 97 },
-  pixelport: {
-    window: 'Mon, Oct 19 – Tue, Oct 20',
-    arrives: '2026-10-19',
-    carrier: 'FedEx Ground',
-    onTime: 95,
-    kit: { icon: 'package-check', text: 'Complete: all accessories' },
-  },
-  gadgetgrove: {
-    window: 'Tue, Oct 20 – Fri, Oct 23',
-    arrives: '2026-10-20',
-    carrier: 'USPS Ground Advantage',
-    onTime: 81,
-    kit: { warn: true, icon: 'package-x', text: 'Missing: carry case' },
-    ineligible: 'Not eligible for featured offer: delivery performance under review',
-  },
+/** "Complete: all accessories" for complete used/refurbished offers, "Missing: …" when items are absent. */
+export function kitNote(o: OfferView): { warn: boolean; icon: 'package-check' | 'package-x'; text: string } | null {
+  if (o.missingItems.length) return { warn: true, icon: 'package-x', text: `Missing: ${o.missingItems.join(', ').toLowerCase()}` };
+  if (o.condition !== 'new' && o.complete) return { warn: false, icon: 'package-check', text: 'Complete: all accessories' };
+  return null;
+}
+
+/** "Eligible: offer active, …" → ["Eligible", "offer active, …"] (bold lead-in of a rule step). */
+export const splitStep = (s: string): [string, string] => {
+  const i = s.indexOf(':');
+  return i > 0 ? [s.slice(0, i), s.slice(i + 1).trim()] : ['', s];
 };
-
-const group = (condition: string): ConditionGroup => (condition.startsWith('Used') ? 'Used' : condition.startsWith('Refurbished') ? 'Refurbished' : 'New');
-
-export const offerRows: OfferRow[] = auroraOffers.map((o) => ({ ...o, group: group(o.condition), ...EXTRA[o.seller] }));
-
-export const total = (o: Offer) => Math.round((o.price + o.ship) * 100) / 100;

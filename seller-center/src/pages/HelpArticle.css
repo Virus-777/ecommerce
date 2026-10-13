@@ -1,0 +1,21 @@
+/* Seller help article (screen added after the design). Mobile first; tokens from marketly.css. */
+
+/* In-article search: full width on the phone, a comfortable measure on wider screens. */
+.ha-search .search-in { flex: 1 1 100%; }
+@container app (min-width: 768px) { .ha-search .search-in { flex: 0 1 520px; } }
+
+/* One-line answer shown first. */
+.ha-answer { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-4); border-radius: var(--r-lg); background: var(--brand-soft); border-left: 3px solid var(--brand); }
+.ha-answer p { max-width: 68ch; color: var(--text); font-size: var(--fs-md); font-weight: var(--fw-medium); line-height: 1.5; }
+@container app (min-width: 768px) { .ha-answer { padding: var(--sp-5); } .ha-answer p { font-size: var(--fs-lg); } }
+
+/* Numbered steps read at body size inside an article (the Help page's guide uses xs). */
+.ha-steps li .t { color: var(--text); font-weight: var(--fw-semibold); }
+.ha-steps li .d { color: var(--text-2); max-width: 68ch; }
+.ha-steps li a { align-self: flex-start; }
+
+/* Calls to action (.row.between): the button wraps under its text on the phone. */
+.ha-cta > .stack { flex: 1 1 260px; min-width: 0; }
+
+/* Search results list: title with its category under it. */
+.ha-results a { display: flex; flex-direction: column; gap: var(--sp-0-5); min-width: 0; }

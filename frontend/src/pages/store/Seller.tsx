@@ -1,41 +1,107 @@
 import { useState, type MouseEvent } from 'react';
-import { Link } from 'react-router';
-import { sellers } from '@marketly/web-shared/data/fixtures';
+import { Link, useParams } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { StoreLayout } from '@/layouts';
+import NotFound from './NotFound';
+import { ApiError, call, useApi } from '@marketly/web-shared/api';
 import { num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import {
-  Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, IconButton, KeyValue, LogoTile, Pager, ProductCard, SearchInput, SellerBadge, Stars, Stat, Tabs,
-} from '@marketly/web-shared/ui';
-import { SORT_OPTIONS, items, sortItems, type SortKey } from './data/collection';
-import { FEEDBACK, FEEDBACK_STATS, POLICIES, STORE, STORE_CHIPS, STORE_PRODUCT_IDS, VERIFIED } from './data/seller';
+import { Alert, Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, IconButton, KeyValue, SearchInput, SellerBadge, Stars, Stat, Tabs } from '@marketly/web-shared/ui';
+import { initialsOf, tintOf } from '@/api/catalog';
+import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, LogoPic, SkLines } from '@/api/cards';
+import { SortSelect, useListingParams } from '@/api/listing';
+import { readPage, readQuery, toCardProduct, useFacets, useListing, useSearchClick } from '@/api/search';
 
-// Design: pages/store/store-seller.html (Northwind Audio storefront). The tabs jump to their section
-// (products, seller feedback, policies); chips, store search and Sort filter the product grid.
+// Design: pages/store/store-seller.html. Data: GET /api/store/sellers/stores/{slug} (header, about,
+// highlights, verification, shipping and returns, promotion; closed store → 404), seller feedback
+// GET /api/store/reviews/sellers/{sellerId}/feedback-summary and …/feedback, the product grid
+// GET /api/store/search/products?seller={slug}&q&category&sort (+ /search/facets for the category chips).
+// Not shown: featured collections (REST gives offer ids only, no product cards) and messaging the
+// seller without an order (gap G4).
 
-const SELLER = sellers.northwind;
-const PRODUCTS = items(STORE_PRODUCT_IDS);
-const FEATURED = items(STORE.featured.ids);
+const PER_PAGE = 12;
 
 type Tab = 'products' | 'feedback' | 'about';
 const TAB_TARGET: Record<Tab, string> = { products: 'sl-all', feedback: 'sl-fb', about: 'sl-pol' };
-
 const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-export default function Seller() {
-  const [tab, setTab] = useState<Tab>('products');
-  const [chip, setChip] = useState('');
-  const [q, setQ] = useState('');
-  const [sort, setSort] = useState<SortKey>('Recommended');
-  const [page, setPage] = useState(1);
+// Storefront fields typed `unknown` in the API spec (shapes from GET /api/store/sellers/stores/{slug}).
+interface Highlights {
+  positivePct?: number | null;
+  ratingCount?: number | null;
+  onTimeDispatchPct?: number | null;
+  repliesWithin24hPct?: number | null;
+  medianReplyHours?: number | null;
+}
+interface Shipping {
+  shipsFrom?: string | null;
+  shipsTo?: string | null;
+  dispatch?: string | null;
+  carriers?: string[];
+}
+interface Returns {
+  window?: string | null;
+  returnShipping?: string | null;
+  warranty?: string | null;
+}
+interface Contact {
+  canMessage?: boolean;
+  replyTarget?: string | null;
+}
+interface Promotion {
+  title?: string;
+  detail?: string;
+}
 
-  const active = STORE_CHIPS.find((c) => c.value === chip) ?? STORE_CHIPS[0];
-  const pages = q.trim() ? 1 : Math.max(1, Math.ceil(active.count / STORE.perPage));
-  const needle = q.trim().toLowerCase();
-  const list = sortItems(
-    PRODUCTS.filter((p) => (!chip || p.sub === chip) && (!needle || p.name.toLowerCase().includes(needle))),
-    sort,
-  );
+const REPLY: Record<string, string> = { within_24h: 'Usually within 24 hours', within_48h: 'Usually within 2 days', within_12h: 'Usually within 12 hours' };
+const monthYear = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+const dayLabel = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Los_Angeles' });
+const pct = (n: number | null | undefined) => (n == null ? '—' : `${Math.round(n)}%`);
+
+export default function Seller() {
+  const { slug = '' } = useParams();
+  const { api } = useApi();
+  const lp = useListingParams();
+  const [tab, setTab] = useState<Tab>('products');
+  const [allFeedback, setAllFeedback] = useState(false);
+
+  const store = useQuery({
+    queryKey: ['sellers', 'store', slug],
+    queryFn: () => call(api.GET('/api/store/sellers/stores/{slug}', { params: { path: { slug } } })),
+  });
+  const sellerId = store.data?.seller.id;
+  const summary = useQuery({
+    queryKey: ['reviews', 'seller-feedback-summary', sellerId],
+    queryFn: () => call(api.GET('/api/store/reviews/sellers/{sellerId}/feedback-summary', { params: { path: { sellerId: sellerId! } } })),
+    enabled: !!sellerId,
+  });
+  const feedback = useQuery({
+    queryKey: ['reviews', 'seller-feedback', sellerId, { limit: allFeedback ? 50 : 3 }],
+    queryFn: () => call(api.GET('/api/store/reviews/sellers/{sellerId}/feedback', { params: { path: { sellerId: sellerId! }, query: { page: 1, limit: allFeedback ? 50 : 3 } } })),
+    enabled: !!sellerId,
+  });
+  const found = store.isSuccess;
+  const base = useFacets({ seller: [slug] }, { enabled: found });
+  const query = readQuery(lp.params, { seller: [slug] });
+  const facets = useFacets(query, { enabled: found });
+  const listing = useListing(query, readPage(lp.params), { limit: PER_PAGE, enabled: found });
+  const onOpen = useSearchClick(facets.data?.searchId);
+
+  if (store.error instanceof ApiError && store.error.status === 404) return <NotFound />;
+
+  const s = store.data;
+  const seller = s?.seller;
+  const name = seller?.storeName ?? '';
+  const hl = (s?.highlights ?? {}) as Highlights;
+  const ship = (s?.shipping ?? {}) as Shipping;
+  const ret = (s?.returns ?? {}) as Returns;
+  const contact = (s?.contact ?? {}) as Contact;
+  const promo = (s?.promotion ?? null) as Promotion | null;
+  const chips = base.data?.facets.find((f) => f.kind === 'category')?.values ?? [];
+  const chip = lp.params.get('category') ?? '';
+  const q = lp.params.get('q') ?? '';
+  const ratingCount = summary.data?.count ?? seller?.ratingCount ?? 0;
+  const error = store.error ?? facets.error ?? listing.error;
 
   const openTab = (t: Tab) => {
     setTab(t);
@@ -45,146 +111,197 @@ export default function Seller() {
     e?.preventDefault();
     jump('sl-all');
   };
+  const setParam = (k: string, v: string, replace = false) =>
+    lp.update(
+      (p) => {
+        if (v) p.set(k, v);
+        else p.delete(k);
+      },
+      { replace },
+    );
+
+  const policies: Array<[string, string]> = [
+    ['Ships from', ship.shipsFrom ?? ''],
+    ['Ships to', ship.shipsTo ?? ''],
+    ['Dispatch', ship.dispatch ?? seller?.dispatchLabel ?? ''],
+    ['Carriers', (ship.carriers ?? []).join(', ')],
+    ['Returns', [ret.window, ret.returnShipping].filter(Boolean).join(' · ')],
+    ['Warranty', ret.warranty ?? s?.warranty ?? ''],
+    ['Replies', contact.replyTarget ? (REPLY[contact.replyTarget] ?? contact.replyTarget.replace(/_/g, ' ')) : ''],
+  ];
 
   return (
     <StoreLayout
       appbar={{
-        title: SELLER.name,
-        back: href('store/product'),
+        title: name || 'Store',
+        back: href('store/home'),
         actions: <IconButton icon="search" label="Search this store" onClick={() => document.getElementById('sl-q')?.focus()} />,
       }}
     >
       <div className="container page gap-6">
+        {error ? (
+          <LoadError
+            error={error}
+            onRetry={() => {
+              void store.refetch();
+              void facets.refetch();
+              listing.refetch();
+            }}
+            title="We couldn’t load this store"
+          />
+        ) : null}
+        {s && !s.sellingNow && (
+          <Alert tone="warning" title="This store isn’t selling right now">
+            You can still read its feedback and policies. Orders you already placed are not affected.
+          </Alert>
+        )}
         <section className="shop-hero" aria-labelledby="sl-h">
           <div className="ban tint-2">
-            <span className="shop-ban-t">{STORE.banner}</span>
-            <span className="no-phone">
-              <Icon name="headphones" />
-              <Icon name="speaker" />
-            </span>
+            {s?.banner && <img src={s.banner.url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />}
+            {s?.tagline && (
+              <span className="shop-ban-t" style={s.banner ? { position: 'relative' } : undefined}>
+                {s.tagline}
+              </span>
+            )}
           </div>
           <div className="id">
-            <LogoTile initials={SELLER.initials} tint={SELLER.tint} className="lg" />
+            <LogoPic logo={seller?.logo} initials={initialsOf(name || '?')} tint={tintOf(name)} className="lg" />
             <div className="stack gap-1 grow minw-200">
-              <div className="row gap-2">
-                <h1 className="h1" id="sl-h">
-                  {SELLER.name}
-                </h1>
-                <SellerBadge seller={SELLER} />
-              </div>
-              <div className="row gap-3 small sub">
-                <span>
-                  <Stars rating={STORE.rating} /> <b>{SELLER.positive}% positive</b> ({num(SELLER.ratings)} ratings)
-                </span>
-                <span>
-                  <Icon name="map-pin" className="ic-sm" /> {SELLER.location}
-                </span>
-                <span>
-                  <Icon name="clock" className="ic-sm" /> Ships in {SELLER.dispatch}
-                </span>
-                <span>Selling on Marketly since {STORE.since}</span>
-              </div>
+              {seller ? (
+                <>
+                  <div className="row gap-2">
+                    <h1 className="h1" id="sl-h">
+                      {name}
+                    </h1>
+                    <SellerBadge seller={{ verified: seller.verified }} />
+                  </div>
+                  <div className="row gap-3 small sub">
+                    <span>
+                      {summary.data?.average != null && <Stars rating={summary.data.average} />}{' '}
+                      {seller.positivePct != null ? (
+                        <>
+                          <b>{Math.round(seller.positivePct)}% positive</b> ({num(ratingCount)} ratings)
+                        </>
+                      ) : (
+                        'No ratings yet'
+                      )}
+                    </span>
+                    {seller.location && (
+                      <span>
+                        <Icon name="map-pin" className="ic-sm" /> {seller.location}
+                      </span>
+                    )}
+                    {seller.dispatchLabel && (
+                      <span>
+                        <Icon name="clock" className="ic-sm" /> {seller.dispatchLabel.split(' · ')[0]}
+                      </span>
+                    )}
+                    <span>Selling on Marketly since {monthYear(s!.sellingSince)}</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h1 className="h1 sr-only" id="sl-h">
+                    Store
+                  </h1>
+                  <SkLines n={2} />
+                </>
+              )}
             </div>
             <div className="row gap-2">
-              <Button variant="secondary" icon="message-square" to={href('account/messages')}>
+              {/* Messaging needs an order (POST messaging/conversations requires orderId; gap G4). */}
+              <Button variant="secondary" icon="message-square" disabled title="Message a seller from one of your orders. Questions about a product go to its Questions and answers.">
                 Contact seller
               </Button>
-              <CopyButton text={typeof window !== 'undefined' ? window.location.href : href('store/seller')} label="Share store" icon="share-2" />
+              <CopyButton text={typeof window !== 'undefined' ? window.location.href : href('store/seller', '', { slug })} label="Share store" icon="share-2" />
             </div>
           </div>
-          <p className="small sub measure-lg u-p-0-sp-5-sp-5">{STORE.about}</p>
+          {s?.introduction && <p className="small sub measure-lg u-p-0-sp-5-sp-5">{s.introduction}</p>}
         </section>
 
         <div className="split">
           <div className="stack gap-6">
             <Tabs<Tab>
               items={[
-                { value: 'products', label: 'Products', count: STORE.productCount },
-                { value: 'feedback', label: 'Feedback', count: num(SELLER.ratings) },
+                { value: 'products', label: 'Products', count: s ? num(s.productCount) : undefined },
+                { value: 'feedback', label: 'Feedback', count: num(ratingCount) },
                 { value: 'about', label: 'About and policies' },
               ]}
               active={tab}
               onChange={openTab}
             />
-            <div className="shop-promo">
-              <Icon name="ticket-percent" />
-              <div className="stack gap-0 grow">
-                <span className="strong">{STORE.promo.title}</span>
-                <span className="xs sub">{STORE.promo.terms}</span>
+            {promo?.title && (
+              <div className="shop-promo">
+                <Icon name="ticket-percent" />
+                <div className="stack gap-0 grow">
+                  <span className="strong">{promo.title}</span>
+                  {promo.detail && <span className="xs sub">{promo.detail}</span>}
+                </div>
+                <Button variant="secondary" size="sm" onClick={() => toAll()}>
+                  Shop eligible items
+                </Button>
               </div>
-              <Button variant="secondary" size="sm" onClick={() => toAll()}>
-                Shop eligible items
-              </Button>
-            </div>
-
-            <section className="stack gap-4" aria-labelledby="sl-feat">
-              <div className="row between base">
-                <h2 className="h2">
-                  <span id="sl-feat">{STORE.featured.title}</span>
-                </h2>
-                <a className="small strong" href="#sl-all" onClick={toAll}>
-                  See {STORE.featured.count} items <Icon name="arrow-right" className="ic-sm" />
-                </a>
-              </div>
-              <div className="grid-products">
-                {FEATURED.map((p) => (
-                  <ProductCard key={p.id} p={p} from />
-                ))}
-              </div>
-            </section>
+            )}
 
             <section className="stack gap-4" aria-labelledby="sl-all">
               <h2 className="h3" id="sl-all">
-                All products ({STORE.productCount})
+                All products{s ? ` (${num(s.productCount)})` : ''}
               </h2>
-              <ChipRow>
-                {STORE_CHIPS.map((c) => (
-                  <Chip
-                    key={c.value}
-                    active={chip === c.value}
-                    onClick={() => {
-                      setChip(c.value);
-                      setPage(1);
-                    }}
-                  >
-                    {c.value ? `${c.label} (${c.count})` : c.label}
+              {chips.length > 1 && (
+                <ChipRow>
+                  <Chip active={!chip} onClick={() => setParam('category', '')}>
+                    All
                   </Chip>
-                ))}
-              </ChipRow>
+                  {chips.map((c) => (
+                    <Chip key={c.value} active={chip === c.value} onClick={() => setParam('category', c.value)}>
+                      {`${c.label} (${num(c.count)})`}
+                    </Chip>
+                  ))}
+                </ChipRow>
+              )}
               <div className="shop-toolbar">
-                <SearchInput
-                  id="sl-q"
-                  placeholder="Search this store"
-                  value={q}
-                  onChange={(v) => {
-                    setQ(v);
-                    setPage(1);
-                  }}
-                />
+                <SearchInput id="sl-q" placeholder="Search this store" value={q} onChange={(v) => setParam('q', v, true)} />
                 <span className="shop-sort">
                   <label className="small sub nowrap" htmlFor="sl-sort">
                     Sort by
                   </label>
-                  <select className="select" id="sl-sort" value={sort} onChange={(e) => setSort(e.target.value as SortKey)}>
-                    {SORT_OPTIONS.map((o) => (
-                      <option key={o}>{o}</option>
-                    ))}
-                  </select>
+                  <SortSelect id="sl-sort" ctx={facets.data} lp={lp} />
                 </span>
               </div>
-              {list.length > 0 ? (
-                <div className="grid-products">
-                  {list.map((p) => (
-                    <ProductCard key={p.id} p={p} from />
+              {listing.isPending || store.isPending ? (
+                <CardGridSkeleton n={8} />
+              ) : listing.hits.length > 0 ? (
+                <div className="grid-products" aria-busy={listing.isFetching || undefined}>
+                  {listing.hits.map((h) => (
+                    <ApiProductCard key={`${h.kind}-${h.position}-${h.product.productId}`} c={toCardProduct(h.product, h)} from onOpen={onOpen} />
                   ))}
                 </div>
-              ) : (
-                <EmptyState icon="search-x" title="No products in this store match your search" action={<Button variant="secondary" size="sm" onClick={() => { setQ(''); setChip(''); }}>Clear search</Button>}>
-                  Try a different word, or search all of Marketly from the search bar.
+              ) : !error ? (
+                <EmptyState
+                  icon="search-x"
+                  title={q || chip ? 'No products in this store match your search' : 'This store has no products in stock right now'}
+                  action={
+                    q || chip ? (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() =>
+                          lp.update((p) => {
+                            p.delete('q');
+                            p.delete('category');
+                          })
+                        }
+                      >
+                        Clear search
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  {q || chip ? 'Try a different word, or search all of Marketly from the search bar.' : 'New listings show up here as soon as they are in stock.'}
                 </EmptyState>
-              )}
+              ) : null}
               <div className="row end">
-                <Pager page={page} total={pages} onPage={setPage} grid end={page >= pages} />
+                <ListingPager listing={listing} onPage={lp.setPage} />
               </div>
             </section>
 
@@ -196,45 +313,64 @@ export default function Seller() {
                   </h2>
                   <span className="xs muted">About shipping, packaging and communication. Product reviews are on each product page.</span>
                 </div>
-                <a className="small strong" href="#">
-                  See all {num(SELLER.ratings)}
-                </a>
+                {!allFeedback && (feedback.data?.total ?? 0) > (feedback.data?.items.length ?? 0) && (
+                  <a
+                    className="small strong"
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setAllFeedback(true);
+                    }}
+                  >
+                    See all {num(feedback.data!.total ?? 0)}
+                  </a>
+                )}
               </div>
               <div className="card-body">
                 <div className="grid md3 gap-4">
-                  {FEEDBACK_STATS.map((s) => (
-                    <Stat key={s.k} label={s.k} value={s.v} note={s.d} />
-                  ))}
+                  <Stat label={`Positive, last ${summary.data?.periodMonths ?? 12} months`} value={pct(summary.data?.positivePct ?? hl.positivePct)} note={summary.data?.label ?? `${num(ratingCount)} ratings`} />
+                  <Stat label="On-time dispatch" value={pct(hl.onTimeDispatchPct ?? summary.data?.onTimeDispatchPct)} note={hl.onTimeDispatchPct == null ? 'Not enough orders yet' : 'Last 90 days'} />
+                  <Stat label="Replies within 24 h" value={pct(hl.repliesWithin24hPct)} note={hl.medianReplyHours != null ? `Median ${Math.round(hl.medianReplyHours)} h` : 'Not enough messages yet'} />
                 </div>
-                <ul className="list">
-                  {FEEDBACK.map((f) => (
-                    <li key={f.id} className="items-start">
-                      <div className="stack gap-1 grow">
-                        <div className="row gap-2">
-                          {f.positive ? (
-                            <Badge tone="success" icon="thumbs-up">
-                              Positive
-                            </Badge>
-                          ) : (
-                            <Badge tone="danger" icon="thumbs-down">
-                              Negative
-                            </Badge>
-                          )}
-                          <span className="xs muted">
-                            {f.buyer} · {f.date} · Item: {f.item}
-                          </span>
-                        </div>
-                        <p className="small">{f.text}</p>
-                        {f.reply && (
-                          <div className="shop-reply">
-                            <span className="xs strong">{SELLER.name} replied</span>
-                            <span>{f.reply}</span>
+                {feedback.isPending ? (
+                  <SkLines n={3} />
+                ) : feedback.isError ? (
+                  <LoadError error={feedback.error} onRetry={() => void feedback.refetch()} title="We couldn’t load the feedback" />
+                ) : (feedback.data?.items.length ?? 0) === 0 ? (
+                  <p className="small muted">No feedback yet.</p>
+                ) : (
+                  <ul className="list">
+                    {feedback.data!.items.map((f) => (
+                      <li key={f.id} className="items-start">
+                        <div className="stack gap-1 grow">
+                          <div className="row gap-2">
+                            {f.sentiment === 'positive' ? (
+                              <Badge tone="success" icon="thumbs-up">
+                                Positive
+                              </Badge>
+                            ) : f.sentiment === 'negative' ? (
+                              <Badge tone="danger" icon="thumbs-down">
+                                Negative
+                              </Badge>
+                            ) : (
+                              <Badge>Neutral</Badge>
+                            )}
+                            <span className="xs muted">
+                              {[f.author.displayName, dayLabel(f.postedAt), f.itemTitle ? `Item: ${f.itemTitle}` : null].filter(Boolean).join(' · ')}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                          {f.comment && <p className="small">{f.comment}</p>}
+                          {f.response && (
+                            <div className="shop-reply">
+                              <span className="xs strong">{f.response.fromName} replied</span>
+                              <span>{f.response.text}</span>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </section>
           </div>
@@ -247,26 +383,39 @@ export default function Seller() {
                 </h2>
               </div>
               <div className="card-body shop-verify">
-                <p className="small sub">Verified seller means Marketly checked these details before approving the store:</p>
-                <ul>
-                  {VERIFIED.map((v) => (
-                    <li key={v}>
-                      <Icon name="circle-check" />
-                      <span>{v}</span>
-                    </li>
-                  ))}
-                  <li className="no">
-                    <Icon name="circle-minus" />
-                    <span>
-                      <b>Not checked:</b> the authenticity of each product. If a listing looks wrong,{' '}
-                      <Link to={href('help/contact')} className="link-inline">
-                        report it
-                      </Link>
-                      .
-                    </span>
-                  </li>
-                </ul>
-                <span className="xs muted">Last checked Mar 12, 2026</span>
+                {s ? (
+                  <>
+                    <p className="small sub">{s.verification.state === 'verified' ? 'Verified seller means Marketly checked these details before approving the store:' : 'Marketly checks these details for every approved store:'}</p>
+                    <ul>
+                      {s.verification.checked.map((v) => (
+                        <li key={v}>
+                          <Icon name="circle-check" />
+                          <span>{v}</span>
+                        </li>
+                      ))}
+                      {s.verification.notChecked.map((v, i) => (
+                        <li key={v} className="no">
+                          <Icon name="circle-minus" />
+                          <span>
+                            <b>Not checked:</b> {v}
+                            {i === 0 && (
+                              <>
+                                . If a listing looks wrong,{' '}
+                                <Link to={href('help/contact')} className="link-inline">
+                                  report it
+                                </Link>
+                                .
+                              </>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {s.verification.lastCheckedAt && <span className="xs muted">Last checked {dayLabel(s.verification.lastCheckedAt)}</span>}
+                  </>
+                ) : (
+                  <SkLines n={4} />
+                )}
               </div>
             </section>
             <section className="card" aria-labelledby="sl-pol">
@@ -275,12 +424,7 @@ export default function Seller() {
                   Shipping and returns
                 </h2>
               </div>
-              <div className="card-body">
-                <KeyValue pairs={POLICIES} />
-                <a className="small strong" href="#">
-                  Full store policies
-                </a>
-              </div>
+              <div className="card-body">{s ? <KeyValue pairs={policies.filter(([, v]) => v)} /> : <SkLines n={5} />}</div>
             </section>
             <p className="xs muted">
               Marketly support steps in if a seller doesn’t resolve a problem.{' '}

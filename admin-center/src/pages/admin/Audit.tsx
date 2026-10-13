@@ -1,65 +1,13 @@
 import { useState, type ReactNode } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href } from '@marketly/web-shared/routes';
 import { announce, Avatar, Breadcrumbs, Button, Card, ChipRow, Chip, Icon, KeyValue, Pager, SearchInput, Select, StatusBadge, TableWrap, Timeline, type IconName, type TimelineEvent } from '@marketly/web-shared/ui';
+import { ENTRIES, TARGET, type AuditEntry as Entry, type AuditTag as Tag } from './data/audit';
 
-// Design: pages/admin/admin-audit.html
-
-type Target = 'Orders' | 'Sellers' | 'Products' | 'Payouts' | 'Settings' | 'Staff';
-type Approval = 'Approved' | 'Pending' | 'Not required';
-type Tag = 'financial' | 'enforcement' | 'settings';
-
-interface Entry {
-  id: string;
-  day: 'Oct 8' | 'Oct 7' | 'Oct 6';
-  time: string;
-  staff: string;
-  role: string;
-  action: string;
-  target: Target;
-  ref: string;
-  sub: string;
-  reason: string;
-  before: string;
-  after: string;
-  approval: Approval;
-  approvalNote: string;
-  tags: Tag[];
-  extra?: Array<[string, string]>;
-  history?: TimelineEvent[];
-}
-
-const TARGET: Record<Target, { label: string; icon: IconName; to?: string }> = {
-  Payouts: { label: 'Payout', icon: 'wallet', to: href('admin/payouts') },
-  Products: { label: 'Product', icon: 'package', to: href('admin/catalog') },
-  Sellers: { label: 'Seller', icon: 'store', to: href('admin/seller') },
-  Orders: { label: 'Order', icon: 'shopping-bag', to: href('admin/order') },
-  Staff: { label: 'Staff', icon: 'user-cog', to: href('admin/staff') },
-  Settings: { label: 'Setting', icon: 'settings', to: href('admin/settings') },
-};
-
-const ENTRIES: Entry[] = [
-  {
-    id: 'e1', day: 'Oct 8', time: '9:32 AM', staff: 'Priya Nair', role: 'Finance Manager', action: 'Released payout hold', target: 'Payouts', ref: 'PO-261009-0418', sub: 'Casa Verde Home', reason: 'Carrier confirmed delivery for disputed order MK-260921-18320', before: 'Held $1,240.00', after: 'Available $1,240.00', approval: 'Approved', approvalNote: 'Morgan Hale, 9:41 AM', tags: ['financial'],
-    extra: [['Hold placed', 'Sep 29 · review date Oct 9'], ['Evidence', 'UPS proof of delivery, case CS-260930-1172']],
-    history: [
-      { t: 'Requested by Priya Nair', d: 'Oct 8, 9:32 AM', state: 'done', body: 'Above $1,000 threshold, second review required' },
-      { t: 'Approved by Morgan Hale, Business Owner', d: 'Oct 8, 9:41 AM', state: 'done' },
-      { t: 'Included in payout run', d: 'Fri, Oct 9, 10:00 AM PT', state: 'current', body: 'Approved is not paid. Status shows Paid only after the bank confirms.' },
-    ],
-  },
-  { id: 'e2', day: 'Oct 8', time: '9:05 AM', staff: 'Ana Silva', role: 'Inventory Manager', action: 'Stock adjustment', target: 'Products', ref: 'PLR-CI26', sub: 'Pellar Cast Iron Skillet', reason: 'Damaged in receiving, PUR-2610-0039', before: 'Available 79', after: 'Available 77, Damaged 2', approval: 'Not required', approvalNote: 'Under 50 units', tags: [] },
-  { id: 'e3', day: 'Oct 8', time: '8:47 AM', staff: 'Grace Kim', role: 'Seller Manager', action: 'Restricted seller', target: 'Sellers', ref: 'Gadget Grove', sub: 'New sales paused', reason: 'Late dispatch 11% over 30 days, target under 4%', before: 'Approved', after: 'Restricted', approval: 'Approved', approvalNote: 'Sven Larsen, 8:52 AM', tags: ['enforcement'] },
-  { id: 'e4', day: 'Oct 7', time: '6:12 PM', staff: 'Isabel Cruz', role: 'Customer Support Manager', action: 'Goodwill credit', target: 'Orders', ref: 'MK-261002-55410', sub: 'Jordan Lee', reason: 'Delivery 4 days late, seller Casa Verde Home', before: '$0.00', after: '$15.00 credit', approval: 'Not required', approvalNote: 'Within $50 limit', tags: ['financial'] },
-  { id: 'e5', day: 'Oct 7', time: '4:40 PM', staff: 'Omar Haddad', role: 'Catalog Manager', action: 'Suspended offer', target: 'Products', ref: 'BRL-S2', sub: 'Gadget Grove offer', reason: 'Counterfeit report TR-261007-004 under review', before: 'Active', after: 'Suspended', approval: 'Not required', approvalNote: 'Catalog role', tags: ['enforcement'] },
-  { id: 'e6', day: 'Oct 7', time: '3:18 PM', staff: 'Priya Nair', role: 'Finance Manager', action: 'Refund without return', target: 'Orders', ref: 'MK-260930-21877', sub: 'Kestrel 27" Monitor', reason: 'Package lost by carrier, claim USPS-CLM-4410', before: 'Requested', after: 'Approved $329.00', approval: 'Pending', approvalNote: 'Waiting for Morgan Hale', tags: ['financial'] },
-  { id: 'e7', day: 'Oct 7', time: '11:02 AM', staff: 'Riley Chen', role: 'Platform Administrator', action: 'Assigned role', target: 'Staff', ref: 'Hannah Wu', sub: 'Finance staff', reason: 'New finance staff member, invited', before: 'No role', after: 'Finance staff, view only', approval: 'Not required', approvalNote: 'Access only', tags: [] },
-  { id: 'e8', day: 'Oct 7', time: '10:15 AM', staff: 'Riley Chen', role: 'Platform Administrator', action: 'Scheduled setting change', target: 'Settings', ref: 'Returns · Electronics', sub: 'From Nov 1', reason: 'Align with manufacturer return terms', before: '30 days', after: '15 days', approval: 'Approved', approvalNote: 'Morgan Hale, Oct 7', tags: ['settings'] },
-  { id: 'e9', day: 'Oct 6', time: '5:55 PM', staff: 'Theo Grant', role: 'Shipping Manager', action: 'Opened carrier claim', target: 'Orders', ref: 'MK-261001-33019', sub: 'UPS-CLM-88412', reason: 'UPS scan shows damage in transit', before: 'No claim', after: 'Claim $116.00', approval: 'Not required', approvalNote: 'Within $1,000 limit', tags: ['financial'] },
-  { id: 'e10', day: 'Oct 6', time: '2:31 PM', staff: 'Dana Ortiz', role: 'Official Store Manager', action: 'Price change', target: 'Products', ref: 'HAL-AUR-BLK', sub: 'Official Store offer', reason: 'Home Week markdown, Oct 6–19', before: '$229.00', after: '$189.00 (−17%)', approval: 'Not required', approvalNote: 'Within 30% limit', tags: [] },
-];
+// Design: pages/admin/admin-audit.html. Entries live in ./data/audit (shared with admin/audit-entry).
+// ?q= and ?staff= preset the filters: the entry page's "Filter the log by…" chips link here.
 
 const STAFF = ['All staff', 'Morgan Hale', 'Riley Chen', 'Dana Ortiz', 'Ken Watanabe', 'Ana Silva', 'Theo Grant', 'Lena Park', 'Omar Haddad', 'Grace Kim', 'Isabel Cruz', 'Priya Nair', 'Jamie Brooks', 'Noor Aziz', 'Sven Larsen', 'Mei Lin'];
 const TARGETS = ['All targets', 'Orders', 'Sellers', 'Products', 'Payouts', 'Settings', 'Staff'];
@@ -89,20 +37,23 @@ function historyFor(e: Entry): TimelineEvent[] {
 }
 
 const label = (e: Entry) => `${e.day}, ${e.time}`;
+const entryHref = (e: Entry) => href('admin/audit-entry', '', { id: e.id });
 
 export default function Audit() {
-  const [q, setQ] = useState('');
-  const [staff, setStaff] = useState(STAFF[0]);
+  const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const [q, setQ] = useState(params.get('q') ?? '');
+  const [staff, setStaff] = useState(STAFF.includes(params.get('staff') ?? '') ? params.get('staff')! : STAFF[0]);
   const [target, setTarget] = useState(TARGETS[0]);
   const [range, setRange] = useState(RANGES[0]);
   const [chips, setChips] = useState<Array<'pending' | Tag>>([]);
-  const [selId, setSelId] = useState('e1');
+  const [selId, setSelId] = useState(ENTRIES[0].id);
   const [page, setPage] = useState(1);
 
   const needle = q.trim().toLowerCase();
   const rows = ENTRIES.filter(
     (e) =>
-      (!needle || [e.ref, e.sub, e.staff, e.action, e.reason].some((t) => t.toLowerCase().includes(needle))) &&
+      (!needle || [e.id, e.ref, e.sub, e.staff, e.action, e.reason, e.requestId, e.code, ...e.changes.map((c) => c.after ?? '')].some((t) => t.toLowerCase().includes(needle))) &&
       (staff === STAFF[0] || e.staff === staff) &&
       (target === TARGETS[0] || e.target === target) &&
       (range !== 'Today' || e.day === 'Oct 8') &&
@@ -130,9 +81,9 @@ export default function Audit() {
         <Icon name={TARGET[e.target].icon} className="ic-sm" />
         {TARGET[e.target].label}
       </span>
-      <a className="mono nowrap" href="#" title={e.ref}>
+      <Link className="mono nowrap" to={href(TARGET[e.target].to)} title={e.ref}>
         {e.ref}
-      </a>
+      </Link>
       <span className="xs muted">{e.sub}</span>
     </span>
   );
@@ -208,7 +159,9 @@ export default function Audit() {
                       <tr key={e.id} className={cx(warn && 'is-warn', e.id === selId && 'is-selected')} aria-selected={e.id === selId}>
                         <td>
                           {warn && <span className="sr-only">At risk: </span>}
-                          <span className="small nowrap">{label(e)}</span>
+                          <Link className="small nowrap" to={entryHref(e)} title={`Open full entry ${e.id}`}>
+                            {label(e)}
+                          </Link>
                         </td>
                         <td>
                           <span className="ac-who">
@@ -260,10 +213,12 @@ export default function Audit() {
           </div>
           <div className="ac-mlist only-phone">
             {rows.map((e) => (
-              <div key={e.id} className={cx('ac-mi', e.approval === 'Pending' && 'is-warn')} onClick={() => setSelId(e.id)}>
+              <div key={e.id} className={cx('ac-mi', e.approval === 'Pending' && 'is-warn')} onClick={() => navigate(entryHref(e))}>
                 {e.approval === 'Pending' && <span className="sr-only">At risk: </span>}
                 <div className="row between gap-2 nowrap top">
-                  <span className="small strong min-w-0">{e.action}</span>
+                  <Link className="small strong min-w-0" to={entryHref(e)} onClick={(ev) => ev.stopPropagation()}>
+                    {e.action}
+                  </Link>
                   <StatusBadge status={e.approval} />
                 </div>
                 <div className="xs sub">
@@ -291,7 +246,16 @@ export default function Audit() {
           </div>
         </section>
 
-        <Card title={sel.action} titleAs="h3" sub={`${label(sel)} · selected entry`}>
+        <Card
+          title={sel.action}
+          titleAs="h3"
+          sub={`${label(sel)} · selected entry`}
+          actions={
+            <Button variant="secondary" size="sm" iconRight="arrow-right" to={entryHref(sel)}>
+              Open full entry
+            </Button>
+          }
+        >
           <KeyValue
             pairs={[
               ['Staff', `${sel.staff}, ${sel.role}`],
@@ -299,13 +263,9 @@ export default function Audit() {
                 'Target',
                 <>
                   {TARGET[sel.target].label}{' '}
-                  {TARGET[sel.target].to ? (
-                    <Link className="mono nowrap" to={TARGET[sel.target].to!}>
-                      {sel.ref}
-                    </Link>
-                  ) : (
-                    <span className="mono nowrap">{sel.ref}</span>
-                  )}{' '}
+                  <Link className="mono nowrap" to={href(TARGET[sel.target].to)}>
+                    {sel.ref}
+                  </Link>{' '}
                   · {sel.sub}
                 </>,
               ],

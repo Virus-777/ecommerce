@@ -11,8 +11,8 @@ function niceMax(v: number) {
 
 type Fmt = (v: number) => string;
 
-export function LineChart({ labels, series, height = 220, fmt = (v) => String(v), area, label = 'Line chart' }: { labels: string[]; series: Array<{ name: string; data: number[] }>; height?: number; fmt?: Fmt; area?: boolean; label?: string }) {
-  const W = 640, H = height, L = 40, R = 16, T = 12, B = 26;
+export function LineChart({ labels, series, height = 220, width = 640, fmt = (v) => String(v), area, label = 'Line chart' }: { labels: string[]; series: Array<{ name: string; data: number[] }>; height?: number; /** Drawing width (viewBox units). Pass the container's pixel width so text keeps its size in wide cards. */ width?: number; fmt?: Fmt; area?: boolean; label?: string }) {
+  const W = width, H = height, L = 40, R = 16, T = 12, B = 26;
   const all = series.flatMap((s) => s.data);
   const stepV = niceMax((Math.max(...all) * 1.05) / 4);
   const max = Math.ceil((Math.max(...all) * 1.05) / stepV) * stepV;
@@ -64,8 +64,8 @@ export function LineChart({ labels, series, height = 220, fmt = (v) => String(v)
   );
 }
 
-export function BarChart({ labels, data, height = 200, fmt = (v) => String(v), s2, label = 'Bar chart' }: { labels: string[]; data: number[]; height?: number; fmt?: Fmt; s2?: boolean; label?: string }) {
-  const W = 640, H = height, L = 40, R = 8, T = 12, B = 26;
+export function BarChart({ labels, data, height = 200, width = 640, fmt = (v) => String(v), s2, label = 'Bar chart' }: { labels: string[]; data: number[]; height?: number; /** Drawing width (viewBox units); see LineChart. */ width?: number; fmt?: Fmt; s2?: boolean; label?: string }) {
+  const W = width, H = height, L = 40, R = 8, T = 12, B = 26;
   const n = labels.length;
   const max = niceMax(Math.max(...data) * 1.05);
   const step = (W - L - R) / n;

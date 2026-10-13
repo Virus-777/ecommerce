@@ -1,393 +1,226 @@
-// Sample data for the product detail page (design: pages/store/store-product*.html).
-// Two products: the Halden Aurora (reviews, several offers) and the Brightline desk lamp
-// (new listing with no reviews, one offer: the "no-reviews-yet" view).
-import { auroraOffers, P, type Offer, type SellerId, type Tint } from '@marketly/web-shared/data/fixtures';
-import { money } from '@marketly/web-shared/lib/format';
-import type { CardProduct, IconName } from '@marketly/web-shared/ui';
+// API access for the product detail page and its sub-pages (offers, reviews, questions):
+// catalog product, purchase box, rating summary, category trail, add to cart, Buy now.
+// Product routes carry the id (/p/:slug/:id); the slug is cosmetic (BACKEND-REQUESTS G1).
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router';
+import { useSession } from '@/app/session';
+import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { href } from '@marketly/web-shared/routes';
+import { announce } from '@marketly/web-shared/ui';
 
-export interface Variant {
-  name: string;
-  tint: Tint;
-  icon: IconName;
-  /** Price/stock line under the swatch. */
-  sub: string;
+export type CatalogProduct = components['schemas']['catalog.Product'];
+export type CatalogVariant = components['schemas']['catalog.Variant'];
+export type Category = components['schemas']['catalog.Category'];
+export type PurchaseBox = components['schemas']['offers.PurchaseBox'];
+export type OfferView = components['schemas']['offers.OfferView'];
+export type SellerCue = components['schemas']['offers.SellerCue'];
+export type RatingSummary = components['schemas']['reviews.RatingSummary'];
+export type SimilarProduct = components['schemas']['search.ProductCard'];
+export type MediaRef = components['schemas']['MediaRef'];
+export type AddItemResult = components['schemas']['cart.AddItemResult'];
+export type CartSource = 'product_page' | 'offers_list';
+
+/** Seller id of first-party offers (docs/api/README.md, Constants). */
+export { OFFICIAL_STORE_ID } from '@marketly/web-shared/config';
+
+/** Route params of the product pages: /p/:slug/:id(/offers|/reviews|/questions). */
+export function useProductParams() {
+  const { slug = '', id = '' } = useParams();
+  return { slug, id };
 }
 
-export interface Thumb {
-  label: string;
-  icon: IconName;
-  /** Video length ("0:42"): the thumb plays a video. */
-  video?: string;
-  /** Fixed tint (video poster); photos follow the selected variant. */
-  tint?: Tint;
+export const productHref = (slug: string, id: string, view?: string, query?: Record<string, string>) => href('store/product', view, { slug, id }, query);
+
+/** Sign-in link that comes back to `next` (the current page by default). */
+export function useSignInHref() {
+  const loc = useLocation();
+  return useCallback((next?: string) => href('auth/sign-in', '', undefined, { next: next ?? loc.pathname + loc.search }), [loc.pathname, loc.search]);
 }
 
-export interface Review {
-  id: string;
-  name: string;
-  verified: boolean;
-  rating: number;
-  title: string;
-  date: string;
-  color: string;
-  soldBy: string;
-  body: string;
-  helpful: number;
-  photos: boolean;
-  reply?: { from: string; date: string; body: string };
+/** Store page of an offer's seller: the Official Store page, or the seller's storefront. */
+export const sellerHref = (s: Pick<SellerCue, 'official' | 'storeSlug'>) =>
+  s.official || !s.storeSlug ? href('store/official') : href('store/seller', '', { slug: s.storeSlug });
+
+/* ---------------- Reads ---------------- */
+
+export function useCatalogProduct(id: string) {
+  const { api } = useApi();
+  return useQuery({
+    queryKey: ['catalog', 'product', id],
+    queryFn: () => call(api.GET('/api/store/catalog/products/{id}', { params: { path: { id } } })),
+    enabled: !!id,
+  });
 }
 
-export interface QaAnswer {
-  role: 'staff' | 'seller' | 'customer';
-  who: string;
-  date: string;
-  body: string;
+/** The buy box for a variant (default: the server's choice) and an offer the shopper picked (default: featured). */
+export function usePurchaseBox(id: string, variantId?: string, offerId?: string) {
+  const { api } = useApi();
+  return useQuery({
+    queryKey: ['offers', 'purchase-box', id, variantId ?? null, offerId ?? null],
+    queryFn: () => call(api.GET('/api/store/offers/products/{productId}/purchase-box', { params: { path: { productId: id }, query: { variantId, offerId } } })),
+    enabled: !!id,
+    placeholderData: (prev) => (prev && prev.product.id === id ? prev : undefined),
+  });
 }
 
-export interface Question {
-  q: string;
-  answers: QaAnswer[];
-  /** Shown instead of answers while the question is unanswered. */
-  pending?: string;
+export function useRatingSummary(id: string) {
+  const { api } = useApi();
+  return useQuery({
+    queryKey: ['reviews', 'rating-summary', id],
+    queryFn: () => call(api.GET('/api/store/reviews/products/{productId}/rating-summary', { params: { path: { productId: id } } })),
+    enabled: !!id,
+  });
 }
 
-/** One seller's offer as shown in the buy box. */
-export interface BuyOffer {
-  seller: SellerId;
-  price: number;
-  was?: number | null;
-  ship: number;
-  /** Sale copy under the price (featured sale offer). */
-  saleEnds?: string;
-  wasNote?: string;
-  /** Show "+ $x shipping · $total before tax" under the price. */
-  shippingNote?: boolean;
-  stock: { tone: 'success' | 'warning'; label: string; available: number; condition: string };
-  delivery: string;
-  deliveryNote?: string;
-  shipsFrom: string;
-  carrier: string;
-  /** Append " · Free" / " · $6.99" to the ships-from line. */
-  showShipCost?: boolean;
-  ratingsSuffix?: string;
-  returns: string;
-  warranty: string;
-  limit: number;
-  visit: string;
-  /** Second line in the phone action bar. */
-  barNote: string;
+/** Similar in-stock products (the Related products row). */
+export function useSimilarProducts(id: string, limit = 5) {
+  const { api } = useApi();
+  return useQuery({
+    queryKey: ['search', 'similar', id, limit],
+    queryFn: () => call(api.GET('/api/store/search/products/{productId}/similar', { params: { path: { productId: id }, query: { limit } } })),
+    enabled: !!id,
+  });
 }
 
-export interface ProductDetail {
-  id: string;
-  /** Id prefix used by the design for this product's headings and fields. */
-  px: 'pdp' | 'pdl';
-  appbarTitle: string;
-  crumbs: { cat: string; sub: string; name: string };
-  brand: string;
-  name: string;
-  thumbsLabel: string;
-  thumbs: Thumb[];
-  photosTotal: number;
-  rating: number;
-  ratings: number;
-  written: number;
-  questions: number;
-  rank?: { badge: string; note: string };
-  listed?: string;
-  variants: Variant[];
-  features: string[];
-  about: string;
-  inBox: string[];
-  specs: Array<[string, string]>;
-  offers: BuyOffer[];
-  /** All marketplace offers for this item (the Offers page). Empty when the buy-box offer is the only one. */
-  market: Offer[];
-  ratingBars: Array<[number, number]>;
-  reviews: Review[];
-  questionList: Question[];
-  qaPlaceholder: string;
-  qaOrderNote: boolean;
-  relatedMore: string;
-  related: CardProduct[];
-  sponsored: CardProduct[];
+export function useCategories() {
+  const { api } = useApi();
+  return useQuery({
+    queryKey: ['catalog', 'categories'],
+    queryFn: () => call(api.GET('/api/store/catalog/categories')),
+    staleTime: 5 * 60_000,
+  });
 }
 
-const official = auroraOffers.find((o) => o.seller === 'official')!;
-const northwind = auroraOffers.find((o) => o.seller === 'northwind')!;
+/** Root-to-leaf categories of a category id (for breadcrumbs). Empty while the tree loads. */
+export function categoryTrail(tree: Category[] | undefined, categoryId: string | null | undefined): Category[] {
+  if (!tree || !categoryId) return [];
+  const walk = (nodes: Category[], trail: Category[]): Category[] | null => {
+    for (const n of nodes) {
+      const t = [...trail, n];
+      if (n.id === categoryId) return t;
+      const hit = walk(n.children ?? [], t);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return walk(tree, []) ?? [];
+}
 
-export const aurora: ProductDetail = {
-  id: 'aurora',
-  px: 'pdp',
-  appbarTitle: 'Halden Aurora',
-  crumbs: { cat: 'Electronics', sub: 'Headphones', name: 'Halden Aurora' },
-  brand: P.aurora.brand,
-  name: P.aurora.name,
-  thumbsLabel: 'Photos and video',
-  thumbs: [
-    { label: 'Play product video, 42 seconds', icon: 'headphones', video: '0:42', tint: '6' },
-    { label: 'Photo 1', icon: 'headphones' },
-    { label: 'Photo 2', icon: 'headphones' },
-    { label: 'Photo 3', icon: 'briefcase' },
-    { label: 'Photo 4', icon: 'battery-charging' },
-    { label: 'Photo 5', icon: 'bluetooth' },
-  ],
-  photosTotal: 7,
-  rating: P.aurora.rating,
-  ratings: P.aurora.reviews,
-  written: 412,
-  questions: 38,
-  rank: { badge: '#3 in Headphones', note: 'Ranked by units sold in the last 30 days' },
-  variants: [
-    { name: 'Midnight black', tint: '2', icon: 'headphones', sub: '$189.00 · In stock' },
-    { name: 'Stone', tint: '5', icon: 'headphones', sub: '2 offers from $184.00' },
-    { name: 'Sage', tint: '1', icon: 'headphones', sub: '$199.00 · In stock' },
-  ],
-  features: [
-    'Hybrid active noise cancelling with 6 microphones and an adjustable transparency mode',
-    'Up to 40 hours with ANC on, 55 hours off. 10 minutes of charging gives 5 hours',
-    'Bluetooth 5.3 multipoint: stay connected to a phone and a laptop at once',
-    'Folds flat into the included hard travel case',
-    'Wired listening with the 3.5 mm cable when the battery is empty',
-  ],
-  about:
-    'Aurora is Halden’s full-size travel headphone. It blocks steady noise like engines and air conditioning, and the transparency mode lets announcements through without taking the headphones off. Controls are physical buttons, so they work with gloves.',
-  inBox: ['Aurora headphones', 'Hard travel case', 'USB-C to USB-C cable, 1 m', '3.5 mm audio cable, 1.2 m', 'Airplane adapter', 'Quick start guide'],
-  specs: [
-    ['Brand', 'Halden'],
-    ['Model', 'Aurora (2026), HA-AUR26'],
-    ['SKU', P.aurora.sku],
-    ['Type', 'Over-ear, closed back'],
-    ['Noise cancelling', 'Active, hybrid (6 microphones)'],
-    ['Battery', '40 h ANC on · 55 h ANC off'],
-    ['Charging', 'USB-C, 2 h full charge'],
-    ['Bluetooth', '5.3, multipoint (2 devices)'],
-    ['Codecs', 'SBC, AAC, LDAC'],
-    ['Wired', '3.5 mm (cable included)'],
-    ['Weight', '254 g (9 oz)'],
-    ['Warranty', '2-year manufacturer warranty, US'],
-  ],
-  offers: [
-    {
-      seller: 'official',
-      price: official.price,
-      was: P.aurora.was,
-      ship: official.ship,
-      saleEnds: 'Sale ends Oct 19, 11:59 PM PT',
-      wasNote: 'Was price is the Official Store’s lowest price in the 30 days before the sale.',
-      stock: { tone: 'success', label: official.stock, available: P.aurora.stock, condition: official.condition },
-      delivery: `Free delivery ${official.delivery}`,
-      deliveryNote: 'Order within 4 h 12 min for this date',
-      shipsFrom: 'Reno, NV',
-      carrier: 'UPS Ground',
-      showShipCost: true,
-      returns: official.returns,
-      warranty: official.warranty,
-      limit: 3,
-      visit: 'Visit the seller’s store',
-      barNote: 'Free delivery Oct 15',
-    },
-    {
-      seller: 'northwind',
-      price: northwind.price,
-      ship: northwind.ship,
-      shippingNote: true,
-      stock: { tone: 'success', label: northwind.stock, available: 23, condition: northwind.condition },
-      delivery: 'Arrives Fri, Oct 16 – Mon, Oct 19',
-      shipsFrom: 'Portland, OR',
-      carrier: 'USPS Ground Advantage',
-      showShipCost: true,
-      returns: '30-day returns. You pay return shipping (about $8.50) unless the item is faulty.',
-      warranty: northwind.warranty,
-      limit: 3,
-      visit: 'Visit Northwind Audio’s store',
-      barNote: `+ ${money(northwind.ship)} shipping`,
-    },
-  ],
-  market: auroraOffers,
-  ratingBars: [
-    [5, 72],
-    [4, 17],
-    [3, 6],
-    [2, 2],
-    [1, 3],
-  ],
-  reviews: [
-    {
-      id: 'r1',
-      name: 'Mara D.',
-      verified: true,
-      rating: 5,
-      title: 'Quiet enough for a six-hour flight',
-      date: 'Oct 2, 2026',
-      color: 'Midnight black',
-      soldBy: 'Marketly Official',
-      body: 'Wore them PDX to JFK and back. The engine noise drops to a low hum, and I still had 60% battery at the end. Clamping is firm for the first week.',
-      helpful: 48,
-      photos: false,
-    },
-    {
-      id: 'r2',
-      name: 'Devon P.',
-      verified: true,
-      rating: 4,
-      title: 'Great noise cancelling, bulky case',
-      date: 'Sep 27, 2026',
-      color: 'Stone',
-      soldBy: 'Northwind Audio',
-      body: 'Sound and ANC are excellent for the price. The case takes up half my backpack. Multipoint between my phone and work laptop works without re-pairing.',
-      helpful: 21,
-      photos: false,
-    },
-    {
-      id: 'r3',
-      name: 'Ines K.',
-      verified: true,
-      rating: 2,
-      title: 'Left ear cup crackles at high volume',
-      date: 'Sep 19, 2026',
-      color: 'Midnight black',
-      soldBy: 'Marketly Official',
-      body: 'Started after two weeks. Only above 80% volume. Otherwise comfortable.',
-      helpful: 9,
-      photos: false,
-      reply: {
-        from: 'Marketly Official Store',
-        date: 'Sep 20, 2026',
-        body: 'Sorry about this. This is covered by the 2-year warranty and by our 30-day return window. Start a return from your order and choose “Item is faulty” for a free replacement.',
+/** Home › top category › leaf category (› product) as Breadcrumbs items. Falls back to the product's category names. */
+export function productCrumbs(product: Pick<CatalogProduct, 'categoryId' | 'categoryPath'> | undefined, tree: Category[] | undefined) {
+  const trail = categoryTrail(tree, product?.categoryId);
+  const items: Array<{ label: string; to?: string }> = [{ label: 'Home', to: href('store/home') }];
+  if (trail.length) {
+    trail.forEach((c, i) => items.push({ label: c.name, to: i === 0 && trail.length > 1 ? href('store/categories') : href('store/category', '', { slug: c.slug }) }));
+  } else {
+    (product?.categoryPath ?? []).forEach((name) => items.push({ label: name }));
+  }
+  return items;
+}
+
+/* ---------------- Variants and offers ---------------- */
+
+/** "Color: Midnight black" → the option values, e.g. "Midnight black". */
+export const variantName = (v: { options?: Record<string, string> } | undefined) => Object.values(v?.options ?? {}).join(' · ');
+/** The option names, e.g. "Color". */
+export const variantAxis = (v: { options?: Record<string, string> } | undefined) => Object.keys(v?.options ?? {}).join(' / ');
+
+/** Photos of a variant, or the product's photos when the variant has none. */
+export const variantImages = (p: CatalogProduct | undefined, variantId: string | undefined): MediaRef[] => {
+  const v = p?.variants.find((x) => x.id === variantId);
+  return v?.images?.length ? v.images : (p?.images ?? []);
+};
+
+export const STOCK_TONE: Record<OfferView['availability']['state'], 'success' | 'warning' | 'danger'> = {
+  in_stock: 'success',
+  low_stock: 'warning',
+  out_of_stock: 'danger',
+};
+export const STOCK_LABEL: Record<OfferView['availability']['state'], string> = {
+  in_stock: 'In stock',
+  low_stock: 'Low stock',
+  out_of_stock: 'Out of stock',
+};
+
+/** Who ships the order: the seller, or Marketly for Official Store and Marketly-fulfilled offers. */
+export const shipperName = (o: OfferView) => (o.fulfilledBy === 'seller' && !o.seller.official ? o.seller.name : 'Marketly');
+
+/** "Order within 7 h 27 min for this date". */
+export const orderWithin = (minutes?: number | null) => {
+  if (!minutes || minutes <= 0) return '';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `Order within ${h ? `${h} h ` : ''}${m} min for this date`;
+};
+
+/* ---------------- Dates ---------------- */
+
+const TZ = 'America/Los_Angeles';
+/** "Oct 2, 2026" in the market time zone. */
+export const fmtDate = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: TZ }) : '');
+/** "Oct 19, 11:59 PM PT". */
+export const fmtDateTime = (iso?: string | null) =>
+  iso ? `${new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: TZ })} PT` : '';
+
+/* ---------------- Writes ---------------- */
+
+/** POST /cart/cart/items with the chosen offer; refreshes the header badge. */
+export function useAddToCart() {
+  const { api } = useApi();
+  const { refreshCart } = useSession();
+  return useMutation({
+    mutationFn: (v: { offerId: string; quantity: number; source: CartSource }) => call(api.POST('/api/store/cart/cart/items', { body: v })),
+    onSuccess: () => refreshCart(),
+  });
+}
+
+/**
+ * Add-to-cart button state: which offer was just added ("Added to cart" for a moment), which one is
+ * being added, and the error of the last attempt (shown next to that offer's button).
+ */
+export function useCartButton(source: CartSource) {
+  const add = useAddToCart();
+  const [added, setAdded] = useState<string | null>(null);
+  const [error, setError] = useState<{ offerId: string; text: string } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const run = (offerId: string, quantity: number, what: string) => {
+    setError(null);
+    add.mutate(
+      { offerId, quantity, source },
+      {
+        onSuccess: (r) => {
+          setAdded(offerId);
+          announce(r.message || `Added ${what} to your cart`);
+          clearTimeout(timer.current);
+          timer.current = setTimeout(() => setAdded(null), 2500);
+        },
+        onError: (e) => {
+          const text = errorMessage(e);
+          setError({ offerId, text });
+          announce(text);
+        },
       },
-    },
-  ],
-  questionList: [
-    {
-      q: 'Can I connect it to my phone and laptop at the same time?',
-      answers: [{ role: 'staff', who: 'Marketly Product Support', date: 'Oct 1, 2026', body: 'Yes. Aurora supports Bluetooth multipoint with two devices. Audio switches to whichever device starts playing.' }],
-    },
-    {
-      q: 'Is the Northwind Audio offer a US unit with the US warranty?',
-      answers: [{ role: 'seller', who: 'Northwind Audio', date: 'Sep 29, 2026', body: 'Yes. We sell US retail units bought from Halden’s US distributor. The 2-year warranty is registered in your name with Halden US.' }],
-    },
-    {
-      q: 'Can the ear cushions be replaced?',
-      answers: [
-        { role: 'customer', who: 'Priya K.', date: 'Sep 22, 2026', body: 'Yes, they clip off. I bought a replacement pair from Halden for $24.' },
-        { role: 'staff', who: 'Marketly Product Support', date: 'Sep 23, 2026', body: 'Replacement cushions (HAL-AUR-CUSH) are sold by the Official Store.' },
-      ],
-    },
-  ],
-  qaPlaceholder: 'Search 38 questions and answers',
-  qaOrderNote: true,
-  relatedMore: 'More headphones',
-  related: [
-    { name: 'Halden Aurora Buds ANC Earbuds', price: 139, was: 169, rating: 4.5, reviews: 912, icon: 'ear', tint: '2', seller: 'official', offers: 2, delivery: 'Thu, Oct 15', free: true },
-    { name: 'Halden Studio 2 Wired Monitor Headphones', price: 149, rating: 4.7, reviews: 356, icon: 'headphones', tint: '5', seller: 'official', offers: 2, delivery: 'Thu, Oct 15', free: true },
-    { name: 'Halden Aurora Hard Travel Case', price: 29, rating: 4.6, reviews: 188, icon: 'briefcase', tint: '5', seller: 'official', offers: 1, delivery: 'Wed, Oct 14', free: false },
-    { name: 'Kestrel Wave Over-ear Bluetooth Headphones', price: 79, rating: 4.2, reviews: 1032, icon: 'headphones', tint: '6', seller: 'pixelport', offers: 3, delivery: 'Fri, Oct 16', free: true },
-    { name: 'Halden Pocket Mini Bluetooth Speaker', price: 39, rating: 4.3, reviews: 410, icon: 'speaker', tint: '2', seller: 'northwind', offers: 2, delivery: 'Thu, Oct 15', free: true },
-  ],
-  sponsored: [
-    { name: 'Lumen Q3 Noise Cancelling Headphones', price: 159, rating: 4.3, reviews: 421, icon: 'headphones', tint: '3', seller: 'pixelport', offers: 2, delivery: 'Fri, Oct 16', free: true },
-    { name: 'Kestrel Wave Pro ANC Headphones', price: 129, was: 149, rating: 4.3, reviews: 577, icon: 'headphones', tint: '6', seller: 'pixelport', offers: 2, delivery: 'Fri, Oct 16', free: true },
-    { name: 'Halden Aria True Wireless Earbuds', price: 99, was: 129, rating: 4.4, reviews: 688, icon: 'ear', tint: '2', seller: 'northwind', offers: 2, delivery: 'Fri, Oct 16', free: true },
-    { name: 'Lumen Q1 On-ear Wireless Headphones', price: 69, rating: 4.0, reviews: 265, icon: 'headphones', tint: '3', seller: 'northwind', offers: 2, delivery: 'Fri, Oct 16', free: true },
-    { name: 'Halden Air Open-ear Sport Headphones', price: 119, rating: 4.2, reviews: 204, icon: 'ear', tint: '1', seller: 'northwind', offers: 1, delivery: 'Fri, Oct 16', free: true },
-  ],
-};
+    );
+  };
+  return { run, added, error, pending: add.isPending ? (add.variables?.offerId ?? null) : null };
+}
 
-export const lamp: ProductDetail = {
-  id: 'lamp',
-  px: 'pdl',
-  appbarTitle: 'Desk lamp',
-  crumbs: { cat: 'Home & Kitchen', sub: 'Lighting', name: 'Brightline Smart LED Desk Lamp' },
-  brand: P.lamp.brand,
-  name: P.lamp.name,
-  thumbsLabel: 'Photos',
-  thumbs: [
-    { label: 'Photo 1', icon: 'lamp-desk' },
-    { label: 'Photo 2', icon: 'lamp-desk' },
-    { label: 'Photo 3', icon: 'smartphone' },
-    { label: 'Photo 4', icon: 'sun-dim' },
-    { label: 'Photo 5', icon: 'plug' },
-  ],
-  photosTotal: 5,
-  rating: 0,
-  ratings: 0,
-  written: 0,
-  questions: 1,
-  listed: 'Listed on Marketly Oct 6, 2026',
-  variants: [
-    { name: 'White', tint: '5', icon: 'lamp-desk', sub: '$42.00 · 9 left' },
-    { name: 'Charcoal', tint: '6', icon: 'lamp-desk', sub: '$42.00 · In stock' },
-  ],
-  features: [
-    'Built-in 15 W Qi wireless charger in the base',
-    'Five color temperatures from 2700 K to 6500 K, stepless dimming',
-    'App and voice control with a manual touch strip that works offline',
-    'Folding arm and head reach 45 cm over the desk from a 14 cm base',
-    'Auto-off timer and a night mode at 3% brightness',
-  ],
-  about:
-    'A compact desk lamp that charges your phone in its base. The touch strip on the arm controls brightness and color without the app, so it still works if your Wi-Fi is down.',
-  inBox: ['Lamp with charging base', '24 W USB-C power adapter', 'USB-C cable, 1.5 m', 'Quick start guide'],
-  specs: [
-    ['Brand', 'Brightline'],
-    ['Model', 'Smart Desk Lamp W1'],
-    ['SKU', P.lamp.sku],
-    ['Light', '8 W LED, 520 lumens, CRI 90+'],
-    ['Color temperature', '2700–6500 K'],
-    ['Charging pad', 'Qi, up to 15 W'],
-    ['Connectivity', 'Wi-Fi 2.4 GHz, Bluetooth for setup'],
-    ['Power', '24 W USB-C adapter (included)'],
-    ['Size', 'Base 14 cm, arm reach 45 cm'],
-    ['Warranty', '2 years, handled by the Official Store'],
-  ],
-  offers: [
-    {
-      seller: 'official',
-      price: P.lamp.price,
-      ship: 0,
-      stock: { tone: 'warning', label: 'Low stock', available: P.lamp.stock, condition: 'New' },
-      delivery: `Free delivery ${P.lamp.delivery}`,
-      deliveryNote: 'Free on Official Store orders over $35',
-      shipsFrom: 'Reno, NV',
-      carrier: 'UPS Ground',
-      ratingsSuffix: ' for this seller',
-      returns: '30-day free returns',
-      warranty: '2-year warranty on electronics, handled by Marketly',
-      limit: 2,
-      visit: 'Visit the Official Store',
-      barNote: 'Free delivery Oct 14',
-    },
-  ],
-  market: [],
-  ratingBars: [],
-  reviews: [],
-  questionList: [
-    {
-      q: 'Will the charging pad work through a phone case?',
-      answers: [{ role: 'staff', who: 'Marketly Product Support', date: 'Oct 7, 2026', body: 'Yes, through cases up to 5 mm thick without metal or magnets.' }],
-    },
-    {
-      q: 'Does it need the app to change brightness?',
-      answers: [],
-      pending: 'Not answered yet. Asked Oct 8, 2026. The Official Store usually answers within 1 business day.',
-    },
-  ],
-  qaPlaceholder: 'Search questions and answers',
-  qaOrderNote: false,
-  relatedMore: 'More lighting',
-  related: [
-    { name: 'Brightline Arc Floor Lamp, Dimmable', price: 89, was: 119, rating: 4.4, reviews: 233, icon: 'lamp-floor', tint: '5', seller: 'official', offers: 1, delivery: 'Thu, Oct 15', free: true },
-    { name: 'Brightline Warm White String Lights, 10 m', price: 19, was: 26, rating: 4.3, reviews: 852, icon: 'lightbulb', tint: '5', seller: 'official', offers: 1, delivery: 'Wed, Oct 14', free: false },
-    P.keyboard,
-    P.kestrel27,
-    P.pourover,
-  ],
-  sponsored: [
-    P.ssd1tb,
-    { name: 'Northwind Studio Cable Kit, 3.5 mm to USB-C', price: 24, rating: 4.5, reviews: 96, icon: 'cable', tint: '2', seller: 'northwind', offers: 1, delivery: 'Fri, Oct 16', free: false },
-    { name: 'Mosswood Gooseneck Pour-over Kettle', price: 48, was: 60, rating: 4.5, reviews: 377, icon: 'coffee', tint: '3', seller: 'casaverde', offers: 1, delivery: 'Mon, Oct 19', free: true },
-    { name: 'Mosswood Percale Sheet Set, Queen', price: 79, was: 99, rating: 4.6, reviews: 640, icon: 'bed-double', tint: '1', seller: 'casaverde', offers: 2, delivery: 'Mon, Oct 19', free: true },
-    P.speaker,
-  ],
-};
+/** Buy now: a checkout session from one offer (the cart is not changed), then the checkout page. */
+export function useBuyNow() {
+  const { api } = useApi();
+  const navigate = useNavigate();
+  return useMutation({
+    mutationFn: (v: { offerId: string; quantity: number }) => call(api.POST('/api/store/checkout/sessions', { body: { source: 'buy_now', offerId: v.offerId, quantity: v.quantity } })),
+    onSuccess: (checkout) => navigate(href('store/checkout', '', undefined, { session: checkout.id })),
+  });
+}
+
+/** Records a product view for the recently viewed row (customers and guest sessions). Best effort. */
+export function useRecordView() {
+  const { api } = useApi();
+  return useMutation({
+    mutationFn: (v: { productId: string; variantId?: string }) => call(api.POST('/api/store/customers/recently-viewed', { body: v })),
+  });
+}

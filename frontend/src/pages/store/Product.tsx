@@ -1,113 +1,230 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useSession } from '@/app/session';
-import { sellers } from '@marketly/web-shared/data/fixtures';
 import { StoreLayout } from '@/layouts';
+import { ApiError, errorMessage } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money, num } from '@marketly/web-shared/lib/format';
-import { useView } from '@marketly/web-shared/lib/hooks';
+import { dollars, formatMoney, num, percentOff } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import {
-  Alert, Avatar, Badge, Breadcrumbs, Button, Chip, EmptyState, Icon, IconButton, Img, KeyValue, Meter, PhoneCollapse,
-  Price, ProductCard, SearchInput, SellerBadge, Stars5, announce, type IconName,
+  Alert, Avatar, Badge, Breadcrumbs, Button, Chip, EmptyState, Icon, IconButton, KeyValue, Meter, PhoneCollapse,
+  Price, SearchInput, SellerBadge, Stars, Stars5, announce, type IconName,
 } from '@marketly/web-shared/ui';
-import { aurora, lamp, type BuyOffer, type ProductDetail, type QaAnswer, type Review } from './data/product';
+import NotFound from './NotFound';
+import {
+  STOCK_LABEL, STOCK_TONE, categoryTrail, fmtDate, fmtDateTime, orderWithin, productCrumbs, productHref, sellerHref, shipperName,
+  useBuyNow, useCartButton, useCatalogProduct, useCategories, useProductParams, usePurchaseBox, useRatingSummary, useRecordView,
+  useSignInHref, useSimilarProducts, variantAxis, variantImages, variantName,
+  type CatalogProduct, type OfferView, type PurchaseBox, type RatingSummary, type SimilarProduct,
+} from './data/product';
+import { useDebounced, useQuestionPage, type ApiAnswer } from './data/questions';
+import { useHelpfulVote, useReviewPage, type ApiReview, type ReviewFilters } from './data/reviews';
+import { LoadError, ListSkeleton, Photo, type VoteState } from './data/review-parts';
 
-// Design: pages/store/store-product.html (Official Store offer)
-//   view "seller-offer-selected" = Northwind Audio's offer chosen in the buy box
-//   view "no-reviews-yet"        = a new listing with zero reviews (the Brightline desk lamp)
+// Design: pages/store/store-product.html
+//   view "seller-offer-selected" (+ &offer=<offerId>) = another seller's offer chosen in the buy box
+//   view "no-reviews-yet" follows the data: a product without reviews shows the no-reviews state
 
-type View = 'seller-offer-selected' | 'no-reviews-yet';
+const px = 'pdp';
 
 export default function Product() {
-  const [view, setView] = useView<View>();
-  const product = view === 'no-reviews-yet' ? lamp : aurora;
-  // The buy-box offer lives in the URL so the seller choice is linkable: the second seller's
-  // offer is the "seller-offer-selected" view, the featured (first) offer is the default.
-  const offer = view === 'seller-offer-selected' && product.offers[1] ? product.offers[1] : product.offers[0];
-  const chooseOffer = (o: BuyOffer) => setView(o === product.offers[0] ? '' : 'seller-offer-selected');
-  return <ProductPage key={product.id} product={product} offer={offer} onChooseOffer={chooseOffer} />;
+  const { id } = useProductParams();
+  // A new product (related products) starts with fresh page state.
+  return <ProductScreen key={id} />;
 }
 
-const sellerHref = (id: BuyOffer['seller']) => ('official' in sellers[id] ? href('store/official') : href('store/seller'));
+function ProductScreen() {
+  const { slug, id } = useProductParams();
+  const [params, setParams] = useSearchParams();
+  const offerId = params.get('offer') ?? undefined;
+  const [variantId, setVariantId] = useState<string | undefined>(undefined);
 
-const QA_ROLE: Record<QaAnswer['role'], { tone: '' | 'brand' | 'info'; icon: IconName; label: string }> = {
-  staff: { tone: 'brand', icon: 'badge-check', label: 'Marketly staff' },
+  const product = useCatalogProduct(id);
+  const box = usePurchaseBox(id, variantId, offerId);
+  const summary = useRatingSummary(id);
+  const categories = useCategories();
+
+  // Recently viewed (customers and guest sessions), once per product.
+  const record = useRecordView();
+  const recorded = useRef(false);
+  useEffect(() => {
+    if (recorded.current || !product.data) return;
+    recorded.current = true;
+    record.mutate({ productId: id }, { onError: () => undefined });
+  }, [product.data, id, record]);
+
+  const setOffer = (o: string | null) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (o) {
+          p.set('view', 'seller-offer-selected');
+          p.set('offer', o);
+        } else {
+          p.delete('view');
+          p.delete('offer');
+        }
+        return p;
+      },
+      { preventScrollReset: true },
+    );
+  const chooseVariant = (v: string) => {
+    setVariantId(v);
+    // An offer belongs to one variant: a new variant starts from its featured offer.
+    if (offerId) setOffer(null);
+  };
+
+  if (product.error instanceof ApiError && product.error.status === 404) return <NotFound />;
+  if (product.error) {
+    return (
+      <StoreLayout nav="categories" appbar={{ title: 'Product', back: href('store/home') }}>
+        <div className="container page gap-5">
+          <LoadError error={product.error} onRetry={() => void product.refetch()} title="We couldn’t load this product" />
+        </div>
+      </StoreLayout>
+    );
+  }
+  if (!product.data) return <ProductSkeleton />;
+
+  return (
+    <ProductPage
+      slug={slug}
+      id={id}
+      product={product.data}
+      box={box.data}
+      boxError={box.error}
+      onRetryBox={() => void box.refetch()}
+      summary={summary.data}
+      crumbs={productCrumbs(product.data, categories.data)}
+      leaf={categoryTrail(categories.data, product.data.categoryId).at(-1)}
+      onVariant={chooseVariant}
+      onOffer={setOffer}
+    />
+  );
+}
+
+const QA_ROLE: Record<ApiAnswer['label'], { tone: '' | 'brand' | 'info'; icon: IconName; label: string }> = {
+  marketly_staff: { tone: 'brand', icon: 'badge-check', label: 'Marketly staff' },
   seller: { tone: 'info', icon: 'store', label: 'Seller' },
   customer: { tone: '', icon: 'user-round', label: 'Customer' },
 };
 
 type ReviewFilter = 'all' | 'verified' | 'photos' | 'critical' | 'color' | `star-${number}`;
 
-function ProductPage({ product, offer, onChooseOffer }: { product: ProductDetail; offer: BuyOffer; onChooseOffer: (o: BuyOffer) => void }) {
-  const { cartCount, setCartCount } = useSession();
-  const px = product.px;
-  const featured = product.offers[0];
-  const isFeatured = offer === featured;
-  const others = product.market.filter((o) => !o.main);
-  const onlyOffer = product.market.length === 0;
-  const seller = sellers[offer.seller];
-  const official = 'official' in seller && seller.official;
-  const hasReviews = product.reviews.length > 0;
+const toFilters = (f: ReviewFilter, variantId: string | undefined): ReviewFilters => ({
+  verifiedOnly: f === 'verified',
+  withPhotos: f === 'photos',
+  critical: f === 'critical',
+  variantId: f === 'color' ? variantId : undefined,
+  rating: f.startsWith('star-') ? Number(f.slice(5)) : undefined,
+  sort: 'helpful',
+});
 
-  // Gallery, variant, wishlist
-  const [variantIdx, setVariantIdx] = useState(0);
-  const variant = product.variants[variantIdx];
-  const [thumbIdx, setThumbIdx] = useState(() => Math.max(0, product.thumbs.findIndex((t) => !t.video)));
-  const thumb = product.thumbs[thumbIdx];
-  const photoNo = product.thumbs.slice(0, thumbIdx + 1).filter((t) => !t.video).length;
-  const [saved, setSaved] = useState(false);
+interface ProductPageProps {
+  slug: string;
+  id: string;
+  product: CatalogProduct;
+  box?: PurchaseBox;
+  boxError: unknown;
+  onRetryBox: () => void;
+  summary?: RatingSummary;
+  crumbs: Array<{ label: string; to?: string }>;
+  leaf?: { name: string; slug: string };
+  onVariant: (variantId: string) => void;
+  onOffer: (offerId: string | null) => void;
+}
 
-  // Quantity and add to cart
+function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, crumbs, leaf, onVariant, onOffer }: ProductPageProps) {
+  const navigate = useNavigate();
+  const signIn = useSignInHref();
+  const { signedIn, cartCount } = useSession();
+  const offer = box?.selected ?? null;
+  const featured = box?.featured ?? null;
+  const isFeatured = box?.selectedBy === 'featured';
+  const onlyOffer = box?.selectedBy === 'only_offer';
+  const hasReviews = !!summary?.hasReviews;
+  const rating = summary?.average ?? 0;
+
+  // Gallery and variant
+  const variantId = box?.variantId;
+  const variantRow = box?.variants.find((v) => v.variantId === variantId);
+  const catalogVariant = product.variants.find((v) => v.id === variantId) ?? product.variants[0];
+  const color = variantRow?.label ?? variantName(catalogVariant);
+  const axis = variantAxis(catalogVariant) || 'Option';
+  const images = variantImages(product, variantId);
+  const thumbs = [...(product.video ? [{ kind: 'video' as const, media: product.video }] : []), ...images.map((m) => ({ kind: 'photo' as const, media: m }))];
+  const [thumbIdx, setThumbIdx] = useState(product.video ? 1 : 0);
+  useEffect(() => setThumbIdx(product.video ? 1 : 0), [variantId, product.video]);
+  const thumb = thumbs[Math.min(thumbIdx, thumbs.length - 1)];
+  const photoNo = thumbs.slice(0, thumbIdx + 1).filter((t) => t.kind === 'photo').length;
+
+  // Quantity, add to cart, Buy now
   const [qty, setQty] = useState(1);
-  const [added, setAdded] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  const addToCart = () => {
-    setCartCount(cartCount + qty);
-    setAdded(true);
-    announce(`Added ${qty} × ${product.name} from ${seller.name} to your cart`);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setAdded(false), 2500);
-  };
+  const qtyOptions = box?.quantityOptions?.length ? box.quantityOptions : Array.from({ length: Math.max(1, offer?.availability.maxPerOrder ?? 1) }, (_, i) => i + 1);
+  const quantity = Math.min(qty, qtyOptions.at(-1) ?? 1);
+  const cart = useCartButton('product_page');
+  const buyNow = useBuyNow();
+  const added = !!offer && cart.added === offer.offerId;
+  const addToCart = () => offer && cart.run(offer.offerId, quantity, `${quantity} × ${product.title} from ${offer.seller.name}`);
+  const buy = () => offer && buyNow.mutate({ offerId: offer.offerId, quantity }, { onError: (e) => announce(errorMessage(e)) });
   const addLabel = added ? 'Added to cart' : 'Add to cart';
+  const actionError = (offer && cart.error?.offerId === offer.offerId ? cart.error.text : null) ?? (buyNow.error ? errorMessage(buyNow.error) : null);
 
-  // Reviews
+  // Reviews (first three, filtered on the server)
   const [filter, setFilter] = useState<ReviewFilter>('all');
-  const [voted, setVoted] = useState<Record<string, boolean>>({});
-  const [reported, setReported] = useState<Record<string, boolean>>({});
-  const matches = (r: Review) => {
-    if (filter === 'verified') return r.verified;
-    if (filter === 'photos') return r.photos;
-    if (filter === 'critical') return r.rating <= 2;
-    if (filter === 'color') return r.color === variant.name;
-    if (filter.startsWith('star-')) return r.rating === Number(filter.slice(5));
-    return true;
+  const reviews = useReviewPage(id, toFilters(filter, variantId), 1, 3, hasReviews);
+  const vote = useHelpfulVote();
+  const [votes, setVotes] = useState<Record<string, VoteState>>({});
+  const voteOf = (r: ApiReview): VoteState => votes[r.id] ?? { voted: !!r.viewerVotedHelpful, count: r.helpfulCount };
+  const helpful = (r: ApiReview) => {
+    if (!signedIn) return navigate(signIn());
+    const prev = voteOf(r);
+    const on = !prev.voted;
+    setVotes((m) => ({ ...m, [r.id]: { voted: on, count: prev.count + (on ? 1 : -1) } }));
+    vote.mutate(
+      { targetType: 'product_review', targetId: r.id, helpful: on },
+      {
+        onSuccess: (res) => setVotes((m) => ({ ...m, [r.id]: { voted: on, count: res.helpfulCount } })),
+        onError: (e) => {
+          setVotes((m) => ({ ...m, [r.id]: prev }));
+          announce(errorMessage(e));
+        },
+      },
+    );
   };
-  const reviews = product.reviews.filter(matches);
+  const report = (r: ApiReview) => {
+    const to = href('store/reviews', 'report-review', { slug, id }, { review: r.id });
+    navigate(signedIn ? to : signIn(to));
+  };
   const chips: Array<[ReviewFilter, string]> = [
     ['all', 'All reviews'],
     ['verified', 'Verified Purchase only'],
     ['photos', 'With photos'],
     ['critical', 'Critical (1–2 stars)'],
-    ['color', variant.name],
+    ...(product.variants.length > 1 && color ? ([['color', color]] as Array<[ReviewFilter, string]>) : []),
   ];
 
-  // Questions
+  // Questions (first three; search runs on the server)
   const [qaQuery, setQaQuery] = useState('');
-  const q = qaQuery.trim().toLowerCase();
-  const questions = product.questionList.filter((it) => !q || it.q.toLowerCase().includes(q) || it.answers.some((a) => a.body.toLowerCase().includes(q)));
+  const qaSearch = useDebounced(qaQuery.trim());
+  const questions = useQuestionPage(id, qaSearch, 'helpful', 1, 3);
+  const qaTotal = useQuestionPage(id, '', 'helpful', 1, 3).data?.total;
 
   const share = () => {
-    if (navigator.share) navigator.share({ title: product.name, url: window.location.href }).catch(() => undefined);
+    if (navigator.share) navigator.share({ title: product.title, url: window.location.href }).catch(() => undefined);
   };
+
+  const shipping = offer?.delivery.shippingCost;
+  const barNote = offer ? (offer.delivery.free || !shipping?.amount ? offer.delivery.label : `+ ${formatMoney(shipping)} shipping`) : '';
+  const offersLink = href('store/offers', '', { slug, id }, variantId ? { variant: variantId } : undefined);
+  const sellerFeedback = offer && !offer.seller.official ? offer.seller : null;
 
   return (
     <StoreLayout
       nav="categories"
       appbar={{
-        title: product.appbarTitle,
-        back: href('store/category'),
+        title: product.title,
+        back: leaf ? href('store/category', '', { slug: leaf.slug }) : href('store/home'),
         actions: (
           <>
             <IconButton icon="share-2" label="Share" onClick={share} />
@@ -116,258 +233,308 @@ function ProductPage({ product, offer, onChooseOffer }: { product: ProductDetail
         ),
       }}
       actionBar={
-        <>
-          <div className="stack gap-0 none">
-            <Price amount={offer.price} was={offer.was} noOff />
-            <span className="xs muted">{offer.barNote}</span>
-          </div>
-          <span className="grow" />
-          <Button size="sm" onClick={addToCart}>
-            {addLabel}
-          </Button>
-          <Button variant="secondary" size="sm" to={href('store/checkout')}>
-            Buy now
-          </Button>
-        </>
+        offer ? (
+          <>
+            <div className="stack gap-0 none">
+              <Price amount={dollars(offer.price)} was={offer.compareAt ? dollars(offer.compareAt.amount) : null} noOff />
+              <span className="xs muted">{barNote}</span>
+            </div>
+            <span className="grow" />
+            <Button size="sm" onClick={addToCart} disabled={cart.pending === offer.offerId}>
+              {addLabel}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={buy} disabled={buyNow.isPending}>
+              Buy now
+            </Button>
+          </>
+        ) : undefined
       }
     >
       <div className="container page gap-8">
         <div className="stack gap-4">
-          <Breadcrumbs
-            items={[
-              { label: 'Home', to: href('store/home') },
-              { label: product.crumbs.cat, to: href('store/categories') },
-              { label: product.crumbs.sub, to: href('store/category') },
-              { label: product.crumbs.name },
-            ]}
-          />
+          <Breadcrumbs items={[...crumbs, { label: product.title }]} />
           <div className="shop-pdp">
             {/* Gallery */}
             <div className="shop-gal">
               <div className="main">
-                <Img icon={thumb.icon} tint={thumb.tint ?? variant.tint} />
-                <span className="cnt">
-                  <Badge tone="solid">{thumb.video ? thumb.video : `${photoNo} / ${product.photosTotal}`}</Badge>
-                </span>
-                <span className="fav">
-                  <button
-                    type="button"
-                    className={cx('icon-btn', saved && 'is-active')}
-                    aria-label="Save to wishlist"
-                    aria-pressed={saved}
-                    onClick={() => {
-                      setSaved((v) => !v);
-                      announce(saved ? 'Removed from your wishlist' : 'Saved to your wishlist');
-                    }}
-                  >
-                    <Icon name="heart" fill={saved ? 'currentColor' : 'none'} />
-                  </button>
-                </span>
+                {thumb?.kind === 'video' ? (
+                  <div className="imgph tint-6">
+                    <video src={thumb.media.url} controls style={{ width: '100%', height: '100%' }} aria-label="Product video" />
+                  </div>
+                ) : (
+                  <Photo media={thumb?.media} />
+                )}
+                {thumbs.length > 0 && (
+                  <span className="cnt">
+                    <Badge tone="solid">{thumb?.kind === 'video' ? 'Video' : `${photoNo} / ${images.length}`}</Badge>
+                  </span>
+                )}
               </div>
-              <div className="shop-thumbs" role="group" aria-label={product.thumbsLabel}>
-                {product.thumbs.map((t, i) => (
-                  <button key={t.label} type="button" className={cx(i === thumbIdx && 'is-active')} aria-label={t.label} aria-pressed={i === thumbIdx} onClick={() => setThumbIdx(i)}>
-                    <Img icon={t.icon} tint={t.tint ?? variant.tint} className="thumb" />
-                    {t.video && (
-                      <span className="vid">
-                        <Icon name="circle-play" />
-                        {t.video}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-              <p className="xs muted">
-                <Icon name="info" className="ic-sm" /> Photos show {variant.name}. Choosing another color updates the photos, offers and price.
-              </p>
+              {thumbs.length > 1 && (
+                <div className="shop-thumbs" role="group" aria-label={product.video ? 'Photos and video' : 'Photos'}>
+                  {thumbs.map((t, i) => (
+                    <button
+                      key={t.media.id}
+                      type="button"
+                      className={cx(i === thumbIdx && 'is-active')}
+                      aria-label={t.kind === 'video' ? 'Play product video' : `Photo ${i + (product.video ? 0 : 1)}`}
+                      aria-pressed={i === thumbIdx}
+                      onClick={() => setThumbIdx(i)}
+                    >
+                      {t.kind === 'video' ? (
+                        <>
+                          <Photo className="thumb" icon="circle-play" />
+                          <span className="vid">
+                            <Icon name="circle-play" />
+                            Video
+                          </span>
+                        </>
+                      ) : (
+                        <Photo media={t.media} className="thumb" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {product.variants.length > 1 && color && (
+                <p className="xs muted">
+                  <Icon name="info" className="ic-sm" /> Photos show {color}. Choosing another {axis.toLowerCase()} updates the photos, offers and price.
+                </p>
+              )}
             </div>
 
             {/* Title, variants, features */}
             <div className="stack gap-4">
               <div className="stack gap-2">
-                <Link className="small strong" to={href('store/brand')}>
-                  Visit the {product.brand} brand page
-                </Link>
-                <h1 className="h2">{product.name}</h1>
+                {product.brand && (
+                  <Link className="small strong" to={href('store/brand', '', { slug: product.brand.slug })}>
+                    Visit the {product.brand.name} brand page
+                  </Link>
+                )}
+                <h1 className="h2">{product.title}</h1>
                 {hasReviews ? (
                   <div className="row gap-3">
-                    <Stars5 rating={product.rating} className="u-fs-16" />
-                    <a className="small" href="#">
-                      {product.rating} · {num(product.ratings)} ratings
-                    </a>
+                    <Stars5 rating={rating} className="u-fs-16" />
+                    <Link className="small" to={href('store/reviews', '', { slug, id })}>
+                      {rating.toFixed(1)} · {num(summary?.ratingCount ?? 0)} ratings
+                    </Link>
                     <span className="xs muted">·</span>
-                    <a className="small" href="#">
-                      {product.questions} answered questions
-                    </a>
+                    <Link className="small" to={href('store/questions', '', { slug, id })}>
+                      {num(summary?.answeredQuestions ?? 0)} answered questions
+                    </Link>
                   </div>
                 ) : (
                   <div className="row gap-2">
-                    <Badge tone="info" icon="sparkles">
-                      New listing
-                    </Badge>
+                    {isNewListing(product.listedAt) && (
+                      <Badge tone="info" icon="sparkles">
+                        New listing
+                      </Badge>
+                    )}
                     <span className="small sub">No reviews yet</span>
                     <span className="xs muted">·</span>
-                    <a className="small" href="#">
-                      {product.questions} answered question{product.questions === 1 ? '' : 's'}
+                    {/* A new listing's few questions are all on this page: jump to them. */}
+                    <a
+                      className="small"
+                      href={`#${px}-qa-h`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        document.getElementById(`${px}-qa-h`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                    >
+                      {summary?.answeredQuestions ?? 0} answered question{summary?.answeredQuestions === 1 ? '' : 's'}
                     </a>
                   </div>
                 )}
-                {product.rank ? (
-                  <span className="xs muted">
-                    <Badge tone="outline">{product.rank.badge}</Badge> {product.rank.note}
+                {product.listedAt && <span className="xs muted">Listed on Marketly {fmtDate(product.listedAt)}</span>}
+              </div>
+              {box && box.variants.length > 1 && (
+                <div className="stack gap-2">
+                  <span className="small">
+                    <b>{axis}:</b> {color}
                   </span>
-                ) : (
-                  product.listed && <span className="xs muted">{product.listed}</span>
-                )}
-              </div>
-              <div className="stack gap-2">
-                <span className="small">
-                  <b>Color:</b> {variant.name}
-                </span>
-                <div className="shop-var" role="group" aria-label="Color">
-                  {product.variants.map((v, i) => (
-                    <button key={v.name} type="button" className={cx(i === variantIdx && 'is-selected')} aria-pressed={i === variantIdx} onClick={() => setVariantIdx(i)}>
-                      <Img icon={v.icon} tint={v.tint} />
-                      <span className="vn">{v.name}</span>
-                      <span className="sub">{v.sub}</span>
-                    </button>
-                  ))}
+                  <div className="shop-var" role="group" aria-label={axis}>
+                    {box.variants.map((v) => {
+                      const on = v.variantId === variantId;
+                      const cv = product.variants.find((x) => x.id === v.variantId);
+                      return (
+                        <button key={v.variantId} type="button" className={cx(on && 'is-selected')} aria-pressed={on} onClick={() => !on && onVariant(v.variantId)}>
+                          <Photo media={cv?.images?.[0] ?? product.images[0]} />
+                          <span className="vn">{v.label}</span>
+                          <span className="sub">{v.summary}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-              <div className="stack gap-2">
-                <h2 className="h4">Key features</h2>
-                <ul className="shop-feat stack gap-2">
-                  {product.features.map((f) => (
-                    <li key={f}>
-                      <Icon name="check" />
-                      <span>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              )}
+              {product.keyFeatures.length > 0 && (
+                <div className="stack gap-2">
+                  <h2 className="h4">Key features</h2>
+                  <ul className="shop-feat stack gap-2">
+                    {product.keyFeatures.map((f) => (
+                      <li key={f}>
+                        <Icon name="check" />
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
 
             {/* Buy box */}
-            <section className="card shop-buy" aria-labelledby="buy-h">
+            <section className="card shop-buy" aria-labelledby="buy-h" aria-busy={!box || undefined}>
               <div className="card-body">
                 <h2 className="sr-only" id="buy-h">
                   Purchase options
                 </h2>
-                {onlyOffer ? (
-                  <div className="row between">
-                    <span className="eyebrow">Only offer</span>
-                    <span className="xs muted">1 seller</span>
+                {boxError && !box ? (
+                  <LoadError error={boxError} onRetry={onRetryBox} title="We couldn’t load the offers" />
+                ) : !box ? (
+                  <div className="sk-lines">
+                    <span className="sk h-30" />
+                    <span className="sk sk-line" />
+                    <span className="sk sk-line short" />
+                    <span className="sk h-46" />
+                  </div>
+                ) : !offer ? (
+                  <Unavailable box={box} offersLink={offersLink} />
+                ) : (
+                  <>
+                    {onlyOffer ? (
+                      <div className="row between">
+                        <span className="eyebrow">Only offer</span>
+                        <span className="xs muted">1 seller</span>
+                      </div>
+                    ) : isFeatured ? (
+                      <div className="row between">
+                        <span className="eyebrow">Featured offer</span>
+                        <Link className="xs" to={offersLink}>
+                          How it’s chosen
+                        </Link>
+                      </div>
+                    ) : (
+                      <Alert tone="info" title={`You chose ${offer.seller.name}’s offer`}>
+                        This seller stays with the item in your cart. We never switch sellers for you.
+                      </Alert>
+                    )}
+                    <OfferPrice offer={offer} />
+                    <div className="row gap-2">
+                      <Badge tone={STOCK_TONE[offer.availability.state]}>
+                        {offer.availability.state === 'low_stock' && offer.availability.quantity ? `${offer.availability.quantity} left` : STOCK_LABEL[offer.availability.state]}
+                      </Badge>
+                      <span className="small sub">
+                        {offer.availability.quantity != null && `${offer.availability.quantity} available · `}Condition: <b>{offer.conditionLabel}</b>
+                      </span>
+                    </div>
+                    {(offer.conditionNotes || offer.missingItems.length > 0) && (
+                      <span className="xs muted">
+                        {offer.conditionNotes}
+                        {offer.missingItems.length > 0 && ` Missing: ${offer.missingItems.join(', ')}.`}
+                      </span>
+                    )}
+                    <div className="stack gap-2">
+                      <div className="shop-line">
+                        <Icon name="truck" />
+                        <span>
+                          <b>{offer.delivery.label}</b> to {box.deliverTo.label} ·{' '}
+                          <a href="#" className="link-inline">
+                            Change
+                          </a>
+                          {deliveryNote(offer) && (
+                            <>
+                              <br />
+                              <span className="xs muted">{deliveryNote(offer)}</span>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      <div className="shop-line">
+                        <Icon name="package" />
+                        <span>
+                          Ships from {offer.delivery.shipsFrom} by <b>{shipperName(offer)}</b>
+                          {offer.delivery.carrier && ` with ${offer.delivery.carrier}`}
+                          {` · ${offer.delivery.free || !shipping?.amount ? 'Free' : formatMoney(shipping)}`}
+                        </span>
+                      </div>
+                      <div className="shop-line">
+                        <Icon name="store" />
+                        <span>
+                          Sold by{' '}
+                          <Link to={sellerHref(offer.seller)} className="link-inline">
+                            <b>{offer.seller.name}</b>
+                          </Link>{' '}
+                          <SellerBadge seller={offer.seller} compact />
+                          <br />
+                          <span className="xs muted">{sellerRatingLine(offer)}</span>
+                        </span>
+                      </div>
+                      <div className="shop-line">
+                        <Icon name="undo-2" />
+                        <span>
+                          {offer.returns.summary} ·{' '}
+                          <Link to={href('info/policy')} className="link-inline">
+                            Return policy
+                          </Link>
+                        </span>
+                      </div>
+                      <div className="shop-line">
+                        <Icon name="shield-check" />
+                        <span>{offer.warranty.summary}</span>
+                      </div>
+                    </div>
+                    <div className="row gap-3">
+                      <label className="small strong" htmlFor={`${px}-qty`}>
+                        Quantity
+                      </label>
+                      <select className="select" id={`${px}-qty`} value={quantity} onChange={(e) => setQty(Number(e.target.value))}>
+                        {qtyOptions.map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                      {offer.availability.purchaseLimit != null && <span className="xs muted">Limit {offer.availability.purchaseLimit} per customer</span>}
+                    </div>
+                    <div className="stack gap-2">
+                      <Button block icon={added ? 'check' : 'shopping-cart'} onClick={addToCart} disabled={cart.pending === offer.offerId}>
+                        {addLabel}
+                      </Button>
+                      <Button variant="secondary" block onClick={buy} disabled={buyNow.isPending}>
+                        Buy now
+                      </Button>
+                      {actionError ? (
+                        <span className="error-text" role="alert">
+                          <Icon name="circle-alert" className="ic-sm" />
+                          {actionError}
+                        </span>
+                      ) : (
+                        <span className="xs muted center">You’ll review totals, delivery and seller details before paying.</span>
+                      )}
+                    </div>
+                    <Link className="small strong" to={sellerHref(offer.seller)}>
+                      <Icon name="store" className="ic-sm" /> {offer.seller.official ? 'Visit the Official Store' : `Visit ${offer.seller.name}’s store`}
+                    </Link>
+                  </>
+                )}
+              </div>
+              {box &&
+                offer &&
+                (onlyOffer ? (
+                  <div className="card-foot start">
+                    <span className="small sub">No other sellers offer this product yet.</span>
                   </div>
                 ) : isFeatured ? (
-                  <div className="row between">
-                    <span className="eyebrow">Featured offer</span>
-                    <Link className="xs" to={href('store/offers')}>
-                      How it’s chosen
+                  <div className="card-foot between">
+                    <span className="small sub">Other sellers on Marketly</span>
+                    <Link className="small strong" to={offersLink}>
+                      {box.otherOffers.count} offer{box.otherOffers.count === 1 ? '' : 's'}
+                      {box.otherOffers.lowestPrice && ` from ${formatMoney(box.otherOffers.lowestPrice)}`} <Icon name="chevron-right" className="ic-sm" />
                     </Link>
                   </div>
                 ) : (
-                  <Alert tone="info" title={`You chose ${seller.name}’s offer`}>
-                    This seller stays with the item in your cart. We never switch sellers for you.
-                  </Alert>
-                )}
-                <OfferPrice offer={offer} />
-                <div className="row gap-2">
-                  <Badge tone={offer.stock.tone}>{offer.stock.label}</Badge>
-                  <span className="small sub">
-                    {offer.stock.available} available · Condition: <b>{offer.stock.condition}</b>
-                  </span>
-                </div>
-                <div className="stack gap-2">
-                  <div className="shop-line">
-                    <Icon name="truck" />
-                    <span>
-                      <b>{offer.delivery}</b> to Portland 97205 ·{' '}
-                      <a href="#" className="link-inline">
-                        Change
-                      </a>
-                      {offer.deliveryNote && (
-                        <>
-                          <br />
-                          <span className="xs muted">{offer.deliveryNote}</span>
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <div className="shop-line">
-                    <Icon name="package" />
-                    <span>
-                      Ships from {offer.shipsFrom} by <b>{official ? 'Marketly' : seller.name}</b> with {offer.carrier}
-                      {offer.showShipCost && ` · ${offer.ship === 0 ? 'Free' : money(offer.ship)}`}
-                    </span>
-                  </div>
-                  <div className="shop-line">
-                    <Icon name="store" />
-                    <span>
-                      Sold by{' '}
-                      <Link to={sellerHref(offer.seller)} className="link-inline">
-                        <b>{seller.name}</b>
-                      </Link>{' '}
-                      <SellerBadge seller={seller} compact />
-                      <br />
-                      <span className="xs muted">
-                        {seller.positive}% positive · {num(seller.ratings)} ratings{offer.ratingsSuffix}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="shop-line">
-                    <Icon name="undo-2" />
-                    <span>
-                      {offer.returns} ·{' '}
-                      <Link to={href('info/policy')} className="link-inline">
-                        Return policy
-                      </Link>
-                    </span>
-                  </div>
-                  <div className="shop-line">
-                    <Icon name="shield-check" />
-                    <span>{offer.warranty}</span>
-                  </div>
-                </div>
-                <div className="row gap-3">
-                  <label className="small strong" htmlFor={`${px}-qty`}>
-                    Quantity
-                  </label>
-                  <select className="select" id={`${px}-qty`} value={qty} onChange={(e) => setQty(Number(e.target.value))}>
-                    {Array.from({ length: offer.limit }, (_, i) => i + 1).map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="xs muted">Limit {offer.limit} per customer</span>
-                </div>
-                <div className="stack gap-2">
-                  <Button block icon={added ? 'check' : 'shopping-cart'} onClick={addToCart}>
-                    {addLabel}
-                  </Button>
-                  <Button variant="secondary" block to={href('store/checkout')}>
-                    Buy now
-                  </Button>
-                  <span className="xs muted center">You’ll review totals, delivery and seller details before paying.</span>
-                </div>
-                <Link className="small strong" to={sellerHref(offer.seller)}>
-                  <Icon name="store" className="ic-sm" /> {offer.visit}
-                </Link>
-              </div>
-              {onlyOffer ? (
-                <div className="card-foot start">
-                  <span className="small sub">No other sellers offer this product yet.</span>
-                </div>
-              ) : isFeatured ? (
-                <div className="card-foot between">
-                  <span className="small sub">Other sellers on Marketly</span>
-                  <Link className="small strong" to={href('store/offers')}>
-                    {others.length} offers from {money(Math.min(...others.map((o) => o.price)))} <Icon name="chevron-right" className="ic-sm" />
-                  </Link>
-                </div>
-              ) : (
-                <FeaturedFoot product={product} onChoose={() => onChooseOffer(featured)} />
-              )}
+                  featured && <FeaturedFoot featured={featured} total={box.otherOffers.count + 1} offersLink={offersLink} onChoose={() => onOffer(null)} />
+                ))}
             </section>
           </div>
         </div>
@@ -376,24 +543,26 @@ function ProductPage({ product, offer, onChooseOffer }: { product: ProductDetail
         <section className="shop-two even" aria-label="Product details">
           <div className="stack gap-4">
             <h2 className="h3">About this item</h2>
-            <p className="sub">{product.about}</p>
-            <div className="stack gap-2">
-              <PhoneCollapse className="pdp-collapse" summaryClassName="pdp-sum" summary={<h3 className="h4">In the box</h3>}>
-                <ul className="shop-feat stack gap-1">
-                  {product.inBox.map((it) => (
-                    <li key={it}>
-                      <Icon name="package" />
-                      <span>{it}</span>
-                    </li>
-                  ))}
-                </ul>
-              </PhoneCollapse>
-            </div>
+            <p className="sub">{product.description}</p>
+            {product.includedItems.length > 0 && (
+              <div className="stack gap-2">
+                <PhoneCollapse className="pdp-collapse" summaryClassName="pdp-sum" summary={<h3 className="h4">In the box</h3>}>
+                  <ul className="shop-feat stack gap-1">
+                    {product.includedItems.map((it) => (
+                      <li key={it}>
+                        <Icon name="package" />
+                        <span>{it}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </PhoneCollapse>
+              </div>
+            )}
           </div>
           <div className="stack gap-3">
             <PhoneCollapse className="pdp-collapse" summaryClassName="pdp-sum" summary={<h2 className="h3">Specifications</h2>}>
               <div className="card pad">
-                <KeyValue pairs={product.specs.map(([k, v]) => [k, k === 'SKU' ? <span className="mono">{v}</span> : v])} />
+                <KeyValue pairs={specPairs(product)} />
               </div>
             </PhoneCollapse>
           </div>
@@ -404,28 +573,35 @@ function ProductPage({ product, offer, onChooseOffer }: { product: ProductDetail
           <h2 className="h2" id={`${px}-rev-h`}>
             Customer reviews
           </h2>
-          {hasReviews ? (
+          {!summary ? (
+            <ListSkeleton rows={2} />
+          ) : hasReviews ? (
             <div className="shop-two">
               <div className="stack gap-4">
                 <div className="row gap-3 base">
-                  <span className="display d-xl">{product.rating}</span>
+                  <span className="display d-xl">{rating.toFixed(1)}</span>
                   <span className="stack gap-1">
-                    <Stars5 rating={product.rating} className="u-fs-18" />
+                    <Stars5 rating={rating} className="u-fs-18" />
                     <span className="small sub">
-                      {num(product.ratings)} ratings · {num(product.written)} written reviews
+                      {num(summary.ratingCount)} ratings · {num(summary.writtenCount)} written reviews
                     </span>
                   </span>
                 </div>
                 <div className="rating-bars">
-                  {product.ratingBars.map(([star, pct]) => (
-                    <RatingBar key={star} star={star} pct={pct} active={filter === `star-${star}`} onClick={() => setFilter(filter === `star-${star}` ? 'all' : `star-${star}`)} />
+                  {summary.distribution.map((b) => (
+                    <RatingBar key={b.stars} star={b.stars} pct={b.pct} active={filter === `star-${b.stars}`} onClick={() => setFilter(filter === `star-${b.stars}` ? 'all' : `star-${b.stars}`)} />
                   ))}
                 </div>
                 <Alert tone="info" title="About these reviews">
-                  Product reviews describe the headphones. Feedback about a seller’s shipping and service is on each seller’s page, for example{' '}
-                  <Link to={href('store/seller')} className="link-inline">
-                    Northwind Audio feedback
-                  </Link>
+                  Product reviews describe the product. Feedback about a seller’s shipping and service is on each seller’s page
+                  {sellerFeedback ? (
+                    <>
+                      , for example{' '}
+                      <Link to={sellerHref(sellerFeedback)} className="link-inline">
+                        {sellerFeedback.name} feedback
+                      </Link>
+                    </>
+                  ) : null}
                   . Verified Purchase means the reviewer bought this product on Marketly.
                 </Alert>
                 <Button variant="secondary" to={href('account/review')}>
@@ -440,66 +616,70 @@ function ProductPage({ product, offer, onChooseOffer }: { product: ProductDetail
                     </Chip>
                   ))}
                 </div>
-                {reviews.map((r) => {
-                  const on = !!voted[r.id];
-                  return (
-                    <article key={r.id} className="shop-rev">
-                      <div className="row gap-2">
-                        <Avatar name={r.name} />
-                        <span className="small strong">{r.name}</span>
-                        {r.verified && (
-                          <Badge tone="success" icon="circle-check">
-                            Verified Purchase
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="row gap-2">
-                        <Stars5 rating={r.rating} size="md" />
-                        <h3 className="h4">{r.title}</h3>
-                      </div>
-                      <span className="xs muted">
-                        Reviewed {r.date} · Color: {r.color} · Sold by {r.soldBy}
-                      </span>
-                      <p className="small">{r.body}</p>
-                      {r.reply && (
-                        <div className="shop-reply">
-                          <span className="xs strong">
-                            Response from {r.reply.from} · {r.reply.date}
-                          </span>
-                          <span>{r.reply.body}</span>
+                {reviews.error ? (
+                  <div className="u-pt-sp-3">
+                    <LoadError error={reviews.error} onRetry={() => void reviews.refetch()} title="We couldn’t load the reviews" />
+                  </div>
+                ) : !reviews.data ? (
+                  <div className="u-pt-sp-3">
+                    <ListSkeleton />
+                  </div>
+                ) : (
+                  reviews.data.items.map((r) => {
+                    const v = voteOf(r);
+                    return (
+                      <article key={r.id} className="shop-rev">
+                        <div className="row gap-2">
+                          <Avatar name={r.author.displayName} />
+                          <span className="small strong">{r.author.displayName}</span>
+                          {r.author.verifiedPurchase && (
+                            <Badge tone="success" icon="circle-check">
+                              Verified Purchase
+                            </Badge>
+                          )}
                         </div>
-                      )}
-                      <div className="row gap-2">
-                        <Button variant="ghost" size="sm" icon="thumbs-up" aria-pressed={on} onClick={() => setVoted((m) => ({ ...m, [r.id]: !on }))}>
-                          Helpful ({r.helpful + (on ? 1 : 0)})
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          icon="flag"
-                          disabled={reported[r.id]}
-                          onClick={() => {
-                            setReported((m) => ({ ...m, [r.id]: true }));
-                            announce('Thanks. We’ll review this report.');
-                          }}
-                        >
-                          {reported[r.id] ? 'Reported' : 'Report'}
-                        </Button>
-                      </div>
-                    </article>
-                  );
-                })}
-                {reviews.length === 0 && <p className="small sub u-pt-sp-3">No reviews match this filter.</p>}
-                <a className="small strong u-pt-sp-3" href="#">
-                  See all {num(product.written)} reviews <Icon name="arrow-right" className="ic-sm" />
-                </a>
+                        <div className="row gap-2">
+                          <Stars5 rating={r.rating} size="md" />
+                          <h3 className="h4">{r.headline}</h3>
+                        </div>
+                        <span className="xs muted">
+                          {[`Reviewed ${fmtDate(r.reviewedAt)}`, r.variantLabel, `Sold by ${r.soldBy.name}`].filter(Boolean).join(' · ')}
+                        </span>
+                        <p className="small">{r.text}</p>
+                        {r.response && (
+                          <div className="shop-reply">
+                            <span className="xs strong">
+                              Response from {r.response.fromName}
+                              {r.response.publishedAt && ` · ${fmtDate(r.response.publishedAt)}`}
+                            </span>
+                            <span>{r.response.text}</span>
+                          </div>
+                        )}
+                        <div className="row gap-2">
+                          <Button variant="ghost" size="sm" icon="thumbs-up" aria-pressed={v.voted} onClick={() => helpful(r)}>
+                            Helpful ({v.count})
+                          </Button>
+                          <Button variant="ghost" size="sm" icon="flag" onClick={() => report(r)}>
+                            Report
+                          </Button>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+                {reviews.data?.items.length === 0 && <p className="small sub u-pt-sp-3">No reviews match this filter.</p>}
+                <Link className="small strong u-pt-sp-3" to={href('store/reviews', '', { slug, id })}>
+                  See all {num(summary.writtenCount)} reviews <Icon name="arrow-right" className="ic-sm" />
+                </Link>
               </div>
             </div>
           ) : (
             <div className="shop-two">
               <div className="stack gap-3">
                 <span className="h3">No reviews yet</span>
-                <p className="small sub">This product was listed on Oct 6. We don’t show a star rating until customers who bought it have reviewed it.</p>
+                <p className="small sub">
+                  {product.listedAt ? `This product was listed on ${fmtDate(product.listedAt)}. ` : ''}We don’t show a star rating until customers who bought it have reviewed it.
+                </p>
                 <Alert tone="info" title="Only verified purchases can review">
                   Reviews are linked to a recorded purchase on Marketly. Seller feedback for the Official Store is shown on{' '}
                   <Link to={href('store/official')} className="link-inline">
@@ -531,146 +711,170 @@ function ProductPage({ product, offer, onChooseOffer }: { product: ProductDetail
             <h2 className="h2" id={`${px}-qa-h`}>
               Customer questions
             </h2>
-            <Button variant="secondary" size="sm" icon="message-circle-question">
+            <Button variant="secondary" size="sm" icon="message-circle-question" to={href('store/questions', 'ask', { slug, id })}>
               Ask a question
             </Button>
           </div>
           <PhoneCollapse className="pdp-collapse" summaryClassName="pdp-sum pdp-sum--more" summary="Show customer questions">
             <div className="toolbar">
-              <SearchInput id={`${px}-qa-q`} placeholder={product.qaPlaceholder} value={qaQuery} onChange={setQaQuery} />
+              <SearchInput
+                id={`${px}-qa-q`}
+                placeholder={qaTotal ? `Search ${num(qaTotal)} questions and answers` : 'Search questions and answers'}
+                value={qaQuery}
+                onChange={setQaQuery}
+              />
             </div>
             <div className="card pad stack gap-0">
-              {questions.map((it) => (
-                <div key={it.q} className="shop-qa">
-                  <div className="row gap-2 top nowrap">
-                    <span className="strong small none">Q:</span>
-                    <span className="strong small">{it.q}</span>
-                  </div>
-                  {it.answers.map((a, i) => {
-                    const role = QA_ROLE[a.role];
-                    return (
-                      <div key={i} className="a">
-                        <div className="row gap-2">
-                          <Badge tone={role.tone} icon={role.icon}>
-                            {role.label}
-                          </Badge>
-                          <span className="xs muted">
-                            {a.who} · {a.date}
-                          </span>
-                        </div>
-                        <span>{a.body}</span>
-                      </div>
-                    );
-                  })}
-                  {it.pending && (
-                    <div className="a">
-                      <span className="xs muted">{it.pending}</span>
+              {questions.error ? (
+                <LoadError error={questions.error} onRetry={() => void questions.refetch()} title="We couldn’t load the questions" />
+              ) : !questions.data ? (
+                <ListSkeleton rows={2} />
+              ) : (
+                questions.data.items.map((it) => (
+                  <div key={it.id} className="shop-qa">
+                    <div className="row gap-2 top nowrap">
+                      <span className="strong small none">Q:</span>
+                      <span className="strong small">{it.text}</span>
                     </div>
-                  )}
-                </div>
-              ))}
-              {questions.length === 0 && <p className="small sub">No questions match “{qaQuery.trim()}”.</p>}
+                    {it.answers.map((a) => {
+                      const role = QA_ROLE[a.label];
+                      return (
+                        <div key={a.id} className="a">
+                          <div className="row gap-2">
+                            <Badge tone={role.tone} icon={role.icon}>
+                              {role.label}
+                            </Badge>
+                            <span className="xs muted">
+                              {a.by.displayName} · {fmtDate(a.answeredAt)}
+                            </span>
+                          </div>
+                          <span>{a.text}</span>
+                        </div>
+                      );
+                    })}
+                    {it.answers.length === 0 && (
+                      <div className="a">
+                        <span className="xs muted">
+                          Not answered yet. Asked {fmtDate(it.askedAt)}.{it.answerExpectation ? ` ${it.answerExpectation}` : ''}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+              {questions.data?.items.length === 0 &&
+                (qaSearch ? <p className="small sub">No questions match “{qaSearch}”.</p> : <p className="small sub">No questions yet. Ask the sellers and other customers.</p>)}
+              {!qaSearch && (questions.data?.total ?? 0) > (questions.data?.items.length ?? 0) && (
+                <Link className="small strong u-pt-sp-3" to={href('store/questions', '', { slug, id })}>
+                  See all {num(questions.data?.total ?? 0)} questions <Icon name="arrow-right" className="ic-sm" />
+                </Link>
+              )}
+              {qaSearch && (questions.data?.total ?? 0) > (questions.data?.items.length ?? 0) && (
+                <Link className="small strong u-pt-sp-3" to={href('store/questions', '', { slug, id }, { q: qaSearch })}>
+                  See all {num(questions.data?.total ?? 0)} matching questions <Icon name="arrow-right" className="ic-sm" />
+                </Link>
+              )}
             </div>
             <p className="xs muted">
-              Answers are labeled Seller, Marketly staff or Customer so you know who is speaking.
-              {product.qaOrderNote && (
-                <>
-                  {' '}
-                  Questions about your own order go to{' '}
-                  <Link to={href('account/messages')} className="link-inline">
-                    order messages
-                  </Link>
-                  .
-                </>
-              )}
+              Answers are labeled Seller, Marketly staff or Customer so you know who is speaking. Questions about your own order go to{' '}
+              <Link to={href('account/messages')} className="link-inline">
+                order messages
+              </Link>
+              .
             </p>
           </PhoneCollapse>
         </section>
 
-        {/* Related and sponsored */}
-        <section className="stack gap-4" aria-labelledby={`${px}-rel`}>
-          <div className="row between base">
-            <h2 className="h2">
-              <span id={`${px}-rel`}>Related products</span>
-            </h2>
-            <Link className="small strong" to={href('store/category')}>
-              {product.relatedMore} <Icon name="arrow-right" className="ic-sm" />
-            </Link>
-          </div>
-          <div className="grid-products wide">
-            {product.related.map((p) => (
-              <ProductCard key={p.name} p={p} showSeller from />
-            ))}
-          </div>
-        </section>
-        <section className="stack gap-4" aria-labelledby={`${px}-sp`}>
-          <div className="row between base">
-            <h2 className="h3" id={`${px}-sp`}>
-              Sponsored products related to this item
-            </h2>
-            <Link className="xs" to={href('help/article')}>
-              Why these ads?
-            </Link>
-          </div>
-          <div className="grid-products wide">
-            {product.sponsored.map((p) => (
-              <ProductCard key={p.name} p={p} sponsored showSeller from />
-            ))}
-          </div>
-        </section>
+        <Related id={id} leaf={leaf} />
       </div>
     </StoreLayout>
   );
 }
 
-/** Price block of the buy box: sale copy for a featured sale, or the shipping total for a seller offer. */
-function OfferPrice({ offer }: { offer: BuyOffer }) {
-  const price = <Price amount={offer.price} was={offer.was} lg />;
-  if (offer.saleEnds) {
-    return (
-      <div className="stack gap-1">
-        {price}
-        <span className="small t-deal-text strong">{offer.saleEnds}</span>
-        {offer.wasNote && <span className="xs muted">{offer.wasNote}</span>}
-      </div>
-    );
-  }
-  if (offer.shippingNote) {
-    return (
-      <div className="stack gap-1">
-        {price}
+/* ---------------- Pieces ---------------- */
+
+const DAY = 86_400_000;
+/** "New listing" for the first 60 days. */
+const isNewListing = (listedAt?: string | null) => !!listedAt && Date.now() - new Date(listedAt).getTime() < 60 * DAY;
+
+/** Spec table rows: the product's specs plus the model number when the specs don't name it. */
+function specPairs(p: CatalogProduct): Array<[string, string]> {
+  const rows = Object.entries(p.specs ?? {}).map(([k, v]) => [k, String(v)] as [string, string]);
+  if (p.modelNumber && !rows.some(([, v]) => v.includes(p.modelNumber!))) rows.push(['Model number', p.modelNumber]);
+  return rows;
+}
+
+const deliveryNote = (o: OfferView) =>
+  [orderWithin(o.delivery.orderWithinMinutes), o.delivery.freeOver && !o.delivery.free ? `Free on orders over ${formatMoney(o.delivery.freeOver)}` : '', o.delivery.serviceNotice ?? '']
+    .filter(Boolean)
+    .join(' · ');
+
+const sellerRatingLine = (o: OfferView) =>
+  o.seller.ratingCount && o.seller.positivePct != null ? `${o.seller.positivePct}% positive · ${num(o.seller.ratingCount)} ratings` : 'No seller ratings yet';
+
+/** Price block of the buy box: sale and was-price notes, and the shipping total for a paid-shipping offer. */
+function OfferPrice({ offer }: { offer: OfferView }) {
+  const price = <Price amount={dollars(offer.price)} was={offer.compareAt ? dollars(offer.compareAt.amount) : null} lg />;
+  const ends = offer.saleEndsAt ?? offer.promotion?.endsAt;
+  const sale = ends ? `${offer.promotion?.label ?? 'Sale'} ends ${fmtDateTime(ends)}` : offer.promotion?.label;
+  const wasNote = offer.compareAt ? (offer.promotion?.wasPriceRule ?? offer.compareAt.explanation) : null;
+  const ship = offer.delivery.shippingCost;
+  const paidShipping = !offer.delivery.free && !!ship?.amount;
+  if (!sale && !wasNote && !paidShipping) return price;
+  return (
+    <div className="stack gap-1">
+      {price}
+      {sale && <span className="small t-deal-text strong">{sale}</span>}
+      {wasNote && <span className="xs muted">{wasNote}</span>}
+      {paidShipping && (
         <span className="small sub">
-          + {money(offer.ship)} shipping · <b>{money(offer.price + offer.ship)}</b> before tax
+          + {formatMoney(ship)} shipping · <b>{formatMoney(offer.total)}</b> before tax
         </span>
-      </div>
-    );
-  }
-  return price;
+      )}
+    </div>
+  );
+}
+
+/** No offer can be bought for this variant: why, when it may return, and other sellers. */
+function Unavailable({ box, offersLink }: { box: PurchaseBox; offersLink: string }) {
+  const u = box.unavailable;
+  return (
+    <div className="stack gap-3">
+      <Alert tone="warning" title={u?.title ?? 'Currently unavailable'}>
+        {u?.message ?? 'No seller offers this item right now.'}
+        {u?.expectedRestockDate && ` Expected back around ${fmtDate(u.expectedRestockDate)}.`}
+      </Alert>
+      {(u?.alternatives.length ?? 0) > 0 && (
+        <Link className="small strong" to={offersLink}>
+          See {u!.alternatives.length} other offer{u!.alternatives.length === 1 ? '' : 's'} <Icon name="chevron-right" className="ic-sm" />
+        </Link>
+      )}
+    </div>
+  );
 }
 
 /** Card foot while another seller's offer is chosen: the featured offer, with a way back to it. */
-function FeaturedFoot({ product, onChoose }: { product: ProductDetail; onChoose: () => void }) {
-  const main = product.market.find((o) => o.main) ?? product.market[0];
-  const s = sellers[main.seller];
+function FeaturedFoot({ featured, total, offersLink, onChoose }: { featured: OfferView; total: number; offersLink: string; onChoose: () => void }) {
+  const ship = featured.delivery.shippingCost;
   return (
     <div className="card-foot u-fd-column" style={{ justifyContent: 'stretch', alignItems: 'stretch' } as CSSProperties}>
       <span className="eyebrow">Featured offer</span>
       <div className="row between gap-2">
         <span className="stack gap-0">
           <span className="row gap-2">
-            <b className="small">{s.name}</b>
-            <SellerBadge seller={s} compact />
+            <b className="small">{featured.seller.name}</b>
+            <SellerBadge seller={featured.seller} compact />
           </span>
           <span className="xs muted">
-            {money(main.price)} · {main.ship === 0 ? `Free delivery ${main.delivery}` : `+ ${money(main.ship)} shipping`} · {main.returns}
+            {formatMoney(featured.price)} · {featured.delivery.free || !ship?.amount ? featured.delivery.label : `+ ${formatMoney(ship)} shipping`} · {featured.returns.summary}
           </span>
         </span>
         <Button variant="secondary" size="sm" onClick={onChoose}>
           Choose
         </Button>
       </div>
-      <Link className="small strong" to={href('store/offers')}>
-        See all {product.market.length} offers
+      <Link className="small strong" to={offersLink}>
+        See all {total} offers
       </Link>
     </div>
   );
@@ -695,5 +899,118 @@ function RatingBar({ star, pct, active, onClick }: { star: number; pct: number; 
       <Meter pct={pct} label={label} />
       <span>{pct}%</span>
     </>
+  );
+}
+
+/** Related products: similar in-stock products from search. Hidden when there are none. */
+function Related({ id, leaf }: { id: string; leaf?: { name: string; slug: string } }) {
+  const related = useSimilarProducts(id, 5);
+  if (related.isError || (related.data && related.data.length === 0)) return null;
+  return (
+    <section className="stack gap-4" aria-labelledby={`${px}-rel`}>
+      <div className="row between base">
+        <h2 className="h2">
+          <span id={`${px}-rel`}>Related products</span>
+        </h2>
+        {leaf && (
+          <Link className="small strong" to={href('store/category', '', { slug: leaf.slug })}>
+            More {leaf.name.toLowerCase()} <Icon name="arrow-right" className="ic-sm" />
+          </Link>
+        )}
+      </div>
+      <div className="grid-products wide">
+        {related.data
+          ? related.data.map((p) => <RelatedCard key={p.productId} p={p} />)
+          : Array.from({ length: 5 }, (_, i) => (
+              <div key={i} className="sk-card" aria-hidden="true">
+                <span className="sk sk-img" />
+                <span className="sk sk-line" />
+                <span className="sk sk-line short" />
+              </div>
+            ))}
+      </div>
+    </section>
+  );
+}
+
+/** Product card (.pcard) for a search ProductCard. The wishlist heart is hidden (wishlist is off at launch). */
+function RelatedCard({ p }: { p: SimilarProduct }) {
+  const to = productHref(p.slug, p.productId);
+  const price = dollars(p.price);
+  const was = p.wasPrice ? dollars(p.wasPrice) : null;
+  const off = percentOff(price, was);
+  return (
+    <article className="pcard">
+      <div className="pcard-media">
+        <Link to={to} aria-label={p.title}>
+          <Photo media={p.image} />
+        </Link>
+        <div className="tags">
+          {off > 0 && <Badge tone="deal">−{off}%</Badge>}
+          {p.official && <Badge tone="brand">Official</Badge>}
+        </div>
+      </div>
+      <Link className="name" to={to}>
+        {p.title}
+      </Link>
+      {p.rating != null && <Stars rating={p.rating} count={p.ratingCount} />}
+      <Price amount={price} was={was} from={p.priceIsFrom && p.offerCount > 1} noOff />
+      {p.deliveryCue && (
+        <div className="meta">
+          {p.freeDelivery ? (
+            <span>
+              <Icon name="truck" className="ic-sm" /> {p.deliveryCue}
+            </span>
+          ) : (
+            <span>{p.deliveryCue}</span>
+          )}
+        </div>
+      )}
+      <div className="meta">
+        <span className="seller-line">
+          Sold by{' '}
+          {p.official ? (
+            <Link to={href('store/official')}>
+              <b>{p.sellerName}</b>
+            </Link>
+          ) : (
+            <b>{p.sellerName}</b>
+          )}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function ProductSkeleton() {
+  return (
+    <StoreLayout nav="categories" appbar={{ title: 'Product', back: href('store/home') }}>
+      <div className="container page gap-8" aria-busy="true" aria-label="Loading product">
+        <div className="stack gap-4">
+          <span className="sk sk-line short" />
+          <div className="shop-pdp">
+            <div className="shop-gal">
+              <span className="sk sk-img" />
+            </div>
+            <div className="sk-lines">
+              <span className="sk sk-line short" />
+              <span className="sk h-30" />
+              <span className="sk sk-line" />
+              <span className="sk sk-line" />
+              <span className="sk sk-line short" />
+            </div>
+            <div className="card shop-buy">
+              <div className="card-body sk-lines">
+                <span className="sk h-30" />
+                <span className="sk sk-line" />
+                <span className="sk sk-line short" />
+                <span className="sk h-46" />
+                <span className="sk h-46" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </StoreLayout>
   );
 }
