@@ -56,7 +56,8 @@ export async function screensFlow(sim: Sim): Promise<void> {
   const seller = w.sellers.find((s) => o.groups.some((g) => g.sellerId === s.sellerId)) ?? w.sellers[0]!;
   const visitor = await sim.people.visitor('store', 'android', 'visitor (screens)');
   const categories = (await api.call(visitor, 'GET', '/api/store/catalog/categories')) as { slug: string }[];
-  const offerView = await api.call(visitor, 'GET', `/api/store/offers/offers/${seller.offers[0]!.offerId}`);
+  // the storefront link the Seller Center shows ("View my store")
+  const storeProfile = (await api.call(seller.session, 'GET', '/api/seller/sellers/store-profile')) as { slug: string };
   const myReturns = await api.call(c.session, 'GET', '/api/store/returns/requests?limit=5');
   const myCases = await api.call(c.session, 'GET', '/api/store/support/cases?limit=5');
   const sellerReturns = await api.call(seller.session, 'GET', '/api/seller/returns/requests?limit=5');
@@ -69,7 +70,7 @@ export async function screensFlow(sim: Sim): Promise<void> {
     ['CategoryPage', visitor, { slug: categories[0]?.slug ?? 'electronics', postalCode: '97205' }],
     ['ProductPage', visitor, { id: offer.productId, postalCode: '97205' }],
     ['OffersPage', visitor, { id: offer.productId, postalCode: '97205' }],
-    ['SellerStorefront', visitor, { slug: offerView.seller?.slug }],
+    ['SellerStorefront', visitor, { slug: storeProfile.slug }],
     ['CartPage', c.session, { postalCode: '97205' }],
     ['AccountOverview', c.session, {}],
     ['OrderList', c.session, {}],

@@ -155,24 +155,31 @@ export async function runChecks(db: Db, sim: Sim): Promise<CheckResult[]> {
 
   const ledger = await all('finance.ledger_entries');
   const accounts = await all('finance.seller_accounts');
-  await check('ledger entries per seller add up to the seller account (pending, available, held)', async () => {
+  // An entry's bucket is where it was booked. A sale's lot later moves pending → available (release, or reversal
+  // after a full refund) by its state, without a new entry, so a bucket is not the sum of the entries booked in it:
+  // the total is, and pending is what the lots still pending hold (plus pending entries outside any lot).
+  const lotsBySeller = new Map<string, any[]>();
+  for (const l of await all('finance.earnings_lots')) lotsBySeller.set(l.seller_id, [...(lotsBySeller.get(l.seller_id) ?? []), l]);
+  await check('ledger entries per seller add up to the seller account (total, and pending = lots still pending)', async () => {
     const problems: string[] = [];
     for (const a of accounts) {
       const es = ledger.filter((e) => e.seller_id === a._id);
-      for (const bucket of ['pending', 'available', 'held']) {
-        const sum = es.filter((e) => e.bucket === bucket).reduce((s, e) => s + e.amount, 0);
-        if (sum !== a[bucket]) problems.push(`seller ${a._id}: Σ ${bucket} entries ${sum} ≠ account ${a[bucket]}`);
-      }
+      const total = es.reduce((s, e) => s + e.amount, 0);
+      if (total !== a.pending + a.available + a.held) problems.push(`seller ${a._id}: Σ entries ${total} ≠ account total ${a.pending + a.available + a.held}`);
+      const pendingLots = (lotsBySeller.get(a._id) ?? []).filter((l) => l.state === 'pending').reduce((s, l) => s + l.net, 0);
+      const pendingLoose = es.filter((e) => e.bucket === 'pending' && !e.lot_id).reduce((s, e) => s + e.amount, 0);
+      if (pendingLots + pendingLoose !== a.pending) problems.push(`seller ${a._id}: pending lots ${pendingLots} + entries outside lots ${pendingLoose} ≠ account pending ${a.pending}`);
     }
     return problems.length ? examples(problems, 4) : null;
   });
 
-  await check('the balances sellers saw through the API equal their ledger', async () => {
+  await check('the balances sellers saw through the API equal their stored account', async () => {
     const problems: string[] = [];
+    const byId = new Map(accounts.map((a) => [a._id, a]));
     for (const [sellerId, b] of sim.world.balances) {
-      const es = ledger.filter((e) => e.seller_id === sellerId);
-      const sum = (bucket: string) => es.filter((e) => e.bucket === bucket).reduce((s, e) => s + e.amount, 0);
-      for (const bucket of ['pending', 'available', 'held'] as const) if (sum(bucket) !== b[bucket]) problems.push(`seller ${sellerId}: API ${bucket} ${b[bucket]} ≠ ledger ${sum(bucket)}`);
+      const a = byId.get(sellerId);
+      if (!a) problems.push(`seller ${sellerId}: no account`);
+      else for (const bucket of ['pending', 'available', 'held'] as const) if (a[bucket] !== b[bucket]) problems.push(`seller ${sellerId}: API ${bucket} ${b[bucket]} ≠ account ${a[bucket]}`);
     }
     return sim.world.balances.size === 0 ? 'no balances were read (finance flow did not run)' : problems.length ? examples(problems, 4) : null;
   });

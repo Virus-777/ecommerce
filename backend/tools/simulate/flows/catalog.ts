@@ -224,10 +224,20 @@ export async function searchFlow(sim: Sim): Promise<void> {
   let found = 0;
   for (const title of titles.slice(0, 6)) {
     const q = title.split(' ').slice(0, 3).join(' ');
-    const res = await api.call(shopper, 'GET', `/api/store/search/products?q=${encodeURIComponent(q)}&postalCode=97205&limit=24`);
-    const ids = (res.items as { product: { productId: string } }[]).map((h) => h.product.productId);
-    if (all.some((o) => o.title.startsWith(title) && ids.includes(o.productId))) found++;
-    else run.check(`search "${q}" finds ${title}`, false, (res.items as { product: { title: string } }[]).map((h) => h.product.title));
+    // earlier runs listed products with the same titles: scroll like a shopper (up to 5 pages) to this run's one
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let hit = false;
+    for (let page = 0; page < 5 && !hit; page++) {
+      const res = await api.call(shopper, 'GET', `/api/store/search/products?q=${encodeURIComponent(q)}&postalCode=97205&limit=24${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+      const items = res.items as { product: { productId: string; title: string } }[];
+      seen.push(...items.map((h) => h.product.title));
+      hit = all.some((o) => o.title.startsWith(title) && items.some((h) => h.product.productId === o.productId));
+      cursor = res.nextCursor ?? null;
+      if (!cursor) break;
+    }
+    if (hit) found++;
+    else run.check(`search "${q}" finds ${title}`, false, seen);
   }
   run.pass();
   // a category listing, filtered by price and sorted
