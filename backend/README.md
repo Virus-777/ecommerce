@@ -19,7 +19,7 @@ The spec is the source of truth. `npm run gen` turns it into code, and the check
 |---|---|---|
 | `types` | TypeScript interfaces + Zod schemas in `src/spec/<module>.ts` | Request validation; response validation outside production |
 | `endpoints` | Routes at `/api/<area>/<module><path>` with params, query, paging, body, response, status, auth, permission, idempotency, launch phase | Compiler: one typed handler per endpoint. `npm run check:api`: the server's OpenAPI equals `docs/api/openapi.json` |
-| `tables` | One MongoDB collection per table (`<module>.<table>`): the Mongoose schema in `infra/mongo/schema.ts`, the database validator and indexes in `spec.collections`, and the row types | Applied at startup (`MIGRATE_ON_START`) or by `npm run migrate`; module tests compare the collections, validators and indexes with the spec |
+| `tables` | One MongoDB collection per table (`<module>.<table>`): the Mongoose schema in the module's `schema.ts`, the database validator and indexes in `spec.collections`, and the row types | Applied at startup (`MIGRATE_ON_START`) or by `npm run migrate`; module tests compare the collections, validators and indexes with the spec |
 | `events` | Typed event map, payload schemas | A module can publish only its own events and subscribe only to the ones it consumes |
 | `publicApi` | `<Module>PublicApi` interface the service implements | `ctx.use()` only for `dependsOn`, `ctx.tryUse()` only for `optionalDeps`, only declared functions |
 | `stateMachines` | `domain/state-machines.ts` | Illegal moves throw `ILLEGAL_TRANSITION` (409) |
@@ -27,7 +27,7 @@ The spec is the source of truth. `npm run gen` turns it into code, and the check
 | `jobs`, `settings`, `permissions`, `errorCodes` | Scheduler entries, typed `ctx.settings.get()`, guard checks, error statuses | Undeclared names are refused at startup |
 | GraphQL fragments and screen queries | `/graphql/store`, `/graphql/seller`, `/graphql/admin`, persisted queries | Composed from enabled modules at startup; unusable screen queries are reported |
 
-Run `npm run gen` after changing the spec (and `node docs/api/tools/build.mjs` first). Generated files start with a `GENERATED` header: `src/spec/**`, `src/modules/index.ts`, and each module's `README.md`, `graphql/schema.ts` and `infra/mongo/schema.ts`. Everything else belongs to you; the generator creates it once and never overwrites it.
+Run `npm run gen` after changing the spec (and `node docs/api/tools/build.mjs` first). Generated files start with a `GENERATED` header: `src/spec/**`, `src/modules/index.ts`, and each module's `README.md`, `graphql/schema.ts` and `schema.ts`. Everything else belongs to you; the generator creates it once and never overwrites it.
 
 ## Layout
 
@@ -58,8 +58,9 @@ module.ts            manifest: spec, version, Mongoose schemas, wiring (routes, 
 contract.ts          the only file other modules may import
 service.ts           use cases; implements the public API, event consumers and jobs
 ports.ts             repository interface (database-agnostic) and provider ports
-infra/mongo/         repository adapter (repository.ts) + GENERATED Mongoose schemas (schema.ts)
-infra/<provider>/    provider adapters behind ports, with a deterministic dev adapter
+repository.ts        the MongoDB repository on ctx.mongo
+schema.ts            GENERATED Mongoose schemas, one per spec table
+providers/           provider adapters behind ports, with a deterministic dev adapter
 http/<area>.ts       one handler per spec endpoint of that area
 graphql/             schema.ts (generated fragment) + resolvers.ts
 domain/              state machines and pure rules
@@ -74,7 +75,7 @@ test/                behaviour tests; helpers.ts boots the module for them
 Every module is built. A new module starts from its spec (`npm run module:new <name>` scaffolds handlers that answer `501 NOT_IMPLEMENTED`); the full conventions are in [docs/BUILDING-MODULES.md](docs/BUILDING-MODULES.md).
 
 1. Read its `README.md` (the API reference for that module).
-2. Write the repository in `ports.ts` and `infra/mongo/repository.ts`, using `ctx.mongo` (the module's own collections, `ctx.mongo.table(name)`).
+2. Write the repository in `ports.ts` and `repository.ts`, using `ctx.mongo` (the module's own collections, `ctx.mongo.table(name)`).
 3. Implement the public API, consumers and jobs in `service.ts`. Talk to other modules only through `ctx.use()` / `ctx.tryUse()` and events.
 4. Replace the `notImplemented` handlers in `http/<area>.ts`. Inputs and outputs are typed from the spec:
 
@@ -105,7 +106,7 @@ Every module is built. A new module starts from its spec (`npm run module:new <n
 
 ## Configuration
 
-Environment variables, read and checked at startup by `src/kernel/config/index.ts` (an invalid value stops the server). Every one has a working default for local development; [.env.example](.env.example) lists them with comments. The search engine's own variables (`SEARCH_ENGINE`, `OPENSEARCH_*`) are read by the search module (`src/modules/search/infra/config.ts`; [docs/02 §9](../docs/02-backend-architecture.md#9-search-engine-opensearch)).
+Environment variables, read and checked at startup by `src/kernel/config/index.ts` (an invalid value stops the server). Every one has a working default for local development; [.env.example](.env.example) lists them with comments. The search engine's own variables (`SEARCH_ENGINE`, `OPENSEARCH_*`) are read by the search module (`src/modules/search/engine-config.ts`; [docs/02 §9](../docs/02-backend-architecture.md#9-search-engine-opensearch)).
 
 | Variable | Default | Production |
 |---|---|---|

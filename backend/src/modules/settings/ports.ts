@@ -1,6 +1,6 @@
 /**
  * What the settings service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/.
+ * The MongoDB adapter is repository.ts.
  */
 import type { Actor, Page, TimelineEvent } from '../../spec/common.js';
 import type { ChangeItem, ImpactPreview, SettingChange } from '../../spec/settings.js';

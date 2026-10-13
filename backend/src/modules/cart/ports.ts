@@ -1,6 +1,6 @@
 /**
  * What the cart service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/.
+ * The MongoDB adapter is repository.ts.
  */
 import type { Page } from '../../kernel/lib/pagination.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';

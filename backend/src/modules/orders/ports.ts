@@ -1,6 +1,6 @@
 /**
  * What the orders service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/.
+ * The MongoDB adapter is repository.ts.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as catalog from '../../spec/catalog.js';

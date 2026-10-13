@@ -28,8 +28,9 @@ graphql/resolvers   thin: call service read methods (batched where the field is 
 service.ts          use cases: authorization beyond the middleware, rules, transactions, events, audit.
 domain/             pure rules and state machines (no I/O): pricing math, eligibility, transitions.
 ports.ts            repository interface (+ provider ports) in domain terms.
-infra/mongo/        repository on ctx.mongo (the module's own collections, §5b) + the GENERATED Mongoose schemas.
-infra/<provider>/   provider adapters (email, payments, carriers, storage) behind ports, with a dev adapter.
+repository.ts       repository on ctx.mongo (the module's own collections, §5b).
+schema.ts           the GENERATED Mongoose schemas, one per spec table.
+providers/          provider adapters (email, payments, carriers, storage) behind ports, with a dev adapter.
 ```
 
 - Handlers receive `{ params, query, body, page, principal, sellerId, sellerAccess, scope, can, actor, requestId, idempotencyKey, operationId, request, reply }` (`src/kernel/http/index.ts`). Pass what the service needs; don't pass `request`/`reply` into services.
@@ -116,14 +117,14 @@ Every module keeps its data in MongoDB, one collection per spec table (`<module>
 
 ```ts
 // module.ts
-import { schemas } from './infra/mongo/schema.js';              // GENERATED Mongoose schemas, one per spec table
+import { schemas } from './schema.js';                         // GENERATED Mongoose schemas, one per spec table
 export default defineModule({ spec, version, schemas, register(ctx) {
   const service = new ThingService({ repo: createMongoThingRepository(ctx.mongo), ctx });
   …
 ```
 
 ```ts
-// infra/mongo/repository.ts: the same ports.ts interface, on ctx.mongo
+// repository.ts: the same ports.ts interface, on ctx.mongo
 export function createMongoThingRepository(store: ModuleStore): ThingRepository {
   const things = store.table<ThingRow>('things');               // rows keep their spec shape (id, snake_case)
   return {
@@ -140,6 +141,21 @@ export function createMongoThingRepository(store: ModuleStore): ThingRepository 
 - **`forUpdate`** locks by writing (`_lock` is incremented): a second transaction writing the same document conflicts and is retried after the first commits. Keep the lock order the module already uses (inventory: reservations, their lines, then stock levels).
 - **Never insert-and-catch a duplicate key inside a transaction**: the error aborts the whole transaction. Use `insertIfAbsent` / `insertManyIfAbsent` (on conflict do nothing) and `upsert` / `upsertMany` (on conflict do update).
 - **Nulls and lists:** `{ col: { $ne: x } }` also matches documents where `col` is null; when null rows must not match (the spec's `<>` conditions mean that), write `{ col: { $nin: [x, null] } }`. `{ $in: [] }` matches nothing; a condition on an array of objects is a dotted filter (`{ 'items.key': key }`); a join is two reads.
+- **Kernel helpers: use these, never a local copy** (`kernel/mongo/index.ts`, `kernel/lib/`; tests in `kernel/mongo/mongo.test.ts`):
+
+  | Need | Use |
+  |---|---|
+  | Insert unless a unique key is taken (on conflict do nothing) | `t.insertIfAbsent(row)` / `t.insertManyIfAbsent(rows)`: checks the primary key and every unique index of the spec (partial and case-insensitive ones included); `undefined` / a count when skipped. Pass `key` only for "on conflict (key) do nothing". |
+  | A count that goes up (on conflict do update n = n + x) | `t.increment({ owner, day }, { count: 1, bytes })`: an upserted `$inc`, returns the row |
+  | A Where object (`{ col: value \| list \| { op, value } }`) as a filter, with SQL's nulls | `whereFilter(where)`; types `Where<R>`, `Cond<V>` |
+  | A search box term | `{ name: contains(q) }` (trimmed, escaped, case-insensitive); `likePattern(p)` for SQL LIKE; `escapeRegExp(s)` (`kernel/lib/text.ts`) to build other patterns |
+  | Compare like `lower(x) = lower(y)` (a `lower(col)` index) | `t.find(f, { collation: CASE_INSENSITIVE })`; also `findOne`, `exists`, `count` |
+  | PostgreSQL's "nulls last" in ascending order | `t.find(f, { sort: { due_at: 1, id: 1 }, nullsLast: ['due_at'] })` |
+  | A list sorted by a computed value (a rank, a deadline with a default) | `t.pageAggregate([{ $match: t.filter(f) }, { $addFields: { rank: … } }], page, { key: 'rank', direction: 'desc' })` |
+  | A write outside a transaction that may lose a race on a unique key | `isDuplicateKey(err)` |
+  | "This row must exist" (a bug if not: 500, not 404) | `` orThrow(row, `orders: order ${id}`) `` (`kernel/lib/or-throw.ts`) |
+
+  `t.page` already runs its count and read one after another inside a transaction.
 - **Inbox, locks, counters:** `store.claim(key)` inside the transaction of the effects (true the first time); `store.lock(name)` serialises transactions on a name; `store.nextValue(name)` for sequences and identity columns.
 - **Seed data** lives in code (`domain/seed.ts`), applied on boot. A schema change is a spec change (`npm run gen`; the kernel syncs validators and indexes); data changes after launch (backfills, renames) are `mongoMigrations: [{ id, up(db) }]` in the manifest, each run once.
 - **Tests** read a module's collections the way its repository does: `app.kernel.mongo.module(name, spec.collections, schemas).table(t)`.
@@ -177,7 +193,7 @@ Granting a permission never grants financial authority: `check` is the only sour
 ## 9. Providers, jobs, webhooks, GraphQL
 
 - **Providers** (email, push, payment processor, carriers, file storage, virus scanning, address
-  validation): define a port in `ports.ts`, put a **deterministic dev adapter** in `infra/<provider>/dev.ts`
+  validation): define a port in `ports.ts`, put a **deterministic dev adapter** in `providers/<provider>.ts` (a folder `providers/<provider>/` when it needs several files)
   (no network; e.g. payments: amounts ending in `02` decline, `03` time out; storage: local `.data/` or memory;
   email: recorded as sent). Wire the dev adapter in `module.ts`; real adapters come later behind the same port.
 - **Jobs** (`spec.jobs`): implement every handler wired in `module.ts`. Make them restartable and idempotent (in production a failed

@@ -1,7 +1,7 @@
 /**
  * What the payments service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/.
- * The payment processor is behind PaymentProvider; the deterministic dev adapter is infra/card-processor/dev.ts.
+ * The MongoDB adapter is repository.ts.
+ * The payment processor is behind PaymentProvider; the deterministic dev adapter is providers/card-processor.ts.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';

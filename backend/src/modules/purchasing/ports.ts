@@ -1,6 +1,6 @@
 /**
  * What the purchasing service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/.
+ * The MongoDB adapter is repository.ts.
  */
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';

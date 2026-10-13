@@ -1,6 +1,6 @@
 /**
  * EngineQuery → OpenSearch request bodies (pure; unit-tested with exact bodies in test/opensearch-query.test.ts).
- * Semantics follow the MongoDB engine (infra/mongo/engine.ts):
+ * Semantics follow the MongoDB engine (mongo-engine.ts):
  *
  * - Text: every group must match, any alternative of a group (synonyms are expanded by the service before the
  *   engine sees the query, so a synonym change applies on the next query without reindexing). A word matches

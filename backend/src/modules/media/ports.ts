@@ -1,7 +1,7 @@
 /**
  * What the media service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/; providers (storage, malware scanning, image and
- * video processing) have deterministic dev adapters in infra/<provider>/dev.ts.
+ * The MongoDB adapter is repository.ts; providers (storage, malware scanning, image and
+ * video processing) have deterministic dev adapters in providers/.
  */
 import type { Readable } from 'node:stream';
 import type { Page } from '../../spec/common.js';
@@ -158,7 +158,7 @@ export class InvalidObjectKeyError extends Error {
 
 /**
  * Object storage: two buckets (public renditions, private originals, documents, evidence and generated
- * files). Keys are '/'-separated paths of safe segments (infra/storage/keys.ts); every adapter refuses
+ * files). Keys are '/'-separated paths of safe segments (providers/storage/keys.ts); every adapter refuses
  * others with InvalidObjectKeyError. Writes are atomic: a reader sees the old object or the new one.
  *
  * viaApi: the bytes travel through this API (memory and local-disk storage): clients PUT uploads to

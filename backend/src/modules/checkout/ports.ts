@@ -1,6 +1,6 @@
 /**
  * What the checkout service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/.
+ * The MongoDB adapter is repository.ts.
  */
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import type { CheckoutDb } from '../../spec/checkout.js';
@@ -38,7 +38,7 @@ export interface TaxCalculation {
 /**
  * Sales tax per line for a destination (spec integration "Sales tax rates": a rate table at launch, a tax
  * service later). null when there is no destination yet (the quote then shows "calculated once you enter a
- * delivery address"). Deterministic dev adapter: infra/tax/dev.ts.
+ * delivery address"). Deterministic dev adapter: providers/tax.ts.
  */
 export interface TaxProvider {
   calculate(input: { destination: common.Address | null; currency: string; lines: TaxLineInput[] }): Promise<TaxCalculation | null>;

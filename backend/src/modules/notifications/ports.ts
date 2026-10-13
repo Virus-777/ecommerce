@@ -1,6 +1,6 @@
 /**
  * What the notifications service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/; providers (email, SMS, push) live in infra/<provider>/.
+ * The MongoDB adapter is repository.ts; providers (email, SMS, push) live in providers/.
  */
 import type { NotificationsDb } from '../../spec/notifications.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';

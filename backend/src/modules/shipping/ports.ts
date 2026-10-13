@@ -1,6 +1,6 @@
 /**
  * What the shipping service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/; carriers sit behind CarrierPort (dev adapter in infra/carriers/).
+ * The MongoDB adapter is repository.ts; carriers sit behind CarrierPort (dev adapter in providers/carriers.ts).
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';

@@ -1,6 +1,6 @@
 /**
  * MongoDB through Mongoose (docs/04-mongodb-migration.md): one database, each module's collections named
- * `<module>.<table>` with the Mongoose schemas generated from the spec (src/modules/<m>/infra/mongo/schema.ts),
+ * `<module>.<table>` with the Mongoose schemas generated from the spec (src/modules/<m>/schema.ts),
  * kernel collections `kernel.*` (kernel/mongo/schemas.ts). Production and staging connect to a replica set
  * (MONGODB_URI); development without MONGODB_URI and tests run an in-process replica set (mongodb-memory-server).
  *

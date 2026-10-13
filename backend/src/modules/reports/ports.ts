@@ -1,6 +1,6 @@
 /**
  * What the reports service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/.
+ * The MongoDB adapter is repository.ts.
  */
 import type { Page } from '../../spec/common.js';
 import type { ReportsDb } from '../../spec/reports.js';

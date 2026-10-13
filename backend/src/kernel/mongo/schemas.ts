@@ -1,5 +1,5 @@
 /**
- * Mongoose schema helpers for the generated module schemas (src/modules/<m>/infra/mongo/schema.ts, docs/04 §3) and
+ * Mongoose schema helpers for the generated module schemas (src/modules/<m>/schema.ts, docs/04 §3) and
  * the kernel's own collections.
  *
  * The spec's meaning (docs/api/spec/FORMAT.md): NOT NULL is "not null" (an empty string is a value: Mongoose's required would refuse

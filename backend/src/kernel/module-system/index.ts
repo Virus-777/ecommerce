@@ -5,7 +5,7 @@
  *
  * `spec` is the generated copy of docs/api/spec/modules/<name>.json: name, launch phase,
  * dependencies, permissions, events, jobs, settings and endpoints all come from it. `schemas` are the
- * generated Mongoose schemas of its collections (infra/mongo/schema.ts).
+ * generated Mongoose schemas of its collections (schema.ts).
  */
 import type { FastifyBaseLogger } from 'fastify';
 import type { specs } from '../../spec/index.js';
@@ -48,7 +48,7 @@ export interface ModuleContext<N extends ModuleName> {
   readonly config: Config;
   readonly log: FastifyBaseLogger;
   /**
-   * This module's collections in MongoDB, one per spec table (repositories in infra/mongo/); other modules'
+   * This module's collections in MongoDB, one per spec table (the module's repository.ts); other modules'
    * collections are off limits. Transactions, named locks and the event inbox (claim, seen) are on it too.
    */
   readonly mongo: ModuleStore;
@@ -120,7 +120,7 @@ export interface ModuleDefinition<S extends ModuleSpecDef = ModuleSpecDef> {
   readonly spec: S;
   /** Bump on every change; shown by npm run modules */
   readonly version: string;
-  /** The Mongoose schemas of the module's collections (generated: infra/mongo/schema.ts) */
+  /** The Mongoose schemas of the module's collections (generated: schema.ts) */
   readonly schemas: ModuleSchemas;
   /** Data migrations (backfills, renames), each run once after the collections from the spec exist */
   readonly mongoMigrations?: readonly MongoMigration[];

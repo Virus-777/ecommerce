@@ -1,8 +1,8 @@
 /**
  * What the finance service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/.
+ * The MongoDB adapter is repository.ts.
  * The payout provider (bank transfers, micro-deposits, settlement reports) is a port with a
- * deterministic development adapter in infra/provider/dev.ts.
+ * deterministic development adapter in providers/payouts.ts.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';

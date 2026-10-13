@@ -1,7 +1,7 @@
 /**
- * Wires the search engine chosen by SEARCH_ENGINE (infra/config.ts): the repository (always MongoDB: the read
+ * Wires the search engine chosen by SEARCH_ENGINE (engine-config.ts): the repository (always MongoDB: the read
  * model) and the engine that answers queries. With OpenSearch the repository is wrapped so its writes feed the
- * engine's index (infra/index-feed.ts).
+ * engine's index (index-feed.ts).
  */
 import type { ClientOptions } from '@opensearch-project/opensearch';
 import type { ModuleContext } from '../../kernel/module-system/index.js';

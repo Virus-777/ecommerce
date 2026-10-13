@@ -150,14 +150,14 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | **Approvals** | Limits per role (refunds, payouts, holds, restrictions, price changes). Above the limit the action becomes an approval request; some actions always need a second reviewer. Granting access never grants financial authority |
 | **Purchase snapshots** | Orders copy the product description, variation, condition, price, seller and terms accepted at purchase (plan ch. 8) |
 | **Errors** | `{ error: { code, message, details } }` with stable codes (`OFFER_CHANGED`, `ILLEGAL_TRANSITION`, `APPROVAL_REQUIRED` …) |
-| **Database portability** | Services depend on repository interfaces (`ports.ts`); the MongoDB adapters live in `infra/mongo/`. No cross-module joins or references exist to untangle, so another database means new adapters, not new services |
+| **Database portability** | Services depend on repository interfaces (`ports.ts`); the MongoDB adapter is each module's `repository.ts`. No cross-module joins or references exist to untangle, so another database means new adapters, not new services |
 | **File storage** | Owner decision: files live on the server's **local file system** (no S3). media's storage port has two adapters, chosen by `MEDIA_STORAGE` (below); both stream bytes through the API: uploads to `PUT /api/{area}/media/uploads/{id}/content` (the caller's token), downloads from `GET /files/{bucket}/{key}` by signed links the auth middleware verifies ([03-auth-middleware.md](03-auth-middleware.md) §0 "File links") |
 
 ### File storage configuration (media)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MEDIA_STORAGE` | `local`; `memory` when `NODE_ENV=test` | `local`: files on disk under `MEDIA_STORAGE_DIR` (`infra/storage/local.ts`). `memory`: kept in the process and lost on restart (`infra/storage/memory.ts`; refused in production). Both pass the same contract tests (`infra/storage/storage.test.ts`) |
+| `MEDIA_STORAGE` | `local`; `memory` when `NODE_ENV=test` | `local`: files on disk under `MEDIA_STORAGE_DIR` (`providers/storage/local.ts`). `memory`: kept in the process and lost on restart (`providers/storage/memory.ts`; refused in production). Both pass the same contract tests (`providers/storage/storage.test.ts`) |
 | `MEDIA_STORAGE_DIR` | `.data/media` (relative to the working directory) | `<dir>/<bucket>/<key>` holds the bytes (buckets `marketly-public`, `marketly-private` are folders), `<dir>/.meta/` content type, ETag and checksum per file, `<dir>/.tmp/` writes in progress (temp file, flushed, then renamed: atomic). Back it up with the database; with more than one API server it must be a shared volume |
 | `API_URL` | `http://localhost:<PORT>` | The API's public address: file links (`<API_URL>/files/…`) point here. Required in production |
 | `APP_SECRET` | dev value while `DEV_TOKENS` is on; required in production | File links are signed with `secretFor(config, 'media.files')`, derived from it; rotating it invalidates links already handed out, including stored public image URLs |
@@ -225,8 +225,9 @@ src/modules/<module>/
   domain/                State machines and pure business rules (no framework, no database)
   service.ts             Use cases; implements the public API, event consumers and jobs, through ports.ts and ctx
   ports.ts               Repository interfaces (database-agnostic) and provider ports
-  infra/mongo/           MongoDB repository (repository.ts) and the generated Mongoose schemas (schema.ts)
-  infra/<provider>/      Provider adapters behind ports (storage, scanning, search engine …), with a dev adapter
+  repository.ts          MongoDB repository on ctx.mongo (the module's own collections)
+  schema.ts              The generated Mongoose schemas, one per spec table
+  providers/             Provider adapters behind ports (storage, scanning, search engine …), with a dev adapter
   http/<area>.ts         One typed handler per spec endpoint of that area (store, seller, admin, public, webhooks); request and response schemas are generated in src/spec
   graphql/               This module's schema fragment + resolvers (read-only; fields it owns, incl. fields on other modules' types)
   permissions.ts         Permission keys this module declares
@@ -250,18 +251,18 @@ The build validates that every type resolves, path parameters match, permissions
 
 ## 9. Search engine (OpenSearch)
 
-Search's public API and endpoints are the same with either engine; only the adapter behind the `SearchEngine` port changes (`backend/src/modules/search/infra/`).
+Search's public API and endpoints are the same with either engine; only the adapter behind the `SearchEngine` port changes (`backend/src/modules/search/`: `mongo-engine.ts`, `providers/opensearch/`).
 
 | `SEARCH_ENGINE` | Where | What answers queries |
 |---|---|---|
-| `mongo` (default) | development, tests | Stemmed words and prefixes over the read-model collections `search.search_documents` / `search.search_offers`, with aggregation pipelines (`infra/mongo/engine.ts`). Misspellings are corrected only when the first letter is right |
-| `opensearch` | production | An OpenSearch index fed from the same read model (`infra/opensearch/`) |
+| `mongo` (default) | development, tests | Stemmed words and prefixes over the read-model collections `search.search_documents` / `search.search_offers`, with aggregation pipelines (`mongo-engine.ts`). Misspellings are corrected only when the first letter is right |
+| `opensearch` | production | An OpenSearch index fed from the same read model (`providers/opensearch/`) |
 
-**Read model and feed.** MongoDB stays the source of truth for the index: event consumers and jobs write `search_documents` and `search_offers` exactly as before. With OpenSearch the repository is wrapped (`infra/index-feed.ts`): after each commit the changed products are read back and sent as one `_bulk` request. A rebuilt document carries its searchable texts and replaces the indexed one; other changes replace every field but the texts. Each write is a Painless update that applies only if the read-model `version` is not older, so concurrent servers cannot put an older state back. Rejected (429) and failed (5xx) items are retried with backoff (`OPENSEARCH_BULK_ATTEMPTS`); whatever still fails — the cluster is down, or a change arrives for a document the index lacks — is marked dirty and rebuilt in full by `search.process-dirty`. Suggestion terms (popular queries, category, brand and store names), synonyms, recent searches, logs and jobs stay in MongoDB.
+**Read model and feed.** MongoDB stays the source of truth for the index: event consumers and jobs write `search_documents` and `search_offers` exactly as before. With OpenSearch the repository is wrapped (`index-feed.ts`): after each commit the changed products are read back and sent as one `_bulk` request. A rebuilt document carries its searchable texts and replaces the indexed one; other changes replace every field but the texts. Each write is a Painless update that applies only if the read-model `version` is not older, so concurrent servers cannot put an older state back. Rejected (429) and failed (5xx) items are retried with backoff (`OPENSEARCH_BULK_ATTEMPTS`); whatever still fails — the cluster is down, or a change arrives for a document the index lacks — is marked dirty and rebuilt in full by `search.process-dirty`. Suggestion terms (popular queries, category, brand and store names), synonyms, recent searches, logs and jobs stay in MongoDB.
 
-**Index.** Queries and writes use the alias `<prefix>-products`, which points at one versioned index `<prefix>-products-<UTC timestamp>` (the first one is `…-00000000000000000`). Documents hold every read-model field (cards are built from hits), the texts (title and brand weighted highest, then category, attributes, description; English analysis with Porter stems, as the MongoDB engine stems), live offers as `nested` documents (seller, condition, price, stock, delivery, featured flag and `card_rank`: featured first, then in stock, then cheapest), category attributes as nested key/value pairs, keyword facets, numeric prices, rating, popularity and `sales_30d`, dispatch days and same-day cutoffs for "ships today" and "arrives by". `MAPPING_VERSION` (`infra/opensearch/mapping.ts`) is stored in the index; bump it on any mapping change.
+**Index.** Queries and writes use the alias `<prefix>-products`, which points at one versioned index `<prefix>-products-<UTC timestamp>` (the first one is `…-00000000000000000`). Documents hold every read-model field (cards are built from hits), the texts (title and brand weighted highest, then category, attributes, description; English analysis with Porter stems, as the MongoDB engine stems), live offers as `nested` documents (seller, condition, price, stock, delivery, featured flag and `card_rank`: featured first, then in stock, then cheapest), category attributes as nested key/value pairs, keyword facets, numeric prices, rating, popularity and `sales_30d`, dispatch days and same-day cutoffs for "ships today" and "arrives by". `MAPPING_VERSION` (`providers/opensearch/mapping.ts`) is stored in the index; bump it on any mapping change.
 
-**Queries** (`infra/opensearch/query.ts`, exact bodies unit-tested):
+**Queries** (`providers/opensearch/query.ts`, exact bodies unit-tested):
 - Text: every word (group) must match across the text fields (`cross_fields`, operator and), any synonym alternative of a group; phrases match as phrases; a full GTIN matches the `gtins` keyword. Synonyms come from search's synonym table and are expanded by the service before the engine sees the query, so a synonym change applies on the next query with no reindex.
 - The card offer is the matching offer with the lowest `card_rank` (inner hit `eo`, with the number of matching offers for "from" prices). Filters on sellers, condition, price, stock and delivery apply to offers.
 - Recommended ranking = text relevance (BM25 `s/(s+1)` × weight) + the published ranking policy's factors as scripts (in stock and delivery speed of the card offer, featured offer, rating with ≥ 3 reviews, conversion) + 1 for a GTIN match. Explain splits a hit's score into the same factors.

@@ -11,7 +11,7 @@
  * Analysis follows the index settings (analysis.ts); scoring is BM25 (k1 1.2, b 0.75) over one shard.
  *
  * Not faithful (see docs/02-backend-architecture.md §9): Painless is not run — scripts are matched by their
- * source to their JavaScript twins in infra/opensearch/scripts.ts (an unknown script is an error); writes are
+ * source to their JavaScript twins in providers/opensearch/scripts.ts (an unknown script is an error); writes are
  * visible at once (no refresh interval); one shard, so scores and cardinality are exact; the standard tokenizer
  * is approximated; fuzzy scoring and the term suggester's ranking are simplified; no cluster behaviour
  * (replicas, timeouts, partial shard failures) beyond the faults a test injects.

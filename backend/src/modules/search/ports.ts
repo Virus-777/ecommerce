@@ -1,9 +1,9 @@
 /**
  * What the search service needs from the outside world, database-agnostic.
- * The MongoDB adapters live in infra/mongo/: the repository (this module's own collections, the read model of
- * the index) and the development search engine (stemmed words and prefixes over those collections). infra/opensearch/ is the
+ * The MongoDB adapters: repository.ts (this module's own collections, the read model of
+ * the index) and the development search engine mongo-engine.ts (stemmed words and prefixes over those collections). providers/opensearch/ is the
  * production engine: it keeps its own index, fed from the repository's writes (SearchIndexFeed). The engine is
- * chosen by SEARCH_ENGINE (infra/config.ts).
+ * chosen by SEARCH_ENGINE (engine-config.ts).
  */
 import type { Json } from '../../kernel/lib/json.js';
 import type { SearchDb } from '../../spec/search.js';
@@ -189,7 +189,7 @@ export interface IndexedDocument {
 
 /**
  * How an engine that keeps its own index (OpenSearch) is fed. The repository stays the read model; every write
- * to it is passed on after commit (infra/index-feed.ts). The MongoDB engine reads the collections and has no feed.
+ * to it is passed on after commit (index-feed.ts). The MongoDB engine reads the collections and has no feed.
  */
 export interface SearchIndexFeed {
   /** Writes and removes documents; answers the products that could not be written (they are marked dirty and rebuilt) */

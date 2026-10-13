@@ -5,7 +5,7 @@
  *   X-Signature: sha256=<hex>    X-Timestamp: <unix seconds>    X-Event-Id: <provider event id> (optional)
  * Secrets come from WEBHOOK_SECRETS per provider (config.webhookSecrets; development and tests use
  * "dev-webhook-secret"). A provider with its own scheme (e.g. Stripe-Signature) gets its own verifier
- * in the module's infra; the middleware only needs the WebhookVerifier contract.
+ * in the module's providers/; the middleware only needs the WebhookVerifier contract.
  */
 import type { FastifyRequest } from 'fastify';
 import { createHmac, timingSafeEqual } from 'node:crypto';

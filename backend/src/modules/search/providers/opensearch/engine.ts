@@ -1,7 +1,7 @@
 /**
  * OpenSearch search engine (production): implements the SearchEngine port over the products index
  * (mapping.ts), with requests built by query.ts, and feeds the index from the read model (SearchIndexFeed,
- * products-index.ts). Suggestion terms stay in MongoDB (infra/mongo/terms.ts): term suggestions are
+ * products-index.ts). Suggestion terms stay in MongoDB (terms.ts at the module root): term suggestions are
  * answered by the MongoDB engine, and spelling correction combines the index's words with the terms' words.
  *
  * Typo tolerance: misspelled words are corrected (service: "Showing results for …") from candidates the index's

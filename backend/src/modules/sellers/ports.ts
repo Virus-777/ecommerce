@@ -1,7 +1,7 @@
 /**
  * What the sellers service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/; providers (verification, payout tokenisation,
- * address checks) have deterministic dev adapters in infra/providers/.
+ * The MongoDB adapter is repository.ts; providers (verification, payout tokenisation,
+ * address checks) have deterministic dev adapters in providers/dev.ts.
  */
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';

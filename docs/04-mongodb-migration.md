@@ -78,7 +78,7 @@ The layering was built for this: services talk only to their module's repository
 
 The spec keeps its table notation (`docs/api/spec/FORMAT.md`), read as collections. `npm run gen` generates (`tools/lib/mongo.ts`, `tools/lib/mongoose.ts`):
 
-- `src/modules/<module>/infra/mongo/schema.ts`: a **Mongoose schema per collection** (409 in 33 modules): field types, NOT NULL, enum values, `check >= 0`, and the indexes (724). The module manifest passes them (`schemas`), and repositories reach the models through `ctx.mongo.table(name)`;
+- `src/modules/<module>/schema.ts` (`infra/mongo/schema.ts` until the flat layout of docs/05): a **Mongoose schema per collection** (409 in 33 modules): field types, NOT NULL, enum values, `check >= 0`, and the indexes (724). The module manifest passes them (`schemas`), and repositories reach the models through `ctx.mongo.table(name)`;
 - `spec.collections` in `src/spec/<module>.ts`: per collection the `_id` field, the database validator (`$jsonSchema`) and the same indexes. The validator stays in the database as the backstop for writes that bypass Mongoose validation (bulk writes, update pipelines);
 - the row types (`src/spec/<module>.ts`) stay: they describe documents as well as rows.
 
