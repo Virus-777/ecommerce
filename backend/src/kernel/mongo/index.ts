@@ -179,4 +179,6 @@ export class ModuleStore {
 }
 
 export { Table } from './table.js';
-export type { Filter, Sort, UpdateSpec } from './table.js';
+export { CASE_INSENSITIVE, isDuplicateKey } from './table.js';
+export type { Collation, ComputedOrder, Filter, FindOptions, ReadOptions, Sort, UpdateSpec } from './table.js';
+export { contains, likePattern, whereFilter, type Cond, type Where } from './filters.js';

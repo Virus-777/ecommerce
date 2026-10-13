@@ -10,7 +10,7 @@ import { testMongo } from '../../testing/mongo.js';
 import { newId } from '../lib/ids.js';
 import type { CollectionDef } from '../spec/define.js';
 import { Schema } from 'mongoose';
-import type { ModuleSchemas, MongoStore } from './index.js';
+import { CASE_INSENSITIVE, contains, isDuplicateKey, likePattern, whereFilter, type ModuleSchemas, type MongoStore } from './index.js';
 import { migrateMongo } from './schema.js';
 import { collectionOptions, integer } from './schemas.js';
 
@@ -35,6 +35,7 @@ const demo = {
       indexes: ['(status, created_at desc)', 'unique (sku, status) where status in (\'draft\',\'active\')', '(created_at) where archived_at is null', 'unique (lower(alt_code))'],
     },
     { name: 'links', columns: { item_id: 'uuid → items', tag: 'text', note: 'text?' }, indexes: ['pk (item_id, tag)'] },
+    { name: 'counters', columns: { owner: 'text', day: 'text', count: 'int', bytes: 'int', note: 'text?' }, indexes: ['pk (owner, day)'] },
   ],
 } as unknown as ModuleSpec;
 
@@ -61,10 +62,21 @@ function demoSchemas(d: Record<string, CollectionDef>): ModuleSchemas {
     collectionOptions('demo.items'),
   );
   const links = new Schema({ item_id: { type: String, required: true }, tag: { type: String, required: true }, note: { type: String, default: null }, _lock: Number }, collectionOptions('demo.links', { generatedId: true }));
-  for (const [table, schema] of [['items', items], ['links', links]] as const) {
+  const counters = new Schema(
+    {
+      owner: { type: String, required: true },
+      day: { type: String, required: true },
+      count: { type: Number, required: true, validate: integer },
+      bytes: { type: Number, required: true, validate: integer },
+      note: { type: String, default: null },
+      _lock: Number,
+    },
+    collectionOptions('demo.counters', { generatedId: true }),
+  );
+  for (const [table, schema] of [['items', items], ['links', links], ['counters', counters]] as const) {
     for (const i of d[table]!.indexes) schema.index(i.key, { name: i.name, ...(i.unique ? { unique: true } : {}), ...(i.partial ? { partialFilterExpression: i.partial } : {}), ...(i.collation ? { collation: i.collation } : {}) });
   }
-  return { items, links };
+  return { items, links, counters };
 }
 beforeAll(async () => {
   const problems: string[] = [];
@@ -214,5 +226,156 @@ describe('transactions', () => {
     expect(order).toHaveLength(4);
     expect(order[1]).toBe(order[0]!.replace('start', 'end'));
     expect(order[3]).toBe(order[2]!.replace('start', 'end'));
+  });
+});
+
+describe('repository helpers', () => {
+  const items = () => store.module('demo', defs, schemas).table<Item>('items');
+  const code = () => `C${newId().slice(-10)}`;
+
+  it('insertIfAbsent checks every unique index: primary key, unique columns, partial and case-insensitive ones', async () => {
+    const t = items();
+    const first = item({ alt_code: code() });
+    expect(await t.insertIfAbsent(first)).toMatchObject({ id: first.id });
+    expect(await t.insertIfAbsent({ ...first, sku: `${first.sku}-2`, alt_code: null })).toBeUndefined(); // same id
+    expect(await t.insertIfAbsent(item({ sku: first.sku }))).toBeUndefined(); // same sku
+    expect(await t.insertIfAbsent(item({ alt_code: first.alt_code!.toLowerCase() }))).toBeUndefined(); // lower(alt_code)
+    // nulls never clash (the unique nullable column's index is partial)
+    expect(await t.insertIfAbsent(item({ alt_code: null }))).toBeDefined();
+    expect(await t.insertIfAbsent(item({ alt_code: null }))).toBeDefined();
+    // with a key, only that key is checked: a clash on another unique index still fails
+    await expect(t.insertIfAbsent(item({ sku: first.sku }), ['id'])).rejects.toSatisfy(isDuplicateKey);
+  });
+
+  it('insertIfAbsent inside a transaction skips a taken key without aborting it', async () => {
+    const mod = store.module('demo', defs, schemas);
+    const taken = await mod.table<Item>('items').insert(item());
+    const fresh = item();
+    await mod.transaction(async (tx) => {
+      expect(await tx.table<Item>('items').insertIfAbsent(item({ sku: taken.sku }))).toBeUndefined();
+      expect(await tx.table<Item>('items').insertIfAbsent(fresh)).toBeDefined();
+    });
+    expect(await mod.table<Item>('items').get(fresh.id)).toBeDefined();
+  });
+
+  it('insertManyIfAbsent inserts in order, skipping rows that clash with stored ones or earlier ones', async () => {
+    const links = store.module('demo', defs, schemas).table<{ item_id: string; tag: string; note: string | null }>('links');
+    const id = newId();
+    await links.insert({ item_id: id, tag: 'a' });
+    expect(await links.insertManyIfAbsent([{ item_id: id, tag: 'a' }, { item_id: id, tag: 'b' }, { item_id: id, tag: 'b' }, { item_id: id, tag: 'c' }])).toBe(2);
+    expect((await links.find({ item_id: id }, { sort: { tag: 1 } })).map((l) => l.tag)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('whereFilter keeps SQL null rules', async () => {
+    const t = items();
+    const tag = newId();
+    const [x, y] = [code(), code()];
+    await t.insertMany([item({ tags: [tag], alt_code: null, stock: 1 }), item({ tags: [tag], alt_code: x, stock: 2 }), item({ tags: [tag], alt_code: y, stock: 3 })]);
+    const count = (w: Record<string, unknown>) => t.count(whereFilter({ tags: tag, ...w }));
+    expect(await count({ alt_code: null })).toBe(1);
+    expect(await count({ alt_code: [x, null] })).toBe(1);
+    expect(await count({ alt_code: [] })).toBe(0);
+    expect(await count({ alt_code: { op: '<>', value: x } })).toBe(1);
+    expect(await count({ alt_code: { op: '<>', value: null } })).toBe(0);
+    expect(await count({ alt_code: { op: 'is not', value: null } })).toBe(2);
+    expect(await count({ alt_code: { op: 'is not', value: x } })).toBe(2);
+    expect(await count({ alt_code: { op: 'not in', value: [x] } })).toBe(1);
+    expect(await count({ alt_code: { op: 'not in', value: [] } })).toBe(3);
+    expect(await count({ alt_code: { op: 'not in', value: [x, null] } })).toBe(0);
+    expect(await count({ alt_code: { op: 'like', value: `${x.slice(0, -2)}%` } })).toBe(1);
+    expect(await count({ stock: { op: '>=', value: 2 } })).toBe(2);
+    expect(await count({ stock: { op: '>=', value: null } })).toBe(0);
+    expect(await count({ stock: { op: 'between', value: [1, 2] } })).toBe(2);
+    expect(await count({ stock: undefined })).toBe(3);
+    expect(() => whereFilter({ stock: { op: '~', value: 1 } })).toThrow(/unsupported/);
+  });
+
+  it('contains and likePattern match literally', () => {
+    expect(contains('  a.b ')).toEqual({ $regex: 'a\\.b', $options: 'i' });
+    const like = new RegExp(likePattern('50\\%_x%').$regex);
+    expect(like.test('50%_xyz')).toBe(true);
+    expect(like.test('50%ax')).toBe(true);
+    expect(like.test('50x_x')).toBe(false);
+  });
+
+  it('reads with a collation compare case-insensitively', async () => {
+    const t = items();
+    const row = await t.insert(item({ sku: `MiXeD-${newId()}` }));
+    const lower = row.sku.toLowerCase();
+    expect(await t.findOne({ sku: lower })).toBeUndefined();
+    expect(await t.findOne({ sku: lower }, { collation: CASE_INSENSITIVE })).toMatchObject({ id: row.id });
+    expect(await t.find({ sku: lower }, { collation: CASE_INSENSITIVE })).toHaveLength(1);
+    expect(await t.count({ sku: lower }, { collation: CASE_INSENSITIVE })).toBe(1);
+    expect(await t.exists({ sku: lower }, { collation: CASE_INSENSITIVE })).toBe(true);
+    expect(await t.exists({ sku: lower })).toBe(false);
+  });
+
+  it('nullsLast puts the nulls of a sort field after its values, in either direction', async () => {
+    const t = items();
+    const tag = newId();
+    const t0 = Date.now();
+    const at = (i: number) => new Date(t0 + i * 1000);
+    await t.insertMany([item({ tags: [tag], archived_at: null, stock: 1 }), item({ tags: [tag], archived_at: at(2), stock: 2 }), item({ tags: [tag], archived_at: at(1), stock: 3 })]);
+    const asc = await t.find({ tags: tag }, { sort: { archived_at: 1 }, nullsLast: ['archived_at'] });
+    expect(asc.map((r) => r.stock)).toEqual([3, 2, 1]);
+    const desc = await t.find({ tags: tag, price: '12.50' }, { sort: { archived_at: -1 }, nullsLast: ['archived_at'], skip: 1, limit: 5 });
+    expect(desc.map((r) => r.stock)).toEqual([3, 1]);
+    expect(desc[0]).toEqual(asc[0]); // rows come back as rows (numeric as string, dates as Date)
+    await expect(t.find({ tags: tag }, { sort: { stock: 1 }, nullsLast: ['archived_at'] })).rejects.toThrow(/nullsLast/);
+  });
+
+  it('increment upserts an $inc: creates the row, then adds to it', async () => {
+    const counters = store.module('demo', defs, schemas).table<{ owner: string; day: string; count: number; bytes: number; note: string | null }>('counters');
+    const owner = newId();
+    expect(await counters.increment({ owner, day: '2026-10-13' }, { count: 1, bytes: 10 })).toEqual({ owner, day: '2026-10-13', count: 1, bytes: 10, note: null });
+    expect(await counters.increment({ owner, day: '2026-10-13' }, { count: 1, bytes: 5 })).toMatchObject({ count: 2, bytes: 15 });
+    const raw = await store.db.collection('demo.counters').findOne({ owner });
+    expect(raw!.note).toBeNull(); // stored as an explicit null, as every insert does
+  });
+
+  it('page counts and reads one after another inside a transaction', async () => {
+    const mod = store.module('demo', defs, schemas);
+    const tag = newId();
+    for (let i = 0; i < 3; i++) await mod.table<Item>('items').insert(item({ tags: [tag] }));
+    const p = await mod.transaction((tx) => tx.table<Item>('items').page({ tags: tag }, { mode: 'page', page: 1, limit: 2 }, { column: 'created_at', direction: 'desc' }));
+    expect(p).toMatchObject({ total: 3, totalPages: 2 });
+    expect(p.items).toHaveLength(2);
+  });
+
+  it('pageAggregate pages on a computed key by cursor and by page number', async () => {
+    const t = items();
+    const tag = newId();
+    const t0 = Date.now();
+    const FAR = new Date('9999-01-01T00:00:00Z');
+    const at = (i: number) => new Date(t0 + i * 1000);
+    // by archived_at, "never" last: the rows with stock 2, 4, 0, then the two without a date
+    const dates = [at(2), null, at(0), null, at(1)];
+    for (const [i, d] of dates.entries()) await t.insert(item({ tags: [tag], archived_at: d, stock: i }));
+    const pipeline = [{ $match: t.filter({ tags: tag }) }, { $addFields: { sort_at: { $ifNull: ['$archived_at', FAR] } } }];
+    const order = { key: 'sort_at', direction: 'asc' } as const;
+    const seen: Item[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: Awaited<ReturnType<typeof t.page>> = await t.pageAggregate(pipeline, { mode: 'cursor', cursor, limit: 2 }, order);
+      seen.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen.map((r) => r.stock).slice(0, 3)).toEqual([2, 4, 0]);
+    expect(seen).toHaveLength(5);
+    expect(seen[0]).not.toHaveProperty('sort_at');
+    expect(seen[0]!.price).toBe('12.50');
+    const p2 = await t.pageAggregate(pipeline, { mode: 'page', page: 2, limit: 2 }, order);
+    expect(p2).toMatchObject({ page: 2, totalPages: 3, total: 5 });
+    expect(p2.items.map((r) => r.stock)).toEqual(seen.slice(2, 4).map((r) => r.stock));
+  });
+
+  it('isDuplicateKey recognises MongoDB duplicate-key errors only', async () => {
+    const t = items();
+    const row = await t.insert(item());
+    const err = await t.insert({ ...row }).catch((e: unknown) => e);
+    expect(isDuplicateKey(err)).toBe(true);
+    expect(isDuplicateKey({ message: 'E11000 duplicate key error collection: x' })).toBe(true);
+    expect(isDuplicateKey(new Error('other'))).toBe(false);
+    expect(isDuplicateKey(undefined)).toBe(false);
   });
 });

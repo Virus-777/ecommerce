@@ -5,7 +5,9 @@ import { dateInZone, zonedDayRange, zonedTimeToUtc } from './clock.js';
 import { isUuid, newId } from './ids.js';
 import { allocate, format, money, multiply } from './money.js';
 import { decodeCursor, encodeCursor, pageOf, toPageRequest } from './pagination.js';
+import { orThrow } from './or-throw.js';
 import { createStateMachine } from './state-machine.js';
+import { escapeRegExp } from './text.js';
 
 describe('state machines', () => {
   const m = createStateMachine('Ad campaign', {
@@ -125,5 +127,20 @@ describe('job schedules from the spec', () => {
   it('refuses phrases it cannot time, so no job silently never runs', () => {
     expect(() => parseSchedule('per payoutSchedule at cutoff (e.g. Thu 23:59 PT)')).toThrow(/not one the scheduler can time/);
     expect(() => parseSchedule('queue worker')).toThrow(/not one the scheduler can time/);
+  });
+});
+
+describe('small helpers', () => {
+  it('escapeRegExp makes a string match itself literally', () => {
+    const s = 'a.b*c+(d)?[e]{f}|g^h$i\\j';
+    expect(new RegExp(`^${escapeRegExp(s)}$`).test(s)).toBe(true);
+    expect(new RegExp(escapeRegExp('a.c')).test('abc')).toBe(false);
+  });
+
+  it('orThrow returns the row, or throws naming what is missing', () => {
+    expect(orThrow({ id: 1 }, 'x')).toEqual({ id: 1 });
+    expect(orThrow(0, 'zero is a value')).toBe(0);
+    expect(() => orThrow(undefined, 'access: role r1')).toThrow('access: role r1 not found');
+    expect(() => orThrow(null, 'thing')).toThrow('thing not found');
   });
 });
