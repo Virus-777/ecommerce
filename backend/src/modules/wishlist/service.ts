@@ -24,7 +24,8 @@ import {
   UNAVAILABLE_PUBLICATIONS,
   verifyShareToken,
 } from './domain/rules.js';
-import type { AlertKind, AlertRow, AlertState, ItemRow, ListRow, WishlistRepository } from './ports.js';
+import type { AlertKind, AlertRow, AlertState, ItemRow, ListRow } from './ports.js';
+import type { WishlistRepository } from './repository.js';
 import { Lookups, Views, type ItemDetail } from './views.js';
 
 export interface WishlistServiceDeps {
@@ -44,7 +45,7 @@ const invalid = (path: string, message: string) => new AppError('VALIDATION_FAIL
 const CLOSED_OFFER = new Set(['removed']);
 
 /**
- * Wishlist use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Wishlist use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/wishlist.json.
  */
 export class WishlistService implements WishlistPublicApi {

@@ -9,7 +9,8 @@ import { money } from '../../kernel/lib/money.js';
 import type * as common from '../../spec/common.js';
 import { wishlistAlertMachine } from './domain/state-machines.js';
 import { dropMet, inCooldown, PAUSED } from './domain/rules.js';
-import type { AlertCandidate, AlertRow, WishlistRepository } from './ports.js';
+import type { AlertCandidate, AlertRow } from './ports.js';
+import type { WishlistRepository } from './repository.js';
 import { Lookups } from './views.js';
 
 const SYSTEM = { actor: { kind: 'system' as const, id: 'wishlist', name: 'Wishlist' } };

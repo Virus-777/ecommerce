@@ -1,10 +1,11 @@
 /**
  * A list holds a product and variant once, a product saved without a variant included:
- * `unique nulls not distinct (list_id, product_id, variant_id)` (a plain unique index on MongoDB, where nulls are equal).
+ * a unique index on (list_id, product_id, variant_id), where MongoDB treats nulls as equal.
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { isDuplicateKey } from '../../../kernel/mongo/index.js';
 import { buildTestApp } from '../../../testing/app.js';
 import { spec } from '../../../spec/wishlist.js';
 import { schemas } from '../schema.js';
@@ -48,7 +49,7 @@ describe('saved item key', () => {
     const err = await table('items')
       .insert(item(l, productId))
       .catch((e: unknown) => e);
-    expect((err as { code?: number }).code).toBe(11000);
+    expect(isDuplicateKey(err)).toBe(true);
     // a variant of it, or another list, is another item
     await table('items').insert(item(l, productId, { variant_id: newId() }));
     await table('items').insert(item(await list(), productId));
