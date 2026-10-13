@@ -14,7 +14,6 @@ export type ParticipantRec = Db['participants'];
 export type MessageRec = Db['messages'];
 export type ReportRec = Db['message_reports'];
 export type TemplateRec = Db['reply_templates'];
-export type AccessLogRec = Db['staff_access_log'];
 export type ReplyStatsRec = Db['seller_reply_stats'];
 
 /**

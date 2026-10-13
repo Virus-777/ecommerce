@@ -8,7 +8,6 @@ export type Db = ReviewsDb;
 export type TableName = keyof Db & string;
 /** Tables keyed by `id` */
 export type IdTable = Exclude<TableName, 'helpful_votes' | 'product_rating_summaries' | 'seller_feedback_summaries' | 'review_invites'>;
-export type InviteRec = Db['review_invites'];
 
 export type ReviewRec = Db['product_reviews'];
 export type FeedbackRec = Db['seller_feedback'];
