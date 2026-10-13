@@ -62,7 +62,6 @@ export class PayoutsPart extends Part {
 
   async runView(run: RunRec, by?: By | null): Promise<PayoutRun> {
     const rows = await this.repo.find('payouts', { run_id: run.id });
-    const cur = run.currency;
     const days = await this.core.num('availableAfterDeliveryDays', 7);
     const prev = await this.repo.findOne('payout_runs', { created_at: { op: '<', value: run.created_at }, status: { op: '<>', value: 'cancelled' } }, { orderBy: [['created_at', 'desc']] });
     const prevFailed = prev ? await this.repo.find('payouts', { run_id: prev.id, status: 'failed' }) : [];

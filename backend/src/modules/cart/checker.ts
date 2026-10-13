@@ -7,7 +7,6 @@ import { isAppError, isNotImplemented } from '../../kernel/errors/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import { money, type Money } from '../../kernel/lib/money.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
-import type * as catalog from '../../spec/catalog.js';
 import { OFFICIAL_STORE_ID } from '../../spec/common.js';
 import type {
   CartDestination,
@@ -21,7 +20,6 @@ import type {
   PackageShippingLine,
 } from '../../spec/cart.js';
 import type * as offers from '../../spec/offers.js';
-import type * as promotions from '../../spec/promotions.js';
 import type * as shipping from '../../spec/shipping.js';
 import { evaluateLine, type LineEval, type OfferFacts, type ProductFacts } from './domain/check.js';
 import {

@@ -41,7 +41,6 @@ import {
   unavailableMessage,
   validPostalCode,
   type LimitKind,
-  type StoredCoupon,
 } from './domain/rules.js';
 import { cartLifecycleMachine, cartLineAvailabilityMachine } from './domain/state-machines.js';
 import type { AdminCartFilter, CartAggregate, CartRow, ItemRow, OwnerKey } from './ports.js';
