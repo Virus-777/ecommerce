@@ -33,7 +33,7 @@ import { Webhooks } from './service/webhooks.js';
 export type { PaymentsServiceDeps };
 
 /**
- * Payments use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Payments use cases. Depends only on its repository, the payment provider, the event bus, the clock and other modules' public APIs.
  * The work is split by area (service/*.ts); this class is the module's public API, its event consumers, jobs
  * and the entry points of the HTTP handlers.
  */

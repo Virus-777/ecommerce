@@ -18,7 +18,8 @@ import type { ItemPaidAmount } from '../../../spec/orders.js';
 import type { Refund, RefundableItem, RefundableSummary, RefundView, StartRefundInput } from '../../../spec/payments.js';
 import { refundExecutionMachine } from '../domain/state-machines.js';
 import { ACCEPTED, is, isExpired, methodLabel, refundBackoffMs, retryableRefundFailure, type RefundStatus, refundOrderKey } from '../domain/rules.js';
-import { ProviderError, type IntentRec, type PaymentsRepository, type ProviderRefund, type RefundDestination, type RefundItemRec, type RefundLogRec, type RefundRec } from '../ports.js';
+import { ProviderError, type IntentRec, type ProviderRefund, type RefundDestination, type RefundItemRec, type RefundLogRec, type RefundRec } from '../ports.js';
+import type { PaymentsRepository } from '../repository.js';
 import type { Scope } from '../../../kernel/auth/scope.js';
 import { Batch, SYSTEM, illegal, invalid, notFound, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
 import { refundKey, type Credit } from './credit.js';
@@ -222,7 +223,7 @@ export class Refunds {
         requestedBy,
         key: idempotencyKey,
       });
-      const r = await tx.insertIfNew('refunds', row);
+      const r = await tx.insertIfAbsent('refunds', row);
       if (!r) return null;
       await tx.insertMany(
         'refund_items',
@@ -341,7 +342,7 @@ export class Refunds {
       }
       if (amount < e.refund.total.amount) this.core.ctx.log.warn({ orderId: e.orderId, itemId: e.itemId, asked: e.refund.total.amount, amount }, 'payments: cancellation refund capped at the remaining amount');
       const item: RefundItemRec = { refund_id: '', order_item_id: e.itemId, group_id: cap.groupId, seller_id: cap.sellerId, amount };
-      const r = await tx.insertIfNew(
+      const r = await tx.insertIfAbsent(
         'refunds',
         this.newRow({ ref: await this.core.nextRef('RF', tx), orderId: e.orderId, intent: locked, origin: 'cancellation', originId: e.cancellationId, originRef: null, amount, destination: 'original_method', reason, requestedBy: actor, key }),
       );
@@ -363,7 +364,7 @@ export class Refunds {
       const totals = await tx.intentRefundTotals(locked.id);
       const amount = locked.captured_amount - totals.sent - totals.inFlight;
       if (amount <= 0) return null;
-      const r = await tx.insertIfNew(
+      const r = await tx.insertIfAbsent(
         'refunds',
         this.newRow({ ref, orderId: locked.order_id, intent: locked, origin: 'orphan_payment', originId: locked.id, originRef: locked.ref, amount, destination: 'original_method', reason, requestedBy: by.actor, key: `orphan:${locked.id}` }),
       );

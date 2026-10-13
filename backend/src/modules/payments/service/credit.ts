@@ -20,7 +20,8 @@
  */
 import { createHash } from 'node:crypto';
 import { ACCEPTED, is } from '../domain/rules.js';
-import type { CaptureCredit, CreditReturn, IntentRec, PaymentsRepository, StoredTender } from '../ports.js';
+import type { CaptureCredit, CreditReturn, IntentRec, StoredTender } from '../ports.js';
+import type { PaymentsRepository } from '../repository.js';
 import { notFound, type Core } from './core.js';
 
 /** Credit given back outside a refund: the order was cancelled before its card was charged (in full) */

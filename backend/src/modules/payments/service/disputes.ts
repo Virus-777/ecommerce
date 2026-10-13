@@ -10,7 +10,8 @@ import type * as common from '../../../spec/common.js';
 import type { Dispute } from '../../../spec/payments.js';
 import { paymentDisputeMachine } from '../domain/state-machines.js';
 import { HOUR, disputePrefix, fmt } from '../domain/rules.js';
-import { ProviderError, type DisputeRec, type PaymentsRepository, type StoredEvidence } from '../ports.js';
+import { ProviderError, type DisputeRec, type StoredEvidence } from '../ports.js';
+import type { PaymentsRepository } from '../repository.js';
 import { Batch, PROVIDER_ACTOR, SYSTEM, illegal, invalid, notFound, type By, type Core } from './core.js';
 import type { Views } from './views.js';
 

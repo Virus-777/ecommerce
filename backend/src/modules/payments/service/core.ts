@@ -13,7 +13,8 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { OrderDetail } from '../../../spec/orders.js';
 import type { ProviderCall } from '../../../spec/payments.js';
-import { ProviderError, type PaymentProvider, type PaymentsRepository } from '../ports.js';
+import { ProviderError, type PaymentProvider } from '../ports.js';
+import type { PaymentsRepository } from '../repository.js';
 
 export interface PaymentsServiceDeps {
   repo: PaymentsRepository;

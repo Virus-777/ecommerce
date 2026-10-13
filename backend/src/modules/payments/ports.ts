@@ -1,9 +1,8 @@
 /**
- * What the payments service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts.
- * The payment processor is behind PaymentProvider; the deterministic dev adapter is providers/card-processor.ts.
+ * Row types of the payments collections (JSON columns typed), the shapes the repository (repository.ts) and the
+ * service share, and the payment provider: the processor is behind PaymentProvider, the deterministic development
+ * provider is providers/card-processor.ts.
  */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type { Decline, MethodSnapshot, NextAction, PaymentsDb, Tender } from '../../spec/payments.js';
 
@@ -94,9 +93,6 @@ export interface Recs {
 }
 export type Table = keyof Recs;
 
-/** Column filter: a value, a list (in), null (is null) or an operator */
-export type Where<R> = { [K in keyof R]?: R[K] | readonly R[K][] | null | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not'; value: unknown } };
-
 export interface FindOptions<R> {
   orderBy?: [keyof R & string, 'asc' | 'desc'][];
   limit?: number;
@@ -133,44 +129,6 @@ export interface RefundTotals {
   orderItemId: string;
   sent: number;
   inFlight: number;
-}
-
-/** Persistence for this module's own tables: payments.intents, payments.allocations, payments.captures, payments.provider_calls, payments.refunds, payments.refund_items, payments.refund_log, payments.disputes, payments.dispute_log, payments.saved_methods, payments.webhook_events, payments.ref_sequences. */
-export interface PaymentsRepository {
-  /** Runs fn in a transaction with a repository bound to it (nested calls join the outer one) */
-  transaction<T>(fn: (tx: PaymentsRepository) => Promise<T>): Promise<T>;
-
-  get<T extends Table>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;
-  find<T extends Table>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]>;
-  insert<T extends Table>(table: T, row: Recs[T]): Promise<Recs[T]>;
-  insertMany<T extends Table>(table: T, rows: Recs[T][]): Promise<void>;
-  /**
-   * Live authorizations (authorized, partially_captured) last changed at or before `upTo`, in keyset order
-   * (updated_at, id) after the given position: the expiry sweep walks them page by page until none are left.
-   */
-  liveAuthorizations(after: { updatedAt: Date; id: string } | null, upTo: Date, limit: number): Promise<IntentRec[]>;
-  update<T extends Table>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
-  /** Conditional update: only rows matching `where` change (money-safe compare-and-set); returns the changed rows */
-  updateWhere<T extends Table>(table: T, where: Where<Recs[T]>, patch: Partial<Recs[T]>): Promise<Recs[T][]>;
-  deleteWhere<T extends Table>(table: T, where: Where<Recs[T]>): Promise<void>;
-
-  /** Next value of a daily counter (RF-, CB-, DP- references) */
-  nextSequence(kind: string, day: string): Promise<number>;
-  /** Stores a provider event unless (provider, external_id) is known; null for a replay */
-  insertWebhookIfNew(row: WebhookRec): Promise<WebhookRec | null>;
-  /** Insert that yields null instead of failing on a unique conflict (refund per origin, capture per key) */
-  insertIfNew<T extends 'refunds' | 'captures' | 'intents'>(table: T, row: Recs[T]): Promise<Recs[T] | null>;
-
-  /** Sent and in-flight refund money per order item of an order */
-  refundTotals(orderId: string): Promise<RefundTotals[]>;
-  /** Sent and in-flight refund money of a payment intent (all its refunds) */
-  intentRefundTotals(intentId: string): Promise<{ sent: number; inFlight: number }>;
-
-  listIntents(f: PaymentListFilter, page: PageRequest): Promise<common.Page<IntentRec>>;
-  listRefunds(f: RefundListFilter, page: PageRequest): Promise<common.Page<RefundRec>>;
-  listDisputes(f: DisputeListFilter, page: PageRequest): Promise<common.Page<DisputeRec>>;
-  /** Provider events applied to the payment or to one of its refunds, oldest first */
-  webhooksFor(intentId: string): Promise<WebhookRec[]>;
 }
 
 /* ---------------------------------------------------------------- payment provider port */

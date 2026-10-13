@@ -13,7 +13,8 @@ import type * as common from '../../../spec/common.js';
 import type { Allocation, AuthorizeInput, AuthorizeResult, PaymentDetail, PaymentStatusView, Tender } from '../../../spec/payments.js';
 import { paymentIntentMachine } from '../domain/state-machines.js';
 import { ACCEPTED, DAY, ENDED, HOUR, MINUTE, PENDING, checkBackoffMs, declineOf, is, isExpired, methodLabel, type IntentStatus } from '../domain/rules.js';
-import { ProviderError, type AllocationRec, type CaptureRec, type CardDetails, type IntentRec, type PaymentsRepository, type ProviderCapture, type ProviderPayment, type StoredMethod } from '../ports.js';
+import { ProviderError, type AllocationRec, type CaptureRec, type CardDetails, type IntentRec, type ProviderCapture, type ProviderPayment, type StoredMethod } from '../ports.js';
+import type { PaymentsRepository } from '../repository.js';
 import { Batch, SYSTEM, illegal, invalid, notFound, type By, type Cfg, type Core, type Lookup, type OrderInfo } from './core.js';
 import { CANCELLED_KEY, EXCESS_KEY, itemKey, type Credit } from './credit.js';
 import type { Views } from './views.js';
@@ -110,7 +111,7 @@ export class Intents {
       updated_at: now,
     };
     for (let attempt = 0; ; attempt++) {
-      const inserted = await this.repo.insertIfNew('intents', row);
+      const inserted = await this.repo.insertIfAbsent('intents', row);
       if (inserted) break;
       // the same key or another live intent of the session won a race
       const winner = (await this.repo.find('intents', { idempotency_key: idempotencyKey }))[0] ?? (await this.repo.find('intents', { checkout_session_id: input.checkoutSessionId, status: LIVE }))[0];
@@ -238,7 +239,7 @@ export class Intents {
             const captured = p.capturedAmount || authorized;
             // a whole-payment capture: all the store credit still used goes with it (an order's only)
             const credit = i.order_id ? Math.max(0, (this.credit.tender(i)?.amount.amount ?? 0) - this.credit.outside(i)) : 0;
-            const capture = await tx.insertIfNew('captures', { id: newId(), intent_id: i.id, group_id: null, amount: captured, credit_amount: credit, status: 'succeeded', provider_ref: p.providerRef ?? i.provider_ref, idempotency_key: `${i.id}:capture:provider`, at: now });
+            const capture = await tx.insertIfAbsent('captures', { id: newId(), intent_id: i.id, group_id: null, amount: captured, credit_amount: credit, status: 'succeeded', provider_ref: p.providerRef ?? i.provider_ref, idempotency_key: `${i.id}:capture:provider`, at: now });
             Object.assign(patch, { captured_amount: captured, captured_at: now });
             if (capture && i.order_id) {
               const withShare: IntentRec = credit > 0 ? { ...i, tenders: this.credit.withShare(i, capture.id, { amount: credit, groupId: null }) } : i;
