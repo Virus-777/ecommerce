@@ -8,7 +8,7 @@ import type * as identity from '../../../spec/identity.js';
 import type { StaffRef } from '../../../spec/reports.js';
 import { GROUPS, UNASSIGNED_OWNER } from '../domain/catalogue.js';
 import type { Issue } from '../domain/rules.js';
-import type { ReportsRepository } from '../ports.js';
+import type { ReportsRepository } from '../repository.js';
 
 export interface ReportsServiceDeps {
   repo: ReportsRepository;

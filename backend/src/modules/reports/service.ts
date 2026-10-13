@@ -21,7 +21,7 @@ export const actorOfPrincipal = (p: identity.Principal & { name?: string | null 
 const envOf = (e?: Partial<Env>): Env => ({ id: e?.id ?? newId(), at: e?.at ?? new Date().toISOString() });
 
 /**
- * Reports use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Reports use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/reports.json.
  */
 export class ReportsService implements ReportsPublicApi {
