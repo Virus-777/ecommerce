@@ -54,7 +54,8 @@ process.env.RATE_LIMITS = 'false';
 
 /** What the simulator does in process instead of over HTTP, and why (printed in the report file) */
 const DEV_SHORTCUTS = [
-  'Business Owner bootstrap (first run only): AccessService.bootstrapBusinessOwner, the operator command tools/bootstrap-owner.ts runs; there is no API for it',
+  'Business Owner bootstrap (first run only): AccessService.bootstrapBusinessOwner, the operator command tools/bootstrap-owner.ts runs; there is no API for it. It returns the owners\' invitation links and pass codes',
+  'Staff invitation pass codes: each new hire gets a link and pass code from tools/lib/staff-link.ts, what npm run staff-link prints for the operator (the Admin Center never shows a pass code)',
   'Mailbox: emailed codes, invitation links and seller invitation codes are read from the development outbox (notifications/providers/dev-outbox.ts)',
   'Bank statement: the two payout test deposits are computed like the development payout provider sends them (finance/providers/payouts.ts testDepositsFor)',
   'Scheduled jobs run now with app.kernel.jobs.runNow (JOBS_ENABLED is false on development servers): media processing, search indexing, notifications dispatch, refunds, payout runs, reports',
