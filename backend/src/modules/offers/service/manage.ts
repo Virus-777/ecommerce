@@ -18,20 +18,6 @@ export const DEFAULT_PARCEL = { weightGrams: 1000 };
 
 const DEFAULT_RETURN_DAYS = 30;
 
-const PATCH_TERMS: Record<string, string> = {
-  conditionNotes: 'conditionNotes',
-  missingItems: 'missingItems',
-  compareAt: 'compareAt',
-  saleEndsAt: 'saleEndsAt',
-  purchaseLimit: 'purchaseLimit',
-  dispatchBusinessDays: 'dispatch',
-  shippingProfileId: 'shippingProfileId',
-  returnTerms: 'returnTerms',
-  warranty: 'warranty',
-  variantId: 'variantId',
-  condition: 'condition',
-};
-
 export interface Baseline {
   windowDays: number;
   freeReturnShipping: boolean;
