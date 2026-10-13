@@ -15,7 +15,7 @@ import { Views } from './service/views.js';
 export type { ReviewsServiceDeps };
 
 /**
- * Reviews use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Reviews use cases. Depends on its repository, the event bus, the clock and other modules' public APIs.
  * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class ReviewsService implements ReviewsPublicApi {

@@ -44,7 +44,8 @@ import {
 } from '../domain/rules.js';
 import { appealMachine, moderationItemMachine } from '../domain/state-machines.js';
 import { MODERATION_EVENTS, RESPONSE_MODERATION_EVENTS, RESTORE_EVENTS } from '../domain/transitions.js';
-import type { AppealRec, DecisionRec, ItemRec, ReferralRec, ReportRec, ReviewsRepository } from '../ports.js';
+import type { AppealRec, DecisionRec, ItemRec, ReferralRec, ReportRec } from '../ports.js';
+import type { ReviewsRepository } from '../repository.js';
 import { authorOf, type Content, findContent, isPublic, loadContent, machineOf, moveContent, productOf } from './content.js';
 import { type By, type Core, Effects, invalid, notFound, TRUST_ACTOR } from './core.js';
 import { appealView, type Views } from './views.js';

@@ -2,6 +2,7 @@
  * Pure rules of the reviews module (no I/O): automatic content checks, the seller response rule check,
  * feedback scoring, display names, labels, rating distributions and the moderation reason catalogue.
  */
+import { escapeRegExp } from '../../../kernel/lib/text.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type { ModerationReason, RatingBucket } from '../../../spec/reviews.js';
 
@@ -89,7 +90,7 @@ export function responseChecks(text: string, customer: { shownName: string; priv
   const extraName = customer.privateNames
     .map((n) => n.trim().toLowerCase())
     .filter((n) => n.length >= 3 && !shown.includes(n))
-    .some((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(lower));
+    .some((n) => new RegExp(`\\b${escapeRegExp(n)}\\b`, 'i').test(lower));
   add(out, extraName, "Names the customer beyond what the review shows", 'personal_information');
   add(out, ADDRESS.test(text), 'Contains an address', 'personal_information');
   add(out, ORDER_DETAILS.test(text), 'Mentions order details', 'personal_information');

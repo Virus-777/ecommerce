@@ -13,7 +13,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type * as orders from '../../../spec/orders.js';
 import { isOfficial, OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME, sellerKey, shortName, variantLabelOf } from '../domain/rules.js';
-import type { ReviewsRepository } from '../ports.js';
+import type { ReviewsRepository } from '../repository.js';
 
 export interface ReviewsServiceDeps {
   repo: ReviewsRepository;

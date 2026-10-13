@@ -32,7 +32,7 @@ export class SummariesPart {
     }
     const delay = await this.core.num('inviteDelayDays');
     const deliveredAt = new Date(e.deliveredAt);
-    await this.core.repo.insertIgnore('review_invites', {
+    await this.core.repo.insertIfAbsent('review_invites', {
       order_item_id: e.itemId,
       order_id: e.orderId,
       customer_id: e.customerId,

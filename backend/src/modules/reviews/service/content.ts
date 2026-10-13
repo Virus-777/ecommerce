@@ -6,7 +6,8 @@ import { isUuid } from '../../../kernel/lib/ids.js';
 import type { ContentType } from '../domain/rules.js';
 import { answerMachine, productReviewMachine, questionMachine, sellerFeedbackMachine, sellerResponseMachine } from '../domain/state-machines.js';
 import { apply, oneStep, walk } from '../domain/transitions.js';
-import type { AnswerRec, FeedbackRec, QuestionRec, ResponseRec, ReviewRec, ReviewsRepository } from '../ports.js';
+import type { AnswerRec, FeedbackRec, QuestionRec, ResponseRec, ReviewRec } from '../ports.js';
+import type { ReviewsRepository } from '../repository.js';
 import type { Core, Effects } from './core.js';
 
 export type Content =
