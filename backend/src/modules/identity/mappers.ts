@@ -41,9 +41,10 @@ export const twoStepMethod = (m: TwoStepMethodRow): TwoStepMethod => ({
   lastUsedAt: isoOrNull(m.last_used_at),
 });
 
-export const twoStepStatus = (realm: string, methods: TwoStepMethodRow[], recoveryCodesRemaining: number, staffRequired: boolean): TwoStepStatus => ({
+/** 2-step is never required: members choose it, and staff sign in with email and password only (2026-10-14) */
+export const twoStepStatus = (methods: TwoStepMethodRow[], recoveryCodesRemaining: number): TwoStepStatus => ({
   enabled: methods.length > 0,
-  required: realm === 'staff' && staffRequired,
+  required: false,
   methods: methods.map(twoStepMethod),
   recoveryCodesRemaining: methods.length ? recoveryCodesRemaining : 0,
 });

@@ -8,6 +8,7 @@ import type {
   IdentityPublicApi,
   Invitation,
   Principal,
+  StaffInvitationIssued,
   VerificationChallenge,
 } from '../../spec/identity.js';
 import { normalizeEmail } from './domain/policy.js';
@@ -48,13 +49,13 @@ export class IdentityService implements IdentityPublicApi {
     this.sessions = new Sessions(this.core, this.authentication);
     this.passwords = new Passwords(this.core);
     this.security = new Security(this.core, this.authentication);
-    this.invitations = new Invitations(this.core, this.security, this.authentication);
+    this.invitations = new Invitations(this.core, this.authentication);
     this.guests = new Guests(this.core);
     this.accounts = new Accounts(this.core, this.security, this.authentication, this.passwords);
   }
 
-  /** Public API: invite a staff member (access assigns the roles) */
-  inviteStaff(input: { email: string; name: string; invitedBy: common.Actor }): Promise<Invitation> {
+  /** Public API: invite a staff member (access assigns the roles); the pass code comes back only here */
+  inviteStaff(input: { email: string; name: string; invitedBy: common.Actor }): Promise<StaffInvitationIssued> {
     return this.invitations.inviteStaff(input);
   }
 
@@ -85,11 +86,6 @@ export class IdentityService implements IdentityPublicApi {
   /** Sign an account out everywhere (or in one area) */
   revokeSessions(accountId: string, reason: string, audience?: 'store' | 'seller' | 'admin'): Promise<number> {
     return this.sessions.revokeSessions(accountId, reason, audience);
-  }
-
-  /** Public API: password or 2-step code check before a sensitive action */
-  verifyStepUp(accountId: string, proof: { password?: string; code?: string }): Promise<boolean> {
-    return this.security.verifyStepUp(accountId, proof);
   }
 
   /** Public API: let a guest session open one order */

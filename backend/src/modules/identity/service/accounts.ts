@@ -78,7 +78,7 @@ export class Accounts {
         createdAt: map.iso(a.created_at),
         lastSignInAt: map.isoOrNull(a.last_sign_in_at),
         passwordChangedAt: map.isoOrNull(a.password_changed_at),
-        twoStep: map.twoStepStatus(a.realm, x.methods, x.recovery, s.staffTwoStepRequired),
+        twoStep: map.twoStepStatus(x.methods, x.recovery),
         devices: x.devices.map((d) => map.device(d)),
         sellerContexts: x.sellers.map(map.sellerContext),
         invitation: x.invitation ? map.invitation(x.invitation, now) : null,

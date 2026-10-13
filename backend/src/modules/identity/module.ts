@@ -7,6 +7,7 @@ import { adminRoutes } from './http/admin.js';
 import { SESSION_COOKIE_ENDPOINTS } from './http/client.js';
 import { publicRoutes } from './http/public.js';
 import { devExternalIdentityVerifier } from './providers/external-id.js';
+import { mongoMigrations } from './migrations.js';
 import { IdentityRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { IdentityService } from './service.js';
@@ -19,8 +20,9 @@ import { IdentityService } from './service.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     // Google / Apple ID tokens: the deterministic dev verifier in development and tests; no provider is wired for production yet
     const externalIds = ctx.config.devTokens ? devExternalIdentityVerifier : undefined;

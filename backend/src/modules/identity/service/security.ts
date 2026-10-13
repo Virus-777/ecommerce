@@ -157,7 +157,8 @@ export class Security {
 
   private warnings(a: AccountRow, methods: TwoStepMethodRow[], recovery: number, events: SecurityEventRow[], now: Date): SecurityWarning[] {
     const w: SecurityWarning[] = [];
-    if (!methods.length) w.push({ code: 'two_step_off', message: '2-step verification is off. Turn it on to protect your account.' });
+    // staff have no 2-step to turn on (they sign in with email and password)
+    if (!methods.length && a.realm !== 'staff') w.push({ code: 'two_step_off', message: '2-step verification is off. Turn it on to protect your account.' });
     else if (recovery < 3) w.push({ code: 'recovery_codes_low', message: recovery ? `Only ${recovery} recovery codes left. Create new ones.` : 'No recovery codes left. Create new ones.' });
     if (a.password_changed_at && now.getTime() - a.password_changed_at.getTime() > 365 * DAY) w.push({ code: 'password_old', message: 'Your password is more than a year old.' });
     const newDevice = events.find((e) => e.kind === 'signed_in_new_device' && now.getTime() - e.at.getTime() < 7 * DAY);
@@ -167,7 +168,6 @@ export class Security {
 
   /** GET /security */
   async getSecurity(principal: KernelPrincipal): Promise<SecurityOverview> {
-    const s = await this.core.cfg();
     const a = await this.core.accountOf(principal);
     const now = this.core.now();
     const sec = (await this.securityOf([a.id], 10, new Date(now.getTime() - 30 * DAY))).get(a.id)!;
@@ -175,7 +175,7 @@ export class Security {
       account: map.accountSummary(a, sec.methods.length > 0, now),
       passwordChangedAt: map.isoOrNull(a.password_changed_at),
       email: { address: a.email, verifiedAt: map.isoOrNull(a.email_verified_at), pendingChangeTo: sec.pendingEmail ?? null },
-      twoStep: map.twoStepStatus(a.realm, sec.methods, sec.recovery, s.staffTwoStepRequired),
+      twoStep: map.twoStepStatus(sec.methods, sec.recovery),
       devices: sec.devices.map((d) => map.device(d, principal.sessionId)),
       recentActivity: sec.events.map(map.securityEvent),
       warnings: this.warnings(a, sec.methods, sec.recovery, sec.events, now),
@@ -183,7 +183,7 @@ export class Security {
   }
 
   /**
-   * Shared step-up check (re-auth, inline current password, approval codes): wrong answers count on
+   * Shared step-up check (re-auth, inline current password, a member's 2-step code): wrong answers count on
    * the sign-in failure counter and lock step-up (and sign-in) for lockoutMinutes at the limit.
    */
   private async stepUpCheck(accountId: string, proof: { password?: string | null; code?: string | null }, o: { client?: ClientInfo; audience?: Audience | null }): Promise<{ ok: true } | { ok: false; error: AppError }> {
@@ -270,6 +270,8 @@ export class Security {
     const a = await this.core.accountOf(p);
     const purpose = body.purpose;
     if (!isReauthPurpose(purpose)) throw new AppError('VALIDATION_FAILED', 'Say which action this confirmation is for', issue('body.purpose', 'a step-up purpose such as payout-account'));
+    // staff have no 2-step: re-entering the password is how they confirm a sensitive Admin Center action
+    if (a.realm === 'staff' && !body.password) throw new AppError('VALIDATION_FAILED', 'Enter your password', issue('body.password', 'required'));
     if (!body.password && !body.code) throw new AppError('VALIDATION_FAILED', 'Enter your password or a 2-step code', issue('body.password', 'password or code required'));
     const s = await this.core.cfg();
     await this.requireStepUp(a.id, { password: body.password ?? null, code: body.password ? null : body.code }, { client: caller.client, audience: p?.audience });
@@ -309,11 +311,9 @@ export class Security {
     await this.core.repo.clearReauthUsed(tokenHash(token));
   }
 
-  /** Public API: password or 2-step code check before a sensitive action */
-  async verifyStepUp(accountId: string, proof: { password?: string; code?: string }): Promise<boolean> {
-    if (!isUuid(accountId) || (!proof.password && !proof.code)) return false;
-    const r = await this.stepUpCheck(accountId, proof, {});
-    return r.ok;
+  /** Staff sign in with email and password only (owner decision 2026-10-14): they cannot add a 2-step method */
+  private membersOnly(a: AccountRow) {
+    if (a.realm === 'staff') throw new AppError('TWO_STEP_NOT_FOR_STAFF', 'Staff accounts sign in with email and password; 2-step verification is not used for staff');
   }
 
   /** POST /two-step/setups */
@@ -321,6 +321,7 @@ export class Security {
     const s = await this.core.cfg();
     const now = this.core.now();
     const a = await this.core.accountOf(caller.principal);
+    this.membersOnly(a);
     if (body.method === 'sms') {
       if (this.core.ctx.config.launchPhase < 2) throw new AppError('METHOD_NOT_AVAILABLE', 'Text message codes are not available yet');
       if (!body.phone || !isE164(body.phone)) throw new AppError('VALIDATION_FAILED', 'Enter a mobile number in international format', issue('body.phone', 'E.164 number required for text messages'));
@@ -359,6 +360,7 @@ export class Security {
   async confirmTwoStepSetup(id: string, code: string, caller: Caller): Promise<RecoveryCodes> {
     const now = this.core.now();
     const a = await this.core.accountOf(caller.principal);
+    this.membersOnly(a);
     let method: TwoStepMethodRow | undefined;
     const outcome = await this.core.repo.transaction(async (repo): Promise<{ error: AppError } | { result: RecoveryCodes }> => {
       const c = await repo.getChallenge(id, { forUpdate: true });
@@ -368,7 +370,7 @@ export class Security {
       if (m instanceof AppError) return { error: m.code === 'CHALLENGE_LOCKED' ? new AppError('CODE_EXPIRED', 'Too many wrong codes; start again') : m };
       method = m;
       const codes = await this.newRecoveryCodes(repo, a.id, now);
-      // this session has now passed 2-step: its next refresh carries twoStepAt (staff can then use Admin Center)
+      // this session has now passed 2-step: its next refresh carries twoStepAt
       const sid = caller.principal?.sessionId;
       if (sid && isUuid(sid)) {
         const session = await repo.getSession(sid);
@@ -383,21 +385,18 @@ export class Security {
   }
 
   private async twoStepStatusOf(a: AccountRow): Promise<TwoStepStatus> {
-    const s = await this.core.cfg();
     const methods = await this.core.methodsOf(a.id);
     const recovery = (await this.core.repo.remainingRecoveryCodes([a.id])).get(a.id) ?? 0;
-    return map.twoStepStatus(a.realm, methods, recovery, s.staffTwoStepRequired);
+    return map.twoStepStatus(methods, recovery);
   }
 
   /** POST /two-step/methods/{id}/remove (re-auth verified by the middleware; a current 2-step code too) */
   async removeTwoStepMethod(id: string, code: string, caller: Caller): Promise<TwoStepStatus> {
-    const s = await this.core.cfg();
     const now = this.core.now();
     const a = await this.core.accountOf(caller.principal);
     const methods = await this.core.methodsOf(a.id);
     const target = methods.find((m) => m.id === id);
     if (!target) throw new AppError('NOT_FOUND', '2-step method not found');
-    if (a.realm === 'staff' && s.staffTwoStepRequired && methods.length <= 1) throw new AppError('TWO_STEP_REQUIRED', 'Staff accounts must keep at least one 2-step method');
     // the current authenticator code, or a recovery code (which also proves the second factor)
     const recoveryShaped = normalizeRecoveryCode(code).length === 10;
     const viaRecovery = recoveryShaped && (await this.core.repo.useRecoveryCode(a.id, this.core.recoveryHash(a.id, code), now));
@@ -503,7 +502,7 @@ export class Security {
         lockReason: locked ? a.lock_reason : null,
         failedSignInsInWindow: failuresInWindow(a, now, s.lockoutMinutes),
         twoStep: (() => {
-          const t = map.twoStepStatus(a.realm, x.methods, x.recovery, s.staffTwoStepRequired);
+          const t = map.twoStepStatus(x.methods, x.recovery);
           return { enabled: t.enabled, required: t.required, methods: t.methods.map((m) => ({ id: m.id, method: m.method.toUpperCase(), label: m.label, addedAt: m.addedAt, lastUsedAt: m.lastUsedAt ?? null })), recoveryCodesRemaining: t.recoveryCodesRemaining };
         })(),
         devices: x.devices.map((d) => ({ id: d.id, kind: d.kind, label: d.label, location: d.last_location, audiences: d.audiences, firstSeenAt: map.iso(d.first_seen_at), lastActiveAt: map.iso(d.last_active_at), twoStepTrustedUntil: map.isoOrNull(d.two_step_trusted_until) })),

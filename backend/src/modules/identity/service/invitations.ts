@@ -1,6 +1,11 @@
 /**
- * Invitations: staff and seller-member invitations, accepting one (password and, for staff, 2-step setup), and
- * the staff list with resend and revoke.
+ * Invitations: staff and seller-member invitations, accepting one (password and, for staff, the invitation pass
+ * code), and the staff list with resend and revoke.
+ *
+ * Staff pass codes (owner decision 2026-10-14: the server runs offline, staff use no authenticator app): each staff
+ * link comes with a pass code that only the code which created the invitation sees (StaffInvitationIssued, printed
+ * by npm run bootstrap-owner and npm run staff-link). The link alone, e.g. from a forwarded email, does not let
+ * anyone in. Only a keyed hash is stored, and the 5th wrong pass code ends the link.
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
@@ -9,32 +14,51 @@ import type * as common from '../../../spec/common.js';
 import type {
   AcceptInvitationRequest,
   AcceptInvitationResult,
-  DeviceInfo,
   Invitation,
   InvitationView,
-  RecoveryCodes,
-  SessionTokens,
+  StaffInvitationIssued,
 } from '../../../spec/identity.js';
-import { hashPassword, randomToken, tokenHash, verifyPassword } from '../domain/crypto.js';
+import { hashPassword, newPassCode, randomToken, safeEqual, tokenHash, verifyPassword } from '../domain/crypto.js';
 import { lockInForce, normalizeEmail, type Realm } from '../domain/policy.js';
 import { accountStatusMachine, invitationMachine } from '../domain/state-machines.js';
 import { maskEmail } from '../domain/text.js';
 import * as map from '../mappers.js';
-import type { InvitationRow } from '../ports.js';
+import type { AccountRow, InvitationRow } from '../ports.js';
 import type { IdentityRepository } from '../repository.js';
 import { type Core, type ClientInfo, type Caller, type WithCookie, DAY, issue } from './core.js';
-import type { Security } from './security.js';
 import type { Authentication } from './authentication.js';
+
+/** Wrong pass codes a staff link allows; the last one revokes it (the operator issues a new link with npm run staff-link) */
+export const PASS_CODE_ATTEMPTS = 5;
+const PASS_CODE_LOCKED = 'Too many wrong pass codes';
 
 export class Invitations {
   constructor(
     readonly core: Core,
-    readonly security: Security,
     readonly authentication: Authentication,
   ) {}
 
   private invitationUrl(i: Pick<InvitationRow, 'purpose'>, token: string) {
     return `${this.core.appUrl(i.purpose === 'staff' ? 'admin' : 'seller')}/invitation#token=${token}`;
+  }
+
+  /** The pass code typed on the accept page matches the one handed over with this link */
+  private passCodeMatches(i: InvitationRow, passCode: string | null | undefined): boolean {
+    if (!i.pass_code_hash || typeof passCode !== 'string' || !passCode.trim()) return false;
+    return safeEqual(i.pass_code_hash, this.core.passCodeHash(i.id, passCode));
+  }
+
+  /**
+   * Counts a wrong pass code on the link. The 5th revokes the link but keeps the account invited and its roles
+   * waiting (no identity.invitation.revoked), so npm run staff-link can hand over a new link and pass code.
+   */
+  private async wrongPassCode(repo: IdentityRepository, i: InvitationRow, a: AccountRow, caller: Caller, now: Date): Promise<AppError> {
+    const attempts = (i.pass_code_attempts ?? 0) + 1;
+    const revoked = attempts >= PASS_CODE_ATTEMPTS;
+    await repo.updateInvitation(i.id, revoked ? { pass_code_attempts: attempts, status: invitationMachine.next('pending', 'revoke'), revoked_at: now, revoke_reason: PASS_CODE_LOCKED } : { pass_code_attempts: attempts });
+    await this.core.securityEvent(repo, a.id, 'sign_in_failed', 'failed', { client: caller.client, audience: 'admin', detail: { reason: 'invitation_pass_code', revoked } });
+    if (revoked) return new AppError('PASS_CODE_INVALID', 'Too many wrong pass codes: this invitation link no longer works. Ask for a new link and pass code.', { attemptsLeft: 0 });
+    return new AppError('PASS_CODE_INVALID', 'That pass code is not right', { attemptsLeft: PASS_CODE_ATTEMPTS - attempts });
   }
 
   private invitationCreated(i: InvitationRow, token: string, by?: { actor?: common.Actor; requestId?: string }) {
@@ -79,7 +103,7 @@ export class Invitations {
       name: i.name,
       contextLabel: i.context_label,
       existingAccount: i.purpose === 'seller_member' && Boolean(a?.password_hash) && a?.status !== 'invited',
-      requiresTwoStepSetup: i.purpose === 'staff' && s.staffTwoStepRequired,
+      requiresPassCode: i.purpose === 'staff',
       policy: this.core.policyFor(i.realm as Realm, s),
       expiresAt: map.iso(i.expires_at),
     };
@@ -90,6 +114,8 @@ export class Invitations {
     const s = await this.core.cfg();
     const now = this.core.now();
     const peek = await this.liveInvitation(this.core.repo, body.token, now);
+    // a missing pass code is a form problem, not a guess: refused before anything is counted
+    if (peek.purpose === 'staff' && !body.passCode?.trim()) throw new AppError('PASS_CODE_INVALID', 'Enter the pass code you were given with the link', { attemptsLeft: PASS_CODE_ATTEMPTS - (peek.pass_code_attempts ?? 0) });
     const peekAccount = await this.invitedAccount(this.core.repo, peek);
     const existingMember = peek.purpose === 'seller_member' && peekAccount && peekAccount.password_hash && peekAccount.status !== 'invited' ? peekAccount : undefined;
     const name = body.name?.trim() || peek.name;
@@ -111,19 +137,20 @@ export class Invitations {
 
       if (i.purpose === 'staff') {
         if (!a || a.status !== 'invited') throw new AppError('INVITATION_INVALID', 'This invitation is no longer valid');
-        a = await this.core.storePassword(repo, a.id, hash!, now, { display_name: name });
-        if (s.staffTwoStepRequired) {
-          const setup = await this.security.newTotpSetup(repo, a, { invitationId: i.id }, s, now);
-          return { result: { status: 'two_step_setup_required', account: await this.core.summaryOf(a, repo), tokens: null, twoStepSetup: setup } };
+        // counted in this transaction, which commits: the error is returned, not thrown
+        if (!this.passCodeMatches(i, body.passCode)) {
+          const error = await this.wrongPassCode(repo, i, a, caller, now);
+          return { error };
         }
-        a = await repo.updateAccount(a.id, { status: accountStatusMachine.next('invited', 'acceptInvitation'), email_verified_at: now });
+        // the link and the pass code are the proof: the account is active and signed in at once (no 2-step set-up)
+        a = await this.core.storePassword(repo, a.id, hash!, now, { display_name: name, status: accountStatusMachine.next('invited', 'acceptInvitation'), email_verified_at: now });
         await repo.updateInvitation(i.id, { status: invitationMachine.next('pending', 'accept'), accepted_at: now, account_id: a.id });
         const done = await this.core.completeSignIn(repo, a, { audience: 'admin', device: body.device, client: caller.client, keepSignedIn: false, twoStepVerified: false, method: 'invitation' }, s, now);
         after = () => {
           this.core.publish('identity.invitation.accepted', { invitationId: i.id, accountId: a!.id, purpose: i.purpose, contextRef: i.context_ref }, caller);
           done.after();
         };
-        return { result: { status: 'signed_in', account: done.result.account!, tokens: done.result.tokens, twoStepSetup: null } };
+        return { result: { status: 'signed_in', account: done.result.account!, tokens: done.result.tokens } };
       }
 
       // seller member: an existing member account confirms with its password; otherwise one is created
@@ -187,52 +214,24 @@ export class Invitations {
         opened.after();
       };
       const fresh = (await repo.getAccount(account.id))!;
-      return { result: { status: 'signed_in', account: await this.core.summaryOf(fresh, repo), tokens: this.core.sessionTokens(opened.session, opened.refreshToken, s), twoStepSetup: null } };
+      return { result: { status: 'signed_in', account: await this.core.summaryOf(fresh, repo), tokens: this.core.sessionTokens(opened.session, opened.refreshToken, s) } };
     });
     after();
     if ('error' in outcome) throw outcome.error;
     return this.core.deliver(outcome.result, web, now);
   }
 
-  /** POST /invitations/two-step: staff confirm the authenticator and get their first session */
-  async confirmInvitationTwoStep(body: { token: string; setupId: string; code: string; device: DeviceInfo }, caller: Caller): Promise<WithCookie<{ tokens: SessionTokens; recoveryCodes: RecoveryCodes }>> {
-    const s = await this.core.cfg();
-    const now = this.core.now();
-    let after = () => {};
-    const outcome = await this.core.repo.transaction(async (repo): Promise<{ error: AppError } | { result: { tokens: SessionTokens; recoveryCodes: RecoveryCodes } }> => {
-      const i = await this.liveInvitation(repo, body.token, now, true);
-      if (i.purpose !== 'staff') throw new AppError('INVITATION_INVALID', 'This invitation does not need 2-step set-up');
-      let a = await this.invitedAccount(repo, i, true);
-      if (!a || a.status !== 'invited' || !a.password_hash) throw new AppError('INVITATION_INVALID', 'Accept the invitation and choose a password first');
-      const c = isUuid(body.setupId) ? await repo.getChallenge(body.setupId, { forUpdate: true }) : undefined;
-      if (!c || c.purpose !== 'two_step_setup' || c.account_id !== a.id) throw new AppError('CODE_EXPIRED', 'This set-up has expired; accept the invitation again');
-      if (c.status !== 'pending' || c.expires_at <= now) throw new AppError('CODE_EXPIRED', 'This set-up has expired; accept the invitation again');
-      const method = await this.security.confirmSetup(repo, c, a, body.code, now);
-      if (method instanceof AppError) return { error: method.code === 'CHALLENGE_LOCKED' ? new AppError('CODE_EXPIRED', 'Too many wrong codes; accept the invitation again') : method };
-      const recoveryCodes = await this.security.newRecoveryCodes(repo, a.id, now);
-      a = await repo.updateAccount(a.id, { status: accountStatusMachine.next('invited', 'acceptInvitation'), email_verified_at: now });
-      await repo.updateInvitation(i.id, { status: invitationMachine.next('pending', 'accept'), accepted_at: now, account_id: a.id });
-      await this.core.securityEvent(repo, a.id, 'two_step_enabled', 'completed', { client: caller.client, detail: { method: 'totp' } });
-      const opened = await this.core.openSession(repo, a, { audience: 'admin', device: body.device, client: caller.client, keepSignedIn: false, twoStepVerified: true, method: 'invitation' }, s, now);
-      const self: common.Actor = { kind: 'staff', id: a.id };
-      after = () => {
-        this.core.publish('identity.two_step.changed', { accountId: a!.id, enabled: true, method: 'totp', by: self }, caller);
-        this.core.publish('identity.invitation.accepted', { invitationId: i.id, accountId: a!.id, purpose: i.purpose, contextRef: i.context_ref }, caller);
-        opened.after();
-      };
-      return { result: { tokens: this.core.sessionTokens(opened.session, opened.refreshToken, s), recoveryCodes } };
-    });
-    after();
-    if ('error' in outcome) throw outcome.error;
-    return this.core.deliver(outcome.result, body.device.kind === 'web', now);
-  }
-
-  /** Public API: invite a staff member (access assigns the roles) */
-  async inviteStaff(input: { email: string; name: string; invitedBy: common.Actor }): Promise<Invitation> {
+  /**
+   * Public API: invite a staff member (access assigns the roles). The link is emailed (identity.invitation.created);
+   * the pass code only comes back here, for the server tools to print.
+   */
+  async inviteStaff(input: { email: string; name: string; invitedBy: common.Actor }): Promise<StaffInvitationIssued> {
     const s = await this.core.cfg();
     const now = this.core.now();
     const email = normalizeEmail(input.email);
     const token = randomToken();
+    const passCode = newPassCode();
+    const invitationId = newId();
     const row = await this.core.repo.transaction(async (repo) => {
       let a = await repo.findAccount('staff', email, { forUpdate: true });
       if (a && a.status !== 'invited') throw new AppError('EMAIL_IN_USE', 'A staff account already uses that email');
@@ -265,7 +264,7 @@ export class Invitations {
       }
       await repo.revokePendingInvitations({ email: a.email, purpose: 'staff', contextRef: null }, 'replaced', now);
       const i: InvitationRow = {
-        id: newId(),
+        id: invitationId,
         realm: 'staff',
         purpose: 'staff',
         email: a.email,
@@ -274,6 +273,8 @@ export class Invitations {
         context_ref: null,
         context_label: null,
         token_hash: tokenHash(token),
+        pass_code_hash: this.core.passCodeHash(invitationId, passCode),
+        pass_code_attempts: 0,
         invited_by_kind: input.invitedBy.kind,
         invited_by_id: input.invitedBy.id ?? '',
         status: invitationMachine.initial,
@@ -287,7 +288,7 @@ export class Invitations {
       return i;
     });
     this.invitationCreated(row, token, { actor: input.invitedBy });
-    return map.invitation(row, now);
+    return { invitation: map.invitation(row, now), acceptUrl: this.invitationUrl(row, token), passCode };
   }
 
   /** Public API: invite a person to act for a seller (reuses their member account) */
@@ -309,6 +310,9 @@ export class Invitations {
         context_ref: input.sellerId,
         context_label: input.sellerName,
         token_hash: tokenHash(token),
+        // seller members accept with the link alone (unchanged): pass codes are for staff only
+        pass_code_hash: null,
+        pass_code_attempts: 0,
         invited_by_kind: input.invitedBy.kind,
         invited_by_id: input.invitedBy.id ?? '',
         status: invitationMachine.initial,
@@ -338,23 +342,39 @@ export class Invitations {
     return i;
   }
 
-  /** POST /invitations/{id}/resend: a new 7-day link; the old one stops working */
-  async resendInvitation(id: string, caller: Caller): Promise<Invitation> {
+  /**
+   * POST /invitations/{id}/resend and npm run staff-link: a new 7-day link and pass code; the old ones stop working.
+   * The HTTP endpoint answers only the invitation: the pass code reaches the person through the server operator.
+   */
+  async resendInvitation(id: string, caller: Caller): Promise<StaffInvitationIssued> {
     const s = await this.core.cfg();
     const now = this.core.now();
     await this.staffInvitation(id);
     const token = randomToken();
+    const passCode = newPassCode();
     const row = await this.core.repo.transaction(async (repo) => {
       const i = (await repo.getInvitation(id, { forUpdate: true }))!;
       const from = i.status === 'pending' && i.expires_at <= now ? 'expired' : i.status;
       const status = invitationMachine.next(from as never, 'resend');
       const a = i.account_id ? await repo.getAccount(i.account_id) : undefined;
+      if (a && a.status === 'closed') throw new AppError('ILLEGAL_TRANSITION', 'This invitation was cancelled; invite the person again', { from: i.status, event: 'resend' });
       if (a && a.status !== 'invited') throw new AppError('ILLEGAL_TRANSITION', 'This person already has an active staff account', { from: a.status, event: 'resend' });
-      return repo.updateInvitation(i.id, { status, token_hash: tokenHash(token), sent_at: now, expires_at: new Date(now.getTime() + s.invitationTtlDays * DAY) });
+      // one live link per person: a newer invitation still pending is replaced by this one
+      await repo.revokePendingInvitations({ email: i.email, purpose: 'staff', contextRef: null }, 'replaced', now);
+      return repo.updateInvitation(i.id, {
+        status,
+        token_hash: tokenHash(token),
+        pass_code_hash: this.core.passCodeHash(i.id, passCode),
+        pass_code_attempts: 0,
+        sent_at: now,
+        expires_at: new Date(now.getTime() + s.invitationTtlDays * DAY),
+        revoked_at: null,
+        revoke_reason: null,
+      });
     });
     this.invitationCreated(row, token, caller);
     await this.core.audit({ action: 'identity.invitation.resend', actionLabel: 'Resent staff invitation', target: { type: 'staff_invitation', id: row.id, label: `${row.name} (${row.email})`, screen: 'admin/staff' } }, caller);
-    return map.invitation(row, now);
+    return { invitation: map.invitation(row, now), acceptUrl: this.invitationUrl(row, token), passCode };
   }
 
   /** POST /invitations/{id}/revoke: the invited account closes */
@@ -377,12 +397,13 @@ export class Invitations {
     const result = await this.core.repo.transaction(async (repo) => {
       const i = isUuid(id) ? await repo.getInvitation(id, { forUpdate: true }) : undefined;
       if (!i || (o.contextRef !== undefined && i.context_ref !== o.contextRef)) throw new AppError('NOT_FOUND', 'Invitation not found');
-      if (i.status === 'revoked') return { row: i, changed: false };
+      const a = i.account_id ? await repo.getAccount(i.account_id, { forUpdate: true }) : undefined;
+      // a staff link ended by wrong pass codes is revoked but its account still waits: cancelling it closes the account
+      const lockedOut = i.status === 'revoked' && i.revoke_reason === PASS_CODE_LOCKED && a?.status === 'invited';
+      if (i.status === 'revoked' && !lockedOut) return { row: i, changed: false };
       // a pending link past its end is expired even before the hourly job marks it
       const from = i.status === 'pending' && i.expires_at <= now ? 'expired' : i.status;
-      const status = invitationMachine.next(from as never, 'revoke');
-      const updated = await repo.updateInvitation(i.id, { status, revoked_at: now, revoke_reason: o.reason });
-      const a = i.account_id ? await repo.getAccount(i.account_id, { forUpdate: true }) : undefined;
+      const updated = await repo.updateInvitation(i.id, lockedOut ? { revoked_at: now, revoke_reason: o.reason } : { status: invitationMachine.next(from as never, 'revoke'), revoked_at: now, revoke_reason: o.reason });
       if (a && a.status === 'invited') await repo.updateAccount(a.id, { status: accountStatusMachine.next('invited', 'revokeInvitation'), closed_at: now });
       return { row: updated, changed: true };
     });

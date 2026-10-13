@@ -49,8 +49,6 @@ export const publicRoutes = (service: IdentityService) =>
     getInvitation: async ({ body }) => service.invitations.getInvitation(body.token),
     /** POST /invitations/accept: Accept an invitation and set a password */
     acceptInvitation: async (input) => send(input.reply, await service.invitations.acceptInvitation(input.body, caller(input))),
-    /** POST /invitations/two-step: Staff: confirm the authenticator code and start the first session */
-    confirmInvitationTwoStep: async (input) => send(input.reply, await service.invitations.confirmInvitationTwoStep(input.body, caller(input))),
     /** POST /external-sign-ins: Continue with Google or Apple */
     externalSignIn: async (input) => send(input.reply, await service.authentication.externalSignIn(input.body, caller(input))),
   });

@@ -150,6 +150,24 @@ export function newRecoveryCode(): string {
 
 export const normalizeRecoveryCode = (code: string) => code.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+/* ------------------------------------------------------------------ staff invitation pass codes */
+
+/** Upper case letters and digits without look-alikes (no 0/O, 1/I/L): read aloud or copied from paper without mistakes */
+const PASS_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+/**
+ * `XXXX-XXXX`, about 40 bits. Short enough to hand over in person; guessing is stopped by the 5 attempts a link
+ * allows, and the stored hash is keyed (core.passCodeHash), so a copy of the database does not reveal it.
+ */
+export function newPassCode(): string {
+  let s = '';
+  for (let i = 0; i < 8; i++) s += PASS_CODE_ALPHABET[randomInt(0, PASS_CODE_ALPHABET.length)];
+  return `${s.slice(0, 4)}-${s.slice(4)}`;
+}
+
+/** What the person typed, in the form that was hashed: any case, the dash and spaces ignored */
+export const normalizePassCode = (code: string) => code.toUpperCase().replace(/[\s-]/g, '');
+
 /* ------------------------------------------------------------------ keys derived from identity's signing key */
 
 /**

@@ -28,6 +28,7 @@ import type {
 import {
   hashPassword,
   IdentityKeys,
+  normalizePassCode,
   normalizeRecoveryCode,
   randomToken,
   sixDigitCode,
@@ -120,6 +121,11 @@ const REAUTH_PURPOSES: Record<ReauthRequest['purpose'], true> = {
   'business-change': true,
   'payout-account': true,
   'seller-closure': true,
+  // staff confirm these with their password (they have no 2-step)
+  'role-grant': true,
+  'staff-account': true,
+  'payout-destination': true,
+  approval: true,
 };
 export const isReauthPurpose = (v: unknown): v is ReauthRequest['purpose'] => typeof v === 'string' && Object.hasOwn(REAUTH_PURPOSES, v);
 
@@ -186,7 +192,6 @@ export class Core {
       memberMinPasswordLength,
       staffMinPasswordLength,
       passwordHistoryCount,
-      staffTwoStepRequired,
       trustedDeviceDays,
       invitationTtlDays,
       guestSessionTtlDays,
@@ -213,7 +218,6 @@ export class Core {
       g('memberMinPasswordLength'),
       g('staffMinPasswordLength'),
       g('passwordHistoryCount'),
-      g('staffTwoStepRequired'),
       g('trustedDeviceDays'),
       g('invitationTtlDays'),
       g('guestSessionTtlDays'),
@@ -241,7 +245,6 @@ export class Core {
       memberMinPasswordLength,
       staffMinPasswordLength,
       passwordHistoryCount,
-      staffTwoStepRequired,
       trustedDeviceDays,
       invitationTtlDays,
       guestSessionTtlDays,
@@ -308,6 +311,11 @@ export class Core {
 
   recoveryHash(accountId: string, code: string) {
     return this.keys.hmac('recovery-codes', `${accountId}:${normalizeRecoveryCode(code)}`);
+  }
+
+  /** A staff invitation's pass code, keyed with the server's secret and bound to the invitation */
+  passCodeHash(invitationId: string, code: string) {
+    return this.keys.hmac('invitation-pass-codes', `${invitationId}:${normalizePassCode(code)}`);
   }
 
   async methodsOf(accountId: string) {

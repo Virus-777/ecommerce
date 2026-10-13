@@ -98,6 +98,7 @@ export function securityLabel(kind: string, detail: Record<string, unknown>, aud
     case 'sign_in_failed':
       if (detail.reason === 'second_factor') return 'Wrong 2-step code';
       if (detail.reason === 'step_up') return 'Wrong password or code when confirming it was you';
+      if (detail.reason === 'invitation_pass_code') return detail.revoked ? 'Wrong invitation pass code: the link no longer works' : 'Wrong invitation pass code';
       return typeof detail.attemptsLeft === 'number' ? `Wrong password (${detail.attemptsLeft} attempts left)` : 'Wrong password';
     case 'sign_in_blocked':
       return detail.cause === 'disabled' ? 'Sign-in refused: the account is disabled' : 'Sign-in blocked while the account is locked';

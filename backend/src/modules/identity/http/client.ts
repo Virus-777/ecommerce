@@ -30,7 +30,6 @@ export const SESSION_COOKIE_ENDPOINTS = [
   'externalSignIn',
   'confirmVerification',
   'acceptInvitation',
-  'confirmInvitationTwoStep',
   'refreshSession',
   'signOut',
   'switchSellerContext',

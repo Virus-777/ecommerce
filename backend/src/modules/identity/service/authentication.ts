@@ -151,8 +151,10 @@ export class Authentication {
     s: Awaited<ReturnType<Core['cfg']>>,
     now: Date,
   ): Promise<{ result: SignInResult; after: () => void }> {
-    const methods = await repo.activeMethods([a.id]);
-    const needsSecondFactor = methods.length > 0 && (a.realm === 'staff' || !(await this.core.trustedDevice(repo, a.id, o.device, now)));
+    // staff sign in with email and password only (owner decision 2026-10-14); members with 2-step get a challenge
+    // unless this device is remembered
+    const methods = a.realm === 'member' ? await repo.activeMethods([a.id]) : [];
+    const needsSecondFactor = methods.length > 0 && !(await this.core.trustedDevice(repo, a.id, o.device, now));
     if (needsSecondFactor) {
       await repo.updateAccount(a.id, { failed_sign_ins: 0, failed_window_started_at: null });
       const challenge = await this.newSignInChallenge(
@@ -165,8 +167,6 @@ export class Authentication {
       );
       return { result: { status: 'second_factor_required', account: null, tokens: null, challenge, sellerContexts: [], passwordResetToken: null }, after: () => {} };
     }
-    // staff without a method (after a staff reset) sign in without twoStepAt: admin areas refuse
-    // with STEP_UP_REQUIRED until they add a method through /api/store/identity/two-step/setups
     return this.core.completeSignIn(
       repo,
       a,
