@@ -23,7 +23,8 @@ import {
 } from '../domain/rules.js';
 import { productReviewMachine, publicationMachine } from '../domain/state-machines.js';
 import { imageRulesOfRow, stringMap, strings } from '../mappers.js';
-import type { BrandRow, CatalogRepository, CheckRow, ProductRow, SubmissionRow, VariantRow } from '../ports.js';
+import type { BrandRow, CheckRow, ProductRow, SubmissionRow, VariantRow } from '../ports.js';
+import { GtinTakenError, type CatalogRepository } from '../repository.js';
 import { invalid, notFound, type By, type ReviewClock } from './base.js';
 import { CatalogTaxonomy } from './taxonomy.js';
 
@@ -294,7 +295,7 @@ export class CatalogProducts extends CatalogTaxonomy {
     } catch (err) {
       for (const s of swaps) await s.undo();
       if (isAppError(err)) throw err;
-      if (/variants_gtin_key|unique/i.test(String((err as Error).message))) throw invalid('variants', 'A GTIN is already used by another product');
+      if (err instanceof GtinTakenError) throw invalid('variants', 'A GTIN is already used by another product');
       throw err;
     }
     for (const s of swaps) await s.commit();

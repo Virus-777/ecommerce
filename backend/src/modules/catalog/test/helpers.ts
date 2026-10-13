@@ -14,7 +14,7 @@ import { vi } from 'vitest';
 import type { EventEnvelope } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as audit from '../../../spec/audit.js';
-import { auth, buildTestApp, callers } from '../../../testing/app.js';
+import { auth, buildTestApp, callers, movingClock } from '../../../testing/app.js';
 import type { CatalogService } from '../service.js';
 
 export { auth, callers, newId };
@@ -71,7 +71,7 @@ export type Stubs = ReturnType<typeof stubs>;
 export interface CatalogTestApp {
   app: FastifyInstance;
   catalog: CatalogService;
-  clock: { now(): Date; advance(ms: number): void; set(d: Date | string): void };
+  clock: ReturnType<typeof movingClock>;
   stubs: Stubs;
   events: EventEnvelope[];
   eventsNamed(name: string): EventEnvelope[];
@@ -82,8 +82,7 @@ export interface CatalogTestApp {
 /** `extra`: more modules to enable and more API stubs (e.g. settings with a business calendar) */
 export async function catalogApp(extra: { only?: string[]; apiStubs?: Record<string, object> } = {}): Promise<CatalogTestApp> {
   // follows real time (tokens are signed with it); tests move it forward by small steps
-  let offset = 0;
-  const clock = { now: () => new Date(Date.now() + offset), advance: (ms: number) => void (offset += ms), set: (d: Date | string) => void (offset = new Date(d).getTime() - Date.now()) };
+  const clock = movingClock();
   const s = stubs();
   const app = await buildTestApp({
     only: ['catalog', 'media', 'audit', 'access', 'sellers', 'offers', 'reports', 'cart', 'orders', 'reviews', ...(extra.only ?? [])],

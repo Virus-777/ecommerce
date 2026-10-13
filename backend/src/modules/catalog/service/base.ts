@@ -9,7 +9,8 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { MediaOwner, UsageInput } from '../../../spec/media.js';
 import { addBusinessDays } from '../domain/rules.js';
-import type { CatalogRepository, CategoryRow } from '../ports.js';
+import type { CategoryRow } from '../ports.js';
+import type { CatalogRepository } from '../repository.js';
 
 /**
  * Review dates of a new submission, prepared before a transaction: the target (setting reviewTargetBusinessDays) and

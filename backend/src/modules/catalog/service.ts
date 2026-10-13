@@ -20,7 +20,7 @@ const MAX_BATCH = 200;
 const invalid = (path: string, message: string) => new AppError('VALIDATION_FAILED', message, { issues: [{ path, message }] });
 
 /**
- * Catalog use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Catalog use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, an endpoint, a consumed event or a job in docs/api/spec/modules/catalog.json.
  * The use cases are layered in service/: base → views → taxonomy → products → review → admin → this class.
  */
