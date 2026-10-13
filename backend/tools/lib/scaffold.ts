@@ -38,8 +38,8 @@ export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields }:
     return `import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/${n}.js';
 ${hasFragment ? `import { resolvers } from './graphql/resolvers.js';\nimport { typeDefs } from './graphql/schema.js';\n` : ''}${areas.map((a) => `import { ${a}Routes } from './http/${a}.js';`).join('\n')}
-import { createMongo${P}Repository } from './infra/mongo/repository.js';
-import { schemas } from './infra/mongo/schema.js';
+import { createMongo${P}Repository } from './repository.js';
+import { schemas } from './schema.js';
 import { ${P}Service } from './service.js';
 
 /**
@@ -78,7 +78,7 @@ export const { permissions, approvalActions } = spec;
     const tables = (mod.tables ?? []).map((t) => `${n}.${t.name}`);
     return `/**
  * What the ${n} service needs from the outside world, database-agnostic.
- * The MongoDB adapter lives in infra/mongo/ (backend/docs/BUILDING-MODULES.md §5b).
+ * The MongoDB adapter is repository.ts (backend/docs/BUILDING-MODULES.md §5b).
  */
 
 /** Persistence for this module's own collections: ${tables.join(', ') || '(none)'}. */
@@ -86,8 +86,8 @@ export interface ${P}Repository {}
 `;
   };
 
-  files['infra/mongo/repository.ts'] = () => `import type { ModuleStore } from '../../../../kernel/mongo/index.js';
-import type { ${P}Repository } from '../../ports.js';
+  files['repository.ts'] = () => `import type { ModuleStore } from '../../kernel/mongo/index.js';
+import type { ${P}Repository } from './ports.js';
 
 /** MongoDB adapter for ${P}Repository (backend/docs/BUILDING-MODULES.md §5b): one collection per spec table, store.table(name). */
 export function createMongo${P}Repository(store: ModuleStore): ${P}Repository {

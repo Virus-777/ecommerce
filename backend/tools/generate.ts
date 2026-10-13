@@ -148,7 +148,7 @@ export const typeDefs = ${JSON.stringify(fragment)};
   {
     // Mongoose schemas of the module's collections (problems are reported by the spec emitter)
     const plans = planTables(m, []);
-    generated.set(join(dir, 'infra', 'mongo', 'schema.ts'), emitMongooseSchemas(m, plans, collectionDefs(m, plans, []), GENERATED(`docs/api/spec/modules/${m.name}.json`)));
+    generated.set(join(dir, 'schema.ts'), emitMongooseSchemas(m, plans, collectionDefs(m, plans, []), GENERATED(`docs/api/spec/modules/${m.name}.json`)));
   }
   const files = scaffoldFiles({ mod: m, common, types: new TypeContext(m, commonTypes, byName), hasFragment: Boolean(fragment), sourceFields: sourceFieldsOf(m, fragment) });
   for (const [rel, content] of Object.entries(files)) {

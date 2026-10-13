@@ -1,5 +1,5 @@
 /**
- * Spec tables → each module's generated Mongoose schemas (src/modules/<m>/infra/mongo/schema.ts,
+ * Spec tables → each module's generated Mongoose schemas (src/modules/<m>/schema.ts,
  * docs/04-mongodb-migration.md §3): one schema per collection `<module>.<table>`, with the field types, NOT NULL,
  * enum values, checks and indexes of the spec (the same collection definitions as lib/mongo.ts).
  */
@@ -81,7 +81,7 @@ export function emitMongooseSchemas(mod: ModuleSpec, plans: TablePlan[], defs: R
  * (kernel/mongo/schema.ts); repositories reach them through ctx.mongo.table(name).
  */
 import { Schema } from 'mongoose';
-import { __HELPERS__ } from '../../../../kernel/mongo/schemas.js';
+import { __HELPERS__ } from '../../kernel/mongo/schemas.js';
 `);
   for (const { table, columns } of plans) {
     const def = defs[table.name]!;
