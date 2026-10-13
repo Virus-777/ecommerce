@@ -158,7 +158,7 @@ describe('addresses', () => {
     const first = await kit.service.rememberCheckoutAddress(c.customerId, address(), 'Home');
     const again = await kit.service.rememberCheckoutAddress(c.customerId, address({ line1: '123  MAIN street' }));
     expect(again.id).toBe(first.id);
-    expect((await kit.service.listAddresses({ kind: 'customer', accountId: c.accountId, customerId: c.customerId })).length).toBe(1);
+    expect((await kit.service.addresses.listAddresses({ kind: 'customer', accountId: c.accountId, customerId: c.customerId })).length).toBe(1);
   });
 });
 

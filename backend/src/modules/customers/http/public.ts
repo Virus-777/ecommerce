@@ -8,5 +8,5 @@ import type { CustomersService } from '../service.js';
 export const publicRoutes = (service: CustomersService) =>
   routes(endpoints, 'public', {
     /** POST /unsubscribe: One-click stop of promotional messages from an email or SMS link */
-    unsubscribe: async ({ body, actor, requestId, request }) => service.unsubscribe(body, { actor, requestId, ip: request.ip }),
+    unsubscribe: async ({ body, actor, requestId, request }) => service.marketing.unsubscribe(body, { actor, requestId, ip: request.ip }),
   });

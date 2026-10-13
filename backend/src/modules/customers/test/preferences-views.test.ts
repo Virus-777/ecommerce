@@ -38,7 +38,7 @@ describe('marketing preferences', () => {
     await kit.call('PUT', `${STORE}/marketing-preferences`, { token: c.token, body: { smsPromotions: true } });
     expect(kit.of('customers.marketing_preferences.changed').length).toBe(before + 1);
     expect(await kit.service.getMarketingConsent(c.customerId)).toMatchObject({ smsPromotions: true, recentSearches: false });
-    const log = await (kit.service as any).deps.repo.consentLog(c.customerId);
+    const log = await kit.service.core.deps.repo.consentLog(c.customerId);
     expect(log.filter((r: any) => r.source === 'app_settings').map((r: any) => [r.channel, r.granted]).sort()).toEqual([
       ['recent_searches', false],
       ['sms', true],

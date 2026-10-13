@@ -279,13 +279,13 @@ describe('events from other modules', () => {
     const enforcement = { enforcementId: newId(), reportId: newId(), action: 'restrict_customer_messaging', ownerTeam: 'customers', targets: [{ type: 'customer', id: c.customerId, label: 'Ana' }], reason: 'Harassing sellers', params: {}, appealDeadline: new Date(kit.clock.now().getTime() + 14 * 86_400_000).toISOString(), alreadyApplied: false };
     await kit.publish('trust', 'trust.enforcement.recorded', enforcement, { kind: 'staff', id: newId() });
     await kit.publish('trust', 'trust.enforcement.recorded', enforcement);
-    const rs = await kit.service.restrictionsOf(c.customerId, true);
+    const rs = await kit.service.admin.restrictionsOf(c.customerId, true);
     expect(rs).toHaveLength(1);
     expect(rs[0]).toMatchObject({ scope: 'messaging', reason: 'Harassing sellers', trustEnforcementId: enforcement.enforcementId, trustReportId: enforcement.reportId, appealRoute: expect.stringContaining('Trust actions'), setBy: { kind: 'staff' } });
     expect(kit.of('customers.account.restricted').at(-1)).toMatchObject({ trustEnforcementId: enforcement.enforcementId });
     // other actions and other targets are ignored
     await kit.publish('trust', 'trust.enforcement.recorded', { ...enforcement, enforcementId: newId(), action: 'suspend_offer' });
-    expect(await kit.service.restrictionsOf(c.customerId, true)).toHaveLength(1);
+    expect(await kit.service.admin.restrictionsOf(c.customerId, true)).toHaveLength(1);
   });
 
   it('trust.enforcement.reversed lifts the restrictions that enforcement created and returns the account to active (once)', async () => {
@@ -314,12 +314,12 @@ describe('events from other modules', () => {
     const lifted = kit.of('customers.account.restriction_lifted').length;
     await kit.publish('trust', 'trust.enforcement.reversed', reversed);
     await kit.publish('trust', 'trust.enforcement.reversed', reversed); // redelivered: nothing more
-    let rs = await kit.service.restrictionsOf(c.customerId, true);
+    let rs = await kit.service.admin.restrictionsOf(c.customerId, true);
     expect(rs.find((r) => r.trustEnforcementId === enforcement.enforcementId)).toMatchObject({ state: 'lifted' });
     expect(rs.find((r) => r.scope === 'reviews')).toMatchObject({ state: 'active' });
     expect(kit.of('customers.account.restriction_lifted').slice(lifted)).toEqual([{ customerId: c.customerId, restrictionId: expect.any(String), scope: 'messaging', trustEnforcementId: enforcement.enforcementId }]);
     expect((await kit.service.getCustomer(c.customerId))!.accountStatus).toBe('restricted');
-    const actions = await kit.service.actionsOf(c.customerId, 10);
+    const actions = await kit.service.admin.actionsOf(c.customerId, 10);
     expect(actions.filter((a) => a.action === 'lift_restriction')).toEqual([expect.objectContaining({ details: expect.stringContaining('Appeal upheld'), actor: expect.objectContaining({ kind: 'system' }) })]);
     expect(audits.at(-1)).toMatchObject({ action: 'customers.account.lift_restriction', target: { id: c.customerId } });
 
@@ -331,7 +331,7 @@ describe('events from other modules', () => {
     await kit.publish('trust', 'trust.enforcement.reversed', { ...reversed, enforcementId: e2.enforcementId, targets: e2.targets });
     expect((await kit.service.getCustomer(d.customerId))!.accountStatus).toBe('active');
     expect(kit.of('customers.account.status_changed')).toContainEqual({ customerId: d.customerId, from: 'restricted', to: 'active', reasonCode: 'abusive_messages' });
-    rs = await kit.service.restrictionsOf(d.customerId, false);
+    rs = await kit.service.admin.restrictionsOf(d.customerId, false);
     expect(rs).toEqual([]);
   });
 

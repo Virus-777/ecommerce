@@ -29,7 +29,7 @@ export default defineModule({
     ctx.http.routes(storeRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
     // the customer list export dataset (reports reads rows through exportRows)
-    ctx.afterBoot(() => service.registerDataset());
+    ctx.afterBoot(() => service.admin.registerDataset());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e.id));

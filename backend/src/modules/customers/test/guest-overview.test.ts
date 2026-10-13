@@ -63,7 +63,7 @@ describe('guest order lookup', () => {
     const res = await kit.call('POST', `${STORE}/guest-orders/lookup`, { token: v.accessToken, body: { orderRef: ORDER.ref.toLowerCase(), email: 'Guest.Buyer@Example.com' } });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ orderId: ORDER.orderId, orderRef: ORDER.ref, granted: true, canCreateAccount: true });
-    const identity = (kit.service as any).deps.ctx.use('identity');
+    const identity = kit.service.core.deps.ctx.use('identity');
     expect(await identity.hasGuestOrderAccess(v.sessionId, ORDER.orderId)).toBe(true);
   });
 

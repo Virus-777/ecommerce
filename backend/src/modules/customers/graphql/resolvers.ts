@@ -39,19 +39,19 @@ export const resolvers = (service: CustomersService): ModuleResolvers => {
       displayName: displayName(r.first_name, r.last_name),
       emailVerified: r.email_verified_at !== null,
       phoneVerified: r.phone !== null && r.phone_verified_at !== null,
-      memberSince: dateInZone(r.created_at, service.marketTimeZone),
-      restrictions: async (args: { includeEnded?: boolean }) => (await service.restrictionsOf(r.id, Boolean(args?.includeEnded))).map(gqlRestriction),
-      defaultAddress: async () => (await service.addressesOf(r.id)).map(gqlAddress).find((a) => a.isDefault) ?? null,
-      addresses: async () => (await service.addressesOf(r.id)).map(gqlAddress),
-      marketingPreferences: () => service.preferencesOf(r),
+      memberSince: dateInZone(r.created_at, service.admin.marketTimeZone),
+      restrictions: async (args: { includeEnded?: boolean }) => (await service.admin.restrictionsOf(r.id, Boolean(args?.includeEnded))).map(gqlRestriction),
+      defaultAddress: async () => (await service.admin.addressesOf(r.id)).map(gqlAddress).find((a) => a.isDefault) ?? null,
+      addresses: async () => (await service.admin.addressesOf(r.id)).map(gqlAddress),
+      marketingPreferences: () => service.admin.preferencesOf(r),
       // download links only for the customer, in the store
-      dataRequests: async () => (await service.dataRequestsOf(r.id, ctx.area === 'store' ? ctx.principal : null)).map(gqlRequest),
-      location: location !== undefined ? location : async () => map.location((await service.defaultAddressesOf([r.id])).get(r.id)),
+      dataRequests: async () => (await service.dataRequests.dataRequestsOf(r.id, ctx.area === 'store' ? ctx.principal : null)).map(gqlRequest),
+      location: location !== undefined ? location : async () => map.location((await service.admin.defaultAddressesOf([r.id])).get(r.id)),
       orderCount: r.order_count,
       totalSpend: gqlMoney({ amount: Number(r.total_spend_minor), currency: r.currency }),
       verification: upper(verificationOf(r.email_verified_at, r.phone_verified_at)),
-      notes: async () => (await service.notesOf(r.id)).map((n) => ({ ...n, author: gqlActor(n.author) })),
-      accountActions: async (args: { limit?: number }) => (await service.actionsOf(r.id, args?.limit ?? 20)).map(gqlAction),
+      notes: async () => (await service.admin.notesOf(r.id)).map((n) => ({ ...n, author: gqlActor(n.author) })),
+      accountActions: async (args: { limit?: number }) => (await service.admin.actionsOf(r.id, args?.limit ?? 20)).map(gqlAction),
     };
   };
 
@@ -59,33 +59,33 @@ export const resolvers = (service: CustomersService): ModuleResolvers => {
     ...i,
     price: i.price ? gqlMoney(i.price) : null,
     wasPrice: i.wasPrice ? gqlMoney(i.wasPrice) : null,
-    product: () => (i.available ? service.productOf(i.productId) : null),
+    product: () => (i.available ? service.recentlyViewed.productOf(i.productId) : null),
   });
 
   return {
     Query: {
       me: async (_root, _args, ctx: GraphQLContext) => {
         const accountId = ctx.principal?.kind === 'customer' ? ctx.principal.accountId : null;
-        const s = accountId ? await service.standingOfUser(accountId) : undefined;
+        const s = accountId ? await service.admin.standingOfUser(accountId) : undefined;
         return s ? customerView(s, ctx) : null;
       },
       recentlyViewed: async (_root, args: { limit?: number }, ctx: GraphQLContext) => {
         const p = ctx.principal;
         let owner: { customerId?: string; guestSessionId?: string } | null = null;
         if (p?.kind === 'customer' && p.accountId) {
-          const id = await service.customerIdOfAccount(p.accountId);
+          const id = await service.admin.customerIdOfAccount(p.accountId);
           owner = id ? { customerId: id } : null;
         } else if (p?.kind === 'visitor') owner = { guestSessionId: p.sessionId };
         if (!owner) return [];
         return (await service.listRecentlyViewedItems(owner, Math.min(args?.limit ?? 12, 50))).map(viewItem);
       },
       customer: async (_root, args: { id: string }, ctx: GraphQLContext) => {
-        const s = await service.standing(args.id);
+        const s = await service.admin.standing(args.id);
         return s ? customerView(s, ctx) : null;
       },
       customers: async (_root, args: { filter?: { search?: string; statuses?: string[]; verification?: string; joinedFrom?: string; joinedTo?: string } | null; paging?: common.PageInput | null }, ctx: GraphQLContext) => {
-        const page = await service.searchStandings(args.filter, args.paging);
-        const defaults = await service.defaultAddressesOf(page.items.map((s) => s.row.id));
+        const page = await service.admin.searchStandings(args.filter, args.paging);
+        const defaults = await service.admin.defaultAddressesOf(page.items.map((s) => s.row.id));
         return { ...page, items: page.items.map((s) => customerView(s, ctx, map.location(defaults.get(s.row.id)))) };
       },
     },

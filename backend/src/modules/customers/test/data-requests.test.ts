@@ -171,9 +171,9 @@ describe('account closure', () => {
     expect(kit.of('customers.account.closed')).toContainEqual({ customerId: c.customerId, userId: c.accountId });
     expect(kit.of('customers.account.status_changed')).toContainEqual({ customerId: c.customerId, from: 'active', to: 'closed', reasonCode: 'customer_request' });
     expect(await kit.service.getMarketingConsent(c.customerId)).toMatchObject({ emailPromotions: false, smsPromotions: false, pushPromotions: false });
-    const requests = await kit.service.dataRequestsOf(c.customerId, null);
+    const requests = await kit.service.dataRequests.dataRequestsOf(c.customerId, null);
     expect(requests.find((x) => x.id === r.id)).toMatchObject({ state: 'completed' });
-    const addresses = await kit.service.addressesOf(c.customerId);
+    const addresses = await kit.service.admin.addressesOf(c.customerId);
     expect(addresses).toEqual([]);
   });
 });

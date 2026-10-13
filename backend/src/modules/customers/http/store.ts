@@ -9,47 +9,47 @@ import type { CustomersService } from '../service.js';
 export const storeRoutes = (service: CustomersService) =>
   routes(endpoints, 'store', {
     /** GET /overview: Account tab home: tiles, alerts, recent orders, open cases and returns */
-    getAccountOverview: async ({ scope }) => service.getAccountOverview(scope),
+    getAccountOverview: async ({ scope }) => service.profiles.getAccountOverview(scope),
     /** GET /profile: Profile, verification state and active restrictions */
-    getProfile: async ({ scope }) => service.getProfile(scope),
+    getProfile: async ({ scope }) => service.profiles.getProfile(scope),
     /** PATCH /profile: Change name or mobile phone */
-    updateProfile: async ({ scope, body, actor, requestId }) => service.updateProfile(scope, body, { actor, requestId }),
+    updateProfile: async ({ scope, body, actor, requestId }) => service.profiles.updateProfile(scope, body, { actor, requestId }),
     /** GET /addresses: Saved addresses (bounded by maxAddresses, not paged) */
-    listAddresses: async ({ scope }) => service.listAddresses(scope),
+    listAddresses: async ({ scope }) => service.addresses.listAddresses(scope),
     /** POST /addresses: Add an address */
-    createAddress: async ({ scope, body, actor, requestId }) => service.createAddress(scope, body, { actor, requestId }),
+    createAddress: async ({ scope, body, actor, requestId }) => service.addresses.createAddress(scope, body, { actor, requestId }),
     /** PATCH /addresses/{id}: Edit an address */
-    updateAddress: async ({ scope, params, body, actor, requestId }) => service.updateAddress(scope, params.id, body, { actor, requestId }),
+    updateAddress: async ({ scope, params, body, actor, requestId }) => service.addresses.updateAddress(scope, params.id, body, { actor, requestId }),
     /** DELETE /addresses/{id}: Remove an address */
-    deleteAddress: async ({ scope, params }) => service.deleteAddress(scope, params.id),
+    deleteAddress: async ({ scope, params }) => service.addresses.deleteAddress(scope, params.id),
     /** POST /addresses/{id}/make-default: Set the default delivery address */
-    makeDefaultAddress: async ({ scope, params }) => service.makeDefaultAddress(scope, params.id),
+    makeDefaultAddress: async ({ scope, params }) => service.addresses.makeDefaultAddress(scope, params.id),
     /** POST /addresses/validate: Check an address before saving or at guest checkout */
     validateAddress: async ({ body }) => service.validateAddress(body),
     /** GET /marketing-preferences: Promotional consent per channel */
-    getMarketingPreferences: async ({ scope }) => service.getMarketingPreferences(scope),
+    getMarketingPreferences: async ({ scope }) => service.marketing.getMarketingPreferences(scope),
     /** PUT /marketing-preferences: Turn promotional channels on or off */
-    updateMarketingPreferences: async ({ scope, body, actor, requestId, request }) => service.updateMarketingPreferences(scope, body, { actor, requestId, ip: request.ip }),
+    updateMarketingPreferences: async ({ scope, body, actor, requestId, request }) => service.marketing.updateMarketingPreferences(scope, body, { actor, requestId, ip: request.ip }),
     /** GET /recently-viewed: Recently viewed products for the home page */
-    listRecentlyViewed: async ({ scope, query }) => service.listRecentlyViewedFor(scope, query.limit),
+    listRecentlyViewed: async ({ scope, query }) => service.recentlyViewed.listRecentlyViewedFor(scope, query.limit),
     /** POST /recently-viewed: Record a product view */
-    recordRecentlyViewed: async ({ scope, body }) => service.recordView(scope, body),
+    recordRecentlyViewed: async ({ scope, body }) => service.recentlyViewed.recordView(scope, body),
     /** DELETE /recently-viewed: Clear the whole list */
-    clearRecentlyViewed: async ({ scope }) => service.clearViews(scope),
+    clearRecentlyViewed: async ({ scope }) => service.recentlyViewed.clearViews(scope),
     /** DELETE /recently-viewed/{productId}: Remove one product from the list */
-    removeRecentlyViewed: async ({ scope, params }) => service.removeView(scope, params.productId),
+    removeRecentlyViewed: async ({ scope, params }) => service.recentlyViewed.removeView(scope, params.productId),
     /** POST /data-requests/exports: Request a copy of my data */
-    requestDataExport: async ({ scope, actor, requestId }) => service.requestDataExport(scope, { actor, requestId }),
+    requestDataExport: async ({ scope, actor, requestId }) => service.dataRequests.requestDataExport(scope, { actor, requestId }),
     /** GET /data-requests: My export and closure requests */
-    listDataRequests: async ({ scope, principal }) => service.listDataRequests(scope, principal),
+    listDataRequests: async ({ scope, principal }) => service.dataRequests.listDataRequests(scope, principal),
     /** GET /closure-eligibility: Can I close my account now, and what blocks it */
-    getClosureEligibility: async ({ scope }) => service.getClosureEligibility(scope),
+    getClosureEligibility: async ({ scope }) => service.dataRequests.getClosureEligibility(scope),
     /** POST /data-requests/closure: Request account closure (the re-auth token is verified by the middleware) */
-    requestClosure: async ({ scope, body, actor, requestId }) => service.requestClosure(scope, body, { actor, requestId }),
+    requestClosure: async ({ scope, body, actor, requestId }) => service.dataRequests.requestClosure(scope, body, { actor, requestId }),
     /** POST /data-requests/{id}/cancel: Cancel a pending closure or export request */
-    cancelDataRequest: async ({ scope, params, actor, requestId }) => service.cancelDataRequest(scope, params.id, { actor, requestId }),
+    cancelDataRequest: async ({ scope, params, actor, requestId }) => service.dataRequests.cancelDataRequest(scope, params.id, { actor, requestId }),
     /** POST /guest-orders/lookup: Find a guest order by reference and checkout email */
-    lookupGuestOrder: async ({ principal, body, request }) => service.lookupGuestOrder(principal, body, request.ip),
+    lookupGuestOrder: async ({ principal, body, request }) => service.guestOrders.lookupGuestOrder(principal, body, request.ip),
     /** POST /guest-orders/links: Email fresh links to every guest order placed with this email */
-    sendGuestOrderLinks: async ({ body, request }) => service.sendGuestOrderLinks(body, request.ip),
+    sendGuestOrderLinks: async ({ body, request }) => service.guestOrders.sendGuestOrderLinks(body, request.ip),
   });

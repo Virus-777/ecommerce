@@ -96,7 +96,7 @@ describe('data export hooks', () => {
     world.reviewsBroken = true;
     expect(await kit.service.buildDataExports()).toMatchObject({ built: 0, failed: 1 });
     world.reviewsBroken = false;
-    const failed = (await kit.service.dataRequestsOf(c.customerId, null)).find((x) => x.id === r.id);
+    const failed = (await kit.service.dataRequests.dataRequestsOf(c.customerId, null)).find((x) => x.id === r.id);
     expect(failed).toMatchObject({ state: 'failed' });
   });
 });
