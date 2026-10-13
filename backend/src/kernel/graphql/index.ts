@@ -41,7 +41,7 @@ import type { Config } from '../config/index.js';
 import { AppError, codeForStatus } from '../errors/index.js';
 import { format, type Money } from '../lib/money.js';
 import type { AuthKind } from '../spec/define.js';
-import { AREAS, composeSchema, directiveArg, parseFragments, type Fragment, type GraphQLArea } from './compose.js';
+import { AREAS, composeSchema, directiveArg, parseFragments, typeOwners, type Fragment, type GraphQLArea } from './compose.js';
 import { costLimitRule } from './cost.js';
 
 export type { GraphQLArea, Fragment };
@@ -177,13 +177,20 @@ function masking(inner: GraphQLFieldResolver<any, GraphQLContext>, permission: s
   };
 }
 
-/** enabled: the modules running; a field whose @source module is off answers null (every module's fragment is in the schema) */
+/**
+ * Resolvers per field: a field with @source(module) takes that module's resolver; a field without one takes the
+ * resolver of the module that defines the type, when it gives one (it converts its REST shape field by field, so
+ * other modules may return that type in its REST shape), else the property of the same name.
+ * enabled: the modules running; a field whose @source module is off answers null (every module's fragment is in the schema).
+ * owners: type name → the module whose fragment defines it.
+ */
 export function wireResolvers(
   schema: GraphQLSchema,
   resolvers: Map<string, ModuleResolvers>,
   launchPhase: number,
   limits: Pick<GraphQLLimits, 'maxPageSize' | 'timeoutMs'> = LIMITS,
   enabled?: ReadonlySet<string>,
+  owners?: ReadonlyMap<string, string>,
 ) {
   const unresolved: string[] = [];
   for (const type of Object.values(schema.getTypeMap())) {
@@ -213,6 +220,10 @@ export function wireResolvers(
           (() => {
             throw new GraphQLError(`${type.name}.${field.name} (${module}.${fn}) is designed but not built yet.`, { extensions: { code: 'NOT_IMPLEMENTED' } });
           });
+      } else {
+        const owner = owners?.get(type.name);
+        const ownField = owner ? resolvers.get(owner)?.[type.name]?.[field.name] : undefined;
+        if (ownField) field.resolve = ownField;
       }
       const resolverOf = () => field.resolve ?? (defaultFieldResolver as GraphQLFieldResolver<any, GraphQLContext>);
       const sensitive = directiveArg(node, 'sensitive', 'permission') as string | undefined;
@@ -320,13 +331,14 @@ export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOpti
   const limits: GraphQLLimits = { ...LIMITS, ...o.limits };
   const production = o.config.env === 'production';
   const docs = parseFragments(o.baseTypeDefs, o.fragments);
+  const owners = typeOwners(o.fragments);
   const out = {} as Record<GraphQLArea, { schema: GraphQLSchema; dropped: string[]; unresolved: string[] }>;
   for (const area of AREAS) {
     const { schema, dropped } = composeSchema(area, docs);
     const problems = validateSchema(schema);
     if (problems.length) throw new Error(`GraphQL ${area} schema is invalid with the enabled modules:\n${problems.map((p) => `  - ${p.message}`).join('\n')}`);
     if (area === 'admin') assertAdminRootAuth(schema);
-    const { unresolved } = wireResolvers(schema, o.resolvers, o.config.launchPhase, limits, o.enabledModules);
+    const { unresolved } = wireResolvers(schema, o.resolvers, o.config.launchPhase, limits, o.enabledModules, owners);
     out[area] = { schema, dropped, unresolved };
 
     const persisted = o.persisted?.[area] ?? Object.fromEntries(Object.entries(persistedQueries[area]).map(([id, q]) => [id, q.query]));

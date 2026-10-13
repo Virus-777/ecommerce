@@ -41,7 +41,8 @@ docs/api/graphql/
 - **Each module defines only its own types** (`Order` belongs to orders, `Product` to catalog).
 - **The module that owns the data resolves the field**, even when the field hangs on another module's type. For example, `returns` adds `Order.returns`; `offers` adds `Product.offers`.
 - Every such field names its resolver: `@source(module: "returns", fn: "listByOrder")`. `fn` is a function in that module's public API (`publicApi` in its REST spec).
-- **Removing a module removes its fragment.** Its fields disappear from the composed schemas. Queries that used them fail validation at build time, never silently at runtime.
+- **Fields of a module's own types need no `@source`.** The module that defines a type may convert any of its fields (REST → GraphQL: enum case, labels, nested lookups) in its resolvers under the type's name; the object stays in its REST shape, so another module can return that type straight from the owner's public API (search results return offers this way).
+- **A module that is off keeps its fragment:** its fields stay in the schemas and answer null, so screen queries stay valid while wishlist or wallet are off. **Deleting a module's folder removes its fragment**: its fields disappear, and queries that used them fail validation at build time, never silently at runtime.
 
 ## Implementation notes (for the build phase)
 

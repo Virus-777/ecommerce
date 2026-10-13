@@ -112,51 +112,55 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
 
   const offersById = (ctx: GraphQLContext, id: string) => load(ctx, 'offers', id, async (ids) => new Map((await core.toOffers(await core.repo.getMany('offers', ids.filter(isUuid)))).map((o) => [o.id, o])));
 
-  /** Offer (REST) → GraphQL Offer; `primed` holds quotes computed for a comparison */
-  function offerOut(o: Offer, ctx: GraphQLContext, primed?: { view: OfferView; deliverTo: DeliverTo }) {
-    const product = () => productOf(ctx, o.productId);
-    return {
-      ...o,
-      __primed: primed,
-      ownerType: up(o.ownerType),
-      official: o.ownerType === 'official',
-      product: async () => {
-        const p = await product();
-        return p ? productOut(p) : null;
-      },
-      variant: async () => {
-        const v = (await product())?.variants.find((x) => x.id === o.variantId);
-        return { ...(v ?? { id: o.variantId, options: {}, gtin: null, images: [] }), options: pairs(v?.options) };
-      },
-      condition: up(o.condition),
-      conditionLabel: conditionLabel(o.condition),
-      price: money(o.price),
-      compareAt: o.compareAt ? { ...o.compareAt, amount: money(o.compareAt.amount), basis: up(o.compareAt.basis) } : null,
-      // what customers get: Marketly's dispatch and ships-from for Fulfilled by Marketly offers (Offer.shipping)
-      dispatch: o.shipping.dispatch,
-      fulfilledBy: up(o.fulfilledBy),
-      returnTerms: { ...o.returnTerms, kind: up(o.returnTerms.kind) },
-      warranty: { ...o.warranty, kind: up(o.warranty.kind), handledBy: up(o.warranty.handledBy ?? null) },
-      status: up(o.status),
-      statusReason: statusReason(o.statusReason),
-      featuredEligibility: { ...o.featuredEligibility, reasons: reasons(o.featuredEligibility.reasons) },
-      priceContext: async () => {
-        const c = await service.views.priceContext(o.variantId, o.id);
-        return { lowestNewPrice: money(c.lowestNewPrice), officialStorePrice: money(c.officialStorePrice), otherOfferCount: c.otherOfferCount };
-      },
-      priceHistory: async (args: { limit?: number | null }) =>
-        (await core.repo.find('offer_price_history', { offer_id: o.id }, { orderBy: [['valid_from', 'desc']], limit: Math.min(Math.max(args?.limit ?? 20, 1), 200) })).map((h) => {
-          const p = pricePoint(h, o.price.currency);
-          return { ...p, price: money(p.price), compareAt: money(p.compareAt), changedBy: actor(p.changedBy) };
-        }),
-      statusLog: async (args: { limit?: number | null }) =>
-        (await core.repo.find('offer_status_log', { offer_id: o.id }, { orderBy: [['at', 'desc']], limit: Math.min(Math.max(args?.limit ?? 20, 1), 200) })).map((l) => {
-          const e = statusEntry(l);
-          return { ...e, from: up(e.from ?? null), to: up(e.to), actor: actor(e.actor) };
-        }),
-      priceChanges: async () => (await service.pricing.changesFor(o.id)).map(priceChangeOut),
-    };
+  /**
+   * An Offer for GraphQL is the REST Offer itself: its fields are converted by the Offer field resolvers below, so an
+   * offer another module returns (search results, promotions) answers exactly like one from this module.
+   * `primed` holds quotes computed for a comparison.
+   */
+  function offerOut(o: Offer, _ctx: GraphQLContext, primed?: { view: OfferView; deliverTo: DeliverTo }) {
+    return { ...o, __primed: primed };
   }
+
+  /** REST Offer → GraphQL Offer, field by field (the parent is always the REST Offer) */
+  const offerFields = {
+    ownerType: (o: Offer) => up(o.ownerType),
+    official: (o: Offer) => o.ownerType === 'official',
+    product: async (o: Offer, _args: unknown, ctx: GraphQLContext) => {
+      const p = await productOf(ctx, o.productId);
+      return p ? productOut(p) : null;
+    },
+    variant: async (o: Offer, _args: unknown, ctx: GraphQLContext) => {
+      const v = (await productOf(ctx, o.productId))?.variants.find((x) => x.id === o.variantId);
+      return { ...(v ?? { id: o.variantId, options: {}, gtin: null, images: [] }), options: pairs(v?.options) };
+    },
+    condition: (o: Offer) => up(o.condition),
+    conditionLabel: (o: Offer) => conditionLabel(o.condition),
+    price: (o: Offer) => money(o.price),
+    compareAt: (o: Offer) => (o.compareAt ? { ...o.compareAt, amount: money(o.compareAt.amount), basis: up(o.compareAt.basis) } : null),
+    // what customers get: Marketly's dispatch and ships-from for Fulfilled by Marketly offers (Offer.shipping)
+    dispatch: (o: Offer) => o.shipping.dispatch,
+    fulfilledBy: (o: Offer) => up(o.fulfilledBy),
+    returnTerms: (o: Offer) => ({ ...o.returnTerms, kind: up(o.returnTerms.kind) }),
+    warranty: (o: Offer) => ({ ...o.warranty, kind: up(o.warranty.kind), handledBy: up(o.warranty.handledBy ?? null) }),
+    status: (o: Offer) => up(o.status),
+    statusReason: (o: Offer) => statusReason(o.statusReason),
+    featuredEligibility: (o: Offer) => ({ ...o.featuredEligibility, reasons: reasons(o.featuredEligibility.reasons) }),
+    priceContext: async (o: Offer) => {
+      const c = await service.views.priceContext(o.variantId, o.id);
+      return { lowestNewPrice: money(c.lowestNewPrice), officialStorePrice: money(c.officialStorePrice), otherOfferCount: c.otherOfferCount };
+    },
+    priceHistory: async (o: Offer, args: { limit?: number | null }) =>
+      (await core.repo.find('offer_price_history', { offer_id: o.id }, { orderBy: [['valid_from', 'desc']], limit: Math.min(Math.max(args?.limit ?? 20, 1), 200) })).map((h) => {
+        const p = pricePoint(h, o.price.currency);
+        return { ...p, price: money(p.price), compareAt: money(p.compareAt), changedBy: actor(p.changedBy) };
+      }),
+    statusLog: async (o: Offer, args: { limit?: number | null }) =>
+      (await core.repo.find('offer_status_log', { offer_id: o.id }, { orderBy: [['at', 'desc']], limit: Math.min(Math.max(args?.limit ?? 20, 1), 200) })).map((l) => {
+        const e = statusEntry(l);
+        return { ...e, from: up(e.from ?? null), to: up(e.to), actor: actor(e.actor) };
+      }),
+    priceChanges: async (o: Offer) => (await service.pricing.changesFor(o.id)).map(priceChangeOut),
+  };
 
   const out = (o: Offer | null | undefined, ctx: GraphQLContext) => (o ? offerOut(o, ctx) : null);
 
@@ -180,6 +184,7 @@ export const resolvers = (service: OffersService): ModuleResolvers => {
 
   return {
     Offer: {
+      ...offerFields,
       quote: async (root: { id: string; __primed?: { view: OfferView; deliverTo: DeliverTo } }, args: { postalCode?: string | null; quantity?: number | null }, ctx: GraphQLContext) => {
         const quantity = args.quantity && args.quantity > 0 ? args.quantity : 1;
         const d = service.storefront.deliverTo(args.postalCode);

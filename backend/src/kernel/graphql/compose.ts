@@ -85,6 +85,13 @@ export interface Fragment {
   typeDefs: string;
 }
 
+/** Type name → the module whose fragment defines it (not extends it) */
+export function typeOwners(fragments: readonly Fragment[]): Map<string, string> {
+  const owners = new Map<string, string>();
+  for (const f of fragments) for (const d of parse(f.typeDefs).definitions) if (d.kind === Kind.OBJECT_TYPE_DEFINITION) owners.set(d.name.value, f.module);
+  return owners;
+}
+
 /** Parse base.graphql and the fragments once; each area is composed from the parsed documents. */
 export const parseFragments = (baseTypeDefs: string, fragments: readonly Fragment[]): DocumentNode[] => [parse(baseTypeDefs), ...fragments.map((f) => parse(f.typeDefs))];
 

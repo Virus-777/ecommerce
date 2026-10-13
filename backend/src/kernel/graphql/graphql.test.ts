@@ -22,6 +22,8 @@ const fragment = /* GraphQL */ `
     email: String @sensitive(permission: "demo.contact.view", mask: "email")
     phones: [String!] @sensitive(permission: "demo.contact.view", mask: "phone")
     note: String @sensitive(permission: "demo.contact.view", mask: "hide")
+    "Converted by the demo module's DemoItem resolver (no @source: demo defines the type)"
+    shout: String!
   }
   type DemoItemPage {
     items: [DemoItem!]!
@@ -52,6 +54,9 @@ const offFragment = /* GraphQL */ `
 const seen: { paging?: unknown; limit?: unknown; previewLimit?: unknown }[] = [];
 const node = (n: number): { id: string; child: unknown } => ({ id: String(n), child: n < 20 ? node(n + 1) : null });
 const resolvers: ModuleResolvers = {
+  DemoItem: {
+    shout: (r: { name: string }) => `${r.name.toUpperCase()}!`,
+  },
   Query: {
     demoItems: (_r, args: { paging?: unknown }) => (seen.push({ paging: args.paging }), { items: [{ id: '1', name: 'One', secret: 's', email: 'ana@example.com', phones: ['+15035550123'], note: 'VIP' }], nextCursor: null }),
     demoTop: (_r, args: { limit?: unknown; previewLimit?: unknown }) => (seen.push({ limit: args.limit, previewLimit: args.previewLimit }), []),
@@ -224,6 +229,13 @@ describe('GraphQL kernel', () => {
       expect(itemOf(await post(app, 'admin', q, 'staff', 'demo.contact.view'))).toEqual(plain);
       expect(itemOf(await post(app, 'seller', q, 'seller', 'demo.contact.view'))).toEqual(plain);
       expect(itemOf(await post(app, 'store', q, 'customer'))).toEqual(plain);
+    });
+  });
+
+  describe("fields of a module's own types", () => {
+    it("are converted by that module's type resolver, without @source", async () => {
+      const res = await post(app, 'store', { query: '{ demoItems { items { name shout } } }' });
+      expect(res.json()).toEqual({ data: { demoItems: { items: [{ name: 'One', shout: 'ONE!' }] } } });
     });
   });
 
