@@ -10,7 +10,8 @@ import type * as common from '../../../spec/common.js';
 import type { ContactChannel, HelpArticle, HelpArticleAdmin, HelpArticleInput, HelpArticleSummary, HelpCategory, HelpHome, LinkRef, Version } from '../../../spec/content.js';
 import { isValidSlug, plainText, readMinutes, sanitizeHtml, sanitizeJson, slugify } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
-import type { ArticleRow, CategoryRow, ContentRepository, VersionRow } from '../ports.js';
+import type { ArticleRow, CategoryRow, VersionRow } from '../ports.js';
+import type { ContentRepository } from '../repository.js';
 import { dateOrNull, invalid, iso, notFound, requireText, SYSTEM, unique, type By, type DraftReview } from './base.js';
 import { ContentHomepage } from './homepage.js';
 

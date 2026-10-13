@@ -12,7 +12,7 @@ import { ContentPolicies } from './service/policies.js';
 export type { ContentServiceDeps } from './service/base.js';
 
 /**
- * Content use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Content use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, an endpoint, a consumed event or a job in docs/api/spec/modules/content.json.
  * The use cases are layered in service/: base → tiles → pages → homepage → help → policies → this class
  * (navigation, consumed events and jobs).

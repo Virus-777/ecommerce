@@ -13,7 +13,8 @@ import type * as common from '../../../spec/common.js';
 import type { LinkRef, OwnerRef, Schedule, Version } from '../../../spec/content.js';
 import type { UsageInput } from '../../../spec/media.js';
 import { isSafeUrl, isValidTimeZone, scheduleLabel } from '../domain/rules.js';
-import type { ContentRepository, VersionRow } from '../ports.js';
+import type { VersionRow } from '../ports.js';
+import type { ContentRepository } from '../repository.js';
 
 export interface ContentServiceDeps {
   repo: ContentRepository;

@@ -9,7 +9,8 @@ import type * as common from '../../../spec/common.js';
 import type { BannerBlock, HomeSection, HomeSectionAdmin, Homepage, HomepageAdmin, HomepageReview, LinkRef, PreviewRequest, ProductSource, PromiseItem, SectionInput, SectionProductRow, Version } from '../../../spec/content.js';
 import { DEFAULT_AD_POSITIONS, DEFAULT_RULES, HOMEPAGE_ID, inWindow, PRODUCT_KINDS, SECTION_KIND_LABEL } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
-import type { ContentRepository, SectionRow, VersionRow } from '../ports.js';
+import type { SectionRow, VersionRow } from '../ports.js';
+import type { ContentRepository } from '../repository.js';
 import { actorFromKey, actorKey, dateOrNull, invalid, iso, notFound, requireText, SYSTEM, unique, type By } from './base.js';
 import { ContentPages } from './pages.js';
 
