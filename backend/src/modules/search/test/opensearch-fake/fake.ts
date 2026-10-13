@@ -16,6 +16,7 @@
  * is approximated; fuzzy scoring and the term suggester's ranking are simplified; no cluster behaviour
  * (replicas, timeouts, partial shard failures) beyond the faults a test injects.
  */
+import { escapeRegExp } from '../../../../kernel/lib/text.js';
 import { SCRIPT_TWINS, type DocValues } from '../../providers/opensearch/scripts.js';
 import { analysisOf, autoEdits, editDistance, type Analysis, type Token } from './analysis.js';
 
@@ -346,10 +347,10 @@ function evalQuery(q: Json, ctx: Ctx): Result {
       let re = '';
       for (let i = 0; i < pattern.length; i++) {
         const ch = pattern[i]!;
-        if (ch === '\\' && i + 1 < pattern.length) re += pattern[++i]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (ch === '\\' && i + 1 < pattern.length) re += escapeRegExp(pattern[++i]!);
         else if (ch === '*') re += '.*';
         else if (ch === '?') re += '.';
-        else re += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        else re += escapeRegExp(ch);
       }
       const rx = new RegExp(`^${re}$`, spec.case_insensitive ? 'is' : 's');
       return docValues(ctx, field).some((v) => rx.test(String(v))) ? { match: true, score: spec.boost ?? 1 } : NO;
