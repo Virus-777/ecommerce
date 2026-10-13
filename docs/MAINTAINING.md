@@ -29,6 +29,7 @@ From `backend/`:
 | `npm run token -- staff` | a development token (`visitor`, `customer`, `seller`, `staff`). Every endpoint needs a token: `curl -H "Authorization: Bearer <token>" …` |
 | `npx vitest run src/modules/<module>` | one module's tests (a minute or two). Use this while working |
 | `TEST_MONGODB_URI=mongodb://127.0.0.1:27017/?replicaSet=rs0 npx vitest run` | the tests on a real MongoDB instead of the in-memory one (after a MongoDB upgrade, for example). They create databases named `t<n>_<n>` and drop them at the end; never point it at a production server |
+| `npm run simulate` | realistic traffic over real HTTP on the database of `MONGODB_URI` (local servers only): staff, sellers, products, customers, orders, shipping, returns, refunds, a payout run, then read-only database checks. Leaves its data in place; report in `backend/.data/simulate-report.json`. `-- --scale medium` makes about 4× the data, `-- --seed <n>` repeats a run's random choices. The first run creates the Business Owner and keeps its sign-in in `backend/.data/simulate-owner.json` (keep that file) |
 | `npm run check` | everything, in order: spec freshness, types, module boundaries, API conformance, all tests, every endpoint over HTTP. About 8 minutes. Run it before every commit you keep |
 
 Requirements: Node 22 or newer; MongoDB 6.0 installed (`C:\Program Files\MongoDB\Server\6.0`) makes the
@@ -200,6 +201,10 @@ It runs six steps and stops at the first failure; the name in the output tells y
 | `check:api` | the running server's API differs from `docs/api/openapi.json` | regenerate (§3); if it persists, a handler or route was changed by hand |
 | `test` | a test failed | run that file alone (`npx vitest run <file>`). If it passes alone but failed in the full run, it is timing: look for something done after the reply is sent, or a clock set before the app starts (set it after) |
 | `test:http` | an endpoint answered wrongly to a generated request: 500, a 401/403 for the right caller, or 400 for valid input | the report is in `backend/.data/test-http-report.json`; reproduce with `npm run test:http -- --only <module>` |
+
+`npm run test:http` on its own uses a throwaway in-memory database. With `-- --url` it calls a running server and
+**writes into that server's database**: generated sample records, and change requests waiting for approval (fee
+rules, return policies …). Use `--url` only on a database you can throw away, and never approve its sample requests.
 
 ## 9. Rules that keep the system correct
 
