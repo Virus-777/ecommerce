@@ -12,7 +12,8 @@ import { newId } from '../../kernel/lib/ids.js';
 import type { Actor } from '../../spec/common.js';
 import type { InventoryStockChangedEvent, InventoryStockLowEvent, MovementRef, StockQuantities } from '../../spec/inventory.js';
 import { addQty, applyMove, sellsFrom, stockState, unitsIn, zeroQty, type GroupOrOutside } from './domain/rules.js';
-import type { InventoryRepository, Row } from './ports.js';
+import type { Row } from './ports.js';
+import type { InventoryRepository } from './repository.js';
 
 export interface HoldInfo {
   reasonCode: string;

@@ -101,7 +101,8 @@ import {
   toTransfer,
   unitCostOf,
 } from './mappers.js';
-import type { InventoryRepository, ItemListFilter, Row } from './ports.js';
+import type { ItemListFilter, Row } from './ports.js';
+import { DuplicateKeyError, type InventoryRepository } from './repository.js';
 import { levelQty, StockTx, type StockEvents } from './stock-tx.js';
 
 export interface InventoryServiceDeps {
@@ -157,7 +158,7 @@ const afterOf = (m: Row<'stock_movements'>): StockQuantities => (typeof m.after 
 type ReturnOutcomeKind = (typeof RETURN_OUTCOMES)[number];
 
 /**
- * Inventory use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Inventory use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, an endpoint, a consumed event or a job in docs/api/spec/modules/inventory.json.
  */
 export class InventoryService implements InventoryPublicApi {
@@ -409,10 +410,9 @@ export class InventoryService implements InventoryPublicApi {
   async #sellerLocation(tx: InventoryRepository, sellerId: string): Promise<Row<'locations'>> {
     const existing = (await tx.locations({ ownerType: 'seller', sellerId }))[0];
     if (existing) return existing;
-    const row = await tx.insert(
+    const row = await tx.insertIfAbsent(
       'locations',
       { id: newId(), code: `SV-${sellerId}`, name: 'Seller stock', kind: 'seller_virtual', owner_type: 'seller', seller_id: sellerId, address: null, time_zone: this.ctx.config.market.timeZone, sellable: true, active: true, is_default: true },
-      { ignoreConflict: true },
     );
     return row ?? (await tx.locationByCode(`SV-${sellerId}`))!;
   }
@@ -469,7 +469,7 @@ export class InventoryService implements InventoryPublicApi {
         throw invalid('locationId', input.ownerType === 'official' ? 'Add an active company stock location first' : 'Unknown stock location');
       }
       const now = st.now;
-      const item = await st.tx.insert(
+      const item = await st.tx.insertIfAbsent(
         'stock_items',
         {
           id,
@@ -491,7 +491,6 @@ export class InventoryService implements InventoryPublicApi {
           created_at: now,
           updated_at: now,
         },
-        { ignoreConflict: true },
       );
       if (!item) throw inventoryError('SKU_TAKEN', `A stock item with SKU ${sku} already exists`, { sku });
       await st.tx.ensureLevel(id, location.id, now);
@@ -533,7 +532,7 @@ export class InventoryService implements InventoryPublicApi {
     const id = newId();
     const created = await this.#stock('checkout_hold', async (st) => {
       const now = st.now;
-      const inserted = await st.tx.insert('reservations', { id, source: 'checkout', key, order_id: null, order_ref: null, state: 'held', expires_at: new Date(now.getTime() + ttl * 60_000), released_reason: null, created_at: now, updated_at: now }, { ignoreConflict: true });
+      const inserted = await st.tx.insertIfAbsent('reservations', { id, source: 'checkout', key, order_id: null, order_ref: null, state: 'held', expires_at: new Date(now.getTime() + ttl * 60_000), released_reason: null, created_at: now, updated_at: now });
       if (!inserted) return false; // the same key won a race: answer with that hold
       await st.lock([...wanted.keys()]);
       const short: { stockItemId: string; requested: number; available: number }[] = [];
@@ -680,7 +679,7 @@ export class InventoryService implements InventoryPublicApi {
       'order_allocated',
       async (st) => {
         const now = st.now;
-        const inserted = await st.tx.insert('reservations', { id, source, key, order_id: input.orderId, order_ref: input.orderRef ?? null, state: 'allocated', expires_at: null, released_reason: null, created_at: now, updated_at: now }, { ignoreConflict: true });
+        const inserted = await st.tx.insertIfAbsent('reservations', { id, source, key, order_id: input.orderId, order_ref: input.orderRef ?? null, state: 'allocated', expires_at: null, released_reason: null, created_at: now, updated_at: now });
         if (!inserted) return false; // the same key won a race
         await st.lock([...wanted.keys()]);
         const short: { stockItemId: string; requested: number; available: number }[] = [];
@@ -768,7 +767,7 @@ export class InventoryService implements InventoryPublicApi {
         { actor },
       );
     } catch (err) {
-      if (!isAppError(err) && /unique|duplicate/i.test(String((err as Error)?.message))) throw inventoryError('SKU_TAKEN', `A stock item with SKU ${next.sku} already exists`, { sku: next.sku });
+      if (err instanceof DuplicateKeyError) throw inventoryError('SKU_TAKEN', `A stock item with SKU ${next.sku} already exists`, { sku: next.sku });
       throw err;
     }
     return this.#itemApi(await this.#item(before.id));
@@ -1063,7 +1062,7 @@ export class InventoryService implements InventoryPublicApi {
     const id = newId();
     const ref: MovementRef = { kind: 'receipt', id: receipt.receiptId, label: `Received ${receipt.purchaseOrderRef}` };
     const inserted = await this.#stock('incoming', async (st) => {
-      const row = await st.tx.insert(
+      const row = await st.tx.insertIfAbsent(
         'inbound_receipts',
         {
           id,
@@ -1085,7 +1084,6 @@ export class InventoryService implements InventoryPublicApi {
           confirmed_at: null,
           note: null,
         },
-        { ignoreConflict: true },
       );
       if (!row) return false;
       await st.tx.insertInboundLines(
@@ -1635,7 +1633,7 @@ export class InventoryService implements InventoryPublicApi {
     }
     const id = newId();
     const inserted = await this.repo.transaction(async (tx) => {
-      const row = await tx.insert(
+      const row = await tx.insertIfAbsent(
         'inbound_receipts',
         {
           id,
@@ -1657,7 +1655,6 @@ export class InventoryService implements InventoryPublicApi {
           confirmed_at: null,
           note: null,
         },
-        { ignoreConflict: true },
       );
       if (!row) return false;
       // the counted units stay in Incoming (against the inbound shipment) until the Inventory Manager confirms them
@@ -2544,10 +2541,9 @@ export class InventoryService implements InventoryPublicApi {
     if (sellable && active) await this.#checkSecondSellable();
     if (await this.repo.locationByCode(code)) throw new AppError('CONFLICT', `A location with code ${code} already exists`, { code });
     const hasDefault = !!(await this.repo.locations({ ownerType: 'official' })).find((l) => l.is_default);
-    const row = await this.repo.insert(
+    const row = await this.repo.insertIfAbsent(
       'locations',
       { id: newId(), code, name: body.name.trim(), kind: 'warehouse', owner_type: 'official', seller_id: null, address: JSON.stringify(body.address), time_zone: body.timeZone, sellable, active, is_default: !hasDefault && active },
-      { ignoreConflict: true },
     );
     if (!row) throw new AppError('CONFLICT', `A location with code ${code} already exists`, { code });
     const api = toLocation(row);
@@ -3118,7 +3114,7 @@ export class InventoryService implements InventoryPublicApi {
       if (!(await st.tx.claimEvent(`return-inspected:${event.returnId}:${event.orderItemId}`))) return;
       await st.lock([item.id]);
       await this.#addReturned(st, event.returnId, event.orderItemId, item.id, location, quantity);
-      const row = await st.tx.insert(
+      const row = await st.tx.insertIfAbsent(
         'return_outcomes',
         {
           id: newId(),
@@ -3137,7 +3133,6 @@ export class InventoryService implements InventoryPublicApi {
           recorded_at: null,
           inspected_at: envelope?.at ? new Date(envelope.at) : st.now,
         },
-        { ignoreConflict: true },
       );
       if (row) return;
       // another item of the same return and stock item (one outcome per return and stock item): add its units

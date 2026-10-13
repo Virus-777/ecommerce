@@ -4,7 +4,7 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoInventoryRepository } from './repository.js';
+import { InventoryRepository } from './repository.js';
 import { InventoryService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -20,7 +20,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   register(ctx) {
-    const service = new InventoryService({ repo: createMongoInventoryRepository(ctx.mongo), ctx });
+    const service = new InventoryService({ repo: new InventoryRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
