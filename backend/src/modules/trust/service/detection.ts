@@ -38,7 +38,7 @@ export class Detection {
   ensureRules(): Promise<void> {
     this.#seeded ??= (async () => {
       const now = this.core.now();
-      await this.core.repo.insertIgnore(
+      await this.core.repo.insertManyIfAbsent(
         'detection_rules',
         RULES.map((r) => ({ key: r.key, description: r.description, type: r.type, active: r.active, thresholds: r.thresholds, base_score: r.baseScore, updated_by: actorText(SYSTEM), updated_at: now, last_run_at: null })),
       );
@@ -55,7 +55,7 @@ export class Detection {
   async record(key: string, kind: string, subject: { type: string; id: string }, features: Record<string, unknown>, at?: string | Date | null) {
     if (!isUuid(subject.id)) return;
     const when = at ? new Date(at) : this.core.now();
-    await this.core.repo.insertIgnore('risk_signals', [{ id: detId(`${kind}:${key}`), kind, subject_type: subject.type, subject_id: subject.id, features, at: Number.isNaN(when.getTime()) ? this.core.now() : when }]);
+    await this.core.repo.insertManyIfAbsent('risk_signals', [{ id: detId(`${kind}:${key}`), kind, subject_type: subject.type, subject_id: subject.id, features, at: Number.isNaN(when.getTime()) ? this.core.now() : when }]);
   }
 
   async onReviewPublished(e: EventPayload<'reviews.review.published'>) {

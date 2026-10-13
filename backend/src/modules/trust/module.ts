@@ -6,7 +6,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
-import { createMongoTrustRepository } from './repository.js';
+import { TrustRepository } from './repository.js';
 import { TrustService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -22,7 +22,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   register(ctx) {
-    const service = new TrustService({ repo: createMongoTrustRepository(ctx.mongo), ctx });
+    const service = new TrustService({ repo: new TrustRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), publicRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

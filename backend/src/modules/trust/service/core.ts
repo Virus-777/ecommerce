@@ -12,7 +12,8 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { StaffRef, TrustSubject } from '../../../spec/trust.js';
 import { ACTIVE, riskLevel, riskScore, thresholdsOf, type Thresholds } from '../domain/rules.js';
-import type { AppealRec, EnforcementRec, EventRec, EvidenceRec, NoteRec, RecommendationRec, ReportRec, RequestRec, SubjectRec, TrustRepository } from '../ports.js';
+import type { AppealRec, EnforcementRec, EventRec, EvidenceRec, NoteRec, RecommendationRec, ReportRec, RequestRec, SubjectRec } from '../ports.js';
+import type { TrustRepository } from '../repository.js';
 
 export interface TrustServiceDeps {
   repo: TrustRepository;
@@ -184,17 +185,16 @@ export class Core {
     const ids = [...new Set(reportIds)].filter(isUuid);
     const out = new Map<string, Agg>();
     if (!ids.length) return out;
-    const [reports, subjects, evidence, requests, recs, enfs, notes, events, merged] = await Promise.all([
-      repo.find('reports', { id: ids }),
-      repo.find('report_subjects', { report_id: ids }),
-      repo.find('evidence', { report_id: ids }, { orderBy: [['added_at', 'asc'], ['id', 'asc']] }),
-      repo.find('evidence_requests', { report_id: ids }, { orderBy: [['due_at', 'asc'], ['id', 'asc']] }),
-      repo.find('recommendations', { report_id: ids }, { orderBy: [['id', 'asc']] }),
-      repo.find('enforcements', { report_id: ids }, { orderBy: [['recorded_at', 'asc'], ['id', 'asc']] }),
-      repo.find('report_notes', { report_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
-      repo.find('report_events', { report_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
-      repo.find('reports', { merged_into_id: ids }),
-    ]);
+    // one read after another: inside a transaction (write) the session runs one operation at a time
+    const reports = await repo.find('reports', { id: ids });
+    const subjects = await repo.find('report_subjects', { report_id: ids });
+    const evidence = await repo.find('evidence', { report_id: ids }, { orderBy: [['added_at', 'asc'], ['id', 'asc']] });
+    const requests = await repo.find('evidence_requests', { report_id: ids }, { orderBy: [['due_at', 'asc'], ['id', 'asc']] });
+    const recs = await repo.find('recommendations', { report_id: ids }, { orderBy: [['id', 'asc']] });
+    const enfs = await repo.find('enforcements', { report_id: ids }, { orderBy: [['recorded_at', 'asc'], ['id', 'asc']] });
+    const notes = await repo.find('report_notes', { report_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    const events = await repo.find('report_events', { report_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    const merged = await repo.find('reports', { merged_into_id: ids });
     for (const r of reports) out.set(r.id, { report: r, subjects: [], evidence: [], requests: [], recommendations: [], enforcements: [], notes: [], events: [], mergedIds: [] });
     for (const x of subjects) out.get(x.report_id)?.subjects.push(x);
     for (const x of evidence) out.get(x.report_id)?.evidence.push(x);

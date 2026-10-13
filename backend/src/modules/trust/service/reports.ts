@@ -12,7 +12,8 @@ import type * as reports from '../../../spec/reports.js';
 import type { EvidenceInput, EvidenceItem, EvidenceRequest, MyReport, ReportReporter, ReportRow, StoreReportInput, TrustOverview, TrustReport, TrustSubject } from '../../../spec/trust.js';
 import { trustReportMachine, evidenceRequestMachine } from '../domain/state-machines.js';
 import { ACTIVE, FORM_TYPES, humanize, OUTCOMES, REPORT_TYPES, riskLevel, SUBJECT_TYPES, TYPE_LABELS, type ReportStatus, type SubjectType } from '../domain/rules.js';
-import type { Assessment, EvidenceRec, ReportFilter, ReportRec, TrustRepository } from '../ports.js';
+import type { Assessment, EvidenceRec, ReportFilter, ReportRec } from '../ports.js';
+import type { TrustRepository } from '../repository.js';
 import { Batch, illegal, invalid, invalidField, notFound, type Agg, type By, type Core } from './core.js';
 import type { Views } from './views.js';
 
@@ -159,7 +160,7 @@ export class Reports {
       };
       await tx.insert('reports', row);
       const subjects = this.core.subjectRows(id, input.subjects);
-      await tx.insertIgnore('report_subjects', subjects);
+      await tx.insertManyIfAbsent('report_subjects', subjects);
       const evidence = input.evidence.map((e) => ({ ...e, report_id: id }));
       for (const e of evidence) await tx.insert('evidence', e);
       const s = await this.core.score(tx, row, subjects, evidence);
@@ -188,7 +189,7 @@ export class Reports {
   async extend(tx: TrustRepository, agg: Agg, o: { subjects?: TrustSubject[]; evidence?: EvidenceRec[]; label: string; actor: common.Actor; key?: string | null; signalScore?: number | null; countReporter?: boolean }) {
     const id = agg.report.id;
     if (o.countReporter) await tx.update('reports', id, { reporter_count: agg.report.reporter_count + 1 });
-    if (o.subjects?.length) await tx.insertIgnore('report_subjects', this.core.subjectRows(id, o.subjects));
+    if (o.subjects?.length) await tx.insertManyIfAbsent('report_subjects', this.core.subjectRows(id, o.subjects));
     for (const e of o.evidence ?? []) await tx.insert('evidence', { ...e, report_id: id });
     if (o.signalScore !== null && o.signalScore !== undefined) {
       const factors = agg.report.risk_factors.filter((f) => f.factor !== 'signal');
@@ -745,7 +746,7 @@ export class Reports {
     const customerId = body.to.type === 'customer' ? await this.customerIdOf(body.to.id) : null;
     const row = await this.core.write(id, by, async (tx, agg, batch) => {
       if (!this.core.isActive(agg.report.status)) throw illegal('Trust report', agg.report.status, 'requestEvidence', 'Reopen the report before asking for proof');
-      await tx.insertIgnore('report_subjects', this.core.subjectRows(id, [{ ...body.to, label: body.to.label || humanize(body.to.type) }]));
+      await tx.insertManyIfAbsent('report_subjects', this.core.subjectRows(id, [{ ...body.to, label: body.to.label || humanize(body.to.type) }]));
       const row = await tx.insert('evidence_requests', {
         id: newId(),
         report_id: id,
@@ -823,7 +824,7 @@ export class Reports {
     await this.core.write(id, by, async (tx, agg) => {
       if (agg.report.status === 'merged') throw illegal('Trust report', 'merged', 'link');
       const existing = new Set(agg.events.filter((e) => e.kind === 'case_linked').map((e) => String(e.detail.caseRef)));
-      const added = await tx.insertIgnore('report_subjects', this.core.subjectRows(id, (body.subjects ?? []).map((s) => ({ ...s, label: s.label || humanize(s.type) }))));
+      const added = await tx.insertManyIfAbsent('report_subjects', this.core.subjectRows(id, (body.subjects ?? []).map((s) => ({ ...s, label: s.label || humanize(s.type) }))));
       const cases = [...new Set((body.caseRefs ?? []).map((c) => c.trim()).filter((c) => c && !existing.has(c)))];
       await this.core.timeline(tx, id, [
         ...(added ? [{ kind: 'linked', label: `${added} subject${added === 1 ? '' : 's'} linked`, actor: by.actor }] : []),
@@ -993,7 +994,7 @@ export class Reports {
       if (!this.core.isActive(into.report.status)) throw invalidField('intoReportId', 'Merge into an open report');
       const status = this.ensure(agg.report.status, 'merge');
       const now = this.core.now();
-      await tx.insertIgnore('report_subjects', agg.subjects.map((s) => ({ ...s, report_id: into.report.id })));
+      await tx.insertManyIfAbsent('report_subjects', agg.subjects.map((s) => ({ ...s, report_id: into.report.id })));
       await tx.updateWhere('evidence', { report_id: id }, { report_id: into.report.id });
       await tx.updateWhere('evidence_requests', { report_id: id, state: 'open' }, { report_id: into.report.id });
       const kept = await tx.update('reports', into.report.id, { reporter_count: into.report.reporter_count + agg.report.reporter_count, updated_at: now });
