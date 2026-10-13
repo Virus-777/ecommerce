@@ -103,8 +103,8 @@ describe('seller context', () => {
     const noPurpose = await kit.call('POST', `${SELLER}/reauth`, { token: pick.body.accessToken, body: { purpose: '  ', password: c.password } });
     expect(noPurpose.status).toBe(400);
     expect(noPurpose.body.error.details.issues[0].path).toBe('body.purpose');
-    // only the declared reauth step-up purposes (code step-ups such as role-grant never take a token)
-    for (const purpose of ['anything-else', 'role-grant']) {
+    // only the declared reauth step-up purposes
+    for (const purpose of ['anything-else', 'payout_account']) {
       const unknown = await kit.call('POST', `${SELLER}/reauth`, { token: pick.body.accessToken, body: { purpose, password: c.password } });
       expect(unknown.status).toBe(400);
       expect(unknown.body.error.details.issues[0].path).toBe('body.purpose');
@@ -136,7 +136,7 @@ describe('seller-member invitations', () => {
     expect(kit.last('identity.invitation.created').acceptUrl).toMatch(/^http:\/\/localhost:3001\//); // SELLER_URL (development default)
     const v = await visitor(kit, 'seller');
     const view = await kit.call('POST', `${PUBLIC}/invitations/lookups`, { token: v.accessToken, body: { token } });
-    expect(view.body).toMatchObject({ purpose: 'seller_member', existingAccount: false, requiresTwoStepSetup: false, contextLabel: 'Gamma Tools' });
+    expect(view.body).toMatchObject({ purpose: 'seller_member', existingAccount: false, requiresPassCode: false, contextLabel: 'Gamma Tools' });
     const accept = await kit.call('POST', `${PUBLIC}/invitations/accept`, { token: v.accessToken, body: { token, password: STRONG, device: web } });
     expect(accept.status, JSON.stringify(accept.body)).toBe(200);
     expect(accept.body).toMatchObject({ status: 'signed_in', account: { email, status: 'active', emailVerified: true }, tokens: { audience: 'seller', refreshToken: '' } });
@@ -359,7 +359,7 @@ describe('jobs', () => {
     const k = await boot();
     try {
       const api = k.app.kernel.boot.apis.get('identity') as IdentityPublicApi;
-      const inv = await api.inviteStaff({ email: uniqueEmail('late'), name: 'Late Larry', invitedBy: { kind: 'staff', id: newId() } });
+      const { invitation: inv } = await api.inviteStaff({ email: uniqueEmail('late'), name: 'Late Larry', invitedBy: { kind: 'staff', id: newId() } });
       const c = await customer(k);
       const v = await visitor(k);
       await k.call('POST', `${PUBLIC}/registrations`, {

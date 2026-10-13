@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { accessFixture, STEP_UP_CODE, usd, type Fixture } from './fixture.js';
+import { accessFixture, APPROVAL_REAUTH, usd, type Fixture } from './fixture.js';
 
 let f: Fixture;
 let staffA: string; // finance staff: refunds up to $2,000, second reviewer above $1,000
@@ -118,7 +118,7 @@ describe('approval requests', () => {
     expect(again.body.error.code).toBe('ILLEGAL_TRANSITION');
   });
 
-  it('needs two approvers above the approver threshold, with a fresh 2-step code above stepUpAbove', async () => {
+  it('needs two approvers above the approver threshold, with the password again above stepUpAbove', async () => {
     const run = await f.svc.requestApproval({
       action: 'finance.payouts.release',
       target: { type: 'payout_run', id: newId(), ref: 'PO-RUN-261009' },
@@ -128,21 +128,23 @@ describe('approval requests', () => {
       requestedBy: f.principal(staffA),
     });
     expect(run).toMatchObject({ requiredApprovals: 2, requesterCountsAsFirst: false });
-    // above $10,000 the approval needs a 2-step code
+    // above $10,000 the approver confirms with the password (a re-auth token, purpose approval)
     const noCode = await f.call('POST', `/approval-requests/${run.id}/approve`, f.token(manager), {});
     expect(noCode.status).toBe(403);
-    expect(noCode.body.error.code).toBe('STEP_UP_REQUIRED');
-    const first = await f.call('POST', `/approval-requests/${run.id}/approve`, f.token(manager), { stepUpCode: STEP_UP_CODE });
+    expect(noCode.body.error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'approval' } });
+    const wrong = await f.call('POST', `/approval-requests/${run.id}/approve`, f.token(manager), { reauthToken: 'ra.-.not-issued' });
+    expect(wrong.status).toBe(403);
+    const first = await f.call('POST', `/approval-requests/${run.id}/approve`, f.token(manager), { reauthToken: APPROVAL_REAUTH });
     expect(first.status, JSON.stringify(first.body)).toBe(200);
     expect(first.body).toMatchObject({ status: 'partially_approved', requiredApprovals: 2 });
-    const twice = await f.call('POST', `/approval-requests/${run.id}/approve`, f.token(manager), { stepUpCode: STEP_UP_CODE });
+    const twice = await f.call('POST', `/approval-requests/${run.id}/approve`, f.token(manager), { reauthToken: APPROVAL_REAUTH });
     expect(twice.status).toBe(409);
     expect(twice.body.error.code).toBe('ALREADY_APPROVED_BY_YOU');
     await f.drain();
     expect(f.eventsNamed('access.approval.partially_approved').find((e) => e.requestId === run.id)).toMatchObject({ remainingApprovals: 1, eligibleAccountIds: expect.arrayContaining([manager2, owner]) });
     // finance staff are not second reviewers of payouts
-    await expect(f.svc.decide(run.id, f.principal(staffB), { kind: 'approve', stepUpCode: STEP_UP_CODE })).rejects.toMatchObject({ code: 'NOT_ELIGIBLE_APPROVER' });
-    const second = await f.svc.decide(run.id, f.principal(manager2), { kind: 'approve', stepUpCode: STEP_UP_CODE });
+    await expect(f.svc.decide(run.id, f.principal(staffB), { kind: 'approve', reauthToken: APPROVAL_REAUTH })).rejects.toMatchObject({ code: 'NOT_ELIGIBLE_APPROVER' });
+    const second = await f.svc.decide(run.id, f.principal(manager2), { kind: 'approve', reauthToken: APPROVAL_REAUTH });
     expect(second.status).toBe('approved');
     expect(second.approvals.map((a) => a.by.id)).toEqual([manager, manager2]);
   });
@@ -150,8 +152,8 @@ describe('approval requests', () => {
   it('lets the Business Owner approve alone above every limit', async () => {
     const run = await f.svc.requestApproval({ action: 'finance.payouts.release', target: { type: 'payout_run', id: newId() }, amount: usd(400_000), summary: 'Big run', reason: 'Quarter end', requestedBy: f.principal(manager) });
     expect(run.eligibleApprovers.map((s) => s.accountId)).toEqual([owner]);
-    await expect(f.svc.decide(run.id, f.principal(manager2), { kind: 'approve', stepUpCode: STEP_UP_CODE })).rejects.toMatchObject({ code: 'NOT_ELIGIBLE_APPROVER' });
-    const done = await f.svc.decide(run.id, f.principal(owner), { kind: 'approve', stepUpCode: STEP_UP_CODE });
+    await expect(f.svc.decide(run.id, f.principal(manager2), { kind: 'approve', reauthToken: APPROVAL_REAUTH })).rejects.toMatchObject({ code: 'NOT_ELIGIBLE_APPROVER' });
+    const done = await f.svc.decide(run.id, f.principal(owner), { kind: 'approve', reauthToken: APPROVAL_REAUTH });
     expect(done.status).toBe('approved');
   });
 

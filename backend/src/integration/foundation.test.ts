@@ -2,8 +2,8 @@
  * Tranche 1 wired together, with no stubs and no development tokens: identity issues the tokens,
  * access answers the permissions, and the kernel middleware enforces both on every request.
  *
- *   first Business Owner (bootstrap) → accepts the invitation (password + authenticator) → real admin token
- *   → reads protected admin screens (access.hasPermission) → invites a support agent (step-up with a real code)
+ *   first Business Owner (bootstrap) → accepts the invitation (link + pass code + password) → real admin token
+ *   → reads protected admin screens (access.hasPermission) → invites a support agent (step-up: the password again)
  *   → the agent is refused where the role doesn't reach → audit holds the history → notifications sent the invites
  *   → signing out revokes the token on the next revocation poll.
  */
@@ -31,14 +31,17 @@ const call: Flows['call'] = (...args) => f.call(...args);
 
 let owner: Staff;
 let agent: Staff;
+/** The owner's pass code from the bootstrap (printed by npm run bootstrap-owner, never emailed) */
+let ownerPassCode: string;
 
 describe('the platform foundation, end to end', () => {
   it('bootstraps the first Business Owner, once', async () => {
     const access = app.kernel.boot.apis.get('access') as AccessService;
-    await access.bootstrapBusinessOwner({ email: 'owner@marketly.test', name: 'Olivia Owner' });
+    const issued = await access.bootstrapBusinessOwner({ email: 'owner@marketly.test', name: 'Olivia Owner' });
     await app.kernel.events.drain();
     await expect(access.bootstrapBusinessOwner({ email: 'second@marketly.test', name: 'Someone Else' })).rejects.toMatchObject({ code: 'CONFLICT' });
-    owner = await f.acceptStaffInvitation('owner@marketly.test');
+    ownerPassCode = issued.passCode;
+    owner = await f.acceptStaffInvitation('owner@marketly.test', issued);
   });
 
   it('serves protected admin screens to the owner with a token identity issued', async () => {
@@ -50,14 +53,14 @@ describe('the platform foundation, end to end', () => {
     expect(member.body.assignments).toEqual(expect.arrayContaining(['business_owner', 'platform_administrator'].map((key) => expect.objectContaining({ status: 'active', role: expect.objectContaining({ key }) }))));
   });
 
-  it('asks for a fresh authenticator code before granting a role, then invites a support agent', async () => {
+  it('asks for the password again before granting a role, then invites a support agent', async () => {
     const roles = (await call('GET', '/api/admin/access/roles', { token: owner.accessToken })).body as { id: string; key: string }[];
     const supportAgent = roles.find((r) => r.key === 'support_agent')!;
     const body = { email: 'agent@marketly.test', name: 'Avery Agent', roleIds: [supportAgent.id], reason: 'New support hire' };
-    const noCode = await call('POST', '/api/admin/access/staff-invitations', { token: owner.accessToken, body, headers: { 'x-step-up-code': '000000' } });
-    expect(noCode.status, JSON.stringify(noCode.body)).toBe(403); // the dev code doesn't work for a real staff token
-    expect(noCode.body.error.code, JSON.stringify(noCode.body)).toBe('STEP_UP_REQUIRED');
-    const invited = await call('POST', '/api/admin/access/staff-invitations', { token: owner.accessToken, body, headers: { 'x-step-up-code': f.code(owner) } });
+    const noToken = await call('POST', '/api/admin/access/staff-invitations', { token: owner.accessToken, body: { ...body, reauthToken: 'dev-reauth.role-grant' } });
+    expect(noToken.status, JSON.stringify(noToken.body)).toBe(403); // the dev proof doesn't work for a real staff token
+    expect(noToken.body.error.code, JSON.stringify(noToken.body)).toBe('STEP_UP_REQUIRED');
+    const invited = await call('POST', '/api/admin/access/staff-invitations', { token: owner.accessToken, body: { ...body, reauthToken: await f.reauth(owner, 'role-grant') } });
     expect(invited.status, JSON.stringify(invited.body)).toBe(201);
     agent = await f.acceptStaffInvitation('agent@marketly.test');
   });
@@ -77,11 +80,13 @@ describe('the platform foundation, end to end', () => {
     expect(actions).toEqual(expect.arrayContaining(['access.role.assign', 'access.staff.invite']));
   });
 
-  it('emailed both invitations through notifications', async () => {
+  it('emailed the invitation links through notifications, never a pass code', async () => {
     const deliveries = await call('GET', '/api/admin/notifications/deliveries?limit=100', { token: owner.accessToken });
     expect(deliveries.status, JSON.stringify(deliveries.body)).toBe(200);
-    const toAgent = deliveries.body.items.filter((d: { accountId?: string; channel: string }) => d.accountId === agent.accountId && d.channel === 'email');
-    expect(toAgent.length, JSON.stringify(deliveries.body.items.map((d: { topicKey: string; accountId?: string }) => [d.topicKey, d.accountId]))).toBeGreaterThan(0);
+    // the owner's, the agent's, and the agent's new link from npm run staff-link (flows.acceptStaffInvitation)
+    const invites = deliveries.body.items.filter((d: { topicKey: string; channel: string }) => d.topicKey === 'staff.account.invitation' && d.channel === 'email');
+    expect(invites.length, JSON.stringify(deliveries.body.items.map((d: { topicKey: string }) => d.topicKey))).toBe(3);
+    expect(JSON.stringify(deliveries.body)).not.toContain(ownerPassCode);
   });
 
   it('revokes a signed-out session on every server at the next revocation poll', async () => {

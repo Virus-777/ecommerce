@@ -217,9 +217,9 @@ describe('store credit with the modules that use it', () => {
       const requestId = grant.approval.approvalRequestId as string;
       // no seeded role holds the wallet.goodwill.grant permission yet (reported), so the Business Owner approves;
       // Finance is eligible by limit but refused without the permission
-      const finance = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: financeManager.accessToken, body: { note: 'Agreed' }, headers: { 'x-step-up-code': f.code(financeManager) } });
+      const finance = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: financeManager.accessToken, body: { note: 'Agreed', reauthToken: await f.reauth(financeManager, 'approval') } });
       expect(finance.body.error?.code).toBe('NOT_ELIGIBLE_APPROVER');
-      const ok = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Agreed' }, headers: { 'x-step-up-code': f.code(listing.owner) } });
+      const ok = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Agreed', reauthToken: await f.reauth(listing.owner, 'approval') } });
       expect(ok.status, JSON.stringify(ok.body)).toBeLessThan(300);
       await app.kernel.events.drain();
 

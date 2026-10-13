@@ -12,7 +12,6 @@ import { ADMIN, boot, expectLedgerMatches, SELLER, USD, type Kit } from './helpe
 const DAY = 86_400_000;
 let k: Kit;
 const idem = () => ({ 'idempotency-key': newId() });
-const stepUp = { 'x-step-up-code': '000000' };
 
 async function initialDestination(sellerId: string) {
   const providerDestinationId = `dest_${newId().slice(0, 8)}`;
@@ -70,7 +69,7 @@ describe('payout destinations', () => {
   });
 
   it('needs the micro-deposits before Finance can verify the change', async () => {
-    const res = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Called the owner', callbackConfirmed: true }, stepUp);
+    const res = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Called the owner', callbackConfirmed: true, reauthToken: 'dev-reauth.payout-destination' });
     expect(res.status).toBe(409);
     expect(res.body.error).toMatchObject({ code: 'CHECKS_INCOMPLETE', details: { pending: ['Micro-deposits confirmed'] } });
   });
@@ -97,11 +96,11 @@ describe('payout destinations', () => {
   });
 
   it('refuses the requester as reviewer, then verifies with a pause before paying the new account', async () => {
-    const same = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, callers.staff(undefined, { sub: requester }), { reason: 'Mine', callbackConfirmed: true }, stepUp);
+    const same = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, callers.staff(undefined, { sub: requester }), { reason: 'Mine', callbackConfirmed: true, reauthToken: 'dev-reauth.payout-destination' });
     expect(same.status).toBe(409);
     expect(same.body.error.code).toBe('SAME_APPROVER');
     // the callback to the phone on file is the third check: not confirmed, the change is not verified
-    const noCallback = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Owner did not answer', callbackConfirmed: false, callbackNote: 'Voicemail' }, stepUp);
+    const noCallback = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Owner did not answer', callbackConfirmed: false, callbackNote: 'Voicemail', reauthToken: 'dev-reauth.payout-destination' });
     expect(noCallback.status, JSON.stringify(noCallback.body)).toBe(200);
     expect(noCallback.body.status).toBe('under_review');
     expect(noCallback.body.checks).toEqual([
@@ -111,7 +110,7 @@ describe('payout destinations', () => {
     ]);
     expect(k.of('finance.destination.verified').filter((e) => e.reviewId === reviewId)).toEqual([]);
     expect((await k.call('GET', `${SELLER}/payout-destination`, k.sellerToken(S))).body.destination).toMatchObject({ status: 'change_under_review', label: 'First Bank •••• 1111' });
-    const ok = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Callback to the registered phone done', callbackConfirmed: true, callbackNote: 'Owner confirmed' }, stepUp);
+    const ok = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'Callback to the registered phone done', callbackConfirmed: true, callbackNote: 'Owner confirmed', reauthToken: 'dev-reauth.payout-destination' });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('verified');
     expect(ok.body.checks.every((c: any) => c.result === 'passed')).toBe(true);
@@ -122,13 +121,13 @@ describe('payout destinations', () => {
     const block = await k.svc.hasPayoutBlock(S);
     expect(block.blocked).toBe(true);
     expect(block.reasons[0]).toContain('New payout account');
-    expect((await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'again', callbackConfirmed: true }, stepUp)).status).toBe(409);
+    expect((await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'again', callbackConfirmed: true, reauthToken: 'dev-reauth.payout-destination' })).status).toBe(409);
   });
 
   it('rejects a change: the current account keeps being paid', async () => {
     await k.emit('sellers.payout_account.changed', { sellerId: S, changeId: newId(), providerDestinationId: 'dest_x', label: 'Shady Bank •••• 0001', accountHolderName: 'Someone else', accountType: 'checking', previousLabel: 'Pacific Coast CU •••• 6620', isInitial: false, requestedBy: { kind: 'seller', id: newId() } });
     const id = (await k.call('GET', `${SELLER}/payout-destination`, k.sellerToken(S))).body.destination.pendingChange.reviewId;
-    const res = await k.call('POST', `${ADMIN}/destination-reviews/${id}/reject`, k.staff, { reason: 'Account holder name does not match' }, stepUp);
+    const res = await k.call('POST', `${ADMIN}/destination-reviews/${id}/reject`, k.staff, { reason: 'Account holder name does not match', reauthToken: 'dev-reauth.payout-destination' });
     expect(res.body.status).toBe('rejected');
     expect(k.of('finance.destination.rejected').at(-1)).toEqual({ sellerId: S, reviewId: id, reason: 'Account holder name does not match' });
     expect((await k.call('GET', `${SELLER}/payout-destination`, k.sellerToken(S))).body.destination).toMatchObject({ status: 'verified', label: 'Pacific Coast CU •••• 6620' });
@@ -215,7 +214,7 @@ describe('payout run approval', () => {
     const again = await k.call('POST', `${ADMIN}/payout-runs/${big.id}/approve`, callers.staff(undefined, { sub: firstId }), { confirmedReview: true }, idem());
     expect(again.status).toBe(409);
     expect(again.body.error.code).toBe('SAME_APPROVER');
-    const second = await k.call('POST', `${ADMIN}/payout-runs/${big.id}/approve`, k.staff, { confirmedReview: true, stepUpCode: '123456' }, idem());
+    const second = await k.call('POST', `${ADMIN}/payout-runs/${big.id}/approve`, k.staff, { confirmedReview: true, reauthToken: 'dev-reauth.approval' }, idem());
     expect(second.status, JSON.stringify(second.body)).toBe(200);
     expect(second.body.status).toBe('approved');
     expect(second.body.approvals.map((a: any) => a.status)).toEqual(['approved', 'approved']);
@@ -300,7 +299,7 @@ describe('failed payouts and recovery', () => {
     const [a, b] = k.provider.testDepositsFor('dest_new');
     await k.call('POST', `${SELLER}/payout-destination/confirm-deposits`, k.sellerToken(S), { amounts: [USD(a), USD(b)] });
     const reviewId = (await k.call('GET', `${SELLER}/payout-destination`, k.sellerToken(S))).body.destination.pendingChange.reviewId;
-    const approved = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'ok', callbackConfirmed: true }, stepUp);
+    const approved = await k.call('POST', `${ADMIN}/destination-reviews/${reviewId}/approve`, k.staff, { reason: 'ok', callbackConfirmed: true, reauthToken: 'dev-reauth.payout-destination' });
     expect(approved.body.status).toBe('verified');
     const res = await k.call('POST', `${ADMIN}/payouts/${retry.id}/retry`, k.staff, { now: false, reason: 'Retry to the new account' }, idem());
     expect(res.status).toBe(409);

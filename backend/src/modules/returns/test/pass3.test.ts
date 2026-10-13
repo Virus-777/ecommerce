@@ -249,14 +249,18 @@ describe('case refunds (requestRefund)', () => {
     expect(h.named('returns.refund.approved').find((e) => e.refundRequestId === other.id)).toMatchObject({ items: [{ orderItemId: m.items[1]![0]!, quantity: 1 }] });
   });
 
-  it('asks for a 2-step code when access says the amount is above stepUpAbove', async () => {
+  it('asks for the password again (a re-auth token) when access says the amount is above stepUpAbove', async () => {
     const sellerId = newId();
     const p = product(h, { title: 'Sofa', price: 90000, sellerId });
     const m = await placeOrder(h, [group(h, [line(p, 1)], { sellerId })]);
     const rr = await h.service.requestRefund({ source: 'case', caseId: newId(), orderId: m.order.id, orderItemIds: [m.items[0]![0]!], breakdown: breakdown(90000, 90000), fundedBy: 'seller', reason: 'Wrong item', proposedBy: { kind: 'staff', id: newId() } });
     h.authority.stepUp = true;
     try {
-      expect((await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), {}, idem())).body.error.code).toBe('STEP_UP_REQUIRED');
+      const missing = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), {}, idem());
+      expect(missing.body.error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'approval' } });
+      // a token identity did not issue to this session is refused the same way
+      const wrong = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), { reauthToken: 'ra.-.not-issued' }, idem());
+      expect(wrong.body.error.code).toBe('STEP_UP_REQUIRED');
     } finally {
       h.authority.stepUp = false;
     }

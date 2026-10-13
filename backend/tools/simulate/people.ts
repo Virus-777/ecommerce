@@ -1,16 +1,15 @@
 /**
  * Signing people in the way the apps do: app sessions for visitors, registration with the emailed code,
- * accepting a staff invitation from its email (password + authenticator), staff sign-in with a 2-step code,
- * seller sign-in after an approved application.
+ * accepting a staff invitation with its link and pass code (handed over by the server operator), staff sign-in with
+ * email and password, staff confirming sensitive actions with the password again, seller sign-in after an approved
+ * application.
  *
  * What a person reads in their mailbox comes from the development outbox (notifications/providers/dev-outbox.ts):
  * the development email provider records what it would have sent, and the codes and links in those emails are
- * stored nowhere else. Authenticator codes come from the key the person typed into their authenticator app
- * (testing/totp.ts does what the app does).
+ * stored nowhere else. Staff use no authenticator app (owner decision 2026-10-14).
  */
 import type { FastifyInstance } from 'fastify';
 import { devOutbox } from '../../src/modules/notifications/providers/dev-outbox.js';
-import { totp } from '../../src/testing/totp.js';
 import type { AppName, Client, Session, SessionTokens } from './http.js';
 import type { Runner } from './runner.js';
 
@@ -22,18 +21,18 @@ export interface Person {
   phone: string;
 }
 
-/** A staff member with their authenticator */
+/** A staff member (email and password; the password again for sensitive actions) */
 export interface Staff extends Person {
   accountId: string;
-  /** The authenticator key from the 2-step setup (manual entry key) */
-  totpKey: string;
-  /** Last 30-second step used for a code: the server refuses a step at or before it */
-  lastStep: number | null;
   session: Session;
   roles: string[];
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** What the server operator hands a new staff member (npm run bootstrap-owner or npm run staff-link) */
+export interface StaffInvite {
+  link: string;
+  passCode: string;
+}
 
 export function device(client: 'web' | 'android') {
   return client === 'android' ? { kind: 'android' as const, name: 'Marketly app on Pixel 8', appVersion: '1.4.2', installationId: `inst-${crypto.randomUUID()}` } : { kind: 'web' as const };
@@ -88,46 +87,32 @@ export class People {
   }
 
   /**
-   * A fresh authenticator code. The server accepts the current 30-second step or the next one, each only once and
-   * never one at or before the last used, so a staff member gets two codes at once and then one per step: wait
-   * when needed, like a person waiting for their app to show the next code.
+   * A re-auth token for a sensitive Admin Center action: the staff member types the password again (purpose of the
+   * endpoint: role-grant, staff-account, payout-destination, or approval above access stepUpAbove). Single use.
    */
-  async code(s: Staff): Promise<string> {
-    for (;;) {
-      const now = Math.floor(Date.now() / 30_000);
-      const step = Math.max(now, (s.lastStep ?? now - 1) + 1);
-      if (step <= now + 1) {
-        s.lastStep = step;
-        return totp(s.totpKey, new Date(step * 30_000 + 1_000));
-      }
-      const wait = (step - 1) * 30_000 - Date.now() + 500;
-      console.log(`    (waiting ${Math.ceil(wait / 1000)}s for ${s.firstName}'s next authenticator code)`);
-      await sleep(wait);
-    }
+  async reauth(s: Staff, purpose: 'role-grant' | 'staff-account' | 'payout-destination' | 'approval'): Promise<string> {
+    const r = await this.api.call(s.session, 'POST', '/api/admin/identity/reauth', { purpose, password: s.password });
+    return r.reauthToken as string;
   }
 
-  /** Accepts an emailed staff invitation: password, then the authenticator (2-step is required for staff) */
-  async acceptStaffInvitation(p: Person, roles: string[]): Promise<Staff> {
-    const token = await this.fromMailbox(p.email, /#token=([\w.~-]+)/, 'the invitation link');
+  /** Accepts a staff invitation with the link and pass code the server operator handed over, and a new password */
+  async acceptStaffInvitation(p: Person, roles: string[], invite: StaffInvite): Promise<Staff> {
+    const token = new URL(invite.link).hash.replace('#token=', '');
     const v = await this.visitor('admin');
     const lookup = await this.api.call(v, 'POST', '/api/public/identity/invitations/lookups', { token });
-    this.runner.check('the invitation names this person', lookup.name === `${p.firstName} ${p.lastName}` && lookup.requiresTwoStepSetup === true, lookup);
-    const d = device('web');
-    const accepted = await this.api.call(v, 'POST', '/api/public/identity/invitations/accept', { token, password: p.password, name: `${p.firstName} ${p.lastName}`, device: d });
-    this.runner.check('staff must set up 2-step', accepted.status === 'two_step_setup_required' && accepted.twoStepSetup, accepted);
-    const staff: Staff = { ...p, accountId: accepted.account.id, totpKey: accepted.twoStepSetup.manualEntryKey, lastStep: null, session: v, roles };
-    const confirmed = await this.api.request(v, 'POST', '/api/public/identity/invitations/two-step', { token, setupId: accepted.twoStepSetup.setupId, code: await this.code(staff), device: d });
-    staff.session = this.api.session(`staff ${p.firstName} ${p.lastName}`, 'admin', 'web', confirmed.body.tokens, confirmed.headers, staff.accountId);
+    this.runner.check('the invitation names this person and asks for the pass code', lookup.name === `${p.firstName} ${p.lastName}` && lookup.requiresPassCode === true, lookup);
+    const accepted = await this.api.request(v, 'POST', '/api/public/identity/invitations/accept', { token, passCode: invite.passCode, password: p.password, name: `${p.firstName} ${p.lastName}`, device: device('web') });
+    this.runner.check('the invitation signs the staff member in at once', accepted.body.status === 'signed_in' && accepted.body.tokens, accepted.body);
+    const staff: Staff = { ...p, accountId: accepted.body.account.id, session: v, roles };
+    staff.session = this.api.session(`staff ${p.firstName} ${p.lastName}`, 'admin', 'web', accepted.body.tokens, accepted.headers, staff.accountId);
     return staff;
   }
 
-  /** Staff sign-in to the Admin Center: password, then a code from the authenticator */
+  /** Staff sign-in to the Admin Center: email and password */
   async staffSignIn(s: Staff): Promise<void> {
     const v = await this.visitor('admin');
-    const first = await this.api.call(v, 'POST', '/api/public/identity/sessions', { email: s.email, password: s.password, audience: 'admin', keepSignedIn: false, device: device('web') });
-    this.runner.check('staff sign-in asks for the second factor', first.status === 'second_factor_required' && first.challenge?.id, first);
-    const done = await this.api.request(v, 'POST', `/api/public/identity/sign-in-challenges/${first.challenge.id}/verify`, { method: 'totp', code: await this.code(s), rememberDevice: false });
-    this.runner.check('signed in', done.body.status === 'signed_in', done.body);
+    const done = await this.api.request(v, 'POST', '/api/public/identity/sessions', { email: s.email, password: s.password, audience: 'admin', keepSignedIn: false, device: device('web') });
+    this.runner.check('staff sign in with email and password', done.body.status === 'signed_in', done.body);
     s.session = this.api.session(`staff ${s.firstName} ${s.lastName}`, 'admin', 'web', done.body.tokens, done.headers, s.accountId);
   }
 

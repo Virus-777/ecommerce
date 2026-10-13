@@ -1,21 +1,30 @@
 /**
  * Flow 1, staff: the Business Owner and a deputy, then the team every later flow works with, each invited from
- * the Admin Center with a fresh authenticator code and signed in through their own invitation.
+ * the Admin Center (the inviter confirms with the password) and signed in through their own invitation: the link
+ * and pass code the server operator prints with npm run staff-link (staff use no authenticator app).
  *
  * The first run creates the owner and the deputy with the bootstrap (an operator command, not an API: the same
- * call tools/bootstrap-owner.ts makes) and keeps their sign-in details in .data/simulate-owner.json (gitignored).
- * Later runs sign in as them.
+ * call tools/bootstrap-owner.ts makes, which returns each link and pass code) and keeps their sign-in details in
+ * .data/simulate-owner.json (gitignored). Later runs sign in as them with email and password.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AccessService } from '../../../src/modules/access/service.js';
-import type { Person, Staff } from '../people.js';
+import { staffLink } from '../../lib/staff-link.js';
+import type { Staff, StaffInvite } from '../people.js';
 import type { Sim, World } from '../sim.js';
 
 export const OWNER_FILE = fileURLToPath(new URL('../../../.data/simulate-owner.json', import.meta.url));
 
 type Saved = Omit<Staff, 'session'>;
+
+/** What the operator does for an invited person (npm run staff-link): a new link and pass code to hand over */
+async function operatorLink(sim: Sim, email: string): Promise<StaffInvite> {
+  const r = await staffLink(sim.app, { email });
+  if (!r.link || !r.passCode) sim.run.fail({ step: 'npm run staff-link', message: `no invitation link and pass code for ${email}: ${r.done}` });
+  return { link: r.link!, passCode: r.passCode! };
+}
 
 /** The team: who does what in the later flows, and the roles access seeds for it (access/domain/seed.ts) */
 const TEAM: { key: keyof World['staff']; first: string; last: string; roles: string[] }[] = [
@@ -52,53 +61,22 @@ function write(f: OwnerFile) {
 
 const strip = ({ session: _s, ...rest }: Staff) => ({ ...rest, accepted: true });
 
-/** Writes the owner's and deputy's sign-in details (never printed); keeps the last authenticator step used */
+/** Writes the owner's and deputy's sign-in details (never printed) */
 export function saveOwners(w: World): void {
   if (!w.owner || !w.deputy) return;
   write({ owner: strip(w.owner), deputy: strip(w.deputy) });
 }
 
-/**
- * The owners of an earlier run that stopped between the bootstrap and accepting the invitations: the invitation
- * emails went with that run's process, and nobody can sign in yet to send them again. Only here a development
- * token is used (DEV_TOKENS, development only; its step-up code is the fixed 000000), standing in for a Platform
- * Administrator: it resends each invitation. When no email arrives, it revokes the stuck invitations and role
- * assignments so the bootstrap can run again with new owners. Returns what it did.
- */
-async function recoverOwners(sim: Sim, file: OwnerFile): Promise<'resent' | 'reset'> {
-  const { api, run, people } = sim;
-  const dev = sim.devToken('staff', 'resend the invitations of owners whose invitation emails were lost when an earlier run stopped before accepting them');
-  const invitations: { id: string; email: string; accountId: string | null }[] = [];
-  for (const status of ['pending', 'expired']) invitations.push(...(await api.call(dev, 'GET', `/api/admin/identity/invitations?status=${status}&limit=100`)).items);
-  const stuck = [file.owner, file.deputy].map((p) => ({ p, inv: invitations.find((i) => i.email.toLowerCase() === p.email.toLowerCase()) }));
-  const missing = stuck.find((s) => !s.inv);
-  if (missing) run.fail({ step: 'recover owner invitations', message: `${missing.p.email} has no open invitation and ${OWNER_FILE} has no sign-in for them; delete the file only if no Business Owner exists` });
-  let emailed = true;
-  for (const { p, inv } of stuck) {
-    await api.call(dev, 'POST', `/api/admin/identity/invitations/${inv!.id}/resend`, undefined, { headers: { 'x-step-up-code': '000000' } });
-    if ((await people.peekMailbox(p.email, /#token=([\w.~-]+)/)) === undefined) emailed = false;
-  }
-  if (emailed) return 'resent';
-  // the resend sent nothing (notifications skips it as a duplicate of the first invitation email: see the report)
-  console.log('  the resent invitations were not emailed; revoking them so the bootstrap can run again');
-  sim.devTokenPlaces.push(`${run.current.name}: staff dev token to revoke the stuck owner invitations and role assignments, because a resent invitation is not emailed`);
-  for (const { inv } of stuck) {
-    await api.call(dev, 'POST', `/api/admin/identity/invitations/${inv!.id}/revoke`, { reason: 'Simulator: invitation email lost; owners bootstrapped again' }, { headers: { 'x-step-up-code': '000000' } });
-    if (!inv!.accountId) continue;
-    const member = await api.call(dev, 'GET', `/api/admin/access/members/${inv!.accountId}`);
-    for (const a of member.assignments as { id: string; status: string }[]) {
-      if (a.status === 'pending_acceptance' || a.status === 'pending_approval') await api.call(dev, 'POST', `/api/admin/access/role-assignments/${a.id}/revoke`, { reason: 'Simulator: invitation email lost; owners bootstrapped again' });
-    }
-  }
-  return 'reset';
-}
-
 export async function staffFlow(sim: Sim): Promise<void> {
   const { api, people, world: w, run } = sim;
   let file = load();
+  // the links and pass codes the operator hands over, by email (pass codes are printed once, never stored)
+  const invites = new Map<string, StaffInvite>();
   if (file && (!file.owner.accepted || !file.deputy.accepted)) {
     if (file.owner.accepted || file.deputy.accepted) run.fail({ step: 'owners', message: `Only one of the two Business Owners in ${OWNER_FILE} accepted the invitation; finish the other by hand` });
-    if ((await recoverOwners(sim, file)) === 'reset') file = null;
+    // an earlier run stopped between the bootstrap and accepting: its pass codes went with that run, so the operator
+    // prints new links and pass codes (npm run staff-link)
+    for (const p of [file.owner, file.deputy]) invites.set(p.email, await operatorLink(sim, p.email));
   }
   if (!file) {
     const person = (firstName: string, lastName: string): Saved & { accepted: boolean } => ({
@@ -108,34 +86,34 @@ export async function staffFlow(sim: Sim): Promise<void> {
       password: `Mt-Hood-${crypto.randomUUID().slice(0, 12)}-Summit!`,
       phone: sim.phone(),
       accountId: '',
-      totpKey: '',
-      lastStep: null,
       roles: OWNER_ROLES,
       accepted: false,
     });
     file = { owner: person('Olivia', 'Hart'), deputy: person('Daniel', 'Reyes') };
-    // in process: the bootstrap is an operator command with no API (the call tools/bootstrap-owner.ts makes)
+    // in process: the bootstrap is an operator command with no API (the call tools/bootstrap-owner.ts makes; it
+    // returns each person's link and pass code)
     const access = sim.app.kernel.boot.apis.get('access') as AccessService;
     try {
-      await access.bootstrapBusinessOwner({ email: file.owner.email, name: 'Olivia Hart', deputy: { email: file.deputy.email, name: 'Daniel Reyes' } });
+      const result = await access.bootstrapBusinessOwner({ email: file.owner.email, name: 'Olivia Hart', deputy: { email: file.deputy.email, name: 'Daniel Reyes' } });
+      invites.set(file.owner.email, { link: result.acceptUrl, passCode: result.passCode });
+      invites.set(file.deputy.email, { link: result.deputy!.acceptUrl, passCode: result.deputy!.passCode });
     } catch (err) {
       run.fail({ step: 'bootstrap Business Owner', message: `${(err as Error).message}. A Business Owner exists that the simulator has no sign-in for (${OWNER_FILE} is missing).` });
     }
     // written at once: if this run stops before the invitations are accepted, the next run knows who the owners
-    // are and asks for their invitations again
+    // are and asks the operator for new links
     write(file);
     await sim.app.kernel.events.drain();
     run.pass();
   }
   const signInOrAccept = async (saved: Saved & { accepted: boolean }): Promise<Staff> => {
     if (saved.accepted) {
-      // later runs: password + authenticator
-      const s: Staff = { ...saved, session: undefined as never };
+      // later runs: email and password
+      const s: Staff = { firstName: saved.firstName, lastName: saved.lastName, email: saved.email, password: saved.password, phone: saved.phone, accountId: saved.accountId, roles: saved.roles, session: undefined as never };
       await people.staffSignIn(s);
       return s;
     }
-    // the invitation emails of the bootstrap (or of the recovery) are in this run's mailbox
-    return people.acceptStaffInvitation(saved, OWNER_ROLES);
+    return people.acceptStaffInvitation(saved, OWNER_ROLES, invites.get(saved.email)!);
   };
   w.owner = await signInOrAccept(file.owner);
   write({ owner: { ...file.owner, ...strip(w.owner), accepted: true }, deputy: file.deputy });
@@ -148,7 +126,7 @@ export async function staffFlow(sim: Sim): Promise<void> {
 
   const roles = (await api.call(owner.session, 'GET', '/api/admin/access/roles')) as { id: string; key: string }[];
   for (const [i, t] of TEAM.entries()) {
-    // owner and deputy take turns: each Business Owner gets one authenticator code per 30 seconds
+    // owner and deputy take turns inviting; the other approves the sensitive grants
     const [inviter, other] = i % 2 === 0 ? [owner, deputy] : [deputy, owner];
     const person = sim.person('marketly.test', t.first, t.last);
     const roleIds = t.roles.map((k) => {
@@ -156,7 +134,9 @@ export async function staffFlow(sim: Sim): Promise<void> {
       if (!r) run.fail({ step: 'roles', message: `role ${k} is not seeded` });
       return r!.id;
     });
-    await api.call(inviter.session, 'POST', '/api/admin/access/staff-invitations', { email: person.email, name: `${t.first} ${t.last}`, roleIds, reason: `Simulated hire ${sim.runId}` }, { headers: { 'x-step-up-code': await people.code(inviter) } });
+    // granting roles is a sensitive action: the inviter confirms with the password (a re-auth token)
+    const reauthToken = await people.reauth(inviter, 'role-grant');
+    await api.call(inviter.session, 'POST', '/api/admin/access/staff-invitations', { email: person.email, name: `${t.first} ${t.last}`, roleIds, reason: `Simulated hire ${sim.runId}`, reauthToken });
     // a sensitive grant waits for the other Business Owner. Only the grant for this person: other requests waiting
     // for a decision are not the simulator's to approve
     const pending = await api.call(other.session, 'GET', '/api/admin/access/approval-requests?view=to_decide');
@@ -165,7 +145,8 @@ export async function staffFlow(sim: Sim): Promise<void> {
       if (r.status !== 'pending' && r.status !== 'partially_approved') continue;
       await api.call(other.session, 'POST', `/api/admin/access/approval-requests/${r.id}/approve`, { note: 'Agreed: role for the new hire' });
     }
-    w.staff[t.key] = await people.acceptStaffInvitation(person, t.roles);
+    // the Admin Center never shows the pass code: the operator prints a link and pass code for the new hire
+    w.staff[t.key] = await people.acceptStaffInvitation(person, t.roles, await operatorLink(sim, person.email));
   }
   // each new member reaches their own area (the middleware asks access for the permission)
   const finance = w.staff.finance!;

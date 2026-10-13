@@ -178,8 +178,7 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
   const payload = (over: Record<string, unknown> = {}) => (d.body ? (isObject ? { ...(body.value as object), ...appCookie, ...over } : body.value) : undefined);
   const extra: Record<string, string> = {};
   if (d.idempotent) extra['idempotency-key'] = crypto.randomUUID();
-  if (d.stepUp?.kind === 'code') extra['x-step-up-code'] = '000000';
-  const proof = d.stepUp?.kind === 'reauth' ? { reauthToken: `dev-reauth.${d.stepUp.purpose}` } : {};
+  const proof = d.stepUp ? { reauthToken: `dev-reauth.${d.stepUp.purpose}` } : {};
   const call = async (check: string, headers: Record<string, string>, b: unknown, expect: (r: Res) => string | null) => {
     const r = await send(d.method, url, headers, b);
     record(op, check, expect(r) ?? headerProblems(r, url));
@@ -245,13 +244,12 @@ async function testEndpoint(module: string, id: string, d: EndpointDef) {
 
   // 6. the right token, without the step-up proof
   if (d.stepUp) {
-    const headers = { ...extra, ...rightToken(d), ...(d.stepUp.kind === 'code' ? { 'x-step-up-code': '999999' } : {}) };
-    const r = await send(d.method, url, headers, payload(d.stepUp.kind === 'reauth' ? { reauthToken: 'not-a-reauth-token' } : {}));
+    const headers = { ...extra, ...rightToken(d) };
+    const r = await send(d.method, url, headers, payload({ reauthToken: 'not-a-reauth-token' }));
     if (later(r)) record(op, 'wrong step-up', null, 'later launch phase');
     else record(op, 'wrong step-up', expectStatus(r, 403, ['STEP_UP_REQUIRED']) ?? headerProblems(r, url));
     // no proof at all: still a step-up refusal (403), never a validation error
-    const { 'x-step-up-code': _code, ...withoutCode } = { ...extra, ...rightToken(d) };
-    const missing = await send(d.method, url, withoutCode, payload(d.stepUp.kind === 'reauth' ? { reauthToken: undefined } : {}));
+    const missing = await send(d.method, url, headers, payload({ reauthToken: undefined }));
     if (later(missing)) record(op, 'no step-up', null, 'later launch phase');
     else {
       const details = missing.body?.error?.details;

@@ -63,7 +63,7 @@ export async function financeFlow(sim: Sim): Promise<void> {
   const submitted = await api.call(prep, 'POST', `/api/admin/finance/payout-runs/${run0.id}/submit`);
   run.check('the payout run waits for approval', ['pending_approval', 'approved'].includes(submitted.status), submitted.status);
   if (submitted.status === 'pending_approval') {
-    const approved = await api.call(fin.session, 'POST', `/api/admin/finance/payout-runs/${run0.id}/approve`, { confirmedReview: true, note: 'Checked the holds and destinations', stepUpCode: await people.code(fin) });
+    const approved = await api.call(fin.session, 'POST', `/api/admin/finance/payout-runs/${run0.id}/approve`, { confirmedReview: true, note: 'Checked the holds and destinations', reauthToken: await people.reauth(fin, 'approval') });
     run.check('the payout run is approved', ['approved', 'releasing', 'completed'].includes(approved.status), approved.status);
   }
   const released = await api.call(fin.session, 'POST', `/api/admin/finance/payout-runs/${run0.id}/release`);

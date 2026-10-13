@@ -40,7 +40,7 @@ afterAll(async () => {
 const ADMIN = '/api/admin/access';
 let owner: Staff;
 let deputy: Staff;
-let ownerIds: { accountId: string; deputy: { accountId: string } | null };
+let ownerIds: Awaited<ReturnType<AccessService['bootstrapBusinessOwner']>>;
 
 async function roleIds(token: string, keys: string[]) {
   const roles = (await f.call('GET', `${ADMIN}/roles`, { token })).body as { id: string; key: string }[];
@@ -57,8 +57,7 @@ async function assignmentsOf(token: string, accountId: string) {
 async function inviteFinanceManager(inviter: Staff, email: string, name: string) {
   const invited = await f.call('POST', `${ADMIN}/staff-invitations`, {
     token: inviter.accessToken,
-    body: { email, name, roleIds: await roleIds(inviter.accessToken, ['finance_manager']), reason: 'New finance hire' },
-    headers: { 'x-step-up-code': f.code(inviter) },
+    body: { email, name, roleIds: await roleIds(inviter.accessToken, ['finance_manager']), reason: 'New finance hire', reauthToken: await f.reauth(inviter, 'role-grant') },
   });
   expect(invited.status, JSON.stringify(invited.body)).toBe(201);
   const request = requested.findLast((r) => r.actionKey === 'access.roles.sensitive-grant' && String(r.target.label).includes(name));
@@ -79,7 +78,12 @@ describe('bootstrap with a deputy Business Owner', () => {
   it('invites both, gives both Business Owner and Platform Administrator, and audits each grant', async () => {
     const result = await access.bootstrapBusinessOwner({ email: 'owner@marketly.test', name: 'Olivia Owner', deputy: { email: 'deputy@marketly.test', name: 'Dev Deputy' } });
     await app.kernel.events.drain();
-    expect(result).toEqual({ accountId: expect.any(String), invitationId: expect.any(String), deputy: { accountId: expect.any(String), invitationId: expect.any(String) } });
+    // each person's link and pass code come back to the operator's command (npm run bootstrap-owner prints them)
+    const invitee = { accountId: expect.any(String), invitationId: expect.any(String), acceptUrl: expect.stringContaining('/invitation#token='), passCode: expect.stringMatching(/^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/) };
+    expect(result).toEqual({ ...invitee, deputy: invitee });
+    expect(result.deputy!.passCode).not.toBe(result.passCode);
+    // the pass code is never in the (emailed) invitation event
+    expect(JSON.stringify(f.events('identity.invitation.created'))).not.toContain(result.passCode);
     expect(result.deputy!.accountId).not.toBe(result.accountId);
     ownerIds = result;
     expect(f.events('identity.invitation.created').map((e) => e.email)).toEqual(expect.arrayContaining(['owner@marketly.test', 'deputy@marketly.test']));
@@ -97,8 +101,8 @@ describe('bootstrap with a deputy Business Owner', () => {
   });
 
   it('both roles become active when each person accepts', async () => {
-    owner = await f.acceptStaffInvitation('owner@marketly.test');
-    deputy = await f.acceptStaffInvitation('deputy@marketly.test');
+    owner = await f.acceptStaffInvitation('owner@marketly.test', ownerIds);
+    deputy = await f.acceptStaffInvitation('deputy@marketly.test', ownerIds.deputy!);
     expect(owner.accountId).toBe(ownerIds.accountId);
     expect(deputy.accountId).toBe(ownerIds.deputy!.accountId);
     for (const s of [owner, deputy]) {
@@ -117,7 +121,7 @@ describe('bootstrap with a deputy Business Owner', () => {
     expect(self.status).toBe(403);
     expect(self.body.error.code).toBe('SELF_APPROVAL_NOT_ALLOWED');
 
-    const ok = await f.call('POST', `${ADMIN}/approval-requests/${request.requestId}/approve`, { token: deputy.accessToken, body: { note: 'Agreed', stepUpCode: f.code(deputy) } });
+    const ok = await f.call('POST', `${ADMIN}/approval-requests/${request.requestId}/approve`, { token: deputy.accessToken, body: { note: 'Agreed' } });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('approved');
     await app.kernel.events.drain();
@@ -129,9 +133,9 @@ describe('bootstrap with a deputy Business Owner', () => {
     const { accountId, request } = await inviteFinanceManager(deputy, 'felix@marketly.test', 'Felix Finance');
     expect(request.eligibleAccountIds).toContain(owner.accountId);
     expect(request.eligibleAccountIds).not.toContain(deputy.accountId);
-    const self = await f.call('POST', `${ADMIN}/approval-requests/${request.requestId}/approve`, { token: deputy.accessToken, body: { stepUpCode: f.code(deputy) } });
+    const self = await f.call('POST', `${ADMIN}/approval-requests/${request.requestId}/approve`, { token: deputy.accessToken, body: {} });
     expect(self.body.error.code).toBe('SELF_APPROVAL_NOT_ALLOWED');
-    const ok = await f.call('POST', `${ADMIN}/approval-requests/${request.requestId}/approve`, { token: owner.accessToken, body: { stepUpCode: f.code(owner) } });
+    const ok = await f.call('POST', `${ADMIN}/approval-requests/${request.requestId}/approve`, { token: owner.accessToken, body: {} });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('approved');
     await app.kernel.events.drain();
@@ -146,13 +150,12 @@ describe('bootstrap with a deputy Business Owner', () => {
   it('a third Business Owner needs the other Business Owner, too', async () => {
     const invited = await f.call('POST', `${ADMIN}/staff-invitations`, {
       token: owner.accessToken,
-      body: { email: 'bea@marketly.test', name: 'Bea Owner', roleIds: await roleIds(owner.accessToken, ['business_owner']), reason: 'Co-founder' },
-      headers: { 'x-step-up-code': f.code(owner) },
+      body: { email: 'bea@marketly.test', name: 'Bea Owner', roleIds: await roleIds(owner.accessToken, ['business_owner']), reason: 'Co-founder', reauthToken: await f.reauth(owner, 'role-grant') },
     });
     expect(invited.status, JSON.stringify(invited.body)).toBe(201);
     const request = requested.findLast((r) => r.actionKey === 'access.roles.sensitive-grant' && String(r.target.label).includes('Bea Owner'));
     expect(request.eligibleAccountIds).toEqual([deputy.accountId]);
-    const ok = await f.call('POST', `${ADMIN}/approval-requests/${request.requestId}/approve`, { token: deputy.accessToken, body: { stepUpCode: f.code(deputy) } });
+    const ok = await f.call('POST', `${ADMIN}/approval-requests/${request.requestId}/approve`, { token: deputy.accessToken, body: {} });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('approved');
   });

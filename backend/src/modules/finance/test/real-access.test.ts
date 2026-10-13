@@ -65,7 +65,7 @@ describe('approval limits from access', () => {
     expect(big.body.approval).toMatchObject({ required: true, approvalRequestId: expect.any(String) });
     const { id: holdId, approval: { approvalRequestId } } = big.body;
     expect((await svc.core.repo.findOne('seller_accounts', { seller_id: S }))?.held).toBe(100_000);
-    const approved = await f.call('POST', `/api/admin/access/approval-requests/${approvalRequestId}/approve`, { token: managerA.accessToken, body: { note: 'Agreed', stepUpCode: f.code(managerA) } });
+    const approved = await f.call('POST', `/api/admin/access/approval-requests/${approvalRequestId}/approve`, { token: managerA.accessToken, body: { note: 'Agreed', reauthToken: await f.reauth(managerA, 'approval') } });
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
     expect((await svc.core.repo.findOne('seller_accounts', { seller_id: S }))?.held).toBe(2_100_000);
     expect((await svc.core.repo.get('holds', holdId))?.approval_request_id).toBeNull();
@@ -91,7 +91,7 @@ describe('approval limits from access', () => {
     expect(twice.body.error.code).toBe('SAME_APPROVER');
     const view = await f.call('GET', `${ADMIN}/payout-runs/${run.body.id}`, { token: managerB.accessToken });
     expect(view.body.viewerCanApprove).toBe(true);
-    const second = await f.call('POST', `${ADMIN}/payout-runs/${run.body.id}/approve`, { token: managerB.accessToken, body: { confirmedReview: true, stepUpCode: f.code(managerB) }, headers: { 'idempotency-key': newId() } });
+    const second = await f.call('POST', `${ADMIN}/payout-runs/${run.body.id}/approve`, { token: managerB.accessToken, body: { confirmedReview: true, reauthToken: await f.reauth(managerB, 'approval') }, headers: { 'idempotency-key': newId() } });
     expect(second.status, JSON.stringify(second.body)).toBe(200);
     expect(second.body.status).toBe('approved');
     const released = await f.call('POST', `${ADMIN}/payout-runs/${run.body.id}/release`, { token: managerB.accessToken, headers: { 'idempotency-key': newId() } });
@@ -105,7 +105,7 @@ describe('approval limits from access', () => {
     const request = await (app.kernel.boot.apis.get('access') as AccessPublicApi).getApproval(credit.approvalRequestId!);
     expect(request).toMatchObject({ status: 'pending', target: { type: 'seller_credit', id: credit.id } });
     // access has no Finance limits for finance.credits.issue yet (seed), so the Business Owner decides it
-    const approved = await f.call('POST', `/api/admin/access/approval-requests/${credit.approvalRequestId}/approve`, { token: owner.accessToken, body: { note: 'Claim checked', stepUpCode: f.code(owner) } });
+    const approved = await f.call('POST', `/api/admin/access/approval-requests/${credit.approvalRequestId}/approve`, { token: owner.accessToken, body: { note: 'Claim checked', reauthToken: await f.reauth(owner, 'approval') } });
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
     await app.kernel.events.drain();
     expect((await svc.core.repo.get('seller_credits', credit.id))?.status).toBe('posted');

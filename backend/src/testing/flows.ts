@@ -6,8 +6,8 @@ import type { FastifyInstance } from 'fastify';
 import { expect } from 'vitest';
 import type { EventEnvelope } from '../kernel/events/index.js';
 import type { AccessService } from '../modules/access/service.js';
+import type { IdentityService } from '../modules/identity/service.js';
 import { auth } from './app.js';
-import { totp } from './totp.js';
 
 export interface Flows {
   app: FastifyInstance;
@@ -25,12 +25,18 @@ export interface Flows {
    * Business Owner approves the grant, then the person accepts. Returns the signed-in staff member.
    */
   staffWithSensitiveRoles(inviter: Staff, approver: Staff, email: string, name: string, roleKeys: string[]): Promise<Staff>;
-  /** Accepts the emailed staff invitation (password + authenticator) and returns the real admin session */
-  acceptStaffInvitation(email: string): Promise<Staff>;
-  /** Invites a staff member with roles (the inviter confirms with an authenticator code) and signs them in */
+  /**
+   * Accepts a staff invitation with its link and pass code (and a new password) and returns the real admin session.
+   * Without `issued`, the link and pass code come the way the server operator gets them for someone invited from the
+   * Admin Center: npm run staff-link (staffLink below).
+   */
+  acceptStaffInvitation(email: string, issued?: { acceptUrl: string; passCode: string }): Promise<Staff>;
+  /** What npm run staff-link does for an invited person: a new link and pass code (the previous link stops working) */
+  staffLink(email: string): Promise<{ acceptUrl: string; passCode: string }>;
+  /** Invites a staff member with roles (the inviter confirms with the password) and signs them in */
   staffWithRoles(inviter: Staff, email: string, name: string, roleKeys: string[]): Promise<Staff>;
-  /** A fresh authenticator code for a staff member (each code works once) */
-  code(s: Staff): string;
+  /** A re-auth token for a sensitive Admin Center action: the staff member re-enters the password (single use) */
+  reauth(s: Staff, purpose: 'role-grant' | 'staff-account' | 'payout-destination' | 'approval'): Promise<string>;
   /** Registers and confirms a customer; returns the store session */
   customer(email: string): Promise<{ accountId: string; accessToken: string; email: string; password: string }>;
   /** Password sign-in to an app (seller: optionally for a seller) */
@@ -72,8 +78,9 @@ export interface Listing {
 
 export interface Staff {
   accountId: string;
-  key: string;
   accessToken: string;
+  /** Staff sign in with email and password and re-enter the password for sensitive actions (no 2-step) */
+  password: string;
 }
 
 const PASSWORD = 'Blue-Orchid-2026-Key';
@@ -111,13 +118,12 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
     expect(v.status, JSON.stringify(v.body)).toBe(201);
     return v.body.accessToken as string;
   };
-  const code = (s: Staff) => {
-    // A fresh 30-second step for every code (the server refuses a step already used), and the code is made for the
-    // clock time the request is checked at: made before advancing, a code from the end of a step was two steps
-    // behind by the time it was checked and was refused now and then (flows.test.ts).
-    clock.advance(30_000);
-    return totp(s.key, clock.now());
+  const reauth: Flows['reauth'] = async (s, purpose) => {
+    const r = await call('POST', '/api/admin/identity/reauth', { token: s.accessToken, body: { purpose, password: s.password } });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    return r.body.reauthToken as string;
   };
+  const identity = () => app.kernel.boot.apis.get('identity') as IdentityService;
 
   const self: Flows = {
     app,
@@ -125,35 +131,41 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
     events,
     device,
     visitor,
-    code,
-    async acceptStaffInvitation(email) {
-      const created = events('identity.invitation.created').findLast((p) => p.email === email);
-      expect(created, `invitation for ${email}`).toBeDefined();
-      const token = new URL(created.acceptUrl).hash.replace('#token=', '');
+    reauth,
+    async staffLink(email) {
+      // as tools/lib/staff-link.ts does: identity's resend, as the server operator
+      const ids = identity();
+      const account = (await ids.core.repo.findAccountsByEmail(email.trim().toLowerCase())).find((a) => a.realm === 'staff');
+      expect(account?.status, `an invited staff account for ${email}`).toBe('invited');
+      const invitation = (await ids.core.repo.latestInvitations([account!.id])).get(account!.id);
+      const operator = { kind: 'system' as const, id: null, name: 'Server operator (tests)' };
+      const issued = await ids.invitations.resendInvitation(invitation!.id, { principal: null, actor: operator, client: { ip: null, userAgent: 'flows' } });
+      await app.kernel.events.drain();
+      return { acceptUrl: issued.acceptUrl, passCode: issued.passCode };
+    },
+    async acceptStaffInvitation(email, issued) {
+      const { acceptUrl, passCode } = issued ?? (await self.staffLink(email));
+      const token = new URL(acceptUrl).hash.replace('#token=', '');
       const v = await visitor('admin');
-      const d = device();
-      const accepted = await call('POST', '/api/public/identity/invitations/accept', { token: v, body: { token, password: PASSWORD, device: d } });
+      const accepted = await call('POST', '/api/public/identity/invitations/accept', { token: v, body: { token, passCode, password: PASSWORD, device: device() } });
       expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
-      const key = accepted.body.twoStepSetup.manualEntryKey as string;
-      const confirmed = await call('POST', '/api/public/identity/invitations/two-step', { token: v, body: { token, setupId: accepted.body.twoStepSetup.setupId, code: totp(key, clock.now()), device: d } });
-      expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(200);
-      clock.advance(30_000);
-      return { accountId: accepted.body.account.id, key, accessToken: confirmed.body.tokens.accessToken };
+      expect(accepted.body.status).toBe('signed_in');
+      return { accountId: accepted.body.account.id, accessToken: accepted.body.tokens.accessToken, password: PASSWORD };
     },
     async bootstrapOwner(email = 'owner@marketly.test', name = 'Olivia Owner') {
-      await (app.kernel.boot.apis.get('access') as AccessService).bootstrapBusinessOwner({ email, name });
+      const result = await (app.kernel.boot.apis.get('access') as AccessService).bootstrapBusinessOwner({ email, name });
       await app.kernel.events.drain();
-      return self.acceptStaffInvitation(email);
+      return self.acceptStaffInvitation(email, result);
     },
     async bootstrapOwners() {
-      await (app.kernel.boot.apis.get('access') as AccessService).bootstrapBusinessOwner({
+      const result = await (app.kernel.boot.apis.get('access') as AccessService).bootstrapBusinessOwner({
         email: 'owner@marketly.test',
         name: 'Olivia Owner',
         deputy: { email: 'deputy@marketly.test', name: 'Dan Deputy' },
       });
       await app.kernel.events.drain();
-      const owner = await self.acceptStaffInvitation('owner@marketly.test');
-      const deputy = await self.acceptStaffInvitation('deputy@marketly.test');
+      const owner = await self.acceptStaffInvitation('owner@marketly.test', result);
+      const deputy = await self.acceptStaffInvitation('deputy@marketly.test', result.deputy!);
       return { owner, deputy };
     },
     async staffWithSensitiveRoles(inviter, approver, email, name, roleKeys) {
@@ -161,14 +173,14 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
       const roleIds = roleKeys.map((k) => roles.find((r) => r.key === k)!.id);
       const invited = await call('POST', '/api/admin/access/staff-invitations', {
         token: inviter.accessToken,
-        body: { email, name, roleIds, reason: 'New hire' },
-        headers: { 'x-step-up-code': code(inviter) },
+        body: { email, name, roleIds, reason: 'New hire', reauthToken: await reauth(inviter, 'role-grant') },
       });
       expect(invited.status, JSON.stringify(invited.body)).toBe(201);
       const pending = (await call('GET', '/api/admin/access/approval-requests?view=to_decide', { token: approver.accessToken })).body.items as { id: string; status: string }[];
       expect(pending.length, 'a sensitive grant waits for the other Business Owner').toBeGreaterThan(0);
       for (const r of pending) {
-        const ok = await call('POST', `/api/admin/access/approval-requests/${r.id}/approve`, { token: approver.accessToken, body: { note: 'Agreed' }, headers: { 'x-step-up-code': code(approver) } });
+        // grants have no amount, so no password confirmation (that is for money above stepUpAbove)
+        const ok = await call('POST', `/api/admin/access/approval-requests/${r.id}/approve`, { token: approver.accessToken, body: { note: 'Agreed' } });
         expect(ok.status, JSON.stringify(ok.body)).toBeLessThan(300);
       }
       return self.acceptStaffInvitation(email);
@@ -178,8 +190,7 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
       const roleIds = roleKeys.map((k) => roles.find((r) => r.key === k)!.id);
       const invited = await call('POST', '/api/admin/access/staff-invitations', {
         token: inviter.accessToken,
-        body: { email, name, roleIds, reason: 'New hire' },
-        headers: { 'x-step-up-code': code(inviter) },
+        body: { email, name, roleIds, reason: 'New hire', reauthToken: await reauth(inviter, 'role-grant') },
       });
       expect(invited.status, JSON.stringify(invited.body)).toBe(201);
       return self.acceptStaffInvitation(email);

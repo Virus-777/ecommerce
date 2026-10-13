@@ -67,7 +67,7 @@ export async function returnFlow(sim: Sim): Promise<void> {
   const request = remedy.refundRequest as { id: string; status: string } | null;
   run.check('the remedy opened a refund request', Boolean(request), remedy);
   if (request!.status === 'under_review' || request!.status === 'requested') {
-    const approved = await api.call(fin.session, 'POST', `/api/admin/returns/refunds/${request!.id}/approve`, { note: 'Damaged in transit, seller agreed', stepUpCode: await people.code(fin) });
+    const approved = await api.call(fin.session, 'POST', `/api/admin/returns/refunds/${request!.id}/approve`, { note: 'Damaged in transit, seller agreed', reauthToken: await people.reauth(fin, 'approval') });
     run.check('Finance approved the refund', ['approved', 'processing', 'sent'].includes(approved.status), approved.status);
   }
   await sim.job('payments.process-refunds');

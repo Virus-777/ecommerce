@@ -49,7 +49,7 @@ describe('a sponsored product campaign, end to end', () => {
     expect(proposed.status, JSON.stringify(proposed.body)).toBe(202);
     const requestId = proposed.body.approval.approvalRequestId;
     expect(requestId).toBeTruthy();
-    const approve = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Go', stepUpCode: f.code(listing.owner) } });
+    const approve = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Go', reauthToken: await f.reauth(listing.owner, 'approval') } });
     expect(approve.status, JSON.stringify(approve.body)).toBe(200);
     await app.kernel.events.drain();
     const rules = await f.call('GET', '/api/admin/advertising/rules', { token: ads.accessToken });

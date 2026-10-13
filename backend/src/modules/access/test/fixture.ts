@@ -52,7 +52,8 @@ const ACCESS_EVENTS = [
   'access.away.ended',
 ];
 
-export const STEP_UP_CODE = '123456';
+/** The re-auth token (purpose approval) the stubbed identity accepts: the approver re-entered the password */
+export const APPROVAL_REAUTH = 'ra.-.approval-test-token';
 
 export async function accessFixture(): Promise<Fixture> {
   let offset = 0;
@@ -83,9 +84,12 @@ export async function accessFixture(): Promise<Fixture> {
           accounts.set(id, { id, realm: 'staff', email: input.email, displayName: input.name, status: 'invited', emailVerified: false, twoStepEnabled: false });
           invitations.push({ email: input.email, name: input.name });
           const now = clock.now().toISOString();
-          return { id: newId(), realm: 'staff', purpose: 'staff', email: input.email, name: input.name, status: 'pending', invitedBy: input.invitedBy, sentAt: now, expiresAt: now, accountId: id } as identity.Invitation;
+          const invitation = { id: newId(), realm: 'staff', purpose: 'staff', email: input.email, name: input.name, status: 'pending', invitedBy: input.invitedBy, sentAt: now, expiresAt: now, accountId: id } as identity.Invitation;
+          return { invitation, acceptUrl: `https://admin.marketly.test/invitation#token=${newId()}`, passCode: 'ABCD-EFGH' };
         },
-        verifyStepUp: async (_id: string, proof: { code?: string }) => proof.code === STEP_UP_CODE,
+        verifyReauthToken: async (_p: unknown, token: string, purpose: string) => token === APPROVAL_REAUTH && purpose === 'approval',
+        consumeReauthToken: async () => true,
+        releaseReauthToken: async () => {},
       },
       audit: {
         record: async (entry: audit.RecordInput) => {
@@ -126,9 +130,10 @@ export async function accessFixture(): Promise<Fixture> {
     principal: (accountId) => ({ kind: 'staff', accountId, sessionId: newId(), twoStepVerifiedAt: new Date().toISOString() }),
     token: (accountId, permissions) => callers.staff(permissions ?? ['*'], { sub: accountId }),
     async call(method, url, token, payload, headers = {}) {
-      // endpoints with stepUp: code take the development step-up code at the middleware
-      const stepUp = /^\/(role-assignments|staff-invitations|roles\/[^/]+\/permissions)$/.test(url) ? { 'x-step-up-code': '000000' } : {};
-      const res = await app.inject({ method, url: `/api/admin/access${url}`, headers: { ...auth(token), ...stepUp, ...headers }, ...(payload !== undefined ? { payload: payload as object } : {}) });
+      // endpoints with a role-grant step-up take the development re-auth proof at the middleware (a test may pass its own)
+      const stepUp = /^\/(role-assignments|staff-invitations|roles\/[^/]+\/permissions)$/.test(url) && payload && typeof payload === 'object';
+      const body = stepUp ? { reauthToken: 'dev-reauth.role-grant', ...(payload as object) } : payload;
+      const res = await app.inject({ method, url: `/api/admin/access${url}`, headers: { ...auth(token), ...headers }, ...(body !== undefined ? { payload: body as object } : {}) });
       return { status: res.statusCode, body: res.body ? res.json() : null };
     },
     roleId,

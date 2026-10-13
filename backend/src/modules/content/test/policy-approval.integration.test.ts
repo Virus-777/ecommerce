@@ -59,7 +59,7 @@ describe('policy approval by a Content Manager owner (real access)', () => {
     ]);
 
     const requestId = approved.body.approval.approvalRequestId as string;
-    const decided = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: owner.accessToken, body: { note: 'Approved', stepUpCode: f.code(owner) }, headers: { 'x-step-up-code': f.code(owner) } });
+    const decided = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: owner.accessToken, body: { note: 'Approved', reauthToken: await f.reauth(owner, 'approval') } });
     expect(decided.status, JSON.stringify(decided.body)).toBe(200);
     await app.kernel.events.drain();
     const after = await f.call('GET', `${ADMIN}/policy-versions/${id}`, { token: cm.accessToken });

@@ -1,6 +1,6 @@
 /**
- * npm run staff-link on a server without email: new invitation links, revoking a mistyped invitation (so the
- * Business Owner can be bootstrapped again), password reset links and 2-step resets, with real identity and access.
+ * npm run staff-link on a server without email: new invitation links with pass codes, revoking a mistyped invitation
+ * (so the Business Owner can be bootstrapped again) and password reset links, with real identity and access.
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -42,17 +42,19 @@ describe('npm run staff-link', () => {
     await app.kernel.events.drain();
   });
 
-  it('gives an invited person a new link; the old one stops working', async () => {
+  it('gives an invited person a new link and pass code; the old ones stop working', async () => {
     const old = f.events('identity.invitation.created').findLast((e) => e.email === 'olivia@company.example')!.acceptUrl as string;
     clock.advance(1000); // a new expiry, as a later run would have
     const r = await staffLink(app, { email: 'OLIVIA@company.example ' });
     expect(r.link).toMatch(/\/invitation#token=/);
     expect(r.link).not.toBe(old);
+    expect(r.passCode).toMatch(/^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/);
+    // the pass code reached only the operator: not in the event the run published
+    expect(JSON.stringify(f.events('identity.invitation.created'))).not.toContain(r.passCode);
     const v = await f.visitor('admin');
-    const stale = await f.call('POST', '/api/public/identity/invitations/accept', { token: v, body: { token: tokenOf(old), password: 'Correct-Horse-42!', device: f.device() } });
+    const stale = await f.call('POST', '/api/public/identity/invitations/accept', { token: v, body: { token: tokenOf(old), passCode: r.passCode, password: 'Correct-Horse-42!', device: f.device() } });
     expect(stale.status).toBe(410);
-    // the new link is the one acceptStaffInvitation uses (the latest sent)
-    const owner = await f.acceptStaffInvitation('olivia@company.example');
+    const owner = await f.acceptStaffInvitation('olivia@company.example', { acceptUrl: r.link!, passCode: r.passCode! });
     expect(owner.accountId).toBeDefined();
   });
 
@@ -60,14 +62,6 @@ describe('npm run staff-link', () => {
     const r = await staffLink(app, { email: 'olivia@company.example' });
     expect(r.link).toMatch(/\/reset-password#token=/);
     expect(await identity.passwords.getPasswordReset(tokenOf(r.link!))).toMatchObject({ valid: true, forced: true });
-  });
-
-  it('resets 2-step sign-in (lost phone)', async () => {
-    const account = (await identity.core.repo.findAccountsByEmail('olivia@company.example')).find((a) => a.realm === 'staff')!;
-    expect(await identity.core.repo.activeMethods([account.id])).not.toHaveLength(0);
-    const r = await staffLink(app, { email: 'olivia@company.example', resetTwoStep: 'Lost phone, checked in person' });
-    expect(r.done).toMatch(/Removed the 2-step methods/);
-    expect(await identity.core.repo.activeMethods([account.id])).toHaveLength(0);
   });
 
   it('refuses what it cannot do, with a message that says what to do instead', async () => {

@@ -97,7 +97,7 @@ describe('after the order', () => {
     financeManager = finance;
     const approved = await f.call('POST', `/api/admin/returns/refunds/${accepted.body.remedies[0].refundRequestId}/approve`, {
       token: finance.accessToken,
-      body: { note: 'Seller offered it', stepUpCode: f.code(finance) },
+      body: { note: 'Seller offered it', reauthToken: await f.reauth(finance, 'approval') },
       headers: { 'idempotency-key': key() },
     });
     expect(approved.status, JSON.stringify(approved.body)).toBe(200);
@@ -124,7 +124,7 @@ describe('after the order', () => {
     const big = await finance.creditSeller({ sellerId: listing.sellerId, amount: { amount: 75_000, currency: 'USD' }, reason: 'Pallet damaged at our warehouse', reference: { ...reference, ref: 'FS-CLAIM-2' }, idempotencyKey: 'fs:lost:2' });
     expect(big).toMatchObject({ status: 'pending_approval' });
     expect(big.approvalRequestId).toBeTruthy();
-    const ok = await f.call('POST', `/api/admin/access/approval-requests/${big.approvalRequestId}/approve`, { token: financeManager.accessToken, body: { note: 'Checked the claim' }, headers: { 'x-step-up-code': f.code(financeManager) } });
+    const ok = await f.call('POST', `/api/admin/access/approval-requests/${big.approvalRequestId}/approve`, { token: financeManager.accessToken, body: { note: 'Checked the claim', reauthToken: await f.reauth(financeManager, 'approval') } });
     expect(ok.status, JSON.stringify(ok.body)).toBeLessThan(300);
     await app.kernel.events.drain();
 
@@ -157,7 +157,7 @@ describe('after the order', () => {
     if (decided.status === 409 && decided.body.error.code === 'APPROVAL_REQUIRED') {
       // above the Seller Manager's authority: the Business Owner approves, then the decision goes through
       const requestId = decided.body.error.details.approvalRequestId as string;
-      const ok = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Agreed' }, headers: { 'x-step-up-code': f.code(listing.owner) } });
+      const ok = await f.call('POST', `/api/admin/access/approval-requests/${requestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Agreed', reauthToken: await f.reauth(listing.owner, 'approval') } });
       expect(ok.status, JSON.stringify(ok.body)).toBeLessThan(300);
       decided = await f.call('POST', `/api/admin/trust/recommendations/${rec.body.id}/decide`, { token: listing.sellerManager.accessToken, body: { accept: true, reason: 'Counterfeit units sold' } });
     }
@@ -180,7 +180,7 @@ describe('after the order', () => {
     expect(restrictedBefore.body.items.length, JSON.stringify(restrictedBefore.body)).toBeGreaterThan(0);
     let reversed = await f.call('POST', `/api/admin/trust/enforcements/${enforcementId}/reverse`, { token: trustManager.accessToken, body: { reason: 'Appeal upheld: the units were genuine' } });
     if (reversed.status === 409 && reversed.body.error.code === 'APPROVAL_REQUIRED') {
-      const ok = await f.call('POST', `/api/admin/access/approval-requests/${reversed.body.error.details.approvalRequestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Agreed' }, headers: { 'x-step-up-code': f.code(listing.owner) } });
+      const ok = await f.call('POST', `/api/admin/access/approval-requests/${reversed.body.error.details.approvalRequestId}/approve`, { token: listing.owner.accessToken, body: { note: 'Agreed', reauthToken: await f.reauth(listing.owner, 'approval') } });
       expect(ok.status, JSON.stringify(ok.body)).toBeLessThan(300);
       reversed = await f.call('POST', `/api/admin/trust/enforcements/${enforcementId}/reverse`, { token: trustManager.accessToken, body: { reason: 'Appeal upheld: the units were genuine' } });
     }

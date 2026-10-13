@@ -190,14 +190,13 @@ describe('re-auth, recovery codes and removal', () => {
     expect((await signIn(kit, { email: c.email, password: c.password })).body.status).toBe('signed_in');
   });
 
-  it('verifyStepUp checks a password or a current code (public API)', async () => {
+  it('members still confirm a re-auth with a current 2-step code instead of the password (never the same code twice)', async () => {
     const c = await customer(kit);
     const { key } = await enableTotp(kit, c.tokens.accessToken, c.password);
-    expect(await identity.verifyStepUp(c.accountId, { password: c.password })).toBe(true);
-    expect(await identity.verifyStepUp(c.accountId, { password: 'Wrong-Pass-9' })).toBe(false);
-    expect(await identity.verifyStepUp(c.accountId, { code: totp(key, kit.clock.now()) })).toBe(true);
-    expect(await identity.verifyStepUp(c.accountId, { code: totp(key, kit.clock.now()) })).toBe(false); // replay
-    expect(await identity.verifyStepUp(c.accountId, {})).toBe(false);
+    const ok = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'recovery-codes', code: totp(key, kit.clock.now()) } });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    const replay = await kit.call('POST', `${STORE}/reauth`, { token: c.tokens.accessToken, body: { purpose: 'recovery-codes', code: totp(key, kit.clock.now()) } });
+    expect(replay.body.error.code).toBe('CODE_INVALID');
     kit.clock.advance(30_000);
   });
 });

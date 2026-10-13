@@ -70,11 +70,10 @@ describe('roles', () => {
 describe('role permissions', () => {
   it('rejects unknown keys and applies non-sensitive changes at once', async () => {
     const role = await f.call('POST', '/roles', f.token(admin), { name: 'Catalog Helper', workArea: 'Catalog', reason: 'r' });
-    const stepUp = { 'x-step-up-code': '000000' };
-    const unknown = await f.call('PUT', `/roles/${role.body.id}/permissions`, f.token(admin), { permissionKeys: ['catalog.products.review', 'nope.x.y', 'finance.balances.view'], reason: 'r' }, stepUp);
+    const unknown = await f.call('PUT', `/roles/${role.body.id}/permissions`, f.token(admin), { permissionKeys: ['catalog.products.review', 'nope.x.y', 'finance.balances.view'], reason: 'r' });
     expect(unknown.status).toBe(400);
     expect(unknown.body.error).toMatchObject({ code: 'UNKNOWN_PERMISSION', details: { keys: ['nope.x.y', 'finance.balances.view'] } });
-    const ok = await f.call('PUT', `/roles/${role.body.id}/permissions`, f.token(admin), { permissionKeys: ['catalog.products.review', 'media.assets.view'], reason: 'Help with reviews' }, stepUp);
+    const ok = await f.call('PUT', `/roles/${role.body.id}/permissions`, f.token(admin), { permissionKeys: ['catalog.products.review', 'media.assets.view'], reason: 'Help with reviews' });
     expect(ok.status).toBe(200);
     expect(ok.body.role.permissionCount).toBe(2);
     expect(ok.body.pendingPermissionApproval).toBeNull();
@@ -84,7 +83,7 @@ describe('role permissions', () => {
 
   it('holds sensitive permissions for a second staff member with access.roles.manage', async () => {
     const role = await f.call('POST', '/roles', f.token(admin), { name: 'Payout Clerk', workArea: 'Finance', reason: 'r' });
-    const res = await f.call('PUT', `/roles/${role.body.id}/permissions`, f.token(admin), { permissionKeys: ['finance.ledger.view', 'workqueues.items.view'], reason: 'Clerk duties' }, { 'x-step-up-code': '000000' });
+    const res = await f.call('PUT', `/roles/${role.body.id}/permissions`, f.token(admin), { permissionKeys: ['finance.ledger.view', 'workqueues.items.view'], reason: 'Clerk duties' });
     expect(res.status).toBe(200);
     expect(res.body.role.permissionCount).toBe(1); // workqueues.items.view applied, finance.ledger.view waits
     expect(res.body.pendingPermissionApproval).toMatchObject({ required: true });
@@ -101,7 +100,7 @@ describe('role permissions', () => {
 describe('role assignments', () => {
   it('gives a plain role at once, and a role carrying sensitive permissions after a second reviewer', async () => {
     const member = await f.staff('Mia Member', []);
-    const plain = await f.call('POST', '/role-assignments', f.token(admin), { accountId: member, roleId: await f.roleId('order_manager'), reason: 'Promotion' }, { 'x-step-up-code': '000000' });
+    const plain = await f.call('POST', '/role-assignments', f.token(admin), { accountId: member, roleId: await f.roleId('order_manager'), reason: 'Promotion' });
     expect(plain.status).toBe(201);
     expect(plain.body).toMatchObject({ status: 'active', role: { key: 'order_manager' }, grantedBy: { kind: 'staff', id: admin } });
     expect(await f.svc.hasPermission(f.principal(member), 'orders.orders.manage')).toBe(true);
@@ -152,7 +151,7 @@ describe('role assignments', () => {
   });
 
   it('invites staff with roles; assignments start when the invitation is accepted', async () => {
-    const res = await f.call('POST', '/staff-invitations', f.token(admin), { email: 'new.hire@marketly.test', name: 'Nina Hire', roleIds: [await f.roleId('support_agent')], reason: 'New agent', requestLimitReview: true }, { 'x-step-up-code': '000000' });
+    const res = await f.call('POST', '/staff-invitations', f.token(admin), { email: 'new.hire@marketly.test', name: 'Nina Hire', roleIds: [await f.roleId('support_agent')], reason: 'New agent', requestLimitReview: true });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toMatchObject({ status: 'invited', roles: [{ key: 'support_agent' }], limitReview: { required: true } });
     expect(f.invitations.map((i) => i.email)).toContain('new.hire@marketly.test');
@@ -173,7 +172,7 @@ describe('role assignments', () => {
 
   it('an approved sensitive grant for someone still invited waits for acceptance (guarded approve)', async () => {
     const invite = async (email: string, name: string) => {
-      const res = await f.call('POST', '/staff-invitations', f.token(admin), { email, name, roleIds: [await f.roleId('finance_staff')], reason: 'Finance hire' }, { 'x-step-up-code': '000000' });
+      const res = await f.call('POST', '/staff-invitations', f.token(admin), { email, name, roleIds: [await f.roleId('finance_staff')], reason: 'Finance hire' });
       expect(res.status, JSON.stringify(res.body)).toBe(201);
       const id = res.body.account.id as string;
       const assignment = (await f.svc.members.getMember(f.principal(owner) as never, id)).assignments[0]!;
