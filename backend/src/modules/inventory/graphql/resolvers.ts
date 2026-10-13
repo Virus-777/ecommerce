@@ -72,8 +72,8 @@ const viewerOf = (ctx: GraphQLContext): { sellerId?: string } => (ctx.area === '
  *   Query.stockSummary → service.getStockSummary
  */
 export const resolvers = (service: InventoryService): ModuleResolvers => {
-  const lastChange = batcher<string, string>(async (ids) => service.lastChangesFor(ids));
-  const movements = batcher<string, Movement[]>(async (ids, arg) => service.recentMovementsFor(ids, Number(arg)));
+  const lastChange = batcher<string, string>(async (ids) => service.sellerStock.lastChangesFor(ids));
+  const movements = batcher<string, Movement[]>(async (ids, arg) => service.sellerStock.recentMovementsFor(ids, Number(arg)));
 
   /** StockItem with its lazily resolved fields */
   const stockItemOut = (s: StockItem) => ({
