@@ -128,10 +128,11 @@ export function SignIn() {
 
   return (
     <div className="bo">
-      <main className="bo-content" id="main" tabIndex={-1}>
+      {/* No sidebar here: span both columns of the back-office grid (from 1024px it reserves the sidebar column). */}
+      <main className="bo-content" id="main" tabIndex={-1} style={{ gridColumn: '1 / -1' }}>
         <div className="buy-auth stack gap-4" style={{ marginInline: 'auto', paddingBlock: 'var(--sp-8)' }}>
           <div className="row between">
-            <Logo area="Seller Center" />
+            <Logo area="Seller Center" home="seller/dashboard" />
           </div>
           <section className="card">
             {needsStore ? (

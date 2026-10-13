@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 // Series colours come from the design tokens (.s1/.s2 = chart-1/chart-2: Official Store vs sellers).
 
 function niceMax(v: number) {
+  // All-zero (or empty) data: keep a scale of 1 so the drawing never divides by zero (NaN coordinates).
+  if (!(v > 0)) return 1;
   const p = Math.pow(10, Math.floor(Math.log10(v)));
   const n = v / p;
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
@@ -15,9 +17,9 @@ export function LineChart({ labels, series, height = 220, width = 640, fmt = (v)
   const W = width, H = height, L = 40, R = 16, T = 12, B = 26;
   const all = series.flatMap((s) => s.data);
   const stepV = niceMax((Math.max(...all) * 1.05) / 4);
-  const max = Math.ceil((Math.max(...all) * 1.05) / stepV) * stepV;
+  const max = Math.max(stepV, Math.ceil((Math.max(...all) * 1.05) / stepV) * stepV);
   const n = labels.length;
-  const x = (i: number) => L + (i * (W - L - R)) / (n - 1);
+  const x = (i: number) => (n > 1 ? L + (i * (W - L - R)) / (n - 1) : (L + W - R) / 2);
   const y = (v: number) => T + (H - T - B) * (1 - v / max);
   const ticks: number[] = [];
   for (let t = 0; t <= max + 1e-9; t += stepV) ticks.push(t);
@@ -104,7 +106,7 @@ export function BarChart({ labels, data, height = 200, width = 640, fmt = (v) =>
 export function Sparkline({ data, series = 1 }: { data: number[]; series?: 1 | 2 }) {
   const W = 120, H = 32;
   const max = Math.max(...data), min = Math.min(...data);
-  const x = (i: number) => (i * W) / (data.length - 1);
+  const x = (i: number) => (data.length > 1 ? (i * W) / (data.length - 1) : W / 2);
   const y = (v: number) => 3 + (H - 6) * (1 - (v - min) / (max - min || 1));
   return (
     <svg className="chart" viewBox={`0 0 ${W} ${H}`} style={{ width: W, height: H }} aria-hidden="true">

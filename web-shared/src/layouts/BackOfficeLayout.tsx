@@ -141,6 +141,8 @@ function useNavCount(n: NavLinkItem): NavCount | null {
 }
 
 const AREA_LABEL: Record<BoArea, string> = { seller: 'Seller Center', admin: 'Admin Center', ops: 'Operations' };
+/** Each area's home: the sidebar logo links there (not to the store). */
+const AREA_HOME: Record<BoArea, ScreenId> = { seller: 'seller/dashboard', admin: 'admin/dashboard', ops: 'ops/queues' };
 const NAV: Record<BoArea, NavEntry[]> = { seller: SELLER_NAV, admin: ADMIN_NAV, ops: OPS_NAV };
 
 function NavItemLink({ n, active, onNavigate }: { n: NavLinkItem; active?: string; onNavigate?: () => void }) {
@@ -190,7 +192,7 @@ function Sidebar({ area, active, sheet, onClose }: { area: BoArea; active?: stri
   return (
     <aside className={cx('bo-side', sheet && 'is-sheet')} id={sheet ? undefined : 'bo-side'}>
       <div className="brand">
-        <Logo area={label} />
+        <Logo area={label} home={AREA_HOME[area]} />
         {sheet && <IconButton icon="x" label="Close menu" className="nav-sheet-close" onClick={onClose} />}
       </div>
       <nav aria-label={label} ref={navRef}>

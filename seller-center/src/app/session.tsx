@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useRef, useMemo, useState, type ReactNode } from 'react';
 import { call, useApi, useSessionState, type SessionTokens } from '@marketly/web-shared/api';
 import { BackOfficeIdentityProvider, type BackOfficeIdentity } from '@marketly/web-shared/layouts';
 import { initials } from '@marketly/web-shared/lib/format';
@@ -173,8 +173,11 @@ export function SellerSessionProvider({ children }: { children: ReactNode }) {
   // Start (or resume) the session on first render: refresh cookie → seller session, else a visitor session.
   useQuery({ queryKey: ['session', 'start'], queryFn: () => session.token().then(() => true), staleTime: Infinity, retry: false });
   const sellerId = state.kind === 'seller' ? (state.claims?.sellerId as string | undefined) : undefined;
-  if (state.status !== 'ready' && !state.claims) {
-    return state.status === 'error' ? <SignIn /> : <div className="route-loading" role="status" aria-label="Loading" />;
+  // After sign-out the session is idle again: that is signed out (sign-in), not starting (loading).
+  const started = useRef(false);
+  if (state.status === 'ready' || state.status === 'error') started.current = true;
+  if (!state.claims && (state.status === 'starting' || (state.status === 'idle' && !started.current))) {
+    return <div className="route-loading" role="status" aria-label="Loading" />;
   }
   if (!sellerId) return <SignIn />;
   return <SignedIn sellerId={sellerId}>{children}</SignedIn>;
