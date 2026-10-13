@@ -10,31 +10,31 @@ import { caller } from './client.js';
 export const adminRoutes = (service: IdentityService) =>
   routes(endpoints, 'admin', {
     /** POST /reauth: Confirm it is you before a sensitive Admin Center action (single-use token for one purpose) */
-    reauthenticateStaff: async (input) => service.reauthenticate(input.body, caller(input)),
+    reauthenticateStaff: async (input) => service.security.reauthenticate(input.body, caller(input)),
     /** GET /accounts: Find accounts (staff or members) */
-    listAccounts: async ({ query, page, can }) => service.listAccounts(query, page, can),
+    listAccounts: async ({ query, page, can }) => service.accounts.listAccounts(query, page, can),
     /** GET /accounts/{id}: Account security detail (devices, lockout, recent activity) */
-    getAccount: async ({ params, can }) => service.getAccountAdmin(params.id, can),
+    getAccount: async ({ params, can }) => service.accounts.getAccountAdmin(params.id, can),
     /** POST /accounts/{id}/lock: Lock an account (suspected compromise, offboarding) */
-    lockAccount: async (input) => service.lockAccount(input.params.id, input.body, caller(input), input.can),
+    lockAccount: async (input) => service.accounts.lockAccount(input.params.id, input.body, caller(input), input.can),
     /** POST /accounts/{id}/unlock: Unlock an account */
-    unlockAccount: async (input) => service.unlockAccount(input.params.id, input.body.reason, caller(input), input.can),
+    unlockAccount: async (input) => service.accounts.unlockAccount(input.params.id, input.body.reason, caller(input), input.can),
     /** POST /accounts/{id}/force-password-reset: Require a new password at next sign-in */
-    forcePasswordReset: async (input) => service.forcePasswordReset(input.params.id, input.body, caller(input), input.can),
+    forcePasswordReset: async (input) => service.accounts.forcePasswordReset(input.params.id, input.body, caller(input), input.can),
     /** POST /accounts/{id}/reset-two-step: Remove 2-step methods after an identity check (lost phone) */
-    resetTwoStep: async (input) => service.resetTwoStep(input.params.id, input.body, caller(input), input.can),
+    resetTwoStep: async (input) => service.accounts.resetTwoStep(input.params.id, input.body, caller(input), input.can),
     /** POST /accounts/{id}/sign-out-all: Sign an account out everywhere */
-    signOutAccount: async (input) => service.signOutAccount(input.params.id, input.body.reason, caller(input), input.can),
+    signOutAccount: async (input) => service.accounts.signOutAccount(input.params.id, input.body.reason, caller(input), input.can),
     /** POST /accounts/{id}/disable: Disable a staff account (offboarding) */
-    disableAccount: async (input) => service.disableAccount(input.params.id, input.body.reason, caller(input), input.can),
+    disableAccount: async (input) => service.accounts.disableAccount(input.params.id, input.body.reason, caller(input), input.can),
     /** POST /accounts/{id}/enable: Re-enable a disabled staff account */
-    enableAccount: async (input) => service.enableAccount(input.params.id, input.body.reason, caller(input), input.can),
+    enableAccount: async (input) => service.accounts.enableAccount(input.params.id, input.body.reason, caller(input), input.can),
     /** GET /accounts/{id}/security-activity: Security activity of one account */
-    listAccountActivity: async ({ params, query, page, can }) => service.listAccountActivity(params.id, query, page, can),
+    listAccountActivity: async ({ params, query, page, can }) => service.accounts.listAccountActivity(params.id, query, page, can),
     /** GET /invitations: Staff invitations */
-    listInvitations: async ({ query, page }) => service.listInvitations(query.status, page),
+    listInvitations: async ({ query, page }) => service.invitations.listInvitations(query.status, page),
     /** POST /invitations/{id}/resend: Resend a staff invitation (new 7-day link) */
-    resendInvitation: async (input) => service.resendInvitation(input.params.id, caller(input)),
+    resendInvitation: async (input) => service.invitations.resendInvitation(input.params.id, caller(input)),
     /** POST /invitations/{id}/revoke: Cancel a staff invitation */
-    revokeInvitation: async (input) => service.revokeStaffInvitation(input.params.id, input.body.reason, caller(input)),
+    revokeInvitation: async (input) => service.invitations.revokeStaffInvitation(input.params.id, input.body.reason, caller(input)),
   });

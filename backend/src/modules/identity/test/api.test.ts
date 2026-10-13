@@ -372,7 +372,7 @@ describe('jobs', () => {
       k.clock.advance(8 * 24 * 3600_000);
       await k.app.kernel.jobs.runNow('identity.expire-invitations');
       // (dev staff tokens are signed at the real time, which is 8 days behind this clock: ask the service)
-      const list = await (api as unknown as IdentityService).listInvitations('expired', { mode: 'cursor', cursor: null, limit: 50 });
+      const list = await (api as unknown as IdentityService).invitations.listInvitations('expired', { mode: 'cursor', cursor: null, limit: 50 });
       expect(list.items.map((i) => i.id)).toContain(inv.id);
 
       await k.app.kernel.jobs.runNow('identity.expire-sessions');
