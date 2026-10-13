@@ -8,8 +8,7 @@
  *   (preValidation)             refresh token (+ Origin and X-Requested-With for the cookie) and its per-session limit · webhook
  *                               signature + replay check + per-provider limit · rate-limit classes · step-up proof present
  *   (preHandler)                conditional permissions → [idempotency, in register.ts] → step-up proof verified
- *   (onSend)                    a failed request gives its re-auth token back
- *   (onResponse)                record the webhook event
+ *   (onSend)                    a failed request gives its re-auth token back · a processed webhook event is recorded
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Config } from '../config/index.js';
@@ -386,25 +385,22 @@ export class AuthChain {
       }
     };
 
-    // a failed request gives its re-auth token back before the response leaves, so an immediate retry can use it
+    // Both run before the response leaves, so an immediate retry already sees them: a failed request gives its
+    // re-auth token back (the retry can use it), and a processed webhook event is recorded (a replay is a duplicate)
     const onSend = async (request: FastifyRequest, reply: { statusCode: number }, payload: unknown) => {
       if (reply.statusCode >= 400 && request.reauthToken) {
         const token = request.reauthToken;
         request.reauthToken = undefined;
         await k.authorities.releaseReauthToken(token).catch(() => {});
       }
+      const ev = request.auth?.provider;
+      if (reply.statusCode < 400 && ev?.eventId && !request.webhookDuplicate) {
+        await k.webhookEvents.record(ev.name, ev.eventId).catch(() => {});
+      }
       return payload;
     };
 
-    const onResponse = async (request: FastifyRequest, reply: { statusCode: number }) => {
-      if (reply.statusCode >= 400) return;
-      const ev = request.auth?.provider;
-      if (ev?.eventId && !request.webhookDuplicate) {
-        await k.webhookEvents.record(ev.name, ev.eventId).catch(() => {});
-      }
-    };
-
-    return { onRequest, preValidation, preHandlerBefore, preHandlerAfter, onSend, onResponse };
+    return { onRequest, preValidation, preHandlerBefore, preHandlerAfter, onSend };
   }
 
   #matches(cond: Readonly<Record<string, string>>, request: FastifyRequest) {
