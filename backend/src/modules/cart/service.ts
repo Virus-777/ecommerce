@@ -44,7 +44,8 @@ import {
   type StoredCoupon,
 } from './domain/rules.js';
 import { cartLifecycleMachine, cartLineAvailabilityMachine } from './domain/state-machines.js';
-import type { AdminCartFilter, CartAggregate, CartRepository, CartRow, ItemRow, OwnerKey } from './ports.js';
+import type { AdminCartFilter, CartAggregate, CartRow, ItemRow, OwnerKey } from './ports.js';
+import type { CartRepository } from './repository.js';
 
 export interface CartServiceDeps {
   repo: CartRepository;
@@ -76,7 +77,7 @@ const notFound = (what = 'Cart item') => new AppError('NOT_FOUND', `${what} not 
 const invalid = (path: string, message: string) => new AppError('VALIDATION_FAILED', message, { issues: [{ path, message }] });
 
 /**
- * Cart use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Cart use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to an endpoint, a publicApi function, a consumed event or a job in docs/api/spec/modules/cart.json.
  */
 export class CartService implements CartPublicApi {

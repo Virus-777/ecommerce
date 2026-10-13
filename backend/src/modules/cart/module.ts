@@ -4,7 +4,7 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoCartRepository } from './repository.js';
+import { CartRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { CartService } from './service.js';
 
@@ -20,7 +20,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   register(ctx) {
-    const service = new CartService({ repo: createMongoCartRepository(ctx.mongo), ctx });
+    const service = new CartService({ repo: new CartRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

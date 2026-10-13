@@ -40,7 +40,8 @@ import {
   type NoticePlan,
   type StoredCoupon,
 } from './domain/rules.js';
-import type { CartRepository, CartRow, ItemRow, NoticeRow } from './ports.js';
+import type { CartRow, ItemRow, NoticeRow } from './ports.js';
+import type { CartRepository } from './repository.js';
 
 /** Shipping has no parcel weight per offer yet: every unit is quoted at this weight */
 export const DEFAULT_UNIT_WEIGHT_GRAMS = 1000;
