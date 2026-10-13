@@ -69,6 +69,8 @@ const signer = devSigner({ jwk: TEST_JWK });
 export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promise<Kit> {
   const clock = fixedClock(new Date());
   const app = await buildTestApp({ clock, ...opts, only: ['customers', ...(opts.only ?? [])], config: { rateLimits: false, ...opts.config } });
+  // the boot can take a while: start the app's time after it
+  clock.set(new Date());
   const events: EventEnvelope[] = [];
   const bus = app.kernel.events;
   for (const name of Object.keys(spec.events.publishes)) bus.subscribe('test', name, (e) => void events.push(e));

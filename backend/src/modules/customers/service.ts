@@ -71,7 +71,6 @@ import type {
   AddressValidationProvider,
   ConsentRow,
   CustomerRow,
-  CustomersRepository,
   CustomerStanding,
   DataRequestRow,
   PreferencesRow,
@@ -79,6 +78,7 @@ import type {
   ViewOwner,
   ViewRow,
 } from './ports.js';
+import type { CustomersRepository } from './repository.js';
 
 export interface CustomersServiceDeps {
   repo: CustomersRepository;
@@ -140,7 +140,7 @@ const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /**
- * Customers use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Customers use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, an endpoint, a consumed event or a job in docs/api/spec/modules/customers.json.
  *
  * Rule kept throughout: other modules are never called inside a repository transaction (they use their
@@ -281,7 +281,7 @@ export class CustomersService implements CustomersPublicApi {
     return s ? map.snapshot(s) : null;
   }
 
-  /** Resolve the customer for an identity session (the kernel calls this for every own-customer request: one statement) */
+  /** Resolve the customer for an identity session (the kernel calls this for every own-customer request, so it stays one lookup) */
   async getCustomerByUserId(userId: string): Promise<CustomerSnapshot | null> {
     if (!isUuid(userId)) return null;
     const s = await this.repo.standingByUserId(userId, this.now());
