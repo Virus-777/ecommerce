@@ -45,7 +45,8 @@ import {
   type Category,
 } from './domain/rules.js';
 import { retentionChangeMachine } from './domain/state-machines.js';
-import type { AuditRepository, CheckpointRow, EntryQuery, NewChainRow, RetentionRow } from './ports.js';
+import type { AuditRepository, CheckpointRow, EntryQuery, NewChainRow, RetentionRow } from './repository.js';
+import { normalizeIp } from './text.js';
 
 export interface AuditServiceDeps {
   repo: AuditRepository;
@@ -88,7 +89,7 @@ function parseActor(text: string | null): common.Actor | null {
 const actorText = (a: common.Actor) => JSON.stringify({ kind: a.kind, id: a.id ?? null, name: a.name ?? null });
 
 /**
- * Action history use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Action history use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/audit.json.
  */
 export class AuditService implements AuditPublicApi {
@@ -790,8 +791,8 @@ export class AuditService implements AuditPublicApi {
   }
 
   /**
-   * Job audit.prepare-partitions (daily): nothing to prepare on MongoDB, where entries are one collection rather
-   * than month partitions; the job keeps its spec name and schedule and always succeeds.
+   * Job audit.prepare-partitions (daily): does nothing and always succeeds (entries are one collection, there is
+   * nothing to prepare); the job keeps its spec name and schedule.
    */
   async preparePartitions(): Promise<{ created: number }> {
     return { created: 0 };
@@ -902,7 +903,7 @@ export class AuditService implements AuditPublicApi {
     const run = async (tx: AuditRepository) => {
       await tx.lockChain();
       const head = o.prevHash ? null : await tx.chainHead();
-      const ips = prepared.some((p) => p.rawIp) ? await tx.normalizeIps(prepared.map((p) => p.rawIp)) : prepared.map(() => null);
+      const ips = prepared.map((p) => (p.rawIp === null ? null : normalizeIp(p.rawIp)));
       let prev = o.prevHash ?? head?.hash ?? GENESIS_HASH;
       const rows: NewChainRow[] = prepared.map(({ rawIp: _raw, ...p }, i) => {
         const base = { ...p, ip: ips[i] ?? null };

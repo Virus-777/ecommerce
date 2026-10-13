@@ -53,7 +53,7 @@ export interface ChainRow {
   hash: Uint8Array;
 }
 
-/** JSON with object keys sorted at every level; undefined becomes null (as it does in jsonb). */
+/** JSON with object keys sorted at every level; undefined becomes null (as it does in stored JSON). */
 export function canonicalJson(value: unknown): string {
   if (value === null || value === undefined) return 'null';
   if (Array.isArray(value)) return `[${value.map((v) => canonicalJson(v === undefined ? null : v)).join(',')}]`;

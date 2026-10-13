@@ -1,8 +1,8 @@
 /**
  * audit.purge-expired with a fixed clock, the chain verifying across the purged range, and audit on
  * its own (no access, no reports): shortening needs approval it cannot get, exports are unavailable.
- * On MongoDB the history is one collection (no month partitions): the purge deletes by the indexed at, and
- * audit.prepare-partitions has nothing to do but still succeeds.
+ * The history is one collection: the purge deletes by the indexed at, and audit.prepare-partitions does nothing
+ * but still succeeds.
  */
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

@@ -4,7 +4,7 @@ import { resolvers } from './graphql/resolvers.js';
 import { typeDefs } from './graphql/schema.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoAuditRepository } from './repository.js';
+import { AuditRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { AuditService } from './service.js';
 
@@ -20,7 +20,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   register(ctx) {
-    const service = new AuditService({ repo: createMongoAuditRepository(ctx.mongo), ctx });
+    const service = new AuditService({ repo: new AuditRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));

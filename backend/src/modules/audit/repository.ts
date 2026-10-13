@@ -1,12 +1,68 @@
-import type { ModuleStore } from '../../kernel/mongo/index.js';
-import type { Filter } from '../../kernel/mongo/table.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
-import type { AuditDb } from '../../spec/audit.js';
+import { orThrow } from '../../kernel/lib/or-throw.js';
+import { contains, startsWith, type Filter, type ModuleStore } from '../../kernel/mongo/index.js';
+import type { AuditDb, AuditFilters } from '../../spec/audit.js';
 import type { Page, TimelineEvent } from '../../spec/common.js';
 import type { ChainRow, ChainTarget } from './domain/chain.js';
 import { PURGE_ACTION, type ApprovalProjection } from './domain/rules.js';
-import type { AuditRepository, CheckpointRow, EntryQuery, IntegrityCheckRow, NewChainRow, RetentionRow } from './ports.js';
-import { normalizeIp, searchWords } from './text.js';
+import { searchWords } from './text.js';
+
+/** Filters as the repository applies them (dates already resolved to instants). */
+export interface EntryQuery extends Omit<AuditFilters, 'from' | 'to'> {
+  from?: Date;
+  to?: Date;
+  /** `to` is exclusive (whole market days) rather than inclusive (a datetime filter) */
+  toExclusive?: boolean;
+}
+
+/** A row to append: everything but seq, which the repository numbers. */
+export type NewChainRow = Omit<ChainRow, 'seq'> & { searchText: string };
+
+export interface RetentionRow {
+  retainYears: number;
+  pendingYears: number | null;
+  pendingReason: string | null;
+  pendingApprovalRequestId: string | null;
+  /** JSON of the requesting Actor */
+  pendingRequestedBy: string | null;
+  /** JSON of the Actor who last changed it */
+  updatedBy: string | null;
+  updatedAt: Date | null;
+  lastPurgeAt: Date | null;
+  lastPurgeRemoved: number | null;
+  lastPurgeThrough: Date | null;
+}
+
+export interface IntegrityCheckRow {
+  id: string;
+  startedAt: Date;
+  finishedAt: Date | null;
+  fromSeq: number;
+  toSeq: number;
+  ok: boolean | null;
+  brokenAtSeq: number | null;
+}
+
+/** A signed chain checkpoint (audit.checkpoints) */
+export interface CheckpointRow {
+  id: string;
+  seq: number;
+  hash: Uint8Array;
+  /** hex HMAC-SHA256 over seq and hash */
+  mac: string;
+  keyId: string;
+  kind: 'verified' | 'purge';
+  createdAt: Date;
+}
+
+export interface SummaryCounts {
+  total: number;
+  pendingSecondReview: number;
+  financial: number;
+  sellerEnforcement: number;
+  settings: number;
+  byActor: { name: string; n: number }[];
+}
 
 type EntryRow = AuditDb['entries'];
 type TargetRow = AuditDb['entry_targets'];
@@ -25,11 +81,10 @@ const OPEN_APPROVAL = ['pending', 'partially_approved'];
 const bytes = (v: unknown): Uint8Array => (v instanceof Uint8Array ? new Uint8Array(v.buffer, v.byteOffset, v.byteLength) : new Uint8Array(Buffer.from(v as string)));
 const buffer = (v: Uint8Array) => Buffer.from(v.buffer, v.byteOffset, v.byteLength);
 /**
- * JSON values as jsonb stored them: what JSON.stringify keeps (undefined members dropped, dates as ISO text). The
+ * JSON values as they are stored: what JSON.stringify keeps (undefined members dropped, dates as ISO text). The
  * hash is computed over the value as given, so the stored value must read back as the same canonical JSON.
  */
 const json = (v: unknown): unknown => (v === null || v === undefined ? null : JSON.parse(JSON.stringify(v)));
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function toChainRow(r: EntryRow, related: ChainTarget[]): ChainRow {
   return {
@@ -109,38 +164,47 @@ function toCheck(r: CheckDbRow): IntegrityCheckRow {
 const all = (parts: Filter[]): Filter => (parts.length === 0 ? {} : parts.length === 1 ? parts[0]! : { $and: parts });
 
 /**
- * MongoDB adapter for AuditRepository (docs/04-mongodb-migration.md §4): one collection per spec table, no month
- * partitions. Append-only is this repository's rule: entries and entry_targets are only inserted, and deleted only by
- * purgeEntries (the retention purge); nothing here updates them.
+ * audit.entries, audit.entry_targets, audit.approval_states, audit.retention, audit.integrity_checks,
+ * audit.checkpoints (MongoDB, docs/04-mongodb-migration.md §4). Append-only is this repository's rule: entries and
+ * entry_targets are only inserted, and deleted only by purgeEntries (the retention purge); nothing here updates them.
  */
-export function createMongoAuditRepository(store: ModuleStore): AuditRepository {
-  const t = {
-    entries: store.table<EntryRow>('entries'),
-    targets: store.table<TargetRow>('entry_targets'),
-    approvals: store.table<ApprovalRow>('approval_states'),
-    retention: store.table<RetentionDbRow>('retention'),
-    checkpoints: store.table<CheckpointDbRow>('checkpoints'),
-    checks: store.table<CheckDbRow>('integrity_checks'),
-  };
+export class AuditRepository {
+  readonly #t;
+
+  constructor(private readonly store: ModuleStore) {
+    this.#t = {
+      entries: store.table<EntryRow>('entries'),
+      targets: store.table<TargetRow>('entry_targets'),
+      approvals: store.table<ApprovalRow>('approval_states'),
+      retention: store.table<RetentionDbRow>('retention'),
+      checkpoints: store.table<CheckpointDbRow>('checkpoints'),
+      checks: store.table<CheckDbRow>('integrity_checks'),
+    };
+  }
+
+  /** Runs fn with a repository bound to one transaction. */
+  transaction<T>(fn: (tx: AuditRepository) => Promise<T>): Promise<T> {
+    return this.store.transaction((tx) => fn(new AuditRepository(tx)));
+  }
 
   /** Entries where the record is the target, or (includeRelated) one of the related targets (a join is two reads) */
-  async function touches(type: string, id: string, includeRelated: boolean): Promise<Filter> {
+  async #touches(type: string, id: string, includeRelated: boolean): Promise<Filter> {
     const own = { target_type: type, target_id: id };
     if (!includeRelated) return own;
-    const related = await t.targets.distinct<string>('entry_id', { target_type: type, target_id: id });
+    const related = await this.#t.targets.distinct<string>('entry_id', { target_type: type, target_id: id });
     return related.length ? { $or: [own, { id: { $in: related } }] } : own;
   }
 
-  async function filterOf(q: EntryQuery | null): Promise<Filter[]> {
+  async #filterOf(q: EntryQuery | null): Promise<Filter[]> {
     const and: Filter[] = [];
     if (!q) return and;
     if (q.actorId) and.push({ actor_id: q.actorId });
-    if (q.roleKey) and.push({ 'actor_roles.key': q.roleKey }); // jsonb containment of [{ key }]
+    if (q.roleKey) and.push({ 'actor_roles.key': q.roleKey }); // any of the actor's roles has this key
     if (q.module) and.push({ module: q.module });
     if (q.category) and.push({ category: q.category });
     if (q.action) and.push({ action: q.action });
     if (q.sellerId) and.push({ seller_id: q.sellerId.toLowerCase() });
-    if (q.targetType && q.targetId) and.push(await touches(q.targetType, q.targetId, true));
+    if (q.targetType && q.targetId) and.push(await this.#touches(q.targetType, q.targetId, true));
     else if (q.targetType) and.push({ target_type: q.targetType });
     else if (q.targetId) and.push({ target_id: q.targetId });
     if (q.from) and.push({ at: { $gte: q.from } });
@@ -150,285 +214,297 @@ export function createMongoAuditRepository(store: ModuleStore): AuditRepository 
       if (state === 'not_required') and.push({ approval_request_id: null });
       else if (state === 'pending') {
         // referenced and not (yet) projected in any other state
-        const moved = await t.approvals.distinct<string>('approval_request_id', { state: { $ne: 'pending' } });
+        const moved = await this.#t.approvals.distinct<string>('approval_request_id', { state: { $ne: 'pending' } });
         and.push({ approval_request_id: { $nin: [null, ...moved] } });
-      } else and.push({ approval_request_id: { $in: await t.approvals.distinct<string>('approval_request_id', { state }) } });
+      } else and.push({ approval_request_id: { $in: await this.#t.approvals.distinct<string>('approval_request_id', { state }) } });
     }
     const text = q.q?.trim();
     if (text) {
       const words = searchWords(text);
       and.push({
         $or: [
-          // plainto_tsquery: every word of the query (no words: no match)
+          // every word of the query (no words: no match)
           ...(words.length ? [{ search_words: { $all: words } }] : []),
-          { target_ref: { $regex: `^${escapeRegExp(text)}`, $options: 'i' } },
+          { target_ref: startsWith(text) },
           { target_id: text },
-          { actor_name: { $regex: escapeRegExp(text), $options: 'i' } },
+          { actor_name: contains(text) },
         ],
       });
     }
     return and;
   }
 
-  async function relatedOf(ids: readonly string[]): Promise<Map<string, ChainTarget[]>> {
+  async #relatedOf(ids: readonly string[]): Promise<Map<string, ChainTarget[]>> {
     const out = new Map<string, ChainTarget[]>();
     if (!ids.length) return out;
-    for (const r of await t.targets.find({ entry_id: { $in: [...ids] } })) out.set(r.entry_id, [...(out.get(r.entry_id) ?? []), { type: r.target_type, id: r.target_id }]);
+    for (const r of await this.#t.targets.find({ entry_id: { $in: [...ids] } })) out.set(r.entry_id, [...(out.get(r.entry_id) ?? []), { type: r.target_type, id: r.target_id }]);
     return out;
   }
 
-  async function withRelated(rows: readonly EntryRow[]): Promise<ChainRow[]> {
-    const related = await relatedOf(rows.map((r) => r.id));
+  async #withRelated(rows: readonly EntryRow[]): Promise<ChainRow[]> {
+    const related = await this.#relatedOf(rows.map((r) => r.id));
     return rows.map((r) => toChainRow(r, related.get(r.id) ?? []));
   }
 
-  async function pageOfRows(filter: Filter, page: PageRequest): Promise<Page<ChainRow>> {
-    const p = await t.entries.page(filter, page, { column: 'at', direction: 'desc' });
-    return { ...p, items: await withRelated(p.items) };
+  async #pageOfRows(filter: Filter, page: PageRequest): Promise<Page<ChainRow>> {
+    const p = await this.#t.entries.page(filter, page, { column: 'at', direction: 'desc' });
+    return { ...p, items: await this.#withRelated(p.items) };
   }
 
-  async function one(filter: Filter, sort: Record<string, 1 | -1> = { seq: -1 }): Promise<ChainRow | null> {
-    const r = await t.entries.findOne(filter, { sort });
-    return r ? (await withRelated([r]))[0]! : null;
+  async #one(filter: Filter, sort: Record<string, 1 | -1> = { seq: -1 }): Promise<ChainRow | null> {
+    const r = await this.#t.entries.findOne(filter, { sort });
+    return r ? (await this.#withRelated([r]))[0]! : null;
   }
 
-  const repo: AuditRepository = {
-    transaction: (fn) => store.transaction((tx) => fn(createMongoAuditRepository(tx))),
+  /* ---------------------------------------------------------------- the chain (call inside a transaction) */
 
-    /* ---------------------------------------------------------------- chain */
+  /** Serializes appends: held until the transaction ends. */
+  lockChain(): Promise<void> {
+    return this.store.lock(CHAIN_LOCK);
+  }
 
-    lockChain: () => store.lock(CHAIN_LOCK),
+  async chainHead(): Promise<{ seq: number; hash: Uint8Array } | null> {
+    const r = await this.#t.entries.findOne({}, { sort: { seq: -1 } });
+    return r ? { seq: Number(r.seq), hash: bytes(r.hash) } : null;
+  }
 
-    async chainHead() {
-      const r = await t.entries.findOne({}, { sort: { seq: -1 } });
-      return r ? { seq: Number(r.seq), hash: bytes(r.hash) } : null;
-    },
-
-    normalizeIps: async (ips) => ips.map((ip) => (ip === null ? null : normalizeIp(ip))),
-
-    async insertEntries(rows) {
-      const out: { id: string; seq: number }[] = [];
-      // one after another (seq is numbered in this order); each chunk is one round trip
-      for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
-        const chunk = rows.slice(i, i + INSERT_CHUNK);
-        const docs: Partial<EntryRow>[] = [];
-        for (const r of chunk) {
-          docs.push({
-            id: r.id,
-            seq: await store.nextValue('entries.seq'),
-            at: r.at,
-            actor_kind: r.actorKind,
-            actor_id: r.actorId,
-            actor_name: r.actorName,
-            actor_roles: (json(r.actorRoles) ?? []) as EntryRow['actor_roles'],
-            action: r.action,
-            action_label: r.actionLabel,
-            module: r.module,
-            category: r.category,
-            target_type: r.targetType,
-            target_id: r.targetId,
-            target_ref: r.targetRef,
-            target_label: r.targetLabel,
-            target_screen: r.targetScreen,
-            seller_id: r.sellerId,
-            reason: r.reason,
-            before: json(r.before) as EntryRow['before'],
-            after: json(r.after) as EntryRow['after'],
-            before_text: r.beforeText,
-            after_text: r.afterText,
-            evidence: (json(r.evidence) ?? []) as EntryRow['evidence'],
-            approval_request_id: r.approvalRequestId,
-            approval_note: r.approvalNote,
-            request_id: r.requestId,
-            ip: r.ip,
-            visible_to_seller: r.visibleToSeller,
-            search_words: searchWords(r.searchText),
-            prev_hash: buffer(r.prevHash),
-            hash: buffer(r.hash),
-          });
-        }
-        await t.entries.insertMany(docs);
-        const targets = chunk.flatMap((r) => r.relatedTargets.map((x) => ({ entry_id: r.id, target_type: x.type, target_id: x.id, at: r.at })));
-        await t.targets.insertMany(targets);
-        out.push(...docs.map((d) => ({ id: d.id!, seq: d.seq! })));
+  async insertEntries(rows: readonly NewChainRow[]): Promise<{ id: string; seq: number }[]> {
+    const out: { id: string; seq: number }[] = [];
+    // one after another (seq is numbered in this order); each chunk is one round trip
+    for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+      const chunk = rows.slice(i, i + INSERT_CHUNK);
+      const docs: Partial<EntryRow>[] = [];
+      for (const r of chunk) {
+        docs.push({
+          id: r.id,
+          seq: await this.store.nextValue('entries.seq'),
+          at: r.at,
+          actor_kind: r.actorKind,
+          actor_id: r.actorId,
+          actor_name: r.actorName,
+          actor_roles: (json(r.actorRoles) ?? []) as EntryRow['actor_roles'],
+          action: r.action,
+          action_label: r.actionLabel,
+          module: r.module,
+          category: r.category,
+          target_type: r.targetType,
+          target_id: r.targetId,
+          target_ref: r.targetRef,
+          target_label: r.targetLabel,
+          target_screen: r.targetScreen,
+          seller_id: r.sellerId,
+          reason: r.reason,
+          before: json(r.before) as EntryRow['before'],
+          after: json(r.after) as EntryRow['after'],
+          before_text: r.beforeText,
+          after_text: r.afterText,
+          evidence: (json(r.evidence) ?? []) as EntryRow['evidence'],
+          approval_request_id: r.approvalRequestId,
+          approval_note: r.approvalNote,
+          request_id: r.requestId,
+          ip: r.ip,
+          visible_to_seller: r.visibleToSeller,
+          search_words: searchWords(r.searchText),
+          prev_hash: buffer(r.prevHash),
+          hash: buffer(r.hash),
+        });
       }
-      return out;
-    },
+      await this.#t.entries.insertMany(docs);
+      const targets = chunk.flatMap((r) => r.relatedTargets.map((x) => ({ entry_id: r.id, target_type: x.type, target_id: x.id, at: r.at })));
+      await this.#t.targets.insertMany(targets);
+      out.push(...docs.map((d) => ({ id: d.id!, seq: d.seq! })));
+    }
+    return out;
+  }
 
-    /* ---------------------------------------------------------------- reads */
+  /* ---------------------------------------------------------------- reads */
 
-    getEntry: (id) => one({ id }),
+  getEntry(id: string): Promise<ChainRow | null> {
+    return this.#one({ id });
+  }
 
-    searchEntries: async (q, page) => pageOfRows(all(await filterOf(q)), page),
+  async searchEntries(q: EntryQuery, page: PageRequest): Promise<Page<ChainRow>> {
+    return this.#pageOfRows(all(await this.#filterOf(q)), page);
+  }
 
-    countEntries: async (q) => t.entries.count(all(await filterOf(q))),
+  async countEntries(q: EntryQuery): Promise<number> {
+    return this.#t.entries.count(all(await this.#filterOf(q)));
+  }
 
-    async targetHistory(type, id, opts, page) {
-      const and = [await touches(type, id, opts.includeRelated)];
-      if (opts.category) and.push({ category: opts.category });
-      return pageOfRows(all(and), page);
-    },
+  async targetHistory(type: string, id: string, opts: { includeRelated: boolean; category?: string }, page: PageRequest): Promise<Page<ChainRow>> {
+    const and = [await this.#touches(type, id, opts.includeRelated)];
+    if (opts.category) and.push({ category: opts.category });
+    return this.#pageOfRows(all(and), page);
+  }
 
-    sellerEntries(sellerId, q, page) {
-      const and: Filter[] = [{ seller_id: sellerId, visible_to_seller: true }];
-      if (q.from) and.push({ at: { $gte: q.from } });
-      if (q.to) and.push({ at: { $lt: q.to } });
-      if (q.targetType) and.push({ target_type: q.targetType });
-      return pageOfRows(all(and), page);
-    },
+  sellerEntries(sellerId: string, q: { from?: Date; to?: Date; targetType?: string }, page: PageRequest): Promise<Page<ChainRow>> {
+    const and: Filter[] = [{ seller_id: sellerId, visible_to_seller: true }];
+    if (q.from) and.push({ at: { $gte: q.from } });
+    if (q.to) and.push({ at: { $lt: q.to } });
+    if (q.targetType) and.push({ target_type: q.targetType });
+    return this.#pageOfRows(all(and), page);
+  }
 
-    async entriesBySeq(q, afterSeq, limit, maxSeq) {
-      const and = await filterOf(q);
-      if (afterSeq !== null) and.push({ seq: { $gt: afterSeq } });
-      if (maxSeq !== undefined) and.push({ seq: { $lte: maxSeq } });
-      return withRelated(await t.entries.find(all(and), { sort: { seq: 1 }, limit }));
-    },
+  /** Oldest first by seq, after `afterSeq` (exports, verification) */
+  async entriesBySeq(q: EntryQuery | null, afterSeq: number | null, limit: number, maxSeq?: number): Promise<ChainRow[]> {
+    const and = await this.#filterOf(q);
+    if (afterSeq !== null) and.push({ seq: { $gt: afterSeq } });
+    if (maxSeq !== undefined) and.push({ seq: { $lte: maxSeq } });
+    return this.#withRelated(await this.#t.entries.find(all(and), { sort: { seq: 1 }, limit }));
+  }
 
-    entryBySeq: (seq) => one({ seq }),
+  entryBySeq(seq: number): Promise<ChainRow | null> {
+    return this.#one({ seq });
+  }
 
-    async maxSeq() {
-      const r = await t.entries.findOne({}, { sort: { seq: -1 } });
-      return r ? Number(r.seq) : null;
-    },
+  async maxSeq(): Promise<number | null> {
+    const r = await this.#t.entries.findOne({}, { sort: { seq: -1 } });
+    return r ? Number(r.seq) : null;
+  }
 
-    async summary(from, to) {
-      const range = { at: { $gte: from, $lt: to } };
-      const byCategory = new Map(
-        (await t.entries.aggregate<{ _id: string; n: number }>([{ $match: range }, { $group: { _id: '$category', n: { $sum: 1 } } }])).map((r) => [r._id, r.n]),
-      );
-      const total = [...byCategory.values()].reduce((a, b) => a + b, 0);
-      // entries with an approval that is not decided yet (or not projected yet): two reads instead of not exists
-      const referenced = await t.entries.distinct<string>('approval_request_id', { ...range, approval_request_id: { $ne: null } });
-      const decided = referenced.length ? await t.approvals.distinct<string>('approval_request_id', { approval_request_id: { $in: referenced }, state: { $nin: OPEN_APPROVAL } }) : [];
-      const pendingSecondReview = await t.entries.count({ ...range, approval_request_id: { $nin: [null, ...decided] } });
-      const byActor = await t.entries.aggregate<{ name: string; n: number }>([
-        { $match: { ...range, actor_kind: 'staff' } },
-        { $group: { _id: { $ifNull: ['$actor_name', '$actor_id', 'Unknown staff'] }, n: { $sum: 1 } } },
-        { $sort: { n: -1, _id: 1 } },
-        { $limit: 10 },
-        { $project: { _id: 0, name: '$_id', n: 1 } },
-      ]);
-      return {
-        total,
-        pendingSecondReview,
-        financial: byCategory.get('financial') ?? 0,
-        sellerEnforcement: byCategory.get('seller_enforcement') ?? 0,
-        settings: byCategory.get('settings') ?? 0,
-        byActor,
-      };
-    },
+  async summary(from: Date, to: Date): Promise<SummaryCounts> {
+    const range = { at: { $gte: from, $lt: to } };
+    const byCategory = new Map(
+      (await this.#t.entries.aggregate<{ _id: string; n: number }>([{ $match: range }, { $group: { _id: '$category', n: { $sum: 1 } } }])).map((r) => [r._id, r.n]),
+    );
+    const total = [...byCategory.values()].reduce((a, b) => a + b, 0);
+    // entries with an approval that is not decided yet (or not projected yet): two reads instead of not exists
+    const referenced = await this.#t.entries.distinct<string>('approval_request_id', { ...range, approval_request_id: { $ne: null } });
+    const decided = referenced.length ? await this.#t.approvals.distinct<string>('approval_request_id', { approval_request_id: { $in: referenced }, state: { $nin: OPEN_APPROVAL } }) : [];
+    const pendingSecondReview = await this.#t.entries.count({ ...range, approval_request_id: { $nin: [null, ...decided] } });
+    const byActor = await this.#t.entries.aggregate<{ name: string; n: number }>([
+      { $match: { ...range, actor_kind: 'staff' } },
+      { $group: { _id: { $ifNull: ['$actor_name', '$actor_id', 'Unknown staff'] }, n: { $sum: 1 } } },
+      { $sort: { n: -1, _id: 1 } },
+      { $limit: 10 },
+      { $project: { _id: 0, name: '$_id', n: 1 } },
+    ]);
+    return {
+      total,
+      pendingSecondReview,
+      financial: byCategory.get('financial') ?? 0,
+      sellerEnforcement: byCategory.get('seller_enforcement') ?? 0,
+      settings: byCategory.get('settings') ?? 0,
+      byActor,
+    };
+  }
 
-    async oldestEntryAt() {
-      return (await t.entries.findOne({}, { sort: { at: 1 } }))?.at ?? null;
-    },
+  async oldestEntryAt(): Promise<Date | null> {
+    return (await this.#t.entries.findOne({}, { sort: { at: 1 } }))?.at ?? null;
+  }
 
-    latestEntryFor: (approvalRequestId, action) => one({ approval_request_id: approvalRequestId, action }),
+  latestEntryFor(approvalRequestId: string, action: string): Promise<ChainRow | null> {
+    return this.#one({ approval_request_id: approvalRequestId, action });
+  }
 
-    async purgeCheckpoints() {
-      const rows = await t.entries.find({ action: PURGE_ACTION, module: 'audit' }, { sort: { seq: 1 } });
-      return rows.flatMap((r) => {
-        const cp = (r.after as { checkpoint?: { seq?: unknown; hash?: unknown } } | null)?.checkpoint;
-        return cp && typeof cp.seq === 'number' && typeof cp.hash === 'string' ? [{ seq: cp.seq, hash: cp.hash }] : [];
-      });
-    },
+  /** Purge checkpoints recorded in purge entries (after.checkpoint) */
+  async purgeCheckpoints(): Promise<{ seq: number; hash: string }[]> {
+    const rows = await this.#t.entries.find({ action: PURGE_ACTION, module: 'audit' }, { sort: { seq: 1 } });
+    return rows.flatMap((r) => {
+      const cp = (r.after as { checkpoint?: { seq?: unknown; hash?: unknown } } | null)?.checkpoint;
+      return cp && typeof cp.seq === 'number' && typeof cp.hash === 'string' ? [{ seq: cp.seq, hash: cp.hash }] : [];
+    });
+  }
 
-    /* ---------------------------------------------------------------- approval projection */
+  /* ---------------------------------------------------------------- approval projection */
 
-    async approvalStates(ids) {
-      const out = new Map<string, ApprovalProjection>();
-      for (const r of await t.approvals.getMany([...new Set(ids)])) out.set(r.approval_request_id, toProjection(r));
-      return out;
-    },
+  async approvalStates(ids: readonly string[]): Promise<Map<string, ApprovalProjection>> {
+    const out = new Map<string, ApprovalProjection>();
+    for (const r of await this.#t.approvals.getMany([...new Set(ids)])) out.set(r.approval_request_id, toProjection(r));
+    return out;
+  }
 
-    async getApprovalState(id, opts) {
-      const r = await t.approvals.get(id, { forUpdate: opts?.forUpdate });
-      return r ? toProjection(r) : null;
-    },
+  async getApprovalState(id: string, opts?: { forUpdate?: boolean }): Promise<ApprovalProjection | null> {
+    const r = await this.#t.approvals.get(id, { forUpdate: opts?.forUpdate });
+    return r ? toProjection(r) : null;
+  }
 
-    async saveApprovalState(p) {
-      await t.approvals.upsert({
-        approval_request_id: p.approvalRequestId,
-        state: p.state,
-        approvers: json(p.approvers) as ApprovalRow['approvers'],
-        steps: json(p.steps) as ApprovalRow['steps'],
-        awaiting: p.awaiting,
-        decided_at: p.decidedAt,
-        updated_at: p.updatedAt,
-      });
-    },
+  async saveApprovalState(p: ApprovalProjection): Promise<void> {
+    await this.#t.approvals.upsert({
+      approval_request_id: p.approvalRequestId,
+      state: p.state,
+      approvers: json(p.approvers) as ApprovalRow['approvers'],
+      steps: json(p.steps) as ApprovalRow['steps'],
+      awaiting: p.awaiting,
+      decided_at: p.decidedAt,
+      updated_at: p.updatedAt,
+    });
+  }
 
-    /* ---------------------------------------------------------------- retention */
+  /* ---------------------------------------------------------------- retention */
 
-    async retention(defaultYears, opts) {
-      await t.retention.insertIfAbsent({ id: 1, retain_years: defaultYears });
-      const r = await t.retention.get(1, { forUpdate: opts?.forUpdate });
-      if (!r) throw new Error('audit: retention row missing');
-      return toRetention(r);
-    },
+  /** The single row, created with `defaultYears` when missing */
+  async retention(defaultYears: number, opts?: { forUpdate?: boolean }): Promise<RetentionRow> {
+    await this.#t.retention.insertIfAbsent({ id: 1, retain_years: defaultYears });
+    return toRetention(orThrow(await this.#t.retention.get(1, { forUpdate: opts?.forUpdate }), 'audit: retention row'));
+  }
 
-    async updateRetention(patch) {
-      const set: Partial<RetentionDbRow> = {};
-      if (patch.retainYears !== undefined) set.retain_years = patch.retainYears;
-      if (patch.pendingYears !== undefined) set.pending_years = patch.pendingYears;
-      if (patch.pendingReason !== undefined) set.pending_reason = patch.pendingReason;
-      if (patch.pendingApprovalRequestId !== undefined) set.pending_approval_request_id = patch.pendingApprovalRequestId;
-      if (patch.pendingRequestedBy !== undefined) set.pending_requested_by = patch.pendingRequestedBy;
-      if (patch.updatedBy !== undefined) set.updated_by = patch.updatedBy;
-      if (patch.updatedAt !== undefined) set.updated_at = patch.updatedAt;
-      if (patch.lastPurgeAt !== undefined) set.last_purge_at = patch.lastPurgeAt;
-      if (patch.lastPurgeRemoved !== undefined) set.last_purge_removed = patch.lastPurgeRemoved;
-      if (patch.lastPurgeThrough !== undefined) set.last_purge_through = patch.lastPurgeThrough;
-      const r = await t.retention.update(1, set);
-      if (!r) throw new Error('audit: retention row missing');
-      return toRetention(r);
-    },
+  async updateRetention(patch: Partial<RetentionRow>): Promise<RetentionRow> {
+    const set: Partial<RetentionDbRow> = {};
+    if (patch.retainYears !== undefined) set.retain_years = patch.retainYears;
+    if (patch.pendingYears !== undefined) set.pending_years = patch.pendingYears;
+    if (patch.pendingReason !== undefined) set.pending_reason = patch.pendingReason;
+    if (patch.pendingApprovalRequestId !== undefined) set.pending_approval_request_id = patch.pendingApprovalRequestId;
+    if (patch.pendingRequestedBy !== undefined) set.pending_requested_by = patch.pendingRequestedBy;
+    if (patch.updatedBy !== undefined) set.updated_by = patch.updatedBy;
+    if (patch.updatedAt !== undefined) set.updated_at = patch.updatedAt;
+    if (patch.lastPurgeAt !== undefined) set.last_purge_at = patch.lastPurgeAt;
+    if (patch.lastPurgeRemoved !== undefined) set.last_purge_removed = patch.lastPurgeRemoved;
+    if (patch.lastPurgeThrough !== undefined) set.last_purge_through = patch.lastPurgeThrough;
+    return toRetention(orThrow(await this.#t.retention.update(1, set), 'audit: retention row'));
+  }
 
-    async firstSeqAtOrAfter(cutoff) {
-      const r = await t.entries.findOne({ at: { $gte: cutoff } }, { sort: { seq: 1 } });
-      return r ? Number(r.seq) : null;
-    },
+  /** First seq that is kept when entries before `cutoff` are purged; null when every entry is older */
+  async firstSeqAtOrAfter(cutoff: Date): Promise<number | null> {
+    const r = await this.#t.entries.findOne({ at: { $gte: cutoff } }, { sort: { seq: 1 } });
+    return r ? Number(r.seq) : null;
+  }
 
-    async lastEntryBefore(beforeSeq) {
-      const r = await t.entries.findOne(beforeSeq !== null ? { seq: { $lt: beforeSeq } } : {}, { sort: { seq: -1 } });
-      return r ? { seq: Number(r.seq), hash: bytes(r.hash), at: r.at } : null;
-    },
+  /** The last entry with seq < `beforeSeq` (the newest when null): where a purge up to `beforeSeq` stops */
+  async lastEntryBefore(beforeSeq: number | null): Promise<{ seq: number; hash: Uint8Array; at: Date } | null> {
+    const r = await this.#t.entries.findOne(beforeSeq !== null ? { seq: { $lt: beforeSeq } } : {}, { sort: { seq: -1 } });
+    return r ? { seq: Number(r.seq), hash: bytes(r.hash), at: r.at } : null;
+  }
 
-    async purgeEntries(beforeSeq, cutoff) {
-      // the only delete of entries: those before the cut-off (indexed at) that come before every kept entry in the chain
-      const doomed: Filter = beforeSeq === null ? { at: { $lt: cutoff } } : { at: { $lt: cutoff }, seq: { $lt: beforeSeq } };
-      // their related targets carry the entry's at: every target before the cut-off but those of kept (backdated) entries
-      const keptBefore = beforeSeq === null ? [] : await t.entries.distinct<string>('id', { at: { $lt: cutoff }, seq: { $gte: beforeSeq } });
-      await t.targets.deleteMany({ at: { $lt: cutoff }, ...(keptBefore.length ? { entry_id: { $nin: keptBefore } } : {}) });
-      return { removed: await t.entries.deleteMany(doomed) };
-    },
+  /**
+   * Removes the entries before `cutoff` with seq < `beforeSeq` (every entry before `cutoff` when null) and their
+   * related targets: the only delete of entries (they are append-only otherwise).
+   */
+  async purgeEntries(beforeSeq: number | null, cutoff: Date): Promise<{ removed: number }> {
+    // the only delete of entries: those before the cut-off (indexed at) that come before every kept entry in the chain
+    const doomed: Filter = beforeSeq === null ? { at: { $lt: cutoff } } : { at: { $lt: cutoff }, seq: { $lt: beforeSeq } };
+    // their related targets carry the entry's at: every target before the cut-off but those of kept (backdated) entries
+    const keptBefore = beforeSeq === null ? [] : await this.#t.entries.distinct<string>('id', { at: { $lt: cutoff }, seq: { $gte: beforeSeq } });
+    await this.#t.targets.deleteMany({ at: { $lt: cutoff }, ...(keptBefore.length ? { entry_id: { $nin: keptBefore } } : {}) });
+    return { removed: await this.#t.entries.deleteMany(doomed) };
+  }
 
-    /* ---------------------------------------------------------------- integrity checks */
+  /* ---------------------------------------------------------------- integrity checks */
 
-    async lastIntegrityCheck() {
-      const r = await t.checks.findOne({}, { sort: { started_at: -1, id: -1 } });
-      return r ? toCheck(r) : null;
-    },
+  async lastIntegrityCheck(): Promise<IntegrityCheckRow | null> {
+    const r = await this.#t.checks.findOne({}, { sort: { started_at: -1, id: -1 } });
+    return r ? toCheck(r) : null;
+  }
 
-    async lastOkIntegrityCheck() {
-      const r = await t.checks.findOne({ ok: true }, { sort: { started_at: -1, id: -1 } });
-      return r ? toCheck(r) : null;
-    },
+  async lastOkIntegrityCheck(): Promise<IntegrityCheckRow | null> {
+    const r = await this.#t.checks.findOne({ ok: true }, { sort: { started_at: -1, id: -1 } });
+    return r ? toCheck(r) : null;
+  }
 
-    async saveIntegrityCheck(c) {
-      await t.checks.upsert({ id: c.id, started_at: c.startedAt, finished_at: c.finishedAt, from_seq: c.fromSeq, to_seq: c.toSeq, ok: c.ok, broken_at_seq: c.brokenAtSeq });
-    },
+  async saveIntegrityCheck(c: IntegrityCheckRow): Promise<void> {
+    await this.#t.checks.upsert({ id: c.id, started_at: c.startedAt, finished_at: c.finishedAt, from_seq: c.fromSeq, to_seq: c.toSeq, ok: c.ok, broken_at_seq: c.brokenAtSeq });
+  }
 
-    /* ---------------------------------------------------------------- signed checkpoints */
+  /* ---------------------------------------------------------------- signed checkpoints */
 
-    async latestCheckpoint() {
-      const r = await t.checkpoints.findOne({}, { sort: { seq: -1 } });
-      return r ? { id: r.id, seq: Number(r.seq), hash: bytes(r.hash), mac: r.mac, keyId: r.key_id, kind: r.kind as CheckpointRow['kind'], createdAt: r.created_at } : null;
-    },
+  /** The checkpoint with the highest seq */
+  async latestCheckpoint(): Promise<CheckpointRow | null> {
+    const r = await this.#t.checkpoints.findOne({}, { sort: { seq: -1 } });
+    return r ? { id: r.id, seq: Number(r.seq), hash: bytes(r.hash), mac: r.mac, keyId: r.key_id, kind: r.kind as CheckpointRow['kind'], createdAt: r.created_at } : null;
+  }
 
-    async insertCheckpoint(c) {
-      // one per seq (unique index): a second one at the same seq is ignored
-      await t.checkpoints.insertIfAbsent({ id: c.id, seq: c.seq, hash: buffer(c.hash), mac: c.mac, key_id: c.keyId, kind: c.kind, created_at: c.createdAt }, ['seq']);
-    },
-  };
-  return repo;
+  /** One checkpoint per seq: a second one at the same seq is ignored */
+  async insertCheckpoint(c: CheckpointRow): Promise<void> {
+    await this.#t.checkpoints.insertIfAbsent({ id: c.id, seq: c.seq, hash: buffer(c.hash), mac: c.mac, key_id: c.keyId, kind: c.kind, created_at: c.createdAt }, ['seq']);
+  }
 }

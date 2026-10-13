@@ -125,7 +125,7 @@ describe('record', () => {
   it('stores IP addresses in their canonical inet text form, so the hash recomputes', async () => {
     const id = await auditApi(app).record(entry({ ip: '::FFFF:0102:0304' }));
     expect((await get(`/entries/${id}`)).json().ip).toBe('::ffff:1.2.3.4');
-    // the expected forms are what host(inet) gives for each address (PostgreSQL 17, where the format comes from)
+    // the expected forms are the canonical text forms (as PostgreSQL's host(inet) writes them, the hash depends on it)
     for (const [ip, host] of [
       ['203.0.113.7', '203.0.113.7'],
       ['::2', '::2'],

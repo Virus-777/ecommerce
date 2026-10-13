@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { auth, buildTestApp, callers } from '../../../testing/app.js';
 import { hashRow } from '../domain/chain.js';
-import type { AuditRepository } from '../ports.js';
+import type { AuditRepository } from '../repository.js';
 import { auditApi, auditTable, entry, waitForEvents } from './helpers.js';
 
 let app: FastifyInstance;
