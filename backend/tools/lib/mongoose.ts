@@ -104,9 +104,12 @@ import { __HELPERS__ } from '../../kernel/mongo/schemas.js';
     for (const u of def.unenforced) out.push(`// not enforced by MongoDB yet (the repository enforces it, docs/04 §2): ${u.replace(/\n/g, ' ')}`);
     out.push('');
   }
-  // import only the helpers the schemas use (the import line itself names none of them)
+  // import only the helpers the schemas use (the import line itself names none of them; comments do not count)
   const body = out.join('\n');
-  const schemasPart = body.slice(body.indexOf('\nconst ') + 1);
+  const schemasPart = body
+    .slice(body.indexOf('\nconst ') + 1)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
   const helpers = ['collectionOptions', ...['DATE', 'integer', 'positive'].filter((h) => new RegExp(`\\b${h}\\b`).test(schemasPart))].sort((a, b) =>
     a.localeCompare(b, 'en', { sensitivity: 'base' }),
   );

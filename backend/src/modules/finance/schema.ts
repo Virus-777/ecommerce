@@ -6,7 +6,7 @@
  * (kernel/mongo/schema.ts); repositories reach them through ctx.mongo.table(name).
  */
 import { Schema } from 'mongoose';
-import { collectionOptions, DATE, integer, positive } from '../../kernel/mongo/schemas.js';
+import { collectionOptions, DATE, integer } from '../../kernel/mongo/schemas.js';
 
 /** Running balances per seller (derived from ledger_entries, kept for fast reads) */
 const seller_accounts = new Schema(
