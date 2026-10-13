@@ -133,7 +133,7 @@ describe('role assignments', () => {
     await expect(f.svc.decide(reqId, f.principal(admin2), { kind: 'approve' })).rejects.toMatchObject({ code: 'NOT_ELIGIBLE_APPROVER' });
     const rejected = await f.svc.decide(reqId, f.principal(owner), { kind: 'reject' });
     expect(rejected.status).toBe('rejected');
-    const member = await f.svc.getMember(f.principal(owner) as never, admin);
+    const member = await f.svc.members.getMember(f.principal(owner) as never, admin);
     expect(member.assignments.find((a) => a.id === self.body.id)).toMatchObject({ status: 'revoked' });
   });
 
@@ -176,11 +176,11 @@ describe('role assignments', () => {
       const res = await f.call('POST', '/staff-invitations', f.token(admin), { email, name, roleIds: [await f.roleId('finance_staff')], reason: 'Finance hire' }, { 'x-step-up-code': '000000' });
       expect(res.status, JSON.stringify(res.body)).toBe(201);
       const id = res.body.account.id as string;
-      const assignment = (await f.svc.getMember(f.principal(owner) as never, id)).assignments[0]!;
+      const assignment = (await f.svc.members.getMember(f.principal(owner) as never, id)).assignments[0]!;
       expect(assignment.status).toBe('pending_approval');
       return { id, assignmentId: assignment.id, requestId: assignment.approval!.approvalRequestId! };
     };
-    const statusOf = async (id: string, assignmentId: string) => (await f.svc.getMember(f.principal(owner) as never, id)).assignments.find((a) => a.id === assignmentId)!.status;
+    const statusOf = async (id: string, assignmentId: string) => (await f.svc.members.getMember(f.principal(owner) as never, id)).assignments.find((a) => a.id === assignmentId)!.status;
     const accept = async (id: string) => {
       f.accounts.set(id, { ...f.accounts.get(id)!, status: 'active' });
       await f.svc.onInvitationAcceptedFromIdentity({ invitationId: newId(), accountId: id, purpose: 'staff' });

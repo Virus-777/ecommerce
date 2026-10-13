@@ -71,7 +71,7 @@ describe('limit changes', () => {
     await f.drain();
     expect(f.eventsNamed('access.limits.changed')).toEqual([expect.objectContaining({ roleId, roleKey: 'finance_staff', actionKeys: ['returns.refunds.approve'], limitChangeId: proposed.body.id })]);
     expect((await f.svc.check(f.principal(staff), 'returns.refunds.approve', { money: usd(2500) })).decision).toBe('allowed');
-    const limits = await f.svc.listLimits({ roleId, actionKey: 'returns.refunds.approve' });
+    const limits = await f.svc.limits.listLimits({ roleId, actionKey: 'returns.refunds.approve' });
     expect(limits).toHaveLength(1);
     expect(limits[0]).toMatchObject({ value: { limitMoney: usd(3000) }, approvedBy: { kind: 'staff', id: owner } });
     // the request created before keeps the limits in force when it was created: $2,500 is above the old staff limit
