@@ -158,7 +158,7 @@ export class Cancellations {
     const cfg = await this.core.cfg();
     const key = by.idempotencyKey ?? null;
     if (key) {
-      const prior = await this.core.repo.find('cancellations', { order_id: orderId, idempotency_key: { op: '<>', value: null } });
+      const prior = await this.core.repo.find('cancellations', { order_id: orderId, idempotency_key: { op: 'is not', value: null } });
       const mine = prior.filter((c) => c.idempotency_key?.startsWith(`${key}:`));
       if (mine.length) return this.answer(orderId, mine.map((c) => c.id));
     }
@@ -457,7 +457,7 @@ export class Cancellations {
     if (!input.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
     const key = by.idempotencyKey ?? null;
     if (key) {
-      const prior = (await this.core.repo.find('cancellations', { order_id: orderId, idempotency_key: { op: '<>', value: null } })).filter((c) => c.idempotency_key?.startsWith(`${key}:`));
+      const prior = (await this.core.repo.find('cancellations', { order_id: orderId, idempotency_key: { op: 'is not', value: null } })).filter((c) => c.idempotency_key?.startsWith(`${key}:`));
       if (prior.length) return this.answer(orderId, prior.map((c) => c.id));
     }
     const counts = ['seller_cannot_fulfill', 'overdue_dispatch'].includes(input.reasonCode);

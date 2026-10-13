@@ -83,6 +83,17 @@ describe('admin orders', () => {
     expect(h.audits.at(-1)).toMatchObject({ action: 'orders.items.cancel', reason: 'Seller confirmed no stock' });
   });
 
+  it('answers a repeated staff cancellation with the same idempotency key with the first result', async () => {
+    const { o } = await order();
+    const item = o.groups[1]!.items[0]!;
+    const by = { actor: { kind: 'staff' as const, id: newId() }, idempotencyKey: newId() };
+    const input = { items: [{ itemId: item.id, quantity: 1 }], reasonCode: 'seller_cannot_fulfill', reason: 'No stock', notifyCustomer: false };
+    const first = await h.service.cancellations.staffCancel(o.id, input, by);
+    // below the HTTP replay: the service itself finds the requests the key made
+    const again = await h.service.cancellations.staffCancel(o.id, input, by);
+    expect(again.requests.map((r) => r.id)).toEqual(first.requests.map((r) => r.id));
+  });
+
   it('decides a customer request for the seller and overrides a decline', async () => {
     const { o, customerId, sellerA } = await order();
     const staff = tokens.staff(['orders.orders.view', 'orders.cancellations.decide']);
