@@ -50,7 +50,7 @@ backend/
 |---|---|---|
 | `/api/store/*` | Customers and guests (website + Android app) | Visitor token (guests) or customer token; the self-service `account` endpoints under `/api/store/identity` take any app's signed-in token |
 | `/api/seller/*` | Seller owners and seller staff (Seller Center, website + app) | Seller member session; seller-level permissions |
-| `/api/admin/*` | Internal staff (Admin Center + Operations) | Staff session with 2-step; role permissions + approval limits |
+| `/api/admin/*` | Internal staff (Admin Center + Operations) | Staff session (email and password; the password again for sensitive actions); role permissions + approval limits |
 | `/api/public/*` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token: on the website the cookie of the app named by `audience` in the body, on Android `refreshToken` in the body. The bootstrap endpoint (`POST /api/public/identity/app-sessions`) takes an app proof |
 | `/webhooks/*` | Payment and carrier providers | Provider signatures |
 | `/files/*` | Anyone holding a link the API issued (`<img src>`, downloads) | The link's own signature (HMAC, expiring for private files, permanent for public renditions), verified by the auth middleware |

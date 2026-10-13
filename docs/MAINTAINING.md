@@ -199,24 +199,27 @@ npm run bootstrap-owner -- --email olivia@company.example --name "Olivia Hart" \
   --deputy-email daniel@company.example --deputy-name "Daniel Reyes"
 ```
 
-It prints one link per person. Hand each link over in person; it opens the Admin Center (`ADMIN_URL` must be an
-address their computer reaches), where they set a password and an authenticator app (works offline). Links last
-7 days (setting `identity.invitationTtlDays`). The command refuses once a Business Owner exists or is invited, so
-it can't be used to take over a running system. The owners then invite the other staff from Admin Center > Staff.
+It prints a link and a pass code per person (`Link: …`, `Pass code: XXXX-XXXX`). Hand both over in person; the
+link opens the Admin Center (`ADMIN_URL` must be an address their computer reaches), where they type the pass code
+and choose a password. That signs them in; from then on staff sign in with email and password (no authenticator
+app: the server is offline and only staff use it, owner decision 2026-10-14). Staff confirm sensitive actions
+(granting roles, staff accounts, payout destinations, large approvals) by typing their password again. Links last
+7 days (setting `identity.invitationTtlDays`); 5 wrong pass codes end a link. The command refuses once a Business
+Owner exists or is invited, so it can't be used to take over a running system. The owners then invite the other
+staff from Admin Center > Staff.
 
-The server sends no email when it has no internet access, so staff get their links from the server instead. Each
-run issues a new link and the previous one stops working (links are stored only as hashes, so an old one cannot be
-shown again):
+The server sends no email when it has no internet access, and the pass code is never emailed or shown in the Admin
+Center, so staff get their link and pass code from the server instead. Each run issues a new link (and pass code)
+and the previous ones stop working (both are stored only as hashes, so an old one cannot be shown again):
 
 | Situation | Command |
 |---|---|
-| Someone was invited from the Admin Center, or lost or let their link expire | `npm run staff-link -- --email ana@company.example` (new invitation link) |
+| Someone was invited from the Admin Center (always: the Admin Center never shows the pass code), lost their link, let it expire, or typed 5 wrong pass codes | `npm run staff-link -- --email ana@company.example` (prints `Link:` and `Pass code:`) |
 | Someone forgot their password | the same command: once they have an account, it prints a password reset link |
-| Someone lost the phone with their authenticator | `npm run staff-link -- --email ana@company.example --reset-two-step "Lost phone, checked in person"` |
 | A Business Owner invitation went to a mistyped email | `npm run staff-link -- --email olivia@compnay.example --revoke "Mistyped email"`, then `bootstrap-owner` again |
 
-Every action is in the audit trail as "Server operator". Check who is asking before handing over a link: it signs
-them in.
+Every action is in the audit trail as "Server operator". Check who is asking before handing over a link and pass
+code: together they let the person in.
 
 ## 8. When `npm run check` fails
 

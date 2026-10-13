@@ -46,7 +46,7 @@ providers/          provider adapters (email, payments, carriers, storage) behin
 ## 3. What the middleware already did (don't repeat it)
 
 Before a handler runs: the token is verified; the caller kind, app (audience), seller context and member
-access, endpoint `permission`, `permissionWhen`, staff 2-step, step-up proofs, rate limits, launch phase
+access, endpoint `permission`, `permissionWhen`, staff session liveness, step-up proofs (re-auth tokens), rate limits, launch phase
 and Idempotency-Key replay are all checked (`docs/03-auth-middleware.md`). In particular:
 
 - **Step-up** (spec `stepUp`): the proof is verified before the handler, after the idempotency replay (a replay

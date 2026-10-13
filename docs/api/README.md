@@ -219,7 +219,7 @@ Endpoints with a step-up need a fresh proof: `reauthToken` in the body, from ide
 
 ### Browsers (CORS)
 
-Each area allows its own app's origins (`CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS`); public endpoints, file links and the `account` endpoints allow every app's. Credentials (`Access-Control-Allow-Credentials: true`) are allowed only on the routes that set, clear or read the refresh cookie: refresh and sign-out, `POST /api/public/identity/app-sessions`, `/sessions`, `/sign-in-challenges/{id}/verify`, `/external-sign-ins`, `/verifications/{id}/confirm`, `/invitations/accept`, `/invitations/two-step`, and `POST /api/seller/identity/session/seller-context`.
+Each area allows its own app's origins (`CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS`); public endpoints, file links and the `account` endpoints allow every app's. Credentials (`Access-Control-Allow-Credentials: true`) are allowed only on the routes that set, clear or read the refresh cookie: refresh and sign-out, `POST /api/public/identity/app-sessions`, `/sessions`, `/sign-in-challenges/{id}/verify`, `/external-sign-ins`, `/verifications/{id}/confirm`, `/invitations/accept`, and `POST /api/seller/identity/session/seller-context`.
 
 ### For frontend developers
 
