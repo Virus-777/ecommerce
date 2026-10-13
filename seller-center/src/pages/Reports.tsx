@@ -1,90 +1,162 @@
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
+import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
-import { money, num } from '@marketly/web-shared/lib/format';
+import { formatMoney, money, num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { announce, BarChart, Button, Card, Img, Legend, LineChart, Meter, PageHeader, SegmentedControl, Stat, StatusBadge, TableWrap, TextInput } from '@marketly/web-shared/ui';
-import { REPORTS, RETURN_REASONS, SERVICE, type Period } from './data/reports';
+import { Alert, announce, BarChart, Button, Card, Img, Legend, LineChart, Meter, PageHeader, SegmentedControl, Stat, StatusBadge, TableWrap, TextInput } from '@marketly/web-shared/ui';
+import { useSellerSession } from '@/app/session';
+import { amt, download, fmtPeriod, fmtTime, waitForExport } from './data/finance';
+import { breakdownsOf, kpiOf, meterPct, metaOf, PERIODS, REPORT, SERVICE_KEYS, statDelta, tableOf, zoneLabel, type Period, type ProductSalesRow, type ReturnsProductRow } from './data/reports';
 
-// Design: pages/seller/seller-reports.html (no views). The 7/30/90-day segment switches every
-// figure, both charts and the product table; the 30-day period is the design's sample.
+// Design: pages/seller/seller-reports.html (no views). The 7/30/90-day segment runs the seller reports
+// for that preset (POST reports/reports/{key}/query, compared with the previous period): order trend
+// (gross sales and orders KPIs, orders chart), product sales (units, product table) and returns by
+// reason (return rate, reasons chart, returns per product). Service performance is the account-health
+// summary (GET sellers/performance, last 30 days). Export CSV runs an async report export
+// (POST reports/exports → poll GET reports/exports/{id} → download link).
 
-const PERIODS: Array<{ label: string; value: Period }> = [
-  { label: '7 days', value: '7d' },
-  { label: '30 days', value: '30d' },
-  { label: '90 days', value: '90d' },
-];
-
-const dayLabel = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 const pct = (n: number) => `${n.toFixed(1)}%`;
 
 export default function Reports() {
+  const { api } = useApi();
+  const { sellerId, storeName, can } = useSellerSession();
+  const canView = can('reports.seller.view');
+  const canExport = can('reports.seller.export');
   const [period, setPeriod] = useState<Period>('30d');
-  const [range, setRange] = useState(REPORTS['30d'].range);
-  const r = REPORTS[period];
+  const p = PERIODS.find((x) => x.value === period)!;
 
-  const choose = (p: Period) => {
-    setPeriod(p);
-    setRange(REPORTS[p].range);
-  };
+  const run = (key: string) =>
+    call(api.POST('/api/seller/reports/reports/{key}/query', { params: { path: { key } }, body: { preset: p.preset, compare: 'previous_period' } }));
+  const trend = useQuery({ queryKey: ['reports', REPORT.trend, sellerId, period], queryFn: () => run(REPORT.trend), enabled: canView });
+  const products = useQuery({ queryKey: ['reports', REPORT.products, sellerId, period], queryFn: () => run(REPORT.products), enabled: canView });
+  const returns = useQuery({ queryKey: ['reports', REPORT.returns, sellerId, period], queryFn: () => run(REPORT.returns), enabled: canView });
+  const performance = useQuery({ queryKey: ['sellers', 'performance', sellerId], queryFn: () => call(api.GET('/api/seller/sellers/performance')) });
+
+  const exportCsv = useMutation({
+    mutationFn: async () => {
+      const job = await call(api.POST('/api/seller/reports/exports', { body: { reportKey: REPORT.products, query: { preset: p.preset }, format: 'csv' } }));
+      announce(`Exporting ${p.label} report as CSV`);
+      const ready = await waitForExport(() => call(api.GET('/api/seller/reports/exports/{id}', { params: { path: { id: job.id } } })), job);
+      download(ready.downloadUrl!);
+      return ready;
+    },
+    onSuccess: (j) => announce(`Report export ${j.ref} is ready`),
+  });
 
   const view = useMemo(() => {
-    const labels = r.orders.map((_, i) => {
-      const d = new Date(r.start);
-      d.setDate(d.getDate() + i);
-      return dayLabel(d);
-    });
-    const products = [...r.products].sort((a, b) => b.gross - a.gross);
-    const orders = r.orders.reduce((a, b) => a + b, 0);
-    const units = products.reduce((a, p) => a + p.units, 0);
-    const gross = products.reduce((a, p) => a + p.gross, 0);
-    const returns = products.reduce((a, p) => a + p.returns, 0);
-    const reasons = r.returnsByReason.reduce((a, b) => a + b, 0);
-    return { labels, products, orders, units, gross, returns, reasons };
-  }, [r]);
+    const t = trend.data;
+    const meta = metaOf(t);
+    const ordersSeries = t?.series.find((s) => s.key === 'orders');
+    const points = (ordersSeries?.points ?? []) as Array<{ x: string; y: number; label?: string }>;
+    const productRows = [...(tableOf<ProductSalesRow>(products.data)?.rows ?? [])].sort((a, b) => b.gross.amount - a.gross.amount);
+    const returnRows = tableOf<ReturnsProductRow>(returns.data)?.rows ?? [];
+    const returnsBy = new Map(returnRows.map((r) => [r.productId, r.units]));
+    const reasons = breakdownsOf(returns.data).find((b) => b.key === 'reason')?.rows ?? [];
+    const ordersKpi = kpiOf(t, 'commerce.orders');
+    const unitsKpi = kpiOf(products.data, 'commerce.units_sold');
+    const returnUnits = Number(tableOf<ReturnsProductRow>(returns.data)?.totals.units ?? 0);
+    return {
+      meta,
+      labels: points.map((pt) => pt.label ?? pt.x),
+      orderPoints: points.map((pt) => pt.y),
+      products: productRows.map((r) => ({ ...r, returns: returnsBy.get(r.productId) ?? 0 })),
+      reasons,
+      reasonTotal: reasons.reduce((a, r) => a + r.requests, 0),
+      orders: ordersKpi?.value ?? 0,
+      units: unitsKpi?.value ?? 0,
+      returnUnits,
+    };
+  }, [trend.data, products.data, returns.data]);
 
-  const d = r.deltas;
+  const gross = kpiOf(trend.data, 'commerce.gross_sales');
+  const orders = kpiOf(trend.data, 'commerce.orders');
+  const units = kpiOf(products.data, 'commerce.units_sold');
+  const compare = view.meta?.compareRange ? `vs prior ${p.label}` : undefined;
+  const meta = view.meta;
+  const failed = [trend, products, returns].find((q) => q.isError);
+  const service = SERVICE_KEYS.map((k) => performance.data?.metrics.find((m) => m.key === k)).filter((m) => !!m);
+  const hasOrders = view.orderPoints.some((v) => v > 0);
+  const hasReasons = view.reasons.some((r) => r.requests > 0);
+
+  const sk = (
+    <div className="stack gap-2">
+      <span className="sk sk-line short" />
+      <span className="sk h-30" />
+    </div>
+  );
+
+  if (!canView) {
+    return (
+      <SellerLayout active="reports">
+        <PageHeader title="Seller reports" sub="Sales, returns and service figures for your store." />
+        <Alert tone="info" title="Reports aren’t part of your access">
+          Ask the store owner to give you the Seller reports permission.
+        </Alert>
+      </SellerLayout>
+    );
+  }
 
   return (
     <SellerLayout active="reports">
       <PageHeader
         title="Seller reports"
-        sub="Figures by order date, Pacific Time. Refreshed Oct 8, 9:40 AM."
+        sub={meta ? `Figures ${(meta.dateBasisLabel ?? 'by order date').replace(/^By/, 'by')}, ${zoneLabel(meta.timeZone)}.${meta.freshAsOf ? ` Refreshed ${fmtTime(meta.freshAsOf)}.` : ''}` : 'Figures by order date, Pacific Time.'}
         actions={
           <>
-            <SegmentedControl items={PERIODS} active={period} onChange={choose} label="Report period" />
+            <SegmentedControl items={PERIODS.map(({ label, value }) => ({ label, value }))} active={period} onChange={setPeriod} label="Report period" />
             <label className="sr-only" htmlFor="rp-range">
               Date range
             </label>
-            <TextInput id="rp-range" icon="calendar" value={range} placeholder="" onChange={(e) => setRange(e.target.value)} />
-            <Button variant="secondary" size="sm" icon="download" onClick={() => announce(`Exporting ${r.label} report as CSV`)}>
-              Export CSV
-            </Button>
+            <TextInput id="rp-range" icon="calendar" value={meta ? fmtPeriod(meta.range, true) : ''} placeholder="" readOnly />
+            {canExport && (
+              <Button variant="secondary" size="sm" icon="download" onClick={() => exportCsv.mutate()} disabled={exportCsv.isPending}>
+                {exportCsv.isPending ? 'Preparing CSV…' : 'Export CSV'}
+              </Button>
+            )}
           </>
         }
       />
+      {exportCsv.isError && (
+        <Alert tone="danger" title="The export didn’t finish">
+          {errorMessage(exportCsv.error)}
+        </Alert>
+      )}
+      {failed && (
+        <Alert tone="danger" title="We couldn’t load your reports">
+          {errorMessage(failed.error)}{' '}
+          <Button variant="ghost" size="sm" onClick={() => [trend, products, returns].forEach((q) => q.isError && void q.refetch())}>
+            Try again
+          </Button>
+        </Alert>
+      )}
       <div className="sb-kpis">
-        <div className="card pad">
-          <Stat label="Gross sales" value={money(view.gross)} delta={d?.gross.value} dir={d?.gross.dir} good={d?.gross.good} note={r.compare} />
-        </div>
-        <div className="card pad">
-          <Stat label="Orders" value={num(view.orders)} delta={d?.orders.value} dir={d?.orders.dir} good={d?.orders.good} />
-        </div>
-        <div className="card pad">
-          <Stat label="Units sold" value={num(view.units)} note={`${(view.units / view.orders).toFixed(1)} units per order`} />
-        </div>
-        <div className="card pad">
-          <Stat label="Return rate" value={pct((view.returns / view.units) * 100)} delta={d?.returnRate.value} dir={d?.returnRate.dir} good={d?.returnRate.good} note="returns ÷ units" />
-        </div>
+        <div className="card pad">{trend.data ? <Stat label="Gross sales" value={gross?.display ?? money(amt(gross?.money))} {...statDelta(gross)} note={statDelta(gross).delta ? compare : undefined} /> : sk}</div>
+        <div className="card pad">{trend.data ? <Stat label="Orders" value={num(orders?.value ?? 0)} {...statDelta(orders)} /> : sk}</div>
+        <div className="card pad">{products.data ? <Stat label="Units sold" value={num(units?.value ?? 0)} note={view.orders ? `${(view.units / view.orders).toFixed(1)} units per order` : undefined} {...statDelta(units)} /> : sk}</div>
+        <div className="card pad">{products.data && returns.data ? <Stat label="Return rate" value={pct(view.units ? (view.returnUnits / view.units) * 100 : 0)} note="returns ÷ units" /> : sk}</div>
       </div>
       <div className="grid lg2 gap-5">
-        <Card title="Orders per day" sub={`${num(view.orders)} orders · ${r.chartRange}`}>
-          <Legend items={['Northwind Audio orders']} />
-          <LineChart labels={view.labels} series={[{ name: 'Orders', data: r.orders }]} area label={`Orders per day, ${r.chartRange.replace(' – ', ' to ')}`} />
+        <Card title={`Orders per ${meta?.granularity ?? 'day'}`} sub={meta ? `${num(view.orders)} orders · ${fmtPeriod(meta.range)}` : undefined}>
+          <Legend items={[`${storeName || 'Your'} orders`]} />
+          {!trend.data ? (
+            <span className="sk h-46" />
+          ) : hasOrders && view.orderPoints.length > 1 ? (
+            <LineChart labels={view.labels} series={[{ name: 'Orders', data: view.orderPoints }]} area label={`Orders per ${meta?.granularity ?? 'day'}, ${fmtPeriod(meta?.range).replace(' – ', ' to ')}`} />
+          ) : (
+            <p className="small muted">No orders in this period.</p>
+          )}
         </Card>
-        <Card titleAs="h3" title="Returns by reason" sub={`${view.reasons} returns in the period`}>
-          <BarChart labels={RETURN_REASONS} data={r.returnsByReason} height={220} label="Returns by reason" />
-          <span className="xs muted">{r.note}</span>
+        <Card titleAs="h3" title="Returns by reason" sub={returns.data ? `${view.reasonTotal} return${view.reasonTotal === 1 ? '' : 's'} in the period` : undefined}>
+          {!returns.data ? (
+            <span className="sk h-46" />
+          ) : hasReasons ? (
+            <BarChart labels={view.reasons.map((r) => r.label)} data={view.reasons.map((r) => r.requests)} height={220} label="Returns by reason" />
+          ) : (
+            <p className="small muted">No return requests in this period.</p>
+          )}
+          {hasReasons && <span className="xs muted">Return requests on your items by the reason customers gave.</span>}
         </Card>
       </div>
       <Card flush titleAs="h3" title="Product sales" sub="Sorted by gross sales">
@@ -93,7 +165,6 @@ export default function Reports() {
             <thead>
               <tr>
                 <th scope="col">Product</th>
-                <th scope="col">SKU</th>
                 <th className="r" scope="col">
                   Units
                 </th>
@@ -112,40 +183,45 @@ export default function Reports() {
               </tr>
             </thead>
             <tbody>
-              {view.products.map((p) => (
-                <tr key={p.sku}>
+              {!products.data &&
+                [0, 1, 2].map((i) => (
+                  <tr key={i}>
+                    <td colSpan={6}>
+                      <span className="sk sk-line" />
+                    </td>
+                  </tr>
+                ))}
+              {products.data && view.products.length === 0 && (
+                <tr>
+                  <td colSpan={6}>
+                    <span className="small muted">No sales in this period.</span>
+                  </td>
+                </tr>
+              )}
+              {view.products.map((r) => (
+                <tr key={r.productId}>
                   <td>
                     <div className="cell-main minw-240">
-                      <Img icon={p.icon} tint="2" className="tiny" />
+                      <Img icon="package" tint="2" className="tiny" />
                       <span className="stack gap-0">
-                        <span className="small strong">{p.name}</span>
-                        {p.liveDiscount && (
-                          <span>
-                            <span className="badge t-deal-soft">Live discount</span>
-                          </span>
-                        )}
+                        <span className="small strong">{r.product}</span>
                       </span>
                     </div>
                   </td>
-                  <td>
-                    <span className="mono nowrap" title={p.sku}>
-                      {p.sku}
-                    </span>
+                  <td className="r">
+                    <span className="num">{num(r.units)}</span>
                   </td>
                   <td className="r">
-                    <span className="num">{num(p.units)}</span>
+                    <span className="num strong">{formatMoney(r.gross)}</span>
                   </td>
                   <td className="r">
-                    <span className="num strong">{money(p.gross)}</span>
+                    <span className="num">{money(r.units ? amt(r.gross) / r.units : 0)}</span>
                   </td>
                   <td className="r">
-                    <span className="num">{money(p.units ? p.gross / p.units : 0)}</span>
+                    <span className="num">{r.returns}</span>
                   </td>
                   <td className="r">
-                    <span className="num">{p.returns}</span>
-                  </td>
-                  <td className="r">
-                    <span className="num">{pct(p.units ? (p.returns / p.units) * 100 : 0)}</span>
+                    <span className="num">{pct(r.units ? (r.returns / r.units) * 100 : 0)}</span>
                   </td>
                 </tr>
               ))}
@@ -156,36 +232,50 @@ export default function Reports() {
       <Card
         titleAs="h3"
         title="Service performance"
-        sub="Against Marketly service targets, last 30 days"
+        sub={performance.data ? `Against Marketly service targets, ${fmtPeriod(performance.data.period)}` : 'Against Marketly service targets, last 30 days'}
         actions={
           <Link className="small strong" to={href('seller/performance')}>
             Account health
           </Link>
         }
       >
-        <div className="grid md2" style={{ '--gap': '0 var(--sp-6)' } as CSSProperties}>
-          {SERVICE.map((m) => {
-            const status = m.meets ? 'Meets target' : 'Below target';
-            const tone = m.meets ? 'success' : 'warning';
-            return (
-              <div key={m.name} className="sb-metric">
-                <div className="stack gap-0">
-                  <span className="small strong">{m.name}</span>
-                  <span className="xs muted">Target: {m.target}</span>
+        {performance.isError ? (
+          <Alert tone="danger" title="We couldn’t load your service figures">
+            {errorMessage(performance.error)}{' '}
+            <Button variant="ghost" size="sm" onClick={() => void performance.refetch()}>
+              Try again
+            </Button>
+          </Alert>
+        ) : !performance.data ? (
+          sk
+        ) : (
+          <div className="grid md2" style={{ '--gap': '0 var(--sp-6)' } as CSSProperties}>
+            {service.map((m) => {
+              const meets = m.status === 'meets' || m.status === 'watch';
+              const status = meets ? 'Meets target' : 'Below target';
+              const tone = meets ? 'success' : 'warning';
+              return (
+                <div key={m.key} className="sb-metric">
+                  <div className="stack gap-0">
+                    <span className="small strong">{m.label}</span>
+                    <span className="xs muted">Target: {m.target.display}</span>
+                  </div>
+                  <div className="row gap-2 nowrap">
+                    <span className="h3 num">{m.display}</span>
+                    <StatusBadge status={status} tone={tone} />
+                  </div>
+                  <div className="bar">
+                    <Meter pct={meterPct(m)} tone={tone} label={`${m.display} ${status}`} />
+                    {m.status === 'watch' && <span className="xs strong meter-note t-warning-text">Near target</span>}
+                  </div>
+                  <span className="xs muted span-all">
+                    {[m.definition, m.detail].map((t) => t.replace(/\.$/, '')).join('. ')}.
+                  </span>
                 </div>
-                <div className="row gap-2 nowrap">
-                  <span className="h3 num">{m.value}</span>
-                  <StatusBadge status={status} tone={tone} />
-                </div>
-                <div className="bar">
-                  <Meter pct={m.pct} tone={tone} label={`${m.value} ${status}`} />
-                  {m.near && <span className="xs strong meter-note t-warning-text">Near target</span>}
-                </div>
-                <span className="xs muted span-all">{m.how}</span>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </Card>
     </SellerLayout>
   );

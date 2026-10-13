@@ -1,103 +1,67 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
+import { ApiError, call, errorMessage, useApi, useUploads, type UploadItem } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money } from '@marketly/web-shared/lib/format';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Breadcrumbs, Button, Card, Checkbox, Field, Icon, Img, KeyValue, OptionCard, Price, StatusBadge, TableWrap, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Breadcrumbs, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, OptionCard, StatusBadge, TableWrap, TextInput, announce } from '@marketly/web-shared/ui';
+import { useSellerSession } from '@/app/session';
+import { adStatus, isAmount, isLaterPhase, parsePT, retryUnlessLater, stampPT, usd, type SellerAdCampaign } from './data/marketing';
 
-// Design: pages/seller/seller-ad-request.html (set up) · view "in-review" (after "Submit for approval").
+// Design: pages/seller/seller-ad-request.html (set up) · view "in-review" (the request after "Submit for approval",
+// opened with ?view=in-review&id=<campaign id>). Data: advertising GET /api/seller/advertising/promotable-offers,
+// …/pricing?type=, POST …/creatives (images uploaded through media as ad_creative), POST/PATCH …/campaigns,
+// …/campaigns/{id}/submit|withdraw, GET …/campaigns/{id}. Advertising is a launch-phase-3 module: while the API
+// answers 501 NOT_IMPLEMENTED the form explains that and can't be sent.
 
-type AdType = 'product' | 'store';
-type Billing = 'cpc' | 'fixed';
+type AdType = 'sponsored_product' | 'sponsored_store';
+type Billing = 'cpc' | 'fixed_daily';
+type Page = 'search' | 'category' | 'product' | 'home';
 
-interface AdProduct {
-  id: string;
-  name: string;
-  short: string;
-  summary: string;
-  sku: string;
-  icon: IconName;
-  stock: string;
-  units: number;
-  price: number;
-  was: number | null;
-}
-interface Placement {
-  id: string;
-  label: string;
-  short: string;
-  long: string;
-}
 interface Draft {
   type: AdType;
   products: Record<string, boolean>;
-  placements: Record<string, boolean>;
+  pages: Record<Page, boolean>;
   start: string;
   end: string;
   daily: string;
   total: string;
   billing: Billing;
   headline: string;
-  desktop: string;
-  mobile: string;
 }
 
-const PRODUCTS: AdProduct[] = [
-  { id: 'ad-p-0', name: 'Halden Pocket Bluetooth Speaker', short: 'Pocket Speaker', summary: 'Halden Pocket Bluetooth Speaker, Teal and Sand', sku: 'HAL-PKT-TEAL / SND', icon: 'speaker', stock: 'In stock · 88', units: 88, price: 53.1, was: 59 },
-  { id: 'ad-p-1', name: 'Halden Aurora ANC Wireless Headphones', short: 'Aurora headphones', summary: 'Halden Aurora ANC Wireless Headphones', sku: 'HAL-AUR-BLK', icon: 'headphones', stock: 'In stock · 24', units: 24, price: 184, was: null },
-  { id: 'ad-p-2', name: 'Studio Cable Kit', short: 'Cable kit', summary: 'Studio Cable Kit', sku: 'NWA-CBL-KIT', icon: 'cable', stock: 'Low stock · 12', units: 12, price: 24, was: null },
+const PAGES: Array<{ value: Page; label: string; short: string }> = [
+  { value: 'search', label: 'Search results for related terms', short: 'Search' },
+  { value: 'category', label: 'Category pages of your products', short: 'Categories' },
+  { value: 'product', label: 'Related products on product pages', short: 'Related products' },
+  { value: 'home', label: 'Home and discovery pages', short: 'Home' },
 ];
-const PLACEMENTS: Placement[] = [
-  { id: 'ad-pl-search', label: 'Search results for related terms', short: 'Search', long: 'Search results' },
-  { id: 'ad-pl-cat', label: 'Category pages: Speakers', short: 'Speakers', long: 'Speakers category' },
-  { id: 'ad-pl-cat2', label: 'Category pages: Headphones', short: 'Headphones', long: 'Headphones category' },
-  { id: 'ad-pl-rel', label: 'Related products on product pages', short: 'related', long: 'related products on speaker pages' },
-];
-const RATES = { cpc: 0.35, fixed: 45 };
 const STEPS = ['Draft', 'In review', 'Approved', 'Scheduled', 'Live'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const STEP_OF: Record<string, number> = { draft: 0, in_review: 1, rejected: 1, approved: 2, scheduled: 3, live: 4, paused: 4, finished: 5, archived: 5 };
 
-const DRAFT: Draft = {
-  type: 'product',
-  products: { 'ad-p-0': true },
-  placements: { 'ad-pl-search': true, 'ad-pl-cat': true, 'ad-pl-rel': true },
-  start: 'Nov 16, 2026, 12:00 AM',
-  end: 'Dec 20, 2026, 11:59 PM',
-  daily: '20.00',
-  total: '500.00',
-  billing: 'cpc',
-  headline: '12-hour battery, splash resistant',
-  desktop: '',
-  mobile: '',
-};
+const DRAFT: Draft = { type: 'sponsored_product', products: {}, pages: { search: true, category: true, product: true, home: false }, start: '', end: '', daily: '', total: '', billing: 'cpc', headline: '' };
+const money = formatMoney;
+const sk = <span className="sk sk-line" aria-hidden="true" />;
+const days = (s: string | null, e: string | null) => (s && e && e > s ? Math.max(1, Math.round((new Date(e).getTime() - new Date(s).getTime()) / 86_400_000)) : 0);
+const dayOnly = (iso: string | null) => (iso ? stampPT(iso).replace(/,\s*\d{1,2}:\d{2}\s*[AP]M$/, '') : '');
 
-/** "Nov 16, 2026, 12:00 AM" -> UTC day number, or null. */
-function dayOf(s: string): number | null {
-  const m = /^([A-Z][a-z]{2})\s+(\d{1,2}),\s*(\d{4})/.exec(s.trim());
-  if (!m || !MONTHS.includes(m[1])) return null;
-  return Date.UTC(Number(m[3]), MONTHS.indexOf(m[1]), Number(m[2])) / 86400000;
-}
-const isAmount = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) > 0;
-const noYear = (s: string) => s.replace(/,\s*\d{4}/, '');
-const dayOnly = (s: string) => noYear(s).replace(/,.*$/, '');
-
-function validate(d: Draft) {
-  const e: Partial<Record<'products' | 'placements' | 'start' | 'end' | 'daily' | 'total' | 'headline', string>> = {};
-  if (d.type === 'product' && !PRODUCTS.some((p) => d.products[p.id])) e.products = 'Choose at least one product to promote.';
-  if (!PLACEMENTS.some((p) => d.placements[p.id])) e.placements = 'Choose at least one placement.';
-  const s = dayOf(d.start);
-  const en = dayOf(d.end);
-  if (s === null) e.start = 'Enter a start date like Nov 16, 2026, 12:00 AM.';
-  else if (s < dayOf('Oct 10, 2026')!) e.start = 'Choose a start date after review, from Oct 10, 2026.';
-  if (en === null) e.end = 'Enter an end date like Dec 20, 2026, 11:59 PM.';
-  else if (s !== null && en < s) e.end = 'The end must be after the start.';
+function validate(d: Draft, minDaily: number | null) {
+  const e: Partial<Record<'products' | 'pages' | 'start' | 'end' | 'daily' | 'total' | 'headline' | 'creative', string>> = {};
+  if (d.type === 'sponsored_product' && !Object.values(d.products).some(Boolean)) e.products = 'Choose at least one product to promote.';
+  if (!Object.values(d.pages).some(Boolean)) e.pages = 'Choose at least one placement.';
+  const s = parsePT(d.start);
+  const en = parsePT(d.end, { endOfDay: true });
+  if (!s) e.start = 'Enter a start date like Nov 16, 2026, 12:00 AM.';
+  else if (new Date(s).getTime() < Date.now()) e.start = 'Choose a start date in the future, after review.';
+  if (!en) e.end = 'Enter an end date like Dec 20, 2026, 11:59 PM.';
+  else if (s && en <= s) e.end = 'The end must be after the start.';
   if (!isAmount(d.daily)) e.daily = 'Enter a daily limit in dollars, like 20.00.';
-  else if (d.billing === 'fixed' && Number(d.daily) < RATES.fixed) e.daily = `A fixed placement costs ${money(RATES.fixed)} a day. Set the daily limit to at least that.`;
-  else if (d.billing === 'cpc' && Number(d.daily) < 5) e.daily = 'Set the daily limit to $5.00 or more.';
+  else if (minDaily !== null && Number(d.daily) * 100 < minDaily) e.daily = `A fixed placement costs ${money({ amount: minDaily, currency: 'USD' })} a day. Set the daily limit to at least that.`;
   if (!isAmount(d.total)) e.total = 'Enter a total limit in dollars, like 500.00.';
-  else if (isAmount(d.daily) && Number(d.total) < Number(d.daily)) e.total = `The total limit can't be less than the daily limit (${money(Number(d.daily))}).`;
-  else if (Number(d.total) > 10000) e.total = 'Requests over $10,000.00 need a call with Marketly Advertising. Lower the total limit.';
+  else if (isAmount(d.daily) && Number(d.total) < Number(d.daily)) e.total = `The total limit can't be less than the daily limit (${money(usd(Number(d.daily)))}).`;
   if (!d.headline.trim()) e.headline = 'Enter a short headline.';
   else if (d.headline.trim().length > 40) e.headline = `Use 40 characters or fewer (now ${d.headline.trim().length}).`;
   return e;
@@ -123,8 +87,9 @@ function AdSteps({ current }: { current: number }) {
   );
 }
 
-function Drop({ title, hint, file, onFile }: { title: string; hint: string; file: string; onFile: (name: string) => void }) {
+function Drop({ title, hint, item, onFile, disabled }: { title: string; hint: string; item?: UploadItem; onFile: (f: File) => void; disabled?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
+  const label = item ? (item.status === 'uploading' ? `Uploading ${item.name}…` : item.status === 'failed' ? (item.error ?? 'Upload failed') : item.name) : title;
   return (
     <div
       className="dropzone"
@@ -132,32 +97,31 @@ function Drop({ title, hint, file, onFile }: { title: string; hint: string; file
       onDrop={(e) => {
         e.preventDefault();
         const f = e.dataTransfer.files[0];
-        if (f) onFile(f.name);
+        if (f && !disabled) onFile(f);
       }}
     >
-      <Icon name={file ? 'circle-check' : 'image-plus'} className="ic-lg" />
-      <span className="small strong u-c-text">{file || title}</span>
+      <Icon name={item?.status === 'ready' ? 'circle-check' : 'image-plus'} className="ic-lg" />
+      <span className="small strong u-c-text">{label}</span>
       <span className="xs">{hint}</span>
-      <input ref={input} type="file" hidden accept="image/jpeg,image/png" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0].name)} />
-      <Button variant="secondary" size="sm" onClick={() => input.current?.click()}>
-        {file ? 'Replace file' : 'Browse files'}
+      <input ref={input} type="file" hidden accept="image/jpeg,image/png" onChange={(e) => (e.target.files?.[0] && onFile(e.target.files[0]), (e.target.value = ''))} />
+      <Button variant="secondary" size="sm" onClick={() => input.current?.click()} disabled={disabled}>
+        {item ? 'Replace file' : 'Browse files'}
       </Button>
     </div>
   );
 }
 
-function Previews({ p, headline }: { p: AdProduct; headline: string }) {
+function Previews({ title, image, headline, storeName, desktop, phone }: { title: string; image?: string | null; headline: string; storeName: string; desktop?: string | null; phone?: string | null }) {
   const card = (
     <div className="stack gap-1">
       <span className="sponsored">
         <Icon name="info" className="ic-sm" />
         Sponsored
       </span>
-      <span className="small strong clamp-2">{p.name}</span>
+      <span className="small strong clamp-2">{title}</span>
       <span className="xs sub">{headline}</span>
-      <Price amount={p.price} was={p.was} noOff />
       <span className="seller-line">
-        Sold by <b>Northwind Audio</b>
+        Sold by <b>{storeName}</b>
       </span>
     </div>
   );
@@ -166,11 +130,11 @@ function Previews({ p, headline }: { p: AdProduct; headline: string }) {
       <div className="sb-device">
         <span className="xs muted row gap-1">
           <Icon name="monitor" className="ic-sm" />
-          Desktop · search results for “bluetooth speaker”
+          Desktop · search results
         </span>
         <div className="grid c2 gap-2">
           <div className="sb-adcard col">
-            <Img icon={p.icon} tint="2" className="r43" />
+            <Img icon="package" tint="2" className="r43" src={desktop ?? image ?? undefined} alt="" />
             {card}
           </div>
           <div className="sb-ghostcard u-fd-column" aria-hidden="true">
@@ -187,7 +151,7 @@ function Previews({ p, headline }: { p: AdProduct; headline: string }) {
         </span>
         <div className="stack gap-2">
           <div className="sb-adcard">
-            <Img icon={p.icon} tint="2" />
+            <Img icon="package" tint="2" src={phone ?? image ?? undefined} alt="" />
             {card}
           </div>
         </div>
@@ -207,180 +171,308 @@ function ChargesNote() {
   );
 }
 
-export default function AdRequest() {
-  const [view, setView] = useView<'in-review'>();
-  const [d, setD] = useState<Draft>(DRAFT);
-  const [submitted, setSubmitted] = useState<Draft>(DRAFT);
-  const [tried, setTried] = useState(false);
-  const [notice, setNotice] = useState('');
+const crumbs = (label: string) => <Breadcrumbs items={[{ label: 'Marketing and ads', to: href('seller/marketing', 'sponsored-ads') }, { label }]} />;
 
-  const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
-  const errs = tried ? validate(d) : {};
-  const nErr = Object.keys(errs).length;
+/* ================================================================== in review (the created request) */
 
-  const summaryOf = (x: Draft) => {
-    const prods = PRODUCTS.filter((p) => x.products[p.id]);
-    const pls = PLACEMENTS.filter((p) => x.placements[p.id]);
-    const s = dayOf(x.start);
-    const e = dayOf(x.end);
-    const days = s !== null && e !== null && e >= s ? e - s + 1 : 0;
-    const daily = isAmount(x.daily) ? Number(x.daily) : 0;
-    const total = isAmount(x.total) ? Number(x.total) : 0;
-    const most = days && daily ? Math.min(total, daily * days) : total;
-    const billing = x.billing === 'cpc' ? `Per click, ${money(RATES.cpc)}` : `Fixed, ${money(RATES.fixed)} per day`;
-    const lead = x.type === 'store' ? null : (prods[0] ?? null);
-    const name = x.type === 'store' ? 'Northwind store holiday feature' : `${lead?.short ?? 'Product'} holiday push`;
-    return { prods, pls, days, daily, total, most, billing, lead, name };
-  };
-  const live = summaryOf(d);
-  const sub = summaryOf(submitted);
-  const preview = live.lead ?? PRODUCTS[0];
-
-  const submit = () => {
-    setTried(true);
-    if (Object.keys(validate(d)).length) {
-      announce('Check the highlighted fields');
-      return;
-    }
-    setSubmitted(d);
-    setNotice('');
-    setView('in-review');
-    window.scrollTo({ top: 0 });
-    announce('Submitted for approval');
-  };
-
-  if (view === 'in-review') {
+function InReview({ id }: { id: string }) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const [, setView] = useView<'in-review'>();
+  const { storeName, can } = useSellerSession();
+  const q = useQuery({ queryKey: ['advertising', 'campaign', id], queryFn: () => call(api.GET('/api/seller/advertising/campaigns/{id}', { params: { path: { id } } })), retry: retryUnlessLater });
+  const withdraw = useMutation({
+    mutationFn: () => call(api.POST('/api/seller/advertising/campaigns/{id}/withdraw', { params: { path: { id } } })),
+    onSuccess: async () => {
+      announce('Request withdrawn');
+      await qc.invalidateQueries({ queryKey: ['advertising'] });
+      setView('');
+    },
+  });
+  const x: SellerAdCampaign | undefined = q.data;
+  if (!x)
     return (
       <SellerLayout active="marketing">
         <div className="page-head">
           <div className="t">
-            <Breadcrumbs items={[{ label: 'Marketing and ads', to: href('seller/marketing', 'sponsored-ads') }, { label: sub.name }]} />
-            <h1 className="h1">{sub.name}</h1>
-            <p className="sub small">
-              Request <span className="mono">AD-261008-0091</span> · submitted Thu, Oct 8, 11:05 AM PT by Avery Stone
-            </p>
-          </div>
-          <div className="actions">
-            <StatusBadge status="In review" />
+            {crumbs('Request')}
+            <h1 className="h1">Sponsored campaign request</h1>
           </div>
         </div>
-        <section className="card">
-          <div className="card-body">
-            <AdSteps current={1} />
+        {q.isPending ? (
+          <div className="stack gap-5" aria-busy="true">
+            <div className="sk sk-card" />
+            <div className="sk sk-card" />
           </div>
-        </section>
-        <div className="sb-main">
-          <div className="stack gap-5">
-            <Alert tone="info" title="Waiting for Marketly Advertising review">
-              Usually within 2 business days (example). We check the offer is available, claims and links, and the Sponsored label. Editing the request now sends it back to the start of review.
-            </Alert>
-            <Card
-              title="Request summary"
-              foot={
-                <>
-                  <Button
-                    variant="danger-soft"
-                    onClick={() => {
-                      setNotice('Request withdrawn. It is a draft again and nothing will be charged.');
-                      setTried(false);
-                      setView('');
-                      announce('Request withdrawn');
-                    }}
-                  >
-                    Withdraw request
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    icon="pencil"
-                    onClick={() => {
-                      setD(submitted);
-                      setNotice('Editing sends the request back to the start of review when you submit again.');
-                      setView('');
-                    }}
-                  >
-                    Edit and resubmit
-                  </Button>
-                </>
-              }
-            >
-              <KeyValue
-                pairs={[
-                  ['Ad type', submitted.type === 'product' ? 'Sponsored product' : 'Sponsored store'],
-                  ['Promotes', submitted.type === 'store' ? 'Store page' : sub.prods.map((p) => p.summary).join(' · ')],
-                  ['Placements', sub.pls.map((p) => p.long).join(' · ').replace(/^./, (c) => c.toUpperCase())],
-                  ['Schedule', `${noYear(submitted.start)} – ${noYear(submitted.end)} PT`],
-                  ['Spending limit', `${money(sub.daily)} per day · ${money(sub.total)} total`],
-                  ['Billing', `${sub.billing} (example rate)`],
-                  ['Creatives', `Desktop ${submitted.desktop || '1200 × 900'} · Mobile ${submitted.mobile || '800 × 800'}`],
-                ]}
-              />
-            </Card>
-            <Card title="Review checks" titleAs="h3" sub="Updated by the reviewer">
-              <ul className="list">
-                <li>
-                  <Icon name="circle-check" className="ic-sm t-success-text" />
-                  <span className="grow small">{submitted.type === 'store' ? 'Store approved and selling' : `Offer active and in stock (${sub.lead?.units ?? 0} units)`}</span>
-                  <StatusBadge status="Approved" />
-                </li>
-                <li>
-                  <Icon name="circle-check" className="ic-sm t-success-text" />
-                  <span className="grow small">Destination link goes to the {submitted.type === 'store' ? 'store page' : 'product page'}</span>
-                  <StatusBadge status="Approved" />
-                </li>
-                <li>
-                  <Icon name="clock" className="ic-sm" />
-                  <span className="grow small">Creative text and claims (“{submitted.headline.split(',')[0]}”)</span>
-                  <StatusBadge status="In review" />
-                </li>
-                <li>
-                  <Icon name="clock" className="ic-sm" />
-                  <span className="grow small">Sponsored label and seller name visible on both sizes</span>
-                  <StatusBadge status="In review" />
-                </li>
-              </ul>
-            </Card>
-            <Card title="Previews you submitted" titleAs="h3">
-              <Previews p={sub.lead ?? PRODUCTS[0]} headline={submitted.headline} />
-            </Card>
-          </div>
-          <div className="stack gap-5">
-            <Card title="Activity" titleAs="h3">
-              <ol className="timeline">
-                {[
-                  { t: 'In review', d: 'Assigned to Jamie Brooks, Advertising', s: 'current' },
-                  { t: 'Submitted for approval', d: 'Oct 8, 11:05 AM · Avery Stone', s: 'done' },
-                  { t: 'Draft created', d: 'Oct 7, 4:40 PM · Avery Stone', s: 'done' },
-                ].map((e) => (
-                  <li key={e.t} className={`ev is-${e.s}`}>
-                    <span className="dot" aria-hidden="true" />
-                    <div className="stack gap-1">
-                      <span className="t">{e.t}</span>
-                      <span className="d">{e.d}</span>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            </Card>
-            <Card title="What happens next" titleAs="h3">
-              <ol className="ol small stack gap-1">
-                <li>Approved: you get an email and the campaign is scheduled.</li>
-                <li>Scheduled: it starts {dayOnly(submitted.start)} at {submitted.start.split(', ').pop()} PT.</li>
-                <li>Live: charges start with the first {submitted.billing === 'cpc' ? 'click' : 'day of placement'}.</li>
-              </ol>
-              <span className="xs muted">If it is not approved, we tell you which check failed and how to fix it.</span>
-            </Card>
-            <ChargesNote />
-          </div>
-        </div>
+        ) : isLaterPhase(q.error) ? (
+          <Alert tone="info" title="Sponsored ads aren’t available yet">
+            Marketly opens sponsored campaigns in a later launch phase.
+          </Alert>
+        ) : q.error instanceof ApiError && q.error.status === 404 ? (
+          <section className="card">
+            <div className="card-body">
+              <EmptyState icon="search-x" title="We couldn’t find this request" action={<Button to={href('seller/marketing', 'sponsored-ads')}>Back to sponsored ads</Button>} />
+            </div>
+          </section>
+        ) : (
+          <Alert tone="danger" title="We couldn’t load this request">
+            {errorMessage(q.error)}{' '}
+            <Button variant="secondary" size="sm" onClick={() => void q.refetch()}>
+              Try again
+            </Button>
+          </Alert>
+        )}
       </SellerLayout>
     );
-  }
+
+  const c = x.campaign;
+  const canManage = can('advertising.requests.manage');
+  const desktop = x.creatives.find((cr) => cr.device === 'desktop') ?? x.creatives[0];
+  const phone = x.creatives.find((cr) => cr.device === 'phone') ?? x.creatives[0];
+  const submitted = x.timeline.find((t) => /submit/i.test(t.label));
+  const checkIcon = (s: string): ReactNode => (s === 'ok' ? <Icon name="circle-check" className="ic-sm t-success-text" /> : s === 'fail' ? <Icon name="circle-x" className="ic-sm t-danger-text" /> : <Icon name="clock" className="ic-sm" />);
+  const checkStatus = (s: string) => (s === 'ok' ? 'Approved' : s === 'fail' ? 'Rejected' : s === 'warn' ? 'Needs changes' : 'In review');
 
   return (
     <SellerLayout active="marketing">
       <div className="page-head">
         <div className="t">
-          <Breadcrumbs items={[{ label: 'Marketing and ads', to: href('seller/marketing', 'sponsored-ads') }, { label: 'New request' }]} />
+          {crumbs(c.name)}
+          <h1 className="h1">{c.name}</h1>
+          <p className="sub small">
+            Request <span className="mono">{c.ref}</span>
+            {submitted ? ` · submitted ${stampPT(submitted.at)} PT` : ''}
+          </p>
+        </div>
+        <div className="actions">
+          <StatusBadge status={adStatus(c.status)} />
+        </div>
+      </div>
+      <section className="card">
+        <div className="card-body">
+          <AdSteps current={STEP_OF[c.status] ?? 1} />
+        </div>
+      </section>
+      <div className="sb-main">
+        <div className="stack gap-5">
+          {c.status === 'in_review' && (
+            <Alert tone="info" title="Waiting for Marketly Advertising review">
+              We check the offer is available, claims and links, and the Sponsored label. Editing the request now sends it back to the start of review.
+            </Alert>
+          )}
+          {c.statusNote && <Alert tone={c.status === 'rejected' ? 'danger' : 'info'}>{c.statusNote}</Alert>}
+          {withdraw.isError && <Alert tone="danger">{errorMessage(withdraw.error)}</Alert>}
+          <Card
+            title="Request summary"
+            foot={
+              canManage && (c.allowedActions.includes('withdraw') || c.allowedActions.includes('edit') || c.status === 'draft' || c.status === 'in_review') ? (
+                <>
+                  {c.allowedActions.includes('withdraw') && (
+                    <Button variant="danger-soft" onClick={() => withdraw.mutate()} disabled={withdraw.isPending}>
+                      Withdraw request
+                    </Button>
+                  )}
+                  <Button variant="secondary" icon="pencil" to={href('seller/ad-request', '', undefined, { id })}>
+                    Edit and resubmit
+                  </Button>
+                </>
+              ) : undefined
+            }
+          >
+            <KeyValue
+              pairs={[
+                ['Ad type', c.placementName],
+                ['Promotes', x.promotes],
+                ['Placements', c.pagesLabel],
+                ['Schedule', c.periodLabel],
+                ['Spending limit', `${money(x.dailyLimit)} per day · ${money(x.totalLimit)} total`],
+                ['Billing', x.billingLabel],
+                ['Creatives', x.creatives.map((cr) => `${cr.device === 'phone' ? 'Mobile' : cr.device === 'desktop' ? 'Desktop' : 'Any device'} ${cr.width && cr.height ? `${cr.width} × ${cr.height}` : cr.formatLabel}`).join(' · ') || '—'],
+              ]}
+            />
+            <p className="xs muted">{x.audienceNote}</p>
+          </Card>
+          <Card title="Review checks" titleAs="h3" sub="Updated by the reviewer">
+            {x.reviewChecks.length ? (
+              <ul className="list">
+                {x.reviewChecks.map((r) => (
+                  <li key={r.label}>
+                    {checkIcon(r.state)}
+                    <span className="grow small">
+                      {r.label}
+                      {r.detail ? ` (${r.detail})` : ''}
+                    </span>
+                    <StatusBadge status={checkStatus(r.state)} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="small sub">Checks appear once a reviewer picks up the request.</p>
+            )}
+          </Card>
+          <Card title="Previews you submitted" titleAs="h3">
+            <Previews title={x.promotes} headline={desktop?.headline ?? ''} storeName={storeName} desktop={desktop?.media?.url} phone={phone?.media?.url} />
+          </Card>
+        </div>
+        <div className="stack gap-5">
+          <Card title="Activity" titleAs="h3">
+            <ol className="timeline">
+              {[...x.timeline]
+                .sort((a, b) => b.at.localeCompare(a.at))
+                .map((e, i) => (
+                  <li key={`${e.at}${i}`} className={cx('ev', i === 0 ? 'is-current' : 'is-done')}>
+                    <span className="dot" aria-hidden="true" />
+                    <div className="stack gap-1">
+                      <span className="t">{e.label}</span>
+                      <span className="d">{[stampPT(e.at), e.detail].filter(Boolean).join(' · ')}</span>
+                    </div>
+                  </li>
+                ))}
+            </ol>
+          </Card>
+          {x.nextSteps.length > 0 && (
+            <Card title="What happens next" titleAs="h3">
+              <ol className="ol small stack gap-1">
+                {x.nextSteps.map((s) => (
+                  <li key={s}>{s}</li>
+                ))}
+              </ol>
+              <span className="xs muted">If it is not approved, we tell you which check failed and how to fix it.</span>
+            </Card>
+          )}
+          <ChargesNote />
+        </div>
+      </div>
+    </SellerLayout>
+  );
+}
+
+/* ================================================================== set up */
+
+export default function AdRequest() {
+  const [view] = useView<'in-review'>();
+  const [params] = useSearchParams();
+  const id = params.get('id');
+  if (view === 'in-review') {
+    return id ? (
+      <InReview id={id} />
+    ) : (
+      <SellerLayout active="marketing">
+        <div className="page-head">
+          <div className="t">
+            {crumbs('Request')}
+            <h1 className="h1">Sponsored campaign request</h1>
+          </div>
+        </div>
+        <section className="card">
+          <div className="card-body">
+            <EmptyState icon="megaphone" title="Open a request from your sponsored ads" action={<Button to={href('seller/marketing', 'sponsored-ads')}>Sponsored ads</Button>}>
+              Requests you submitted are listed on the Sponsored ads tab.
+            </EmptyState>
+          </div>
+        </section>
+      </SellerLayout>
+    );
+  }
+  return <SetUp id={id} />;
+}
+
+function SetUp({ id }: { id: string | null }) {
+  const { api } = useApi();
+  const qc = useQueryClient();
+  const [, setParams] = useSearchParams();
+  const { sellerId, storeName, can } = useSellerSession();
+  const canManage = can('advertising.requests.manage');
+  const [d, setD] = useState<Draft>(DRAFT);
+  const [tried, setTried] = useState(false);
+  const [notice, setNotice] = useState(id ? 'Editing sends the request back to the start of review when you submit again.' : '');
+  const desktop = useUploads('ad_creative', { max: 1, maxBytes: 5 * 1024 * 1024, accept: /\.(jpe?g|png)$/i });
+  const phone = useUploads('ad_creative', { max: 1, maxBytes: 5 * 1024 * 1024, accept: /\.(jpe?g|png)$/i });
+
+  const offers = useQuery({ queryKey: ['advertising', 'promotable', sellerId], queryFn: () => call(api.GET('/api/seller/advertising/promotable-offers', { params: { query: { page: 1, limit: 50 } } })), retry: retryUnlessLater });
+  const pricing = useQuery({ queryKey: ['advertising', 'pricing', d.type], queryFn: () => call(api.GET('/api/seller/advertising/pricing', { params: { query: { type: d.type } } })), retry: retryUnlessLater });
+  const later = isLaterPhase(offers.error) || isLaterPhase(pricing.error);
+  const disabled = later || !canManage;
+  const rate = (b: Billing) => pricing.data?.find((p) => p.billing === b);
+  const exampleRates = pricing.data?.some((p) => p.isExample) ?? true;
+  const minDaily = d.billing === 'fixed_daily' ? (rate('fixed_daily')?.rate.amount ?? null) : null;
+
+  const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
+  const errs = tried ? validate(d, minDaily) : {};
+  const nErr = Object.keys(errs).length;
+
+  const rows = offers.data?.items ?? [];
+  const picked = rows.filter((o) => d.products[o.offerId]);
+  const lead = d.type === 'sponsored_store' ? null : (picked[0] ?? null);
+  const s = parsePT(d.start);
+  const e = parsePT(d.end, { endOfDay: true });
+  const n = days(s, e);
+  const daily = isAmount(d.daily) ? Number(d.daily) : 0;
+  const total = isAmount(d.total) ? Number(d.total) : 0;
+  const most = n && daily ? Math.min(total, daily * n) : total;
+  const billingLabel = (b: Billing) => {
+    const r = rate(b);
+    return r ? r.label : b === 'cpc' ? 'Per click' : 'Fixed placement fee';
+  };
+  const name = d.type === 'sponsored_store' ? `${storeName} store feature` : `${lead?.title ?? 'Product'} sponsored campaign`;
+
+  const save = useMutation({
+    mutationFn: async (submit: boolean) => {
+      const creativeIds: string[] = [];
+      for (const [u, device] of [
+        [desktop, 'desktop'],
+        [phone, 'phone'],
+      ] as const) {
+        const mediaId = u.assetIds[0];
+        if (!mediaId) continue;
+        const cr = await call(api.POST('/api/seller/advertising/creatives', { body: { kind: 'image', device, placementKey: d.type, mediaId, headline: d.headline.trim() } }));
+        creativeIds.push(cr.id);
+      }
+      const body = {
+        name,
+        type: d.type,
+        offerIds: d.type === 'sponsored_store' ? [] : picked.map((o) => o.offerId),
+        pages: PAGES.filter((p) => d.pages[p.value]).map((p) => p.value),
+        startsAt: parsePT(d.start)!,
+        endsAt: parsePT(d.end, { endOfDay: true })!,
+        dailyLimit: usd(Number(d.daily)),
+        totalLimit: usd(Number(d.total)),
+        billing: d.billing,
+        creativeIds,
+        headline: d.headline.trim(),
+      };
+      const saved = id ? await call(api.PATCH('/api/seller/advertising/campaigns/{id}', { params: { path: { id } }, body })) : await call(api.POST('/api/seller/advertising/campaigns', { body }));
+      return submit ? call(api.POST('/api/seller/advertising/campaigns/{id}/submit', { params: { path: { id: saved.campaign.id } } })) : saved;
+    },
+    onSuccess: async (x, submit) => {
+      await qc.invalidateQueries({ queryKey: ['advertising'] });
+      setParams((prev) => {
+        const p = new URLSearchParams(prev);
+        p.set('id', x.campaign.id);
+        if (submit) p.set('view', 'in-review');
+        return p;
+      });
+      if (submit) {
+        window.scrollTo({ top: 0 });
+        announce('Submitted for approval');
+      } else {
+        setNotice('Draft saved. Nothing is sent to Marketly until you submit.');
+        announce('Draft saved');
+      }
+    },
+  });
+  const submit = (send: boolean) => {
+    setTried(true);
+    if (Object.keys(validate(d, minDaily)).length) return announce('Check the highlighted fields');
+    if (desktop.uploading || phone.uploading) return announce('Wait for the images to finish uploading');
+    save.mutate(send);
+  };
+
+  return (
+    <SellerLayout active="marketing">
+      <div className="page-head">
+        <div className="t">
+          {crumbs(id ? 'Edit request' : 'New request')}
           <h1 className="h1">Request a sponsored campaign</h1>
           <p className="sub small">Marketly reviews every request. Nothing runs or is charged until it is approved and scheduled.</p>
         </div>
@@ -395,7 +487,14 @@ export default function AdRequest() {
       </section>
       <div className="sb-main">
         <div className="stack gap-5">
+          {later && (
+            <Alert tone="info" title="Sponsored ads aren’t available yet">
+              Marketly opens sponsored product and store campaigns in a later launch phase. You can’t send a request until then.
+            </Alert>
+          )}
+          {!canManage && !later && <Alert tone="info">Your role can’t request sponsored campaigns.</Alert>}
           {notice && <Alert tone="info" title={notice} />}
+          {save.isError && <Alert tone="danger">{errorMessage(save.error)}</Alert>}
           {nErr > 0 && (
             <Alert tone="danger" title={`Check ${nErr} field${nErr > 1 ? 's' : ''}`}>
               Fix the highlighted fields to submit this request.
@@ -403,8 +502,8 @@ export default function AdRequest() {
           )}
           <Card title="1. Ad type">
             <div className="grid md2 gap-3">
-              <OptionCard id="ad-type-prod" name="ad-type" title={<span className="strong">Sponsored product</span>} body="A labeled product card in search, category and related-product results." checked={d.type === 'product'} onChange={() => set('type', 'product')} />
-              <OptionCard id="ad-type-store" name="ad-type" title={<span className="strong">Sponsored store</span>} body="A labeled feature linking to your store on home and discovery pages." checked={d.type === 'store'} onChange={() => set('type', 'store')} />
+              <OptionCard id="ad-type-prod" name="ad-type" title={<span className="strong">Sponsored product</span>} body="A labeled product card in search, category and related-product results." checked={d.type === 'sponsored_product'} onChange={() => set('type', 'sponsored_product')} disabled={disabled} />
+              <OptionCard id="ad-type-store" name="ad-type" title={<span className="strong">Sponsored store</span>} body="A labeled feature linking to your store on home and discovery pages." checked={d.type === 'sponsored_store'} onChange={() => set('type', 'sponsored_store')} disabled={disabled} />
             </div>
           </Card>
           <Card title="2. Products" titleAs="h3" sub="Only active offers with stock can be promoted" flush>
@@ -428,41 +527,61 @@ export default function AdRequest() {
                   </tr>
                 </thead>
                 <tbody>
-                  {PRODUCTS.map((p) => (
-                    <tr key={p.id} className={cx(d.products[p.id] && d.type === 'product' && 'is-selected')}>
+                  {offers.isPending && (
+                    <tr className="sk-row" aria-hidden="true">
+                      <td colSpan={3}>{sk}</td>
+                    </tr>
+                  )}
+                  {rows.map((p) => (
+                    <tr key={p.offerId} className={cx(d.products[p.offerId] && d.type === 'sponsored_product' && 'is-selected')}>
                       <td>
-                        <input type="checkbox" id={p.id} aria-label={`Promote ${p.name}`} checked={!!d.products[p.id]} disabled={d.type === 'store'} onChange={(e) => set('products', { ...d.products, [p.id]: e.target.checked })} />
+                        <input type="checkbox" id={`ad-p-${p.offerId}`} aria-label={`Promote ${p.title}`} checked={!!d.products[p.offerId]} disabled={d.type === 'sponsored_store' || !p.eligible || disabled} onChange={(ev) => set('products', { ...d.products, [p.offerId]: ev.target.checked })} />
                       </td>
                       <td>
-                        <label htmlFor={p.id} className="row gap-3 nowrap minw-240">
-                          <Img icon={p.icon} tint="2" className="tiny" />
+                        <label htmlFor={`ad-p-${p.offerId}`} className="row gap-3 nowrap minw-240">
+                          <Img icon="package" tint="2" className="tiny" src={p.image?.url ?? undefined} alt="" />
                           <span className="stack gap-0">
-                            <span className="small strong">{p.name}</span>
-                            <span className="xs muted mono nowrap" title={p.sku}>
-                              {p.sku}
-                            </span>
+                            <span className="small strong">{p.title}</span>
+                            {p.sku && (
+                              <span className="xs muted mono nowrap" title={p.sku}>
+                                {p.sku}
+                              </span>
+                            )}
                           </span>
                         </label>
                       </td>
                       <td>
-                        <span className="small">{p.stock}</span>
+                        <span className="small">{p.stockLabel}</span>
+                        {!p.eligible && p.reason && (
+                          <>
+                            <br />
+                            <span className="xs muted">{p.reason}</span>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}
+                  {!offers.isPending && !rows.length && (
+                    <tr>
+                      <td colSpan={3}>
+                        <span className="small sub">{later ? 'Your offers show here once sponsored ads open.' : offers.isError ? errorMessage(offers.error) : 'You have no offers that can be promoted.'}</span>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </TableWrap>
           </Card>
           <Card title="3. Placement and pages" titleAs="h3">
             <div className="grid md2 gap-2">
-              {PLACEMENTS.map((p) => (
-                <Checkbox key={p.id} id={p.id} label={p.label} checked={!!d.placements[p.id]} onChange={(e) => set('placements', { ...d.placements, [p.id]: e.target.checked })} />
+              {PAGES.map((p) => (
+                <Checkbox key={p.value} id={`ad-pl-${p.value}`} label={p.label} checked={d.pages[p.value]} disabled={disabled} onChange={(ev) => set('pages', { ...d.pages, [p.value]: ev.target.checked })} />
               ))}
             </div>
-            {errs.placements && (
+            {errs.pages && (
               <span className="error-text">
                 <Icon name="circle-alert" className="ic-sm" />
-                {errs.placements}
+                {errs.pages}
               </span>
             )}
             <span className="xs muted">Ads never appear in checkout, payment results, order tracking or return pages. Audience: all shoppers in the US service region.</span>
@@ -470,16 +589,16 @@ export default function AdRequest() {
           <Card title="4. Schedule and spending limit" titleAs="h3">
             <div className="sb-form-grid">
               <Field label="Start" error={errs.start}>
-                <TextInput id="ad-start" icon="calendar" value={d.start} error={!!errs.start} placeholder="" onChange={(e) => set('start', e.target.value)} />
+                <TextInput id="ad-start" icon="calendar" value={d.start} error={!!errs.start} placeholder="Nov 16, 2026, 12:00 AM" disabled={disabled} onChange={(ev) => set('start', ev.target.value)} />
               </Field>
               <Field label="End" hint="Times in Pacific Time" error={errs.end}>
-                <TextInput id="ad-end" icon="calendar" value={d.end} error={!!errs.end} placeholder="" onChange={(e) => set('end', e.target.value)} />
+                <TextInput id="ad-end" icon="calendar" value={d.end} error={!!errs.end} placeholder="Dec 20, 2026, 11:59 PM" disabled={disabled} onChange={(ev) => set('end', ev.target.value)} />
               </Field>
               <Field label="Daily spending limit" hint="Ads stop for the day when reached." error={errs.daily}>
-                <TextInput id="ad-daily" prefix="$" value={d.daily} error={!!errs.daily} placeholder="" inputMode="decimal" onChange={(e) => set('daily', e.target.value)} />
+                <TextInput id="ad-daily" prefix="$" value={d.daily} error={!!errs.daily} placeholder="" inputMode="decimal" disabled={disabled} onChange={(ev) => set('daily', ev.target.value)} />
               </Field>
               <Field label="Total spending limit" hint="The campaign stops when reached." error={errs.total}>
-                <TextInput id="ad-total" prefix="$" value={d.total} error={!!errs.total} placeholder="" inputMode="decimal" onChange={(e) => set('total', e.target.value)} />
+                <TextInput id="ad-total" prefix="$" value={d.total} error={!!errs.total} placeholder="" inputMode="decimal" disabled={disabled} onChange={(ev) => set('total', ev.target.value)} />
               </Field>
             </div>
             <div className="stack gap-2">
@@ -491,11 +610,12 @@ export default function AdRequest() {
                   title={
                     <span className="row between">
                       <span className="strong small">Per click</span>
-                      <span className="num small">{money(RATES.cpc)}</span>
+                      <span className="num small">{rate('cpc') ? money(rate('cpc')!.rate) : ''}</span>
                     </span>
                   }
                   body="You pay when a shopper clicks the ad."
                   checked={d.billing === 'cpc'}
+                  disabled={disabled}
                   onChange={() => set('billing', 'cpc')}
                 />
                 <OptionCard
@@ -504,32 +624,34 @@ export default function AdRequest() {
                   title={
                     <span className="row between">
                       <span className="strong small">Fixed placement fee</span>
-                      <span className="num small">{money(RATES.fixed)}/day</span>
+                      <span className="num small">{rate('fixed_daily') ? `${money(rate('fixed_daily')!.rate)}/day` : ''}</span>
                     </span>
                   }
                   body="Flat daily fee for a reserved slot."
-                  checked={d.billing === 'fixed'}
-                  onChange={() => set('billing', 'fixed')}
+                  checked={d.billing === 'fixed_daily'}
+                  disabled={disabled}
+                  onChange={() => set('billing', 'fixed_daily')}
                 />
               </div>
-              <span className="xs muted">Example rates. Final pricing is in the advertising terms.</span>
+              <span className="xs muted">{pricing.data ? (exampleRates ? 'Example rates. Final pricing is in the advertising terms.' : 'Rates from the advertising terms.') : 'Rates show once sponsored ads open.'}</span>
             </div>
           </Card>
           <Card title="5. Creative" titleAs="h3" sub="Upload both sizes. Previews show the Sponsored label customers see.">
             <div className="grid md2 gap-4">
               <div className="stack gap-2">
                 <span className="label">Desktop image</span>
-                <Drop title="Upload desktop image" hint="1200 × 900 px, JPG or PNG, up to 5 MB" file={d.desktop} onFile={(n) => set('desktop', n)} />
+                <Drop title="Upload desktop image" hint="1200 × 900 px, JPG or PNG, up to 5 MB" item={desktop.items[0]} disabled={disabled} onFile={(f) => (desktop.clear(), desktop.add([f]))} />
               </div>
               <div className="stack gap-2">
                 <span className="label">Mobile image</span>
-                <Drop title="Upload mobile image" hint="800 × 800 px, JPG or PNG, up to 5 MB" file={d.mobile} onFile={(n) => set('mobile', n)} />
+                <Drop title="Upload mobile image" hint="800 × 800 px, JPG or PNG, up to 5 MB" item={phone.items[0]} disabled={disabled} onFile={(f) => (phone.clear(), phone.add([f]))} />
               </div>
             </div>
+            {(desktop.error || phone.error) && <span className="xs muted">{desktop.error || phone.error}</span>}
             <Field label="Short headline" hint={`40 characters max. Claims must match the product page. ${d.headline.trim().length}/40`} error={errs.headline}>
-              <TextInput id="ad-headline" value={d.headline} error={!!errs.headline} placeholder="" onChange={(e) => set('headline', e.target.value)} />
+              <TextInput id="ad-headline" value={d.headline} error={!!errs.headline} placeholder="" disabled={disabled} onChange={(ev) => set('headline', ev.target.value)} />
             </Field>
-            <Previews p={preview} headline={d.headline} />
+            <Previews title={lead?.title ?? (d.type === 'sponsored_store' ? storeName : 'Your product')} image={lead?.image?.url} headline={d.headline} storeName={storeName} desktop={desktop.items[0]?.url} phone={phone.items[0]?.url} />
           </Card>
         </div>
         <div className="stack gap-5">
@@ -537,24 +659,26 @@ export default function AdRequest() {
             title="Summary"
             titleAs="h3"
             foot={
-              <>
-                <Button variant="ghost" onClick={() => (setNotice('Draft saved. Nothing is sent to Marketly until you submit.'), announce('Draft saved'))}>
-                  Save draft
-                </Button>
-                <Button iconRight="arrow-right" onClick={submit}>
-                  Submit for approval
-                </Button>
-              </>
+              canManage ? (
+                <>
+                  <Button variant="ghost" onClick={() => submit(false)} disabled={disabled || save.isPending}>
+                    Save draft
+                  </Button>
+                  <Button iconRight="arrow-right" onClick={() => submit(true)} disabled={disabled || save.isPending}>
+                    Submit for approval
+                  </Button>
+                </>
+              ) : undefined
             }
           >
             <KeyValue
               pairs={[
-                ['Type', d.type === 'product' ? 'Sponsored product' : 'Sponsored store'],
-                ['Products', d.type === 'store' ? 'Store page' : `${live.prods.length} selected`],
-                ['Pages', live.pls.map((p) => p.short).join(', ') || '—'],
-                ['Runs', live.days ? `${dayOnly(d.start)} – ${dayOnly(d.end)} (${live.days} days)` : '—'],
-                ['Most you can spend', money(live.most)],
-                ['Billing', live.billing],
+                ['Type', d.type === 'sponsored_product' ? 'Sponsored product' : 'Sponsored store'],
+                ['Products', d.type === 'sponsored_store' ? 'Store page' : `${picked.length} selected`],
+                ['Pages', PAGES.filter((p) => d.pages[p.value]).map((p) => p.short).join(', ') || '—'],
+                ['Runs', n ? `${dayOnly(s)} – ${dayOnly(e)} (${n} days)` : '—'],
+                ['Most you can spend', money(usd(most))],
+                ['Billing', billingLabel(d.billing)],
               ]}
             />
           </Card>

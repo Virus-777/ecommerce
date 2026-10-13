@@ -1,153 +1,196 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
-import { useView } from '@marketly/web-shared/lib/hooks';
+import { useIsPhone, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Dialog, EmptyState, Field, Icon, Img, SearchInput, Select, StatusBadge, StatusLegend, TableWrap, Textarea, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Button, Dialog, EmptyState, Field, Icon, Img, LazyLoad, Pager, SearchInput, Select, StatusBadge, StatusLegend, TableWrap, Textarea, TextInput, announce } from '@marketly/web-shared/ui';
+import { useSellerSession } from '@/app/session';
+import { ADJUST_REASONS, LoadError, STOCK_LABEL, SkeletonRows, fmtFull, fmtWhen, iconFor, openDownload, useDebounced, useInView, waitForExport, type AdjustReason, type StockState } from './data/catalog-parts';
+import { CATEGORIES, flattenCategories, offerHref, type CategoryNode } from './data/products';
 
-// Design: pages/seller/seller-inventory.html · view "adjust-stock" = the Adjust stock dialog for
-// NWA-PKT-CHR (6 → 18, received new stock). Inline quantity edits ask for a reason before saving.
+// Design: pages/seller/seller-inventory.html · view "adjust-stock" = the Adjust stock dialog. Inline quantity
+// edits ask for a reason before saving. Data: GET inventory/summary (KPIs), GET inventory/stock-items (q, state,
+// category; pages on the website, cursor on the phone), GET inventory/movements (recent adjustments).
+// Writes: POST inventory/stock-items/{id}/adjustments, POST inventory/adjustments/batch,
+// POST inventory/stock-items/exports (+ GET …/exports/{id}).
 
 type View = 'adjust-stock';
+type StockRow = components['schemas']['inventory.SellerStockRow'];
+type Movement = components['schemas']['inventory.Movement'];
 
-interface StockRow {
-  sku: string;
-  name: string;
-  variant: string;
-  category: string;
-  icon: IconName;
-  tint: string;
-  available: number;
-  reserved: number;
-  low: number;
-  updated: string;
-}
-
-interface Adjustment {
-  when: string;
-  sku: string;
-  from: number;
-  to: number;
-  reason: string;
-  by: string;
-  /** Free-text instead of "from → to" (e.g. offer hidden). */
-  detail?: string;
-}
-
-const ROWS: StockRow[] = [
-  { sku: 'NWA-PKT-TEAL', name: 'Halden Pocket Bluetooth Speaker', variant: 'Teal', category: 'Speakers', icon: 'speaker', tint: '2', available: 88, reserved: 4, low: 10, updated: 'Oct 8, 9:15 AM · Order MK-261008-12077' },
-  { sku: 'NWA-PKT-CHR', name: 'Halden Pocket Bluetooth Speaker', variant: 'Charcoal', category: 'Speakers', icon: 'speaker', tint: '6', available: 6, reserved: 1, low: 10, updated: 'Oct 7, 6:49 PM · Order MK-261007-10433' },
-  { sku: 'NWA-AUR-BLK', name: 'Halden Aurora ANC Wireless Headphones', variant: 'Midnight black', category: 'Headphones', icon: 'headphones', tint: '2', available: 14, reserved: 2, low: 5, updated: 'Oct 8, 8:03 AM · Order MK-261008-11902' },
-  { sku: 'NWA-AUR-SLV', name: 'Halden Aurora ANC Wireless Headphones', variant: 'Silver', category: 'Headphones', icon: 'headphones', tint: '1', available: 0, reserved: 1, low: 5, updated: 'Oct 7, 3:21 PM · Order MK-261007-10291' },
-  { sku: 'NWA-CBL-KIT', name: 'Northwind Studio Cable Kit', variant: '3.5 mm + 6.35 mm, 2 m', category: 'Cables and adapters', icon: 'cable', tint: '3', available: 42, reserved: 5, low: 15, updated: 'Oct 6, 4:30 PM · Avery Stone, received stock' },
-  { sku: 'NWA-AUR-BLK-U', name: 'Halden Aurora ANC Wireless Headphones', variant: 'Midnight black', category: 'Headphones', icon: 'headphones', tint: '2', available: 2, reserved: 0, low: 2, updated: 'Oct 2, 11:12 AM · Avery Stone' },
-  { sku: 'NWA-BUDS-CHR', name: 'Halden Buds Pro True Wireless Earbuds', variant: 'Charcoal', category: 'Headphones', icon: 'ear', tint: '1', available: 12, reserved: 0, low: 4, updated: 'Oct 4, 3:00 PM · Catalog team' },
-];
-
-const HISTORY: Adjustment[] = [
-  { when: 'Oct 6, 4:30 PM', sku: 'NWA-CBL-KIT', from: 12, to: 42, reason: 'Received new stock · Invoice 7781', by: 'Avery Stone' },
-  { when: 'Oct 5, 11:02 AM', sku: 'NWA-PKT-CHR', from: 9, to: 7, reason: 'Damaged · dented grille, set aside', by: 'Jae Park' },
-  { when: 'Oct 2, 11:12 AM', sku: 'NWA-AUR-BLK-U', from: 0, to: 0, reason: 'Hold for photos', by: 'Avery Stone', detail: 'offer hidden' },
-];
-
-const REASONS = ['Received new stock', 'Count correction', 'Damaged or defective', 'Lost or missing', 'Returned item restocked', 'Moved to another channel', 'Other'];
-const NOW = 'Oct 8, 10:14 AM';
-
-const statusOf = (r: { available: number; low: number }) => (r.available === 0 ? 'Out of stock' : r.available <= r.low ? 'Low stock' : 'In stock');
+const LIMIT = 24;
+const STATUS_FILTER: Record<string, StockState | undefined> = { 'All statuses': undefined, 'In stock': 'in_stock', 'Low stock': 'low_stock', 'Out of stock': 'out_of_stock' };
+/** Movements the seller or staff made (not checkout holds, order allocations or dispatches). */
+const SYSTEM_REFS = new Set(['order', 'reservation']);
 
 interface AdjustDraft {
-  /** One SKU (Adjust button) or the inline edits being saved. */
-  skus: string[];
+  /** One stock item (Adjust button) or the inline edits being saved. */
+  ids: string[];
   mode: 'one' | 'edits';
   qty: string;
-  reason: string;
+  reason: AdjustReason;
   note: string;
 }
 
+/** Signed change to Available and the before → after quantities of a movement. */
+function availableChange(m: Movement): { d: number; from: number; to: number } | null {
+  const d = m.toGroup === 'available' ? m.quantity : m.fromGroup === 'available' ? -m.quantity : 0;
+  if (!d) return null;
+  return { d, from: m.after.available - d, to: m.after.available };
+}
+
 export default function Inventory() {
+  const { api, gql } = useApi();
+  const qc = useQueryClient();
+  const { sellerId, can, memberName } = useSellerSession();
+  const isPhone = useIsPhone();
   const [view, setView] = useView<View>();
-  const [rows, setRows] = useState(ROWS);
-  const [history, setHistory] = useState(HISTORY);
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [q, setQ] = useState('');
   const [st, setSt] = useState('All statuses');
-  const [cat, setCat] = useState('All categories');
+  const [cat, setCat] = useState('');
+  const [page, setPage] = useState(1);
   const [done, setDone] = useState('');
-  const [draft, setDraft] = useState<AdjustDraft>(() =>
-    view === 'adjust-stock' ? { skus: ['NWA-PKT-CHR'], mode: 'one', qty: '18', reason: REASONS[0], note: 'Shipment from Halden distributor, invoice HD-55102.' } : { skus: [], mode: 'one', qty: '', reason: REASONS[0], note: '' },
-  );
+  const [draft, setDraft] = useState<AdjustDraft>({ ids: [], mode: 'one', qty: '', reason: 'received_stock', note: '' });
   const [tried, setTried] = useState(false);
+  /** Rows the dialog acts on, kept when the list refetches. */
+  const [known, setKnown] = useState<Record<string, StockRow>>({});
 
-  const needle = q.trim().toLowerCase();
-  const visible = rows.filter((r) => (!needle || `${r.name} ${r.variant} ${r.sku}`.toLowerCase().includes(needle)) && (st === 'All statuses' || statusOf(r) === st) && (cat === 'All categories' || r.category === cat));
+  const search = useDebounced(q.trim());
+  const filter = { ...(search ? { q: search } : {}), ...(STATUS_FILTER[st] ? { state: STATUS_FILTER[st] } : {}), ...(cat ? { categoryId: cat } : {}) };
+  useEffect(() => setPage(1), [search, st, cat]);
 
-  const inStock = rows.filter((r) => statusOf(r) === 'In stock');
-  const low = rows.filter((r) => statusOf(r) === 'Low stock');
-  const out = rows.filter((r) => statusOf(r) === 'Out of stock');
-  const reserved = rows.reduce((a, r) => a + r.reserved, 0);
+  const summary = useQuery({ queryKey: ['inventory', 'summary', sellerId], queryFn: () => call(api.GET('/api/seller/inventory/summary')) });
+  const categories = useQuery({
+    queryKey: ['catalog', 'categories', 'seller'],
+    queryFn: async () => flattenCategories((await gql<{ categories: CategoryNode[] }>(CATEGORIES)).data?.categories ?? []),
+    staleTime: 10 * 60_000,
+  });
+  const pageQ = useQuery({
+    queryKey: ['inventory', 'stock-items', sellerId, filter, page],
+    queryFn: () => call(api.GET('/api/seller/inventory/stock-items', { params: { query: { ...filter, page, limit: LIMIT } } })),
+    enabled: !isPhone,
+    placeholderData: keepPreviousData,
+  });
+  const phoneQ = useInfiniteQuery({
+    queryKey: ['inventory', 'stock-items', sellerId, 'cursor', filter],
+    initialPageParam: '',
+    queryFn: ({ pageParam }) => call(api.GET('/api/seller/inventory/stock-items', { params: { query: { ...filter, limit: LIMIT, ...(pageParam ? { cursor: pageParam } : {}) } } })),
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    enabled: isPhone,
+  });
+  const movements = useQuery({
+    queryKey: ['inventory', 'movements', sellerId],
+    queryFn: () => call(api.GET('/api/seller/inventory/movements', { params: { query: { limit: 50 } } })),
+  });
+
+  const active = isPhone ? phoneQ : pageQ;
+  const rows: StockRow[] = isPhone ? (phoneQ.data?.pages.flatMap((p) => p.items) ?? []) : (pageQ.data?.items ?? []);
+  const loaded = isPhone ? !!phoneQ.data : !!pageQ.data;
+  const total = pageQ.data?.total ?? rows.length;
+  const totalPages = pageQ.data?.totalPages ?? 1;
+  const more = useInView<HTMLDivElement>(() => void phoneQ.fetchNextPage(), isPhone && phoneQ.hasNextPage && !phoneQ.isFetchingNextPage);
+  useEffect(() => {
+    if (rows.length) setKnown((k) => ({ ...k, ...Object.fromEntries(rows.map((r) => [r.stockItemId, r])) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageQ.data, phoneQ.data]);
+
+  const history = (movements.data?.items ?? []).filter((m) => !SYSTEM_REFS.has(m.reference?.kind ?? '') && availableChange(m)).slice(0, 10);
+  const canAdjust = can('inventory.stock.adjust');
 
   // Inline edits that differ from the saved quantity.
-  const changed = Object.entries(edits).filter(([sku, v]) => {
-    const r = rows.find((x) => x.sku === sku);
+  const changed = Object.entries(edits).filter(([id, v]) => {
+    const r = known[id];
     return r && v.trim() !== '' && Number(v) !== r.available;
   });
   const invalidEdit = changed.some(([, v]) => !Number.isInteger(Number(v)) || Number(v) < 0);
 
-  const single = draft.mode === 'one' ? rows.find((r) => r.sku === draft.skus[0]) : undefined;
+  const single = draft.mode === 'one' ? known[draft.ids[0]] : undefined;
   const qtyN = Number(draft.qty);
   const qtyErr = !single || !tried ? '' : draft.qty.trim() === '' || !Number.isInteger(qtyN) || qtyN < 0 ? 'Enter a whole number of 0 or more.' : qtyN === single.available ? 'Enter a different quantity to record an adjustment.' : '';
   const diff = single && draft.qty.trim() !== '' && Number.isInteger(qtyN) ? qtyN - single.available : 0;
 
-  const openAdjust = (sku: string) => {
-    const r = rows.find((x) => x.sku === sku)!;
-    setDraft({ skus: [sku], mode: 'one', qty: edits[sku] ?? String(r.available), reason: REASONS[0], note: '' });
+  const openAdjust = (r: StockRow) => {
+    setDraft({ ids: [r.stockItemId], mode: 'one', qty: edits[r.stockItemId] ?? String(r.available), reason: 'received_stock', note: '' });
     setTried(false);
+    adjust.reset();
     setView('adjust-stock');
   };
+  // ?view=adjust-stock opened directly: the dialog opens for the first low or out-of-stock item.
+  useEffect(() => {
+    if (view !== 'adjust-stock' || draft.ids.length || !rows.length) return;
+    const r = rows.find((x) => x.state !== 'in_stock' && !x.fulfilledByMarketly) ?? rows.find((x) => !x.fulfilledByMarketly);
+    if (r) setDraft({ ids: [r.stockItemId], mode: 'one', qty: String(r.available), reason: 'received_stock', note: '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, rows.length]);
   const openSaveEdits = () => {
     if (invalidEdit) return;
-    setDraft({ skus: changed.map(([sku]) => sku), mode: 'edits', qty: '', reason: REASONS[1], note: '' });
+    setDraft({ ids: changed.map(([id]) => id), mode: 'edits', qty: '', reason: 'count_correction', note: '' });
     setTried(false);
+    adjust.reset();
     setView('adjust-stock');
   };
-  const close = () => setView('');
+  const close = () => {
+    setView('');
+    setDraft((d) => ({ ...d, ids: [] }));
+  };
+
+  const adjust = useMutation({
+    mutationFn: async (d: AdjustDraft) => {
+      const note = d.note.trim() || null;
+      if (d.mode === 'one') {
+        const r = known[d.ids[0]];
+        await call(api.POST('/api/seller/inventory/stock-items/{id}/adjustments', { params: { path: { id: r.stockItemId } }, body: { newAvailable: Number(d.qty), reasonCode: d.reason, note } }));
+        return { ok: [{ sku: r.sku, from: r.available, to: Number(d.qty) }], failed: [] as string[] };
+      }
+      const items = d.ids.map((id) => ({ stockItemId: id, newAvailable: Number(edits[id]), reasonCode: d.reason }));
+      const res = await call(api.POST('/api/seller/inventory/adjustments/batch', { body: { items, note } }));
+      return {
+        ok: res.results.filter((x) => x.ok).map((x) => ({ sku: known[x.stockItemId]?.sku ?? '', from: known[x.stockItemId]?.available ?? 0, to: Number(edits[x.stockItemId]) })),
+        failed: res.results.filter((x) => !x.ok).map((x) => `${known[x.stockItemId]?.sku ?? x.stockItemId}: ${x.error?.message ?? 'not saved'}`),
+        okIds: res.results.filter((x) => x.ok).map((x) => x.stockItemId),
+      };
+    },
+    onSuccess: (res, d) => {
+      const savedIds = d.mode === 'one' ? d.ids : (res as { okIds?: string[] }).okIds ?? [];
+      setEdits((e) => {
+        const next = { ...e };
+        savedIds.forEach((id) => delete next[id]);
+        return next;
+      });
+      const msg = res.ok.length === 1 ? `Stock for ${res.ok[0].sku} changed from ${res.ok[0].from} to ${res.ok[0].to}.` : `${res.ok.length} quantities saved.`;
+      setDone(res.failed.length ? `${msg} Not saved: ${res.failed.join('; ')}.` : msg);
+      announce(msg);
+      void qc.invalidateQueries({ queryKey: ['inventory'] });
+      void qc.invalidateQueries({ queryKey: ['offers'] });
+      close();
+    },
+  });
 
   const save = () => {
     setTried(true);
-    const targets: Array<[string, number]> = single ? [[single.sku, qtyN]] : changed.map(([sku, v]) => [sku, Number(v)]);
     if (single && (draft.qty.trim() === '' || !Number.isInteger(qtyN) || qtyN < 0 || qtyN === single.available)) return;
-    if (!targets.length) return;
-    const reasonText = draft.note.trim() ? `${draft.reason} · ${draft.note.trim()}` : draft.reason;
-    const entries: Adjustment[] = targets.map(([sku, to]) => ({ when: NOW, sku, from: rows.find((r) => r.sku === sku)!.available, to, reason: reasonText, by: 'Avery Stone' }));
-    setRows((list) => list.map((r) => {
-      const t = targets.find(([sku]) => sku === r.sku);
-      return t ? { ...r, available: t[1], updated: `${NOW} · Avery Stone, ${draft.reason.toLowerCase()}` } : r;
-    }));
-    setHistory((h) => [...entries, ...h]);
-    setEdits((e) => {
-      const next = { ...e };
-      targets.forEach(([sku]) => delete next[sku]);
-      return next;
-    });
-    const msg = entries.length === 1 ? `Stock for ${entries[0].sku} changed from ${entries[0].from} to ${entries[0].to}.` : `${entries.length} quantities saved.`;
-    setDone(msg);
-    announce(msg);
-    close();
+    if (!single && !changed.length) return;
+    adjust.mutate(draft);
   };
 
-  const exportCsv = () => {
-    const csv = ['seller_sku,product,available,reserved,low_stock_at,status', ...rows.map((r) => [r.sku, `"${r.name}, ${r.variant}"`, r.available, r.reserved, r.low, statusOf(r)].join(','))].join('\n');
-    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'northwind-inventory.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-    announce('Inventory exported');
-  };
+  const exporter = useMutation({
+    mutationFn: async () => {
+      const job = await call(api.POST('/api/seller/inventory/stock-items/exports', { body: { filters: filter, format: 'csv' } }));
+      return waitForExport(job, (id) => call(api.GET('/api/seller/inventory/stock-items/exports/{id}', { params: { path: { id } } })));
+    },
+    onSuccess: (job) => {
+      openDownload(job.downloadUrl!, job.fileName);
+      announce('Inventory exported');
+    },
+  });
 
-  const hasDanger = visible.some((r) => statusOf(r) === 'Out of stock');
-  const hasWarn = visible.some((r) => statusOf(r) === 'Low stock');
+  const s = summary.data;
+  const hasDanger = rows.some((r) => r.state === 'out_of_stock');
+  const hasWarn = rows.some((r) => r.state === 'low_stock');
+  const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
   return (
     <SellerLayout active="inventory">
@@ -157,15 +200,28 @@ export default function Inventory() {
           <p className="sub small">Quantities for your approved offers. Customers cannot buy more than the available quantity.</p>
         </div>
         <div className="actions">
-          <Button variant="secondary" size="sm" icon="download" onClick={exportCsv}>
-            Export
-          </Button>
-          <Button size="sm" icon="upload" to={href('seller/bulk-update')}>
-            Bulk update
-          </Button>
+          {can('inventory.stock.export') && (
+            <Button variant="secondary" size="sm" icon="download" onClick={() => exporter.mutate()} disabled={exporter.isPending}>
+              {exporter.isPending ? 'Exporting…' : 'Export'}
+            </Button>
+          )}
+          {can('offers.bulk.update') && (
+            <Button size="sm" icon="upload" to={href('seller/bulk-update')}>
+              Bulk update
+            </Button>
+          )}
         </div>
       </div>
-      {done && <Alert tone="success" title="Stock updated">{done} The change is recorded in Recent adjustments.</Alert>}
+      {done && (
+        <Alert tone="success" title="Stock updated">
+          {done} The change is recorded in Recent adjustments.
+        </Alert>
+      )}
+      {exporter.isError && (
+        <Alert tone="danger" title="The export didn’t finish">
+          {errorMessage(exporter.error)}
+        </Alert>
+      )}
       <div className="sa-kpis">
         <div className="card pad">
           <div className="stat">
@@ -173,8 +229,8 @@ export default function Inventory() {
               <Icon name="package-check" className="ic-sm" />
               In stock
             </span>
-            <span className="v">{inStock.length} SKUs</span>
-            <span className="d">{inStock.reduce((a, r) => a + r.available, 0)} units available</span>
+            <span className="v">{s ? `${s.inStockSkus} SKUs` : <span className="sk sk-line short" />}</span>
+            <span className="d">{s ? `${s.inStockUnits} units available` : ''}</span>
           </div>
         </div>
         <div className="card pad">
@@ -183,9 +239,7 @@ export default function Inventory() {
               <Icon name="triangle-alert" className="ic-sm" />
               Low stock
             </span>
-            <span className="v">
-              {low.length} SKU{low.length === 1 ? '' : 's'}
-            </span>
+            <span className="v">{s ? plural(s.lowStockSkus, 'SKU') : <span className="sk sk-line short" />}</span>
             <span className="d">At or below threshold</span>
           </div>
         </div>
@@ -195,10 +249,8 @@ export default function Inventory() {
               <Icon name="package-x" className="ic-sm" />
               Out of stock
             </span>
-            <span className="v">
-              {out.length} SKU{out.length === 1 ? '' : 's'}
-            </span>
-            <span className="d">Customers can't buy until restocked</span>
+            <span className="v">{s ? plural(s.outOfStockSkus, 'SKU') : <span className="sk sk-line short" />}</span>
+            <span className="d">{s?.outOfStockLabels.length ? s.outOfStockLabels.join(', ') : 'Customers can’t buy until restocked'}</span>
           </div>
         </div>
         <div className="card pad">
@@ -207,7 +259,7 @@ export default function Inventory() {
               <Icon name="lock" className="ic-sm" />
               Reserved for open orders
             </span>
-            <span className="v">{reserved} units</span>
+            <span className="v">{s ? `${s.reservedUnits} units` : <span className="sk sk-line short" />}</span>
             <span className="d">Released only if an order is cancelled</span>
           </div>
         </div>
@@ -218,7 +270,7 @@ export default function Inventory() {
           Stock status
         </label>
         <select className="select" id="inv-st" value={st} onChange={(e) => setSt(e.target.value)}>
-          {['All statuses', 'In stock', 'Low stock', 'Out of stock'].map((o) => (
+          {Object.keys(STATUS_FILTER).map((o) => (
             <option key={o}>{o}</option>
           ))}
         </select>
@@ -226,117 +278,154 @@ export default function Inventory() {
           Category
         </label>
         <select className="select" id="inv-cat" value={cat} onChange={(e) => setCat(e.target.value)}>
-          {['All categories', 'Headphones', 'Speakers', 'Cables and adapters'].map((o) => (
-            <option key={o}>{o}</option>
+          <option value="">All categories</option>
+          {(categories.data ?? []).map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.label}
+            </option>
           ))}
         </select>
         <span className="grow" />
-        <Link className="small strong" to={href('seller/bulk-update')}>
-          <Icon name="file-spreadsheet" className="ic-sm" /> Update many SKUs with a file
-        </Link>
-      </div>
-      <section className="card">
-        <TableWrap label="Inventory table">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Product / SKU</th>
-                <th className="r" scope="col">
-                  Available
-                </th>
-                <th className="r" scope="col">
-                  Reserved
-                </th>
-                <th className="r" scope="col">
-                  Low-stock at
-                </th>
-                <th scope="col">Status</th>
-                <th scope="col">Last updated</th>
-                <th scope="col">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((r) => {
-                const i = rows.indexOf(r);
-                const status = statusOf(r);
-                const edge = status === 'Out of stock' ? 'is-flagged' : status === 'Low stock' ? 'is-warn' : '';
-                const v = edits[r.sku] ?? String(r.available);
-                const bad = v.trim() !== '' && (!Number.isInteger(Number(v)) || Number(v) < 0);
-                return (
-                  <tr key={r.sku} className={edge}>
-                    <td>
-                      {edge && <span className="sr-only">{edge === 'is-flagged' ? 'Urgent: ' : 'At risk: '}</span>}
-                      <div className="cell-main">
-                        <Img icon={r.icon} tint={r.tint} className="tiny" />
-                        <div className="stack gap-0">
-                          <Link className="small strong" to={href('seller/offer')}>
-                            {r.name}
-                          </Link>
-                          <span className="xs muted">
-                            <span className="mono nowrap" title={r.sku}>
-                              {r.sku}
-                            </span>{' '}
-                            · {r.variant}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="r">
-                      <label className="sr-only" htmlFor={`inv-q${i}`}>
-                        Available for {r.sku}
-                      </label>
-                      <input
-                        className={bad ? 'input sa-num is-error' : 'input sa-num'}
-                        id={`inv-q${i}`}
-                        type="number"
-                        min={0}
-                        value={v}
-                        aria-invalid={bad || undefined}
-                        onChange={(e) => setEdits((x) => ({ ...x, [r.sku]: e.target.value }))}
-                      />
-                    </td>
-                    <td className="r">
-                      <span className="num">{r.reserved}</span>
-                    </td>
-                    <td className="r">
-                      <span className="num">{r.low}</span>
-                    </td>
-                    <td>
-                      <StatusBadge status={status} />
-                    </td>
-                    <td>
-                      <span className="xs sub">{r.updated}</span>
-                    </td>
-                    <td>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => openAdjust(r.sku)}>
-                        <span>Adjust</span>
-                        <span className="sr-only"> {r.sku}</span>
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </TableWrap>
-        {visible.length === 0 && <EmptyState icon="search-x" title="No SKUs match these filters" />}
-        {(hasDanger || hasWarn) && (
-          <StatusLegend
-            items={[
-              ...(hasDanger ? [{ tone: 'danger' as const, label: 'Red edge = urgent: overdue or past target' }] : []),
-              ...(hasWarn ? [{ tone: 'warning' as const, label: 'Amber edge = at risk: due soon or near target' }] : []),
-            ]}
-          />
+        {can('offers.bulk.update') && (
+          <Link className="small strong" to={href('seller/bulk-update')}>
+            <Icon name="file-spreadsheet" className="ic-sm" /> Update many SKUs with a file
+          </Link>
         )}
-        <div className="card-foot between">
-          <span className="xs muted">{invalidEdit ? <span className="t-danger-text">Quantities must be whole numbers of 0 or more.</span> : 'Changing a quantity asks you for a reason before it saves.'}</span>
-          <Button size="sm" disabled={!changed.length || invalidEdit} onClick={openSaveEdits}>
-            Save {changed.length} change{changed.length === 1 ? '' : 's'}
-          </Button>
-        </div>
-      </section>
+      </div>
+      {active.isError && !loaded ? (
+        <LoadError error={active.error} onRetry={() => void active.refetch()} />
+      ) : (
+        <section className="card">
+          {!loaded ? (
+            <SkeletonRows rows={5} />
+          ) : (
+            <TableWrap label="Inventory table">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Product / SKU</th>
+                    <th className="r" scope="col">
+                      Available
+                    </th>
+                    <th className="r" scope="col">
+                      Reserved
+                    </th>
+                    <th className="r" scope="col">
+                      Low-stock at
+                    </th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Last updated</th>
+                    <th scope="col">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r, i) => {
+                    const status = STOCK_LABEL[r.state];
+                    const edge = r.state === 'out_of_stock' ? 'is-flagged' : r.state === 'low_stock' ? 'is-warn' : '';
+                    const v = edits[r.stockItemId] ?? String(r.available);
+                    const bad = v.trim() !== '' && (!Number.isInteger(Number(v)) || Number(v) < 0);
+                    const readOnly = r.fulfilledByMarketly || !canAdjust;
+                    return (
+                      <tr key={r.stockItemId} className={edge}>
+                        <td>
+                          {edge && <span className="sr-only">{edge === 'is-flagged' ? 'Urgent: ' : 'At risk: '}</span>}
+                          <div className="cell-main">
+                            <Img icon={iconFor(r.productTitle)} tint="2" src={r.image?.url ?? undefined} className="tiny" />
+                            <div className="stack gap-0">
+                              {r.offerId ? (
+                                <Link className="small strong" to={offerHref(r.offerId)}>
+                                  {r.productTitle}
+                                </Link>
+                              ) : (
+                                <span className="small strong">{r.productTitle}</span>
+                              )}
+                              <span className="xs muted">
+                                <span className="mono nowrap" title={r.sku}>
+                                  {r.sku}
+                                </span>{' '}
+                                · {r.variantLabel}
+                              </span>
+                              {r.fulfilledByMarketly && (
+                                <span className="xs muted">
+                                  At Marketly{r.ownLocationAvailable != null ? ` · ${r.ownLocationAvailable} at your location (not on sale)` : ''}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="r">
+                          <label className="sr-only" htmlFor={`inv-q${i}`}>
+                            Available for {r.sku}
+                          </label>
+                          <input
+                            className={bad ? 'input sa-num is-error' : 'input sa-num'}
+                            id={`inv-q${i}`}
+                            type="number"
+                            min={0}
+                            value={v}
+                            disabled={readOnly}
+                            title={r.fulfilledByMarketly ? 'Marketly holds and sells this stock. Change it through the fulfillment service.' : undefined}
+                            aria-invalid={bad || undefined}
+                            onChange={(e) => setEdits((x) => ({ ...x, [r.stockItemId]: e.target.value }))}
+                          />
+                        </td>
+                        <td className="r">
+                          <span className="num">{r.reserved}</span>
+                        </td>
+                        <td className="r">
+                          <span className="num">{r.lowStockThreshold ?? '—'}</span>
+                        </td>
+                        <td>
+                          <StatusBadge status={status} />
+                        </td>
+                        <td>
+                          <span className="xs sub">{r.lastChange ?? fmtWhen(r.updatedAt)}</span>
+                        </td>
+                        <td>
+                          {!readOnly && (
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => openAdjust(r)}>
+                              <span>Adjust</span>
+                              <span className="sr-only"> {r.sku}</span>
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </TableWrap>
+          )}
+          {loaded && rows.length === 0 && (
+            <EmptyState icon="search-x" title={search || cat || st !== 'All statuses' ? 'No SKUs match these filters' : 'No stock yet'}>
+              {search || cat || st !== 'All statuses' ? undefined : 'Stock items are created with your offers. Add a product to start selling.'}
+            </EmptyState>
+          )}
+          {(hasDanger || hasWarn) && (
+            <StatusLegend
+              items={[
+                ...(hasDanger ? [{ tone: 'danger' as const, label: 'Red edge = urgent: overdue or past target' }] : []),
+                ...(hasWarn ? [{ tone: 'warning' as const, label: 'Amber edge = at risk: due soon or near target' }] : []),
+              ]}
+            />
+          )}
+          {isPhone && loaded && <div ref={more}>{phoneQ.hasNextPage ? <LazyLoad /> : <LazyLoad end />}</div>}
+          <div className="card-foot between">
+            <span className="xs muted">
+              {invalidEdit ? <span className="t-danger-text">Quantities must be whole numbers of 0 or more.</span> : canAdjust ? 'Changing a quantity asks you for a reason before it saves.' : 'Your role can view stock but not change it.'}
+              {!isPhone && loaded && total > rows.length ? ` · ${rows.length} of ${total} SKUs` : ''}
+            </span>
+            {!isPhone && totalPages > 1 && <Pager page={page} total={totalPages} onPage={setPage} only="website" />}
+            {canAdjust && (
+              <Button size="sm" disabled={!changed.length || invalidEdit} onClick={openSaveEdits}>
+                Save {changed.length} change{changed.length === 1 ? '' : 's'}
+              </Button>
+            )}
+          </div>
+        </section>
+      )}
       <section className="card">
         <div className="card-head">
           <div className="stack gap-0">
@@ -344,44 +433,58 @@ export default function Inventory() {
             <span className="xs muted">Every change keeps its reason, person and time</span>
           </div>
         </div>
-        <TableWrap label="Recent adjustments table">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">When</th>
-                <th scope="col">SKU</th>
-                <th scope="col">Change</th>
-                <th scope="col">Reason</th>
-                <th scope="col">By</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((h, i) => {
-                const d = h.to - h.from;
-                return (
-                  <tr key={`${h.sku}${h.when}${i}`}>
-                    <td>{h.when}</td>
-                    <td>
-                      <span className="mono xs nowrap" title={h.sku}>
-                        {h.sku}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={d > 0 ? 'num t-success-text strong' : d < 0 ? 'num t-danger-text strong' : 'num'}>{d > 0 ? `+${d}` : d < 0 ? `−${-d}` : '0'}</span>{' '}
-                      <span className="xs muted">{h.detail ?? `${h.from} → ${h.to}`}</span>
-                    </td>
-                    <td>{h.reason}</td>
-                    <td>{h.by}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </TableWrap>
+        {movements.isError ? (
+          <div className="card-body">
+            <LoadError error={movements.error} onRetry={() => void movements.refetch()} />
+          </div>
+        ) : !movements.data ? (
+          <SkeletonRows rows={3} thumb={false} />
+        ) : history.length === 0 ? (
+          <EmptyState icon="history" title="No adjustments yet">
+            Quantity changes you make here, bulk updates and stock received show up in this list.
+          </EmptyState>
+        ) : (
+          <TableWrap label="Recent adjustments table">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">When</th>
+                  <th scope="col">SKU</th>
+                  <th scope="col">Change</th>
+                  <th scope="col">Reason</th>
+                  <th scope="col">By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((h) => {
+                  const c = availableChange(h)!;
+                  return (
+                    <tr key={h.id}>
+                      <td>{fmtWhen(h.at)}</td>
+                      <td>
+                        <span className="mono xs nowrap" title={h.sku}>
+                          {h.sku}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={c.d > 0 ? 'num t-success-text strong' : 'num t-danger-text strong'}>{c.d > 0 ? `+${c.d}` : `−${-c.d}`}</span>{' '}
+                        <span className="xs muted">
+                          {c.from} → {c.to}
+                        </span>
+                      </td>
+                      <td>{[h.reasonLabel, h.note].filter(Boolean).join(' · ')}</td>
+                      <td>{h.actor.name ?? (h.actor.kind === 'system' ? 'Marketly' : h.actor.kind === 'seller' ? 'Your team' : 'Marketly staff')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TableWrap>
+        )}
       </section>
 
       <Dialog
-        open={view === 'adjust-stock' && draft.skus.length > 0}
+        open={view === 'adjust-stock' && draft.ids.length > 0}
         onClose={close}
         title={single ? 'Adjust stock' : 'Save stock changes'}
         foot={
@@ -389,17 +492,24 @@ export default function Inventory() {
             <Button variant="ghost" onClick={close}>
               Cancel
             </Button>
-            <Button onClick={save}>{single ? 'Save adjustment' : `Save ${changed.length} change${changed.length === 1 ? '' : 's'}`}</Button>
+            <Button onClick={save} disabled={adjust.isPending || !canAdjust}>
+              {adjust.isPending ? 'Saving…' : single ? 'Save adjustment' : `Save ${changed.length} change${changed.length === 1 ? '' : 's'}`}
+            </Button>
           </>
         }
       >
+        {adjust.isError && (
+          <Alert tone="danger" title="The change wasn’t saved">
+            {errorMessage(adjust.error)}
+          </Alert>
+        )}
         {single ? (
           <>
             <div className="row gap-3 nowrap">
-              <Img icon={single.icon} tint={single.tint} className="thumb" />
+              <Img icon={iconFor(single.productTitle)} tint="2" src={single.image?.url ?? undefined} className="thumb" />
               <div className="stack gap-0">
                 <span className="strong">
-                  {single.name}, {single.variant}
+                  {single.productTitle}, {single.variantLabel}
                 </span>
                 <span className="xs muted mono">{single.sku}</span>
               </div>
@@ -419,22 +529,22 @@ export default function Inventory() {
                 <TextInput id="adj-qty" type="number" min={0} value={draft.qty} error={!!qtyErr} onChange={(e) => setDraft((d) => ({ ...d, qty: e.target.value }))} />
               </Field>
               <Field label="Reason">
-                <Select id="adj-reason" options={REASONS} value={draft.reason} onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value }))} />
+                <Select id="adj-reason" options={ADJUST_REASONS} value={draft.reason} onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value as AdjustReason }))} />
               </Field>
             </div>
           </>
         ) : (
           <>
             <ul className="list">
-              {changed.map(([sku, v]) => {
-                const r = rows.find((x) => x.sku === sku)!;
+              {changed.map(([id, v]) => {
+                const r = known[id];
                 return (
-                  <li key={sku}>
+                  <li key={id}>
                     <span className="grow stack gap-0">
                       <span className="small strong">
-                        {r.name}, {r.variant}
+                        {r.productTitle}, {r.variantLabel}
                       </span>
-                      <span className="xs muted mono">{sku}</span>
+                      <span className="xs muted mono">{r.sku}</span>
                     </span>
                     <span className="num small">
                       {r.available} → <b>{v}</b>
@@ -444,7 +554,7 @@ export default function Inventory() {
               })}
             </ul>
             <Field label="Reason">
-              <Select id="adj-reason" options={REASONS} value={draft.reason} onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value }))} />
+              <Select id="adj-reason" options={ADJUST_REASONS} value={draft.reason} onChange={(e) => setDraft((d) => ({ ...d, reason: e.target.value as AdjustReason }))} />
             </Field>
           </>
         )}
@@ -454,7 +564,7 @@ export default function Inventory() {
         <div className="panel row gap-2 small">
           <Icon name="history" className="ic-sm" />
           <span>
-            Recorded as <b>Avery Stone</b> · Oct 8, 2026, 10:14 AM PT, with the reason and note above. Reserved units are not affected.
+            Recorded as <b>{memberName || 'you'}</b> · {fmtFull(new Date().toISOString())}, with the reason and note above. Reserved units are not affected.
           </span>
         </div>
       </Dialog>

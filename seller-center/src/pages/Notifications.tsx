@@ -1,168 +1,239 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Deadline, EmptyState, Icon, PageHeader, Switch, type IconName } from '@marketly/web-shared/ui';
+import { href, type ScreenId } from '@marketly/web-shared/routes';
+import { Alert, Badge, Button, Card, Deadline, EmptyState, Icon, PageHeader, Switch } from '@marketly/web-shared/ui';
+import { useSellerSession } from '@/app/session';
+import { dayKey, deadlineLabel, deadlineTone, iconOf, LoadError, screenHref, shortDate, SkeletonLines, time, weekdayDate, date } from './data/home';
 
 // Design: pages/seller/seller-notifications.html (no views).
+// API: GET /api/seller/notifications/inbox (group, unreadOnly, cursor: "Load older notices"),
+// GET …/inbox/summary (counts per group, needs action sorted by deadline), POST …/inbox/{id}/read,
+// POST …/inbox/read-all, GET …/preferences (the essential-notices note). Times in Pacific Time.
 
-type Cat = 'orders' | 'returns' | 'products' | 'account';
-type Group = 'Today' | 'Earlier this week' | 'Older';
+type Notice = components['schemas']['notifications.Notice'];
+type Group = 'orders' | 'returns_cases' | 'products' | 'account_finance';
+type When = 'Today' | 'Earlier this week' | 'Older';
 
-interface Note {
-  id: string;
-  group: Group;
-  to: string;
-  icon: IconName;
-  title: string;
-  body: string;
-  cat: Cat;
-  unread: boolean;
-  /** urgent = red edge + danger badge; action = amber edge + warning badge. */
-  kind?: 'urgent' | 'action';
-  deadline?: { tone: 'ok' | 'warning' | 'danger'; text: string };
-  time: string;
-  /** Kept back until "Load older notices". */
-  archived?: boolean;
-}
-
-const CATS: Array<{ key: Cat | 'all'; label: string }> = [
+const CATS: Array<{ key: Group | 'all'; label: string }> = [
   { key: 'all', label: 'All' },
   { key: 'orders', label: 'Orders' },
-  { key: 'returns', label: 'Returns & cases' },
+  { key: 'returns_cases', label: 'Returns & cases' },
   { key: 'products', label: 'Products' },
-  { key: 'account', label: 'Account & finance' },
+  { key: 'account_finance', label: 'Account & finance' },
 ];
-const CAT_LABEL: Record<Cat, string> = { orders: 'Orders', returns: 'Returns & cases', products: 'Products', account: 'Account & finance' };
-const GROUPS: Group[] = ['Today', 'Earlier this week', 'Older'];
+const CAT_LABEL: Record<string, string> = { orders: 'Orders', returns_cases: 'Returns & cases', products: 'Products', account_finance: 'Account & finance' };
+const WHEN: When[] = ['Today', 'Earlier this week', 'Older'];
 
-const NOTES: Note[] = [
-  { id: 'n1', group: 'Today', to: href('seller/order'), icon: 'alarm-clock', title: 'Dispatch overdue: MK-261007-10433', body: 'Halden Pocket Speaker × 1 for Alex M. was due Oct 8, 12:00 PM. Ship it or tell the buyer the new date. Overdue orders count toward dispatch reliability.', cat: 'orders', unread: true, kind: 'urgent', deadline: { tone: 'danger', text: 'Overdue 3 h' }, time: '3:02 PM' },
-  { id: 'n2', group: 'Today', to: href('seller/order'), icon: 'shopping-bag', title: '2 new orders to dispatch today', body: 'MK-261008-12077 (Pocket Speaker × 2) and MK-261008-11902 (Aurora ANC Headphones).', cat: 'orders', unread: true, kind: 'action', deadline: { tone: 'warning', text: 'Dispatch by 5:00 PM' }, time: '9:14 AM' },
-  { id: 'n3', group: 'Today', to: href('seller/return', 'inspect-and-refund'), icon: 'package-check', title: 'Return received: RT-260930-0730', body: 'Halden Aurora ANC Headphones arrived at your return address. Record the inspection and refund decision.', cat: 'returns', unread: true, kind: 'action', deadline: { tone: 'ok', text: 'Inspect by Oct 10, 9:05 AM' }, time: '9:05 AM' },
-  { id: 'n4', group: 'Today', to: href('seller/returns', 'disputes'), icon: 'scale', title: 'Dispute RT-260927-0622 needs your evidence', body: 'Marketly support is reviewing the customer’s challenge to your $46.00 partial refund. Add photos or test results before the deadline.', cat: 'returns', unread: true, kind: 'action', deadline: { tone: 'warning', text: 'Evidence due Oct 9, 5:00 PM' }, time: '8:30 AM' },
-  { id: 'n5', group: 'Earlier this week', to: href('seller/product-new', 'changes-requested'), icon: 'file-pen-line', title: 'Changes requested: Ardent USB Desk Microphone', body: 'Reviewer Omar Haddad asked for a photo without a watermark and the sample rate in the specifications.', cat: 'products', unread: false, kind: 'action', deadline: { tone: 'ok', text: 'Resubmit by Oct 14' }, time: 'Wed, Oct 7' },
-  { id: 'n6', group: 'Earlier this week', to: href('seller/return'), icon: 'undo-2', title: 'New return request: RT-261007-0977', body: 'Halden Aurora ANC Headphones · changed mind. Respond by Oct 10, 9:40 AM.', cat: 'returns', unread: false, time: 'Wed, Oct 7' },
-  { id: 'n7', group: 'Earlier this week', to: href('seller/finance'), icon: 'lock', title: 'Hold placed on MK-261003-07712', body: '$172.59 held because the carrier shows no delivery scan. Review date Mon, Oct 12. No action needed unless you have proof of delivery.', cat: 'account', unread: false, time: 'Tue, Oct 6' },
-  { id: 'n8', group: 'Earlier this week', to: href('seller/performance'), icon: 'gavel', title: 'Appeal window closes Oct 16', body: 'New listings in Cameras are still paused (RS-261002-0019). Upload documents or appeal before the deadline.', cat: 'account', unread: false, kind: 'action', deadline: { tone: 'ok', text: 'Appeal by Oct 16' }, time: 'Tue, Oct 6' },
-  { id: 'n9', group: 'Earlier this week', to: href('seller/finance'), icon: 'landmark', title: 'Payout PO-261005-3381 paid: $3,427.95', body: 'Sent Oct 5 to Pacific Coast Credit Union •••• 6620. Arrived Oct 6. Includes a refund-after-payout deduction.', cat: 'account', unread: false, time: 'Mon, Oct 5' },
-  { id: 'n10', group: 'Earlier this week', to: href('seller/products'), icon: 'circle-check', title: 'Product approved: Halden Pocket Speaker, Sand', body: 'Your new color variation is live on the shared product page.', cat: 'products', unread: false, time: 'Mon, Oct 5' },
-  { id: 'n11', group: 'Older', to: href('seller/setup'), icon: 'badge-check', title: 'Seller application approved', body: 'Northwind Audio is approved to sell on Marketly. Finish store setup and submit your first offers.', cat: 'account', unread: false, time: 'Jul 14, 2026' },
-  // Older notices revealed by "Load older notices" (sample).
-  { id: 'n12', group: 'Older', to: href('seller/setup'), icon: 'file-check', title: 'Documents received', body: 'Thanks for uploading your business registration. Marketly staff will check it within 2 business days.', cat: 'account', unread: false, time: 'Jul 10, 2026', archived: true },
-  { id: 'n13', group: 'Older', to: href('seller/setup'), icon: 'mail-check', title: 'Seller application submitted', body: 'We received the Northwind Audio application. You can track it in the setup guide.', cat: 'account', unread: false, time: 'Jul 8, 2026', archived: true },
-];
+function whenOf(iso: string, now = new Date()): When {
+  if (dayKey(iso) === dayKey(now)) return 'Today';
+  return now.getTime() - new Date(iso).getTime() < 7 * 86_400_000 ? 'Earlier this week' : 'Older';
+}
+const stamp = (iso: string, w: When) => (w === 'Today' ? time(iso) : w === 'Earlier this week' ? weekdayDate(iso) : date(iso));
+
+/** Where the publishing module shows the record; the list screen when the link lacks what the detail screen needs. */
+const FALLBACK: Partial<Record<string, ScreenId>> = {
+  'seller/order': 'seller/orders',
+  'seller/return': 'seller/returns',
+  'seller/statement': 'seller/finance',
+  'seller/help-article': 'seller/help',
+};
+function noticeHref(n: Notice): string | undefined {
+  const l = n.link;
+  return screenHref(l.screen, null, l.ref ? { ref: l.ref } : undefined) ?? (FALLBACK[l.screen] ? href(FALLBACK[l.screen]!) : undefined);
+}
+
+/** urgent = red edge + danger badge; action = amber edge + warning badge (open action notices only). */
+function kindOf(n: Notice): 'urgent' | 'action' | undefined {
+  if (!n.actionRequired || (n.state && n.state !== 'open')) return undefined;
+  return n.deadline?.state === 'overdue' ? 'urgent' : 'action';
+}
+
+function NoticeDeadline({ n }: { n: Notice }) {
+  if (n.state === 'resolved') return <Badge tone="success">Resolved {shortDate(n.resolvedAt ?? n.createdAt)}</Badge>;
+  if (n.state === 'expired') return <Badge>No longer needed</Badge>;
+  if (!n.deadline) return null;
+  return <Deadline tone={deadlineTone(n.deadline.state)}>{deadlineLabel(n.deadline.dueAt)}</Deadline>;
+}
+
+/** The notice row: a link to its record, or a plain row when this app has no screen for it. */
+function NoteLink({ n, className, onOpen, children }: { n: Notice; className: string; onOpen: () => void; children: ReactNode }) {
+  const to = noticeHref(n);
+  if (to) {
+    return (
+      <Link className={className} to={to} onClick={onOpen}>
+        {children}
+      </Link>
+    );
+  }
+  return (
+    <a
+      className={className}
+      href="#"
+      onClick={(e) => {
+        e.preventDefault();
+        onOpen();
+      }}
+    >
+      {children}
+    </a>
+  );
+}
 
 export default function Notifications() {
-  const [notes, setNotes] = useState(NOTES);
-  const [cat, setCat] = useState<Cat | 'all'>('all');
+  const { api } = useApi();
+  const { sellerId } = useSellerSession();
+  const qc = useQueryClient();
+  const [cat, setCat] = useState<Group | 'all'>('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const [showOlder, setShowOlder] = useState(false);
   const [allRead, setAllRead] = useState(false);
 
-  const loaded = notes.filter((n) => showOlder || !n.archived);
-  const unreadN = loaded.filter((n) => n.unread).length;
-  const actionN = loaded.filter((n) => n.kind).length;
-  const countOf = (k: Cat | 'all') => loaded.filter((n) => k === 'all' || n.cat === k).length;
-  const shown = loaded.filter((n) => (cat === 'all' || n.cat === cat) && (!unreadOnly || n.unread));
-  const actions = loaded.filter((n) => n.kind);
+  const summary = useQuery({ queryKey: ['notifications', 'summary', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/inbox/summary')), refetchInterval: 60_000 });
+  const prefs = useQuery({ queryKey: ['notifications', 'preferences', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/preferences')), staleTime: 5 * 60_000 });
+  const inbox = useInfiniteQuery({
+    queryKey: ['notifications', 'inbox', sellerId, { group: cat, unreadOnly }],
+    queryFn: ({ pageParam }) =>
+      call(api.GET('/api/seller/notifications/inbox', { params: { query: { group: cat === 'all' ? undefined : cat, unreadOnly: unreadOnly || undefined, cursor: pageParam, limit: 24 } } })),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+  });
 
-  const markRead = (id: string) => setNotes((l) => l.map((n) => (n.id === id ? { ...n, unread: false } : n)));
-  const markAllRead = () => {
-    setNotes((l) => l.map((n) => ({ ...n, unread: false })));
-    setAllRead(true);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['notifications'] });
+  const markRead = useMutation({
+    mutationFn: (id: string) => call(api.POST('/api/seller/notifications/inbox/{id}/read', { params: { path: { id } } })),
+    onSuccess: () => void refresh(),
+  });
+  const markAll = useMutation({
+    mutationFn: () => call(api.POST('/api/seller/notifications/inbox/read-all', { body: {} })),
+    onSuccess: () => {
+      setAllRead(true);
+      void refresh();
+    },
+  });
+  const open = (n: Notice) => {
+    if (!n.readAt) markRead.mutate(n.id);
   };
+
+  const s = summary.data;
+  const notes = inbox.data?.pages.flatMap((p) => p.items) ?? [];
+  const countOf = (k: Group | 'all') => (s ? (k === 'all' ? s.total : (s.totalByGroup[k] ?? 0)) : undefined);
+  const actions = s?.needsAction ?? [];
+  const now = new Date();
 
   return (
     <SellerLayout active="notifications">
       <PageHeader
         title="Notifications"
-        sub={`${unreadN} unread · ${actionN} need action. Times in Pacific Time.`}
+        sub={s ? `${s.unread} unread · ${s.actionRequired} need action. Times in Pacific Time.` : 'Times in Pacific Time.'}
         actions={
-          <Button variant="secondary" size="sm" icon="check-check" onClick={markAllRead} disabled={!unreadN}>
+          <Button variant="secondary" size="sm" icon="check-check" onClick={() => markAll.mutate()} disabled={!s?.unread || markAll.isPending}>
             Mark all as read
           </Button>
         }
       />
       <div className="sb-main">
         <div className="stack gap-3">
-          {allRead && !unreadN && <Alert tone="success" title="All notices marked as read" />}
+          {allRead && !s?.unread && <Alert tone="success" title="All notices marked as read" />}
+          {markAll.isError && (
+            <Alert tone="danger" title="We couldn’t mark the notices as read">
+              {errorMessage(markAll.error)}
+            </Alert>
+          )}
           <div className="row between">
             <div className="hscroll gap-2">
-              {CATS.map((c) => (
-                <a
-                  key={c.key}
-                  className={cx('chip', cat === c.key && 'is-active')}
-                  href="#"
-                  aria-current={cat === c.key ? 'true' : undefined}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setCat(c.key);
-                  }}
-                >
-                  {c.label} ({countOf(c.key)})
-                </a>
-              ))}
+              {CATS.map((c) => {
+                const n = countOf(c.key);
+                return (
+                  <a
+                    key={c.key}
+                    className={cx('chip', cat === c.key && 'is-active')}
+                    href="#"
+                    aria-current={cat === c.key ? 'true' : undefined}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setCat(c.key);
+                    }}
+                  >
+                    {c.label}
+                    {n !== undefined && ` (${n})`}
+                  </a>
+                );
+              })}
             </div>
             <Switch id="nt-unread" label="Unread only" checked={unreadOnly} aria-checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
           </div>
           <section className="card">
-            {shown.length === 0 && (
+            {inbox.isPending ? (
+              <div className="card-body">
+                <SkeletonLines rows={5} />
+              </div>
+            ) : inbox.isError ? (
+              <div className="card-body">
+                <LoadError error={inbox.error} onRetry={() => void inbox.refetch()} />
+              </div>
+            ) : notes.length === 0 ? (
               <div className="card-body">
                 <EmptyState icon="bell" title={unreadOnly ? 'No unread notices' : 'No notices here'}>
                   {unreadOnly ? 'You’re all caught up. Turn off Unread only to see earlier notices.' : 'Notices for this category will appear here.'}
                 </EmptyState>
               </div>
+            ) : (
+              WHEN.map((g) => {
+                const items = notes.filter((n) => whenOf(n.createdAt, now) === g);
+                if (!items.length) return null;
+                return [
+                  <div key={g} className="sb-grp">
+                    {g}
+                  </div>,
+                  ...items.map((n) => {
+                    const kind = kindOf(n);
+                    const unread = !n.readAt;
+                    return (
+                      <NoteLink key={n.id} n={n} className={cx('sb-note', unread && 'is-unread', kind && `is-${kind}`)} onOpen={() => open(n)}>
+                        {kind === 'urgent' && <span className="sr-only">Urgent: </span>}
+                        {kind === 'action' && <span className="sr-only">Needs action: </span>}
+                        <span className="ic">
+                          <Icon name={iconOf(n.icon)} />
+                        </span>
+                        <span className="stack gap-1">
+                          <span className="row gap-2">
+                            {unread && (
+                              <>
+                                <span className="dot" aria-hidden="true" />
+                                <span className="sr-only">Unread.</span>
+                              </>
+                            )}
+                            <span className={unread ? 'small bold' : 'small strong'}>{n.title}</span>
+                          </span>
+                          <span className="xs sub">{n.body}</span>
+                          <span className="row gap-2">
+                            {CAT_LABEL[n.group] && <Badge tone="outline">{CAT_LABEL[n.group]}</Badge>}
+                            {kind && (
+                              <Badge tone={kind === 'urgent' ? 'danger' : 'warning'} icon="triangle-alert">
+                                Action required
+                              </Badge>
+                            )}
+                            <NoticeDeadline n={n} />
+                          </span>
+                        </span>
+                        <span className="side">
+                          <span className="xs muted nowrap">{stamp(n.createdAt, g)}</span>
+                          <Icon name="chevron-right" className="ic-sm" />
+                        </span>
+                      </NoteLink>
+                    );
+                  }),
+                ];
+              })
             )}
-            {GROUPS.map((g) => {
-              const items = shown.filter((n) => n.group === g);
-              if (!items.length) return null;
-              return [
-                <div key={g} className="sb-grp">
-                  {g}
-                </div>,
-                ...items.map((n) => (
-                  <Link key={n.id} className={cx('sb-note', n.unread && 'is-unread', n.kind && `is-${n.kind}`)} to={n.to} onClick={() => markRead(n.id)}>
-                    {n.kind === 'urgent' && <span className="sr-only">Urgent: </span>}
-                    {n.kind === 'action' && <span className="sr-only">Needs action: </span>}
-                    <span className="ic">
-                      <Icon name={n.icon} />
-                    </span>
-                    <span className="stack gap-1">
-                      <span className="row gap-2">
-                        {n.unread && (
-                          <>
-                            <span className="dot" aria-hidden="true" />
-                            <span className="sr-only">Unread.</span>
-                          </>
-                        )}
-                        <span className={n.unread ? 'small bold' : 'small strong'}>{n.title}</span>
-                      </span>
-                      <span className="xs sub">{n.body}</span>
-                      <span className="row gap-2">
-                        <Badge tone="outline">{CAT_LABEL[n.cat]}</Badge>
-                        {n.kind && (
-                          <Badge tone={n.kind === 'urgent' ? 'danger' : 'warning'} icon="triangle-alert">
-                            Action required
-                          </Badge>
-                        )}
-                        {n.deadline && <Deadline tone={n.deadline.tone}>{n.deadline.text}</Deadline>}
-                      </span>
-                    </span>
-                    <span className="side">
-                      <span className="xs muted nowrap">{n.time}</span>
-                      <Icon name="chevron-right" className="ic-sm" />
-                    </span>
-                  </Link>
-                )),
-              ];
-            })}
             <div className="card-foot">
               <span className="xs muted grow">Notices are kept for 12 months.</span>
-              {!showOlder && (
-                <Button variant="ghost" size="sm" onClick={() => setShowOlder(true)}>
-                  Load older notices
+              {inbox.hasNextPage && (
+                <Button variant="ghost" size="sm" onClick={() => void inbox.fetchNextPage()} disabled={inbox.isFetchingNextPage}>
+                  {inbox.isFetchingNextPage ? 'Loading…' : 'Load older notices'}
                 </Button>
               )}
             </div>
@@ -170,18 +241,33 @@ export default function Notifications() {
         </div>
         <div className="stack gap-5">
           <Card title="Needs action" sub="Sorted by deadline">
-            <ul className="list">
-              {actions.map((n) => (
-                <li key={n.id}>
-                  <span className="grow stack gap-0">
-                    <Link className="small strong" to={n.to} onClick={() => markRead(n.id)}>
-                      {n.title}
-                    </Link>
-                    {n.deadline && <Deadline tone={n.deadline.tone}>{n.deadline.text}</Deadline>}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            {summary.isPending ? (
+              <SkeletonLines rows={2} />
+            ) : summary.isError ? (
+              <LoadError error={summary.error} onRetry={() => void summary.refetch()} />
+            ) : actions.length === 0 ? (
+              <p className="small sub">Nothing needs action right now.</p>
+            ) : (
+              <ul className="list">
+                {actions.map((n) => {
+                  const to = noticeHref(n);
+                  return (
+                    <li key={n.id}>
+                      <span className="grow stack gap-0">
+                        {to ? (
+                          <Link className="small strong" to={to} onClick={() => open(n)}>
+                            {n.title}
+                          </Link>
+                        ) : (
+                          <span className="small strong">{n.title}</span>
+                        )}
+                        <NoticeDeadline n={n} />
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </Card>
           <Card title="Email notifications" titleAs="h3">
             <p className="small sub">Choose which notices each person also gets by email.</p>
@@ -189,7 +275,7 @@ export default function Notifications() {
               <Icon name="settings" className="ic-sm" /> Notification preferences
             </Link>
             <Alert tone="info" title="Essential notices can’t be turned off">
-              New orders, dispatch deadlines, return and case deadlines, restrictions, payout results and security alerts always appear here and are always emailed to the owner.
+              {prefs.data?.essentialNote ?? 'New orders, dispatch deadlines, return and case deadlines, restrictions, payout results and security alerts always appear here and are always emailed to the owner.'}
             </Alert>
           </Card>
         </div>

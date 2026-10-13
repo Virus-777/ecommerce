@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { STAFF } from '../data/staff';
 import { cx } from '../lib/cx';
@@ -105,16 +105,52 @@ const SWITCH: Partial<Record<BoArea, { grp: string; item: NavLinkItem }>> = {
   ops: { grp: 'Admin Center', item: { key: 'admin', label: 'Back to Admin Center', icon: 'arrow-left', id: 'admin/dashboard' } },
 };
 
+/** A nav count supplied by the app (overrides the design's sample count for that nav key). */
+export interface NavCount {
+  n: number;
+  /** Urgent: red pill with a screen-reader note. */
+  hot?: boolean;
+  sr?: string;
+  title?: string;
+}
+
+/**
+ * Who is signed in and what needs attention, supplied by each back-office app (Seller Center, Admin Center).
+ * Without a provider the layout shows the design's sample identity and counts.
+ */
+export interface BackOfficeIdentity {
+  user: { name: string; role: string };
+  /** Seller Center: the store this session acts for. */
+  store?: { name: string; initials: string; statusLabel: string; statusTone: 'success' | 'warning' | 'danger' | 'info' | 'muted' };
+  /** Unread notifications for the bell. */
+  notifications?: number;
+  /** Counts per nav key; keys not listed show no count. */
+  counts?: Partial<Record<string, NavCount>>;
+  /** Opens the store switcher (several stores) — Seller Center. */
+  onSwitchStore?: () => void;
+  onSignOut?: () => void;
+}
+
+const IdentityContext = createContext<BackOfficeIdentity | null>(null);
+export const BackOfficeIdentityProvider = IdentityContext.Provider;
+
+function useNavCount(n: NavLinkItem): NavCount | null {
+  const id = useContext(IdentityContext);
+  if (id?.counts) return id.counts[n.key] ?? null;
+  return n.count ? { n: n.count, hot: n.hot, sr: n.hot ? (n.countSr ?? 'urgent') : undefined, title: n.countTitle } : null;
+}
+
 const AREA_LABEL: Record<BoArea, string> = { seller: 'Seller Center', admin: 'Admin Center', ops: 'Operations' };
 const NAV: Record<BoArea, NavEntry[]> = { seller: SELLER_NAV, admin: ADMIN_NAV, ops: OPS_NAV };
 
 function NavItemLink({ n, active, onNavigate }: { n: NavLinkItem; active?: string; onNavigate?: () => void }) {
   const on = n.key === active;
+  const c = useNavCount(n);
   return (
     <Link to={href(n.id)} className={cx(on && 'is-active')} aria-current={on ? 'page' : undefined} onClick={onNavigate}>
       <Icon name={n.icon} />
       <span>{n.label}</span>
-      {n.count ? <Count n={n.count} tone={n.hot ? 'danger' : undefined} sr={n.hot ? (n.countSr ?? 'urgent') : undefined} title={n.countTitle} /> : null}
+      {c && c.n > 0 ? <Count n={c.n} tone={c.hot ? 'danger' : undefined} sr={c.hot ? (c.sr ?? 'urgent') : c.sr} title={c.title} /> : null}
     </Link>
   );
 }
@@ -139,7 +175,8 @@ function NavGroup({ grp, items, active, area, onNavigate }: { grp: string; items
 
 function Sidebar({ area, active, sheet, onClose }: { area: BoArea; active?: string; sheet?: boolean; onClose?: () => void }) {
   const label = AREA_LABEL[area];
-  const user = STAFF[area];
+  const identity = useContext(IdentityContext);
+  const user = identity?.user ?? STAFF[area];
   const sw = SWITCH[area];
   const navRef = useRef<HTMLElement>(null);
   // Bring the active item into view inside the sidebar's own scroller (AD-01).
@@ -169,10 +206,11 @@ function Sidebar({ area, active, sheet, onClose }: { area: BoArea; active?: stri
       )}
       <div className="me">
         <Avatar name={user.name} />
-        <div className="stack gap-0">
+        <div className="stack gap-0 grow min-w-0">
           <span className="strong truncate">{user.name}</span>
           <span className="xs muted truncate">{user.role}</span>
         </div>
+        {identity?.onSignOut && <IconButton icon="log-out" label="Sign out" size="sm" onClick={identity.onSignOut} />}
       </div>
     </aside>
   );
@@ -206,7 +244,10 @@ export interface BackOfficeLayoutProps {
 /** Shared chrome for Seller Center, Admin Center and Operations: sidebar, top bar, phone section chips. */
 export function BackOfficeLayout({ area, active, children }: BackOfficeLayoutProps) {
   const [menu, setMenu] = useState(false);
-  const user = STAFF[area];
+  const identity = useContext(IdentityContext);
+  const user = identity?.user ?? STAFF[area];
+  const store = identity?.store ?? { name: STAFF.seller.store, initials: STAFF.seller.storeInitials, statusLabel: 'Approved · selling', statusTone: 'success' as const };
+  const unread = identity ? (identity.notifications ?? 0) : area === 'seller' ? 4 : 9;
   const flat = NAV[area].flatMap((n) => ('grp' in n ? n.items : [n]));
   const mobile = SWITCH[area] ? [...flat, SWITCH[area]!.item] : flat;
 
@@ -241,15 +282,15 @@ export function BackOfficeLayout({ area, active, children }: BackOfficeLayoutPro
               <LogoMark className="logo-mark sm" />
             </span>
             {area === 'seller' ? (
-              <button type="button" className="row gap-2 nowrap btn-bare tight">
+              <button type="button" className="row gap-2 nowrap btn-bare tight" onClick={identity?.onSwitchStore}>
                 <span className="sr-only">Switch store: </span>
-                <LogoTile initials={STAFF.seller.storeInitials} tint="2" size="sm" />
-                <span className="sr-only only-phone">{STAFF.seller.store}</span>
+                <LogoTile initials={store.initials} tint="2" size="sm" />
+                <span className="sr-only only-phone">{store.name}</span>
                 <span className="stack gap-0 no-phone">
-                  <span className="small strong">{STAFF.seller.store}</span>
-                  <span className="xs t-success-text">● Approved · selling</span>
+                  <span className="small strong">{store.name}</span>
+                  <span className={store.statusTone === 'muted' ? 'xs muted' : `xs t-${store.statusTone}-text`}>● {store.statusLabel}</span>
                 </span>
-                <Icon name="chevrons-up-down" className="ic-sm" />
+                {identity?.onSwitchStore && <Icon name="chevrons-up-down" className="ic-sm" />}
               </button>
             ) : (
               <span className="row gap-2 nowrap small strong no-phone">
@@ -267,7 +308,7 @@ export function BackOfficeLayout({ area, active, children }: BackOfficeLayoutPro
               <IconButton icon="search" label="Search" />
             </span>
             <IconButton icon="circle-help" label="Help" to={href(area === 'seller' ? 'seller/help' : 'help/center')} />
-            <IconButton icon="bell" label={`Notifications, ${area === 'seller' ? 4 : 9} unread`} count={area === 'seller' ? 4 : 9} to={href(area === 'seller' ? 'seller/notifications' : 'admin/inbox')} />
+            <IconButton icon="bell" label={unread ? `Notifications, ${unread} unread` : 'Notifications'} count={unread || undefined} to={href(area === 'seller' ? 'seller/notifications' : 'admin/inbox')} />
             <span className="no-phone">
               <Avatar name={user.name} />
             </span>

@@ -1,189 +1,32 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
+import { ApiError, call, errorMessage, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
-import { money } from '@marketly/web-shared/lib/format';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Card, Icon, PageHeader, SegmentedControl, StatusLegend, Steps, TableWrap, announce, type IconName } from '@marketly/web-shared/ui';
-import { PRODUCT_ROWS } from './data/products';
+import { Alert, Button, Card, EmptyState, Icon, PageHeader, Pager, SegmentedControl, StatusLegend, Steps, TableWrap, announce, type IconName } from '@marketly/web-shared/ui';
+import { useSellerSession } from '@/app/session';
+import { LoadError, SkeletonRows, fmtFull, fmtWhen, openDownload, type Money } from './data/catalog-parts';
 
-// Design: pages/seller/seller-bulk-update.html (step 3, preview of an uploaded CSV with 4 bad rows) ·
-// view "applied" = step 4 done, correction report and upload history. Uploading a CSV parses and
-// validates it in the browser against the seller's SKUs.
+// Design: pages/seller/seller-bulk-update.html (step 3, preview of an uploaded CSV) · view "applied" = step 4
+// done, correction report and upload history. Data: offers bulk updates — GET …/template (prefilled CSV),
+// media upload (purpose bulk_file) + POST …/bulk-updates (parse and validate), GET …/{id} and …/{id}/rows
+// (preview), POST …/{id}/apply, GET …/{id}/correction-report, GET …/bulk-updates (history).
+// ?job=<id> opens one upload; without it the latest preview (or, on ?view=applied, the latest applied file).
 
 type View = 'applied';
+type Job = components['schemas']['offers.BulkUpdateJob'];
+type Row = components['schemas']['offers.BulkUpdateRow'];
+type Filter = 'all' | 'errors' | 'ready';
 
-interface PreviewRow {
-  row: number;
-  sku: string;
-  product?: string;
-  oldPrice?: number;
-  /** undefined = column not in the file (keep), null = empty cell. */
-  newPrice?: number | null;
-  rawPrice?: string;
-  oldQty?: number;
-  newQty?: number;
-  rawQty?: string;
-  error?: string;
-}
+const ROWS_LIMIT = 50;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-interface Stats {
-  total: number;
-  ready: number;
-  price: number;
-  stock: number;
-  errors: number;
-  unchanged: number;
-}
-
-interface UploadFile {
-  name: string;
-  uploaded: string;
-  by: string;
-  rows: PreviewRow[];
-  stats: Stats;
-}
-
-interface HistoryRow {
-  file: string;
-  uploaded: string;
-  by: string;
-  applied: number;
-  skipped: number;
-}
-
-const MIN_PRICE: Record<string, number> = { 'Cables and adapters': 5 };
-const minPrice = (cat: string) => MIN_PRICE[cat] ?? 10;
-const CATALOG = Object.fromEntries(PRODUCT_ROWS.map((r) => [r.sku, r]));
-const short = (sku: string) => {
-  const r = CATALOG[sku];
-  return r ? `${r.name.replace(' Bluetooth', '').replace(' Wireless', '').replace(' True Wireless Earbuds', '').replace(' Headphones', '')}, ${r.condition === 'New' ? r.variant : r.condition}` : undefined;
-};
-
-/** The design's uploaded file: 48 rows, 8 shown in the preview. */
-const SAMPLE: UploadFile = {
-  name: 'northwind-price-stock-2026-10-08.csv',
-  uploaded: '10:18 AM',
-  by: 'Avery Stone',
-  stats: { total: 48, ready: 44, price: 12, stock: 36, errors: 4, unchanged: 0 },
-  rows: [
-    { row: 2, sku: 'NWA-PKT-TEAL', product: 'Halden Pocket Speaker, Teal', oldPrice: 59, newPrice: 54, oldQty: 88 },
-    { row: 3, sku: 'NWA-PKT-CHR', product: 'Halden Pocket Speaker, Charcoal', oldPrice: 59, newPrice: 54, oldQty: 6, newQty: 18 },
-    { row: 4, sku: 'NWA-PKT-BLU', rawPrice: '54.00', rawQty: '10', error: 'Unknown SKU. Check the code or create the offer first.' },
-    { row: 5, sku: 'NWA-AUR-BLK', product: 'Halden Aurora ANC, Midnight black', oldPrice: 184, newPrice: 179, oldQty: 14, newQty: 20 },
-    { row: 6, sku: 'NWA-AUR-SLV', product: 'Halden Aurora ANC, Silver', oldPrice: 184, newPrice: 179, oldQty: 0, newQty: -3, error: "Quantity can't be negative. Enter 0 or more." },
-    { row: 7, sku: 'NWA-CBL-KIT', product: 'Northwind Studio Cable Kit', oldPrice: 24, newPrice: 2.4, oldQty: 42, error: 'Price $2.40 is below the $5.00 minimum for Cables and adapters. Did you mean $24.00?' },
-    { row: 8, sku: 'NWA-AUR-BLK-U', product: 'Halden Aurora ANC, Used – Good', oldPrice: 139, newPrice: 135, oldQty: 2 },
-    { row: 9, sku: 'NWA-BUDS-CHR', product: 'Halden Buds Pro, Charcoal', oldPrice: 149, newPrice: null, oldQty: 12, error: 'Price is empty. Leave the column out to keep the current price.' },
-  ],
-};
-
-const HISTORY: HistoryRow[] = [{ file: 'stock-count-oct-01.csv', uploaded: 'Oct 1, 5:40 PM', by: 'Jae Park', applied: 22, skipped: 0 }];
-const sampleHistory = (f: UploadFile): HistoryRow => ({ file: f.name, uploaded: `Oct 8, ${f.uploaded}`, by: f.by, applied: f.stats.ready, skipped: f.stats.errors });
-
-const priceChanged = (r: PreviewRow) => typeof r.newPrice === 'number' && r.oldPrice !== undefined && r.newPrice !== r.oldPrice;
-const qtyChanged = (r: PreviewRow) => r.newQty !== undefined && r.oldQty !== undefined && r.newQty !== r.oldQty;
-const isReady = (r: PreviewRow) => !r.error && (priceChanged(r) || qtyChanged(r));
-
-function splitCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = '';
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (quoted) {
-      if (c === '"' && line[i + 1] === '"') {
-        cur += '"';
-        i++;
-      } else if (c === '"') quoted = false;
-      else cur += c;
-    } else if (c === '"') quoted = true;
-    else if (c === ',') {
-      out.push(cur);
-      cur = '';
-    } else cur += c;
-  }
-  out.push(cur);
-  return out.map((s) => s.trim());
-}
-
-/** Parses a seller_sku/price/quantity CSV and validates every row. Returns an error message for a bad file. */
-function parseCsv(name: string, text: string): UploadFile | string {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '');
-  if (!lines.length) return 'The file is empty. Download the template, fill it in and upload it again.';
-  const head = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
-  const iSku = head.indexOf('seller_sku');
-  const iPrice = head.indexOf('price');
-  const iQty = head.indexOf('quantity');
-  if (iSku < 0) return 'This file has no seller_sku column. Download the template and keep its header row.';
-  if (iPrice < 0 && iQty < 0) return 'Add a price or quantity column. Leave a column out to keep the current values.';
-  const rows: PreviewRow[] = lines.slice(1).map((line, k) => {
-    const cells = splitCsvLine(line);
-    const sku = (cells[iSku] ?? '').toUpperCase();
-    const rawPrice = iPrice >= 0 ? (cells[iPrice] ?? '').replace(/^\$/, '') : undefined;
-    const rawQty = iQty >= 0 ? cells[iQty] ?? '' : undefined;
-    const r: PreviewRow = { row: k + 2, sku };
-    const p = CATALOG[sku];
-    if (!sku) return { ...r, rawPrice, rawQty, error: 'Seller SKU is empty.' };
-    if (!p) return { ...r, rawPrice, rawQty, error: 'Unknown SKU. Check the code or create the offer first.' };
-    r.product = short(sku);
-    r.oldPrice = p.price;
-    r.oldQty = p.stock;
-    const errs: string[] = [];
-    if (rawPrice !== undefined) {
-      if (rawPrice === '') {
-        r.newPrice = null;
-        errs.push('Price is empty. Leave the column out to keep the current price.');
-      } else if (!Number.isFinite(Number(rawPrice))) {
-        r.rawPrice = rawPrice;
-        errs.push(`Price "${rawPrice}" is not a number. Use digits only, like 54.00.`);
-      } else {
-        r.newPrice = Number(rawPrice);
-        const min = minPrice(p.category);
-        if (r.newPrice < min) errs.push(`Price ${money(r.newPrice)} is below the ${money(min)} minimum for ${p.category}. Did you mean ${money(p.price)}?`);
-        else if (Math.abs(r.newPrice - p.price) / p.price > 0.5) errs.push(`Price changes over 50% need extra confirmation. Change ${p.sku} on its offer page.`);
-      }
-    }
-    if (rawQty !== undefined && rawQty !== '') {
-      const q = Number(rawQty);
-      if (!Number.isInteger(q)) {
-        r.rawQty = rawQty;
-        errs.push('Quantity must be a whole number.');
-      } else {
-        r.newQty = q;
-        if (q < 0) errs.push("Quantity can't be negative. Enter 0 or more.");
-      }
-    }
-    return errs.length ? { ...r, error: errs.join(' ') } : r;
-  });
-  const t = '10:30 AM'; // mock session clock
-  return { name, uploaded: t, by: 'Avery Stone', rows, stats: statsOf(rows) };
-}
-
-function statsOf(rows: PreviewRow[]): Stats {
-  const ready = rows.filter(isReady);
-  return {
-    total: rows.length,
-    ready: ready.length,
-    price: ready.filter(priceChanged).length,
-    stock: ready.filter(qtyChanged).length,
-    errors: rows.filter((r) => r.error).length,
-    unchanged: rows.filter((r) => !r.error && !priceChanged(r) && !qtyChanged(r)).length,
-  };
-}
-
-function download(name: string, lines: string[][]) {
-  const csv = lines.map((l) => l.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function Change({ from, to, money: isMoney }: { from: number; to: number; money?: boolean }) {
-  const f = isMoney ? money : String;
+function Change({ from, to, money: isMoney }: { from: number | Money; to: number | Money; money?: boolean }) {
+  const f = (v: number | Money) => (isMoney ? formatMoney(v as Money) : String(v));
   return (
     <span className="num nowrap">
       <span className="sa-strike">{f(from)}</span>
@@ -193,15 +36,17 @@ function Change({ from, to, money: isMoney }: { from: number; to: number; money?
   );
 }
 
-function PriceCell({ r }: { r: PreviewRow }) {
-  if (r.newPrice === null) return <span className="xs muted">No value</span>;
-  if (r.oldPrice === undefined || typeof r.newPrice !== 'number') return r.rawPrice ? <span className="num">{Number.isFinite(Number(r.rawPrice)) ? money(Number(r.rawPrice)) : r.rawPrice}</span> : r.oldPrice !== undefined ? <span className="num muted">{money(r.oldPrice)}</span> : <span className="xs muted">No value</span>;
-  return r.newPrice !== r.oldPrice ? <Change from={r.oldPrice} to={r.newPrice} money /> : <span className="num muted">{money(r.oldPrice)}</span>;
+function PriceCell({ r }: { r: Row }) {
+  if (!r.priceFrom && !r.priceTo) return <span className="xs muted">No value</span>;
+  if (r.priceFrom && r.priceTo && r.priceFrom.amount !== r.priceTo.amount) return <Change from={r.priceFrom} to={r.priceTo} money />;
+  const v = r.priceTo ?? r.priceFrom;
+  return <span className={cx('num', !r.priceTo || r.priceTo.amount === r.priceFrom?.amount ? 'muted' : '')}>{formatMoney(v!)}</span>;
 }
 
-function QtyCell({ r }: { r: PreviewRow }) {
-  if (r.oldQty === undefined || r.newQty === undefined) return r.rawQty && r.oldQty === undefined ? <span className="num">{r.rawQty}</span> : r.oldQty !== undefined ? <span className="num muted">{r.oldQty}</span> : <span className="xs muted">No value</span>;
-  return r.newQty !== r.oldQty ? <Change from={r.oldQty} to={r.newQty} /> : <span className="num muted">{r.oldQty}</span>;
+function QtyCell({ r }: { r: Row }) {
+  if (r.quantityFrom == null && r.quantityTo == null) return <span className="xs muted">No value</span>;
+  if (r.quantityFrom != null && r.quantityTo != null && r.quantityFrom !== r.quantityTo) return <Change from={r.quantityFrom} to={r.quantityTo} />;
+  return <span className="num muted">{r.quantityTo ?? r.quantityFrom}</span>;
 }
 
 const KPI = ({ icon, k, v, d }: { icon: IconName; k: string; v: ReactNode; d?: string }) => (
@@ -217,67 +62,182 @@ const KPI = ({ icon, k, v, d }: { icon: IconName; k: string; v: ReactNode; d?: s
   </div>
 );
 
-type Filter = 'all' | 'errors' | 'ready';
+const RESULT_BADGE: Record<Row['result'], { label: string; cls: string }> = {
+  ready: { label: 'Ready', cls: 'badge t-success' },
+  unchanged: { label: 'Unchanged', cls: 'badge' },
+  applied: { label: 'Applied', cls: 'badge t-success' },
+  skipped: { label: 'Skipped', cls: 'badge t-danger' },
+  pending_approval: { label: 'Waiting for approval', cls: 'badge t-warning' },
+  error: { label: 'Error', cls: 'badge t-danger' },
+};
 
 export default function BulkUpdate() {
+  const { api, session } = useApi();
+  const qc = useQueryClient();
+  const { sellerId, can } = useSellerSession();
   const [view, setView] = useView<View>();
-  const [file, setFile] = useState<UploadFile>(SAMPLE);
-  const [history, setHistory] = useState<HistoryRow[]>(() => (view === 'applied' ? [sampleHistory(SAMPLE), ...HISTORY] : HISTORY));
-  const [appliedAt, setAppliedAt] = useState('Oct 8, 2026, 10:21 AM PT');
+  const [params, setParams] = useSearchParams();
   const [filter, setFilter] = useState<Filter>('all');
+  const [page, setPage] = useState(1);
   const [fileError, setFileError] = useState('');
+  const [needsConfirm, setNeedsConfirm] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const applied = view === 'applied';
-  const s = file.stats;
-  const errorRows = file.rows.filter((r) => r.error);
-  const shown = file.rows.filter((r) => (filter === 'errors' ? !!r.error : filter === 'ready' ? isReady(r) : true));
+  const allowed = can('offers.bulk.update');
+
+  const counts = useQuery({ queryKey: ['offers', 'counts', sellerId], queryFn: () => call(api.GET('/api/seller/offers/offers/counts')) });
+  const history = useQuery({
+    queryKey: ['offers', 'bulk-updates', sellerId],
+    queryFn: () => call(api.GET('/api/seller/offers/bulk-updates', { params: { query: { limit: 10 } } })),
+    enabled: allowed,
+  });
+  const fallback = (history.data?.items ?? []).find((j) => (view === 'applied' ? j.state === 'applied' : j.state === 'preview_ready' || j.state === 'uploaded' || j.state === 'applying'));
+  const jobId = params.get('job') ?? fallback?.id ?? '';
+  const job = useQuery({
+    queryKey: ['offers', 'bulk-update', sellerId, jobId],
+    queryFn: () => call(api.GET('/api/seller/offers/bulk-updates/{id}', { params: { path: { id: jobId } } })),
+    enabled: allowed && !!jobId,
+    refetchInterval: (q) => (q.state.data && (q.state.data.state === 'uploaded' || q.state.data.state === 'applying') ? 1500 : false),
+  });
+  const j = job.data;
+  const applied = j?.state === 'applied';
+  const result = filter === 'errors' ? (applied ? 'skipped' : 'error') : filter === 'ready' ? (applied ? 'applied' : 'ready') : undefined;
+  const rows = useQuery({
+    queryKey: ['offers', 'bulk-update', sellerId, jobId, 'rows', j?.state, result ?? 'all', page],
+    queryFn: () => call(api.GET('/api/seller/offers/bulk-updates/{id}/rows', { params: { path: { id: jobId }, query: { page, limit: ROWS_LIMIT, ...(result ? { result } : {}) } } })),
+    enabled: !!j && (j.state === 'preview_ready' || j.state === 'applied'),
+    placeholderData: keepPreviousData,
+  });
+  // Rows that need fixing (errors before applying, skipped rows after) for the correction report card.
+  const errorRows = useQuery({
+    queryKey: ['offers', 'bulk-update', sellerId, jobId, 'rows', j?.state, 'errors-all'],
+    queryFn: () => call(api.GET('/api/seller/offers/bulk-updates/{id}/rows', { params: { path: { id: jobId }, query: { limit: 100, result: 'skipped' } } })),
+    enabled: !!j && applied,
+  });
+
+  useEffect(() => setPage(1), [filter, jobId]);
+  // The view follows the job: an applied file shows step 4.
+  useEffect(() => {
+    if (!j) return;
+    if (applied && view !== 'applied') setView('applied', { replace: true });
+    if (!applied && view === 'applied' && params.get('job')) setView('', { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [j?.state]);
+
+  const openJob = (id: string) => {
+    const next = new URLSearchParams(params);
+    next.set('job', id);
+    next.delete('view');
+    setParams(next, { replace: true });
+  };
+
+  const upload = useMutation({
+    mutationFn: async (f: File) => {
+      if (!/\.(csv|xlsx)$/i.test(f.name)) throw new ApiError(415, 'FILE_TYPE_NOT_ALLOWED', 'Upload the CSV template (or an .xlsx file) with the columns seller_sku, price and quantity.');
+      const asset = await uploadMedia(session, f, 'bulk_file');
+      let created = await call(api.POST('/api/seller/offers/bulk-updates', { body: { fileId: asset.id } }));
+      for (let i = 0; i < 60 && created.state === 'uploaded'; i++) {
+        await sleep(1500);
+        created = await call(api.GET('/api/seller/offers/bulk-updates/{id}', { params: { path: { id: created.id } } }));
+      }
+      return created;
+    },
+    onSuccess: (created) => {
+      setFileError(created.state === 'failed' ? (created.failure ?? 'We couldn’t read that file.') : '');
+      setFilter('all');
+      setNeedsConfirm(false);
+      qc.setQueryData(['offers', 'bulk-update', sellerId, created.id], created);
+      void qc.invalidateQueries({ queryKey: ['offers', 'bulk-updates', sellerId] });
+      openJob(created.id);
+      const t = created.totals;
+      announce(`${t.rows} rows read from ${created.fileName}: ${t.ready} ready, ${t.errors} with errors`);
+    },
+    onError: (e) => {
+      const issues = e instanceof ApiError ? (e.details.issues as Array<{ message: string }> | undefined) : undefined;
+      const msg = issues?.length ? `${errorMessage(e)} ${issues.map((i) => i.message).join(' ')}` : errorMessage(e);
+      setFileError(msg);
+      announce(msg);
+    },
+  });
+
+  const apply = useMutation({
+    mutationFn: async (confirm: boolean) => {
+      let done = await call(api.POST('/api/seller/offers/bulk-updates/{id}/apply', { params: { path: { id: jobId } }, body: confirm ? { confirmLargeChanges: true } : {} }));
+      for (let i = 0; i < 60 && done.state === 'applying'; i++) {
+        await sleep(1500);
+        done = await call(api.GET('/api/seller/offers/bulk-updates/{id}', { params: { path: { id: jobId } } }));
+      }
+      return done;
+    },
+    onSuccess: (done) => {
+      setNeedsConfirm(false);
+      qc.setQueryData(['offers', 'bulk-update', sellerId, done.id], done);
+      void qc.invalidateQueries({ queryKey: ['offers'] });
+      void qc.invalidateQueries({ queryKey: ['inventory'] });
+      setFilter('all');
+      setView('applied');
+      announce(`${done.totals.applied} rows applied`);
+    },
+    onError: (e) => {
+      if (e instanceof ApiError && e.code === 'LARGE_PRICE_CHANGE_UNCONFIRMED') setNeedsConfirm(true);
+    },
+  });
+
+  const template = useMutation({
+    mutationFn: () => call(api.GET('/api/seller/offers/bulk-updates/template')),
+    onSuccess: (link) => {
+      openDownload(link.url, link.fileName);
+      announce('Template downloaded');
+    },
+  });
+  const report = useMutation({
+    mutationFn: (id: string) => call(api.GET('/api/seller/offers/bulk-updates/{id}/correction-report', { params: { path: { id } } })),
+    onSuccess: (link) => {
+      openDownload(link.url, link.fileName);
+      announce('Correction report downloaded');
+    },
+  });
 
   const pick = () => input.current?.click();
-  const onFile = async (f?: File) => {
-    if (!f) return;
-    const parsed = parseCsv(f.name, await f.text());
-    if (typeof parsed === 'string') {
-      setFileError(parsed);
-      announce(parsed);
-      return;
-    }
-    setFileError('');
-    setFile(parsed);
-    setFilter('all');
-    setView('');
-    announce(`${parsed.stats.total} rows read from ${f.name}: ${parsed.stats.ready} ready, ${parsed.stats.errors} with errors`);
-  };
-  const apply = () => {
-    if (!s.ready) return;
-    setHistory((h) => [sampleHistory(file), ...h.filter((x) => x.file !== file.name || x.uploaded !== `Oct 8, ${file.uploaded}`)]);
-    if (file !== SAMPLE) setAppliedAt(`Oct 8, 2026, 10:32 AM PT`);
-    setView('applied');
-    announce(`${s.ready} rows applied`);
-  };
-  const template = () => {
-    download('northwind-price-stock-template.csv', [['seller_sku', 'price', 'quantity'], ...PRODUCT_ROWS.map((r) => [r.sku, r.price.toFixed(2), String(r.stock)])]);
-    announce('Template downloaded');
-  };
-  const report = () => {
-    download(`${file.name.replace(/\.csv$/i, '')}-corrections.csv`, [['row', 'seller_sku', 'what_to_fix'], ...errorRows.map((r) => [String(r.row), r.sku, r.error ?? ''])]);
-    announce('Correction report downloaded');
-  };
+  const t = j?.totals;
+  const shown = rows.data?.items ?? [];
+  const shownTotal = rows.data?.total ?? shown.length;
+  const reportRows = applied ? (errorRows.data?.items ?? []) : [];
+  const busy = upload.isPending || j?.state === 'uploaded';
+  const writeError = [template, report].find((m) => m.isError);
+
+  const top = (
+    <>
+      <PageHeader crumbs={[{ label: 'Inventory', to: href('seller/inventory') }, { label: 'Bulk update' }]} title="Bulk price and stock update" sub="Update prices and quantities for many SKUs with one CSV file." />
+      <Steps items={['Download template', 'Upload file', applied ? 'Check preview' : <><span className="sr-only">Step 3 of 4: </span>Check preview</>, 'Apply']} current={applied ? 4 : j ? 2 : 0} />
+    </>
+  );
+
+  if (!allowed)
+    return (
+      <SellerLayout active="inventory">
+        {top}
+        <section className="card">
+          <EmptyState icon="lock" as="h2" title="Bulk updates aren’t part of your role" action={<Button to={href('seller/inventory')}>Back to inventory</Button>}>
+            Ask the store owner for the bulk update permission, or change prices and stock one offer at a time.
+          </EmptyState>
+        </section>
+      </SellerLayout>
+    );
 
   return (
     <SellerLayout active="inventory">
-      <PageHeader crumbs={[{ label: 'Inventory', to: href('seller/inventory') }, { label: 'Bulk update' }]} title="Bulk price and stock update" sub="Update prices and quantities for many SKUs with one CSV file." />
-      <Steps items={['Download template', 'Upload file', applied ? 'Check preview' : <><span className="sr-only">Step 3 of 4: </span>Check preview</>, 'Apply']} current={applied ? 4 : 2} />
-      <input ref={input} type="file" accept=".csv,text/csv" hidden onChange={(e) => (onFile(e.target.files?.[0]), (e.target.value = ''))} />
+      {top}
+      <input ref={input} type="file" accept=".csv,text/csv,.xlsx" hidden onChange={(e) => (e.target.files?.[0] && upload.mutate(e.target.files[0]), (e.target.value = ''))} />
       <div className="grid md2">
         <div className="card pad stack gap-2">
           <span className="row gap-2">
             <Icon name="file-down" />
             <span className="strong">1. Download the template</span>
           </span>
-          <p className="small sub">Prefilled with your 24 SKUs, current prices and quantities. Columns: seller_sku, price, quantity.</p>
+          <p className="small sub">Prefilled with your {counts.data ? `${counts.data.all} ` : ''}SKUs, current prices and quantities. Columns: seller_sku, price, quantity.</p>
           <div className="row gap-2">
-            <Button variant="secondary" size="sm" icon="download" onClick={template}>
-              Download template
+            <Button variant="secondary" size="sm" icon="download" onClick={() => template.mutate()} disabled={template.isPending}>
+              {template.isPending ? 'Preparing…' : 'Download template'}
             </Button>
           </div>
         </div>
@@ -288,12 +248,12 @@ export default function BulkUpdate() {
           </span>
           <div className="panel row gap-2 nowrap">
             <Icon name="file-spreadsheet" className="ic-sm" />
-            <span className="small grow truncate">{file.name}</span>
-            <span className="xs muted">{s.total} rows</span>
+            <span className="small grow truncate">{busy ? (upload.variables?.name ?? j?.fileName ?? 'Reading your file…') : (j?.fileName ?? 'No file uploaded yet')}</span>
+            <span className="xs muted">{busy ? 'Checking…' : t ? `${t.rows} rows` : 'CSV, up to 25 MB'}</span>
           </div>
           <div className="row gap-2">
-            <Button variant="ghost" size="sm" onClick={pick}>
-              Replace file
+            <Button variant="ghost" size="sm" onClick={pick} disabled={busy}>
+              {j ? 'Replace file' : 'Upload file'}
             </Button>
           </div>
         </div>
@@ -303,23 +263,44 @@ export default function BulkUpdate() {
           {fileError}
         </Alert>
       )}
-      {applied ? (
+      {writeError && (
+        <Alert tone="danger" title="The download didn’t start">
+          {errorMessage(writeError.error)}
+        </Alert>
+      )}
+      {(history.isError || job.isError) && <LoadError error={history.error ?? job.error} onRetry={() => void (history.isError ? history.refetch() : job.refetch())} />}
+      {jobId && !j && !job.isError ? (
+        <section className="card">
+          <SkeletonRows rows={4} thumb={false} />
+        </section>
+      ) : j?.state === 'failed' ? (
+        <Alert tone="danger" title="We couldn't read that file">
+          {j.failure ?? 'Check the columns and try again.'} Download the template, fill it in and upload it again.
+        </Alert>
+      ) : j?.state === 'expired' ? (
+        <Alert tone="warning" title="This preview expired">
+          Prices and stock may have changed since {fmtWhen(j.uploadedAt)}. Upload the file again to check it.
+        </Alert>
+      ) : applied && t ? (
         <>
-          <Alert tone="success" title={`${s.ready} rows applied`}>
-            Applied {appliedAt} by Avery Stone. New prices and quantities are live on your offers now.{s.errors ? ` ${s.errors} row${s.errors === 1 ? ' was' : 's were'} skipped.` : ''}
+          <Alert tone="success" title={`${t.applied} row${t.applied === 1 ? '' : 's'} applied`}>
+            Applied {fmtFull(j!.appliedAt)}
+            {j!.appliedBy?.name ? ` by ${j!.appliedBy.name}` : ''}. New prices and quantities are live on your offers now.
+            {t.skipped ? ` ${t.skipped} row${t.skipped === 1 ? ' was' : 's were'} skipped.` : ''}
+            {t.pendingApproval ? ` ${t.pendingApproval} waiting for approval.` : ''}
           </Alert>
           <div className="sa-kpis">
-            <KPI icon="circle-check" k="Updated" v={s.ready} />
-            <KPI icon="circle-alert" k="Skipped" v={<span className="t-danger-text">{s.errors}</span>} d="See correction report" />
-            <KPI icon="tag" k="Price changes" v={s.price} />
-            <KPI icon="boxes" k="Stock changes" v={s.stock} d={'Recorded as "Bulk update"'} />
+            <KPI icon="circle-check" k="Updated" v={t.applied} />
+            <KPI icon="circle-alert" k="Skipped" v={<span className={cx(t.skipped > 0 && 't-danger-text')}>{t.skipped}</span>} d={t.skipped ? 'See correction report' : undefined} />
+            <KPI icon="tag" k="Price changes" v={t.priceChanges} />
+            <KPI icon="boxes" k="Stock changes" v={t.stockChanges} d={'Recorded as "Bulk update"'} />
           </div>
-          {errorRows.length > 0 && (
+          {reportRows.length > 0 && (
             <Card
               title="Correction report"
-              sub={`${errorRows.length} row${errorRows.length === 1 ? ' was' : 's were'} not applied. Fix and upload just these rows.`}
+              sub={`${reportRows.length} row${reportRows.length === 1 ? ' was' : 's were'} not applied. Fix and upload just these rows.`}
               actions={
-                <Button size="sm" icon="download" onClick={report}>
+                <Button size="sm" icon="download" onClick={() => report.mutate(j!.id)} disabled={report.isPending}>
                   Download report (CSV)
                 </Button>
               }
@@ -335,19 +316,19 @@ export default function BulkUpdate() {
                     </tr>
                   </thead>
                   <tbody>
-                    {errorRows.map((r) => (
+                    {reportRows.map((r) => (
                       <tr key={r.row} className="is-flagged">
                         <td>
                           <span className="sr-only">Urgent: </span>
                           <span className="num xs muted">{r.row}</span>
                         </td>
                         <td>
-                          <span className="mono xs nowrap" title={r.sku}>
-                            {r.sku}
+                          <span className="mono xs nowrap" title={r.sellerSku}>
+                            {r.sellerSku}
                           </span>
                         </td>
                         <td>
-                          <span className="small">{r.error}</span>
+                          <span className="small">{r.error?.message ?? 'Not applied'}</span>
                         </td>
                       </tr>
                     ))}
@@ -358,79 +339,102 @@ export default function BulkUpdate() {
             </Card>
           )}
           <Card title="Upload history" titleAs="h3" flush>
-            <TableWrap label="Upload history table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">File</th>
-                    <th scope="col">Uploaded</th>
-                    <th scope="col">By</th>
-                    <th className="r" scope="col">
-                      Applied
-                    </th>
-                    <th className="r" scope="col">
-                      Skipped
-                    </th>
-                    <th scope="col">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((h, i) => (
-                    <tr key={`${h.file}${i}`}>
-                      <td>{h.file}</td>
-                      <td>{h.uploaded}</td>
-                      <td>{h.by}</td>
-                      <td className="r">{h.applied}</td>
-                      <td className="r">{h.skipped}</td>
-                      <td>
-                        {i === 0 && h.file === file.name && errorRows.length ? (
+            {!history.data ? (
+              <SkeletonRows rows={2} thumb={false} />
+            ) : (
+              <TableWrap label="Upload history table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">File</th>
+                      <th scope="col">Uploaded</th>
+                      <th scope="col">By</th>
+                      <th className="r" scope="col">
+                        Applied
+                      </th>
+                      <th className="r" scope="col">
+                        Skipped
+                      </th>
+                      <th scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.data.items.map((h: Job) => (
+                      <tr key={h.id}>
+                        <td>
                           <a
-                            className="small"
                             href="#"
                             onClick={(e) => {
                               e.preventDefault();
-                              report();
+                              openJob(h.id);
                             }}
                           >
-                            Report
+                            {h.fileName}
                           </a>
-                        ) : (
-                          <a className="small" href="#">
-                            Report
-                          </a>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
+                        </td>
+                        <td>{fmtWhen(h.uploadedAt)}</td>
+                        <td>{h.uploadedBy.name ?? (h.state === 'applied' ? (h.appliedBy?.name ?? '') : '')}</td>
+                        <td className="r">{h.state === 'applied' ? h.totals.applied : '—'}</td>
+                        <td className="r">{h.state === 'applied' ? h.totals.skipped : h.state === 'preview_ready' ? 'Not applied' : h.state.replace('_', ' ')}</td>
+                        <td>
+                          {h.totals.errors > 0 || h.totals.skipped > 0 ? (
+                            <a
+                              className="small"
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                report.mutate(h.id);
+                              }}
+                            >
+                              Report
+                            </a>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
           </Card>
         </>
-      ) : (
+      ) : j && t ? (
         <>
           <div className="sa-kpis">
-            <KPI icon="file-spreadsheet" k="Rows in file" v={s.total} />
-            <KPI icon="circle-check" k="Ready to apply" v={s.ready} d={`${s.price} price · ${s.stock} stock changes`} />
-            <KPI icon="circle-alert" k="Errors" v={<span className={cx(s.errors > 0 && 't-danger-text')}>{s.errors}</span>} d="Skipped unless fixed" />
-            <KPI icon="minus" k="Unchanged" v={s.unchanged} />
+            <KPI icon="file-spreadsheet" k="Rows in file" v={t.rows} />
+            <KPI icon="circle-check" k="Ready to apply" v={t.ready} d={`${t.priceChanges} price · ${t.stockChanges} stock changes`} />
+            <KPI icon="circle-alert" k="Errors" v={<span className={cx(t.errors > 0 && 't-danger-text')}>{t.errors}</span>} d="Skipped unless fixed" />
+            <KPI icon="minus" k="Unchanged" v={t.unchanged} />
           </div>
-          {s.errors > 0 && (
-            <Alert tone="warning" title={`${s.errors} row${s.errors === 1 ? ' has' : 's have'} errors`}>
-              Rows with errors are skipped. Nothing changes until you apply. Fix them in your file and upload again, or apply the {s.ready} valid rows now and download the correction report.
+          {t.errors > 0 && (
+            <Alert tone="warning" title={`${t.errors} row${t.errors === 1 ? ' has' : 's have'} errors`}>
+              Rows with errors are skipped. Nothing changes until you apply. Fix them in your file and upload again, or apply the {t.ready} valid rows now and download the correction report.
+            </Alert>
+          )}
+          {needsConfirm && (
+            <Alert tone="warning" title="Some prices change a lot">
+              At least one row changes a price by more than the large-change limit. Check the preview, then confirm to apply.{' '}
+              <Button size="sm" variant="secondary" onClick={() => apply.mutate(true)} disabled={apply.isPending}>
+                Confirm and apply
+              </Button>
+            </Alert>
+          )}
+          {apply.isError && !needsConfirm && (
+            <Alert tone="danger" title="The file wasn’t applied">
+              {errorMessage(apply.error)}
             </Alert>
           )}
           <Card
             title="Preview"
-            sub={`${file.name} · uploaded ${file.uploaded} by ${file.by}`}
+            sub={`${j.fileName} · uploaded ${fmtWhen(j.uploadedAt)}${j.uploadedBy.name ? ` by ${j.uploadedBy.name}` : ''} · apply by ${fmtWhen(j.expiresAt)}`}
             actions={
               <SegmentedControl<Filter>
                 items={[
                   { value: 'all', label: 'All rows' },
-                  { value: 'errors', label: `Errors (${s.errors})` },
-                  { value: 'ready', label: `Ready (${s.ready})` },
+                  { value: 'errors', label: `Errors (${t.errors})` },
+                  { value: 'ready', label: `Ready (${t.ready})` },
                 ]}
                 active={filter}
                 onChange={setFilter}
@@ -440,72 +444,82 @@ export default function BulkUpdate() {
             foot={
               <>
                 <span className="xs muted grow">
-                  Showing {shown.length} of {filter === 'all' ? s.total : filter === 'errors' ? s.errors : s.ready} rows
+                  Showing {shown.length} of {filter === 'all' ? t.rows : shownTotal} rows
                 </span>
-                <Button variant="secondary" size="sm" icon="download" onClick={report} disabled={!errorRows.length}>
+                {(rows.data?.totalPages ?? 1) > 1 && <Pager page={page} total={rows.data!.totalPages!} onPage={setPage} only="website" />}
+                <Button variant="secondary" size="sm" icon="download" onClick={() => report.mutate(j.id)} disabled={!t.errors || report.isPending}>
                   Download correction report
                 </Button>
-                <Button variant="secondary" size="sm" icon="upload" onClick={pick}>
+                <Button variant="secondary" size="sm" icon="upload" onClick={pick} disabled={busy}>
                   Upload a corrected file
                 </Button>
-                <Button size="sm" onClick={apply} disabled={!s.ready}>
-                  Apply {s.ready} valid row{s.ready === 1 ? '' : 's'}
+                <Button size="sm" onClick={() => apply.mutate(false)} disabled={!t.ready || apply.isPending || j.state !== 'preview_ready'}>
+                  {apply.isPending || j.state === 'applying' ? 'Applying…' : `Apply ${t.ready} valid row${t.ready === 1 ? '' : 's'}`}
                 </Button>
               </>
             }
           >
-            <TableWrap label="Preview table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Row</th>
-                    <th scope="col">Seller SKU</th>
-                    <th scope="col">Product</th>
-                    <th scope="col">Price</th>
-                    <th scope="col">Quantity</th>
-                    <th scope="col">Result</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.map((r) => (
-                    <tr key={r.row} className={r.error ? 'is-flagged' : ''}>
-                      <td>
-                        {r.error && <span className="sr-only">Urgent: </span>}
-                        <span className="num xs muted">{r.row}</span>
-                      </td>
-                      <td>
-                        <span className="mono xs nowrap" title={r.sku}>
-                          {r.sku}
-                        </span>
-                      </td>
-                      <td>{r.product ? <span className="small">{r.product}</span> : <span className="xs muted">Not found</span>}</td>
-                      <td>
-                        <PriceCell r={r} />
-                      </td>
-                      <td>
-                        <QtyCell r={r} />
-                      </td>
-                      <td>
-                        {r.error ? (
-                          <span className="error-text wrap items-start u-maxw-36ch">
-                            <Icon name="circle-alert" className="ic-sm" />
-                            <span>{r.error}</span>
-                          </span>
-                        ) : isReady(r) ? (
-                          <span className="badge t-success">Ready</span>
-                        ) : (
-                          <span className="badge">Unchanged</span>
-                        )}
-                      </td>
+            {j.state === 'uploaded' || !rows.data ? (
+              <SkeletonRows rows={4} thumb={false} />
+            ) : (
+              <TableWrap label="Preview table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Row</th>
+                      <th scope="col">Seller SKU</th>
+                      <th scope="col">Product</th>
+                      <th scope="col">Price</th>
+                      <th scope="col">Quantity</th>
+                      <th scope="col">Result</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
+                  </thead>
+                  <tbody>
+                    {shown.map((r) => (
+                      <tr key={r.row} className={r.error ? 'is-flagged' : ''}>
+                        <td>
+                          {r.error && <span className="sr-only">Urgent: </span>}
+                          <span className="num xs muted">{r.row}</span>
+                        </td>
+                        <td>
+                          <span className="mono xs nowrap" title={r.sellerSku}>
+                            {r.sellerSku}
+                          </span>
+                        </td>
+                        <td>{r.productLabel ? <span className="small">{r.productLabel}</span> : <span className="xs muted">Not found</span>}</td>
+                        <td>
+                          <PriceCell r={r} />
+                        </td>
+                        <td>
+                          <QtyCell r={r} />
+                        </td>
+                        <td>
+                          {r.error ? (
+                            <span className="error-text wrap items-start u-maxw-36ch">
+                              <Icon name="circle-alert" className="ic-sm" />
+                              <span>{r.error.message}</span>
+                            </span>
+                          ) : (
+                            <span className={RESULT_BADGE[r.result].cls}>{RESULT_BADGE[r.result].label}</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
+            {rows.data && shown.length === 0 && <EmptyState icon="search-x" title={filter === 'errors' ? 'No rows with errors' : 'No rows to show'} />}
             {shown.some((r) => r.error) && <StatusLegend items={[{ tone: 'danger', label: 'Red edge = urgent: overdue or past target' }]} />}
           </Card>
         </>
-      )}
+      ) : !jobId && history.data ? (
+        <section className="card">
+          <EmptyState icon="file-spreadsheet" as="h2" title="Upload a file to see the preview" action={<Button icon="upload" onClick={pick} disabled={busy}>{busy ? 'Checking your file…' : 'Upload file'}</Button>}>
+            Download the template, change prices or quantities, then upload it. Nothing changes until you check the preview and apply it.
+          </EmptyState>
+        </section>
+      ) : null}
       <p className="xs muted row gap-1 nowrap top">
         <Icon name="info" className="ic-sm" />
         <span className="wrap">Price changes over 50% in one update and broad catalog edits need extra confirmation. Stock changes are recorded with the reason "Bulk update" and your name.</span>

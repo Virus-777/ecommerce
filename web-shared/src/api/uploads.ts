@@ -53,7 +53,9 @@ async function api<T>(session: Session, method: string, path: string, body?: unk
  */
 export async function uploadMedia(session: Session, file: File, purpose: UploadPurpose, o: { alt?: string; timeoutMs?: number } = {}): Promise<MediaAsset> {
   const base = `/api/${session.audience}/media`;
-  const spec = { purpose, fileName: file.name, contentType: file.type || 'application/octet-stream', sizeBytes: file.size, ...(o.alt ? { alt: o.alt } : {}) };
+  // Browsers on Windows report .csv as application/vnd.ms-excel: spreadsheets are typed by their extension.
+  const contentType = /\.csv$/i.test(file.name) ? 'text/csv' : /\.xlsx$/i.test(file.name) ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : file.type || 'application/octet-stream';
+  const spec = { purpose, fileName: file.name, contentType, sizeBytes: file.size, ...(o.alt ? { alt: o.alt } : {}) };
   // The admin area wraps the upload and names the owner (platform content).
   const ticket = await api<Ticket>(session, 'POST', `${base}/uploads`, session.audience === 'admin' ? { upload: spec, ownerKind: 'platform' } : spec);
 
@@ -76,12 +78,14 @@ export async function uploadMedia(session: Session, file: File, purpose: UploadP
   const sent = await fetch(own ? target.pathname + target.search : ticket.url, { method: ticket.method, headers: ticket.method === 'POST' && !own ? undefined : headers, body });
   if (!sent.ok) throw await toApiError(sent);
 
-  let asset = await api<MediaAsset>(session, 'POST', `${base}/uploads/${ticket.uploadId}/complete`);
+  // The seller and admin areas answer {asset, usages, …}; the store area answers the asset itself.
+  const unwrap = (r: MediaAsset | { asset: MediaAsset }): MediaAsset => ('asset' in r && r.asset ? r.asset : (r as MediaAsset));
+  let asset = unwrap(await api<MediaAsset | { asset: MediaAsset }>(session, 'POST', `${base}/uploads/${ticket.uploadId}/complete`));
   const until = Date.now() + (o.timeoutMs ?? 90_000);
   while (asset.status === 'processing' || asset.status === 'pending_upload') {
     if (Date.now() > until) throw new ApiError(504, 'UPLOAD_TIMEOUT', `${file.name} is taking too long to process. Try again in a moment.`);
     await sleep(1500);
-    asset = await api<MediaAsset>(session, 'GET', `${base}/assets/${ticket.assetId}`);
+    asset = unwrap(await api<MediaAsset | { asset: MediaAsset }>(session, 'GET', `${base}/assets/${ticket.assetId}`));
   }
   if (asset.status !== 'ready') throw new ApiError(422, 'UPLOAD_REJECTED', asset.rejectionReason || `${file.name} couldn’t be used. Try another file.`);
   return asset;

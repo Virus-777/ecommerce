@@ -1,92 +1,145 @@
-import { useState, type ReactNode } from 'react';
-import { Link } from 'react-router';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { ApiError, call, errorMessage, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import {
-  Alert, Badge, Button, Card, Checkbox, Chip, Field, FileDrop, Icon, Img, KeyValue, Meter, PageHeader, Select, StatusLegend, Switch, TableWrap, Textarea, TextInput, Timeline, announce, type IconName,
+  Alert, Badge, Button, Card, Checkbox, Chip, EmptyState, Field, FileDrop, Icon, IconButton, Img, KeyValue, Meter, PageHeader, Select, StatusLegend, Switch, TableWrap, Textarea, TextInput, Timeline, announce, type IconName, type TimelineEvent,
 } from '@marketly/web-shared/ui';
+import { useSellerSession } from '@/app/session';
+import { FormSkeleton, LoadError, fmtDay, fmtFull, fmtWhen, inputAmount, reviewLabel, toMinor } from './data/catalog-parts';
+import { CATEGORIES, SELLER_PRODUCT, flattenCategories, offerHref, productHref, type CategoryAttribute, type CategoryNode, type SellerProduct } from './data/products';
 
-// Design: pages/seller/seller-product-new.html (a draft with missing fields) · view "changes-requested"
-// = the same submission returned by the Catalog team with 3 marked fields.
+// Design: pages/seller/seller-product-new.html (a draft with missing fields) · view "changes-requested" = the
+// submission returned by the Catalog team with marked fields (shown when the product's review state is
+// changes requested; the review feedback comes from the review log). URL: ?id=<productId> edits one of the
+// seller's own products; without it the first save creates the draft.
+// Data: GraphQL myProduct (content, submission, review log, own offers) and the category tree;
+// GET catalog/brands; GET catalog/categories/{id}/attributes (attributes and image standards);
+// GET shipping/profiles (default profile for the variation offers). Writes: POST/PATCH catalog/products,
+// POST catalog/products/{id}/submit, media uploads (product_image), and per variation with a SKU and price
+// a draft offer that publishes on approval (POST offers/offers, PATCH offers/offers/{id}).
 
 type View = 'changes-requested';
+type ProductAdmin = components['schemas']['catalog.ProductAdmin'];
+type ImageRule = components['schemas']['catalog.ImageRule'];
 
-interface Variation {
-  color: string;
+const NEW_BRAND = '__new';
+const MIN_DESCRIPTION = 40; // catalog setting minDescriptionLength (seller-visible; no seller settings read in this app)
+const MAX_FEATURES = 5;
+
+interface VarRow {
+  key: string;
+  value: string;
   sku: string;
   price: string;
   qty: string;
   gtin: string;
+  variantId?: string;
+  offerId?: string;
+  /** Saved offer values, to send only what changed. */
+  saved?: { sku: string; price: number };
+  error?: string;
 }
 interface Photo {
-  id: string;
-  icon: IconName;
-  tint: string;
-  src?: string;
-  /** Flagged by the reviewer (text overlay). */
-  flagged?: boolean;
+  key: string;
+  assetId?: string;
+  url?: string;
+  name?: string;
+  status: 'ready' | 'uploading' | 'failed';
+  error?: string;
 }
 interface Accessory {
   id: string;
   label: string;
   checked: boolean;
 }
+interface Form {
+  categoryId: string;
+  brand: string;
+  requestedBrand: string;
+  model: string;
+  name: string;
+  desc: string;
+  features: string[];
+  specs: Array<{ name: string; value: string }>;
+  hasVariations: boolean;
+  varAttr: string;
+  variations: VarRow[];
+  photos: Photo[];
+  gtin: string;
+  noGtin: boolean;
+  mpn: string;
+  accessories: Accessory[];
+}
 
-const ORIGINAL_FREQ = '15 Hz – 28 kHz';
+let seq = 0;
+const key = () => `k${++seq}`;
+const gtinOk = (g: string) => /^\d{8}$|^\d{12,14}$/.test(g.replace(/\s/g, ''));
+const pad = (list: string[], n: number) => [...list, ...Array(Math.max(0, n - list.length)).fill('')].slice(0, Math.max(n, list.length));
 
-const SPEC_FIELDS = [
-  { key: 'type', label: 'Headphone type', id: 'pn-type', options: ['Over-ear, closed-back', 'Over-ear, open-back', 'On-ear'] },
-  { key: 'conn', label: 'Connectivity', id: 'pn-conn', options: ['Wired', 'Bluetooth', 'Wired and Bluetooth'] },
-  { key: 'driver', label: 'Driver size', id: 'pn-driver' },
-  { key: 'imp', label: 'Impedance', id: 'pn-imp' },
-  { key: 'freq', label: 'Frequency response', id: 'pn-freq' },
-  { key: 'cable', label: 'Cable', id: 'pn-cable' },
-  { key: 'weight', label: 'Weight', id: 'pn-weight', placeholder: 'e.g. 285 g', error: 'Add the weight without cables.' },
-  { key: 'mic', label: 'Microphone', id: 'pn-mic', options: ['Select', 'No microphone', 'Inline microphone', 'Boom microphone'], error: 'Choose an option.' },
-  { key: 'anc', label: 'Noise cancellation', id: 'pn-anc', options: ['None (passive isolation)', 'Active (ANC)'] },
-] as const;
-type SpecKey = (typeof SPEC_FIELDS)[number]['key'];
-
-function initialState(cr: boolean) {
+function initialForm(p: SellerProduct | null | undefined): Form {
+  if (!p) {
+    return {
+      categoryId: '',
+      brand: '',
+      requestedBrand: '',
+      model: '',
+      name: '',
+      desc: '',
+      features: pad([], MAX_FEATURES),
+      specs: [],
+      hasVariations: false,
+      varAttr: 'Color',
+      variations: [{ key: key(), value: '', sku: '', price: '', qty: '', gtin: '' }],
+      photos: [],
+      gtin: '',
+      noGtin: false,
+      mpn: '',
+      accessories: [],
+    };
+  }
+  const withOptions = p.variants.filter((v) => v.options.length);
+  const hasVariations = withOptions.length > 0;
+  const varAttr = withOptions[0]?.options[0]?.name ?? p.category?.attributes.find((a) => a.variantDefining)?.name ?? 'Color';
+  const rows: VarRow[] = hasVariations
+    ? p.variants.map((v) => {
+        const offer = p.myOffers.find((o) => o.variant.id === v.id && o.condition === 'NEW') ?? p.myOffers.find((o) => o.variant.id === v.id);
+        return {
+          key: key(),
+          value: v.options.find((o) => o.name === varAttr)?.value ?? v.options[0]?.value ?? '',
+          sku: offer?.sellerSku ?? '',
+          price: offer ? inputAmount(offer.price) : '',
+          qty: offer?.stock ? String(offer.stock.quantities.available) : '',
+          gtin: v.gtin ?? '',
+          variantId: v.id,
+          offerId: offer?.id,
+          saved: offer ? { sku: offer.sellerSku ?? '', price: offer.price.amount } : undefined,
+        };
+      })
+    : [{ key: key(), value: '', sku: '', price: '', qty: '', gtin: '' }];
   return {
-    brand: 'Ferro',
-    model: 'HD-60',
-    name: 'Ferro HD-60 Studio Monitor Headphones',
-    desc: 'Closed-back studio monitor headphones tuned for accurate mixing and tracking. 40 mm drivers, detachable cables and memory-foam ear pads for long sessions.',
-    features: ['Closed-back design isolates sound for tracking', '40 mm neodymium drivers, 32 Ω, easy to drive from laptops', 'Detachable 3 m coiled and 1.2 m straight cables', 'Swivel ear cups fold flat for travel', ''],
-    specs: { type: 'Over-ear, closed-back', conn: 'Wired', driver: '40 mm', imp: '32 Ω', freq: ORIGINAL_FREQ, cable: 'Detachable, 3.5 mm', weight: cr ? '285 g' : '', mic: cr ? 'No microphone' : 'Select', anc: 'None (passive isolation)' } as Record<SpecKey, string>,
-    hasVariations: true,
-    variations: [
-      { color: 'Black', sku: 'NWA-FER-HD60-BLK', price: '129.00', qty: '12', gtin: '0 75213 66001 8' },
-      { color: 'White', sku: 'NWA-FER-HD60-WHT', price: cr ? '129.00' : '', qty: '8', gtin: '0 75213 66002 5' },
-    ] as Variation[],
-    photos: (cr
-      ? [
-          { id: 'p1', icon: 'headphones', tint: '4', flagged: true },
-          { id: 'p2', icon: 'headphones', tint: '1' },
-          { id: 'p3', icon: 'package-open', tint: '3' },
-          { id: 'p4', icon: 'cable', tint: '6' },
-        ]
-      : [
-          { id: 'p1', icon: 'headphones', tint: '4' },
-          { id: 'p2', icon: 'headphones', tint: '1' },
-        ]) as Photo[],
-    gtin: cr ? '0 75213 66001 8' : '',
-    noGtin: false,
-    mpn: 'FER-HD60-01',
-    accessories: [
-      { id: 'pn-acc1', label: '3 m coiled cable, 3.5 mm', checked: true },
-      { id: 'pn-acc2', label: '1.2 m straight cable, 3.5 mm', checked: true },
-      { id: 'pn-acc3', label: '6.35 mm (1/4 in) screw-on adapter', checked: true },
-      { id: 'pn-acc4', label: 'Carry pouch', checked: false },
-    ] as Accessory[],
+    categoryId: p.category?.id ?? '',
+    brand: p.brand?.id ?? (p.requestedBrandName ? NEW_BRAND : ''),
+    requestedBrand: p.requestedBrandName ?? '',
+    model: p.modelNumber ?? '',
+    name: p.title,
+    desc: p.description,
+    features: pad(p.keyFeatures, MAX_FEATURES),
+    specs: p.specs.map((s) => ({ ...s })),
+    hasVariations,
+    varAttr,
+    variations: rows,
+    photos: p.images.map((i) => ({ key: key(), assetId: i.id, url: i.url, status: 'ready' as const })),
+    gtin: hasVariations ? '' : (p.variants[0]?.gtin ?? ''),
+    noGtin: !!p.noGtin,
+    mpn: p.manufacturerPartNumber ?? '',
+    accessories: p.includedItems.map((label, i) => ({ id: `pn-acc${i + 1}`, label, checked: true })),
   };
 }
-type Form = ReturnType<typeof initialState>;
-
-const gtinOk = (g: string) => /^\d{12,13}$/.test(g.replace(/\s/g, ''));
 
 interface Item {
   state: 'ok' | 'warn' | 'miss';
@@ -94,197 +147,482 @@ interface Item {
 }
 const ITEM_ICON: Record<Item['state'], IconName> = { ok: 'circle-check', warn: 'circle-dashed', miss: 'circle-alert' };
 const ITEM_SR: Record<Item['state'], string> = { ok: 'Done: ', warn: 'Incomplete: ', miss: 'Missing: ' };
+const LOG_LABEL: Record<string, string> = {
+  submitted: 'Submitted for review',
+  approved: 'Approved',
+  changes_requested: 'Changes requested',
+  rejected: 'Rejected',
+  publication_changed: 'Publication changed',
+  merged: 'Merged into another product',
+  check_dismissed: 'Check dismissed',
+  correction_accepted: 'Correction accepted',
+  variant_details_changed: 'Variant details changed',
+};
 
 export default function ProductNew() {
-  const [view] = useView<View>();
-  const cr = view === 'changes-requested';
-  return <ProductForm key={cr ? 'cr' : 'draft'} cr={cr} />;
+  const { api, gql } = useApi();
+  const { sellerId } = useSellerSession();
+  const [params] = useSearchParams();
+  const id = params.get('id') ?? '';
+  const [version, setVersion] = useState(0);
+
+  const product = useQuery({
+    queryKey: ['catalog', 'seller-product', sellerId, id],
+    queryFn: async () => (await gql<{ myProduct: SellerProduct | null }>(SELLER_PRODUCT, { id })).data?.myProduct ?? null,
+    enabled: !!id,
+  });
+  const categories = useQuery({
+    queryKey: ['catalog', 'categories', 'seller'],
+    queryFn: async () => (await gql<{ categories: CategoryNode[] }>(CATEGORIES)).data?.categories ?? [],
+    staleTime: 10 * 60_000,
+  });
+  const brands = useQuery({
+    queryKey: ['catalog', 'brands', 'seller'],
+    queryFn: () => call(api.GET('/api/seller/catalog/brands', { params: { query: { limit: 100 } } })),
+    staleTime: 10 * 60_000,
+  });
+  const profiles = useQuery({ queryKey: ['shipping', 'profiles', sellerId], queryFn: () => call(api.GET('/api/seller/shipping/profiles')) });
+
+  const failed = [product, categories, brands].find((q) => q.isError);
+  const loading = (!!id && product.data === undefined) || !categories.data || !brands.data;
+  let body: ReactNode;
+  if (failed) body = <LoadError error={failed.error} onRetry={() => void failed.refetch()} />;
+  else if (loading) body = <FormSkeleton cards={4} />;
+  else if (id && (!product.data || product.data.submittedByMe === false))
+    body = (
+      <section className="card">
+        <EmptyState
+          icon="search-x"
+          as="h2"
+          title={product.data ? 'You didn’t submit this product' : 'Product not found'}
+          action={product.data ? <Button to={href('seller/offer', '', undefined, { product: id })}>Create an offer on it</Button> : <Button to={href('seller/products')}>Back to products and offers</Button>}
+        >
+          {product.data ? 'Its content is managed by the seller or team that submitted it. You can still sell it with your own offer.' : 'This product isn’t one of your submissions, or it was merged into another product.'}
+        </EmptyState>
+      </section>
+    );
+  else
+    return (
+      <ProductForm
+        key={`${id}|${version}`}
+        product={product.data ?? null}
+        tree={categories.data!}
+        brands={brands.data!.items}
+        defaultProfileId={(profiles.data?.find((p) => p.isDefault && p.status !== 'archived') ?? profiles.data?.find((p) => p.status !== 'archived'))?.id}
+        onSaved={async () => {
+          await product.refetch();
+          setVersion((v) => v + 1);
+        }}
+      />
+    );
+
+  return (
+    <SellerLayout active="products">
+      <PageHeader crumbs={[{ label: 'Products and offers', to: href('seller/products') }, { label: id ? 'Product submission' : 'Create a new product' }]} title={id ? 'Product submission' : 'New product'} sub="Complete every section; you can save a draft at any time." />
+      {body}
+    </SellerLayout>
+  );
 }
 
-function ProductForm({ cr }: { cr: boolean }) {
-  const [f, setF] = useState<Form>(() => initialState(cr));
+function ProductForm({
+  product,
+  tree,
+  brands,
+  defaultProfileId,
+  onSaved,
+}: {
+  product: SellerProduct | null;
+  tree: CategoryNode[];
+  brands: Array<components['schemas']['catalog.Brand']>;
+  defaultProfileId?: string;
+  onSaved: () => Promise<void>;
+}) {
+  const { api, session } = useApi();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const { can } = useSellerSession();
+  const [view, setView] = useView<View>();
+  const [f, setF] = useState<Form>(() => initialForm(product));
   const [newAcc, setNewAcc] = useState('');
   const [note, setNote] = useState('');
-  const [saved, setSaved] = useState(cr ? 'Oct 8, 9:58 AM by Avery Stone' : 'Oct 8, 10:42 AM by Avery Stone');
-  const [submitted, setSubmitted] = useState(false);
-  const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((s) => ({ ...s, [k]: v }));
-  const setSpec = (k: SpecKey, v: string) => setF((s) => ({ ...s, specs: { ...s.specs, [k]: v } }));
-  const setVar = (i: number, k: keyof Variation, v: string) => setF((s) => ({ ...s, variations: s.variations.map((x, j) => (j === i ? { ...x, [k]: v } : x)) }));
+  const [picking, setPicking] = useState(!product?.category);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [banner, setBanner] = useState<{ tone: 'success' | 'danger' | 'warning'; title: string; text: ReactNode } | null>(null);
+  const fileSeq = useRef(0);
 
-  // ---- validation (live: the design shows the open problems straight away) ----
-  const specMissing = SPEC_FIELDS.filter((s) => {
-    const v = f.specs[s.key].trim();
-    return !v || v === 'Select';
+  const state = product?.reviewState ?? 'DRAFT';
+  const cr = state === 'CHANGES_REQUESTED';
+  const editable = state === 'DRAFT' || cr;
+  const canSubmit = can('catalog.products.submit');
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((s) => ({ ...s, [k]: v }));
+  const setVar = (i: number, k: keyof VarRow, v: string) => setF((s) => ({ ...s, variations: s.variations.map((x, j) => (j === i ? { ...x, [k]: v, error: undefined } : x)) }));
+
+  // The URL view follows the data: a product with changes requested shows the returned-submission view.
+  const wantView = cr ? 'changes-requested' : '';
+  useEffect(() => {
+    if (product && view !== wantView) setView(wantView, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantView]);
+
+  const cats = useMemo(() => flattenCategories(tree), [tree]);
+  const cat = cats.find((c) => c.id === f.categoryId);
+  const attrsQ = useQuery({
+    queryKey: ['catalog', 'category-attributes', f.categoryId],
+    queryFn: () => call(api.GET('/api/seller/catalog/categories/{id}/attributes', { params: { path: { id: f.categoryId } } })),
+    enabled: !!f.categoryId,
+    staleTime: 10 * 60_000,
   });
-  const specError = (k: SpecKey) => {
-    const def = SPEC_FIELDS.find((s) => s.key === k)!;
-    if (specMissing.includes(def)) return 'error' in def ? def.error : 'Required.';
-    if (cr && k === 'freq' && f.specs.freq.trim() === ORIGINAL_FREQ) return 'Manufacturer lists 10 Hz – 30 kHz. Update the value or attach the spec sheet.';
-    return undefined;
-  };
-  const priceMissing = f.hasVariations ? f.variations.map((v, i) => ({ v, i })).filter(({ v }) => !(Number(v.price) > 0)) : [];
-  const basicsOk = !!(f.brand && f.name.trim() && f.desc.trim());
-  const flaggedPhoto = f.photos.some((p) => p.flagged);
-  const photoCountOk = f.photos.length >= 3;
-  const gtinError = f.noGtin ? undefined : !f.gtin.trim() ? 'Enter the barcode number, or confirm the product has none.' : !gtinOk(f.gtin) ? 'A GTIN/UPC has 12 or 13 digits.' : undefined;
-  const freqFlag = cr && f.specs.freq.trim() === ORIGINAL_FREQ;
-  const pouch = f.accessories.find((a) => a.id === 'pn-acc4');
-  const pouchFlag = cr && !!pouch && !pouch.checked;
+  const attributes: CategoryAttribute[] = (attrsQ.data?.attributes ?? []).map((a) => ({ ...a, unit: a.unit ?? null, kind: a.kind.toUpperCase() as CategoryAttribute['kind'] }));
+  const imageRules: ImageRule[] = attrsQ.data?.imageRules ?? [];
+  const minImages = Math.max(1, ...imageRules.map((r) => Number((r.check as { minCount?: number } | null)?.minCount ?? 1)));
+  const specAttrs = attributes.filter((a) => !a.variantDefining || a.name !== f.varAttr);
+  const variantAttr = attributes.find((a) => a.variantDefining);
+
+  // ---- review feedback (latest changes-requested entry) ----
+  const log = product?.reviewLog ?? [];
+  const lastCr = cr ? [...log].reverse().find((l) => l.action === 'changes_requested') : undefined;
+  const comments = new Map((lastCr?.fields ?? []).map((x) => [x.name.toLowerCase(), x.value]));
+  const comment = (...keys: string[]) => keys.map((k) => comments.get(k.toLowerCase())).find(Boolean);
+  const specComment = (name: string) => comment(`specs.${name}`, name);
+
+  // ---- validation (live, like the design) ----
+  const specValue = (name: string) => f.specs.find((s) => s.name === name)?.value ?? '';
+  const setSpec = (name: string, value: string) =>
+    setF((s) => ({ ...s, specs: s.specs.some((x) => x.name === name) ? s.specs.map((x) => (x.name === name ? { ...x, value } : x)) : [...s.specs, { name, value }] }));
+  const rows = f.hasVariations ? f.variations.filter((v) => v.value.trim()) : [];
+  const required = attributes.filter((a) => a.required);
+  const filled = (a: CategoryAttribute) => (a.variantDefining && f.hasVariations && a.name === f.varAttr ? rows.length > 0 : !!specValue(a.name).trim() && specValue(a.name) !== 'Select');
+  const specMissing = required.filter((a) => !filled(a));
+  const priceMissing = f.variations.map((v, i) => ({ v, i })).filter(({ v }) => f.hasVariations && v.value.trim() && !toMinor(v.price));
+  const brandOk = f.brand === NEW_BRAND ? !!f.requestedBrand.trim() : !!f.brand;
+  const descOk = f.desc.trim().length >= MIN_DESCRIPTION;
+  const basicsOk = !!(brandOk && f.name.trim() && descOk);
+  const readyPhotos = f.photos.filter((p) => p.status === 'ready');
+  const photoCountOk = readyPhotos.length >= minImages;
+  const gtins = f.hasVariations ? rows.map((r) => r.gtin) : [f.gtin];
+  const gtinError = f.noGtin
+    ? undefined
+    : gtins.some((g) => !g.trim())
+      ? f.hasVariations
+        ? 'Add the barcode number for every variation, or confirm the product has none.'
+        : 'Enter the barcode number, or confirm the product has none.'
+      : gtins.some((g) => !gtinOk(g))
+        ? 'A GTIN/UPC has 8, 12, 13 or 14 digits.'
+        : undefined;
+  const photoComment = comment('images', 'imageIds');
+  const boxComment = comment('includedItems');
 
   const specItem: Item | null = specMissing.length
-    ? { state: 'warn', text: <a href={`#${specMissing[0].id}`}>Specifications: {SPEC_FIELDS.length - specMissing.length} of {SPEC_FIELDS.length} required (add {specMissing.map((s) => s.label).join(' and ')})</a> }
+    ? { state: 'warn', text: <a href="#pn-specs">Specifications: {required.length - specMissing.length} of {required.length} required (add {specMissing.map((s) => s.name).join(' and ')})</a> }
     : null;
-  const varItems: Item[] = priceMissing.map(({ v, i }) => ({ state: 'miss', text: <a href={`#pn-vp${i}`}>Variation {v.color} has no price</a> }));
-  const photoItem: Item | null = photoCountOk ? null : { state: 'miss', text: <a href="#pn-images">Images: {f.photos.length} of 3 required</a> };
+  const varItems: Item[] = priceMissing.map(({ v, i }) => ({ state: 'miss', text: <a href={`#pn-vp${i}`}>Variation {v.value} has no price</a> }));
+  const photoItem: Item | null = photoCountOk ? null : { state: 'miss', text: <a href="#pn-images">Images: {readyPhotos.length} of {minImages} required</a> };
   const gtinItem: Item | null = gtinError ? { state: 'miss', text: <a href="#pn-gtin">GTIN/UPC missing, or confirm the product has none</a> } : null;
-  const nVar = f.variations.length;
+  const nVar = rows.length;
+  const commentItems: Item[] = lastCr ? lastCr.fields.map((x) => ({ state: 'miss' as const, text: `${x.name}: ${x.value}` })) : [];
 
-  const items: Item[] = cr
-    ? [
-        { state: basicsOk ? 'ok' : 'miss', text: 'Category and basic details' },
-        ...(specItem ? [specItem] : []),
-        ...(flaggedPhoto ? [{ state: 'miss' as const, text: 'Main image has a text overlay. Replace image 1.' }] : []),
-        ...(photoItem ? [photoItem] : []),
-        ...(freqFlag ? [{ state: 'miss' as const, text: 'Frequency response does not match the manufacturer spec.' }] : []),
-        ...(pouchFlag ? [{ state: 'miss' as const, text: 'Carry pouch shown in photos but not listed in the box.' }] : []),
-        ...(varItems.length ? varItems : [{ state: 'ok' as const, text: `Variations: ${nVar} of ${nVar} complete` }]),
-        gtinItem ?? { state: 'ok', text: 'Identifiers: GTIN and model number' },
-      ]
-    : [
-        { state: 'ok', text: 'Category: Over-ear headphones' },
-        { state: basicsOk ? 'ok' : 'miss', text: basicsOk ? 'Brand, name and description' : <a href="#pn-name">Add the brand, name and description</a> },
-        specItem ?? { state: 'ok', text: `Specifications: ${SPEC_FIELDS.length} of ${SPEC_FIELDS.length} required` },
-        ...(varItems.length ? varItems : [{ state: 'ok' as const, text: `Variations: ${nVar} of ${nVar} complete` }]),
-        photoItem ?? { state: 'ok', text: `Images: ${f.photos.length} added` },
-        gtinItem ?? { state: 'ok', text: 'Identifiers: GTIN and model number' },
-        { state: 'ok', text: 'Included accessories' },
-      ];
+  const items: Item[] = [
+    f.categoryId ? { state: 'ok', text: `Category: ${cat?.name ?? product?.category?.name ?? ''}` } : { state: 'miss', text: <a href="#pn-cat">Choose a category</a> },
+    { state: basicsOk ? 'ok' : 'miss', text: basicsOk ? 'Brand, name and description' : <a href="#pn-name">{!descOk && f.desc.trim() ? `Description needs at least ${MIN_DESCRIPTION} characters` : 'Add the brand, name and description'}</a> },
+    specItem ?? { state: 'ok', text: required.length ? `Specifications: ${required.length} of ${required.length} required` : 'Specifications' },
+    ...(varItems.length ? varItems : [{ state: 'ok' as const, text: f.hasVariations ? `Variations: ${nVar} of ${nVar} complete` : 'One version' }]),
+    photoItem ?? { state: 'ok', text: `Images: ${readyPhotos.length} added` },
+    gtinItem ?? { state: 'ok', text: f.noGtin ? 'Identifiers: no GTIN (confirmed)' : 'Identifiers: GTIN and model number' },
+    { state: f.accessories.some((a) => a.checked) ? 'ok' : 'warn', text: f.accessories.some((a) => a.checked) ? 'Included accessories' : <a href="#pn-accn">List what is in the box</a> },
+    ...(cr ? commentItems : []),
+  ];
+  const blocking = items.filter((i) => i.state !== 'ok' && !(cr && commentItems.includes(i))).length;
   const issues = items.filter((i) => i.state !== 'ok').length;
-  // Completion: each open item costs a share of the bar (draft 9 points, returned submission 6).
   const pct = Math.max(0, 100 - issues * (cr ? 6 : 9));
+  const uploading = f.photos.some((p) => p.status === 'uploading');
 
-  const status = submitted ? 'Submitted' : cr ? 'Changes requested' : 'Draft';
-  const statusTone = submitted ? 'info' : cr ? 'warning' : '';
+  const status = reviewLabel(state);
+  const statusTone = state === 'SUBMITTED' ? 'info' : cr ? 'warning' : state === 'APPROVED' ? 'success' : state === 'REJECTED' ? 'danger' : '';
 
   const addFiles = (files: File[]) => {
     const imgs = files.filter((x) => /^image\//.test(x.type));
     if (!imgs.length) return;
-    setF((s) => {
-      const added: Photo[] = imgs.map((file, i) => ({ id: `u${Date.now()}${i}`, icon: 'image', tint: 'surface-3', src: URL.createObjectURL(file) }));
-      // A returned submission's flagged main image is replaced by the first new photo.
-      const idx = s.photos.findIndex((p) => p.flagged);
-      if (idx >= 0) {
-        const photos = [...s.photos];
-        photos[idx] = added.shift()!;
-        return { ...s, photos: [...photos, ...added] };
-      }
-      return { ...s, photos: [...s.photos, ...added] };
-    });
-    announce(`${imgs.length} image${imgs.length > 1 ? 's' : ''} added`);
+    const added: Photo[] = imgs.map((file) => ({ key: `u${++fileSeq.current}`, name: file.name, url: URL.createObjectURL(file), status: 'uploading' }));
+    setF((s) => ({ ...s, photos: [...s.photos, ...added] }));
+    announce(`${imgs.length} image${imgs.length > 1 ? 's' : ''} uploading`);
+    added.forEach((a, i) =>
+      uploadMedia(session, imgs[i], 'product_image').then(
+        (asset) => setF((s) => ({ ...s, photos: s.photos.map((p) => (p.key === a.key ? { ...p, status: 'ready', assetId: asset.id, url: asset.renditions?.find((r) => r.size === 'small')?.url ?? asset.url ?? p.url } : p)) })),
+        (e) => setF((s) => ({ ...s, photos: s.photos.map((p) => (p.key === a.key ? { ...p, status: 'failed', error: errorMessage(e) } : p)) })),
+      ),
+    );
   };
+  const removePhoto = (k: string) => setF((s) => ({ ...s, photos: s.photos.filter((p) => p.key !== k) }));
+  const makeMain = (k: string) => setF((s) => ({ ...s, photos: [...s.photos.filter((p) => p.key === k), ...s.photos.filter((p) => p.key !== k)] }));
   const addAccessory = () => {
     const label = newAcc.trim();
     if (!label) return;
-    set('accessories', [...f.accessories, { id: `pn-acc${f.accessories.length + 1}`, label, checked: true }]);
+    set('accessories', [...f.accessories, { id: `pn-acc${f.accessories.length + 1}-${key()}`, label, checked: true }]);
     setNewAcc('');
   };
-  const saveDraft = () => {
-    const t = '10:46 AM'; // mock session clock
-    setSaved(`Oct 8, ${t} by Avery Stone`);
-    announce('Draft saved');
-  };
-  const submit = () => {
-    if (issues) return;
-    setSubmitted(true);
-    announce(cr ? 'Resubmitted for review' : 'Submitted for review');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  /** ProductInput from the form. */
+  const input = () => {
+    const variants = f.hasVariations
+      ? rows.map((r) => ({ options: { [f.varAttr]: r.value.trim() }, gtin: r.gtin.replace(/\s/g, '') || null }))
+      : [{ options: {}, gtin: f.gtin.replace(/\s/g, '') || null }];
+    return {
+      title: f.name.trim(),
+      ...(f.brand === NEW_BRAND ? { requestedBrand: { name: f.requestedBrand.trim() } } : f.brand ? { brandId: f.brand } : {}),
+      categoryId: f.categoryId || null,
+      description: f.desc,
+      keyFeatures: f.features.map((x) => x.trim()).filter(Boolean),
+      specs: Object.fromEntries(f.specs.filter((s) => s.name.trim() && s.value.trim() && s.value !== 'Select').map((s) => [s.name.trim(), s.value.trim()])),
+      includedItems: f.accessories.filter((a) => a.checked).map((a) => a.label),
+      imageIds: readyPhotos.map((p) => p.assetId!),
+      modelNumber: f.model.trim() || null,
+      manufacturerPartNumber: f.mpn.trim() || null,
+      noGtin: f.noGtin,
+      variants,
+    };
   };
 
-  const specField = (s: (typeof SPEC_FIELDS)[number]) => {
-    const err = specError(s.key);
+  /** Draft offers (publish on approval) for variations with a SKU and price; existing ones get the new SKU/price. */
+  const syncOffers = async (saved: ProductAdmin): Promise<string[]> => {
+    if (!f.hasVariations || !can('offers.offers.manage')) return [];
+    const problems: string[] = [];
+    const rowErrors: Record<string, string> = {};
+    for (const r of rows) {
+      const price = toMinor(r.price);
+      if (!price || !r.sku.trim()) continue;
+      const variant = saved.product.variants.find((v) => v.options[f.varAttr] === r.value.trim());
+      if (!variant) continue;
+      try {
+        if (r.offerId) {
+          const body = { ...(r.saved?.price !== price ? { price: { amount: price, currency: 'USD' } } : {}), ...(r.saved?.sku !== r.sku.trim() ? { sellerSku: r.sku.trim() } : {}) };
+          if (Object.keys(body).length) await call(api.PATCH('/api/seller/offers/offers/{id}', { params: { path: { id: r.offerId } }, body }));
+        } else {
+          if (!defaultProfileId) throw new ApiError(400, 'SHIPPING_PROFILE_INVALID', 'Add a shipping profile in Shipping settings first.');
+          await call(
+            api.POST('/api/seller/offers/offers', {
+              body: {
+                productId: saved.product.id,
+                variantId: variant.id,
+                condition: 'new',
+                price: { amount: price, currency: 'USD' },
+                sellerSku: r.sku.trim(),
+                quantity: Number.isInteger(Number(r.qty)) && Number(r.qty) > 0 ? Number(r.qty) : 0,
+                dispatchBusinessDays: 1,
+                shippingProfileId: defaultProfileId,
+                returnTerms: { kind: 'baseline' },
+                warranty: { kind: 'manufacturer' },
+                publish: false,
+                publishOnApproval: true,
+              },
+            }),
+          );
+        }
+      } catch (e) {
+        rowErrors[r.key] = errorMessage(e);
+        problems.push(`${r.value}: ${errorMessage(e)}`);
+      }
+    }
+    if (problems.length) setF((s) => ({ ...s, variations: s.variations.map((v) => (rowErrors[v.key] ? { ...v, error: rowErrors[v.key] } : v)) }));
+    return problems;
+  };
+
+  const save = useMutation({
+    mutationFn: async ({ submit }: { submit: boolean }) => {
+      const body = input();
+      let saved = product
+        ? await call(api.PATCH('/api/seller/catalog/products/{id}', { params: { path: { id: product.id } }, body }))
+        : await call(api.POST('/api/seller/catalog/products', { body }));
+      const offerProblems = await syncOffers(saved);
+      if (submit) saved = await call(api.POST('/api/seller/catalog/products/{id}/submit', { params: { path: { id: saved.product.id } }, body: { note: note.trim() || null } }));
+      return { saved, offerProblems };
+    },
+    onSuccess: async ({ saved, offerProblems }, { submit }) => {
+      setErrors({});
+      void qc.invalidateQueries({ queryKey: ['offers'] });
+      void qc.invalidateQueries({ queryKey: ['catalog', 'products'] });
+      const msg = submit ? (cr ? 'Resubmitted for review' : 'Submitted for review') : 'Draft saved';
+      announce(msg);
+      setBanner(
+        offerProblems.length
+          ? { tone: 'warning', title: `${msg}, but some offers weren’t saved`, text: offerProblems.join(' ') }
+          : submit
+            ? { tone: 'success', title: msg, text: <>The Catalog team usually reviews new products within 2 business days. We'll notify you when it's approved or if anything needs changing. <Link to={href('seller/products')}>Back to products</Link></> }
+            : { tone: 'success', title: msg, text: saved.missing.length ? `Still missing before you can submit: ${saved.missing.join(', ')}.` : 'Everything needed for review is filled in.' },
+      );
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (!product) navigate(productHref(saved.product.id), { replace: true });
+      else await onSaved();
+    },
+    onError: (e) => {
+      const fe = e instanceof ApiError ? e.fieldErrors : {};
+      setErrors(fe);
+      setBanner({ tone: 'danger', title: 'We couldn’t save the product', text: e instanceof ApiError && e.code === 'BRAND_NOT_ACTIVE' ? 'This brand is under review or blocked. Choose another brand or request it.' : `${errorMessage(e)}${Object.keys(fe).length ? ` ${Object.values(fe).join(' ')}` : ''}` });
+      announce('The product wasn’t saved');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+  });
+
+  const fieldErr = (...keys: string[]) => keys.map((k) => errors[k]).find(Boolean);
+  const attrField = (a: CategoryAttribute) => {
+    const v = specValue(a.name);
+    const err = (a.required && !filled(a) ? 'Required.' : undefined) ?? specComment(a.name) ?? fieldErr(`specs.${a.name}`);
+    const id = `pn-at-${a.id}`;
     const control =
-      'options' in s ? (
-        <Select id={s.id} options={[...s.options]} value={f.specs[s.key]} className={cx(err && 'is-error')} onChange={(e) => setSpec(s.key, e.target.value)} />
+      a.kind === 'ENUM' || a.kind === 'BOOL' ? (
+        <Select id={id} options={['Select', ...(a.kind === 'BOOL' ? ['Yes', 'No'] : a.options)]} value={v || 'Select'} className={cx(err && 'is-error')} onChange={(e) => setSpec(a.name, e.target.value)} />
       ) : (
-        <TextInput id={s.id} value={f.specs[s.key]} placeholder={'placeholder' in s ? s.placeholder : ''} error={!!err} onChange={(e) => setSpec(s.key, e.target.value)} />
+        <TextInput id={id} value={v} suffix={a.unit ?? undefined} inputMode={a.kind === 'NUMBER' ? 'decimal' : undefined} error={!!err} onChange={(e) => setSpec(a.name, e.target.value)} />
       );
     const field = (
-      <Field key={s.key} label={s.label} error={err}>
+      <Field key={a.id} label={a.name} optional={!a.required} error={err}>
         {control}
       </Field>
     );
-    return cr && s.key === 'freq' ? (
-      <div className="sa-hl" key={s.key}>
+    return specComment(a.name) ? (
+      <div className="sa-hl" key={a.id}>
         {field}
       </div>
     ) : (
       field
     );
   };
+  const otherSpecs = f.specs.map((s, i) => ({ s, i })).filter(({ s }) => !attributes.some((a) => a.name === s.name));
+
+  const crumbs = cat?.path ?? product?.categoryPath ?? [];
+  const firstRow = f.variations[0];
+  const timeline: TimelineEvent[] = [...log]
+    .reverse()
+    .map((l, i) => ({
+      t: l.action === 'changes_requested' ? <><span className="sr-only">At risk: </span>Changes requested</> : (LOG_LABEL[l.action] ?? l.action),
+      d: `${fmtWhen(l.at)}${l.actor.name ? ` · ${l.actor.name}` : ''}`,
+      state: l.action === 'changes_requested' || l.action === 'rejected' ? 'warn' : i === 0 && l.action === 'submitted' ? 'current' : 'done',
+      body: l.reason ?? undefined,
+    }));
 
   return (
     <SellerLayout active="products">
       <PageHeader
-        crumbs={[{ label: 'Products and offers', to: href('seller/products') }, { label: cr ? 'Fix submission' : 'Create a new product' }]}
-        title={cr ? 'Ferro HD-60 Studio Monitor Headphones' : 'New product'}
-        sub={cr ? 'Submission SUB-20417 · fix the marked fields and resubmit' : 'Not in the catalog yet. Complete every section; you can save a draft at any time.'}
+        crumbs={[{ label: 'Products and offers', to: href('seller/products') }, { label: cr ? 'Fix submission' : product ? 'Product submission' : 'Create a new product' }]}
+        title={product ? product.title || 'Untitled product' : 'New product'}
+        sub={
+          cr
+            ? `Submission ${product?.submission?.ref ?? product?.ref ?? ''} · fix the marked fields and resubmit`
+            : state === 'SUBMITTED'
+              ? `Submission ${product?.submission?.ref ?? ''} · waiting for the Catalog team`
+              : product && state !== 'DRAFT'
+                ? `${product.ref} · ${status}`
+                : 'Not in the catalog yet. Complete every section; you can save a draft at any time.'
+        }
         actions={<Badge tone={statusTone}>{status}</Badge>}
       />
-      {submitted && (
-        <Alert tone="success" title={cr ? 'Resubmitted for review' : 'Submitted for review'}>
-          The Catalog team usually reviews new products within 2 business days. We'll notify you when it's approved or if anything needs changing. <Link to={href('seller/products')}>Back to products</Link>
+      {banner && (
+        <Alert tone={banner.tone} title={banner.title}>
+          {banner.text}
         </Alert>
       )}
-      {cr && !submitted && (
+      {state === 'SUBMITTED' && !banner && (
+        <Alert tone="info" title="Submitted for review">
+          {product?.submission?.expectedReviewBy ? `The Catalog team expects to review it by ${fmtDay(product.submission.expectedReviewBy)}.` : 'The Catalog team usually reviews new products within 2 business days.'} You can’t edit it while it’s in review.
+        </Alert>
+      )}
+      {state === 'APPROVED' && (
+        <Alert tone="success" title="Approved and in the catalog">
+          Changes to shared content now go through a correction reviewed by the Catalog team.{' '}
+          {product?.myOffers[0] ? <Link to={offerHref(product.myOffers[0].id)}>Manage your offer</Link> : <Link to={href('seller/offer', '', undefined, { product: product!.id })}>Create your offer</Link>}
+        </Alert>
+      )}
+      {state === 'REJECTED' && (
+        <Alert tone="danger" title="Rejected by the Catalog team">
+          {[...log].reverse().find((l) => l.action === 'rejected')?.reason ?? 'This product can’t be listed.'}
+        </Alert>
+      )}
+      {cr && lastCr && (
         <div className="alert t-warning" role="alert">
           <Icon name="message-square-warning" />
           <div className="stack gap-2 grow">
             <span className="alert-title">Changes requested by the Catalog team</span>
-            <span>Omar Haddad, Catalog Manager · Oct 6, 2026, 2:18 PM PT</span>
             <span>
-              <b>Reason:</b> Inaccurate details and image standards not met. Fix the 3 fields marked below, then resubmit. Other sellers will rely on this shared product content.
+              {lastCr.actor.name ?? 'Catalog team'} · {fmtFull(lastCr.at)}
             </span>
-            <ol className="ol small">
-              <li>Image 1: remove the "Studio grade" text overlay. Main images must show only the product on a plain background.</li>
-              <li>Frequency response: manufacturer lists 10 Hz – 30 kHz.</li>
-              <li>Included accessories: photo 3 shows a carry pouch that is not listed.</li>
-            </ol>
+            {lastCr.reason && (
+              <span>
+                <b>Reason:</b> {lastCr.reason}
+              </span>
+            )}
+            {lastCr.fields.length > 0 && (
+              <ol className="ol small">
+                {lastCr.fields.map((x) => (
+                  <li key={x.name}>
+                    {x.name}: {x.value}
+                  </li>
+                ))}
+              </ol>
+            )}
           </div>
         </div>
       )}
       <div className="sa-split">
         <div className="stack gap-5">
-          <Card title="Category" sub="Sets the specifications this product needs">
+          <Card title="Category" sub="Sets the specifications this product needs" id="pn-cat">
             <div className="row between">
               <span className="row gap-2">
                 <Icon name="folder-tree" className="ic-sm" />
-                <nav className="crumbs" aria-label="Breadcrumb">
-                  <span>Electronics</span>
-                  <Icon name="chevron-right" />
-                  <span>Headphones</span>
-                  <Icon name="chevron-right" />
-                  <span>Over-ear and on-ear</span>
-                </nav>
+                {crumbs.length ? (
+                  <nav className="crumbs" aria-label="Breadcrumb">
+                    {crumbs.map((c, i) => (
+                      <Fragment key={c}>
+                        {i > 0 && <Icon name="chevron-right" />}
+                        <span>{c}</span>
+                      </Fragment>
+                    ))}
+                  </nav>
+                ) : (
+                  <span className="small sub">No category chosen yet</span>
+                )}
               </span>
-              <Button variant="ghost" size="sm" onClick={() => announce('Changing the category resets the specifications. Contact seller support to move a submitted product.')}>
-                Change category
-              </Button>
+              {editable && (
+                <Button variant="ghost" size="sm" onClick={() => setPicking((p) => !p)}>
+                  {f.categoryId ? 'Change category' : 'Choose category'}
+                </Button>
+              )}
             </div>
+            {editable && picking && (
+              <Field label="Category" hint="Changing the category changes the specifications it needs." error={fieldErr('categoryId') ?? comment('category', 'categoryId')}>
+                <Select
+                  id="pn-category"
+                  options={[{ value: '', label: 'Choose a category' }, ...cats.map((c) => ({ value: c.id, label: c.path.join(' › ') }))]}
+                  value={f.categoryId}
+                  onChange={(e) => {
+                    set('categoryId', e.target.value);
+                    if (e.target.value) setPicking(false);
+                  }}
+                />
+              </Field>
+            )}
           </Card>
 
           <Card title="Basic details" titleAs="h3">
             <div className="grid md2">
-              <Field label="Brand" hint="Missing a brand? Request it and we review it with the product.">
-                <Select id="pn-brand" options={['Ferro', 'Halden', 'Kestrel', 'Lumen', 'Brand not listed']} value={f.brand} onChange={(e) => set('brand', e.target.value)} />
+              <Field label="Brand" hint="Missing a brand? Request it and we review it with the product." error={fieldErr('brandId', 'requestedBrand', 'requestedBrand.name') ?? comment('brand', 'brandId')}>
+                <Select id="pn-brand" options={[{ value: '', label: 'Choose a brand' }, ...brands.map((b) => ({ value: b.id, label: b.name })), { value: NEW_BRAND, label: 'Brand not listed' }]} value={f.brand} onChange={(e) => set('brand', e.target.value)} />
               </Field>
-              <Field label="Model number">
+              <Field label="Model number" error={fieldErr('modelNumber') ?? comment('modelNumber')}>
                 <TextInput id="pn-model" value={f.model} onChange={(e) => set('model', e.target.value)} />
               </Field>
             </div>
-            <Field label="Product name" hint={`Brand + model + product type. No prices, promotions or seller names. ${f.name.length} of 150 characters.`} error={!f.name.trim() ? 'Enter the product name.' : undefined}>
+            {f.brand === NEW_BRAND && (
+              <Field label="Brand name" hint="We create the brand when the Catalog team approves it." error={!f.requestedBrand.trim() ? 'Enter the brand name.' : undefined}>
+                <TextInput id="pn-newbrand" value={f.requestedBrand} error={!f.requestedBrand.trim()} onChange={(e) => set('requestedBrand', e.target.value)} />
+              </Field>
+            )}
+            <Field label="Product name" hint={`Brand + model + product type. No prices, promotions or seller names. ${f.name.length} of 150 characters.`} error={!f.name.trim() ? 'Enter the product name.' : (fieldErr('title') ?? comment('title'))}>
               <TextInput id="pn-name" value={f.name} maxLength={150} error={!f.name.trim()} onChange={(e) => set('name', e.target.value)} />
             </Field>
-            <Field label="Description" hint="Describe the product, not your offer. Shipping and return terms go in your offer." error={!f.desc.trim() ? 'Describe the product.' : undefined}>
+            <Field
+              label="Description"
+              hint={`Describe the product, not your offer. Shipping and return terms go in your offer. ${f.desc.trim().length} of at least ${MIN_DESCRIPTION} characters.`}
+              error={!f.desc.trim() ? 'Describe the product.' : !descOk ? `Add at least ${MIN_DESCRIPTION - f.desc.trim().length} more characters.` : (fieldErr('description') ?? comment('description'))}
+            >
               <Textarea id="pn-desc" value={f.desc} onChange={(e) => set('desc', e.target.value)} />
             </Field>
             <div className="field">
@@ -309,13 +647,32 @@ function ProductForm({ cr }: { cr: boolean }) {
                 ))}
               </div>
               <span className="hint" id="pn-f0-hint">
-                Up to 5 short facts customers can scan.
+                {comment('keyFeatures') ?? 'Up to 5 short facts customers can scan.'}
               </span>
             </div>
           </Card>
 
-          <Card title="Specifications" titleAs="h3" sub="Required for Over-ear and on-ear headphones">
-            <div className="grid md2">{SPEC_FIELDS.map(specField)}</div>
+          <Card id="pn-specs" title="Specifications" titleAs="h3" sub={f.categoryId ? (attributes.length ? `Required for ${cat?.name ?? 'this category'}` : `${cat?.name ?? 'This category'} has no fixed specifications. Add the facts customers compare.`) : 'Choose a category first'}>
+            {specAttrs.length > 0 && <div className="grid md2">{specAttrs.map(attrField)}</div>}
+            {(otherSpecs.length > 0 || (f.categoryId && !attrsQ.isLoading)) && (
+              <div className="stack gap-2">
+                {otherSpecs.map(({ s, i }) => (
+                  <div className="grid md2" key={i}>
+                    <Field label="Specification">
+                      <TextInput id={`pn-sn${i}`} value={s.name} placeholder="e.g. Battery life" onChange={(e) => set('specs', f.specs.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
+                    </Field>
+                    <Field label="Value" error={specComment(s.name)}>
+                      <TextInput id={`pn-sv${i}`} value={s.value} placeholder="e.g. 40 h" onChange={(e) => set('specs', f.specs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                    </Field>
+                  </div>
+                ))}
+                <div className="row gap-2">
+                  <Button variant="ghost" size="sm" icon="plus" onClick={() => set('specs', [...f.specs, { name: '', value: '' }])}>
+                    Add specification
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
 
           <Card
@@ -329,10 +686,12 @@ function ProductForm({ cr }: { cr: boolean }) {
                 <div className="row gap-2">
                   <span className="small strong">Varies by</span>
                   <div className="hscroll gap-2">
-                    <Chip active>Color</Chip>
-                    <Chip icon="plus" onClick={() => announce('Size and capacity attributes are not used in this category')}>
-                      Add attribute
-                    </Chip>
+                    <Chip active>{f.varAttr}</Chip>
+                    {variantAttr && variantAttr.name !== f.varAttr && (
+                      <Chip icon="plus" onClick={() => set('varAttr', variantAttr.name)}>
+                        {variantAttr.name}
+                      </Chip>
+                    )}
                   </div>
                 </div>
                 <div className="card">
@@ -340,7 +699,7 @@ function ProductForm({ cr }: { cr: boolean }) {
                     <table className="table">
                       <thead>
                         <tr>
-                          <th scope="col">Color</th>
+                          <th scope="col">{f.varAttr}</th>
                           <th scope="col">Seller SKU</th>
                           <th scope="col">Price</th>
                           <th scope="col">Quantity</th>
@@ -351,34 +710,42 @@ function ProductForm({ cr }: { cr: boolean }) {
                       </thead>
                       <tbody>
                         {f.variations.map((v, i) => {
-                          const bad = priceMissing.some((p) => p.i === i);
+                          const bad = priceMissing.some((p) => p.i === i) || !!v.error;
                           return (
-                            <tr key={v.color} className={bad ? 'is-flagged' : ''}>
+                            <tr key={v.key} className={bad ? 'is-flagged' : ''}>
                               <td>
                                 {bad && <span className="sr-only">Urgent: </span>}
-                                <span className="small strong">{v.color}</span>
+                                <label className="sr-only" htmlFor={`pn-vv${i}`}>
+                                  {f.varAttr} {i + 1}
+                                </label>
+                                {v.variantId && state !== 'DRAFT' && !cr ? (
+                                  <span className="small strong">{v.value}</span>
+                                ) : (
+                                  <input className="input sa-sku" id={`pn-vv${i}`} value={v.value} placeholder={variantAttr?.options[0] ?? 'e.g. Black'} onChange={(e) => setVar(i, 'value', e.target.value)} />
+                                )}
+                                {v.error && <div className="error-text">{v.error}</div>}
                               </td>
                               <td>
                                 <label className="sr-only" htmlFor={`pn-vs${i}`}>
-                                  SKU for {v.color}
+                                  SKU for {v.value}
                                 </label>
                                 <input className="input sa-sku" id={`pn-vs${i}`} value={v.sku} onChange={(e) => setVar(i, 'sku', e.target.value)} />
                               </td>
                               <td>
                                 <label className="sr-only" htmlFor={`pn-vp${i}`}>
-                                  Price for {v.color}
+                                  Price for {v.value}
                                 </label>
                                 <input
-                                  className={cx('input sa-num', bad && 'is-error')}
+                                  className={cx('input sa-num', priceMissing.some((p) => p.i === i) && 'is-error')}
                                   id={`pn-vp${i}`}
                                   value={v.price}
                                   inputMode="decimal"
                                   placeholder={bad ? 'Price' : '0.00'}
-                                  aria-invalid={bad || undefined}
-                                  aria-describedby={bad ? `pn-vp${i}-err` : undefined}
+                                  aria-invalid={priceMissing.some((p) => p.i === i) || undefined}
+                                  aria-describedby={priceMissing.some((p) => p.i === i) ? `pn-vp${i}-err` : undefined}
                                   onChange={(e) => setVar(i, 'price', e.target.value)}
                                 />
-                                {bad && (
+                                {priceMissing.some((p) => p.i === i) && (
                                   <div className="error-text" id={`pn-vp${i}-err`}>
                                     Add a price
                                   </div>
@@ -386,14 +753,18 @@ function ProductForm({ cr }: { cr: boolean }) {
                               </td>
                               <td>
                                 <label className="sr-only" htmlFor={`pn-vq${i}`}>
-                                  Quantity for {v.color}
+                                  Quantity for {v.value}
                                 </label>
-                                <input className="input sa-num" id={`pn-vq${i}`} value={v.qty} inputMode="numeric" onChange={(e) => setVar(i, 'qty', e.target.value)} />
+                                <input className="input sa-num" id={`pn-vq${i}`} value={v.qty} inputMode="numeric" disabled={!!v.offerId} title={v.offerId ? 'Change stock in Inventory' : undefined} onChange={(e) => setVar(i, 'qty', e.target.value)} />
                               </td>
                               <td className="col-pin">
-                                <span className="mono xs nowrap" title={v.gtin}>
-                                  {v.gtin}
-                                </span>
+                                <div className="row gap-1 nowrap">
+                                  <label className="sr-only" htmlFor={`pn-vg${i}`}>
+                                    GTIN for {v.value}
+                                  </label>
+                                  <input className="input sa-sku mono" id={`pn-vg${i}`} value={v.gtin} inputMode="numeric" placeholder="12 or 13 digits" disabled={f.noGtin} onChange={(e) => setVar(i, 'gtin', e.target.value)} />
+                                  {!v.variantId && f.variations.length > 1 && <IconButton icon="x" label={`Remove ${v.value || 'variation'}`} onClick={() => set('variations', f.variations.filter((x) => x.key !== v.key))} />}
+                                </div>
                               </td>
                             </tr>
                           );
@@ -401,11 +772,20 @@ function ProductForm({ cr }: { cr: boolean }) {
                       </tbody>
                     </table>
                   </TableWrap>
-                  {priceMissing.length > 0 && <StatusLegend items={[{ tone: 'danger', label: 'Red edge = urgent: overdue or past target' }]} />}
+                  {(priceMissing.length > 0 || f.variations.some((v) => v.error)) && <StatusLegend items={[{ tone: 'danger', label: 'Red edge = urgent: overdue or past target' }]} />}
                 </div>
+                {editable && (
+                  <div className="row gap-2">
+                    <Button variant="ghost" size="sm" icon="plus" onClick={() => set('variations', [...f.variations, { key: key(), value: '', sku: '', price: '', qty: '', gtin: '' }])}>
+                      Add variation
+                    </Button>
+                  </div>
+                )}
                 <p className="xs muted row gap-1 nowrap top">
                   <Icon name="info" className="ic-sm" />
-                  <span className="wrap">Customers pick a color on one product page. Your price and quantity are your offer; other sellers set their own.</span>
+                  <span className="wrap">
+                    Customers pick a {f.varAttr.toLowerCase()} on one product page. Your price and quantity are your offer (new condition, 1 business day dispatch, your default shipping profile); it goes live when the product is approved and you can change its terms on the offer page. Other sellers set their own.
+                  </span>
                 </p>
               </>
             ) : (
@@ -413,46 +793,77 @@ function ProductForm({ cr }: { cr: boolean }) {
             )}
           </Card>
 
-          <Card id="pn-images" title="Images" titleAs="h3" sub="At least 3 · first image is the main image">
-            <div className={cx(cr && 'sa-hl', 'stack gap-2')}>
-              <div className="sa-thumbs">
-                {f.photos.map((p, i) => (
-                  <div className={cx('sa-thumb', p.flagged && 'is-error')} key={p.id}>
-                    <Img icon={p.icon} tint={p.tint} src={p.src} alt={p.src ? `Product image ${i + 1}` : ''} />
-                    {i === 0 && <Badge tone={p.flagged ? 'danger' : 'solid'}>Main</Badge>}
-                  </div>
+          <Card id="pn-images" title="Images" titleAs="h3" sub={`At least ${minImages} · first image is the main image`}>
+            <div className={cx(photoComment && 'sa-hl', 'stack gap-2')}>
+              {f.photos.length > 0 && (
+                <div className="sa-thumbs">
+                  {f.photos.map((p, i) => (
+                    <div className={cx('sa-thumb', (p.status === 'failed' || (i === 0 && photoComment)) && 'is-error')} key={p.key}>
+                      <Img icon="image" tint="surface-3" src={p.url} alt={`Product image ${i + 1}`} />
+                      {i === 0 && <Badge tone={i === 0 && photoComment ? 'danger' : 'solid'}>Main</Badge>}
+                      {p.status === 'uploading' && <span className="spinner" aria-label="Uploading" />}
+                      {editable && p.status !== 'uploading' && (
+                        <span className="row gap-1">
+                          {i > 0 && p.status === 'ready' && <IconButton icon="star" label={`Make image ${i + 1} the main image`} onClick={() => makeMain(p.key)} />}
+                          <IconButton icon="trash-2" label={`Remove image ${i + 1}`} onClick={() => removePhoto(p.key)} />
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {f.photos
+                .filter((p) => p.status === 'failed')
+                .map((p) => (
+                  <span className="error-text" key={p.key}>
+                    <Icon name="circle-alert" className="ic-sm" />
+                    {p.name}: {p.error}
+                  </span>
                 ))}
-              </div>
-              {flaggedPhoto ? (
+              {photoComment ? (
                 <span className="error-text">
                   <Icon name="circle-alert" className="ic-sm" />
-                  Image 1 has a text overlay. Replace it with a clean product photo.
+                  {photoComment}
                 </span>
               ) : (
                 !photoCountOk && (
                   <span className="error-text">
                     <Icon name="circle-alert" className="ic-sm" />
-                    Add at least {3 - f.photos.length} more image{3 - f.photos.length > 1 ? 's' : ''}.
+                    Add at least {minImages - readyPhotos.length} more image{minImages - readyPhotos.length > 1 ? 's' : ''}.
                   </span>
                 )
               )}
             </div>
-            <FileDrop title="Drag images here or browse" hint="JPG or PNG · at least 1600 px on the longest side · up to 10 MB each" onFiles={addFiles} />
+            {editable && <FileDrop title="Drag images here or browse" hint="JPG, PNG, WebP or HEIC · up to 20 MB each" accept="image/jpeg,image/png,image/webp,image/heic" onFiles={addFiles} />}
             <div className="well stack gap-2">
               <span className="small strong">Image standards</span>
               <ul className="ul small sub stack gap-1">
-                <li>Main image: product only, plain white or light gray background, fills 85% of the frame.</li>
-                <li>No text, logos, watermarks, borders or prices.</li>
-                <li>Show every included accessory in at least one image.</li>
-                <li>Use your own photos or ones you have rights to.</li>
+                {imageRules.length ? (
+                  imageRules.map((r) => <li key={r.text}>{r.text}</li>)
+                ) : (
+                  <>
+                    <li>Main image: product only, plain white or light gray background, fills 85% of the frame.</li>
+                    <li>No text, logos, watermarks, borders or prices.</li>
+                    <li>Show every included accessory in at least one image.</li>
+                    <li>Use your own photos or ones you have rights to.</li>
+                  </>
+                )}
               </ul>
             </div>
           </Card>
 
           <Card title="Identifiers" titleAs="h3">
             <div className="grid md2">
-              <Field label="GTIN / UPC" error={gtinError} hint={!gtinError && !f.noGtin ? 'Matches the barcode on the retail box.' : undefined}>
-                <TextInput id="pn-gtin" value={f.gtin} placeholder="12 or 13 digits" inputMode="numeric" error={!!gtinError} disabled={f.noGtin} onChange={(e) => set('gtin', e.target.value)} />
+              <Field label="GTIN / UPC" error={gtinError ?? fieldErr('variants.gtin', 'variants[0].gtin') ?? comment('gtin', 'variants')} hint={!gtinError && !f.noGtin ? (f.hasVariations ? `Matches the barcode on the retail box. Each variation has its own; this is ${firstRow?.value || 'the first variation'}.` : 'Matches the barcode on the retail box.') : undefined}>
+                <TextInput
+                  id="pn-gtin"
+                  value={f.hasVariations ? (firstRow?.gtin ?? '') : f.gtin}
+                  placeholder="12 or 13 digits"
+                  inputMode="numeric"
+                  error={!!gtinError}
+                  disabled={f.noGtin}
+                  onChange={(e) => (f.hasVariations ? setVar(0, 'gtin', e.target.value) : set('gtin', e.target.value))}
+                />
               </Field>
               <Field label="Manufacturer part number" optional>
                 <TextInput id="pn-mpn" value={f.mpn} onChange={(e) => set('mpn', e.target.value)} />
@@ -462,21 +873,21 @@ function ProductForm({ cr }: { cr: boolean }) {
           </Card>
 
           <Card title="Included accessories" titleAs="h3" sub="Everything in a new, sealed box">
-            <div className={cx(cr && 'sa-hl', 'stack gap-2')}>
+            <div className={cx(boxComment && 'sa-hl', 'stack gap-2')}>
               {f.accessories.map((a) => (
                 <Checkbox
                   key={a.id}
                   id={a.id}
                   label={a.label}
                   checked={a.checked}
-                  aria-describedby={pouchFlag && a.id === 'pn-acc1' ? 'pn-acc1-err' : undefined}
                   onChange={(e) => set('accessories', f.accessories.map((x) => (x.id === a.id ? { ...x, checked: e.target.checked } : x)))}
                 />
               ))}
-              {pouchFlag && (
-                <span className="error-text" id="pn-acc1-err">
+              {!f.accessories.length && <span className="small sub">Nothing listed yet.</span>}
+              {boxComment && (
+                <span className="error-text">
                   <Icon name="circle-alert" className="ic-sm" />
-                  Photo 3 shows a carry pouch. Tick it if it ships in the box, or remove the photo.
+                  {boxComment}
                 </span>
               )}
             </div>
@@ -514,54 +925,62 @@ function ProductForm({ cr }: { cr: boolean }) {
                   </li>
                 ))}
               </ul>
+              {product?.missing && product.missing.length > 0 && (
+                <p className="xs muted">Catalog check on the last save: missing {product.missing.join(', ')}.</p>
+              )}
               <div className="divider" />
               <KeyValue
                 pairs={[
                   ['Status', <Badge tone={statusTone}>{status}</Badge>],
-                  ['Last saved', saved],
-                  ['Review time', 'Usually 2 business days'],
+                  ['Last saved', product ? `${fmtWhen(product.submission?.lastSavedAt ?? product.updatedAt)}${product.submission?.lastSavedBy?.name ? ` by ${product.submission.lastSavedBy.name}` : ''}` : 'Not saved yet'],
+                  ['Review time', product?.submission?.expectedReviewBy && state === 'SUBMITTED' ? `Expected by ${fmtDay(product.submission.expectedReviewBy)}` : 'Usually 2 business days'],
                 ]}
               />
-              {cr && (
+              {cr && editable && (
                 <Field label="Note to the reviewer" optional>
                   <Textarea id="pn-note" placeholder="Explain what you changed" value={note} onChange={(e) => setNote(e.target.value)} />
                 </Field>
               )}
             </div>
             <div className="card-foot">
-              {!cr && issues > 0 && (
+              {!cr && blocking > 0 && editable && (
                 <p className="small t-danger-text strong card-foot-note" id="pn-block">
-                  Fix {issues} item{issues > 1 ? 's' : ''} to submit. Your draft is kept for 90 days.
+                  Fix {blocking} item{blocking > 1 ? 's' : ''} to submit. Your draft is kept for 90 days.
                 </p>
               )}
-              <Button variant="secondary" onClick={saveDraft} disabled={submitted}>
-                Save draft
-              </Button>
-              <Button className={cx(issues > 0 && 'is-disabled')} disabled={issues > 0 || submitted} aria-describedby={issues ? 'pn-block' : undefined} onClick={submit}>
-                {cr ? 'Resubmit for review' : 'Submit for review'}
-              </Button>
+              {editable && canSubmit ? (
+                <>
+                  <Button variant="secondary" onClick={() => save.mutate({ submit: false })} disabled={save.isPending || uploading || !f.name.trim()}>
+                    {save.isPending && !save.variables?.submit ? 'Saving…' : 'Save draft'}
+                  </Button>
+                  <Button className={cx(blocking > 0 && 'is-disabled')} disabled={blocking > 0 || save.isPending || uploading} aria-describedby={blocking ? 'pn-block' : undefined} onClick={() => save.mutate({ submit: true })}>
+                    {save.isPending && save.variables?.submit ? 'Submitting…' : cr ? 'Resubmit for review' : 'Submit for review'}
+                  </Button>
+                </>
+              ) : (
+                <span className="xs muted">{!canSubmit ? 'Your role can’t submit products.' : 'This submission can’t be edited now.'}</span>
+              )}
             </div>
           </section>
-          {cr && issues > 0 && (
+          {cr && blocking > 0 && (
             <p className="xs muted" id="pn-block">
-              Fix the {issues} marked item{issues > 1 ? 's' : ''} to resubmit.
+              Fix the {blocking} marked item{blocking > 1 ? 's' : ''} to resubmit.
             </p>
           )}
-          {cr ? (
+          {log.length > 0 ? (
             <Card title="Review history" titleAs="h3">
-              <Timeline
-                events={[
-                  ...(submitted ? [{ t: 'Resubmitted for review', d: 'Oct 8 · Avery Stone', state: 'current' as const }] : []),
-                  { t: <><span className="sr-only">At risk: </span>Changes requested</>, d: 'Oct 6, 2:18 PM · Omar Haddad, Catalog', state: 'warn', body: 'Image standards and inaccurate details. 3 fields.' },
-                  { t: 'Submitted for review', d: 'Oct 3, 2:40 PM · Avery Stone', state: 'done' },
-                  { t: 'Draft created', d: 'Oct 2, 4:05 PM · Avery Stone', state: 'done' },
-                ]}
-              />
+              <Timeline events={timeline} />
             </Card>
           ) : (
             <Card title="Before you submit" titleAs="h3">
               <p className="small sub">
-                Searched the catalog and found no match for <b>Ferro HD-60</b>. If a duplicate is found during review, your offer is attached to the existing product instead.
+                Search the catalog first{f.model || f.name ? (
+                  <>
+                    {' '}
+                    for <b>{f.model || f.name}</b>
+                  </>
+                ) : null}
+                . If a duplicate is found during review, your offer is attached to the existing product instead.
               </p>
               <Link className="small strong" to={href('seller/catalog-match')}>
                 Search the catalog again

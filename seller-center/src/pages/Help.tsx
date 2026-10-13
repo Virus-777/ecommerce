@@ -1,101 +1,65 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, call, errorMessage, fileSize, newIdempotencyKey, useApi, useUploads, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { useView } from '@marketly/web-shared/lib/hooks';
-import { money } from '@marketly/web-shared/lib/format';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Card, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, PageHeader, SearchInput, Select, StatusBadge, SummaryRow, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
-import { articleSlug, getArticle, getCategory } from './data/help-articles';
+import { Alert, Button, Card, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, PageHeader, SearchInput, Select, StatusBadge, SummaryRow, Textarea, TextInput, type Tone } from '@marketly/web-shared/ui';
+import { useSellerSession } from '@/app/session';
+import { articleHref, getHelpArticle, getHelpHome, helpKeys, helpLinkTo, isContactLink, searchHelp, topicIcon, type HelpArticleSummary, type HelpCategory } from './data/help-articles';
+import { RichText } from './data/help-html';
+import { date, LoadError, SkeletonLines, time, weekdayDate } from './data/home';
 
 // Design: pages/seller/seller-help.html · view "contact-seller-support" = the support request form (a page state, not a dialog).
-// Article links open seller/help-article. The contact view reads ?topic=…&article=… (sent by an
-// article's "Contact seller support") to preselect the topic and prefill the subject.
+// API: help home, search and articles from the content module (audience seller; data/help-articles.ts),
+// seller support topics GET /api/seller/support/categories, my requests GET /api/seller/support/cases
+// (scope support_requests), send POST /api/seller/support/requests (idempotent, attachments as case_evidence
+// uploads), the example fee calculation GET /api/seller/finance/fee-schedule.
+// The contact view reads ?topic=<support category>&article=<slug> (sent by an article's "Contact seller
+// support") to preselect the topic and prefill the subject.
 
-/** Link to the help article listed under this name. */
-const articleTo = (label: string) => href('seller/help-article', '', { slug: articleSlug(label) });
+type CaseRow = components['schemas']['support.SellerCaseRow'];
+type CaseCategory = components['schemas']['support.CaseCategory'];
+type CaseView = components['schemas']['support.CaseView'];
+type SupportOptions = components['schemas']['support.SellerSupportOptions'];
 
-interface Topic {
-  icon: IconName;
-  title: string;
-  desc: string;
-  articles: string[];
-}
-
-interface SupportRequest {
-  ref: string;
-  status: string;
-  subject: string;
-  meta: string;
-}
-
-interface Attachment {
-  name: string;
-  size: number;
-}
-
-const TOPICS: Topic[] = [
-  { icon: 'wallet', title: 'Fees and payouts', desc: 'How commission is calculated, when earnings become available, holds and statements.', articles: ['How the fee basis works', 'Payout schedule and cutoffs', 'Refunds after payout and negative balances'] },
-  { icon: 'file-check', title: 'Listing rules and rejected submissions', desc: 'What reviewers check and how to fix a submission.', articles: ['Photo and title rules', 'Brand claims and proof documents', 'Fix a rejected or changes-requested product'] },
-  { icon: 'truck', title: 'Shipping and dispatch targets', desc: 'Dispatch deadlines, valid tracking and late shipments.', articles: ['Dispatch deadline rules', 'Uploading valid tracking', 'When you can’t fulfill an order'] },
-  { icon: 'undo-2', title: 'Returns and disputes', desc: 'Response targets, who pays return shipping and how disputes are decided.', articles: ['Responding to a return request', 'Partial refunds and reasons', 'Disputes, evidence and appeals'] },
-  { icon: 'gauge', title: 'Account health and restrictions', desc: 'Targets, warnings, restrictions and how to appeal.', articles: ['What each metric measures', 'What a restriction affects', 'How to appeal a decision'] },
-  { icon: 'megaphone', title: 'Advertising', desc: 'Sponsored products and stores, billing and review.', articles: ['Requesting a sponsored campaign', 'How ad charges are billed', 'Why an ad was not approved'] },
-];
-
-/** Popular searches: the chip sets the search text. */
-const POPULAR: Array<{ label: string; q: string }> = [
-  { label: 'Payout schedule', q: 'payout' },
-  { label: 'Changes requested', q: 'changes-requested' },
-  { label: 'Dispatch deadlines', q: 'dispatch' },
-  { label: 'Appeal a restriction', q: 'appeal' },
-];
-
-const GUIDE: Array<[string, string]> = [
-  ['Find the submission', 'In Products and offers, filter by Changes requested or Rejected. Each one shows the reviewer and the date.'],
-  ['Read each reviewer note', 'Notes are attached to the field that needs work, such as a photo, the title or a specification. Common reasons: watermarked or borrowed photos, missing required attributes, brand claims without proof, a duplicate of an existing product.'],
-  ['Fix the flagged fields', 'Only flagged fields need changes. For a duplicate, add your offer to the existing product instead.'],
-  ['Resubmit', 'The status goes back to Submitted. Review usually takes up to 2 business days (example).'],
-  ['If it was rejected', 'The rejection explains the rule that applies. You can submit a corrected version or ask support to review the decision.'],
-];
-
-/** Example fee calculation: 10% marketplace fee on the fee basis (price minus seller-funded discount). */
-const FEE = { price: 100, discount: 10, rate: 0.1, shipping: 6.99 };
-
-const REQUESTS: SupportRequest[] = [
-  { ref: 'CS-261007-1251', status: 'Open', subject: 'Documents for the Cameras restriction', meta: 'Account health · Reply expected by Oct 9, 10:00 AM' },
-  { ref: 'CS-261005-1219', status: 'Waiting on seller', subject: 'Hold on MK-261003-07712', meta: 'Fees and payouts · Support asked for proof of delivery · Oct 6' },
-  { ref: 'CS-260928-1107', status: 'Resolved', subject: 'Shipping label billed twice', meta: 'Fees and payouts · Adjustment ADJ-260930-0112 added Sep 30' },
-];
-
-const SUPPORT_TOPICS = ['Account health and restrictions', 'Fees and payouts', 'Listing rules and rejected submissions', 'Shipping and dispatch', 'Returns and disputes', 'Advertising', 'Something else'];
-const REPLY_CHANNELS = ['In Seller Center and email to avery@northwindaudio.com', 'In Seller Center only'];
 const ACCEPT = 'application/pdf,image/jpeg,image/png';
-const MAX_BYTES = 10 * 1024 * 1024;
+const ACCEPT_RE = /\.(pdf|jpe?g|png)$|^application\/pdf$|^image\/(jpeg|png)$/i;
+const has = (s: string | null | undefined, q: string) => (s ?? '').toLowerCase().includes(q);
+
+/** Case status → badge tone (statusLabel is the text). */
+const CASE_TONE: Record<string, Tone> = {
+  open: 'info',
+  reopened: 'info',
+  waiting_on_seller: 'warning',
+  waiting_on_customer: '',
+  escalated: 'danger',
+  decision_made: 'info',
+  appealed: 'warning',
+  resolved: 'success',
+  closed: '',
+};
+const isClosed = (s: string) => s === 'resolved' || s === 'closed';
+
+const replyTime = (c?: Pick<CaseCategory, 'firstResponseBusinessHours'>) =>
+  !c ? '' : c.firstResponseBusinessHours <= 8 ? 'Within 1 business day' : `Within ${Math.ceil(c.firstResponseBusinessHours / 8)} business days`;
 
 interface Draft {
   topic: string;
   ref: string;
   subject: string;
   message: string;
-  channel: string;
-  files: Attachment[];
+  channel: 'seller_center_and_email' | 'seller_center_only';
 }
 
-const DESIGN_DRAFT: Draft = {
-  topic: 'Account health and restrictions',
-  ref: 'RS-261002-0019',
-  subject: 'Which documents prove we can sell Vantor cameras?',
-  message: 'We buy Vantor cameras from Westline Distribution, an authorized US distributor. Is a recent invoice from them enough, or do you need a letter from Vantor? Invoice attached.',
-  channel: REPLY_CHANNELS[0],
-  files: [{ name: 'westline-invoice-2026-08.pdf', size: 412 * 1024 }],
-};
-const BLANK_DRAFT: Draft = { topic: SUPPORT_TOPICS[0], ref: '', subject: '', message: '', channel: REPLY_CHANNELS[0], files: [] };
-
-type DraftErrors = Partial<Record<'ref' | 'subject' | 'message' | 'files', string>>;
+type DraftErrors = Partial<Record<'topic' | 'ref' | 'subject' | 'message', string>>;
 
 function validate(d: Draft): DraftErrors {
   const e: DraftErrors = {};
   const ref = d.ref.trim();
+  if (!d.topic) e.topic = 'Choose a topic.';
   if (ref && (/\s/.test(ref) || ref.length < 4)) e.ref = 'Enter one reference like MK-261008-12077, or leave this blank.';
   if (!d.subject.trim()) e.subject = 'Enter a subject.';
   else if (d.subject.trim().length < 5) e.subject = 'Make the subject a little longer so support can route it.';
@@ -105,51 +69,101 @@ function validate(d: Draft): DraftErrors {
   return e;
 }
 
-const kb = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
-const has = (s: string, q: string) => s.toLowerCase().includes(q);
+/* ---------------- Data ---------------- */
 
-function RequestList({ items }: { items: SupportRequest[] }) {
-  const open = items.filter((r) => r.status !== 'Resolved').length;
+function useSupportOptions() {
+  const { api } = useApi();
+  const { sellerId } = useSellerSession();
+  return useQuery({ queryKey: ['support', 'categories', sellerId], queryFn: () => call(api.GET('/api/seller/support/categories')) as Promise<SupportOptions>, staleTime: 5 * 60_000 });
+}
+
+function useRequests() {
+  const { api } = useApi();
+  const { sellerId } = useSellerSession();
+  return useQuery({
+    queryKey: ['support', 'cases', sellerId, 'support_requests'],
+    queryFn: () => call(api.GET('/api/seller/support/cases', { params: { query: { scope: 'support_requests', state: 'all', limit: 10 } } })),
+  });
+}
+
+/* ---------------- Parts ---------------- */
+
+function RequestList({ categories }: { categories: CaseCategory[] }) {
+  const requests = useRequests();
+  const items = requests.data?.items ?? [];
+  const open = items.filter((r) => !isClosed(r.status)).length;
+  const label = (key: string) => categories.find((c) => c.key === key)?.label ?? key.replace(/_/g, ' ');
+  const meta = (r: CaseRow) => [label(r.category), r.nextAction?.label, `Updated ${date(r.updatedAt)}`].filter(Boolean).join(' · ');
   return (
-    <Card title="Your support requests" sub={`${open} open`} titleAs="h3" flush>
-      <ul className="list pad">
-        {items.map((r) => (
-          <li key={r.ref}>
-            <span className="grow stack gap-1">
-              <span className="row between">
-                <a className="mono small" href="#">
-                  {r.ref}
-                </a>
-                <StatusBadge status={r.status} />
+    <Card title="Your support requests" sub={requests.data ? `${open} open` : undefined} titleAs="h3" flush>
+      {requests.isPending ? (
+        <div className="pad">
+          <SkeletonLines rows={3} />
+        </div>
+      ) : requests.isError ? (
+        <div className="pad">
+          <LoadError error={requests.error} onRetry={() => void requests.refetch()} />
+        </div>
+      ) : items.length === 0 ? (
+        <div className="card-body">
+          <p className="small sub">No support requests yet. Requests you send appear here with their status.</p>
+        </div>
+      ) : (
+        <ul className="list pad">
+          {items.map((r) => (
+            <li key={r.id}>
+              <span className="grow stack gap-1">
+                <span className="row between">
+                  <span className="mono small">{r.ref}</span>
+                  <StatusBadge status={r.statusLabel} tone={CASE_TONE[r.status] ?? ''} />
+                </span>
+                <span className="small strong">{r.subject}</span>
+                <span className="xs muted">{meta(r)}</span>
               </span>
-              <span className="small strong">{r.subject}</span>
-              <span className="xs muted">{r.meta}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }
 
-function ContactForm({ initial, onCancel, onSent }: { initial: Draft; onCancel: () => void; onSent: (r: SupportRequest) => void }) {
+function ContactForm({ initial, categories, onCancel, onSent }: { initial: Draft; categories: CaseCategory[]; onCancel: () => void; onSent: (c: CaseView) => void }) {
+  const { api } = useApi();
+  const { sellerId, can } = useSellerSession();
+  const qc = useQueryClient();
+  const allowed = can('support.requests.create');
   const [d, setD] = useState<Draft>(initial);
   const [tried, setTried] = useState(false);
-  const [fileErr, setFileErr] = useState('');
+  const files = useUploads('case_evidence', { max: 5, accept: ACCEPT_RE });
+  const key = useRef(newIdempotencyKey());
+  const security = useQuery({ queryKey: ['identity', 'security'], queryFn: () => call(api.GET('/api/store/identity/security')) });
+  const email = security.data?.account.email;
   const errors = tried ? validate(d) : {};
   const n = Object.keys(errors).length;
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((x) => ({ ...x, [k]: v }));
 
-  const addFiles = (files: File[]) => {
-    const ok = files.filter((f) => ACCEPT.split(',').includes(f.type) && f.size <= MAX_BYTES);
-    setFileErr(ok.length < files.length ? 'Some files were skipped. Use PDF, JPG or PNG files up to 10 MB each.' : '');
-    setD((x) => ({ ...x, files: [...x.files, ...ok.filter((f) => !x.files.some((a) => a.name === f.name)).map((f) => ({ name: f.name, size: f.size }))] }));
-  };
-  const send = () => {
+  const send = useMutation({
+    mutationFn: () =>
+      call(
+        api.POST('/api/seller/support/requests', {
+          body: { category: d.topic, reference: d.ref.trim() || null, subject: d.subject.trim(), message: d.message.trim(), mediaIds: files.assetIds.length ? files.assetIds : null, replyChannel: d.channel },
+          params: { header: { 'Idempotency-Key': key.current } },
+        }),
+      ) as Promise<CaseView>,
+    onSuccess: (c) => {
+      key.current = newIdempotencyKey();
+      void qc.invalidateQueries({ queryKey: ['support', 'cases', sellerId] });
+      onSent(c);
+    },
+  });
+  const serverErrors = send.error instanceof ApiError && send.error.code === 'VALIDATION_FAILED' ? send.error.fieldErrors : {};
+  const fieldError = (k: keyof DraftErrors, apiKey: string = k) => errors[k] ?? serverErrors[apiKey];
+
+  const submit = () => {
     setTried(true);
-    if (Object.keys(validate(d)).length) return;
-    const ref = `CS-261008-${1252 + Math.floor(Math.random() * 40)}`;
-    onSent({ ref, status: 'Open', subject: d.subject.trim(), meta: `${d.topic} · Reply expected within 1 business day` });
+    if (Object.keys(validate(d)).length || files.uploading) return;
+    send.mutate();
   };
 
   return (
@@ -160,32 +174,42 @@ function ContactForm({ initial, onCancel, onSent }: { initial: Draft; onCancel: 
           <Button variant="ghost" onClick={onCancel}>
             Cancel
           </Button>
-          <Button icon="send" onClick={send}>
-            Send request
+          <Button icon="send" onClick={submit} disabled={!allowed || send.isPending || files.uploading}>
+            {send.isPending ? 'Sending…' : 'Send request'}
           </Button>
         </>
       }
     >
+      {!allowed && (
+        <Alert tone="info" title="You can’t send support requests">
+          Your role doesn’t include contacting seller support. Ask the store owner to send it or to give you access.
+        </Alert>
+      )}
       {n > 0 && (
         <Alert tone="danger" title={`Check ${n} field${n > 1 ? 's' : ''}`}>
           Fix the highlighted fields to send your request.
         </Alert>
       )}
+      {send.isError && !Object.keys(serverErrors).length && (
+        <Alert tone="danger" title="We couldn’t send your request">
+          {errorMessage(send.error)}
+        </Alert>
+      )}
       <div className="sb-form-grid">
-        <Field label="Topic">
-          <Select id="hp-topic" options={SUPPORT_TOPICS} value={d.topic} onChange={(e) => set('topic', e.target.value)} />
+        <Field label="Topic" error={fieldError('topic', 'category')}>
+          <Select id="hp-topic" options={categories.map((c) => ({ value: c.key, label: c.label }))} value={d.topic} onChange={(e) => set('topic', e.target.value)} />
         </Field>
-        <Field label="Related order, product or reference" optional hint="Order MK-…, return RT-…, payout PO-… or a SKU" error={errors.ref}>
-          <TextInput id="hp-ref" icon="hash" value={d.ref} placeholder="" error={!!errors.ref} onChange={(e) => set('ref', e.target.value)} />
+        <Field label="Related order, product or reference" optional hint="Order MK-…, return RT-…, payout PO-…, restriction RS-… or a SKU" error={fieldError('ref', 'reference')}>
+          <TextInput id="hp-ref" icon="hash" value={d.ref} placeholder="" error={!!fieldError('ref', 'reference')} onChange={(e) => set('ref', e.target.value)} />
         </Field>
         <div className="full">
-          <Field label="Subject" error={errors.subject}>
-            <TextInput id="hp-subj" value={d.subject} placeholder="" error={!!errors.subject} onChange={(e) => set('subject', e.target.value)} />
+          <Field label="Subject" error={fieldError('subject')}>
+            <TextInput id="hp-subj" value={d.subject} placeholder="" error={!!fieldError('subject')} onChange={(e) => set('subject', e.target.value)} />
           </Field>
         </div>
         <div className="full">
-          <Field label="Message" hint="Don’t include customer personal details or card numbers." error={errors.message}>
-            <Textarea id="hp-msg" placeholder="" className={errors.message ? 'is-error' : undefined} value={d.message} onChange={(e) => set('message', e.target.value)} />
+          <Field label="Message" hint="Don’t include customer personal details or card numbers." error={fieldError('message')}>
+            <Textarea id="hp-msg" placeholder="" className={fieldError('message') ? 'is-error' : undefined} value={d.message} onChange={(e) => set('message', e.target.value)} />
           </Field>
         </div>
       </div>
@@ -193,61 +217,172 @@ function ContactForm({ initial, onCancel, onSent }: { initial: Draft; onCancel: 
         <span className="label">
           Attachments <span className="opt">(optional)</span>
         </span>
-        <FileDrop title="Add files" hint="PDF, JPG or PNG, up to 10 MB each" accept={ACCEPT} onFiles={addFiles} />
-        {fileErr && (
+        <FileDrop title="Add files" hint="PDF, JPG or PNG, up to 10 MB each" accept={ACCEPT} onFiles={files.add} />
+        {files.error && (
           <span className="error-text" role="alert">
             <Icon name="circle-alert" className="ic-sm" />
-            {fileErr}
+            {files.error}
           </span>
         )}
-        {d.files.length > 0 && (
+        {files.items.length > 0 && (
           <ul className="list">
-            {d.files.map((f) => (
-              <li key={f.name}>
-                <Icon name="file-text" className="ic-sm" />
-                <span className="grow small">{f.name}</span>
-                <span className="xs muted">{kb(f.size)}</span>
-                <IconButton icon="x" label={`Remove ${f.name}`} onClick={() => set('files', d.files.filter((a) => a.name !== f.name))} />
+            {files.items.map((f) => (
+              <li key={f.key}>
+                <Icon name={f.status === 'failed' ? 'circle-alert' : 'file-text'} className="ic-sm" />
+                <span className="grow small">
+                  {f.name}
+                  {f.status === 'uploading' && <span className="xs muted"> · Uploading…</span>}
+                  {f.status === 'failed' && <span className="xs t-danger-text"> · {f.error}</span>}
+                </span>
+                <span className="xs muted">{fileSize(f.size)}</span>
+                <IconButton icon="x" label={`Remove ${f.name}`} onClick={() => files.remove(f.key)} />
               </li>
             ))}
           </ul>
         )}
       </div>
       <Field label="Reply by">
-        <Select id="hp-chan" options={REPLY_CHANNELS} value={d.channel} onChange={(e) => set('channel', e.target.value)} />
+        <Select
+          id="hp-chan"
+          options={[
+            { value: 'seller_center_and_email', label: email ? `In Seller Center and email to ${email}` : 'In Seller Center and by email' },
+            { value: 'seller_center_only', label: 'In Seller Center only' },
+          ]}
+          value={d.channel}
+          onChange={(e) => set('channel', e.target.value as Draft['channel'])}
+        />
       </Field>
     </Card>
   );
 }
 
+/** "How fees work": the first example calculation with shipping from the seller's fee schedule. */
+function FeesCard() {
+  const { api } = useApi();
+  const { sellerId } = useSellerSession();
+  const fees = useQuery({ queryKey: ['finance', 'fee-schedule', sellerId], queryFn: () => call(api.GET('/api/seller/finance/fee-schedule')), staleTime: 5 * 60_000 });
+  const ex = fees.data ? (fees.data.examples.find((e) => e.shippingCharged.amount > 0) ?? fees.data.examples[0]) : undefined;
+  const rate = ex ? `${ex.rateBps / 100}%` : '';
+  return (
+    <Card title="How fees work" sub="Example calculation" titleAs="h3">
+      {fees.isPending ? (
+        <SkeletonLines rows={4} />
+      ) : fees.isError ? (
+        <LoadError error={fees.error} onRetry={() => void fees.refetch()} />
+      ) : !ex ? (
+        <p className="small sub">Your fee rules are in your seller agreement.</p>
+      ) : (
+        <>
+          <div className="sb-recon">
+            <SummaryRow k="Item price" v={formatMoney(ex.itemPrice)} />
+            {ex.sellerDiscount.amount > 0 && <SummaryRow k="Your discount (seller-funded)" v={<span className="t-deal-text">−{formatMoney(ex.sellerDiscount)}</span>} />}
+            <SummaryRow className="strong" k="Fee basis" v={formatMoney(ex.feeBasis)} />
+            <SummaryRow k={`Marketplace fee, ${rate} of fee basis`} v={<span className="sb-neg">−{formatMoney(ex.fee)}</span>} />
+            {ex.shippingCharged.amount > 0 && <SummaryRow k={`Shipping you charged${fees.data.current.includeShipping ? '' : ' (no fee)'}`} v={formatMoney(ex.shippingCharged)} />}
+            <SummaryRow className="total" k="Your earnings" v={formatMoney(ex.sellerEarnings)} />
+          </div>
+          <p className="xs muted">
+            {fees.data.illustration}.{fees.data.current.platformDiscountsReduceFee ? '' : ' Platform-funded discounts don’t reduce your earnings.'} Final fees are in your seller agreement.
+          </p>
+        </>
+      )}
+      <Link className="small strong" to={href('seller/finance')}>
+        See it on a real statement <Icon name="arrow-right" className="ic-sm" />
+      </Link>
+    </Card>
+  );
+}
+
+function ContactCard({ options }: { options?: SupportOptions }) {
+  const first = options?.categories[0];
+  return (
+    <Card
+      title="Contact seller support"
+      titleAs="h3"
+      foot={
+        <Button size="sm" icon="message-square" to={href('seller/help', 'contact-seller-support')}>
+          Contact seller support
+        </Button>
+      }
+    >
+      <p className="small sub">Owners and staff with access can send a request. Replies come to this page and by email.</p>
+      {options ? (
+        <KeyValue
+          pairs={[
+            ['Standard reply', replyTime(first)],
+            ['Hours', options.hoursLabel],
+            ['Now', options.openNow ? 'Open' : options.nextOpenAt ? `Closed · opens ${weekdayDate(options.nextOpenAt)}, ${time(options.nextOpenAt)}` : 'Closed'],
+          ]}
+        />
+      ) : (
+        <SkeletonLines rows={2} />
+      )}
+    </Card>
+  );
+}
+
+/** Topic cards (help home), or search results grouped by topic. */
+function TopicCards({ topics }: { topics: Array<{ key: string; icon: string | null | undefined; title: string; desc?: string | null; articles: HelpArticleSummary[] }> }) {
+  return (
+    <div className="sb-topics">
+      {topics.map((t) => (
+        <section key={t.key} className="sb-topic">
+          <span className="ic">
+            <Icon name={topicIcon(t.icon)} />
+          </span>
+          <h3 className="h4">{t.title}</h3>
+          {t.desc && <p className="xs sub">{t.desc}</p>}
+          <ul>
+            {t.articles.map((a) => (
+              <li key={a.slug}>
+                <Link to={articleHref(a.slug)}>{a.title}</Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+/* ---------------- Page ---------------- */
+
 export default function Help() {
   const [view, setView] = useView<'contact-seller-support'>();
-  const [requests, setRequests] = useState(REQUESTS);
   const [q, setQ] = useState('');
-  // Opening the view's URL directly shows the design's filled-in request; later visits start blank.
-  const [prefill, setPrefill] = useState(view === 'contact-seller-support');
-  const [sent, setSent] = useState<SupportRequest | null>(null);
-  // Sent from a help article: preselect its topic and prefill the subject.
+  const [debounced, setDebounced] = useState('');
+  const [sent, setSent] = useState<CaseView | null>(null);
   const [params] = useSearchParams();
-  const fromArticle = getArticle(params.get('article') ?? undefined);
+  const home = useQuery({ queryKey: helpKeys.home, queryFn: getHelpHome });
+  const options = useSupportOptions();
+  const categories = useMemo(() => (options.data?.categories ?? []).filter((c) => c.active), [options.data]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  const query = debounced;
+  const search = useQuery({ queryKey: helpKeys.search(query), queryFn: () => searchHelp(query), enabled: !!query });
+
+  // Sent from a help article: preselect its topic and prefill the subject.
+  const articleSlug = params.get('article') ?? '';
+  const fromArticle = useQuery({ queryKey: helpKeys.article(articleSlug), queryFn: () => getHelpArticle(articleSlug), enabled: view === 'contact-seller-support' && !!articleSlug });
   const topicParam = params.get('topic') ?? '';
-  const linkedTopic = SUPPORT_TOPICS.includes(topicParam) ? topicParam : fromArticle ? getCategory(fromArticle.category).supportTopic : '';
-  const linkedDraft: Draft | null = linkedTopic || fromArticle ? { ...BLANK_DRAFT, topic: linkedTopic || BLANK_DRAFT.topic, subject: fromArticle ? `Question about “${fromArticle.label}”` : '' } : null;
+
   useEffect(() => {
     if (view !== 'contact-seller-support') setSent(null);
   }, [view]);
 
-  const query = q.trim().toLowerCase();
-  const topics = TOPICS.map((t) => {
-    if (!query || has(t.title, query) || has(t.desc, query)) return t;
-    return { ...t, articles: t.articles.filter((a) => has(a, query)) };
-  }).filter((t) => !query || t.articles.length || has(t.title, query) || has(t.desc, query));
-  const nArticles = topics.reduce((s, t) => s + t.articles.length, 0);
-
-  const basis = FEE.price - FEE.discount;
-  const fee = basis * FEE.rate;
-
   if (view === 'contact-seller-support') {
+    const formReady = options.isSuccess && (!articleSlug || !fromArticle.isPending);
+    const initial: Draft = {
+      topic: categories.some((c) => c.key === topicParam) ? topicParam : (categories[0]?.key ?? ''),
+      ref: '',
+      subject: fromArticle.data ? `Question about “${fromArticle.data.title}”` : '',
+      message: '',
+      channel: 'seller_center_and_email',
+    };
+    const suggestions = (home.data?.popular ?? []).slice(0, 3);
     return (
       <SellerLayout active="help">
         <PageHeader
@@ -259,13 +394,13 @@ export default function Help() {
           {sent ? (
             <Card title="Request sent">
               <Alert tone="success" title={`We received ${sent.ref}`}>
-                A Seller Manager team member will reply within 1 business day, here and by email.
+                {sent.expectedResponse ? `A Seller Manager team member will reply by ${weekdayDate(sent.expectedResponse.dueAt)}, ${time(sent.expectedResponse.dueAt)}, here and by email.` : 'A Seller Manager team member will reply here and by email.'}
               </Alert>
               <KeyValue
                 pairs={[
                   ['Reference', <span key="r" className="mono">{sent.ref}</span>],
                   ['Subject', sent.subject],
-                  ['Status', <StatusBadge key="s" status={sent.status} />],
+                  ['Status', <StatusBadge key="s" status={sent.statusLabel} tone={CASE_TONE[sent.status] ?? ''} />],
                 ]}
               />
               <div className="row gap-2">
@@ -277,50 +412,52 @@ export default function Help() {
                 </Button>
               </div>
             </Card>
+          ) : options.isError ? (
+            <LoadError error={options.error} onRetry={() => void options.refetch()} />
+          ) : !formReady ? (
+            <Card title="New support request">
+              <SkeletonLines rows={5} />
+            </Card>
           ) : (
-            <ContactForm
-              initial={linkedDraft ?? (prefill ? DESIGN_DRAFT : BLANK_DRAFT)}
-              onCancel={() => {
-                setPrefill(false);
-                setView('');
-              }}
-              onSent={(r) => {
-                setRequests((l) => [r, ...l]);
-                setSent(r);
-                setPrefill(false);
-              }}
-            />
+            <ContactForm key={`${initial.topic}|${initial.subject}`} initial={initial} categories={categories} onCancel={() => setView('')} onSent={setSent} />
           )}
           <div className="stack gap-5">
-            <Card title="Expected reply time" titleAs="h3">
-              <KeyValue
-                pairs={[
-                  ['Standard', 'Within 1 business day'],
-                  ['Restrictions and failed payouts', 'Within 4 hours'],
-                  ['Hours', 'Mon–Sat, 8 AM–8 PM PT'],
-                ]}
-              />
-              <span className="xs muted">Example service targets. Replies arrive here and by email.</span>
-            </Card>
-            <Card title="These may answer it now" titleAs="h3">
-              <ul className="stack gap-2 small">
-                <li>
-                  <Link to={articleTo('Brand claims and proof documents')}>Brand claims and proof documents</Link>
-                </li>
-                <li>
-                  <Link to={articleTo('How to appeal a decision')}>How to appeal a decision</Link>
-                </li>
-                <li>
-                  <Link to={articleTo('What a restriction affects')}>What a restriction affects</Link>
-                </li>
-              </ul>
-            </Card>
-            <RequestList items={requests} />
+            <ExpectedReply options={options.data} />
+            {suggestions.length > 0 && (
+              <Card title="These may answer it now" titleAs="h3">
+                <ul className="stack gap-2 small">
+                  {suggestions.map((a) => (
+                    <li key={a.slug}>
+                      <Link to={articleHref(a.slug)}>{a.title}</Link>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+            <RequestList categories={categories} />
           </div>
         </div>
       </SellerLayout>
     );
   }
+
+  const h = home.data;
+  const lq = query.toLowerCase();
+  const topicById = new Map<string, HelpCategory>((h?.topics ?? []).map((t) => [t.id, t]));
+  const topics = query
+    ? // Search results grouped by their topic, in the help home's topic order.
+      Object.values(
+        (search.data?.items ?? []).reduce<Record<string, { key: string; icon: string | null | undefined; title: string; desc?: string | null; articles: HelpArticleSummary[]; pos: number }>>((acc, a) => {
+          const t = topicById.get(a.categoryId);
+          (acc[a.categoryId] ??= { key: a.categoryId, icon: t?.icon, title: a.categoryName, desc: t?.description, articles: [], pos: t?.position ?? 999 }).articles.push(a);
+          return acc;
+        }, {}),
+      ).sort((a, b) => a.pos - b.pos)
+    : (h?.topics ?? []).map((t) => ({ key: t.id, icon: t.icon, title: t.name, desc: t.description, articles: t.topArticles ?? [] }));
+  const nArticles = query ? (search.data?.items.length ?? 0) : 0;
+  const featured = h?.featured;
+  const featuredAction = featured?.actions.find((l) => !isContactLink(l) && helpLinkTo(l.url).to);
+  const loadingTopics = home.isPending || (!!query && search.isPending);
 
   return (
     <SellerLayout active="help">
@@ -336,31 +473,39 @@ export default function Help() {
       <div className="sb-hsearch">
         <h2 className="h3">How can we help?</h2>
         <SearchInput id="hp-q" placeholder="Search seller help, e.g. why was my product rejected" label="Search seller help" value={q} onChange={setQ} />
-        <div className="row gap-2 xs sub">
-          <span>Popular:</span>
-          <div className="hscroll gap-2">
-            {POPULAR.map((p) => (
-              <a
-                key={p.label}
-                className={query === p.q ? 'chip is-active' : 'chip'}
-                href="#"
-                aria-current={query === p.q ? 'true' : undefined}
-                onClick={(e) => {
-                  e.preventDefault();
-                  setQ(query === p.q ? '' : p.q);
-                }}
-              >
-                {p.label}
-              </a>
-            ))}
+        {(h?.popularSearches.length ?? 0) > 0 && (
+          <div className="row gap-2 xs sub">
+            <span>Popular:</span>
+            <div className="hscroll gap-2">
+              {h!.popularSearches.map((p) => {
+                const to = helpLinkTo(p.url).to;
+                return to ? (
+                  <Link key={p.label} className="chip" to={to}>
+                    {p.label}
+                  </Link>
+                ) : (
+                  <a
+                    key={p.label}
+                    className={has(p.label, lq) && lq ? 'chip is-active' : 'chip'}
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setQ(p.label);
+                    }}
+                  >
+                    {p.label}
+                  </a>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
       </div>
       <div className="sb-main">
         <div className="stack gap-5">
-          {query && (
+          {query && !search.isPending && !search.isError && (
             <p className="small sub" role="status">
-              {nArticles ? `${nArticles} article${nArticles > 1 ? 's' : ''} match “${q.trim()}”.` : `No articles match “${q.trim()}”.`}{' '}
+              {nArticles ? `${nArticles} article${nArticles > 1 ? 's' : ''} match “${query}”.` : `No articles match “${query}”.`}{' '}
               <a
                 href="#"
                 onClick={(e) => {
@@ -372,61 +517,53 @@ export default function Help() {
               </a>
             </p>
           )}
-          {topics.length ? (
-            <div className="sb-topics">
-              {topics.map((t) => (
-                <section key={t.title} className="sb-topic">
-                  <span className="ic">
-                    <Icon name={t.icon} />
-                  </span>
-                  <h3 className="h4">{t.title}</h3>
-                  <p className="xs sub">{t.desc}</p>
-                  <ul>
-                    {t.articles.map((a) => (
-                      <li key={a}>
-                        <Link to={articleTo(a)}>{a}</Link>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+          {home.isError ? (
+            <LoadError error={home.error} onRetry={() => void home.refetch()} title="We couldn’t load seller help" />
+          ) : query && search.isError ? (
+            <LoadError error={search.error} onRetry={() => void search.refetch()} title="We couldn’t search seller help" />
+          ) : loadingTopics ? (
+            <div className="sb-topics" aria-hidden="true">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="sk sk-card" />
               ))}
             </div>
+          ) : topics.length ? (
+            <TopicCards topics={topics} />
           ) : (
             <section className="card pad">
               <EmptyState
                 icon="search-x"
-                title="No help articles found"
+                title={query ? 'No help articles found' : 'No seller help articles yet'}
                 action={
                   <Button variant="secondary" size="sm" icon="message-square" to={href('seller/help', 'contact-seller-support')}>
                     Contact seller support
                   </Button>
                 }
               >
-                Try other words, such as payout, dispatch or appeal, or ask seller support.
+                {query ? 'Try other words, such as payout, dispatch or appeal, or ask seller support.' : 'Ask seller support while the help articles are being written.'}
               </EmptyState>
             </section>
           )}
-          <Card
-            title="Fix a rejected or changes-requested product"
-            sub="Featured guide · 4 min read"
-            titleAs="h3"
-            foot={
-              <Button variant="secondary" size="sm" iconRight="arrow-right" to={href('seller/product-new', 'changes-requested')}>
-                Open a product with changes requested
-              </Button>
-            }
-          >
-            <ol className="sb-guide">
-              {GUIDE.map(([t, d]) => (
-                <li key={t}>
-                  <div className="stack gap-1">
-                    <span className="small strong">{t}</span>
-                    <span className="xs sub">{d}</span>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </Card>
+          {featured && !query && (
+            <Card
+              title={<Link to={articleHref(featured.slug)}>{featured.title}</Link>}
+              sub={`Featured guide · ${featured.readMinutes} min read`}
+              titleAs="h3"
+              foot={
+                featuredAction ? (
+                  <Button variant="secondary" size="sm" iconRight="arrow-right" to={helpLinkTo(featuredAction.url).to}>
+                    {featuredAction.label}
+                  </Button>
+                ) : (
+                  <Button variant="secondary" size="sm" iconRight="arrow-right" to={articleHref(featured.slug)}>
+                    Read the guide
+                  </Button>
+                )
+              }
+            >
+              <RichText html={featured.body} tableLabel={`${featured.title} table`} proseClassName="prose small" />
+            </Card>
+          )}
           <Card title="Restrictions, in short" titleAs="h3">
             <p className="small sub">A restriction always tells you the reason, which activity it affects and how to appeal. Existing orders, returns, customer messages and payouts keep working unless the notice says otherwise.</p>
             <Link className="small strong" to={href('seller/performance')}>
@@ -435,40 +572,33 @@ export default function Help() {
           </Card>
         </div>
         <div className="stack gap-5">
-          <Card title="How fees work" sub="Example calculation" titleAs="h3">
-            <div className="sb-recon">
-              <SummaryRow k="Item price" v={money(FEE.price)} />
-              <SummaryRow k="Your discount (seller-funded)" v={<span className="t-deal-text">−{money(FEE.discount)}</span>} />
-              <SummaryRow className="strong" k="Fee basis" v={money(basis)} />
-              <SummaryRow k={`Marketplace fee, ${FEE.rate * 100}% of fee basis`} v={<span className="sb-neg">−{money(fee)}</span>} />
-              <SummaryRow k="Shipping you charged (no fee)" v={money(FEE.shipping)} />
-              <SummaryRow className="total" k="Your earnings" v={money(basis - fee + FEE.shipping)} />
-            </div>
-            <p className="xs muted">Example rate. Without a discount, a $100.00 sale with a 10% fee gives $10.00 in fees and $90.00 to you. Platform-funded discounts don't reduce your earnings. Final fees are in your seller agreement.</p>
-            <Link className="small strong" to={href('seller/statement')}>
-              See it on a real statement <Icon name="arrow-right" className="ic-sm" />
-            </Link>
-          </Card>
-          <Card
-            title="Contact seller support"
-            titleAs="h3"
-            foot={
-              <Button size="sm" icon="message-square" to={href('seller/help', 'contact-seller-support')}>
-                Contact seller support
-              </Button>
-            }
-          >
-            <p className="small sub">Owners and staff with access can send a request. Replies come to this page and by email.</p>
-            <KeyValue
-              pairs={[
-                ['Standard reply', 'Within 1 business day'],
-                ['Urgent', 'Within 4 hours (example)'],
-              ]}
-            />
-          </Card>
-          <RequestList items={requests} />
+          <FeesCard />
+          <ContactCard options={options.data} />
+          <RequestList categories={categories} />
         </div>
       </div>
     </SellerLayout>
+  );
+}
+
+function ExpectedReply({ options }: { options?: SupportOptions }) {
+  const cats = options?.categories.filter((c) => c.active) ?? [];
+  const fastest = cats.reduce<CaseCategory | undefined>((m, c) => (!m || c.firstResponseBusinessHours < m.firstResponseBusinessHours ? c : m), undefined);
+  const slowest = cats.reduce<CaseCategory | undefined>((m, c) => (!m || c.resolutionBusinessDays > m.resolutionBusinessDays ? c : m), undefined);
+  return (
+    <Card title="Expected reply time" titleAs="h3">
+      {options ? (
+        <KeyValue
+          pairs={[
+            ['First reply', replyTime(fastest)],
+            ['Resolution', slowest ? `Within ${slowest.resolutionBusinessDays} business days` : ''],
+            ['Hours', options.hoursLabel],
+          ]}
+        />
+      ) : (
+        <SkeletonLines rows={3} />
+      )}
+      <span className="xs muted">Service targets for seller support. Replies arrive here and by email.</span>
+    </Card>
   );
 }

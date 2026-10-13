@@ -1,102 +1,223 @@
-import type { ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { call, useApi, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { money } from '@marketly/web-shared/lib/format';
+import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { sales14 } from '@marketly/web-shared/data/fixtures';
-import { Badge, Button, Card, Deadline, Icon, Legend, LineChart, Meter, Stat, StatusLegend, TableWrap, type IconName } from '@marketly/web-shared/ui';
+import { Badge, Button, Card, Deadline, Icon, Legend, LineChart, Meter, Stat, StatusLegend, TableWrap, type Tone } from '@marketly/web-shared/ui';
+import { useSellerSession } from '@/app/session';
+import { helpLinkTo } from './data/help-articles';
+import { dateTime, deadlineLabel, deadlineTone, LoadError, longDate, screenHref, shortDate, SkeletonLines, time, weekdayDate, date } from './data/home';
 
 // Design: pages/seller/seller-dashboard.html (no views).
+// API: GET /api/seller/reports/dashboard (work tiles, dispatch deadlines, sales, performance, announcements),
+// GET /api/seller/settings/upcoming-changes (announced rule changes), GET /api/seller/finance/balances
+// (payouts; finance.balances.view). The SellerDashboard screen query isn't used: its balance fails on the
+// running server (G13: Money.formatted null) and its performance targets lack the thresholds the meters need.
 
-interface Queue {
-  n: number;
-  label: string;
-  sub: string;
-  tone?: 'danger' | 'warning';
-  to: string;
+type WorkTile = components['schemas']['reports.SellerWorkTile'];
+type Balances = components['schemas']['finance.SellerBalances'];
+type UpcomingChange = components['schemas']['settings.UpcomingChange'];
+
+/** The dashboard's json fields (typed `unknown` in the API spec; shapes from reports.md SellerDashboard). */
+interface DispatchRow {
+  orderId: string;
+  orderRef: string;
+  placedAt: string;
+  buyerLabel: string;
+  itemsLabel: string;
+  deadline: { dueAt: string; state: string };
+  nextAction: string;
+}
+interface Sales {
+  range: { from: string; to: string };
+  gross: MoneyValue;
+  deltaPct: number | null;
+  orders: number;
+  averageOrder: MoneyValue | null;
+  today: MoneyValue;
+  todayOrders: number;
+  series: Array<{ key: string; label: string; points: Array<{ x: string; y: number; label: string }> }>;
+  basis: string;
+}
+interface Metric {
+  key: string;
+  label?: string;
+  value: number;
+  display: string;
+  status: 'meets' | 'watch' | 'below' | 'action_needed';
+  detail: string;
+  target: { comparator: 'gte' | 'lte'; threshold: number; unit: string; display: string; isExample: boolean };
+}
+interface Performance {
+  overall: string;
+  period: { from: string; to: string };
+  metrics: Metric[];
+}
+interface Announcement {
+  title: string;
+  body?: string | null;
+  kind?: string | null;
+  effectiveFrom?: string | null;
+  link?: { label?: string; url?: string } | string | null;
 }
 
-const QUEUES: Queue[] = [
-  { n: 1, label: 'Overdue dispatch', sub: 'MK-261007-10433 · 3 h past deadline', tone: 'danger', to: href('seller/orders', 'preparing') },
-  { n: 4, label: 'Dispatch due today by 5:00 PM', sub: '2 new · 2 preparing', tone: 'warning', to: href('seller/orders') },
-  { n: 3, label: 'New orders', sub: 'Placed since yesterday 5:00 PM', to: href('seller/orders') },
-  { n: 3, label: 'Low or out of stock', sub: '2 low · 1 out of stock (Aurora, Silver)', tone: 'warning', to: href('seller/inventory') },
-  { n: 2, label: 'Open returns', sub: '1 needs your decision by Oct 9', to: href('seller/returns') },
-  { n: 5, label: 'Unanswered messages', sub: 'Reply within 24 h · oldest waiting 19 h', tone: 'warning', to: href('seller/customers') },
-];
+const TILE_LABEL: Record<WorkTile['key'], string> = {
+  overdue_dispatch: 'Overdue dispatch',
+  dispatch_due_today: 'Dispatch due today',
+  new_orders: 'New orders',
+  low_stock: 'Low or out of stock',
+  open_returns: 'Open returns',
+  unanswered_messages: 'Unanswered messages',
+};
 
-interface DeadlineRow {
-  ref: string;
-  placed: string;
-  buyer: string;
-  items: string;
-  due: string;
-  tone: 'danger' | 'warning';
-  action: string;
+/** The three service metrics the dashboard shows (design: dispatch, cancellations, message response). */
+const PERF_KEYS = ['dispatch_reliability', 'cancellation_rate', 'response_time'];
+const METRIC_LABEL: Record<string, string> = { dispatch_reliability: 'On-time dispatch', cancellation_rate: 'Cancellation rate', response_time: 'Message response time' };
+const PERF_STATUS: Record<Metric['status'], { badge: string; tone: 'success' | 'warning' | 'danger'; note?: string }> = {
+  meets: { badge: 'Meets target', tone: 'success' },
+  watch: { badge: 'Watch', tone: 'warning', note: 'Near target' },
+  below: { badge: 'Below target', tone: 'danger', note: 'Below target' },
+  action_needed: { badge: 'Action needed', tone: 'danger', note: 'Past target' },
+};
+
+/** Meter fill: share of a "at least" target reached, or how much of an "at most" allowance is used. */
+function meterPct(m: Metric): number {
+  const { comparator, threshold, unit } = m.target;
+  if (comparator === 'gte') return Math.max(0, Math.min(100, unit === 'percent' ? m.value : threshold ? (m.value / threshold) * 100 : 100));
+  if (!threshold) return m.value > 0 ? 100 : 0;
+  return Math.max(0, Math.min(100, Math.round((m.value / threshold) * 100)));
 }
 
-const DEADLINES: DeadlineRow[] = [
-  { ref: 'MK-261007-10433', placed: 'Oct 7, 6:48 PM', buyer: 'Alex M.', items: 'Halden Pocket Speaker × 1', due: 'Overdue 3 h', tone: 'danger', action: 'Record shipment' },
-  { ref: 'MK-261008-12077', placed: 'Oct 8, 9:14 AM', buyer: 'Sam R.', items: 'Halden Pocket Bluetooth Speaker × 2', due: 'Due today 5:00 PM', tone: 'warning', action: 'Prepare' },
-  { ref: 'MK-261008-11902', placed: 'Oct 8, 8:02 AM', buyer: 'Priya K.', items: 'Halden Aurora ANC Headphones', due: 'Due today 5:00 PM', tone: 'warning', action: 'Prepare' },
-];
-
-/** Daily item sales for the last 14 days (USD), on the sales14 date axis. */
-const SALES = [1180, 1342, 1610, 1795, 1204, 1166, 1388, 1452, 1590, 2064, 2236, 1478, 1512, 1688];
-const kfmt = (v: number) => `$${(v / 1000).toFixed(1)}k`;
-
-const PERF = [
-  { label: 'On-time dispatch', badge: 'Meets target', tone: 'success' as const, value: <><b className="num u-c-text">96.4%</b> of 214 orders</>, target: 'Target 95% or higher', pct: 96, aria: '96.4%' },
-  { label: 'Cancellation rate', badge: 'Meets target', tone: 'success' as const, value: <><b className="num u-c-text">0.9%</b> seller-cancelled</>, target: 'Target below 2.5%', pct: 36, aria: '0.9%' },
-  { label: 'Message response time', badge: 'Watch', tone: 'warning' as const, value: <>Median <b className="num u-c-text">14 h</b> · 2 over 24 h</>, target: 'Target within 24 h', pct: 58, aria: '14 h', note: 'Near target' },
-];
-
-const NEWS: Array<{ icon: IconName; title: string; tag?: string; body: string; foot: ReactNode; strong?: boolean }> = [
-  {
-    icon: 'file-text',
-    title: 'Return policy update',
-    tag: 'Policy',
-    body: 'Electronics return windows stay at 30 days. Restocking fees for opened headphones are no longer allowed.',
-    foot: (
-      <>
-        Effective Nov 1, 2026 ·{' '}
-        <Link to={href('seller/help-article', '', { slug: 'responding-to-a-return-request' })} className="link-inline">
-          Read the change
-        </Link>
-      </>
-    ),
-    strong: true,
-  },
-  { icon: 'calendar-days', title: 'Holiday dispatch cutoffs', body: 'Add your closures in Shipping by Nov 15 so arrival estimates stay accurate.', foot: 'Posted Oct 5' },
-];
+const kfmt = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`);
 
 /** Work-queue tile; the shared QueueTile only announces "(urgent)", the design also marks amber tiles "(at risk)". */
-function Tile({ q }: { q: Queue }) {
+function Tile({ t }: { t: WorkTile }) {
+  const tone = t.tone === 'neutral' ? undefined : t.tone;
   return (
-    <Link className={cx('queue-tile', q.tone && `t-${q.tone}`)} to={q.to}>
+    <Link className={cx('queue-tile', tone && `t-${tone}`)} to={screenHref(t.screen, t.screenState) ?? href('seller/dashboard')}>
       <span className="qn">
-        {q.n}
-        {q.tone && <span className="sr-only"> ({q.tone === 'danger' ? 'urgent' : 'at risk'})</span>}
+        {t.count}
+        {tone && <span className="sr-only"> ({tone === 'danger' ? 'urgent' : 'at risk'})</span>}
       </span>
       <span className="stack gap-0 grow">
-        <span className="small strong">{q.label}</span>
-        <span className="xs muted">{q.sub}</span>
+        <span className="small strong">{TILE_LABEL[t.key] ?? t.key}</span>
+        <span className="xs muted">{t.sub}</span>
       </span>
       <Icon name="chevron-right" className="ic-sm" />
     </Link>
   );
 }
 
+function PayoutsCard() {
+  const { api } = useApi();
+  const { sellerId, can } = useSellerSession();
+  const allowed = can('finance.balances.view');
+  const bal = useQuery({ queryKey: ['finance', 'balances', sellerId], queryFn: () => call(api.GET('/api/seller/finance/balances')) as Promise<Balances>, enabled: allowed });
+  const b = bal.data;
+  return (
+    <Card
+      title="Payouts"
+      titleAs="h3"
+      sub="Approved sales are not paid out until they become available"
+      actions={
+        allowed ? (
+          <Link className="small strong" to={href('seller/finance')}>
+            Finance
+          </Link>
+        ) : undefined
+      }
+    >
+      {!allowed ? (
+        <p className="small sub">Balances and payouts are visible to the owner and staff with Finance access.</p>
+      ) : bal.isPending ? (
+        <SkeletonLines rows={3} />
+      ) : bal.isError ? (
+        <LoadError error={bal.error} onRetry={() => void bal.refetch()} />
+      ) : b ? (
+        <>
+          <div className="grid c2 gap-3">
+            <div className="stack gap-1">
+              <span className="xs muted strong">Pending</span>
+              <span className="sa-money">{formatMoney(b.pending)}</span>
+              <span className="xs muted">Waiting for delivery and hold</span>
+            </div>
+            <div className="stack gap-1">
+              <span className="xs muted strong">Available</span>
+              <span className="sa-money">{formatMoney(b.available)}</span>
+              <span className="xs muted">Included in next payout</span>
+            </div>
+          </div>
+          {b.nextPayout ? (
+            <div className="panel row between">
+              <span className="small">
+                Next payout · <b>{weekdayDate(b.nextPayout.scheduledFor)}</b>
+              </span>
+              <span className="small strong num">{formatMoney(b.nextPayout.estimatedAmount)}</span>
+            </div>
+          ) : (
+            <div className="panel row between">
+              <span className="small">No payout scheduled</span>
+            </div>
+          )}
+          <span className="xs muted">
+            {[b.destination?.label ? `To ${b.destination.label}` : 'No payout account yet', `Held: ${formatMoney(b.held)}`].join(' · ')}
+            {b.nextPayout?.note && <> · {b.nextPayout.note}</>}
+          </span>
+          <p className="xs muted row gap-1 nowrap top">
+            <Icon name="info" className="ic-sm" />
+            <span className="wrap">{b.settlementRules.text} Your seller agreement sets the final terms.</span>
+          </p>
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
+function announcementLink(a: Announcement): { label: string; to?: string; external?: string } | null {
+  const l = typeof a.link === 'string' ? { url: a.link } : a.link;
+  if (!l?.url) return null;
+  const t = helpLinkTo(l.url);
+  return t.to || t.external ? { label: l.label ?? 'Read the change', ...t } : null;
+}
+
 export default function Dashboard() {
-  const total = SALES.reduce((a, b) => a + b, 0);
-  const today = SALES[SALES.length - 1];
+  const { api } = useApi();
+  const { sellerId, storeName } = useSellerSession();
+  const dash = useQuery({ queryKey: ['reports', 'dashboard', sellerId], queryFn: () => call(api.GET('/api/seller/reports/dashboard')), refetchInterval: 5 * 60_000 });
+  const changes = useQuery({ queryKey: ['settings', 'upcoming-changes', sellerId], queryFn: () => call(api.GET('/api/seller/settings/upcoming-changes')) });
+
+  const d = dash.data;
+  const deadlines = ((d?.dispatchDeadlines ?? []) as DispatchRow[]).slice(0, 5);
+  const sales = (d?.sales ?? null) as Sales | null;
+  const perf = (d?.performance ?? null) as Performance | null;
+  const metrics = PERF_KEYS.map((k) => perf?.metrics.find((m) => m.key === k)).filter((m): m is Metric => !!m);
+  const series = sales?.series.find((s) => s.key === 'sales') ?? sales?.series[0];
+  const points = series?.points ?? [];
+  const values = points.map((p) => p.y / 100);
+  const hasSales = values.some((v) => v > 0);
+  const days = points.length || 14;
+  const news = [
+    ...((d?.announcements ?? []) as Announcement[]).map((a) => ({ key: `a-${a.title}`, icon: 'file-text' as const, title: a.title, tag: a.kind ? a.kind.charAt(0).toUpperCase() + a.kind.slice(1) : undefined, body: a.body ?? '', when: a.effectiveFrom ? `Effective ${date(a.effectiveFrom)}` : undefined, link: announcementLink(a), strong: !!a.effectiveFrom })),
+    ...((changes.data?.items ?? []) as UpcomingChange[]).map((c) => ({
+      key: `c-${c.ref}`,
+      icon: 'calendar-days' as const,
+      title: c.title,
+      tag: c.module ? c.module.charAt(0).toUpperCase() + c.module.slice(1) : undefined,
+      body: c.description ?? c.appliesTo,
+      when: `Effective ${date(c.effectiveAt)} · Posted ${shortDate(c.postedAt)}`,
+      link: c.helpLink ? announcementLink({ title: c.title, link: { label: 'Read the change', url: c.helpLink } }) : null,
+      strong: true,
+    })),
+  ];
+
   return (
     <SellerLayout active="dashboard">
       <div className="page-head">
         <div className="t">
-          <h1 className="h1">Today at Northwind Audio</h1>
-          <p className="sub small">Thursday, Oct 8, 2026 · updated 10:05 AM PT</p>
+          <h1 className="h1">Today at {storeName}</h1>
+          <p className="sub small">{d ? `${longDate(d.asOf)} · updated ${time(d.asOf)} PT` : ' '}</p>
         </div>
         <div className="actions">
           <Button variant="secondary" size="sm" icon="plus" to={href('seller/catalog-match')}>
@@ -107,14 +228,13 @@ export default function Dashboard() {
           </Button>
         </div>
       </div>
+      {dash.isError && <LoadError error={dash.error} onRetry={() => void dash.refetch()} title="We couldn’t load today’s figures" />}
       <section className="stack gap-3" aria-labelledby="sa-work">
         <h2 className="h3" id="sa-work">
           Work for today
         </h2>
         <div className="sa-tiles">
-          {QUEUES.map((q) => (
-            <Tile key={q.label} q={q} />
-          ))}
+          {d ? d.workToday.map((t) => <Tile key={t.key} t={t} />) : Array.from({ length: 6 }, (_, i) => <div key={i} className="sk sk-card" aria-hidden="true" />)}
         </div>
         <StatusLegend
           kind="number"
@@ -137,47 +257,61 @@ export default function Dashboard() {
             }
             flush
           >
-            <TableWrap label="Dispatch deadlines table">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th scope="col">Order</th>
-                    <th scope="col">Buyer</th>
-                    <th scope="col">Items</th>
-                    <th scope="col">Deadline</th>
-                    <th scope="col">
-                      <span className="sr-only">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {DEADLINES.map((r) => (
-                    <tr key={r.ref} className={r.tone === 'danger' ? 'is-flagged' : 'is-warn'}>
-                      <td>
-                        <span className="sr-only">{r.tone === 'danger' ? 'Urgent: ' : 'At risk: '}</span>
-                        <Link className="mono small nowrap" to={href('seller/order', '', { ref: r.ref })} title={r.ref}>
-                          {r.ref}
-                        </Link>
-                        <div className="xs muted">{r.placed}</div>
-                      </td>
-                      <td>{r.buyer}</td>
-                      <td>
-                        <span className="small">{r.items}</span>
-                      </td>
-                      <td>
-                        <Deadline tone={r.tone}>{r.due}</Deadline>
-                      </td>
-                      <td>
-                        <Link className={cx('btn btn-sm', r.tone === 'danger' ? 'btn-primary' : 'btn-secondary')} to={href('seller/order', '', { ref: r.ref })}>
-                          <span>{r.action}</span>
-                          <span className="sr-only"> {r.ref}</span>
-                        </Link>
-                      </td>
+            {!d ? (
+              <div className="pad">
+                <SkeletonLines rows={3} />
+              </div>
+            ) : deadlines.length === 0 ? (
+              <div className="card-body">
+                <p className="small sub">No open orders to dispatch.</p>
+              </div>
+            ) : (
+              <TableWrap label="Dispatch deadlines table">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Order</th>
+                      <th scope="col">Buyer</th>
+                      <th scope="col">Items</th>
+                      <th scope="col">Deadline</th>
+                      <th scope="col">
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </TableWrap>
+                  </thead>
+                  <tbody>
+                    {deadlines.map((r) => {
+                      const tone = deadlineTone(r.deadline.state);
+                      const to = href('seller/order', '', { ref: r.orderRef });
+                      return (
+                        <tr key={r.orderId} className={tone === 'danger' ? 'is-flagged' : tone === 'warning' ? 'is-warn' : undefined}>
+                          <td>
+                            {tone !== 'ok' && <span className="sr-only">{tone === 'danger' ? 'Urgent: ' : 'At risk: '}</span>}
+                            <Link className="mono small nowrap" to={to} title={r.orderRef}>
+                              {r.orderRef}
+                            </Link>
+                            <div className="xs muted">{dateTime(r.placedAt)}</div>
+                          </td>
+                          <td>{r.buyerLabel}</td>
+                          <td>
+                            <span className="small">{r.itemsLabel}</span>
+                          </td>
+                          <td>
+                            <Deadline tone={tone}>{deadlineLabel(r.deadline.dueAt)}</Deadline>
+                          </td>
+                          <td>
+                            <Link className={cx('btn btn-sm', tone === 'danger' ? 'btn-primary' : 'btn-secondary')} to={to}>
+                              <span>{r.nextAction}</span>
+                              <span className="sr-only"> {r.orderRef}</span>
+                            </Link>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
             <StatusLegend
               items={[
                 { tone: 'danger', label: 'Red edge = urgent: overdue or past target' },
@@ -188,57 +322,43 @@ export default function Dashboard() {
           <Card
             title="Sales"
             titleAs="h3"
-            sub="Last 14 days · item sales before fees, by order date"
+            sub={`Last ${days} days · ${sales?.basis ?? 'item sales before fees, by order date'}`}
             actions={
               <Link className="small strong" to={href('seller/reports')}>
                 Open report
               </Link>
             }
           >
-            <div className="row gap-6">
-              <Stat label="14-day sales" value={kfmt(total)} delta="12.4%" dir="up" good note="vs prior 14 days" />
-              <Stat label="Orders" value="214" note={`avg ${money(total / 214)}`} />
-              <Stat label="Today so far" value={money(today)} note="9 orders" />
-            </div>
-            <Legend items={['Northwind Audio sales']} />
-            <LineChart labels={sales14.labels} series={[{ name: 'Sales', data: SALES }]} fmt={kfmt} area label="Daily sales for Northwind Audio, last 14 days" />
+            {!d ? (
+              <SkeletonLines rows={4} />
+            ) : !sales ? (
+              <p className="small sub">Sales figures aren’t available right now.</p>
+            ) : (
+              <>
+                <div className="row gap-6">
+                  <Stat
+                    label={`${days}-day sales`}
+                    value={formatMoney(sales.gross)}
+                    delta={sales.deltaPct !== null ? `${Math.abs(sales.deltaPct).toFixed(1)}%` : undefined}
+                    dir={sales.deltaPct !== null ? (sales.deltaPct < 0 ? 'down' : 'up') : undefined}
+                    good={sales.deltaPct !== null ? sales.deltaPct >= 0 : undefined}
+                    note={sales.deltaPct !== null ? `vs prior ${days} days` : 'No earlier period to compare'}
+                  />
+                  <Stat label="Orders" value={String(sales.orders)} note={sales.averageOrder ? `avg ${formatMoney(sales.averageOrder)}` : undefined} />
+                  <Stat label="Today so far" value={formatMoney(sales.today)} note={`${sales.todayOrders} order${sales.todayOrders === 1 ? '' : 's'}`} />
+                </div>
+                <Legend items={[`${storeName} sales`]} />
+                {hasSales ? (
+                  <LineChart labels={points.map((p) => p.label)} series={[{ name: 'Sales', data: values }]} fmt={kfmt} area label={`Daily sales for ${storeName}, last ${days} days`} />
+                ) : (
+                  <p className="small sub">No sales in the last {days} days yet.</p>
+                )}
+              </>
+            )}
           </Card>
         </div>
         <div className="stack gap-5">
-          <Card
-            title="Payouts"
-            titleAs="h3"
-            sub="Approved sales are not paid out until they become available"
-            actions={
-              <Link className="small strong" to={href('seller/finance')}>
-                Finance
-              </Link>
-            }
-          >
-            <div className="grid c2 gap-3">
-              <div className="stack gap-1">
-                <span className="xs muted strong">Pending</span>
-                <span className="sa-money">$2,418.60</span>
-                <span className="xs muted">Waiting for delivery and hold</span>
-              </div>
-              <div className="stack gap-1">
-                <span className="xs muted strong">Available</span>
-                <span className="sa-money">$1,306.25</span>
-                <span className="xs muted">Included in next payout</span>
-              </div>
-            </div>
-            <div className="panel row between">
-              <span className="small">
-                Next payout · <b>Tue, Oct 13</b>
-              </span>
-              <span className="small strong num">$1,306.25</span>
-            </div>
-            <span className="xs muted">To Northwind Audio checking ending 6620 · Held: $0.00</span>
-            <p className="xs muted row gap-1 nowrap top">
-              <Icon name="info" className="ic-sm" />
-              <span className="wrap">Example schedule: weekly on Tuesdays; earnings become available 7 days after delivery. Your seller agreement sets the final terms.</span>
-            </p>
-          </Card>
+          <PayoutsCard />
           <Card
             title="Performance"
             titleAs="h3"
@@ -249,43 +369,83 @@ export default function Dashboard() {
               </Link>
             }
           >
-            <ul className="sa-perf">
-              {PERF.map((p) => (
-                <li key={p.label}>
-                  <div className="row between">
-                    <span className="small strong">{p.label}</span>
-                    <Badge tone={p.tone}>{p.badge}</Badge>
-                  </div>
-                  <div className="row between xs muted">
-                    <span>{p.value}</span>
-                    <span>{p.target}</span>
-                  </div>
-                  <Meter pct={p.pct} tone={p.tone} label={p.aria} />
-                  {p.note && <span className={`xs strong meter-note t-${p.tone}-text`}>{p.note}</span>}
-                </li>
-              ))}
-            </ul>
+            {!d ? (
+              <SkeletonLines rows={3} />
+            ) : metrics.length === 0 ? (
+              <p className="small sub">Performance figures aren’t available right now.</p>
+            ) : (
+              <ul className="sa-perf">
+                {metrics.map((m) => {
+                  const st = PERF_STATUS[m.status] ?? PERF_STATUS.meets;
+                  return (
+                    <li key={m.key}>
+                      <div className="row between">
+                        <span className="small strong">{METRIC_LABEL[m.key] ?? m.label ?? m.key}</span>
+                        <Badge tone={st.tone as Tone}>{st.badge}</Badge>
+                      </div>
+                      <div className="row between xs muted">
+                        <span>
+                          <b className="num u-c-text">{m.display}</b> · {m.detail}
+                        </span>
+                        <span>
+                          Target: {m.target.display.charAt(0).toLowerCase() + m.target.display.slice(1)}
+                          {m.target.isExample && ' (example)'}
+                        </span>
+                      </div>
+                      <Meter pct={meterPct(m)} tone={st.tone} label={m.display} />
+                      {st.note && <span className={`xs strong meter-note t-${st.tone}-text`}>{st.note}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </Card>
           <Card title="Announcements" titleAs="h3" flush>
-            <ul className="list pad">
-              {NEWS.map((n) => (
-                <li key={n.title} className="items-start">
-                  <Icon name={n.icon} />
-                  <span className="grow stack gap-1">
-                    {n.tag ? (
-                      <span className="row gap-2">
+            {!d || changes.isPending ? (
+              <div className="pad">
+                <SkeletonLines rows={2} />
+              </div>
+            ) : news.length === 0 ? (
+              <div className="card-body">
+                <p className="small sub">No announcements right now. Rule changes that affect your store appear here before they take effect.</p>
+              </div>
+            ) : (
+              <ul className="list pad">
+                {news.map((n) => (
+                  <li key={n.key} className="items-start">
+                    <Icon name={n.icon} />
+                    <span className="grow stack gap-1">
+                      {n.tag ? (
+                        <span className="row gap-2">
+                          <span className="small strong">{n.title}</span>
+                          <Badge tone="info">{n.tag}</Badge>
+                        </span>
+                      ) : (
                         <span className="small strong">{n.title}</span>
-                        <Badge tone="info">{n.tag}</Badge>
+                      )}
+                      {n.body && <span className="xs sub">{n.body}</span>}
+                      <span className={n.strong ? 'xs strong' : 'xs muted'}>
+                        {n.when}
+                        {n.link && (
+                          <>
+                            {n.when && ' · '}
+                            {n.link.to ? (
+                              <Link to={n.link.to} className="link-inline">
+                                {n.link.label}
+                              </Link>
+                            ) : (
+                              <a href={n.link.external} className="link-inline" target="_blank" rel="noopener noreferrer">
+                                {n.link.label}
+                              </a>
+                            )}
+                          </>
+                        )}
                       </span>
-                    ) : (
-                      <span className="small strong">{n.title}</span>
-                    )}
-                    <span className="xs sub">{n.body}</span>
-                    <span className={n.strong ? 'xs strong' : 'xs muted'}>{n.foot}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </div>
       </div>
