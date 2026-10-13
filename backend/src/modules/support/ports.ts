@@ -1,8 +1,7 @@
 /**
- * What the support service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts.
+ * Row types of the support collections (typed json fields, the case facts and pending approval the repository
+ * maps to their columns) and the case-list filters the repository (repository.ts) takes.
  */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type { Principal } from '../../kernel/auth/index.js';
 import type { DecisionInput, RemedyInput, SupportDb } from '../../spec/support.js';
@@ -115,7 +114,7 @@ export const FACT_COLUMNS = [
 export type FactColumn = (typeof FACT_COLUMNS)[number];
 
 /**
- * A case row: jsonb columns typed, the fact columns gathered in facts and the pending approval
+ * A case row: json columns typed, the fact columns gathered in facts and the pending approval
  * (approval_request_id + pending_decision) in pending.
  */
 export interface CaseRec extends Omit<Db['cases'], 'next_action' | 'decision' | 'decision_draft' | 'approval_request_id' | 'pending_decision' | FactColumn> {
@@ -174,17 +173,8 @@ export interface Recs {
   case_appeals: AppealRec;
   case_events: EventRec;
 }
-export type Table = keyof Recs;
-
-/** A column condition: a value (=), a list (in), null (is null) or an operator */
-export type Cond<V> = V | readonly V[] | { op: '<' | '<=' | '>' | '>=' | '<>' | 'is not' | 'not in'; value: V | null | readonly V[] };
-export type Where<R> = { [K in keyof R]?: Cond<R[K]> };
-
-export interface FindOptions<R> {
-  orderBy?: [keyof R & string, 'asc' | 'desc'][];
-  limit?: number;
-  forUpdate?: boolean;
-}
+/** The support collections (spec tables) */
+export type TableName = keyof Recs;
 
 /** Filters of the case lists (store, seller, admin, exports, jobs) */
 export interface CaseFilter {
@@ -216,33 +206,3 @@ export interface CaseFilter {
 }
 
 export type CaseSort = 'next_deadline' | 'newest' | 'priority' | 'updated';
-
-/** Persistence for this module's own tables: support.case_categories, support.cases, support.case_items, support.case_messages, support.case_evidence, support.case_offers, support.case_remedies, support.case_appeals, support.case_events. */
-export interface SupportRepository {
-  /** Runs fn in one transaction (nested calls join the outer one) */
-  transaction<T>(fn: (tx: SupportRepository) => Promise<T>): Promise<T>;
-  /** Claims an event key in the module inbox (inside a transaction: commits with its effects); false once claimed */
-  claim(key: string): Promise<boolean>;
-
-  /* generic table access (jsonb is mapped at this boundary); case_categories is keyed by key */
-  get<T extends Exclude<Table, 'case_items'>>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined>;
-  find<T extends Table>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]>;
-  count<T extends Table>(table: T, where: Where<Recs[T]>): Promise<number>;
-  insert<T extends Table>(table: T, row: Recs[T]): Promise<Recs[T]>;
-  insertMany<T extends Table>(table: T, rows: Recs[T][]): Promise<void>;
-  update<T extends Exclude<Table, 'case_items'>>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]>;
-
-  /** Inserts categories that do not exist yet (staff changes are kept) */
-  seedCategories(rows: CategoryRec[]): Promise<void>;
-  upsertCategory(row: CategoryRec): Promise<CategoryRec>;
-
-  /** Cases matching a filter in the given order; offset paging in both modes */
-  listCases(f: CaseFilter, sort: CaseSort, page: PageRequest): Promise<common.Page<CaseRec>>;
-  countCases(f: CaseFilter): Promise<number>;
-  /** Cases (any state unless openOnly) linked to any of these order items */
-  casesForItems(orderItemIds: string[], openOnly: boolean): Promise<{ caseId: string; orderItemId: string }[]>;
-  /** Open customer cases per product (case items of the product) */
-  openCasesPerProduct(productIds: string[]): Promise<Map<string, number>>;
-  /** Open cases per owner and how many are past their response deadline */
-  openPerOwner(ownerIds: string[], now: Date): Promise<Map<string, { open: number; overdue: number }>>;
-}

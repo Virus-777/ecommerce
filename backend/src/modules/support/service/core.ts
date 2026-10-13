@@ -11,7 +11,8 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type { CaseCategory } from '../../../spec/support.js';
 import { DEFAULT_CATEGORIES, isOpen, nextActionOf, OFFICIAL_STORE_NAME, SUPPORT_NAME, UNRESOLVED_REMEDY, type NextFacts } from '../domain/rules.js';
-import type { AppealRec, CaseFacts, CaseRec, CategoryRec, EventRec, EvidenceRec, ItemRec, MessageRec, OfferRec, RemedyRec, SupportRepository } from '../ports.js';
+import type { AppealRec, CaseFacts, CaseRec, CategoryRec, EventRec, EvidenceRec, ItemRec, MessageRec, OfferRec, RemedyRec } from '../ports.js';
+import type { SupportRepository } from '../repository.js';
 
 export interface SupportServiceDeps {
   repo: SupportRepository;
@@ -271,16 +272,15 @@ export class Core {
     const ids = [...new Set(caseIds)].filter(isUuid);
     const out = new Map<string, Agg>();
     if (!ids.length) return out;
-    const [cases, items, messages, evidence, offers, remedies, appeals, events] = await Promise.all([
-      repo.find('cases', { id: ids }),
-      repo.find('case_items', { case_id: ids }),
-      repo.find('case_messages', { case_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
-      repo.find('case_evidence', { case_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
-      repo.find('case_offers', { case_id: ids }, { orderBy: [['created_at', 'asc'], ['id', 'asc']] }),
-      repo.find('case_remedies', { case_id: ids }, { orderBy: [['created_at', 'asc'], ['id', 'asc']] }),
-      repo.find('case_appeals', { case_id: ids }, { orderBy: [['submitted_at', 'asc'], ['id', 'asc']] }),
-      repo.find('case_events', { case_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
-    ]);
+    // one read after another: inside a transaction (write) the session runs one operation at a time
+    const cases = await repo.find('cases', { id: ids });
+    const items = await repo.find('case_items', { case_id: ids });
+    const messages = await repo.find('case_messages', { case_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    const evidence = await repo.find('case_evidence', { case_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    const offers = await repo.find('case_offers', { case_id: ids }, { orderBy: [['created_at', 'asc'], ['id', 'asc']] });
+    const remedies = await repo.find('case_remedies', { case_id: ids }, { orderBy: [['created_at', 'asc'], ['id', 'asc']] });
+    const appeals = await repo.find('case_appeals', { case_id: ids }, { orderBy: [['submitted_at', 'asc'], ['id', 'asc']] });
+    const events = await repo.find('case_events', { case_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
     for (const c of cases) out.set(c.id, { c, items: [], messages: [], evidence: [], offers: [], remedies: [], appeals: [], events: [] });
     for (const x of items) out.get(x.case_id)?.items.push(x);
     for (const x of messages) out.get(x.case_id)?.messages.push(x);

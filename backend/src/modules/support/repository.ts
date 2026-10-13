@@ -1,11 +1,17 @@
-import type { ModuleStore } from '../../kernel/mongo/index.js';
-import type { Filter, Sort, Table as MongoTable } from '../../kernel/mongo/table.js';
-import { decodeCursor, encodeCursor } from '../../kernel/lib/pagination.js';
+import { orThrow } from '../../kernel/lib/or-throw.js';
+import { decodeCursor, encodeCursor, type PageRequest } from '../../kernel/lib/pagination.js';
+import { contains, whereFilter, type Filter, type ModuleStore, type Table, type Where } from '../../kernel/mongo/index.js';
 import type * as common from '../../spec/common.js';
 import { CLOSED_STATUSES } from './domain/rules.js';
-import { FACT_COLUMNS, type CaseFacts, type CaseFilter, type CaseRec, type CaseSort, type FactColumn, type PendingApproval, type Recs, type StoredPending, type SupportRepository, type Table } from './ports.js';
+import { FACT_COLUMNS, type CaseFacts, type CaseFilter, type CaseRec, type CaseSort, type CategoryRec, type FactColumn, type PendingApproval, type Recs, type StoredPending, type TableName } from './ports.js';
 
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Sort, limit and lock options of the generic find */
+export interface FindOptions<R> {
+  orderBy?: [keyof R & string, 'asc' | 'desc'][];
+  limit?: number;
+  forUpdate?: boolean;
+}
+
 
 const iso = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
 const date = (s: string | null | undefined) => (s ? new Date(s) : null);
@@ -86,7 +92,7 @@ function decodeCase(row: Record<string, any> | undefined): CaseRec | undefined {
 }
 
 /** A row (or patch) as stored: a case's facts and pending approval become their columns */
-function encode(table: Table, row: Record<string, unknown>): Record<string, unknown> {
+function encode(table: TableName, row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(row)) {
     if (v === undefined) continue;
@@ -109,50 +115,8 @@ function encode(table: Table, row: Record<string, unknown>): Record<string, unkn
 }
 
 /** Rows read from a table, cases decoded */
-const decode = <T extends Table>(table: T, row: unknown): Recs[T] => (table === 'cases' ? decodeCase(row as Record<string, unknown>) : row) as Recs[T];
+const decode = <T extends TableName>(table: T, row: unknown): Recs[T] => (table === 'cases' ? decodeCase(row as Record<string, unknown>) : row) as Recs[T];
 
-const isOp = (v: unknown): v is { op: string; value: unknown } => typeof v === 'object' && v !== null && !Array.isArray(v) && !(v instanceof Date) && 'op' in v;
-
-/** A column condition (ports Cond) as a MongoDB condition, with SQL's meaning (`<>` and NOT IN skip nulls) */
-function cond(v: unknown): unknown {
-  if (v === null) return null;
-  if (Array.isArray(v)) return { $in: v };
-  if (isOp(v)) {
-    switch (v.op) {
-      case '<':
-        return { $lt: v.value };
-      case '<=':
-        return { $lte: v.value };
-      case '>':
-        return { $gt: v.value };
-      case '>=':
-        return { $gte: v.value };
-      case '<>':
-        return { $nin: [v.value, null] };
-      case 'is not':
-        return { $ne: v.value };
-      case 'not in':
-        // an empty list leaves the column unfiltered (as before)
-        return Array.isArray(v.value) && v.value.length ? { $nin: [...v.value, null] } : undefined;
-      default:
-        throw new Error(`support: unknown operator ${v.op}`);
-    }
-  }
-  return v;
-}
-
-function where(w: Record<string, unknown>): Filter {
-  const out: Filter = {};
-  for (const [k, v] of Object.entries(w)) {
-    if (v === undefined) continue;
-    const c = cond(v);
-    if (c !== undefined) out[k] = c;
-  }
-  return out;
-}
-
-const sortOf = (orderBy: [string, 'asc' | 'desc'][] | undefined): Sort | undefined =>
-  orderBy?.length ? Object.fromEntries(orderBy.map(([c, d]) => [c, d === 'desc' ? -1 : 1])) : undefined;
 
 /** The case-list filter as a MongoDB filter on cases */
 function caseFilter(f: CaseFilter): Filter {
@@ -185,118 +149,163 @@ function caseFilter(f: CaseFilter): Filter {
   if (f.openedFrom) and.push({ opened_at: { $gte: f.openedFrom } });
   if (f.openedTo) and.push({ opened_at: { $lt: f.openedTo } });
   if (f.q?.trim()) {
-    const term = { $regex: escapeRegExp(f.q.trim()), $options: 'i' };
+    const term = contains(f.q);
     and.push({ $or: [{ ref: term }, { subject: term }, { order_ref: term }, { customer_name: term }, { seller_name: term }, { return_ref: term }] });
   }
   return and.length ? { $and: and } : {};
 }
 
-/** MongoDB adapter for SupportRepository (docs/04-mongodb-migration.md): one collection per spec table. */
-export function createMongoSupportRepository(store: ModuleStore): SupportRepository {
-  const t = <T extends Table>(name: T) => store.table<Record<string, unknown>>(name) as MongoTable<any>;
-  const cases = t('cases');
 
-  const repo: SupportRepository = {
-    transaction: (fn) => store.transaction((tx) => fn(createMongoSupportRepository(tx))),
-    claim: (key) => store.claim(key),
+/**
+ * support.case_categories, cases, case_items, case_messages, case_evidence, case_offers, case_remedies,
+ * case_appeals and case_events (MongoDB, docs/04-mongodb-migration.md). A case's facts and pending approval are
+ * columns of cases, mapped to CaseRec.facts and CaseRec.pending here.
+ */
+export class SupportRepository {
+  readonly #cases: Table<Record<string, unknown>>;
 
-    async get(table, id, o) {
-      const row = await t(table).get(id, o);
-      return row && decode(table, row);
-    },
-    async find(table, w, o) {
-      const rows = await t(table).find(where(w as Record<string, unknown>), { sort: sortOf(o?.orderBy as [string, 'asc' | 'desc'][]), limit: o?.limit, forUpdate: o?.forUpdate });
-      return rows.map((row) => decode(table, row));
-    },
-    count: (table, w) => t(table).count(where(w as Record<string, unknown>)),
-    async insert(table, row) {
-      return decode(table, await t(table).insert(encode(table, row as Record<string, unknown>)));
-    },
-    async insertMany(table, rows) {
-      await t(table).insertMany(rows.map((r) => encode(table, r as Record<string, unknown>)));
-    },
-    async update(table, id, patch) {
-      const values = encode(table, patch as Record<string, unknown>);
-      const row = Object.keys(values).length ? await t(table).update(id, values) : await t(table).get(id);
-      if (!row) throw new Error(`support: ${table} ${id} not found`);
-      return decode(table, row);
-    },
+  constructor(private readonly store: ModuleStore) {
+    this.#cases = store.table<Record<string, unknown>>('cases');
+  }
 
-    async seedCategories(rows) {
-      await t('case_categories').insertManyIfAbsent(rows);
-    },
-    upsertCategory: (row) => t('case_categories').upsert(row),
+  /** A table's stored rows (cases hold fact columns: decode them before handing a row out) */
+  #t(table: TableName): Table<Record<string, unknown>> {
+    return this.store.table<Record<string, unknown>>(table);
+  }
 
-    async listCases(f, sort, page) {
-      const offset = page.mode === 'page' ? (page.page - 1) * page.limit : page.cursor ? Number(decodeCursor(page.cursor)[0]) || 0 : 0;
-      const filter = caseFilter(f);
-      let rows: Record<string, unknown>[];
-      if (sort === 'newest' || sort === 'updated') {
-        const column = sort === 'newest' ? 'opened_at' : 'updated_at';
-        rows = await cases.find(filter, { sort: { [column]: -1, id: -1 }, skip: offset, limit: page.limit + 1 });
-      } else {
-        // next_response_due_at asc nulls last (MongoDB sorts nulls first): a computed flag sorts the nulls after
-        const docs = await cases.aggregate<Record<string, unknown>>([
-          { $match: cases.filter(filter) },
-          {
-            $addFields: {
-              _due_null: { $cond: [{ $eq: [{ $ifNull: ['$next_response_due_at', null] }, null] }, 1, 0] },
-              ...(sort === 'priority' ? { _rank: { $switch: { branches: [{ case: { $eq: ['$priority', 'urgent'] }, then: 0 }, { case: { $eq: ['$priority', 'high'] }, then: 1 }, { case: { $eq: ['$priority', 'medium'] }, then: 2 }], default: 3 } } } : {}),
-            },
+  /** Runs fn in one transaction (nested calls join the outer one) */
+  transaction<T>(fn: (tx: SupportRepository) => Promise<T>): Promise<T> {
+    return this.store.transaction((tx) => fn(new SupportRepository(tx)));
+  }
+
+  /** Claims an event key in the module inbox (inside a transaction: commits with its effects); false once claimed */
+  claim(key: string): Promise<boolean> {
+    return this.store.claim(key);
+  }
+
+  /* ---------------------------------------------------------------- generic table access (case_categories is keyed by key) */
+
+  async get<T extends Exclude<TableName, 'case_items'>>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined> {
+    const row = await this.#t(table).get(id, o);
+    return row && decode(table, row);
+  }
+
+  async find<T extends TableName>(table: T, where: Where<Recs[T]>, o?: FindOptions<Recs[T]>): Promise<Recs[T][]> {
+    const sort = o?.orderBy?.length ? Object.fromEntries(o.orderBy.map(([c, d]) => [c, d === 'desc' ? -1 : 1] as const)) : undefined;
+    const rows = await this.#t(table).find(whereFilter(where), { sort, limit: o?.limit, forUpdate: o?.forUpdate });
+    return rows.map((row) => decode(table, row));
+  }
+
+  count<T extends TableName>(table: T, where: Where<Recs[T]>): Promise<number> {
+    return this.#t(table).count(whereFilter(where));
+  }
+
+  async insert<T extends TableName>(table: T, row: Recs[T]): Promise<Recs[T]> {
+    return decode(table, await this.#t(table).insert(encode(table, row as unknown as Record<string, unknown>)));
+  }
+
+  async insertMany<T extends TableName>(table: T, rows: Recs[T][]): Promise<void> {
+    await this.#t(table).insertMany(rows.map((r) => encode(table, r as unknown as Record<string, unknown>)));
+  }
+
+  /** Sets the defined fields of patch (facts and pending as their columns); the row after */
+  async update<T extends Exclude<TableName, 'case_items'>>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]> {
+    const values = encode(table, patch as Record<string, unknown>);
+    const row = Object.keys(values).length ? await this.#t(table).update(id, values) : await this.#t(table).get(id);
+    return decode(table, orThrow(row, `support: ${table} ${id}`));
+  }
+
+  /** Inserts categories that do not exist yet (staff changes are kept) */
+  async seedCategories(rows: CategoryRec[]): Promise<void> {
+    await this.#t('case_categories').insertManyIfAbsent(rows);
+  }
+
+  async upsertCategory(row: CategoryRec): Promise<CategoryRec> {
+    return (await this.#t('case_categories').upsert(row)) as unknown as CategoryRec;
+  }
+
+  /* ---------------------------------------------------------------- lists */
+
+  /** Cases matching a filter in the given order; offset paging in both modes */
+  async listCases(f: CaseFilter, sort: CaseSort, page: PageRequest): Promise<common.Page<CaseRec>> {
+    const offset = page.mode === 'page' ? (page.page - 1) * page.limit : page.cursor ? Number(decodeCursor(page.cursor)[0]) || 0 : 0;
+    const filter = caseFilter(f);
+    let rows: Record<string, unknown>[];
+    if (sort === 'newest' || sort === 'updated') {
+      const column = sort === 'newest' ? 'opened_at' : 'updated_at';
+      rows = await this.#cases.find(filter, { sort: { [column]: -1, id: -1 }, skip: offset, limit: page.limit + 1 });
+    } else if (sort === 'next_deadline') {
+      rows = await this.#cases.find(filter, { sort: { next_response_due_at: 1, opened_at: 1, id: 1 }, nullsLast: ['next_response_due_at'], skip: offset, limit: page.limit + 1 });
+    } else {
+      // priority (urgent, high, medium, the rest), then next_response_due_at asc nulls last (a computed flag sorts the nulls after)
+      const docs = await this.#cases.aggregate<Record<string, unknown>>([
+        { $match: this.#cases.filter(filter) },
+        {
+          $addFields: {
+            _due_null: { $cond: [{ $eq: [{ $ifNull: ['$next_response_due_at', null] }, null] }, 1, 0] },
+            _rank: { $switch: { branches: [{ case: { $eq: ['$priority', 'urgent'] }, then: 0 }, { case: { $eq: ['$priority', 'high'] }, then: 1 }, { case: { $eq: ['$priority', 'medium'] }, then: 2 }], default: 3 } },
           },
-          { $sort: sort === 'priority' ? { _rank: 1, _due_null: 1, next_response_due_at: 1, _id: 1 } : { _due_null: 1, next_response_due_at: 1, opened_at: 1, _id: 1 } },
-          { $skip: offset },
-          { $limit: page.limit + 1 },
-          { $project: { _due_null: 0, _rank: 0 } },
-        ]);
-        rows = docs.map((d) => cases.fromDoc(d));
-      }
-      const decoded = rows.map((row) => decodeCase(row)!);
-      const items = decoded.slice(0, page.limit);
-      const more = decoded.length > page.limit;
-      const nextCursor = more ? encodeCursor([offset + page.limit]) : null;
-      if (page.mode === 'page') {
-        const total = await repo.countCases(f);
-        return { items, nextCursor, page: page.page, totalPages: Math.max(1, Math.ceil(total / page.limit)), total };
-      }
-      return { items, nextCursor };
-    },
-    countCases: (f) => cases.count(caseFilter(f)),
-    async casesForItems(orderItemIds, openOnly) {
-      if (!orderItemIds.length) return [];
-      const items = await t('case_items').find({ order_item_id: { $in: orderItemIds } });
-      if (!items.length) return [];
-      const caseIds = [...new Set(items.map((i) => i.case_id as string))];
-      const known = new Set(await cases.distinct<string>('id', { id: { $in: caseIds }, ...(openOnly ? { status: { $nin: [...CLOSED_STATUSES, null] } } : {}) }));
-      return items.filter((i) => known.has(i.case_id as string)).map((i) => ({ caseId: i.case_id as string, orderItemId: i.order_item_id as string }));
-    },
-    async openCasesPerProduct(productIds) {
-      const out = new Map<string, number>();
-      if (!productIds.length) return out;
-      const items = await t('case_items').find({ 'snapshot.productId': { $in: productIds } });
-      if (!items.length) return out;
-      const open = new Set(
-        await cases.distinct<string>('id', { id: { $in: [...new Set(items.map((i) => i.case_id as string))] }, status: { $nin: [...CLOSED_STATUSES, null] }, kind: { $nin: ['seller_request', null] } }),
-      );
-      const perProduct = new Map<string, Set<string>>();
-      for (const i of items) {
-        const productId = (i.snapshot as { productId?: string } | null)?.productId;
-        if (!productId || !open.has(i.case_id as string)) continue;
-        perProduct.set(productId, (perProduct.get(productId) ?? new Set()).add(i.case_id as string));
-      }
-      for (const [p, ids] of perProduct) out.set(p, ids.size);
-      return out;
-    },
-    async openPerOwner(ownerIds, now) {
-      const out = new Map<string, { open: number; overdue: number }>();
-      if (!ownerIds.length) return out;
-      const rows = await cases.aggregate<{ _id: string; open: number; overdue: number }>([
-        { $match: { owner_staff_id: { $in: ownerIds }, status: { $nin: [...CLOSED_STATUSES, null] } } },
-        { $group: { _id: '$owner_staff_id', open: { $sum: 1 }, overdue: { $sum: { $cond: [{ $and: [{ $ne: [{ $ifNull: ['$next_response_due_at', null] }, null] }, { $lt: ['$next_response_due_at', now] }] }, 1, 0] } } } },
+        },
+        { $sort: { _rank: 1, _due_null: 1, next_response_due_at: 1, _id: 1 } },
+        { $skip: offset },
+        { $limit: page.limit + 1 },
+        { $project: { _due_null: 0, _rank: 0 } },
       ]);
-      for (const r of rows) out.set(r._id, { open: r.open, overdue: r.overdue });
-      return out;
-    },
-  };
-  return repo;
+      rows = docs.map((d) => this.#cases.fromDoc(d));
+    }
+    const decoded = rows.map((row) => decodeCase(row)!);
+    const items = decoded.slice(0, page.limit);
+    const more = decoded.length > page.limit;
+    const nextCursor = more ? encodeCursor([offset + page.limit]) : null;
+    if (page.mode === 'page') {
+      const total = await this.countCases(f);
+      return { items, nextCursor, page: page.page, totalPages: Math.max(1, Math.ceil(total / page.limit)), total };
+    }
+    return { items, nextCursor };
+  }
+
+  countCases(f: CaseFilter): Promise<number> {
+    return this.#cases.count(caseFilter(f));
+  }
+
+  /** Cases (any state unless openOnly) linked to any of these order items */
+  async casesForItems(orderItemIds: string[], openOnly: boolean): Promise<{ caseId: string; orderItemId: string }[]> {
+    if (!orderItemIds.length) return [];
+    const items = await this.#t('case_items').find({ order_item_id: { $in: orderItemIds } });
+    if (!items.length) return [];
+    const caseIds = [...new Set(items.map((i) => i.case_id as string))];
+    const known = new Set(await this.#cases.distinct<string>('id', { id: { $in: caseIds }, ...(openOnly ? { status: { $nin: [...CLOSED_STATUSES, null] } } : {}) }));
+    return items.filter((i) => known.has(i.case_id as string)).map((i) => ({ caseId: i.case_id as string, orderItemId: i.order_item_id as string }));
+  }
+
+  /** Open customer cases per product (case items of the product) */
+  async openCasesPerProduct(productIds: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!productIds.length) return out;
+    const items = await this.#t('case_items').find({ 'snapshot.productId': { $in: productIds } });
+    if (!items.length) return out;
+    const open = new Set(
+      await this.#cases.distinct<string>('id', { id: { $in: [...new Set(items.map((i) => i.case_id as string))] }, status: { $nin: [...CLOSED_STATUSES, null] }, kind: { $nin: ['seller_request', null] } }),
+    );
+    const perProduct = new Map<string, Set<string>>();
+    for (const i of items) {
+      const productId = (i.snapshot as { productId?: string } | null)?.productId;
+      if (!productId || !open.has(i.case_id as string)) continue;
+      perProduct.set(productId, (perProduct.get(productId) ?? new Set()).add(i.case_id as string));
+    }
+    for (const [p, ids] of perProduct) out.set(p, ids.size);
+    return out;
+  }
+
+  /** Open cases per owner and how many are past their response deadline */
+  async openPerOwner(ownerIds: string[], now: Date): Promise<Map<string, { open: number; overdue: number }>> {
+    const out = new Map<string, { open: number; overdue: number }>();
+    if (!ownerIds.length) return out;
+    const rows = await this.#cases.aggregate<{ _id: string; open: number; overdue: number }>([
+      { $match: { owner_staff_id: { $in: ownerIds }, status: { $nin: [...CLOSED_STATUSES, null] } } },
+      { $group: { _id: '$owner_staff_id', open: { $sum: 1 }, overdue: { $sum: { $cond: [{ $and: [{ $ne: [{ $ifNull: ['$next_response_due_at', null] }, null] }, { $lt: ['$next_response_due_at', now] }] }, 1, 0] } } } },
+    ]);
+    for (const r of rows) out.set(r._id, { open: r.open, overdue: r.overdue });
+    return out;
+  }
 }

@@ -5,7 +5,7 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoSupportRepository } from './repository.js';
+import { SupportRepository } from './repository.js';
 import { SupportService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -21,7 +21,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   async register(ctx) {
-    const service = new SupportService({ repo: createMongoSupportRepository(ctx.mongo), ctx });
+    const service = new SupportService({ repo: new SupportRepository(ctx.mongo), ctx });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
