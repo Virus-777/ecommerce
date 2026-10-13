@@ -95,7 +95,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | POST | `/api/admin/returns/refunds` | Issue a refund from the order page (exception refund request) _(idempotent, audited)_ | staff<br>`returns.exceptions.propose` | `ExceptionRefundInput` → `RefundRequest` |
 | GET | `/api/admin/returns/refunds` | Refund approval queue for Finance | staff<br>`returns.requests.view` | Page<RefundRequest> |
 | GET | `/api/admin/returns/refunds/{id}` | One refund request with breakdown, funding and earnings impact | staff<br>`returns.requests.view` | `RefundRequest` |
-| POST | `/api/admin/returns/refunds/{id}/approve` | Finance approves the refund and hands it to payments _(idempotent, audited)_ | staff<br>`returns.refunds.approve` | `{ note: text?, stepUpCode: string? }` → `RefundRequest` |
+| POST | `/api/admin/returns/refunds/{id}/approve` | Finance approves the refund and hands it to payments _(idempotent, audited)_ | staff<br>`returns.refunds.approve` | `{ note: text?, reauthToken: string? }` → `RefundRequest` |
 | POST | `/api/admin/returns/refunds/{id}/decline` | Send a refund request back with a reason _(audited)_ | staff<br>`returns.refunds.approve` | `{ reason: text }` → `RefundRequest` |
 | POST | `/api/admin/returns/refunds/{id}/revise` | Change a declined refund and resubmit _(audited)_ | staff<br>`returns.requests.manage` | `RemedyInput` → `RefundRequest` |
 | GET | `/api/admin/returns/policies` | Active baseline, scheduled changes and history | staff<br>`returns.requests.view` | `ReturnPolicyAdmin` |
@@ -2218,7 +2218,7 @@ extend type Order {
   "Returns on this order, newest first. Seller area: only the caller's own returns."
   returns: [Return!]! @source(module: "returns", fn: "listForOrder") @cost(weight: 5)
   "Refund requests for this order (returns, case decisions and exceptions) with Finance approval state"
-  refundRequests: [RefundRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForOrder")
+  refundRequests: [RefundRequest!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForOrder")
 }
 
 extend type OrderItem {
@@ -2232,21 +2232,21 @@ extend type Customer {
   "Open returns, newest first, for the account overview"
   openReturns(limit: Int = 3): ReturnPage! @areas(in: [STORE]) @source(module: "returns", fn: "listOpenForCustomer")
   "Customer 360: the customer's returns"
-  returns(state: ReturnListState = ALL, paging: PageInput): ReturnPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForCustomer")
+  returns(state: ReturnListState = ALL, paging: PageInput): ReturnPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForCustomer")
 }
 
 extend type Seller {
   "Returns queue tiles for the seller dashboard"
   returnCounts: ReturnQueueCounts @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "returns", fn: "sellerQueueCounts") @cost(weight: 3)
   "Seller 360: the seller's returns"
-  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForSeller")
+  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listForSeller")
   "Storefront returns section: the seller's standard terms for new items (category exceptions show per offer on the product page)"
   returnTerms: ReturnTerms @areas(in: [STORE]) @source(module: "returns", fn: "sellerReturnTermsFor")
 }
 
 extend type Case {
   "Refund requests created by this case's decision, with Finance approval state"
-  refundRequests: [RefundRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForCase")
+  refundRequests: [RefundRequest!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequestsForCase")
 }
 
 extend type Query {
@@ -2254,7 +2254,7 @@ extend type Query {
   return(ref: String!): Return @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "returns", fn: "getReturnForCustomer")
 
   "My returns, return status and refund status side by side"
-  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "returns", fn: "listForCustomer")
+  returns(state: ReturnListState = OPEN, paging: PageInput): ReturnPage @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "returns", fn: "listForCustomer")
 
   "A return of the caller's seller account: request, policy, payment, deadlines, shipment, inspection and earnings impact"
   sellerReturn(ref: String!): Return @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "returns", fn: "getReturnForSeller")
@@ -2263,7 +2263,7 @@ extend type Query {
   returnAdmin(ref: String!): Return @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "getReturnAdmin")
 
   "Refund approval queue for Finance"
-  refundRequests(status: RefundRequestStatus, source: RefundRequestSource, paging: PageInput): RefundRequestPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequests")
+  refundRequests(status: RefundRequestStatus, source: RefundRequestSource, paging: PageInput): RefundRequestPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "listRefundRequests")
 
   "One refund request with breakdown, funding, earnings impact and approval"
   refundRequest(ref: String!): RefundRequest @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "returns.requests.view") @source(module: "returns", fn: "getRefundRequest")

@@ -369,7 +369,7 @@ export interface AuthorityCheck {
   eligibleApproverRoles: RoleRef[];
   /** People who could approve now, backups included */
   eligibleApprovers: StaffRef[];
-  /** The amount is above stepUpAbove: whoever acts or approves must give a fresh 2-step code (X-Step-Up-Code). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself. */
+  /** The amount is above stepUpAbove: whoever acts or approves must confirm with their password again (a re-auth token, purpose approval). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself. */
   stepUpRequired: boolean;
 }
 
@@ -388,7 +388,7 @@ export const AuthorityCheck: z.ZodType<AuthorityCheck> = z.object({
   get eligibleApprovers() {
     return z.array(StaffRef);
   },
-  stepUpRequired: z.boolean().describe("The amount is above stepUpAbove: whoever acts or approves must give a fresh 2-step code (X-Step-Up-Code). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself."),
+  stepUpRequired: z.boolean().describe("The amount is above stepUpAbove: whoever acts or approves must confirm with their password again (a re-auth token, purpose approval). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself."),
 }).register(common.apiTypes, { id: "access.AuthorityCheck" });
 
 export interface ApprovalTarget {
@@ -668,6 +668,8 @@ export interface StaffInvitationInput {
   roleIds: string[];
   reportsToAccountId?: string | null;
   reason: string;
+  /** Re-auth token for purpose role-grant (POST /api/admin/identity/reauth with the password) */
+  reauthToken: string;
   /** Request approval limits from the Business Owner: opens an access.limits.change approval request asking the Business Owner to confirm or adjust the limits the chosen roles carry before the new member uses them. Until it is decided the member's approval actions stay at no limit (they can prepare but not approve). */
   requestLimitReview?: boolean | null;
 }
@@ -678,6 +680,7 @@ export const StaffInvitationInput: z.ZodType<StaffInvitationInput> = z.object({
   roleIds: z.array(z.uuid()),
   reportsToAccountId: z.uuid().nullish(),
   reason: z.string(),
+  reauthToken: z.string().describe("Re-auth token for purpose role-grant (POST /api/admin/identity/reauth with the password)"),
   requestLimitReview: z.boolean().describe("Request approval limits from the Business Owner: opens an access.limits.change approval request asking the Business Owner to confirm or adjust the limits the chosen roles carry before the new member uses them. Until it is decided the member's approval actions stay at no limit (they can prepare but not approve).").nullish(),
 }).register(common.apiTypes, { id: "access.StaffInvitationInput" });
 
@@ -1154,8 +1157,8 @@ export interface AccessPublicApi {
   check(principal: identity.Principal, action: string, amount?: AmountInput): Promise<AuthorityCheck>;
   /** Create an approval request (or return the open one for the same action and target). The requesting module keeps its record pending and finishes on access.approval.decided. Used by: finance, returns, sellers, offers, catalog, inventory, purchasing, shipping, support, promotions, customers, settings, content, advertising, audit, wallet. */
   requestApproval(input: RequestApprovalInput): Promise<ApprovalRequest>;
-  /** Same rules as the admin approve/reject/return endpoints, for modules that show the decision inside their own screen (payout run approval) Used by: finance, returns, sellers. */
-  decide(requestId: string, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return', note?: string, stepUpCode?: string }): Promise<ApprovalRequest>;
+  /** Same rules as the admin approve/reject/return endpoints, for modules that show the decision inside their own screen (payout run approval). An approval above stepUpAbove needs reauthToken: a re-auth token for purpose approval issued to this principal's session (used once; given back when the decision fails) Used by: finance, returns, sellers. */
+  decide(requestId: string, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return', note?: string, reauthToken?: string }): Promise<ApprovalRequest>;
   /** The requesting module withdraws a request (record changed or deleted) Used by: finance, returns, sellers, offers, settings. */
   cancelApproval(requestId: string, by: common.Actor, reason: string): Promise<void>;
   /** Full request with decisions Used by: audit, finance, returns, sellers. */
@@ -1460,7 +1463,7 @@ export const endpoints = defineEndpoints({
     path: "/roles/{id}/permissions",
     auth: "staff",
     permission: "access.roles.manage",
-    stepUp: {"kind":"code","purpose":"role-grant"},
+    stepUp: {"kind":"reauth","purpose":"role-grant"},
     scope: "staff",
     summary: "Replace the permissions of a role",
     desc: "Removing permissions and adding ones that are not sensitive apply at once. Adding sensitive permissions (sensitivePermissionPrefixes), or adding any permission to a role the caller holds or to the Business Owner role, is saved pending approval (access.roles.sensitive-grant; the Business Owner decides for the caller's own role and the Business Owner role): the answer is the normal 200 with RoleDetail.pendingPermissionApproval (FORMAT.md, Approval responses), and the permissions are added when the request is approved. A newer proposal for the same role cancels the waiting one. Permissions never include approval limits; those are set with POST /limit-changes.",
@@ -1471,6 +1474,7 @@ export const endpoints = defineEndpoints({
     body: () => z.object({
       permissionKeys: z.array(z.string()),
       reason: z.string(),
+      reauthToken: z.string(),
     }),
     response: () => RoleDetail,
     status: 200,
@@ -1527,7 +1531,7 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     permission: "access.roles.view",
     scope: "staff",
-    summary: "Staff members with roles, lead/backup duties, away status and 2-step state",
+    summary: "Staff members with roles, lead/backup duties and away status",
     query: () =>
       z.object({
         q: z.string().optional(),
@@ -1564,10 +1568,10 @@ export const endpoints = defineEndpoints({
     path: "/staff-invitations",
     auth: "staff",
     permission: "access.roles.manage",
-    stepUp: {"kind":"code","purpose":"role-grant"},
+    stepUp: {"kind":"reauth","purpose":"role-grant"},
     scope: "staff",
     summary: "Invite a staff member with roles",
-    desc: "Calls identity.inviteStaff (7-day link, 2-step set-up on accept) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.",
+    desc: "Calls identity.inviteStaff (7-day link; the person accepts with the link, a pass code and a new password) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.",
     body: () => StaffInvitationInput,
     response: () => StaffMember,
     status: 201,
@@ -1583,7 +1587,7 @@ export const endpoints = defineEndpoints({
     path: "/role-assignments",
     auth: "staff",
     permission: "access.roles.manage",
-    stepUp: {"kind":"code","purpose":"role-grant"},
+    stepUp: {"kind":"reauth","purpose":"role-grant"},
     scope: "staff",
     summary: "Give a staff member a role",
     desc: "A role that carries sensitive permissions, the Business Owner role, or any role for yourself is saved as a pending_approval assignment: the normal 201 with RoleAssignment.approval (FORMAT.md, Approval responses); it becomes active (or pending_acceptance for an invited person) when approved. CONFLICT when the person already holds or awaits the role.",
@@ -1592,6 +1596,7 @@ export const endpoints = defineEndpoints({
       roleId: z.uuid(),
       reason: z.string(),
       expiresAt: z.iso.datetime({ offset: true }).nullish(),
+      reauthToken: z.string(),
     }),
     response: () => RoleAssignment,
     status: 201,
@@ -1792,14 +1797,14 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     scope: "staff",
     summary: "Approve (first or second approval)",
-    desc: "Refused for the requester, for someone who already approved it, and for people whose limit does not cover the amount. Money approvals above stepUpAbove need a fresh 2-step code.",
+    desc: "Refused for the requester, for someone who already approved it, and for people whose limit does not cover the amount. Money approvals above stepUpAbove need the approver's password again: reauthToken (purpose approval) from POST /api/admin/identity/reauth, otherwise STEP_UP_REQUIRED.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
       note: z.string().nullish(),
-      stepUpCode: z.string().nullish(),
+      reauthToken: z.string().describe("Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove").nullish(),
     }),
     response: () => ApprovalRequest,
     status: 200,
@@ -2366,7 +2371,7 @@ export const spec = defineModuleSpec({
         "amount": 1000000,
         "currency": "USD"
       },
-      "desc": "Money approvals above this need a fresh 2-step code",
+      "desc": "Money approvals above this need the approver's password again (a re-auth token, purpose approval)",
       "type": "money",
       "min": 0,
       "approval": "business_owner"

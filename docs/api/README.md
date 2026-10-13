@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1,294 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1,293 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -14,7 +14,7 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 
 | Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 258 |
 | Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 260 |
 | Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 745 |
-| Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 22 |
+| Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 21 |
 | Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider | 9 |
 
 ### Endpoints by auth kind
@@ -28,8 +28,8 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 | Store API | `customer` | Signed-in customer | 97 |
 | Store API | `account` | Any signed-in account, any realm (self-service security endpoints) | 11 |
 | Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 260 |
-| Admin API | `staff` | Staff member with 2-step; optional `permission` narrows it | 745 |
-| Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 19 |
+| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 745 |
+| Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 18 |
 | Public API | `refresh` | Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body) | 2 |
 | Public API | `bootstrap` | No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions | 1 |
 | Webhooks | `provider` | Webhook signature, verified per provider | 9 |
@@ -40,7 +40,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 |---|---|---|---|---|
 | [access](modules/access.md) | 1 | What staff may do and how much they may approve: staff roles, the permission registry, role assignments, leads and backups per work area, approval limits per role, approval requests with a second reviewer, and cover while someone is away. Granting access never grants financial authority. | identity | 33 |
 | [audit](modules/audit.md) | 1 | The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting. | - | 11 |
-| [identity](modules/identity.md) | 1 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 47 |
+| [identity](modules/identity.md) | 1 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 46 |
 | [media](modules/media.md) | 1 | Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). | - | 29 |
 | [notifications](modules/notifications.md) | 1 | Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3). | identity | 45 |
 | [reports](modules/reports.md) | 1 | Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables. | - | 33 |
@@ -136,7 +136,7 @@ Every REST error is `{ "error": { "code", "message", "details"? } }` with the st
 | `INTERNAL_ERROR` | 500 | Something went wrong on the server, or a response did not match the spec. Include the X-Request-Id when reporting it. |
 | `RANGE_NOT_SATISFIABLE` | 416 | File downloads (GET /files/…): the requested Range is outside the file. details.sizeBytes. |
 | `WRONG_AUDIENCE` | 403 | The token is for another app (store, Seller Center or Admin Center). |
-| `STEP_UP_REQUIRED` | 403 | A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose. |
+| `STEP_UP_REQUIRED` | 403 | A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose. |
 | `OWNER_ONLY` | 403 | Only the seller owner can do this. |
 | `NO_SELLER_ACCESS` | 403 | This account cannot act for that seller (or for any seller). |
 | `UPGRADE_REQUIRED` | 426 | This Android app version is no longer supported; update the app. details.minVersionCode, details.updateUrl. |
@@ -163,7 +163,7 @@ GraphQL answers `{ data, errors }` with `errors[].extensions.code` instead of th
 | `UNAUTHORIZED` | `reason`: `token_missing`, `token_expired`, `token_revoked`, `token_malformed`, `token_bad_signature`, `token_unknown_key`, `token_wrong_type`, `token_wrong_issuer`, `token_not_yet_valid`, `token_invalid` (refresh token); `sign_in_required`, `seller_context_required`, `session_idle`; `signature_invalid`, `signature_expired` (webhooks); `link_missing`, `link_invalid` (file links) |
 | `FORBIDDEN` | `permission` for a missing permission; otherwise `reason`: `origin_not_allowed`, `x_requested_with_required` (cookie refresh and sign-out), `link_expired` (file links) |
 | `WRONG_AUDIENCE` | `tokenAudience`, `area` |
-| `STEP_UP_REQUIRED` | `kind` (`reauth`, `code`, `two-step-sign-in`), `purpose` |
+| `STEP_UP_REQUIRED` | `kind` (`reauth`), `purpose` |
 | `ILLEGAL_TRANSITION` | `machine`, `from`, `event`, `allowed` |
 | `APPROVAL_REQUIRED` | `approvalRequestId` |
 | `RATE_LIMITED` | `retryAfterSeconds` (also the `Retry-After` header) |
@@ -181,7 +181,6 @@ GraphQL answers `{ data, errors }` with `errors[].extensions.code` instead of th
 | `Accept-Language` | Ignored: every response is en-US (the only locale at launch) |
 | `X-Request-Id` | Optional. A value of 1–100 letters, digits, _ or - becomes the request id; otherwise the server makes one. Every response carries it; include it when reporting problems |
 | `X-App-Proof` | Bootstrap only: turnstile:<token> (website bot challenge) or play:<token> (Android Play Integrity); dev in development and tests |
-| `X-Step-Up-Code` | Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED |
 | `X-Client` | web, android/<versionCode> or android/<versionName>+<versionCode> (e.g. android/1.4.2+142): analytics and the minimum-version check (426) only, never trusted for authorization |
 | `X-Requested-With` | Any value. Required with the website's refresh cookie on refresh and sign-out, together with an allowed Origin (else 403) |
 
@@ -208,7 +207,7 @@ Endpoints marked idempotent need `Idempotency-Key` (1–255 characters; missing 
 
 ### Step-up
 
-Endpoints with a step-up need a fresh proof: `reauthToken` in the body (kind `reauth`, from identity's re-auth endpoint) or the current 2-step code in `X-Step-Up-Code` (kind `code`). A missing or refused proof → 403 `STEP_UP_REQUIRED` with `details.kind` and `details.purpose`, never 400. A re-auth token works once: it is claimed before the request runs and given back if the request fails, so the person can retry without confirming again. A replayed idempotent request does not spend it.
+Endpoints with a step-up need a fresh proof: `reauthToken` in the body, from identity's re-auth endpoint of the app (the password; members may use a 2-step code instead). Staff confirm with their password (`POST /api/admin/identity/reauth`); they have no 2-step. A missing or refused proof → 403 `STEP_UP_REQUIRED` with `details.kind` and `details.purpose`, never 400. A re-auth token works once: it is claimed before the request runs and given back if the request fails, so the person can retry without confirming again. A replayed idempotent request does not spend it.
 
 ### Sessions
 

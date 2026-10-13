@@ -52,7 +52,7 @@
     "customer": "Signed-in customer",
     "account": "Any signed-in account, any realm (self-service security endpoints)",
     "seller": "Seller member acting for the seller in the token; optional `permission` narrows it",
-    "staff": "Staff member with 2-step; optional `permission` narrows it",
+    "staff": "Staff member (email and password sign-in); optional `permission` narrows it",
     "refresh": "Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body)",
     "provider": "Webhook signature, verified per provider",
     "bootstrap": "No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions"
@@ -214,7 +214,7 @@
     },
     "STEP_UP_REQUIRED": {
       "status": 403,
-      "meaning": "A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose."
+      "meaning": "A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose."
     },
     "OWNER_ONLY": {
       "status": 403,
@@ -239,7 +239,6 @@
     "Accept-Language": "Ignored: every response is en-US (the only locale at launch)",
     "X-Request-Id": "Optional. A value of 1–100 letters, digits, _ or - becomes the request id; otherwise the server makes one. Every response carries it; include it when reporting problems",
     "X-App-Proof": "Bootstrap only: turnstile:<token> (website bot challenge) or play:<token> (Android Play Integrity); dev in development and tests",
-    "X-Step-Up-Code": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
     "X-Client": "web, android/<versionCode> or android/<versionName>+<versionCode> (e.g. android/1.4.2+142): analytics and the minimum-version check (426) only, never trusted for authorization",
     "X-Requested-With": "Any value. Required with the website's refresh cookie on refresh and sign-out, together with an allowed Origin (else 403)"
   },

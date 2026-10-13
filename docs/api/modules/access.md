@@ -18,7 +18,7 @@ What staff may do and how much they may approve: staff roles, the permission reg
 - Away periods: who covers each role while a lead is away, and (with Business Owner approval) temporary delegation of approval authority
 
 **Not here:**
-- Staff accounts, sign-in, 2-step verification, invitations links and account lock/disable: identity (access calls identity.inviteStaff and reacts to identity.account.disabled)
+- Staff accounts, sign-in, invitation links and pass codes, re-authentication and account lock/disable: identity (access calls identity.inviteStaff and reacts to identity.account.disabled)
 - Seller member roles and seller permissions (owner-only payout changes, etc.): sellers
 - Executing the approved action (releasing the payout, sending the refund, suspending the seller): the module that requested the approval, on access.approval.decided
 - The action history itself: audit (access records every role, permission, limit and approval change there)
@@ -34,13 +34,13 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | POST | `/api/admin/access/roles` | Create a task or custom role _(audited)_ | staff<br>`access.roles.manage` | `RoleInput` → `Role` |
 | PATCH | `/api/admin/access/roles/{id}` | Rename a role, change its work area or escalation role _(audited)_ | staff<br>`access.roles.manage` | `RoleUpdate` → `Role` |
 | POST | `/api/admin/access/roles/{id}/archive` | Archive an unused custom role _(audited)_ | staff<br>`access.roles.manage` | `{ reason: text }` → `Role` |
-| PUT | `/api/admin/access/roles/{id}/permissions` | Replace the permissions of a role _(audited, step-up: code)_ | staff<br>`access.roles.manage` | `{ permissionKeys: string[], reason: text }` → `RoleDetail` |
+| PUT | `/api/admin/access/roles/{id}/permissions` | Replace the permissions of a role _(audited, step-up: reauth)_ | staff<br>`access.roles.manage` | `{ permissionKeys: string[], reason: text, reauthToken: string }` → `RoleDetail` |
 | PUT | `/api/admin/access/roles/{id}/coverage` | Set the lead, backups and escalation role _(audited)_ | staff<br>`access.roles.manage` | `CoverageInput` → `RoleCoverage` |
 | GET | `/api/admin/access/permissions` | Permission registry grouped by work area | staff<br>`access.roles.view` | `PermissionGroup[]` |
-| GET | `/api/admin/access/members` | Staff members with roles, lead/backup duties, away status and 2-step state | staff<br>`access.roles.view` | Page<StaffMember> |
+| GET | `/api/admin/access/members` | Staff members with roles, lead/backup duties and away status | staff<br>`access.roles.view` | Page<StaffMember> |
 | GET | `/api/admin/access/members/{accountId}` | One staff member: assignments, effective permissions and limits, away periods | staff<br>`access.roles.view` | `StaffMemberDetail` |
-| POST | `/api/admin/access/staff-invitations` | Invite a staff member with roles _(audited, step-up: code)_ | staff<br>`access.roles.manage` | `StaffInvitationInput` → `StaffMember` |
-| POST | `/api/admin/access/role-assignments` | Give a staff member a role _(audited, step-up: code)_ | staff<br>`access.roles.manage` | `{ accountId: uuid, roleId: uuid, reason: text, expiresAt: datetime? }` → `RoleAssignment` |
+| POST | `/api/admin/access/staff-invitations` | Invite a staff member with roles _(audited, step-up: reauth)_ | staff<br>`access.roles.manage` | `StaffInvitationInput` → `StaffMember` |
+| POST | `/api/admin/access/role-assignments` | Give a staff member a role _(audited, step-up: reauth)_ | staff<br>`access.roles.manage` | `{ accountId: uuid, roleId: uuid, reason: text, expiresAt: datetime?, reauthToken: string }` → `RoleAssignment` |
 | POST | `/api/admin/access/role-assignments/{id}/revoke` | Remove a role from a staff member _(audited)_ | staff<br>`access.roles.manage` | `{ reason: text }` → `RoleAssignment` |
 | GET | `/api/admin/access/approval-actions` | Actions that can have approval limits | staff<br>`access.roles.view` | `ApprovalAction[]` |
 | GET | `/api/admin/access/limits` | Approval limits in force | staff<br>`access.roles.view` | `ApprovalLimit[]` |
@@ -50,7 +50,7 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | POST | `/api/admin/access/authority-checks` | Can I do this, or who must approve it? | staff | `{ action: string, amount: AmountInput? }` → `AuthorityCheck` |
 | GET | `/api/admin/access/approval-requests` | Approval requests (waiting for me, mine, or all) _(also access.approvals.view-all when not own)_ | staff | Page<ApprovalRequest> |
 | GET | `/api/admin/access/approval-requests/{id}` | One approval request with decisions and whether I can decide | staff | `ApprovalRequest` |
-| POST | `/api/admin/access/approval-requests/{id}/approve` | Approve (first or second approval) _(audited)_ | staff | `{ note: text?, stepUpCode: string? }` → `ApprovalRequest` |
+| POST | `/api/admin/access/approval-requests/{id}/approve` | Approve (first or second approval) _(audited)_ | staff | `{ note: text?, reauthToken: string? }` → `ApprovalRequest` |
 | POST | `/api/admin/access/approval-requests/{id}/reject` | Reject with a reason _(audited)_ | staff | `{ reason: text }` → `ApprovalRequest` |
 | POST | `/api/admin/access/approval-requests/{id}/return` | Send back to the requester with a comment _(audited)_ | staff | `{ comment: text }` → `ApprovalRequest` |
 | POST | `/api/admin/access/approval-requests/{id}/resubmit` | Requester resubmits after a return _(audited)_ | staff | `{ note: text }` → `ApprovalRequest` |
@@ -246,7 +246,7 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | approvalsNeeded | `int` Approvals by other people still needed if the caller submits now (0 when allowed) |
 | eligibleApproverRoles | `RoleRef[]` |
 | eligibleApprovers | `StaffRef[]` People who could approve now, backups included |
-| stepUpRequired | `bool` The amount is above stepUpAbove: whoever acts or approves must give a fresh 2-step code (X-Step-Up-Code). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself. |
+| stepUpRequired | `bool` The amount is above stepUpAbove: whoever acts or approves must confirm with their password again (a re-auth token, purpose approval). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself. |
 
 ### ApprovalTarget
 
@@ -366,6 +366,7 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | roleIds | `uuid[]` |
 | reportsToAccountId | `uuid?` |
 | reason | `text` |
+| reauthToken | `string` Re-auth token for purpose role-grant (POST /api/admin/identity/reauth with the password) |
 | requestLimitReview | `bool?` Request approval limits from the Business Owner: opens an access.limits.change approval request asking the Business Owner to confirm or adjust the limits the chosen roles carry before the new member uses them. Until it is decided the member's approval actions stay at no limit (they can prepare but not approve). |
 
 ### RoleCoverage
@@ -794,7 +795,7 @@ Indexes: `pk (away_period_id, role_id)`, `(covered_by_account_id)`
 | permissionsOf | `(accountId: uuid) => string[]`<br>Effective staff permissions (cached, invalidated on access.role.changed) | kernel, reports |
 | check | `(principal: identity.Principal, action: string, amount?: AmountInput) => AuthorityCheck`<br>allowed | approval_required | denied for this person, action and amount, with who could approve. Uses the limits in force now. Permissions alone never make a money action allowed. | finance, returns, payments, sellers, offers, catalog, inventory, purchasing, shipping, support, promotions, customers, settings, content, advertising, audit, wallet |
 | requestApproval | `(input: RequestApprovalInput) => ApprovalRequest`<br>Create an approval request (or return the open one for the same action and target). The requesting module keeps its record pending and finishes on access.approval.decided. | finance, returns, sellers, offers, catalog, inventory, purchasing, shipping, support, promotions, customers, settings, content, advertising, audit, wallet |
-| decide | `(requestId: uuid, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return', note?: string, stepUpCode?: string }) => ApprovalRequest`<br>Same rules as the admin approve/reject/return endpoints, for modules that show the decision inside their own screen (payout run approval) | finance, returns, sellers |
+| decide | `(requestId: uuid, principal: identity.Principal, decision: { kind: 'approve' | 'reject' | 'return', note?: string, reauthToken?: string }) => ApprovalRequest`<br>Same rules as the admin approve/reject/return endpoints, for modules that show the decision inside their own screen (payout run approval). An approval above stepUpAbove needs reauthToken: a re-auth token for purpose approval issued to this principal's session (used once; given back when the decision fails) | finance, returns, sellers |
 | cancelApproval | `(requestId: uuid, by: Actor, reason: string) => void`<br>The requesting module withdraws a request (record changed or deleted) | finance, returns, sellers, offers, settings |
 | getApproval | `(requestId: uuid) => ApprovalRequest | null`<br>Full request with decisions | audit, finance, returns, sellers |
 | approvalInfo | `(requestId: uuid) => ApprovalInfo`<br>Compact common.ApprovalInfo for embedding in other modules' responses | finance, returns, sellers, offers, inventory, purchasing, settings, content, promotions |
@@ -867,7 +868,7 @@ Checked through the access module (limits per role, second reviewer).
 | reminderHoursBeforeDue | `4` | duration, hours, 0–… | Remind reviewers this long before dueAt |
 | reminderAfterHours | `24` | duration, hours, 1–… | Remind reviewers of undated requests waiting this long |
 | reminderMinIntervalMinutes | `60` | duration, minutes, 1–… | Manual reminders per request |
-| stepUpAbove | `{"amount":1000000,"currency":"USD"}` | money, 0–…, approval: business owner | Money approvals above this need a fresh 2-step code |
+| stepUpAbove | `{"amount":1000000,"currency":"USD"}` | money, 0–…, approval: business owner | Money approvals above this need the approver's password again (a re-auth token, purpose approval) |
 | sensitivePermissionPrefixes | `["access.","identity.staff-accounts.","finance.","audit.entries.export","settings.changes."]` | json, approval: business owner | Granting these needs a second reviewer |
 
 ## Notes
@@ -1108,16 +1109,16 @@ extend type Query {
   myApprovalLimit(actionKey: String!): ApprovalLimitView @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "myLimitFor")
 
   "Requests the caller may decide now, oldest due first (dashboard tile, inbox, approvals list)"
-  approvalsWaitingForMe(module: String, actionKey: String, overdue: Boolean, paging: PageInput): ApprovalRequestPage! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "listApprovalsToDecide")
+  approvalsWaitingForMe(module: String, actionKey: String, overdue: Boolean, paging: PageInput): ApprovalRequestPage @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "listApprovalsToDecide")
 
   "Counts for the dashboard and inbox: waiting for me, overdue, my open requests"
-  myApprovalSummary: ApprovalSummary! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalSummaryFor")
+  myApprovalSummary: ApprovalSummary @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "approvalSummaryFor")
 
   "One request with decisions and steps. Visible to the requester, eligible approvers and holders of access.approvals.view-all."
   approvalRequest(id: UUID!): ApprovalRequest @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "getApprovalForViewer")
 
   "Leads, backups and who receives each role's work today (dashboard 'Team on shift')"
-  teamOnShift(workArea: String): [AccessRoleCoverage!]! @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "coverageNow")
+  teamOnShift(workArea: String): [AccessRoleCoverage!] @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "access", fn: "coverageNow")
 }
 
 # ---- Approval requests on the records that wait for them (visible to whoever can read the parent record)
@@ -1139,6 +1140,6 @@ extend type RefundRequest {
 
 extend type Seller {
   "Open requests about this seller (restriction, suspension, payout destination change, holds) for AdminSeller"
-  pendingApprovals: [ApprovalRequest!]! @areas(in: [ADMIN]) @auth(requires: STAFF) @cost(weight: 5) @source(module: "access", fn: "approvalsForSellers")
+  pendingApprovals: [ApprovalRequest!] @areas(in: [ADMIN]) @auth(requires: STAFF) @cost(weight: 5) @source(module: "access", fn: "approvalsForSellers")
 }
 ```

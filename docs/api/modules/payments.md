@@ -933,12 +933,12 @@ type Payment @areas(in: [STORE, ADMIN]) {
   "Last decline on this checkout's attempts, if any"
   decline: PaymentDecline @areas(in: [ADMIN])
   "Share of the payment per seller group"
-  allocations: [PaymentAllocation!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
-  captures: [PaymentCapture!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  allocations: [PaymentAllocation!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  captures: [PaymentCapture!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
   "Every payment attempt of the checkout session (declines, retries)"
-  attempts: [PaymentAttempt!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
+  attempts: [PaymentAttempt!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view")
   "Provider calls (authorize, capture, refund, retrieve) with outcomes"
-  providerCalls: [PaymentProviderCall!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view") @cost(weight: 5)
+  providerCalls: [PaymentProviderCall!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view") @cost(weight: 5)
 }
 
 "How the customer paid, as recorded on the payment"
@@ -1087,7 +1087,7 @@ type Refund @areas(in: [STORE, ADMIN]) {
   providerRef: String @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
   reason: String @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
   requestedBy: Actor @areas(in: [ADMIN])
-  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
+  history: [TimelineEvent!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.refunds.view")
 }
 
 type PaymentRefundItem @areas(in: [STORE, ADMIN]) {
@@ -1267,7 +1267,7 @@ extend type Order {
   refundable: PaymentRefundable @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.payments.view") @source(module: "payments", fn: "remainingRefundable") @cost(weight: 3)
 
   "Chargebacks and payment disputes on this order (order 360, dispute case)"
-  paymentDisputes: [PaymentDispute!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.disputes.manage") @source(module: "payments", fn: "listDisputesForOrder")
+  paymentDisputes: [PaymentDispute!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "payments.disputes.manage") @source(module: "payments", fn: "listDisputesForOrder")
 }
 
 extend type Customer {

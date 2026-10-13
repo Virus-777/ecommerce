@@ -1250,7 +1250,7 @@ extend type Query {
   workSummary: WorkQueueSummary @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "getWorkSummary") @cost(weight: 5)
 
   "Work items across the queues the caller may see"
-  workItems(filter: WorkItemFilterInput, paging: PageInput): WorkItemPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "listItems")
+  workItems(filter: WorkItemFilterInput, paging: PageInput): WorkItemPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "listItems")
 
   workItem(id: UUID!): WorkItem @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "workqueues.items.view") @source(module: "workqueues", fn: "getItem")
 }

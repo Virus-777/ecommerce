@@ -1425,13 +1425,13 @@ type Order {
   "Cancellations, returns and refunds per item with owner"
   afterSales: [OrderAdminAfterSales!]! @areas(in: [ADMIN])
   "Money split per seller group: who funded discounts, fee and earnings"
-  moneyBySeller: [OrderGroupMoney!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
+  moneyBySeller: [OrderGroupMoney!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
   "e.g. 'WELCOME20 is platform-funded; sellers receive their full price.'"
   couponFundingNote: String @areas(in: [ADMIN])
   "Internal notes, never shown to customers or sellers"
-  notes: [OrderInternalNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
+  notes: [OrderInternalNote!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view")
   "Staff action history with names and reasons (latest 20; full list via REST GET /orders/{id}/history)"
-  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @cost(weight: 5)
+  history: [TimelineEvent!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @cost(weight: 5)
   allowedActions: [OrderAdminAction!]! @areas(in: [ADMIN])
 }
 
@@ -2228,22 +2228,22 @@ extend type Query {
   order(ref: String!): Order @areas(in: [STORE]) @auth(requires: SHOPPER) @source(module: "orders", fn: "getOrderForViewer")
 
   "Order history with search, date range and status tab (OrderList, AccountOverview recent orders with paging.limit)"
-  orders(filter: OrderListFilter, paging: PageInput): OrderPage! @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "orders", fn: "listOrdersForCustomer")
+  orders(filter: OrderListFilter, paging: PageInput): OrderPage @areas(in: [STORE]) @auth(requires: CUSTOMER) @source(module: "orders", fn: "listOrdersForCustomer")
 
   "One order as the calling seller sees it: only its own groups, items, money and timeline. Another seller's order returns null (NOT_FOUND)."
   sellerOrder(ref: String!): Order @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "getOrderForSeller")
 
   "The seller's orders by stage with dispatch deadlines (dashboard 'to ship' list, Orders page)"
-  sellerOrders(filter: OrderSellerFilter, paging: PageInput): OrderPage! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "listOrdersForSeller")
+  sellerOrders(filter: OrderSellerFilter, paging: PageInput): OrderPage @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "listOrdersForSeller")
 
   "Tab counts plus overdue and due today"
-  sellerOrderCounts: OrderSellerCounts! @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "countSellerOrders")
+  sellerOrderCounts: OrderSellerCounts @areas(in: [SELLER]) @auth(requires: SELLER, permission: "orders.fulfillment.view") @source(module: "orders", fn: "countSellerOrders")
 
   "Order 360 across all sellers (staff)"
   orderAdmin(ref: String!): Order @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "getOrderAdmin")
 
   "Order list for staff; also feeds the customer 360 (filter.customerId) and seller 360 (filter.sellerId)"
-  ordersAdmin(filter: OrderAdminFilter, paging: PageInput): OrderPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "listOrdersAdmin") @cost(weight: 20)
+  ordersAdmin(filter: OrderAdminFilter, paging: PageInput): OrderPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "orders.orders.view") @source(module: "orders", fn: "listOrdersAdmin") @cost(weight: 20)
 }
 
 extend type Customer {

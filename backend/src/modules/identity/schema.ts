@@ -220,6 +220,8 @@ const invitations = new Schema(
     context_ref: { type: String, default: null },
     context_label: { type: String, default: null },
     token_hash: { type: String, required: true },
+    pass_code_hash: { type: String, default: null }, // staff invitations: hash of the pass code handed over with the link
+    pass_code_attempts: { type: Number, required: true, validate: integer }, // wrong pass codes on this link; at 5 the link is revoked
     invited_by_kind: { type: String, required: true },
     invited_by_id: { type: String, required: true },
     status: { type: String, required: true },

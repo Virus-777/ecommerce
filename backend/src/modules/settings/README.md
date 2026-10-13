@@ -705,9 +705,9 @@ type SettingsUpcomingChange @areas(in: [SELLER]) {
 
 extend type Query {
   "Support hours, open now, closures, maintenance notice and public flags"
-  storeInfo: StoreInfo! @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
+  storeInfo: StoreInfo @auth(requires: ANYONE) @source(module: "settings", fn: "storeInfo")
 
   "Scheduled platform changes that affect sellers, soonest first"
-  upcomingChanges: [SettingsUpcomingChange!]! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "settings", fn: "upcomingChangesForSellers")
+  upcomingChanges: [SettingsUpcomingChange!] @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "settings", fn: "upcomingChangesForSellers")
 }
 ```

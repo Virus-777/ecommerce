@@ -238,9 +238,11 @@ for (const m of modules) {
     if (AREA_AUTHS[ep.area] && !AREA_AUTHS[ep.area].includes(ep.auth)) err(E, `${ep.area}-area endpoints need auth ${AREA_AUTHS[ep.area].map((a) => `"${a}"`).join(' or ')}`);
     if (ep.auth === 'bootstrap' && !(m.name === 'identity' && ep.id === 'startAppSession')) err(E, 'only identity.startAppSession may use auth "bootstrap" (the one endpoint that issues the first token)');
     if (ep.stepUp !== undefined) {
-      if (!['reauth', 'code'].includes(ep.stepUp?.kind) || typeof ep.stepUp?.purpose !== 'string') err(E, 'stepUp must be { kind: "reauth" | "code", purpose: string }');
-      if (ep.stepUp?.kind === 'reauth' && !(typeof ep.body === 'object' && ep.body && 'reauthToken' in ep.body)) err(E, 'stepUp kind "reauth" needs a reauthToken field in the body');
-      if (ep.stepUp?.kind === 'reauth' && reauthPurposes && !reauthPurposes.includes(ep.stepUp.purpose)) err(E, `reauth purpose "${ep.stepUp.purpose}" must be one of identity ReauthRequest.purpose (${reauthPurposes.join(', ')}): add it there`);
+      if (ep.stepUp?.kind !== 'reauth' || typeof ep.stepUp?.purpose !== 'string') err(E, 'stepUp must be { kind: "reauth", purpose: string }');
+      // the body is inline or one of this module's types; either way it must declare the token field
+      const bodyFields = typeof ep.body === 'string' ? m.types?.[ep.body] : ep.body;
+      if (!(typeof bodyFields === 'object' && bodyFields && 'reauthToken' in bodyFields)) err(E, 'stepUp needs a reauthToken field in the body');
+      if (reauthPurposes && !reauthPurposes.includes(ep.stepUp?.purpose)) err(E, `reauth purpose "${ep.stepUp?.purpose}" must be one of identity ReauthRequest.purpose (${reauthPurposes.join(', ')}): add it there`);
       if (!(ep.errors ?? []).includes('STEP_UP_REQUIRED')) err(E, 'endpoints with stepUp must list STEP_UP_REQUIRED in errors');
     }
     if (ep.sellerContext !== undefined && (ep.sellerContext !== 'optional' || ep.area !== 'seller')) err(E, 'sellerContext can only be "optional", on seller-area endpoints');
@@ -311,7 +313,6 @@ for (const m of modules) {
       ...Object.entries(ep.query ?? {}).map(([name, t]) => { const r = typeToSchema(t, m, ''); return { name, in: 'query', required: !r.optional, schema: r.schema }; }),
       ...(ep.paging ? Object.entries(common.pagination.query).map(([name, t]) => ({ name, in: 'query', required: false, description: t.desc, schema: typeToSchema(t, null, '').schema })) : []),
       ...(ep.idempotent ? [{ name: 'Idempotency-Key', in: 'header', required: true, description: common.headers['Idempotency-Key'], schema: { type: 'string' } }] : []),
-      ...(ep.stepUp?.kind === 'code' ? [{ name: 'X-Step-Up-Code', in: 'header', required: true, description: common.headers['X-Step-Up-Code'], schema: { type: 'string' } }] : []),
     ];
     const status = String(ep.status ?? (ep.response === null ? 204 : 200));
     let respSchema = ep.response === null || ep.response === undefined ? null : typeToSchema(ep.response, m, '').schema;
@@ -330,7 +331,7 @@ for (const m of modules) {
       operationId: `${m.name}.${ep.id}`,
       tags: [`${common.areas[ep.area].title} · ${m.title}`],
       summary: ep.summary,
-      description: [ep.desc, ep.permission && `**Permission:** \`${ep.permission}\``, ep.permissionWhen?.length && `**Also needs:** ${ep.permissionWhen.map((r) => `\`${r.permission}\` when ${Object.entries(r.if).map(([k, v]) => `${k} ${String(v).startsWith('!') ? `is not the caller's own (${v.slice(1)})` : `= ${v}`}`).join(' and ')}`).join('; ')}`, ep.stepUp && `**Step-up:** ${ep.stepUp.kind === 'reauth' ? 'single-use re-auth token in the body' : '2-step code in X-Step-Up-Code'} (purpose \`${ep.stepUp.purpose}\`)`, ep.sellerContext === 'optional' && '**Seller context:** optional (works before a seller is chosen).', ep.approval && `**Approval:** ${ep.approval}`, ep.idempotent && '**Idempotent:** send an Idempotency-Key.', ep.audited && '**Audited:** recorded in the action history.', ep.events?.length && `**Publishes:** ${ep.events.map((e) => `\`${e}\``).join(', ')}`, ep.screens?.length && `**Screens:** ${ep.screens.join(', ')}`, (ep.phase ?? m.phase) > 1 && `**Launch phase:** ${ep.phase ?? m.phase}`].filter(Boolean).join('\n\n') || undefined,
+      description: [ep.desc, ep.permission && `**Permission:** \`${ep.permission}\``, ep.permissionWhen?.length && `**Also needs:** ${ep.permissionWhen.map((r) => `\`${r.permission}\` when ${Object.entries(r.if).map(([k, v]) => `${k} ${String(v).startsWith('!') ? `is not the caller's own (${v.slice(1)})` : `= ${v}`}`).join(' and ')}`).join('; ')}`, ep.stepUp && `**Step-up:** single-use re-auth token in the body (purpose \`${ep.stepUp.purpose}\`)`, ep.sellerContext === 'optional' && '**Seller context:** optional (works before a seller is chosen).', ep.approval && `**Approval:** ${ep.approval}`, ep.idempotent && '**Idempotent:** send an Idempotency-Key.', ep.audited && '**Audited:** recorded in the action history.', ep.events?.length && `**Publishes:** ${ep.events.map((e) => `\`${e}\``).join(', ')}`, ep.screens?.length && `**Screens:** ${ep.screens.join(', ')}`, (ep.phase ?? m.phase) > 1 && `**Launch phase:** ${ep.phase ?? m.phase}`].filter(Boolean).join('\n\n') || undefined,
       security: securityFor(ep.auth),
       parameters: parameters.length ? parameters : undefined,
       requestBody: ep.body === BINARY_BODY
@@ -478,7 +479,7 @@ idx.push(
   '| `UNAUTHORIZED` | `reason`: `token_missing`, `token_expired`, `token_revoked`, `token_malformed`, `token_bad_signature`, `token_unknown_key`, `token_wrong_type`, `token_wrong_issuer`, `token_not_yet_valid`, `token_invalid` (refresh token); `sign_in_required`, `seller_context_required`, `session_idle`; `signature_invalid`, `signature_expired` (webhooks); `link_missing`, `link_invalid` (file links) |',
   '| `FORBIDDEN` | `permission` for a missing permission; otherwise `reason`: `origin_not_allowed`, `x_requested_with_required` (cookie refresh and sign-out), `link_expired` (file links) |',
   '| `WRONG_AUDIENCE` | `tokenAudience`, `area` |',
-  '| `STEP_UP_REQUIRED` | `kind` (`reauth`, `code`, `two-step-sign-in`), `purpose` |',
+  '| `STEP_UP_REQUIRED` | `kind` (`reauth`), `purpose` |',
   '| `ILLEGAL_TRANSITION` | `machine`, `from`, `event`, `allowed` |',
   '| `APPROVAL_REQUIRED` | `approvalRequestId` |',
   '| `RATE_LIMITED` | `retryAfterSeconds` (also the `Retry-After` header) |',
@@ -514,7 +515,7 @@ idx.push(
   '',
   '### Step-up',
   '',
-  'Endpoints with a step-up need a fresh proof: `reauthToken` in the body (kind `reauth`, from identity\'s re-auth endpoint) or the current 2-step code in `X-Step-Up-Code` (kind `code`). A missing or refused proof → 403 `STEP_UP_REQUIRED` with `details.kind` and `details.purpose`, never 400. A re-auth token works once: it is claimed before the request runs and given back if the request fails, so the person can retry without confirming again. A replayed idempotent request does not spend it.',
+  'Endpoints with a step-up need a fresh proof: `reauthToken` in the body, from identity\'s re-auth endpoint of the app (the password; members may use a 2-step code instead). Staff confirm with their password (`POST /api/admin/identity/reauth`); they have no 2-step. A missing or refused proof → 403 `STEP_UP_REQUIRED` with `details.kind` and `details.purpose`, never 400. A re-auth token works once: it is claimed before the request runs and given back if the request fails, so the person can retry without confirming again. A replayed idempotent request does not spend it.',
   '',
   '### Sessions',
   '',

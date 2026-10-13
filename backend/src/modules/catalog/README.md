@@ -1086,7 +1086,7 @@ type Product {
   "Possible duplicates found on submission"
   duplicateCandidates: [Product!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @cost(weight: 5)
   "Automated checks run on the latest submission (duplicates, imagery, category fit, claims, brand, restricted items, identifiers). Advisory: the reviewer decides."
-  checks: [ProductCheck!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @cost(weight: 3)
+  checks: [ProductCheck!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @cost(weight: 3)
 }
 
 type Spec {
@@ -1358,7 +1358,7 @@ extend type Query {
   myProduct(id: UUID!): Product @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "catalog", fn: "getProductForSeller")
 
   "Submissions waiting for review, by review deadline (Product.submission carries kind, submittedAt and reviewDeadline)"
-  productReviewQueue(kind: ProductSubmissionKind, categoryId: UUID, paging: PageInput): ProductPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
+  productReviewQueue(kind: ProductSubmissionKind, categoryId: UUID, paging: PageInput): ProductPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review") @source(module: "catalog", fn: "listReviewQueue")
 
   "Any product with review history (staff)"
   productAdmin(id: UUID!): Product @areas(in: [ADMIN]) @auth(requires: STAFF) @source(module: "catalog", fn: "getProductAdmin")

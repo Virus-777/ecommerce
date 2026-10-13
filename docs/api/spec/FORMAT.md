@@ -89,10 +89,12 @@ Used in `types`, `body`, `query`, event `payload` and inline objects.
   "permissionWhen": [                      // optional: an extra permission when the request is about someone else
     { "if": { "query.view": "all" }, "permission": "access.approvals.view-all" }   // value, or "!self" / "!self-member"
   ],
-  "stepUp": { "kind": "reauth", "purpose": "payout-account" },  // optional: reauth = reauthToken in the body; code = X-Step-Up-Code header.
-                                           //   A reauth purpose must be listed in identity ReauthRequest.purpose (the build checks it);
+  "stepUp": { "kind": "reauth", "purpose": "payout-account" },  // optional: a single-use re-auth token (password, or a member's 2-step code)
+                                           //   in the body field reauthToken (the body, inline or a type of this module, must declare it).
+                                           //   The purpose must be listed in identity ReauthRequest.purpose (the build checks it);
                                            //   errors must list STEP_UP_REQUIRED. A missing proof is 403 STEP_UP_REQUIRED, never 400.
-                                           //   Money approvals don't use stepUp: they take "stepUpCode" in the body, checked by access.decide
+                                           //   Money approvals don't use stepUp (only amounts above stepUpAbove need it): they take an
+                                           //   optional "reauthToken" (purpose approval) in the body, checked by access.decide
   "sellerContext": "optional",             // seller area only: works before a seller is chosen
   "scope": "own-member",                   // optional override of the derived record scope:
                                            //   public | own-customer | own-seller | own-member | guest-order | staff

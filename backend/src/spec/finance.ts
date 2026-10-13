@@ -3341,7 +3341,7 @@ export const endpoints = defineEndpoints({
     body: () => z.object({
       confirmedReview: z.boolean(),
       note: z.string().nullish(),
-      stepUpCode: z.string().describe("Current 2-step code; required when the run is above access stepUpAbove").nullish(),
+      reauthToken: z.string().describe("Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove").nullish(),
     }),
     response: () => PayoutRun,
     status: 200,
@@ -3466,7 +3466,7 @@ export const endpoints = defineEndpoints({
     path: "/destination-reviews/{id}/approve",
     auth: "staff",
     permission: "finance.destinations.review",
-    stepUp: {"kind":"code","purpose":"payout-destination"},
+    stepUp: {"kind":"reauth","purpose":"payout-destination"},
     scope: "staff",
     summary: "Verify a new payout destination",
     desc: "The phone callback check has no separate step: the reviewer phones the seller owner on the number on file (not one given in the change) and records the result with callbackConfirmed. false records the check as failed (the review stays under review; reject it if the owner did not ask for the change).",
@@ -3478,6 +3478,7 @@ export const endpoints = defineEndpoints({
       reason: z.string(),
       callbackConfirmed: z.boolean().describe("The owner confirmed the change on a callback to the phone number on file"),
       callbackNote: z.string().nullish(),
+      reauthToken: z.string(),
     }),
     response: () => DestinationReview,
     status: 200,
@@ -3494,7 +3495,7 @@ export const endpoints = defineEndpoints({
     path: "/destination-reviews/{id}/reject",
     auth: "staff",
     permission: "finance.destinations.review",
-    stepUp: {"kind":"code","purpose":"payout-destination"},
+    stepUp: {"kind":"reauth","purpose":"payout-destination"},
     scope: "staff",
     summary: "Reject a payout destination change",
     params: () =>
@@ -3503,6 +3504,7 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       reason: z.string(),
+      reauthToken: z.string(),
     }),
     response: () => DestinationReview,
     status: 200,

@@ -1311,7 +1311,7 @@ type Offer {
   "Status changes with reasons and who made them, newest first"
   statusLog(limit: Int = 20): [OfferStatusEntry!]! @areas(in: [SELLER, ADMIN])
   "Requested, pending, scheduled and recent price changes (Official Store approvals)"
-  priceChanges: [OfferPriceChange!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view")
+  priceChanges: [OfferPriceChange!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view")
   createdAt: DateTime! @areas(in: [SELLER, ADMIN])
   updatedAt: DateTime! @areas(in: [SELLER, ADMIN])
 }
@@ -1715,7 +1715,7 @@ extend type Product {
   priceRange(condition: OfferConditionFilter = ALL): OfferPriceRange @source(module: "offers", fn: "getOfferStats")
 
   "This seller's own offers on the product, any status (Seller Center product detail)"
-  myOffers: [Offer!]! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "offers", fn: "listOwnOffersForProduct")
+  myOffers: [Offer!] @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "offers", fn: "listOwnOffersForProduct")
 
   "Why each offer is or is not featured for a variant and location"
   featuredDecision(variantId: UUID, postalCode: String): OfferFeaturedDecision @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "getFeaturedDecision") @cost(weight: 5)
@@ -1742,6 +1742,6 @@ extend type Query {
   offerAdmin(id: UUID!): Offer @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "getOfferAdmin")
 
   "All offers with filters (seller, product, status, featured eligibility and reason)"
-  offersAdmin(filter: OfferAdminFilter, paging: PageInput): OfferPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "listOffersAdmin")
+  offersAdmin(filter: OfferAdminFilter, paging: PageInput): OfferPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "offers.offers.view") @source(module: "offers", fn: "listOffersAdmin")
 }
 ```

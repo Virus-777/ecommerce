@@ -23,7 +23,7 @@ Marketly uses **REST for everything** and adds **GraphQL for reading screens who
 
 Each endpoint also answers `GET` with the request in the query string (`query` or `persisted`/`extensions`, `variables` and `extensions` as JSON), for clients that send hashed queries by GET (Apollo Kotlin does by default). Only queries run; there is nothing else.
 
-Same tokens and headers as REST: every request carries `Authorization: Bearer` (a visitor token before sign-in), and the same middleware runs first (token, audience, caller kind, seller context, staff 2-step). A type or field appears in a schema only if its `@areas` includes that area, so the seller schema cannot even describe admin data.
+Same tokens and headers as REST: every request carries `Authorization: Bearer` (a visitor token before sign-in), and the same middleware runs first (token, audience, caller kind, seller context, staff session). A type or field appears in a schema only if its `@areas` includes that area, so the seller schema cannot even describe admin data.
 
 **Not cacheable by a CDN.** Every `/graphql/*` response, `GET` included, is `Cache-Control: private, no-store`: it is token-gated and may differ per caller (prices for the shopper's location, masked fields, permissions). Public reads are cached inside the server instead.
 
@@ -91,7 +91,7 @@ GraphQL answers `{ data, errors }`; every error carries `extensions.code` (and `
 | Code | HTTP status | When |
 |---|---|---|
 | `UNAUTHORIZED` | 401 | Before GraphQL runs: token missing, invalid or expired (`details.reason: token_*`, the only case where a client refreshes), a session of the wrong kind for the endpoint (`sign_in_required`, `seller_context_required`), or an idle staff session (`session_idle`: sign in again) |
-| `WRONG_AUDIENCE`, `NO_SELLER_ACCESS`, `STEP_UP_REQUIRED` … | 403 | Before GraphQL runs: the same caller checks and codes as REST for the area (another app's token, no longer a member of the seller, staff without 2-step …) |
+| `WRONG_AUDIENCE`, `NO_SELLER_ACCESS` … | 403 | Before GraphQL runs: the same caller checks and codes as REST for the area (another app's token, no longer a member of the seller …) |
 | `UPGRADE_REQUIRED`, `RATE_LIMITED`, `SERVICE_UNAVAILABLE` | 426, 429, 503 | Before GraphQL runs, as in REST: an outdated Android app, too many requests (`Retry-After`), staff sessions or revocations that can't be checked |
 | `VALIDATION_FAILED` | 400 | Syntax error, unknown field, wrong variable type, a mutation |
 | `QUERY_TOO_COMPLEX` | 400 | Above the depth or cost limit |

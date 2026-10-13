@@ -2078,9 +2078,9 @@ type Seller {
   restrictionSummary: String @areas(in: [ADMIN])
   "Open warning shown in lists, e.g. Dispatch below target"
   warningNote: String @areas(in: [ADMIN])
-  notes: [SellerNote!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
+  notes: [SellerNote!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
   "Account actions: approval, warnings, restrictions, suspensions, appeals, label changes (newest first)"
-  history: [TimelineEvent!]! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
+  history: [TimelineEvent!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view")
 }
 
 enum SellerStatus @areas(in: [SELLER, ADMIN]) {
@@ -2466,6 +2466,6 @@ extend type Query {
   sellerAdmin(id: UUID!): Seller @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "sellers", fn: "getSeller")
 
   "Admin seller list"
-  sellers(filter: SellerFilterInput, paging: PageInput): SellerPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "sellers", fn: "searchSellers")
+  sellers(filter: SellerFilterInput, paging: PageInput): SellerPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "sellers.accounts.view") @source(module: "sellers", fn: "searchSellers")
 }
 ```

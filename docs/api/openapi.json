@@ -870,7 +870,7 @@
           "Admin API · Access and approvals"
         ],
         "summary": "Replace the permissions of a role",
-        "description": "Removing permissions and adding ones that are not sensitive apply at once. Adding sensitive permissions (sensitivePermissionPrefixes), or adding any permission to a role the caller holds or to the Business Owner role, is saved pending approval (access.roles.sensitive-grant; the Business Owner decides for the caller's own role and the Business Owner role): the answer is the normal 200 with RoleDetail.pendingPermissionApproval (FORMAT.md, Approval responses), and the permissions are added when the request is approved. A newer proposal for the same role cancels the waiting one. Permissions never include approval limits; those are set with POST /limit-changes.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Approval:** Approval action access.roles.sensitive-grant. Sensitive permissions need a second reviewer; the caller's own role and the Business Owner role need the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`, `access.approval.requested`\n\n**Screens:** admin/staff",
+        "description": "Removing permissions and adding ones that are not sensitive apply at once. Adding sensitive permissions (sensitivePermissionPrefixes), or adding any permission to a role the caller holds or to the Business Owner role, is saved pending approval (access.roles.sensitive-grant; the Business Owner decides for the caller's own role and the Business Owner role): the answer is the normal 200 with RoleDetail.pendingPermissionApproval (FORMAT.md, Approval responses), and the permissions are added when the request is approved. A newer proposal for the same role cancels the waiting one. Permissions never include approval limits; those are set with POST /limit-changes.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `role-grant`)\n\n**Approval:** Approval action access.roles.sensitive-grant. Sensitive permissions need a second reviewer; the caller's own role and the Business Owner role need the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`, `access.approval.requested`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -884,15 +884,6 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            }
-          },
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -911,11 +902,15 @@
                   },
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": "string"
                   }
                 },
                 "required": [
                   "permissionKeys",
-                  "reason"
+                  "reason",
+                  "reauthToken"
                 ]
               }
             }
@@ -953,7 +948,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -997,7 +992,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "role-grant"
         }
       }
@@ -1190,7 +1185,7 @@
         "tags": [
           "Admin API · Access and approvals"
         ],
-        "summary": "Staff members with roles, lead/backup duties, away status and 2-step state",
+        "summary": "Staff members with roles, lead/backup duties and away status",
         "description": "**Permission:** `access.roles.view`\n\n**Screens:** admin/staff",
         "security": [
           {
@@ -1462,21 +1457,10 @@
           "Admin API · Access and approvals"
         ],
         "summary": "Invite a staff member with roles",
-        "description": "Calls identity.inviteStaff (7-day link, 2-step set-up on accept) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`\n\n**Screens:** admin/staff",
+        "description": "Calls identity.inviteStaff (7-day link; the person accepts with the link, a pass code and a new password) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `role-grant`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -1521,7 +1505,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1554,7 +1538,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "role-grant"
         }
       }
@@ -1566,21 +1550,10 @@
           "Admin API · Access and approvals"
         ],
         "summary": "Give a staff member a role",
-        "description": "A role that carries sensitive permissions, the Business Owner role, or any role for yourself is saved as a pending_approval assignment: the normal 201 with RoleAssignment.approval (FORMAT.md, Approval responses); it becomes active (or pending_acceptance for an invited person) when approved. CONFLICT when the person already holds or awaits the role.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)\n\n**Approval:** Approval action access.roles.sensitive-grant. Roles with sensitive permissions need a second reviewer; the Business Owner role or any role for yourself needs the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`, `access.approval.requested`\n\n**Screens:** admin/staff",
+        "description": "A role that carries sensitive permissions, the Business Owner role, or any role for yourself is saved as a pending_approval assignment: the normal 201 with RoleAssignment.approval (FORMAT.md, Approval responses); it becomes active (or pending_acceptance for an invited person) when approved. CONFLICT when the person already holds or awaits the role.\n\n**Permission:** `access.roles.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `role-grant`)\n\n**Approval:** Approval action access.roles.sensitive-grant. Roles with sensitive permissions need a second reviewer; the Business Owner role or any role for yourself needs the Business Owner\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.role.changed`, `access.approval.requested`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -1607,12 +1580,16 @@
                       "null"
                     ],
                     "format": "date-time"
+                  },
+                  "reauthToken": {
+                    "type": "string"
                   }
                 },
                 "required": [
                   "accountId",
                   "roleId",
-                  "reason"
+                  "reason",
+                  "reauthToken"
                 ]
               }
             }
@@ -1650,7 +1627,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1684,7 +1661,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "role-grant"
         }
       }
@@ -2776,7 +2753,7 @@
           "Admin API · Access and approvals"
         ],
         "summary": "Approve (first or second approval)",
-        "description": "Refused for the requester, for someone who already approved it, and for people whose limit does not cover the amount. Money approvals above stepUpAbove need a fresh 2-step code.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.approval.partially_approved`, `access.approval.decided`\n\n**Screens:** admin/payouts, admin/order, admin/staff, admin/settings, admin/inbox",
+        "description": "Refused for the requester, for someone who already approved it, and for people whose limit does not cover the amount. Money approvals above stepUpAbove need the approver's password again: reauthToken (purpose approval) from POST /api/admin/identity/reauth, otherwise STEP_UP_REQUIRED.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `access.approval.partially_approved`, `access.approval.decided`\n\n**Screens:** admin/payouts, admin/order, admin/staff, admin/settings, admin/inbox",
         "security": [
           {
             "bearer": []
@@ -2806,11 +2783,12 @@
                       "null"
                     ]
                   },
-                  "stepUpCode": {
+                  "reauthToken": {
                     "type": [
                       "string",
                       "null"
-                    ]
+                    ],
+                    "description": "Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove"
                   }
                 }
               }
@@ -2849,7 +2827,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSELF_APPROVAL_NOT_ALLOWED: You cannot approve or reject your own request.\nNOT_ELIGIBLE_APPROVER: Your roles' limits do not cover this action or amount. details.eligibleRoles lists who can.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSELF_APPROVAL_NOT_ALLOWED: You cannot approve or reject your own request.\nNOT_ELIGIBLE_APPROVER: Your roles' limits do not cover this action or amount. details.eligibleRoles lists who can.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -28749,7 +28727,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -35644,12 +35622,12 @@
                       "null"
                     ]
                   },
-                  "stepUpCode": {
+                  "reauthToken": {
                     "type": [
                       "string",
                       "null"
                     ],
-                    "description": "Current 2-step code; required when the run is above access stepUpAbove"
+                    "description": "Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove"
                   }
                 },
                 "required": [
@@ -35691,7 +35669,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -36431,7 +36409,7 @@
           "Admin API · Finance"
         ],
         "summary": "Verify a new payout destination",
-        "description": "The phone callback check has no separate step: the reviewer phones the seller owner on the number on file (not one given in the change) and records the result with callbackConfirmed. false records the check as failed (the review stays under review; reject it if the owner did not ask for the change).\n\n**Permission:** `finance.destinations.review`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `payout-destination`)\n\n**Approval:** Approval action finance.destinations.approve. The reviewer cannot be the person who requested the change; always a recorded review\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `finance.destination.verified`\n\n**Screens:** admin/payouts",
+        "description": "The phone callback check has no separate step: the reviewer phones the seller owner on the number on file (not one given in the change) and records the result with callbackConfirmed. false records the check as failed (the review stays under review; reject it if the owner did not ask for the change).\n\n**Permission:** `finance.destinations.review`\n\n**Step-up:** single-use re-auth token in the body (purpose `payout-destination`)\n\n**Approval:** Approval action finance.destinations.approve. The reviewer cannot be the person who requested the change; always a recorded review\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `finance.destination.verified`\n\n**Screens:** admin/payouts",
         "security": [
           {
             "bearer": []
@@ -36445,15 +36423,6 @@
             "schema": {
               "type": "string",
               "format": "uuid"
-            }
-          },
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
             }
           }
         ],
@@ -36476,11 +36445,15 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "reauthToken": {
+                    "type": "string"
                   }
                 },
                 "required": [
                   "reason",
-                  "callbackConfirmed"
+                  "callbackConfirmed",
+                  "reauthToken"
                 ]
               }
             }
@@ -36518,7 +36491,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -36561,7 +36534,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "payout-destination"
         }
       }
@@ -36573,7 +36546,7 @@
           "Admin API · Finance"
         ],
         "summary": "Reject a payout destination change",
-        "description": "**Permission:** `finance.destinations.review`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `payout-destination`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `finance.destination.rejected`\n\n**Screens:** admin/payouts",
+        "description": "**Permission:** `finance.destinations.review`\n\n**Step-up:** single-use re-auth token in the body (purpose `payout-destination`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `finance.destination.rejected`\n\n**Screens:** admin/payouts",
         "security": [
           {
             "bearer": []
@@ -36588,15 +36561,6 @@
               "type": "string",
               "format": "uuid"
             }
-          },
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -36608,10 +36572,14 @@
                 "properties": {
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "reason"
+                  "reason",
+                  "reauthToken"
                 ]
               }
             }
@@ -36649,7 +36617,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -36692,7 +36660,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "payout-destination"
         }
       }
@@ -44163,7 +44131,7 @@
           "Public API · Identity"
         ],
         "summary": "Accept an invitation and set a password",
-        "description": "Seller members: signs in to Seller Center for the inviting seller. Staff: returns a 2-step set-up that must be confirmed before the first session.\n\n**Publishes:** `identity.invitation.accepted`",
+        "description": "Seller members: signs in to Seller Center for the inviting seller. Staff: passCode is required (the pass code handed over with the link); the account becomes active and is signed in to the Admin Center at once. A wrong pass code is PASS_CODE_INVALID with details.attemptsLeft; the 5th revokes the link (npm run staff-link gives a new link and pass code).\n\n**Publishes:** `identity.invitation.accepted`",
         "security": [
           {
             "bearer": []
@@ -44191,7 +44159,7 @@
             }
           },
           "400": {
-            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.\nWEAK_PASSWORD: The password breaks a rule. details.failed lists the rules (min_length, number, uppercase, personal_info, breached).",
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.\nPASS_CODE_INVALID: The invitation pass code is missing or wrong. details.attemptsLeft; the 5th wrong pass code revokes the link (ask the server operator for a new link and pass code).\nWEAK_PASSWORD: The password breaks a rule. details.failed lists the rules (min_length, number, uppercase, personal_info, breached).",
             "content": {
               "application/json": {
                 "schema": {
@@ -44236,123 +44204,6 @@
         "x-auth": "visitor",
         "x-events": [
           "identity.invitation.accepted"
-        ],
-        "x-phase": 1
-      }
-    },
-    "/api/public/identity/invitations/two-step": {
-      "post": {
-        "operationId": "identity.confirmInvitationTwoStep",
-        "tags": [
-          "Public API · Identity"
-        ],
-        "summary": "Staff: confirm the authenticator code and start the first session",
-        "description": "**Publishes:** `identity.two_step.changed`",
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "token": {
-                    "type": "string"
-                  },
-                  "setupId": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "code": {
-                    "type": "string"
-                  },
-                  "device": {
-                    "$ref": "#/components/schemas/identity.DeviceInfo"
-                  }
-                },
-                "required": [
-                  "token",
-                  "setupId",
-                  "code",
-                  "device"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "tokens": {
-                      "$ref": "#/components/schemas/identity.SessionTokens"
-                    },
-                    "recoveryCodes": {
-                      "$ref": "#/components/schemas/identity.RecoveryCodes"
-                    }
-                  },
-                  "required": [
-                    "tokens",
-                    "recoveryCodes"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.\nCODE_INVALID: The code is wrong. details.attemptsLeft.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "CODE_EXPIRED: The code or challenge has expired; request a new one.\nINVITATION_INVALID: The invitation was accepted, revoked or has expired.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        },
-        "x-module": "identity",
-        "x-area": "public",
-        "x-auth": "visitor",
-        "x-events": [
-          "identity.two_step.changed"
         ],
         "x-phase": 1
       }
@@ -44701,7 +44552,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -44916,7 +44767,7 @@
           "Admin API · Identity"
         ],
         "summary": "Confirm it is you before a sensitive Admin Center action",
-        "description": "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose (two-step-removal and recovery-codes for the staff member's own 2-step settings).\n\n**Audited:** recorded in the action history.",
+        "description": "The staff member re-enters their password (staff have no 2-step). Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose: role-grant (access roles and invitations), staff-account (staff accounts and invitations), payout-destination (finance payout destinations) and approval (approving a request above access stepUpAbove).\n\n**Audited:** recorded in the action history.",
         "security": [
           {
             "bearer": []
@@ -44944,7 +44795,7 @@
             }
           },
           "400": {
-            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.\nCURRENT_PASSWORD_WRONG: The current password is incorrect.\nCODE_INVALID: The code is wrong. details.attemptsLeft.",
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.\nCURRENT_PASSWORD_WRONG: The current password is incorrect.",
             "content": {
               "application/json": {
                 "schema": {
@@ -44998,7 +44849,7 @@
           "Store API · Identity"
         ],
         "summary": "Start turning on 2-step verification",
-        "description": "**Screens:** account/security",
+        "description": "Members only: staff accounts sign in with email and password and cannot add a 2-step method (TWO_STEP_NOT_FOR_STAFF).\n\n**Screens:** account/security",
         "security": [
           {
             "bearer": []
@@ -45046,7 +44897,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nTWO_STEP_NOT_FOR_STAFF: Staff accounts sign in with email and password only; they cannot add a 2-step method.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45072,7 +44923,7 @@
           "Store API · Identity"
         ],
         "summary": "Confirm the first code; returns recovery codes once",
-        "description": "**Publishes:** `identity.two_step.changed`\n\n**Screens:** account/security",
+        "description": "Members only (TWO_STEP_NOT_FOR_STAFF for staff accounts).\n\n**Publishes:** `identity.two_step.changed`\n\n**Screens:** account/security",
         "security": [
           {
             "bearer": []
@@ -45139,7 +44990,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nTWO_STEP_NOT_FOR_STAFF: Staff accounts sign in with email and password only; they cannot add a 2-step method.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45188,7 +45039,7 @@
           "Store API · Identity"
         ],
         "summary": "Turn off a 2-step method",
-        "description": "Staff accounts cannot remove their last method (TWO_STEP_REQUIRED).\n\n**Step-up:** single-use re-auth token in the body (purpose `two-step-removal`)\n\n**Publishes:** `identity.two_step.changed`\n\n**Screens:** account/security",
+        "description": "**Step-up:** single-use re-auth token in the body (purpose `two-step-removal`)\n\n**Publishes:** `identity.two_step.changed`\n\n**Screens:** account/security",
         "security": [
           {
             "bearer": []
@@ -45259,7 +45110,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45270,16 +45121,6 @@
           },
           "404": {
             "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "TWO_STEP_REQUIRED: Staff accounts must keep at least one 2-step method.",
             "content": {
               "application/json": {
                 "schema": {
@@ -45368,7 +45209,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -46566,7 +46407,7 @@
           "Admin API · Identity"
         ],
         "summary": "Remove 2-step methods after an identity check (lost phone)",
-        "description": "Staff accounts must set up 2-step again at next sign-in. The identity check performed is recorded.\n\n**Permission:** `identity.accounts.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.two_step.changed`\n\n**Screens:** admin/staff, admin/customers",
+        "description": "Member accounts (staff accounts have no 2-step). The member can turn 2-step on again from their security page. The identity check performed is recorded.\n\n**Permission:** `identity.accounts.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.two_step.changed`\n\n**Screens:** admin/staff, admin/customers",
         "security": [
           {
             "bearer": []
@@ -46794,7 +46635,7 @@
           "Admin API · Identity"
         ],
         "summary": "Disable a staff account (offboarding)",
-        "description": "Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.\n\n**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.account.disabled`\n\n**Screens:** admin/staff",
+        "description": "Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.\n\n**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.account.disabled`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -46809,15 +46650,6 @@
               "type": "string",
               "format": "uuid"
             }
-          },
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -46829,10 +46661,14 @@
                 "properties": {
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "reason"
+                  "reason",
+                  "reauthToken"
                 ]
               }
             }
@@ -46870,7 +46706,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.\nSELF_ACTION_NOT_ALLOWED: Staff cannot lock, disable or reset their own account.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.\nSELF_ACTION_NOT_ALLOWED: Staff cannot lock, disable or reset their own account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -46913,7 +46749,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "staff-account"
         }
       }
@@ -46925,7 +46761,7 @@
           "Admin API · Identity"
         ],
         "summary": "Re-enable a disabled staff account",
-        "description": "Roles are not restored automatically; assign them again in access.\n\n**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.account.enabled`\n\n**Screens:** admin/staff",
+        "description": "Roles are not restored automatically; assign them again in access.\n\n**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.account.enabled`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -46940,15 +46776,6 @@
               "type": "string",
               "format": "uuid"
             }
-          },
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -46960,10 +46787,14 @@
                 "properties": {
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "reason"
+                  "reason",
+                  "reauthToken"
                 ]
               }
             }
@@ -47001,7 +46832,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -47044,7 +46875,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "staff-account"
         }
       }
@@ -47412,7 +47243,7 @@
           "Admin API · Identity"
         ],
         "summary": "Resend a staff invitation (new 7-day link)",
-        "description": "**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.invitation.created`\n\n**Screens:** admin/staff",
+        "description": "Issues a new link and pass code (the old ones stop working). The pass code is not shown here: the server operator prints the link and pass code with npm run staff-link and hands them over.\n\n**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.invitation.created`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -47427,17 +47258,26 @@
               "type": "string",
               "format": "uuid"
             }
-          },
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reauthToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reauthToken"
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Success",
@@ -47470,7 +47310,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -47513,7 +47353,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "staff-account"
         }
       }
@@ -47525,7 +47365,7 @@
           "Admin API · Identity"
         ],
         "summary": "Cancel a staff invitation",
-        "description": "**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** 2-step code in X-Step-Up-Code (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.invitation.revoked`\n\n**Screens:** admin/staff",
+        "description": "**Permission:** `identity.staff-accounts.manage`\n\n**Step-up:** single-use re-auth token in the body (purpose `staff-account`)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `identity.invitation.revoked`\n\n**Screens:** admin/staff",
         "security": [
           {
             "bearer": []
@@ -47540,15 +47380,6 @@
               "type": "string",
               "format": "uuid"
             }
-          },
-          {
-            "name": "X-Step-Up-Code",
-            "in": "header",
-            "required": true,
-            "description": "Current 2-step code for endpoints with stepUp kind \"code\"; missing → 403 STEP_UP_REQUIRED",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -47560,10 +47391,14 @@
                 "properties": {
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "reason"
+                  "reason",
+                  "reauthToken"
                 ]
               }
             }
@@ -47601,7 +47436,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -47644,7 +47479,7 @@
         "x-audited": true,
         "x-phase": 1,
         "x-step-up": {
-          "kind": "code",
+          "kind": "reauth",
           "purpose": "staff-account"
         }
       }
@@ -96758,12 +96593,12 @@
                       "null"
                     ]
                   },
-                  "stepUpCode": {
+                  "reauthToken": {
                     "type": [
                       "string",
                       "null"
                     ],
-                    "description": "Current 2-step code; required when the refund is above access stepUpAbove"
+                    "description": "Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove"
                   }
                 }
               }
@@ -96802,7 +96637,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -107655,7 +107490,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -110656,7 +110491,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.\nOWNER_ONLY: Only the seller owner can do this.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.\nOWNER_ONLY: Only the seller owner can do this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -110990,7 +110825,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -147649,7 +147484,7 @@
           },
           "stepUpRequired": {
             "type": "boolean",
-            "description": "The amount is above stepUpAbove: whoever acts or approves must give a fresh 2-step code (X-Step-Up-Code). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself."
+            "description": "The amount is above stepUpAbove: whoever acts or approves must confirm with their password again (a re-auth token, purpose approval). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself."
           }
         },
         "required": [
@@ -148213,6 +148048,10 @@
           "reason": {
             "type": "string"
           },
+          "reauthToken": {
+            "type": "string",
+            "description": "Re-auth token for purpose role-grant (POST /api/admin/identity/reauth with the password)"
+          },
           "requestLimitReview": {
             "type": [
               "boolean",
@@ -148225,7 +148064,8 @@
           "email",
           "name",
           "roleIds",
-          "reason"
+          "reason",
+          "reauthToken"
         ]
       },
       "access.RoleCoverage": {
@@ -167298,7 +167138,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Set when this session passed 2-step verification; used for step-up checks"
+            "description": "Set when this member session passed 2-step verification. Staff sessions never have it (staff sign in with email and password; nothing requires it)"
           }
         },
         "required": [
@@ -167646,7 +167486,7 @@
           },
           "rememberDevice": {
             "type": "boolean",
-            "description": "Skip 2-step on this device for 30 days (members only; staff always verify)"
+            "description": "Skip 2-step on this device for 30 days (members only)"
           }
         },
         "required": [
@@ -167951,7 +167791,7 @@
           },
           "required": {
             "type": "boolean",
-            "description": "Always true for staff"
+            "description": "Always false: 2-step is optional for members, and staff accounts have none (they sign in with email and password)"
           },
           "methods": {
             "type": "array",
@@ -168471,8 +168311,9 @@
             "type": "boolean",
             "description": "True: confirm with the current password instead of creating one"
           },
-          "requiresTwoStepSetup": {
-            "type": "boolean"
+          "requiresPassCode": {
+            "type": "boolean",
+            "description": "True for staff invitations: the accept form asks for the pass code the server operator handed over with the link"
           },
           "policy": {
             "$ref": "#/components/schemas/identity.PasswordPolicy"
@@ -168487,7 +168328,7 @@
           "emailMasked",
           "name",
           "existingAccount",
-          "requiresTwoStepSetup",
+          "requiresPassCode",
           "policy",
           "expiresAt"
         ]
@@ -168508,6 +168349,13 @@
               "null"
             ],
             "description": "Existing member accounts"
+          },
+          "passCode": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Staff invitations: the 8-character pass code handed over with the link (XXXX-XXXX; letters in any case, the dash and spaces are ignored)"
           },
           "name": {
             "type": [
@@ -168534,9 +168382,9 @@
           "status": {
             "type": "string",
             "enum": [
-              "signed_in",
-              "two_step_setup_required"
-            ]
+              "signed_in"
+            ],
+            "description": "Always signed_in: the invitation is accepted and the person is signed in"
           },
           "account": {
             "$ref": "#/components/schemas/identity.AccountSummary"
@@ -168550,22 +168398,33 @@
                 "type": "null"
               }
             ]
-          },
-          "twoStepSetup": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/identity.TwoStepSetup"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Staff must confirm an authenticator code before the first session"
           }
         },
         "required": [
           "status",
           "account"
+        ]
+      },
+      "identity.StaffInvitationIssued": {
+        "type": "object",
+        "properties": {
+          "invitation": {
+            "$ref": "#/components/schemas/identity.Invitation"
+          },
+          "acceptUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "SENSITIVE: the accept link (also in identity.invitation.created)"
+          },
+          "passCode": {
+            "type": "string",
+            "description": "SENSITIVE, in-process only: the pass code, shown once as XXXX-XXXX. Only its hash is stored; it is never in an event, an HTTP response or a log"
+          }
+        },
+        "required": [
+          "invitation",
+          "acceptUrl",
+          "passCode"
         ]
       },
       "identity.AccountListItem": {
@@ -168724,9 +168583,13 @@
               "recovery-codes",
               "business-change",
               "payout-account",
-              "seller-closure"
+              "seller-closure",
+              "role-grant",
+              "staff-account",
+              "payout-destination",
+              "approval"
             ],
-            "description": "The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token."
+            "description": "The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose."
           },
           "password": {
             "type": [
@@ -168739,7 +168602,7 @@
               "string",
               "null"
             ],
-            "description": "2-step code instead of the password"
+            "description": "Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step)"
           }
         },
         "required": [

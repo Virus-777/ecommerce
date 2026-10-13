@@ -555,7 +555,7 @@ type AuditEntryPage implements Paged @areas(in: [ADMIN]) {
 
 extend type Query {
   "The action history with filters, newest first"
-  auditEntries(filter: AuditFilterInput, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 10) @source(module: "audit", fn: "searchEntries")
+  auditEntries(filter: AuditFilterInput, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 10) @source(module: "audit", fn: "searchEntries")
 
   auditEntry(id: UUID!): AuditEntry @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @source(module: "audit", fn: "getEntry")
 }
@@ -565,21 +565,21 @@ extend type Query {
 
 extend type Order {
   "Staff and system actions on this order, its items, packages, returns, refunds and cases"
-  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
 }
 
 extend type Seller {
   "Approval, restrictions, holds, payout destination and member changes for this seller"
-  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
 }
 
 extend type Customer {
   "Account actions by staff (restrictions, password resets, closures) and their reasons"
-  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
 }
 
 extend type PayoutRun {
   "Run creation, holds applied, approvals and release"
-  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
+  auditTrail(category: AuditCategory, includeRelated: Boolean = true, paging: PageInput): AuditEntryPage @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "audit.entries.view") @cost(weight: 5) @source(module: "audit", fn: "trailOf")
 }
 ```

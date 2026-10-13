@@ -21,8 +21,8 @@ export interface EndpointDef {
   readonly permission?: string;
   /** Extra permission when the request is about someone else, e.g. { if: { 'query.view': 'all' } } or { 'body.accountId': '!self' } */
   readonly permissionWhen?: readonly { readonly if: Readonly<Record<string, string>>; readonly permission: string }[];
-  /** Fresh proof: reauth = reauthToken in the body; code = X-Step-Up-Code header */
-  readonly stepUp?: { readonly kind: 'reauth' | 'code'; readonly purpose: string };
+  /** Fresh proof: a single-use re-auth token for this purpose in the body (reauthToken) */
+  readonly stepUp?: { readonly kind: 'reauth'; readonly purpose: string };
   /** Seller area: allowed before a seller is chosen */
   readonly sellerContext?: 'optional';
   readonly scope: EndpointScope;

@@ -2189,7 +2189,7 @@ type AccountSecurity @areas(in: [ADMIN]) {
 
 type AccountSecurityTwoStep @areas(in: [ADMIN]) {
   enabled: Boolean!
-  "Always true for staff"
+  "Always false: 2-step is optional for members (staff accounts have none)"
   required: Boolean!
   methods: [AccountSecurityTwoStepMethod!]!
   recoveryCodesRemaining: Int!

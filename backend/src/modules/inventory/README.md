@@ -1290,14 +1290,14 @@ extend type Offer {
 
 extend type Variant {
   "Stock items for this variant. Seller Center: the caller's own items; Admin Center: company and seller items, never summed"
-  stock: [StockItem!]! @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
+  stock: [StockItem!] @areas(in: [SELLER, ADMIN]) @auth(requires: SELLER) @source(module: "inventory", fn: "listStockForVariants")
 }
 
 extend type Query {
   "Seller dashboard stock tile"
-  myStockSummary: StockSellerSummary! @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "inventory", fn: "getSellerStockSummary")
+  myStockSummary: StockSellerSummary @areas(in: [SELLER]) @auth(requires: SELLER) @source(module: "inventory", fn: "getSellerStockSummary")
 
   "Official Store stock by group (admin dashboard and stock overview)"
-  stockSummary(locationId: UUID): StockSummary! @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "inventory.stock.view") @source(module: "inventory", fn: "getStockSummary") @cost(weight: 5)
+  stockSummary(locationId: UUID): StockSummary @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "inventory.stock.view") @source(module: "inventory", fn: "getStockSummary") @cost(weight: 5)
 }
 ```

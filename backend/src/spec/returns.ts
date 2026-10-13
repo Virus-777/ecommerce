@@ -3805,7 +3805,7 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       note: z.string().nullish(),
-      stepUpCode: z.string().describe("Current 2-step code; required when the refund is above access stepUpAbove").nullish(),
+      reauthToken: z.string().describe("Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove").nullish(),
     }),
     response: () => RefundRequest,
     status: 200,

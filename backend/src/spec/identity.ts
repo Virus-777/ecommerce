@@ -19,7 +19,7 @@ export interface Principal {
   /** Visitor session id (also the guest session in the store) */
   guestSessionId?: string | null;
   authenticatedAt?: string | null;
-  /** Set when this session passed 2-step verification; used for step-up checks */
+  /** Set when this member session passed 2-step verification. Staff sessions never have it (staff sign in with email and password; nothing requires it) */
   twoStepVerifiedAt?: string | null;
 }
 
@@ -31,7 +31,7 @@ export const Principal: z.ZodType<Principal> = z.object({
   sellerMemberId: z.uuid().nullish(),
   guestSessionId: z.uuid().describe("Visitor session id (also the guest session in the store)").nullish(),
   authenticatedAt: z.iso.datetime({ offset: true }).nullish(),
-  twoStepVerifiedAt: z.iso.datetime({ offset: true }).describe("Set when this session passed 2-step verification; used for step-up checks").nullish(),
+  twoStepVerifiedAt: z.iso.datetime({ offset: true }).describe("Set when this member session passed 2-step verification. Staff sessions never have it (staff sign in with email and password; nothing requires it)").nullish(),
 }).register(common.apiTypes, { id: "identity.Principal" });
 
 export interface AccountSummary {
@@ -185,14 +185,14 @@ export const SignInResult: z.ZodType<SignInResult> = z.object({
 export interface SecondFactorRequest {
   method: "totp" | "sms" | "recovery_code";
   code: string;
-  /** Skip 2-step on this device for 30 days (members only; staff always verify) */
+  /** Skip 2-step on this device for 30 days (members only) */
   rememberDevice: boolean;
 }
 
 export const SecondFactorRequest: z.ZodType<SecondFactorRequest> = z.object({
   method: z.enum(["totp", "sms", "recovery_code"]),
   code: z.string(),
-  rememberDevice: z.boolean().describe("Skip 2-step on this device for 30 days (members only; staff always verify)"),
+  rememberDevice: z.boolean().describe("Skip 2-step on this device for 30 days (members only)"),
 }).register(common.apiTypes, { id: "identity.SecondFactorRequest" });
 
 export interface RegistrationRequest {
@@ -358,7 +358,7 @@ export const TwoStepMethod: z.ZodType<TwoStepMethod> = z.object({
 
 export interface TwoStepStatus {
   enabled: boolean;
-  /** Always true for staff */
+  /** Always false: 2-step is optional for members, and staff accounts have none (they sign in with email and password) */
   required: boolean;
   methods: TwoStepMethod[];
   recoveryCodesRemaining: number;
@@ -366,7 +366,7 @@ export interface TwoStepStatus {
 
 export const TwoStepStatus: z.ZodType<TwoStepStatus> = z.object({
   enabled: z.boolean(),
-  required: z.boolean().describe("Always true for staff"),
+  required: z.boolean().describe("Always false: 2-step is optional for members, and staff accounts have none (they sign in with email and password)"),
   get methods() {
     return z.array(TwoStepMethod);
   },
@@ -589,7 +589,8 @@ export interface InvitationView {
   contextLabel?: string | null;
   /** True: confirm with the current password instead of creating one */
   existingAccount: boolean;
-  requiresTwoStepSetup: boolean;
+  /** True for staff invitations: the accept form asks for the pass code the server operator handed over with the link */
+  requiresPassCode: boolean;
   policy: PasswordPolicy;
   expiresAt: string;
 }
@@ -600,7 +601,7 @@ export const InvitationView: z.ZodType<InvitationView> = z.object({
   name: z.string(),
   contextLabel: z.string().nullish(),
   existingAccount: z.boolean().describe("True: confirm with the current password instead of creating one"),
-  requiresTwoStepSetup: z.boolean(),
+  requiresPassCode: z.boolean().describe("True for staff invitations: the accept form asks for the pass code the server operator handed over with the link"),
   get policy() {
     return PasswordPolicy;
   },
@@ -612,6 +613,8 @@ export interface AcceptInvitationRequest {
   password?: string | null;
   /** Existing member accounts */
   currentPassword?: string | null;
+  /** Staff invitations: the 8-character pass code handed over with the link (XXXX-XXXX; letters in any case, the dash and spaces are ignored) */
+  passCode?: string | null;
   name?: string | null;
   device: DeviceInfo;
   /** From the invitation link (sent in the body, never in the URL path) */
@@ -621,6 +624,7 @@ export interface AcceptInvitationRequest {
 export const AcceptInvitationRequest: z.ZodType<AcceptInvitationRequest> = z.object({
   password: z.string().describe("New accounts").nullish(),
   currentPassword: z.string().describe("Existing member accounts").nullish(),
+  passCode: z.string().describe("Staff invitations: the 8-character pass code handed over with the link (XXXX-XXXX; letters in any case, the dash and spaces are ignored)").nullish(),
   name: z.string().nullish(),
   get device() {
     return DeviceInfo;
@@ -629,25 +633,37 @@ export const AcceptInvitationRequest: z.ZodType<AcceptInvitationRequest> = z.obj
 }).register(common.apiTypes, { id: "identity.AcceptInvitationRequest" });
 
 export interface AcceptInvitationResult {
-  status: "signed_in" | "two_step_setup_required";
+  /** Always signed_in: the invitation is accepted and the person is signed in */
+  status: "signed_in";
   account: AccountSummary;
   tokens?: SessionTokens | null;
-  /** Staff must confirm an authenticator code before the first session */
-  twoStepSetup?: TwoStepSetup | null;
 }
 
 export const AcceptInvitationResult: z.ZodType<AcceptInvitationResult> = z.object({
-  status: z.enum(["signed_in", "two_step_setup_required"]),
+  status: z.enum(["signed_in"]).describe("Always signed_in: the invitation is accepted and the person is signed in"),
   get account() {
     return AccountSummary;
   },
   get tokens() {
     return SessionTokens.nullish();
   },
-  get twoStepSetup() {
-    return TwoStepSetup.nullish();
-  },
 }).register(common.apiTypes, { id: "identity.AcceptInvitationResult" });
+
+export interface StaffInvitationIssued {
+  invitation: Invitation;
+  /** SENSITIVE: the accept link (also in identity.invitation.created) */
+  acceptUrl: string;
+  /** SENSITIVE, in-process only: the pass code, shown once as XXXX-XXXX. Only its hash is stored; it is never in an event, an HTTP response or a log */
+  passCode: string;
+}
+
+export const StaffInvitationIssued: z.ZodType<StaffInvitationIssued> = z.object({
+  get invitation() {
+    return Invitation;
+  },
+  acceptUrl: z.url().describe("SENSITIVE: the accept link (also in identity.invitation.created)"),
+  passCode: z.string().describe("SENSITIVE, in-process only: the pass code, shown once as XXXX-XXXX. Only its hash is stored; it is never in an event, an HTTP response or a log"),
+}).register(common.apiTypes, { id: "identity.StaffInvitationIssued" });
 
 export interface AccountListItem {
   account: AccountSummary;
@@ -726,17 +742,17 @@ export const LockRequest: z.ZodType<LockRequest> = z.object({
 }).register(common.apiTypes, { id: "identity.LockRequest" });
 
 export interface ReauthRequest {
-  /** The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token. */
-  purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure";
+  /** The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose. */
+  purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure" | "role-grant" | "staff-account" | "payout-destination" | "approval";
   password?: string | null;
-  /** 2-step code instead of the password */
+  /** Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step) */
   code?: string | null;
 }
 
 export const ReauthRequest: z.ZodType<ReauthRequest> = z.object({
-  purpose: z.enum(["account-closure", "email-change", "two-step-removal", "recovery-codes", "business-change", "payout-account", "seller-closure"]).describe("The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token."),
+  purpose: z.enum(["account-closure", "email-change", "two-step-removal", "recovery-codes", "business-change", "payout-account", "seller-closure", "role-grant", "staff-account", "payout-destination", "approval"]).describe("The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose."),
   password: z.string().nullish(),
-  code: z.string().describe("2-step code instead of the password").nullish(),
+  code: z.string().describe("Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step)").nullish(),
 }).register(common.apiTypes, { id: "identity.ReauthRequest" });
 
 export interface ReauthToken {
@@ -998,7 +1014,7 @@ export interface IdentityInvitationCreatedEvent {
   purpose: "staff" | "seller_member";
   email: string;
   name: string;
-  /** SENSITIVE: in-process only */
+  /** SENSITIVE: in-process only. A staff invitation's pass code is never in this event (it is emailed); the server operator hands it over */
   acceptUrl: string;
   contextRef?: string | null;
   contextLabel?: string | null;
@@ -1011,7 +1027,7 @@ export const IdentityInvitationCreatedEvent: z.ZodType<IdentityInvitationCreated
   purpose: z.enum(["staff", "seller_member"]),
   email: z.email(),
   name: z.string(),
-  acceptUrl: z.url().describe("SENSITIVE: in-process only"),
+  acceptUrl: z.url().describe("SENSITIVE: in-process only. A staff invitation's pass code is never in this event (it is emailed); the server operator hands it over"),
   contextRef: z.string().nullish(),
   contextLabel: z.string().nullish(),
   get invitedBy() {
@@ -1072,8 +1088,8 @@ export interface IdentityPublicApi {
   getAccounts(accountIds: string[]): Promise<AccountSummary[]>;
   /** Used when inviting someone who may already have an account Used by: sellers, access. */
   findAccountByEmail(email: string, realm: 'member' | 'staff'): Promise<AccountSummary | null>;
-  /** Create an invited staff account and send the accept link (event identity.invitation.created). access assigns the roles. Used by: access. */
-  inviteStaff(input: { email: string, name: string, invitedBy: common.Actor }): Promise<Invitation>;
+  /** Create an invited staff account and send the accept link (event identity.invitation.created). Returns the invitation with its link and pass code in-process (the pass code is never in the event, an HTTP response or a log; the server tools print it). access assigns the roles. Used by: access. */
+  inviteStaff(input: { email: string, name: string, invitedBy: common.Actor }): Promise<StaffInvitationIssued>;
   /** Invite a person to act for a seller. Reuses an existing member account when the email has one. Used by: sellers. */
   inviteSellerMember(input: { email: string, name: string, sellerId: string, sellerName: string, invitedBy: common.Actor }): Promise<Invitation>;
   /** Cancel a pending invitation (the accept link stops working at once) and publish identity.invitation.revoked. contextRef, when given, must match the invitation's (sellers passes its sellerId so a seller can only revoke its own member invitations; NOT_FOUND otherwise). Revoking an invitation that is already revoked returns it unchanged; an accepted or expired one fails with ILLEGAL_TRANSITION. Used by: sellers, access. */
@@ -1084,8 +1100,6 @@ export interface IdentityPublicApi {
   revokeSellerContext(accountId: string, sellerId: string, reason: string): Promise<void>;
   /** Sign an account out everywhere (or in one area). Returns the number of sessions revoked. Used by: access, sellers, trust. */
   revokeSessions(accountId: string, reason: string, audience?: 'store' | 'seller' | 'admin'): Promise<number>;
-  /** Re-check the password or a 2-step code before a sensitive action (payout destination change, approval of a large payout) Used by: finance, access. */
-  verifyStepUp(accountId: string, proof: { password?: string, code?: string }): Promise<boolean>;
   /** Let a guest session open one order (after guest checkout, a successful lookup in customers, or an emailed link) Used by: checkout, customers. */
   grantGuestOrderAccess(guestSessionId: string, orderId: string, email: string, via: 'checkout' | 'lookup' | 'link'): Promise<GuestSession>;
   /** Gate guest access to order detail, tracking, returns and help Used by: orders, shipping, returns, support, customers, media. */
@@ -1098,13 +1112,13 @@ export interface IdentityPublicApi {
   sendPasswordReset(accountId: string, input: { reason: string, by: common.Actor, revokeSessions: boolean }): Promise<void>;
   /** Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. Used by: customers. */
   startPhoneVerification(accountId: string, phone: string): Promise<VerificationChallenge>;
-  /** True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. Used by: customers, sellers, finance. */
+  /** True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. access checks approvals above stepUpAbove with it (purpose approval). Used by: access, customers, sellers, finance. */
   verifyReauthToken(principal: Principal, token: string, purpose: string): Promise<boolean>;
   /** Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). Used by: graphql. */
   accountSecurityOf(accountIds: string[], opts?: { activityLimit?: number }): Promise<Map<string, unknown>>;
-  /** Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs. Used by: kernel. */
+  /** Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs, and by access for approvals above stepUpAbove. Used by: kernel, access. */
   consumeReauthToken(token: string): Promise<boolean>;
-  /** Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel. Used by: kernel. */
+  /** Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel and by access. Used by: kernel, access. */
   releaseReauthToken(token: string): Promise<void>;
   /** Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. Used by: kernel. */
   revocationsSince(cursor?: string): Promise<{ sessions: { sessionId: string, at: string }[], accounts: { accountId: string, validAfter: string }[], cursor: string }>;
@@ -1257,6 +1271,10 @@ export interface IdentityDb {
     context_ref: string | null;
     context_label: string | null;
     token_hash: string;
+    /** staff invitations: hash of the pass code handed over with the link */
+    pass_code_hash: string | null;
+    /** wrong pass codes on this link; at 5 the link is revoked */
+    pass_code_attempts: number;
     invited_by_kind: string;
     invited_by_id: string;
     status: string;
@@ -1614,40 +1632,12 @@ export const endpoints = defineEndpoints({
     auth: "visitor",
     scope: "public",
     summary: "Accept an invitation and set a password",
-    desc: "Seller members: signs in to Seller Center for the inviting seller. Staff: returns a 2-step set-up that must be confirmed before the first session.",
+    desc: "Seller members: signs in to Seller Center for the inviting seller. Staff: passCode is required (the pass code handed over with the link); the account becomes active and is signed in to the Admin Center at once. A wrong pass code is PASS_CODE_INVALID with details.attemptsLeft; the 5th revokes the link (npm run staff-link gives a new link and pass code).",
     body: () => AcceptInvitationRequest,
     response: () => AcceptInvitationResult,
     status: 200,
-    errors: ["INVITATION_INVALID","WEAK_PASSWORD","INVALID_CREDENTIALS"],
+    errors: ["INVITATION_INVALID","PASS_CODE_INVALID","WEAK_PASSWORD","INVALID_CREDENTIALS"],
     events: ["identity.invitation.accepted"],
-    phase: 1,
-  },
-  confirmInvitationTwoStep: {
-    area: "public",
-    method: "POST",
-    path: "/invitations/two-step",
-    auth: "visitor",
-    scope: "public",
-    summary: "Staff: confirm the authenticator code and start the first session",
-    body: () => z.object({
-      token: z.string(),
-      setupId: z.uuid(),
-      code: z.string(),
-      get device() {
-        return DeviceInfo;
-      },
-    }),
-    response: () => z.object({
-      get tokens() {
-        return SessionTokens;
-      },
-      get recoveryCodes() {
-        return RecoveryCodes;
-      },
-    }),
-    status: 200,
-    errors: ["CODE_INVALID","CODE_EXPIRED","INVITATION_INVALID"],
-    events: ["identity.two_step.changed"],
     phase: 1,
   },
   externalSignIn: {
@@ -1763,11 +1753,11 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     scope: "staff",
     summary: "Confirm it is you before a sensitive Admin Center action",
-    desc: "Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose (two-step-removal and recovery-codes for the staff member's own 2-step settings).",
+    desc: "The staff member re-enters their password (staff have no 2-step). Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose: role-grant (access roles and invitations), staff-account (staff accounts and invitations), payout-destination (finance payout destinations) and approval (approving a request above access stepUpAbove).",
     body: () => ReauthRequest,
     response: () => ReauthToken,
     status: 200,
-    errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","RATE_LIMITED"],
+    errors: ["CURRENT_PASSWORD_WRONG","RATE_LIMITED"],
     audited: true,
     phase: 1,
   },
@@ -1778,10 +1768,11 @@ export const endpoints = defineEndpoints({
     auth: "account",
     scope: "own-customer",
     summary: "Start turning on 2-step verification",
+    desc: "Members only: staff accounts sign in with email and password and cannot add a 2-step method (TWO_STEP_NOT_FOR_STAFF).",
     body: () => TwoStepSetupRequest,
     response: () => TwoStepSetup,
     status: 201,
-    errors: ["CURRENT_PASSWORD_WRONG","METHOD_NOT_AVAILABLE"],
+    errors: ["CURRENT_PASSWORD_WRONG","METHOD_NOT_AVAILABLE","TWO_STEP_NOT_FOR_STAFF"],
     screens: ["account/security"],
     phase: 1,
   },
@@ -1792,6 +1783,7 @@ export const endpoints = defineEndpoints({
     auth: "account",
     scope: "own-customer",
     summary: "Confirm the first code; returns recovery codes once",
+    desc: "Members only (TWO_STEP_NOT_FOR_STAFF for staff accounts).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1801,7 +1793,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => RecoveryCodes,
     status: 200,
-    errors: ["CODE_INVALID","CODE_EXPIRED"],
+    errors: ["CODE_INVALID","CODE_EXPIRED","TWO_STEP_NOT_FOR_STAFF"],
     events: ["identity.two_step.changed"],
     screens: ["account/security"],
     phase: 1,
@@ -1814,7 +1806,6 @@ export const endpoints = defineEndpoints({
     stepUp: {"kind":"reauth","purpose":"two-step-removal"},
     scope: "own-customer",
     summary: "Turn off a 2-step method",
-    desc: "Staff accounts cannot remove their last method (TWO_STEP_REQUIRED).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1825,7 +1816,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => TwoStepStatus,
     status: 200,
-    errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","TWO_STEP_REQUIRED","STEP_UP_REQUIRED"],
+    errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","STEP_UP_REQUIRED"],
     events: ["identity.two_step.changed"],
     screens: ["account/security"],
     phase: 1,
@@ -2061,7 +2052,7 @@ export const endpoints = defineEndpoints({
     permission: "identity.accounts.manage",
     scope: "staff",
     summary: "Remove 2-step methods after an identity check (lost phone)",
-    desc: "Staff accounts must set up 2-step again at next sign-in. The identity check performed is recorded.",
+    desc: "Member accounts (staff accounts have no 2-step). The member can turn 2-step on again from their security page. The identity check performed is recorded.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2107,7 +2098,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/disable",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
-    stepUp: {"kind":"code","purpose":"staff-account"},
+    stepUp: {"kind":"reauth","purpose":"staff-account"},
     scope: "staff",
     summary: "Disable a staff account (offboarding)",
     desc: "Revokes sessions. access consumes identity.account.disabled to end role assignments and flag lead/backup gaps.",
@@ -2117,6 +2108,7 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       reason: z.string(),
+      reauthToken: z.string(),
     }),
     response: () => AccountAdmin,
     status: 200,
@@ -2132,7 +2124,7 @@ export const endpoints = defineEndpoints({
     path: "/accounts/{id}/enable",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
-    stepUp: {"kind":"code","purpose":"staff-account"},
+    stepUp: {"kind":"reauth","purpose":"staff-account"},
     scope: "staff",
     summary: "Re-enable a disabled staff account",
     desc: "Roles are not restored automatically; assign them again in access.",
@@ -2142,6 +2134,7 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       reason: z.string(),
+      reauthToken: z.string(),
     }),
     response: () => AccountAdmin,
     status: 200,
@@ -2200,13 +2193,17 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/resend",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
-    stepUp: {"kind":"code","purpose":"staff-account"},
+    stepUp: {"kind":"reauth","purpose":"staff-account"},
     scope: "staff",
     summary: "Resend a staff invitation (new 7-day link)",
+    desc: "Issues a new link and pass code (the old ones stop working). The pass code is not shown here: the server operator prints the link and pass code with npm run staff-link and hands them over.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
+    body: () => z.object({
+      reauthToken: z.string(),
+    }),
     response: () => Invitation,
     status: 200,
     errors: ["ILLEGAL_TRANSITION","STEP_UP_REQUIRED"],
@@ -2221,7 +2218,7 @@ export const endpoints = defineEndpoints({
     path: "/invitations/{id}/revoke",
     auth: "staff",
     permission: "identity.staff-accounts.manage",
-    stepUp: {"kind":"code","purpose":"staff-account"},
+    stepUp: {"kind":"reauth","purpose":"staff-account"},
     scope: "staff",
     summary: "Cancel a staff invitation",
     params: () =>
@@ -2230,6 +2227,7 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       reason: z.string(),
+      reauthToken: z.string(),
     }),
     response: () => Invitation,
     status: 200,
@@ -2252,7 +2250,7 @@ export const spec = defineModuleSpec({
   summary: "Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log.",
   dependsOn: [],
   optionalDeps: ["audit","sellers","customers"],
-  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","verifyStepUp","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","releaseReauthToken","revocationsSince","verifyRefreshToken","touchStaffSession"],
+  publicApi: ["getAccount","getAccounts","findAccountByEmail","inviteStaff","inviteSellerMember","revokeInvitation","grantSellerContext","revokeSellerContext","revokeSessions","grantGuestOrderAccess","hasGuestOrderAccess","issueOrderLink","closeAccount","sendPasswordReset","startPhoneVerification","verifyReauthToken","accountSecurityOf","consumeReauthToken","releaseReauthToken","revocationsSince","verifyRefreshToken","touchStaffSession"],
   permissions: [
     {
       "key": "identity.accounts.view",
@@ -2443,6 +2441,11 @@ export const spec = defineModuleSpec({
           "expired",
           "resend",
           "pending"
+        ],
+        [
+          "revoked",
+          "resend",
+          "pending"
         ]
       ]
     }
@@ -2600,12 +2603,6 @@ export const spec = defineModuleSpec({
       "min": 0,
       "max": 24,
       "approval": "second_reviewer"
-    },
-    "staffTwoStepRequired": {
-      "default": true,
-      "desc": "Staff must use 2-step verification",
-      "type": "bool",
-      "approval": "business_owner"
     },
     "trustedDeviceDays": {
       "default": 30,
@@ -2769,13 +2766,17 @@ export const spec = defineModuleSpec({
       "status": 400,
       "meaning": "That 2-step method is not enabled yet (SMS is phase 2)."
     },
-    "TWO_STEP_REQUIRED": {
-      "status": 409,
-      "meaning": "Staff accounts must keep at least one 2-step method."
+    "TWO_STEP_NOT_FOR_STAFF": {
+      "status": 403,
+      "meaning": "Staff accounts sign in with email and password only; they cannot add a 2-step method."
     },
     "INVITATION_INVALID": {
       "status": 410,
       "meaning": "The invitation was accepted, revoked or has expired."
+    },
+    "PASS_CODE_INVALID": {
+      "status": 400,
+      "meaning": "The invitation pass code is missing or wrong. details.attemptsLeft; the 5th wrong pass code revokes the link (ask the server operator for a new link and pass code)."
     },
     "SELF_ACTION_NOT_ALLOWED": {
       "status": 403,
@@ -4030,6 +4031,8 @@ export const spec = defineModuleSpec({
         "context_ref",
         "context_label",
         "token_hash",
+        "pass_code_hash",
+        "pass_code_attempts",
         "invited_by_kind",
         "invited_by_id",
         "status",
@@ -4043,6 +4046,7 @@ export const spec = defineModuleSpec({
         "account_id",
         "context_ref",
         "context_label",
+        "pass_code_hash",
         "accepted_at",
         "revoked_at",
         "revoke_reason"
@@ -4066,6 +4070,7 @@ export const spec = defineModuleSpec({
             "email",
             "name",
             "token_hash",
+            "pass_code_attempts",
             "invited_by_kind",
             "invited_by_id",
             "status",
@@ -4119,6 +4124,19 @@ export const spec = defineModuleSpec({
             },
             "token_hash": {
               "bsonType": "string"
+            },
+            "pass_code_hash": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "pass_code_attempts": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
             },
             "invited_by_kind": {
               "bsonType": "string"

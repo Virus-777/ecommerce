@@ -39,7 +39,7 @@ export interface EndpointSpec {
   events?: string[];
   screens?: string[];
   phase?: number;
-  stepUp?: { kind: 'reauth' | 'code'; purpose: string };
+  stepUp?: { kind: 'reauth'; purpose: string };
   sellerContext?: 'optional';
   permissionWhen?: { if: Record<string, string>; permission: string }[];
   scope?: EndpointScope;

@@ -9,16 +9,16 @@ Who someone is and how they prove it: accounts for customers, seller members and
 - **Required by:** [access](../access/README.md), [customers](../customers/README.md), [notifications](../notifications/README.md), [sellers](../sellers/README.md)
 
 ## Owns
-- Accounts in two realms: member (customers and seller members share one account) and staff (invite-only, 2-step verification required)
+- Accounts in two realms: member (customers and seller members share one account) and staff (invite-only: an invitation link plus a pass code; email and password sign-in, no 2-step)
 - Registration with email verification codes (6 digits, 10 minutes, resend timer)
 - Phone number verification codes (requested by customers when the mobile number changes)
 - Sign-in for the store, Seller Center and Admin Center; access tokens plus rotating refresh tokens; keep me signed in
 - Failed sign-in counting and temporary lockout (attempts left shown to the user)
 - Password recovery links (single use, 30 minutes) that never reveal whether an account exists; password change; forced reset by staff
-- 2-step verification (authenticator app at launch, text message later), recovery codes, trusted devices
+- Optional 2-step verification for members (authenticator app at launch, text message later), recovery codes, trusted devices
 - Signed-in devices with sign-out of one device or everywhere
 - Seller context: which seller accounts a member may act for, and switching between them
-- Invitations for staff and seller members (accept link, password set-up, staff 2-step set-up)
+- Invitations for staff and seller members (accept link, password set-up; staff also enter the invitation pass code)
 - Guest sessions (X-Guest-Session) for cart, recently viewed and guest checkout; guest order access grants on a guest session; emailed order links
 - Security activity log per account (sign-ins, failures, password and 2-step changes, staff actions on the account)
 - Staff tools to lock, unlock, force a password reset, reset 2-step, sign out and disable accounts
@@ -70,12 +70,12 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | POST | `/api/admin/identity/accounts/{id}/force-password-reset` | Require a new password at next sign-in _(audited)_ | staff<br>`identity.accounts.manage` | `{ reason: text, sendLink: bool }` → `AccountAdmin` |
 | POST | `/api/admin/identity/accounts/{id}/reset-two-step` | Remove 2-step methods after an identity check (lost phone) _(audited)_ | staff<br>`identity.accounts.manage` | `{ reason: text, identityCheck: text }` → `AccountAdmin` |
 | POST | `/api/admin/identity/accounts/{id}/sign-out-all` | Sign an account out everywhere _(audited)_ | staff<br>`identity.accounts.manage` | `{ reason: text }` → `{ sessionsRevoked: int }` |
-| POST | `/api/admin/identity/accounts/{id}/disable` | Disable a staff account (offboarding) _(audited, step-up: code)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `AccountAdmin` |
-| POST | `/api/admin/identity/accounts/{id}/enable` | Re-enable a disabled staff account _(audited, step-up: code)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `AccountAdmin` |
+| POST | `/api/admin/identity/accounts/{id}/disable` | Disable a staff account (offboarding) _(audited, step-up: reauth)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text, reauthToken: string }` → `AccountAdmin` |
+| POST | `/api/admin/identity/accounts/{id}/enable` | Re-enable a disabled staff account _(audited, step-up: reauth)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text, reauthToken: string }` → `AccountAdmin` |
 | GET | `/api/admin/identity/accounts/{id}/security-activity` | Security activity of one account | staff<br>`identity.accounts.view` | Page<SecurityEvent> |
 | GET | `/api/admin/identity/invitations` | Staff invitations | staff<br>`identity.staff-accounts.manage` | Page<Invitation> |
-| POST | `/api/admin/identity/invitations/{id}/resend` | Resend a staff invitation (new 7-day link) _(audited, step-up: code)_ | staff<br>`identity.staff-accounts.manage` | `Invitation` |
-| POST | `/api/admin/identity/invitations/{id}/revoke` | Cancel a staff invitation _(audited, step-up: code)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text }` → `Invitation` |
+| POST | `/api/admin/identity/invitations/{id}/resend` | Resend a staff invitation (new 7-day link) _(audited, step-up: reauth)_ | staff<br>`identity.staff-accounts.manage` | `{ reauthToken: string }` → `Invitation` |
+| POST | `/api/admin/identity/invitations/{id}/revoke` | Cancel a staff invitation _(audited, step-up: reauth)_ | staff<br>`identity.staff-accounts.manage` | `{ reason: text, reauthToken: string }` → `Invitation` |
 
 ## Public API
 
@@ -97,7 +97,6 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | POST | `/api/public/identity/order-links/redeem` | Open an order from an emailed link | visitor | `{ token: string }` → `OrderLinkRedemption` |
 | POST | `/api/public/identity/invitations/lookups` | Show an invitation (staff or seller member) | visitor | `{ token: string }` → `InvitationView` |
 | POST | `/api/public/identity/invitations/accept` | Accept an invitation and set a password | visitor | `AcceptInvitationRequest` → `AcceptInvitationResult` |
-| POST | `/api/public/identity/invitations/two-step` | Staff: confirm the authenticator code and start the first session | visitor | `{ token: string, setupId: uuid, code: string, device: DeviceInfo }` → `{ tokens: SessionTokens, recoveryCodes: RecoveryCodes }` |
 | POST | `/api/public/identity/external-sign-ins` | Continue with Google or Apple _(phase 2)_ | visitor | `{ provider: enum(google|apple), idToken: string, audience: enum(store|seller), device: DeviceInfo, guestSessionId: uuid?, marketingOptIn: bool? }` → `SignInResult` |
 
 ## Types
@@ -113,7 +112,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | sellerMemberId | `uuid?` |
 | guestSessionId | `uuid?` Visitor session id (also the guest session in the store) |
 | authenticatedAt | `datetime?` |
-| twoStepVerifiedAt | `datetime?` Set when this session passed 2-step verification; used for step-up checks |
+| twoStepVerifiedAt | `datetime?` Set when this member session passed 2-step verification. Staff sessions never have it (staff sign in with email and password; nothing requires it) |
 
 ### AccountSummary
 
@@ -198,7 +197,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 |---|---|
 | method | `enum(totp|sms|recovery_code)` |
 | code | `string` |
-| rememberDevice | `bool` Skip 2-step on this device for 30 days (members only; staff always verify) |
+| rememberDevice | `bool` Skip 2-step on this device for 30 days (members only) |
 
 ### RegistrationRequest
 
@@ -293,7 +292,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | Field | Type |
 |---|---|
 | enabled | `bool` |
-| required | `bool` Always true for staff |
+| required | `bool` Always false: 2-step is optional for members, and staff accounts have none (they sign in with email and password) |
 | methods | `TwoStepMethod[]` |
 | recoveryCodesRemaining | `int` |
 
@@ -415,7 +414,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 | name | `string` |
 | contextLabel | `string?` |
 | existingAccount | `bool` True: confirm with the current password instead of creating one |
-| requiresTwoStepSetup | `bool` |
+| requiresPassCode | `bool` True for staff invitations: the accept form asks for the pass code the server operator handed over with the link |
 | policy | `PasswordPolicy` |
 | expiresAt | `datetime` |
 
@@ -425,6 +424,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 |---|---|
 | password | `string?` New accounts |
 | currentPassword | `string?` Existing member accounts |
+| passCode | `string?` Staff invitations: the 8-character pass code handed over with the link (XXXX-XXXX; letters in any case, the dash and spaces are ignored) |
 | name | `string?` |
 | device | `DeviceInfo` |
 | token | `string` From the invitation link (sent in the body, never in the URL path) |
@@ -433,10 +433,17 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Field | Type |
 |---|---|
-| status | `enum(signed_in|two_step_setup_required)` |
+| status | `enum(signed_in)` Always signed_in: the invitation is accepted and the person is signed in |
 | account | `AccountSummary` |
 | tokens | `SessionTokens?` |
-| twoStepSetup | `TwoStepSetup?` Staff must confirm an authenticator code before the first session |
+
+### StaffInvitationIssued
+
+| Field | Type |
+|---|---|
+| invitation | `Invitation` |
+| acceptUrl | `url` SENSITIVE: the accept link (also in identity.invitation.created) |
+| passCode | `string` SENSITIVE, in-process only: the pass code, shown once as XXXX-XXXX. Only its hash is stored; it is never in an event, an HTTP response or a log |
 
 ### AccountListItem
 
@@ -478,9 +485,9 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Field | Type |
 |---|---|
-| purpose | `enum(account-closure|email-change|two-step-removal|recovery-codes|business-change|payout-account|seller-closure)` The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token. |
+| purpose | `enum(account-closure|email-change|two-step-removal|recovery-codes|business-change|payout-account|seller-closure|role-grant|staff-account|payout-destination|approval)` The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose. |
 | password | `string?` |
-| code | `string?` 2-step code instead of the password |
+| code | `string?` Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step) |
 
 ### ReauthToken
 
@@ -561,9 +568,10 @@ stateDiagram-v2
   pending --> expired: expire
   pending --> revoked: revoke
   expired --> pending: resend
+  revoked --> pending: resend
 ```
 
-Links are valid 7 days. Resend issues a new token and invalidates the old one.
+Links are valid 7 days. Resend issues a new token (and, for staff, a new pass code) and invalidates the old one. The 5th wrong pass code revokes a staff invitation but keeps its account invited and its roles waiting, so a resend (npm run staff-link) can give a new link; a revoked invitation whose account was closed (a cancelled invitation) cannot be resent.
 
 ## Data (schema `identity`)
 
@@ -745,6 +753,8 @@ Indexes: `pk (account_id, seller_id)`, `(seller_id)`
 | context_ref | text? |
 | context_label | text? |
 | token_hash | text unique |
+| pass_code_hash | text? (staff invitations: hash of the pass code handed over with the link) |
+| pass_code_attempts | int (wrong pass codes on this link; at 5 the link is revoked) |
 | invited_by_kind | text |
 | invited_by_id | text |
 | status | text |
@@ -880,23 +890,22 @@ Indexes: `(expires_at)`
 | getAccount | `(accountId: uuid) => AccountSummary | null`<br>Email, display name, status, 2-step state | customers, sellers, access, notifications, audit, support |
 | getAccounts | `(accountIds: uuid[]) => AccountSummary[]`<br>Batch lookup for lists (staff directory, seller members, audit names) | access, sellers, audit, notifications |
 | findAccountByEmail | `(email: string, realm: 'member' | 'staff') => AccountSummary | null`<br>Used when inviting someone who may already have an account | sellers, access |
-| inviteStaff | `(input: { email: string, name: string, invitedBy: Actor }) => Invitation`<br>Create an invited staff account and send the accept link (event identity.invitation.created). access assigns the roles. | access |
+| inviteStaff | `(input: { email: string, name: string, invitedBy: Actor }) => StaffInvitationIssued`<br>Create an invited staff account and send the accept link (event identity.invitation.created). Returns the invitation with its link and pass code in-process (the pass code is never in the event, an HTTP response or a log; the server tools print it). access assigns the roles. | access |
 | inviteSellerMember | `(input: { email: string, name: string, sellerId: uuid, sellerName: string, invitedBy: Actor }) => Invitation`<br>Invite a person to act for a seller. Reuses an existing member account when the email has one. | sellers |
 | revokeInvitation | `(invitationId: uuid, input: { reason: string, by: Actor, contextRef?: string }) => Invitation`<br>Cancel a pending invitation (the accept link stops working at once) and publish identity.invitation.revoked. contextRef, when given, must match the invitation's (sellers passes its sellerId so a seller can only revoke its own member invitations; NOT_FOUND otherwise). Revoking an invitation that is already revoked returns it unchanged; an accepted or expired one fails with ILLEGAL_TRANSITION. | sellers, access |
 | grantSellerContext | `(input: { accountId: uuid, sellerId: uuid, memberId: uuid, sellerName: string, roleLabel: string, isOwner: bool }) => void`<br>Allow a member account to sign in to Seller Center for this seller (NOT_FOUND for other accounts). Idempotent: called again to refresh the seller name, role label or owner flag, and to grant access again after revokeSellerContext (a reactivated member). A different memberId (a re-invited member) ends the sessions bound to the old membership. Only sellers writes these grants. | sellers |
 | revokeSellerContext | `(accountId: uuid, sellerId: uuid, reason: string) => void`<br>Remove seller access and revoke sessions bound to that seller | sellers |
 | revokeSessions | `(accountId: uuid, reason: string, audience?: 'store' | 'seller' | 'admin') => int`<br>Sign an account out everywhere (or in one area). Returns the number of sessions revoked. | access, sellers, trust |
-| verifyStepUp | `(accountId: uuid, proof: { password?: string, code?: string }) => bool`<br>Re-check the password or a 2-step code before a sensitive action (payout destination change, approval of a large payout) | finance, access |
 | grantGuestOrderAccess | `(guestSessionId: uuid, orderId: uuid, email: string, via: 'checkout' | 'lookup' | 'link') => GuestSession`<br>Let a guest session open one order (after guest checkout, a successful lookup in customers, or an emailed link) | checkout, customers |
 | hasGuestOrderAccess | `(guestSessionId: uuid, orderId: uuid) => bool`<br>Gate guest access to order detail, tracking, returns and help | orders, shipping, returns, support, customers, media |
 | issueOrderLink | `(orderId: uuid, email: string) => { url: url, expiresAt: datetime }`<br>Signed link for confirmation and 'email me my order links' emails; redeemed at POST /api/public/identity/order-links/{token}/redeem | checkout, customers, notifications |
 | closeAccount | `(accountId: uuid, reason: string) => void`<br>Close the member credential after customers completes a closure. Revokes all sessions; keeps Seller Center access if the account still belongs to a seller. | customers |
 | sendPasswordReset | `(accountId: uuid, input: { reason: string, by: Actor, revokeSessions: bool }) => void`<br>Staff-initiated reset from another module's screen (customers account actions) | customers |
 | startPhoneVerification | `(accountId: uuid, phone: string) => VerificationChallenge`<br>Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. | customers |
-| verifyReauthToken | `(principal: Principal, token: string, purpose: string) => bool`<br>True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. | customers, sellers, finance |
+| verifyReauthToken | `(principal: Principal, token: string, purpose: string) => bool`<br>True only when the re-auth token was issued for this purpose (the endpoint's step-up purpose) to this account, session, audience and seller, and is unused and unexpired. A token issued for another purpose is refused. Does not consume it. access checks approvals above stepUpAbove with it (purpose approval). | access, customers, sellers, finance |
 | accountSecurityOf | `(accountIds: uuid[], opts?: { activityLimit?: int }) => Map<uuid, AccountSecurity>`<br>Batched staff view of sign-in security for customer 360 views: AccountAdmin (lock, forced reset, 2-step, devices, recent security activity) plus email status, warnings and a one-line sign-in summary. Callers pass identity account ids (Customer.userId). | graphql |
-| consumeReauthToken | `(token: string) => bool`<br>Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs. | kernel |
-| releaseReauthToken | `(token: string) => void`<br>Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel. | kernel |
+| consumeReauthToken | `(token: string) => bool`<br>Claims a verified re-auth token for one request: marks it used only if it is still unused, and returns true when this call marked it (a second request with the same token gets false and is refused). Called by the kernel after verifying the token, before the handler runs, and by access for approvals above stepUpAbove. | kernel, access |
+| releaseReauthToken | `(token: string) => void`<br>Puts back a re-auth token claimed by a request that then failed, so the person can retry without confirming again; called by the kernel and by access. | kernel, access |
 | revocationsSince | `(cursor?: string) => { sessions: { sessionId: uuid, at: datetime }[], accounts: { accountId: uuid, validAfter: datetime }[], cursor: string }`<br>Revoked sessions and account-wide revocations (tokens issued before validAfter) since a cursor; every server polls this every few seconds and loads the last access-token lifetime on startup. | kernel |
 | verifyRefreshToken | `(refreshToken: string) => { sessionId: uuid, accountId?: uuid, audience: string, kind: string } | null`<br>Middleware check for refresh and sign-out: the session the refresh token belongs to (also during the reuse grace window), or null when it is unknown, expired, revoked or reused. | kernel |
 | touchStaffSession | `(sessionId: uuid) => { live: bool, reason?: 'revoked' | 'expired' | 'idle' | 'unknown' }`<br>Middleware check on every admin request (each server caches the answer 5 s per session): whether the staff session is still live (not revoked, not past its expiry or absolute limit, and active within staffIdleMinutes), recording the activity (sessions.last_active_at, at most once a minute) that keeps it from going idle. | kernel |
@@ -928,8 +937,9 @@ Indexes: `(expires_at)`
 | `REFRESH_TOKEN_INVALID` | 401 | Refresh token unknown, expired, revoked or reused; sign in again. |
 | `EMAIL_IN_USE` | 409 | Another account in this realm uses that email. |
 | `METHOD_NOT_AVAILABLE` | 400 | That 2-step method is not enabled yet (SMS is phase 2). |
-| `TWO_STEP_REQUIRED` | 409 | Staff accounts must keep at least one 2-step method. |
+| `TWO_STEP_NOT_FOR_STAFF` | 403 | Staff accounts sign in with email and password only; they cannot add a 2-step method. |
 | `INVITATION_INVALID` | 410 | The invitation was accepted, revoked or has expired. |
+| `PASS_CODE_INVALID` | 400 | The invitation pass code is missing or wrong. details.attemptsLeft; the 5th wrong pass code revokes the link (ask the server operator for a new link and pass code). |
 | `SELF_ACTION_NOT_ALLOWED` | 403 | Staff cannot lock, disable or reset their own account. |
 | `ORDER_LINK_INVALID` | 410 | The order link has expired; use Guest order lookup. |
 | `APP_PROOF_INVALID` | 401 | The app proof (Play Integrity or bot challenge) is missing or failed. |
@@ -960,7 +970,6 @@ Indexes: `(expires_at)`
 | memberMinPasswordLength | `10` | int, characters, 8–64, approval: second reviewer | Members (register screen: at least 10 characters, one number, one uppercase) |
 | staffMinPasswordLength | `12` | int, characters, 12–64, approval: second reviewer | Staff accounts |
 | passwordHistoryCount | `5` | int, 0–24, approval: second reviewer | Recent passwords that cannot be reused |
-| staffTwoStepRequired | `true` | bool, approval: business owner | Staff must use 2-step verification |
 | trustedDeviceDays | `30` | duration, days, 0–90, approval: second reviewer | Members can skip 2-step on a remembered device |
 | invitationTtlDays | `7` | duration, days, 1–30, approval: second reviewer | Invitation link lifetime |
 | guestSessionTtlDays | `30` | duration, days, 1–…, approval: second reviewer | Guest session lifetime after last activity |
@@ -981,7 +990,8 @@ Indexes: `(expires_at)`
 - **Google / Apple sign-in**: Phase 2: verify ID tokens for 'Continue with Google / Apple'
 
 ## Notes
-- Realms: a member account serves both the store and Seller Center; seller access comes from seller_access rows that only the sellers module writes. Staff accounts are separate, invite-only and always use 2-step verification. The same email may exist once in each realm.
+- Realms: a member account serves both the store and Seller Center; seller access comes from seller_access rows that only the sellers module writes. Staff accounts are separate and invite-only; the same email may exist once in each realm.
+- Staff sign-in without an authenticator (owner decision 2026-10-14: the server runs offline and only staff use it). A staff invitation comes with a pass code (8 characters, XXXX-XXXX, no 0/O/1/I/L) that the server operator prints with npm run bootstrap-owner or npm run staff-link and hands over with the link; only its hash is stored, and it is never in identity.invitation.created, an HTTP response or a log. Accepting takes the link token, the pass code and a new password and signs the person in. Staff then sign in with email and password, have no 2-step methods (they cannot add one), and confirm sensitive actions by re-entering the password (POST /api/admin/identity/reauth → reauthToken). Members keep their optional 2-step unchanged.
 - Audience is chosen at sign-in (store | seller | admin). A token for one audience is rejected by the other API areas with UNAUTHORIZED, except that the store-area security endpoints (/security, /password, /two-step/*, /devices, /security-activity) accept any member session, so seller staff manage their own sign-in security with the same endpoints.
 - Seller context: a seller-audience session acts for exactly one seller at a time. With one seller the context is set at sign-in; with several, sign-in returns seller_context_required and the app calls POST /api/seller/identity/session/seller-context. Seller-area paths never contain a seller id; the token carries it.
 - Account discovery is prevented: registration, password reset and sign-in respond the same way (and with similar timing) whether or not the email exists.
@@ -1039,7 +1049,7 @@ type AccountSecurity @areas(in: [ADMIN]) {
 
 type AccountSecurityTwoStep @areas(in: [ADMIN]) {
   enabled: Boolean!
-  "Always true for staff"
+  "Always false: 2-step is optional for members (staff accounts have none)"
   required: Boolean!
   methods: [AccountSecurityTwoStepMethod!]!
   recoveryCodesRemaining: Int!
