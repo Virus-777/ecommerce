@@ -18,7 +18,7 @@ import { ViewsPart } from './service/views.js';
 export type { AdvertisingServiceDeps };
 
 /**
- * Advertising use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Advertising use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class AdvertisingService implements AdvertisingPublicApi {
@@ -49,8 +49,8 @@ export class AdvertisingService implements AdvertisingPublicApi {
 
   /** Install seed on boot: the launch placements and global rules version 1, each only when absent (domain/seed.ts) */
   async seed(): Promise<void> {
-    for (const row of placementSeedRows()) await this.core.repo.insertIgnore('placements', row);
-    await this.core.repo.insertIgnore('global_rules', rulesSeedRow());
+    for (const row of placementSeedRows()) await this.core.repo.insertIfAbsent('placements', row);
+    await this.core.repo.insertIfAbsent('global_rules', rulesSeedRow());
   }
 
   /* ---------------- public API (in-process) */

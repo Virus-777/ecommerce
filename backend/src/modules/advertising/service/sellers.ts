@@ -249,7 +249,7 @@ export class SellerPart extends Part {
       await tx.removeWhere('campaign_items', { campaign_id: id });
       await tx.removeWhere('campaign_creatives', { campaign_id: id });
       for (const it of v.items) await tx.insert('campaign_items', { ...it, campaign_id: id });
-      for (const c of v.creatives) await tx.insertIgnore('campaign_creatives', { campaign_id: id, creative_id: c.creative_id, device: c.device });
+      for (const c of v.creatives) await tx.insertIfAbsent('campaign_creatives', { campaign_id: id, creative_id: c.creative_id, device: c.device });
       await this.core.log(tx, id, 'edit', by, { from: locked.status, to, reason: locked.status === 'in_review' ? 'Edited during review; back to the start of review' : locked.status === 'approved' ? 'Edited after approval; back to draft' : null });
       return { before: locked, after };
     });

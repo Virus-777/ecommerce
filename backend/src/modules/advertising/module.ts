@@ -5,7 +5,7 @@ import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { createMongoAdvertisingRepository } from './repository.js';
+import { AdvertisingRepository } from './repository.js';
 import { AdvertisingService } from './service.js';
 import { schemas } from './schema.js';
 
@@ -21,7 +21,7 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   async register(ctx) {
-    const service = new AdvertisingService({ repo: createMongoAdvertisingRepository(ctx.mongo), ctx });
+    const service = new AdvertisingService({ repo: new AdvertisingRepository(ctx.mongo), ctx });
     // install seed: the launch placements and global rules version 1 (domain/seed.ts)
     await service.seed();
     ctx.provide(service);

@@ -227,7 +227,7 @@ export class OpsPart extends Part {
     const groups = e.groups ?? [];
     const amount = c.advertiser_kind === 'seller' ? groups.filter((g) => g.sellerId === c.seller_id).reduce((a, g) => a + g.total.amount, 0) : c.advertiser_kind === 'official_store' ? groups.filter((g) => g.ownerType === 'official').reduce((a, g) => a + g.total.amount, 0) : e.total.amount;
     if (amount <= 0) return;
-    await this.repo.insertIgnore('attributions', { id: newId(), order_id: e.orderId, campaign_id: c.id, click_event_id: click.id, amount, currency: e.total.currency, attributed_at: at, reversed: false });
+    await this.repo.insertIfAbsent('attributions', { id: newId(), order_id: e.orderId, campaign_id: c.id, click_event_id: click.id, amount, currency: e.total.currency, attributed_at: at, reversed: false });
   }
 
   /** Reduce attributed sales for cancelled items (one adjustment per cancellation) */
@@ -243,7 +243,7 @@ export class OpsPart extends Part {
       const remaining = a.amount + adjustments.reduce((s, x) => s + x.amount, 0);
       const reduce = Math.min(Math.max(e.refund?.itemAmount?.amount ?? 0, 0), remaining);
       if (reduce <= 0) continue;
-      const inserted = await this.repo.insertIgnore('attributions', { id: newId(), order_id: e.cancellationId, campaign_id: a.campaign_id, click_event_id: a.click_event_id, amount: -reduce, currency: a.currency, attributed_at: this.now(), reversed: true });
+      const inserted = await this.repo.insertIfAbsent('attributions', { id: newId(), order_id: e.cancellationId, campaign_id: a.campaign_id, click_event_id: a.click_event_id, amount: -reduce, currency: a.currency, attributed_at: this.now(), reversed: true });
       if (inserted && remaining - reduce <= 0) await this.repo.update('attributions', a.id, { reversed: true });
     }
   }

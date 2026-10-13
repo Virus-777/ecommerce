@@ -176,7 +176,7 @@ export class CreativesPart extends Part {
           created_by: encodeActor(by.actor),
           created_at: this.now(),
         });
-        if (campaignId) await tx.insertIgnore('campaign_creatives', { campaign_id: campaignId, creative_id: id, device: input.device });
+        if (campaignId) await tx.insertIfAbsent('campaign_creatives', { campaign_id: campaignId, creative_id: id, device: input.device });
       });
     } catch (err) {
       if (asset) await this.core.optionalMedia((m) => m.detach(asset!.id, { module: 'advertising', kind: 'ad_creative', refId: id }));

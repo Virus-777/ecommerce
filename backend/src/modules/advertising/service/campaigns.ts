@@ -11,7 +11,8 @@ import type { AdCampaign, AdCampaignInput, AdCampaignSummary, AdPreview, Campaig
 import type * as common from '../../../spec/common.js';
 import { adCampaignMachine } from '../domain/state-machines.js';
 import { advertiserIsOwn, dismissalLabel, frequencyLabel, hasDiscountClaim, isPageType, isPaid, linkState, missingDevices, OVERLAY_KEYS, shortDate, sourceKinds, stepFor, requiredSteps, type ReviewRole } from '../domain/rules.js';
-import type { AdvertisingRepository, CampaignRec, ItemRec, PlacementRec } from '../ports.js';
+import type { CampaignRec, ItemRec, PlacementRec } from '../ports.js';
+import type { AdvertisingRepository } from '../repository.js';
 import { encodeActor, invalid, notFound, Part, SYSTEM, type By } from './core.js';
 import type { Model } from './views.js';
 
@@ -390,7 +391,7 @@ export class CampaignsPart extends Part {
     await tx.removeWhere('campaign_items', { campaign_id: id });
     await tx.removeWhere('campaign_creatives', { campaign_id: id });
     for (const it of v.items) await tx.insert('campaign_items', { ...it, campaign_id: id });
-    for (const c of v.creatives) await tx.insertIgnore('campaign_creatives', { campaign_id: id, creative_id: c.creative_id, device: c.device });
+    for (const c of v.creatives) await tx.insertIfAbsent('campaign_creatives', { campaign_id: id, creative_id: c.creative_id, device: c.device });
   }
 
   async create(input: AdCampaignInput, by: By): Promise<AdCampaign> {

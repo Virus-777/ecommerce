@@ -487,7 +487,7 @@ export class ServingPart extends Part {
       const dedupeKind = kind === 'close' ? 'dismiss' : kind;
       const id = eventId(c.i, dedupeKind);
       const now = this.now();
-      const inserted = await this.repo.insertIgnore('ad_events', {
+      const inserted = await this.repo.insertIfAbsent('ad_events', {
         id,
         impression_id: c.i,
         campaign_id: c.c,
