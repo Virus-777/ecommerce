@@ -9,7 +9,7 @@ npm run token -- staff # a development token (visitor | customer | seller | staf
 npm run check          # spec freshness, types, module boundaries, API conformance, tests, every endpoint over HTTP
 ```
 
-Node 22+ (tested on 26). With no `MONGODB_URI`, the server starts an embedded MongoDB replica set (an installed MongoDB 6.0 is used when there is one; otherwise the first run downloads it). Set `MONGO_DATA_DIR` to keep data between restarts, or `MONGODB_URI` for a MongoDB server (a replica set: transactions need one; [docs/04-mongodb-migration.md](../docs/04-mongodb-migration.md) §5). Configuration is below and in [.env.example](.env.example). How to write module code: [docs/BUILDING-MODULES.md](docs/BUILDING-MODULES.md).
+Node 22+ (tested on 26). With no `MONGODB_URI`, the server starts an embedded MongoDB replica set (an installed MongoDB 6.0 is used when there is one; otherwise the first run downloads it). Set `MONGO_DATA_DIR` to keep data between restarts, or `MONGODB_URI` for a MongoDB server (a replica set: transactions need one; [docs/04-mongodb-migration.md](../docs/04-mongodb-migration.md) §5). Configuration is below and in [.env.example](.env.example). Looking after the backend (common changes, MongoDB, deploying, failing checks): [docs/MAINTAINING.md](../docs/MAINTAINING.md). How module code is written: [docs/BUILDING-MODULES.md](docs/BUILDING-MODULES.md).
 
 ## How the code stays on the API plan
 
@@ -56,9 +56,9 @@ Inside a module:
 ```
 module.ts            manifest: spec, version, Mongoose schemas, wiring (routes, consumers, jobs, resolvers)
 contract.ts          the only file other modules may import
-service.ts           use cases; implements the public API, event consumers and jobs
-ports.ts             repository interface (database-agnostic) and provider ports
-repository.ts        the MongoDB repository on ctx.mongo
+service.ts           use cases; implements the public API, event consumers and jobs (large modules: delegates to service/<feature>.ts)
+repository.ts        every database read and write, one class (its own type) on ctx.mongo
+ports.ts             row types and provider ports, when the module has any
 schema.ts            GENERATED Mongoose schemas, one per spec table
 providers/           provider adapters behind ports, with a deterministic dev adapter
 http/<area>.ts       one handler per spec endpoint of that area
@@ -75,7 +75,7 @@ test/                behaviour tests; helpers.ts boots the module for them
 Every module is built. A new module starts from its spec (`npm run module:new <name>` scaffolds handlers that answer `501 NOT_IMPLEMENTED`); the full conventions are in [docs/BUILDING-MODULES.md](docs/BUILDING-MODULES.md).
 
 1. Read its `README.md` (the API reference for that module).
-2. Write the repository in `ports.ts` and `repository.ts`, using `ctx.mongo` (the module's own collections, `ctx.mongo.table(name)`).
+2. Write the repository class in `repository.ts`, using `ctx.mongo` (the module's own collections, `ctx.mongo.table(name)`).
 3. Implement the public API, consumers and jobs in `service.ts`. Talk to other modules only through `ctx.use()` / `ctx.tryUse()` and events.
 4. Replace the `notImplemented` handlers in `http/<area>.ts`. Inputs and outputs are typed from the spec:
 

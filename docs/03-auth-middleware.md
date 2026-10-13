@@ -486,7 +486,7 @@ Every staff role also gets `workqueues.items.view` and `workqueues.items.work` f
 
 **Not built yet:**
 - the Play Integrity verifier (deployment);
-- a kernel helper that applies `spec.tenantTables` in repositories, a check against unscoped tenant reads, and generated cross-tenant 404 tests (§7).
+- a kernel helper that applies the spec's tenant owner columns in repositories, a check against unscoped tenant reads, and generated cross-tenant 404 tests (§7).
 
 ### Planned layout (v3 design, for reference)
 

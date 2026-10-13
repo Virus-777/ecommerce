@@ -72,7 +72,7 @@ export default defineModule({
   schemas,                            // Mongoose schemas of its collections catalog.* (generated)
   graphql: typeDefs,                  // the module's GraphQL fragment (generated)
   register(ctx) {
-    const service = new CatalogService({ repo: createMongoCatalogRepository(ctx.mongo), ctx });
+    const service = new CatalogService({ repo: new CatalogRepository(ctx.mongo), ctx });
     ctx.provide(service);                                   // public API for other modules
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
@@ -150,7 +150,7 @@ Generated from the module specs (`docs/api/spec/modules/`, `docs/api/graphql/mod
 | **Approvals** | Limits per role (refunds, payouts, holds, restrictions, price changes). Above the limit the action becomes an approval request; some actions always need a second reviewer. Granting access never grants financial authority |
 | **Purchase snapshots** | Orders copy the product description, variation, condition, price, seller and terms accepted at purchase (plan ch. 8) |
 | **Errors** | `{ error: { code, message, details } }` with stable codes (`OFFER_CHANGED`, `ILLEGAL_TRANSITION`, `APPROVAL_REQUIRED` …) |
-| **Database portability** | Services depend on repository interfaces (`ports.ts`); the MongoDB adapter is each module's `repository.ts`. No cross-module joins or references exist to untangle, so another database means new adapters, not new services |
+| **Database portability** | Every database read and write of a module is in its `repository.ts` (one class); services call its methods and never the database. No cross-module joins or references exist to untangle, so another database means rewriting repositories, not services |
 | **File storage** | Owner decision: files live on the server's **local file system** (no S3). media's storage port has two adapters, chosen by `MEDIA_STORAGE` (below); both stream bytes through the API: uploads to `PUT /api/{area}/media/uploads/{id}/content` (the caller's token), downloads from `GET /files/{bucket}/{key}` by signed links the auth middleware verifies ([03-auth-middleware.md](03-auth-middleware.md) §0 "File links") |
 
 ### File storage configuration (media)
@@ -223,9 +223,10 @@ src/modules/<module>/
   contract.ts            The ONLY file other modules may import: public API interface, shared types, event payloads
   README.md              Generated from the module's API spec (docs/api/modules/<module>.md)
   domain/                State machines and pure business rules (no framework, no database)
-  service.ts             Use cases; implements the public API, event consumers and jobs, through ports.ts and ctx
-  ports.ts               Repository interfaces (database-agnostic) and provider ports
-  repository.ts          MongoDB repository on ctx.mongo (the module's own collections)
+  service.ts             Use cases; implements the public API, event consumers and jobs, through the repository and ctx
+                         (large modules: service/core.ts + service/<feature>.ts, composed by a short service.ts)
+  repository.ts          Every read and write on ctx.mongo (the module's own collections), one class that is its own type
+  ports.ts               Row types and provider ports (interfaces of outside services), when the module has any
   schema.ts              The generated Mongoose schemas, one per spec table
   providers/             Provider adapters behind ports (storage, scanning, search engine …), with a dev adapter
   http/<area>.ts         One typed handler per spec endpoint of that area (store, seller, admin, public, webhooks); request and response schemas are generated in src/spec

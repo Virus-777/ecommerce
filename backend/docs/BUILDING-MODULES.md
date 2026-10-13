@@ -26,9 +26,11 @@ code, an event), work within it if you reasonably can, and list it under "Spec g
 http/<area>.ts      thin: map HandlerInput → service call → response. No queries, no rules.
 graphql/resolvers   thin: call service read methods (batched where the field is on a list).
 service.ts          use cases: authorization beyond the middleware, rules, transactions, events, audit.
+                    Past about 1,000 lines: service/core.ts (deps and shared helpers) + one class per feature in
+                    service/<feature>.ts, and a short service.ts that builds them and implements the PublicApi (see orders).
 domain/             pure rules and state machines (no I/O): pricing math, eligibility, transitions.
-ports.ts            repository interface (+ provider ports) in domain terms.
-repository.ts       repository on ctx.mongo (the module's own collections, §5b).
+repository.ts       one class on ctx.mongo (the module's own collections, §5b); the class is the repository's type.
+ports.ts            row types and provider ports, when the module has any.
 schema.ts           the GENERATED Mongoose schemas, one per spec table.
 providers/          provider adapters (email, payments, carriers, storage) behind ports, with a dev adapter.
 ```
@@ -60,8 +62,8 @@ and Idempotency-Key replay are all checked (`docs/03-auth-middleware.md`). In pa
 The service still owns:
 
 - **Record scope.** A customer, seller or visitor must only reach their own records. Read tenant tables
-  with the owner condition of `input.scope` (`kernel/auth/scope.ts`; the owner columns are in
-  `spec.tenantTables`). Another tenant's record is **NOT_FOUND (404)**, never FORBIDDEN (don't confirm it exists).
+  with the owner condition of `input.scope` (`kernel/auth/scope.ts`; a table's owner column is `seller_id` /
+  `customer_id`, or the one its spec `tenant` names). Another tenant's record is **NOT_FOUND (404)**, never FORBIDDEN (don't confirm it exists).
   Never take the owner id from the body: sellers act for `input.sellerId`, customers for `scope.customerId`/`principal.accountId`.
 - **Business permissions** the spec describes in prose (e.g. "only the assignee or a lead may…"): use `input.can('perm')`.
 - **Approval limits** (§6).
@@ -119,20 +121,30 @@ Every module keeps its data in MongoDB, one collection per spec table (`<module>
 // module.ts
 import { schemas } from './schema.js';                         // GENERATED Mongoose schemas, one per spec table
 export default defineModule({ spec, version, schemas, register(ctx) {
-  const service = new ThingService({ repo: createMongoThingRepository(ctx.mongo), ctx });
+  const service = new ThingService({ repo: new ThingRepository(ctx.mongo), ctx });
   …
 ```
 
 ```ts
-// repository.ts: the same ports.ts interface, on ctx.mongo
-export function createMongoThingRepository(store: ModuleStore): ThingRepository {
-  const things = store.table<ThingRow>('things');               // rows keep their spec shape (id, snake_case)
-  return {
-    transaction: (fn) => store.transaction((tx) => fn(createMongoThingRepository(tx))),
-    getThing: (id, o) => things.get(id, o),                      // { forUpdate: true } locks it inside a transaction
-    listThings: (f, page) => things.page({ status: { $in: f.statuses } }, page, { column: 'created_at', direction: 'desc' }),
-    updateThing: (id, patch) => things.update(id, patch),        // a $set patch, operators ($inc, $push), or a pipeline
-  };
+// repository.ts: one class; services type their dependency as this class (no separate interface)
+export class ThingRepository {
+  readonly #things;
+  constructor(private readonly store: ModuleStore) {
+    this.#things = store.table<ThingRow>('things');              // rows keep their spec shape (id, snake_case)
+  }
+  /** fn with a repository bound to one transaction */
+  transaction<T>(fn: (tx: ThingRepository) => Promise<T>): Promise<T> {
+    return this.store.transaction((tx) => fn(new ThingRepository(tx)));
+  }
+  getThing(id: string, o?: { forUpdate?: boolean }) {             // { forUpdate: true } locks it inside a transaction
+    return this.#things.get(id, o);
+  }
+  listThings(statuses: string[], page: PageRequest) {
+    return this.#things.page({ status: { $in: statuses } }, page, { column: 'created_at', direction: 'desc' });
+  }
+  updateThing(id: string, patch: Partial<ThingRow>) {             // a $set patch, operators ($inc, $push), or a pipeline
+    return this.#things.update(id, patch);
+  }
 }
 ```
 
@@ -140,7 +152,7 @@ export function createMongoThingRepository(store: ModuleStore): ThingRepository 
 - **Transactions are retried** when MongoDB reports a write conflict: the function runs again, so it must only read and write this module's tables (no events, provider calls or other modules; that was already the rule). Run operations inside one transaction one after another, never with `Promise.all`.
 - **`forUpdate`** locks by writing (`_lock` is incremented): a second transaction writing the same document conflicts and is retried after the first commits. Keep the lock order the module already uses (inventory: reservations, their lines, then stock levels).
 - **Never insert-and-catch a duplicate key inside a transaction**: the error aborts the whole transaction. Use `insertIfAbsent` / `insertManyIfAbsent` (on conflict do nothing) and `upsert` / `upsertMany` (on conflict do update).
-- **Nulls and lists:** `{ col: { $ne: x } }` also matches documents where `col` is null; when null rows must not match (the spec's `<>` conditions mean that), write `{ col: { $nin: [x, null] } }`. `{ $in: [] }` matches nothing; a condition on an array of objects is a dotted filter (`{ 'items.key': key }`); a join is two reads.
+- **Nulls and lists:** `{ col: { $ne: x } }` also matches documents where `col` is null; when null rows must not match (the spec's `<>` conditions mean that), write `{ col: { $nin: [x, null] } }` (or a `whereFilter` `<>`). "Is not null" is `{ $ne: null }` (`whereFilter`: `{ op: 'is not', value: null }`); `<>` null matches nothing. `{ $in: [] }` matches nothing; a condition on an array of objects is a dotted filter (`{ 'items.key': key }`); a join is two reads.
 - **Kernel helpers: use these, never a local copy** (`kernel/mongo/index.ts`, `kernel/lib/`; tests in `kernel/mongo/mongo.test.ts`):
 
   | Need | Use |
@@ -152,7 +164,7 @@ export function createMongoThingRepository(store: ModuleStore): ThingRepository 
   | Compare like `lower(x) = lower(y)` (a `lower(col)` index) | `t.find(f, { collation: CASE_INSENSITIVE })`; also `findOne`, `exists`, `count` |
   | PostgreSQL's "nulls last" in ascending order | `t.find(f, { sort: { due_at: 1, id: 1 }, nullsLast: ['due_at'] })` |
   | A list sorted by a computed value (a rank, a deadline with a default) | `t.pageAggregate([{ $match: t.filter(f) }, { $addFields: { rank: … } }], page, { key: 'rank', direction: 'desc' })` |
-  | A write outside a transaction that may lose a race on a unique key | `isDuplicateKey(err)` |
+  | A write outside a transaction that may lose a race on a unique key | `isDuplicateKey(err)`; give the service a neutral answer (`undefined`, or a small error class of the module), never a database code |
   | "This row must exist" (a bug if not: 500, not 404) | `` orThrow(row, `orders: order ${id}`) `` (`kernel/lib/or-throw.ts`) |
 
   `t.page` already runs its count and read one after another inside a transaction.
@@ -193,7 +205,7 @@ Granting a permission never grants financial authority: `check` is the only sour
 ## 9. Providers, jobs, webhooks, GraphQL
 
 - **Providers** (email, push, payment processor, carriers, file storage, virus scanning, address
-  validation): define a port in `ports.ts`, put a **deterministic dev adapter** in `providers/<provider>.ts` (a folder `providers/<provider>/` when it needs several files)
+  validation): define a port (an interface) in `ports.ts`, put a **deterministic dev adapter** in `providers/<provider>.ts` (a folder `providers/<provider>/` when it needs several files)
   (no network; e.g. payments: amounts ending in `02` decline, `03` time out; storage: local `.data/` or memory;
   email: recorded as sent). Wire the dev adapter in `module.ts`; real adapters come later behind the same port.
 - **Jobs** (`spec.jobs`): implement every handler wired in `module.ts`. Make them restartable and idempotent (in production a failed
@@ -222,12 +234,22 @@ Granting a permission never grants financial authority: `check` is the only sour
   - `secretFor(ctx.config, '<module>.<purpose>')` (`kernel/lib/secrets.ts`): the key for links and tokens your module signs (download links, unsubscribe tokens). Never invent secrets or borrow webhook secrets.
   - `ctx.config.publicUrls.store | seller | admin`: base addresses for links in emails and documents. Never hardcode a domain.
 
-## 9b. Modules already built
+## 9b. Examples to copy
 
-Built and merged: tranche 1 **identity, access, settings, audit, media, notifications**; tranche 2 **customers, catalog, inventory, sellers, purchasing, workqueues**; tranche 3 **offers, cart, orders, search, promotions, content**; tranche 4 **checkout, payments, shipping, finance, returns, messaging, reviews**; tranche 5 **support, trust, advertising, reports, warehouse** (all 30 launch modules). The phase 3–4 modules (wishlist, wallet, fulfillment-service) are built and off in `modules.config.ts`; tests enable them with `only: [...]`, and `MODULES=…,fulfillment-service` boots Fulfilled by Marketly like any other module (no guard: set its `serviceLocationId` / `serviceShippingProfileId` settings or rely on the defaults first). `src/integration/fulfilled-by-marketly.test.ts` shows the whole service (enrollment, inbound, Marketly-fulfilled order, warehouse shipping, fees, return, reconciliation, suspension) with real modules. `flows.liveListing()` sets up a seller with a live offer; `src/integration/order-lifecycle.test.ts` shows a whole order (checkout, payment, shipment, delivery, return, refund) with real modules. Real end-to-end flows for tests (staff with roles, customers, seller sign-in) are in `src/testing/flows.ts`; see `src/integration/*.test.ts`. Call their
-public APIs for real; in tests boot them (`only: [...]` pulls dependencies) rather than stubbing, unless
-you need to control an answer. Notifications already consumes the events your spec publishes and turns
-them into notices, so publish exactly the spec's events and payloads.
+All 33 modules are built. wishlist, wallet and fulfillment-service are off at launch (`modules.config.ts`);
+tests enable them with `only: [...]`, and `MODULES=…,fulfillment-service` boots Fulfilled by Marketly (set its
+`serviceLocationId` / `serviceShippingProfileId` settings or rely on the defaults first).
+
+- Modules to read first: `orders` (a service split by feature, lock order, events), `inventory` (stock in
+  transactions), `settings` (a small module).
+- Whole flows with real modules: `src/integration/order-lifecycle.test.ts` (checkout, payment, shipment,
+  delivery, return, refund) and `fulfilled-by-marketly.test.ts`.
+- Real sign-in and set-up for tests: `src/testing/flows.ts` (staff with roles, customers, seller sign-in;
+  `flows.liveListing()` gives a seller with a live offer).
+
+Call other modules' public APIs for real; in tests boot them (`only: [...]` pulls dependencies) rather than
+stubbing, unless you need to control an answer. Notifications already turns the events your spec publishes
+into notices, so publish exactly the spec's events and payloads.
 
 ## 10. Tests
 
@@ -259,7 +281,8 @@ await app.kernel.events.drain();   // wait for event consumers
   audit entries written (stub `audit.record` and assert the calls), jobs (`app.kernel.jobs.runNow`), consumers.
 - Vitest 5 clears mock **calls** before every test (`clearMocks` default): calls made at boot or in `beforeAll` (`afterBoot` hooks) are gone by the time a test runs; record them in the stub implementation if a test needs them.
 - Clocks: `movingClock()` (real time you can move ahead; dev tokens stay valid) is the easy default.
-  Apps on a fixed clock: set `tokenClock.now = () => clock.now()` (from `testing/app.ts`), and a larger
+  A fixed clock is set to its time **after** `buildTestApp` returns (`clock.set(...)`): a slow boot otherwise
+  leaves tokens signed at the fixed time "not yet valid" under load. Apps on a fixed clock: set `tokenClock.now = () => clock.now()` (from `testing/app.ts`), and a larger
   `tokenClock.ttlSeconds` if the test moves the clock far ahead, so `callers.*` tokens stay valid at the app's time.
 - Dates: `marketDate(at, days?)` (from `testing/app.ts`) is the market's calendar date (YYYY-MM-DD) `days` after `at`,
   which is what modules mean by "today". Compare module dates with it, never with `toISOString().slice(0, 10)`.

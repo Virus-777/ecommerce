@@ -1,6 +1,8 @@
 # Phase: simplification plan (one maintainer, offline)
 
-Status: **approved 2026-10-13**; building R1 first (§4).
+Status: **done 2026-10-13** (approved the same day). R1–R4 merged with `npm run check` green (7,650 tests, 6,456 HTTP checks);
+R5 is [docs/MAINTAINING.md](MAINTAINING.md). One change from §2 R2: a repository is a **class** that is its own type,
+not `ReturnType<typeof createXRepository>`: a factory cannot infer its own type when its `transaction(fn)` refers to it.
 
 The owner will maintain the backend alone, without an assistant. Every change below has one aim: a developer who
 opens a module for the first time finds one obvious way to do each thing, reads less code to understand a feature,
