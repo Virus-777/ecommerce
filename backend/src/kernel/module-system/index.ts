@@ -124,8 +124,6 @@ export interface ModuleDefinition<S extends ModuleSpecDef = ModuleSpecDef> {
   readonly schemas: ModuleSchemas;
   /** Data migrations (backfills, renames), each run once after the collections from the spec exist */
   readonly mongoMigrations?: readonly MongoMigration[];
-  /** GraphQL fragment (graphql/schema.ts), when the module contributes to the read layer */
-  readonly graphql?: string;
   register(ctx: ModuleContext<any>): void | Promise<void>;
 }
 
@@ -134,7 +132,6 @@ export function defineModule<S extends ModuleSpecDef & { name: ModuleName }>(def
   version: string;
   schemas: ModuleSchemas;
   mongoMigrations?: readonly MongoMigration[];
-  graphql?: string;
   register(ctx: ModuleContext<S['name']>): void | Promise<void>;
 }): ModuleDefinition<S> {
   return def as ModuleDefinition<S>;

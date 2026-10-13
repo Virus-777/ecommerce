@@ -70,7 +70,6 @@ export default defineModule({
                                       //   dependsOn, optionalDeps, permissions, events, jobs, settings, endpoints
   version: '1.2.0',                   // bump on every change (npm run modules shows it)
   schemas,                            // Mongoose schemas of its collections catalog.* (generated)
-  graphql: typeDefs,                  // the module's GraphQL fragment (generated)
   register(ctx) {
     const service = new CatalogService({ repo: new CatalogRepository(ctx.mongo), ctx });
     ctx.provide(service);                                   // public API for other modules

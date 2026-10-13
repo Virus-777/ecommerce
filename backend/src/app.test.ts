@@ -83,10 +83,9 @@ describe('the launch configuration', () => {
       expect((await app.inject({ url: `/graphql/store?extensions=${encodeURIComponent(JSON.stringify(extensions))}` })).statusCode).toBe(401);
     });
 
-    it('reports screen queries that need a module that is off at launch', () => {
-      // Product.saved (wishlist, phase 3) and Customer.wallet / walletAdmin (wallet, phase 3): see the design note in README
-      const names = app.kernel.unusableQueries.map((q) => `${q.area}/${q.name}`).sort();
-      expect(names).toEqual(['admin/AdminCustomer', 'store/AccountOverview', 'store/CategoryPage', 'store/HomePage', 'store/ProductPage', 'store/SearchResults', 'store/SellerStorefront']);
+    it('runs every screen query at launch, also those selecting fields of modules that are off', () => {
+      // Product.saved (wishlist) and Customer.wallet / walletAdmin (wallet) are in the schema and answer null while off
+      expect(app.kernel.unusableQueries).toEqual([]);
     });
   });
 });

@@ -25,7 +25,7 @@ The spec is the source of truth. `npm run gen` turns it into code, and the check
 | `stateMachines` | `domain/state-machines.ts` | Illegal moves throw `ILLEGAL_TRANSITION` (409) |
 | `dependsOn` | Load order | The server refuses to start when a dependency is off, and names it |
 | `jobs`, `settings`, `permissions`, `errorCodes` | Scheduler entries, typed `ctx.settings.get()`, guard checks, error statuses | Undeclared names are refused at startup |
-| GraphQL fragments and screen queries | `/graphql/store`, `/graphql/seller`, `/graphql/admin`, persisted queries | Composed from enabled modules at startup; unusable screen queries are reported |
+| GraphQL fragments and screen queries | `/graphql/store`, `/graphql/seller`, `/graphql/admin`, persisted queries | Composed at startup from every module's fragment (fields of a module that is off answer null); unusable screen queries are reported |
 
 Run `npm run gen` after changing the spec (and `node docs/api/tools/build.mjs` first). Generated files start with a `GENERATED` header: `src/spec/**`, `src/modules/index.ts`, and each module's `README.md`, `graphql/schema.ts` and `schema.ts`. Everything else belongs to you; the generator creates it once and never overwrites it.
 
@@ -145,7 +145,6 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 
 Found while building; the code follows the spec as written until these are decided.
 
-- **Screen queries that need a module that is off at launch.** HomePage, ProductPage, CategoryPage, SearchResults, SellerStorefront and AccountOverview select `Product.saved` (wishlist), and AccountOverview / AdminCustomer select `Customer.wallet` / `walletAdmin` (wallet). Both modules are phase 3 and off at launch, so these 7 persisted queries don't validate in the launch configuration (the server warns at startup). Either remove those fields from the launch queries, or keep phase 3 fragments in the schema with `@phase` fields resolving to null.
 - **Type used but never defined:** `identity.AccountSecurity` (identity public API `accountSecurityOf`). It is typed `unknown` until the spec defines it (`npm run gen` lists it).
 - **`catalog.brand_stats`** declares `category_id` nullable ("null = all categories") inside its primary key. The key is a unique index on (brand_id, category_id) in which null counts as a value, so there is one "all categories" row per brand.
 - **`customers`** lists `orders.order.placed` twice under `consumes`. The two reactions share one handler.

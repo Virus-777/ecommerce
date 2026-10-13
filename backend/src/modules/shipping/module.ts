@@ -2,7 +2,6 @@ import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/shipping.js';
 import { resolvers } from './graphql/resolvers.js';
-import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
@@ -22,7 +21,6 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
-  graphql: typeDefs,
   register(ctx) {
     // carriers sit behind a port; the deterministic dev adapter until real carrier accounts are connected
     const service = new ShippingService({ repo: new ShippingRepository(ctx.mongo), ctx, carriers: devCarrierAdapter() });

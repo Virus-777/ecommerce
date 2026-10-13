@@ -38,3 +38,40 @@ export const moduleLoaders: Record<string, () => Promise<{ default: ModuleDefini
   "wishlist": () => import('./wishlist/module.js'),
   "workqueues": () => import('./workqueues/module.js'),
 };
+
+/**
+ * Every module's GraphQL fragment, on or off: the schemas always have every field, and a field of a module that is
+ * off answers null (so screen queries stay valid while wishlist or wallet are off).
+ */
+export const graphqlFragments: Record<string, () => Promise<{ typeDefs: string }>> = {
+  "access": () => import('./access/graphql/schema.js'),
+  "advertising": () => import('./advertising/graphql/schema.js'),
+  "audit": () => import('./audit/graphql/schema.js'),
+  "cart": () => import('./cart/graphql/schema.js'),
+  "catalog": () => import('./catalog/graphql/schema.js'),
+  "checkout": () => import('./checkout/graphql/schema.js'),
+  "content": () => import('./content/graphql/schema.js'),
+  "customers": () => import('./customers/graphql/schema.js'),
+  "finance": () => import('./finance/graphql/schema.js'),
+  "identity": () => import('./identity/graphql/schema.js'),
+  "inventory": () => import('./inventory/graphql/schema.js'),
+  "messaging": () => import('./messaging/graphql/schema.js'),
+  "notifications": () => import('./notifications/graphql/schema.js'),
+  "offers": () => import('./offers/graphql/schema.js'),
+  "orders": () => import('./orders/graphql/schema.js'),
+  "payments": () => import('./payments/graphql/schema.js'),
+  "promotions": () => import('./promotions/graphql/schema.js'),
+  "reports": () => import('./reports/graphql/schema.js'),
+  "returns": () => import('./returns/graphql/schema.js'),
+  "reviews": () => import('./reviews/graphql/schema.js'),
+  "search": () => import('./search/graphql/schema.js'),
+  "sellers": () => import('./sellers/graphql/schema.js'),
+  "settings": () => import('./settings/graphql/schema.js'),
+  "shipping": () => import('./shipping/graphql/schema.js'),
+  "support": () => import('./support/graphql/schema.js'),
+  "trust": () => import('./trust/graphql/schema.js'),
+  "wallet": () => import('./wallet/graphql/schema.js'),
+  "warehouse": () => import('./warehouse/graphql/schema.js'),
+  "wishlist": () => import('./wishlist/graphql/schema.js'),
+  "workqueues": () => import('./workqueues/graphql/schema.js'),
+};

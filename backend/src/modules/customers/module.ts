@@ -1,7 +1,6 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/customers.js';
 import { resolvers } from './graphql/resolvers.js';
-import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
@@ -20,7 +19,6 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
-  graphql: typeDefs,
   register(ctx) {
     // Address validation provider: the deterministic dev adapter in development and tests; none is wired for production yet (format rules only)
     const addressProvider = ctx.config.devTokens ? devAddressProvider : undefined;

@@ -1,7 +1,6 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/settings.js';
 import { resolvers } from './graphql/resolvers.js';
-import { typeDefs } from './graphql/schema.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
@@ -19,7 +18,6 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
-  graphql: typeDefs,
   async register(ctx) {
     const service = new SettingsService({
       repo: new SettingsRepository(ctx.mongo),

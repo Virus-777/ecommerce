@@ -1,7 +1,6 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/warehouse.js';
 import { resolvers } from './graphql/resolvers.js';
-import { typeDefs } from './graphql/schema.js';
 import { adminRoutes } from './http/admin.js';
 import { WarehouseRepository } from './repository.js';
 import { WarehouseService } from './service.js';
@@ -17,7 +16,6 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
-  graphql: typeDefs,
   register(ctx) {
     const service = new WarehouseService({ repo: new WarehouseRepository(ctx.mongo), ctx });
     ctx.provide(service);

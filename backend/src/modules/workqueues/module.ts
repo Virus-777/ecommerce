@@ -1,7 +1,6 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/workqueues.js';
 import { resolvers } from './graphql/resolvers.js';
-import { typeDefs } from './graphql/schema.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { WorkqueuesRepository } from './repository.js';
@@ -18,7 +17,6 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
-  graphql: typeDefs,
   register(ctx) {
     const service = new WorkqueuesService({ repo: new WorkqueuesRepository(ctx.mongo), ctx });
     ctx.provide(service);

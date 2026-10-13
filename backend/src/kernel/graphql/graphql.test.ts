@@ -42,6 +42,13 @@ const fragment = /* GraphQL */ `
   }
 `;
 
+/** A module that is off: its fragment is in the schema, its fields answer null */
+const offFragment = /* GraphQL */ `
+  extend type DemoItem {
+    saved: Boolean @source(module: "off", fn: "isSaved")
+  }
+`;
+
 const seen: { paging?: unknown; limit?: unknown; previewLimit?: unknown }[] = [];
 const node = (n: number): { id: string; child: unknown } => ({ id: String(n), child: n < 20 ? node(n + 1) : null });
 const resolvers: ModuleResolvers = {
@@ -82,7 +89,7 @@ async function demoApp(o: { persistedOnly?: boolean; limits?: GraphQLKernelOptio
     customerIdOf: async () => null,
   } as unknown as AuthChain;
   const config: Config = { ...loadConfig({ NODE_ENV: 'test' }), graphqlPersistedOnly: o.persistedOnly ?? false };
-  await registerGraphQL(app, { config, baseTypeDefs, fragments: [{ module: 'demo', typeDefs: fragment }], resolvers: new Map([['demo', resolvers]]), auth, persisted, limits: o.limits });
+  await registerGraphQL(app, { config, baseTypeDefs, fragments: [{ module: 'demo', typeDefs: fragment }, { module: 'off', typeDefs: offFragment }], resolvers: new Map([['demo', resolvers]]), auth, persisted, limits: o.limits, enabledModules: new Set(['demo']) });
   await app.ready();
   return app;
 }
@@ -217,6 +224,13 @@ describe('GraphQL kernel', () => {
       expect(itemOf(await post(app, 'admin', q, 'staff', 'demo.contact.view'))).toEqual(plain);
       expect(itemOf(await post(app, 'seller', q, 'seller', 'demo.contact.view'))).toEqual(plain);
       expect(itemOf(await post(app, 'store', q, 'customer'))).toEqual(plain);
+    });
+  });
+
+  describe('modules that are off', () => {
+    it('keep their fields in the schema, answering null, so screen queries that select them still run', async () => {
+      const res = await post(app, 'store', { query: '{ demoItems { items { name saved } } }' });
+      expect(res.json()).toEqual({ data: { demoItems: { items: [{ name: 'One', saved: null }] } } });
     });
   });
 

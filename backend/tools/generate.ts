@@ -177,6 +177,17 @@ import type { ModuleDefinition } from '../kernel/module-system/index.js';
 export const moduleLoaders: Record<string, () => Promise<{ default: ModuleDefinition }>> = {
 ${present.map((n) => `  ${JSON.stringify(n)}: () => import('./${n}/module.js'),`).join('\n')}
 };
+
+/**
+ * Every module's GraphQL fragment, on or off: the schemas always have every field, and a field of a module that is
+ * off answers null (so screen queries stay valid while wishlist or wallet are off).
+ */
+export const graphqlFragments: Record<string, () => Promise<{ typeDefs: string }>> = {
+${present
+  .filter((n) => generated.has(join(modulesDir, n, 'graphql', 'schema.ts')))
+  .map((n) => `  ${JSON.stringify(n)}: () => import('./${n}/graphql/schema.js'),`)
+  .join('\n')}
+};
 `,
   );
 }

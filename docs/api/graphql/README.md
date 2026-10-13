@@ -47,7 +47,7 @@ docs/api/graphql/
 
 | Concern | Design |
 |---|---|
-| Server | **Mercurius** (Fastify's GraphQL plugin), one instance per area, composed at startup from enabled modules' fragments and resolvers |
+| Server | **Mercurius** (Fastify's GraphQL plugin), one instance per area, composed at startup from every module's fragment and the enabled modules' resolvers (a field of a module that is off answers null, so screen queries stay valid) |
 | N+1 queries | Every `@source` resolver is batched per request (DataLoader / Mercurius loaders), e.g. one call for all `OrderGroup.shipments` in an order |
 | Limits | See [Limits](#limits): depth 9, cost 1,500, page size 100, 10 s per request |
 | Persisted queries | Production apps send the **query id** from `manifest.json`, never free text (the store and seller endpoints only accept known queries in production). Staff tools may send ad-hoc queries in admin. Both request formats below are accepted |

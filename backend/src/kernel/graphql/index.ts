@@ -177,7 +177,14 @@ function masking(inner: GraphQLFieldResolver<any, GraphQLContext>, permission: s
   };
 }
 
-export function wireResolvers(schema: GraphQLSchema, resolvers: Map<string, ModuleResolvers>, launchPhase: number, limits: Pick<GraphQLLimits, 'maxPageSize' | 'timeoutMs'> = LIMITS) {
+/** enabled: the modules running; a field whose @source module is off answers null (every module's fragment is in the schema) */
+export function wireResolvers(
+  schema: GraphQLSchema,
+  resolvers: Map<string, ModuleResolvers>,
+  launchPhase: number,
+  limits: Pick<GraphQLLimits, 'maxPageSize' | 'timeoutMs'> = LIMITS,
+  enabled?: ReadonlySet<string>,
+) {
   const unresolved: string[] = [];
   for (const type of Object.values(schema.getTypeMap())) {
     if (!isObjectType(type) || type.name.startsWith('__')) continue;
@@ -193,6 +200,10 @@ export function wireResolvers(schema: GraphQLSchema, resolvers: Map<string, Modu
       // every Money in every module gets its display text here, so a resolver can return the REST { amount, currency }
       if (type.name === 'Money' && field.name === 'formatted') field.resolve = (m: Money & { formatted?: string | null }) => m.formatted ?? format(m);
       const module = directiveArg(node, 'source', 'module') as string | undefined;
+      if (module && enabled && !enabled.has(module)) {
+        field.resolve = () => null;
+        continue;
+      }
       if (module) {
         const fn = directiveArg(node, 'source', 'fn') as string;
         const own = resolvers.get(module)?.[type.name]?.[field.name];
@@ -301,6 +312,8 @@ export interface GraphQLKernelOptions {
   limits?: Partial<GraphQLLimits>;
   /** Persisted queries per area, id → query text (default: the generated manifests) */
   persisted?: Record<GraphQLArea, Record<string, string>>;
+  /** The modules running: fragments of other modules stay in the schema, their fields answer null (default: all) */
+  enabledModules?: ReadonlySet<string>;
 }
 
 export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOptions) {
@@ -313,7 +326,7 @@ export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOpti
     const problems = validateSchema(schema);
     if (problems.length) throw new Error(`GraphQL ${area} schema is invalid with the enabled modules:\n${problems.map((p) => `  - ${p.message}`).join('\n')}`);
     if (area === 'admin') assertAdminRootAuth(schema);
-    const { unresolved } = wireResolvers(schema, o.resolvers, o.config.launchPhase, limits);
+    const { unresolved } = wireResolvers(schema, o.resolvers, o.config.launchPhase, limits, o.enabledModules);
     out[area] = { schema, dropped, unresolved };
 
     const persisted = o.persisted?.[area] ?? Object.fromEntries(Object.entries(persistedQueries[area]).map(([id, q]) => [id, q.query]));

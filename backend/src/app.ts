@@ -30,7 +30,7 @@ import { migrateMongo, mongoUnits } from './kernel/mongo/schema.js';
 import { bootModules, type BootResult } from './kernel/module-system/boot.js';
 import { allSpecs, loadDefinitions } from './kernel/module-system/loader.js';
 import { enabledModules } from './modules.config.js';
-import { moduleLoaders } from './modules/index.js';
+import { graphqlFragments, moduleLoaders } from './modules/index.js';
 import * as common from './spec/common.js';
 import { baseTypeDefs } from './spec/graphql.js';
 
@@ -198,7 +198,9 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
   const graphql = await registerGraphQL(app, {
     config,
     baseTypeDefs,
-    fragments: defs.flatMap((d) => (d.graphql ? [{ module: d.spec.name, typeDefs: d.graphql }] : [])),
+    // every module's fragment, on or off: screen queries stay valid and fields of modules that are off answer null
+    fragments: await Promise.all(Object.entries(graphqlFragments).map(async ([module, load]) => ({ module, typeDefs: (await load()).typeDefs }))),
+    enabledModules: new Set(defs.map((d) => d.spec.name)),
     resolvers: boot.resolvers,
     auth,
   });

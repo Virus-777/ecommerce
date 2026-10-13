@@ -37,7 +37,7 @@ export function scaffoldFiles({ mod, common, types, hasFragment, sourceFields }:
     ];
     return `import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/${n}.js';
-${hasFragment ? `import { resolvers } from './graphql/resolvers.js';\nimport { typeDefs } from './graphql/schema.js';\n` : ''}${areas.map((a) => `import { ${a}Routes } from './http/${a}.js';`).join('\n')}
+${hasFragment ? `import { resolvers } from './graphql/resolvers.js';\n` : ''}${areas.map((a) => `import { ${a}Routes } from './http/${a}.js';`).join('\n')}
 import { ${P}Repository } from './repository.js';
 import { schemas } from './schema.js';
 import { ${P}Service } from './service.js';
@@ -51,7 +51,7 @@ import { ${P}Service } from './service.js';
 export default defineModule({
   spec,
   version: '0.1.0',
-  schemas,${hasFragment ? '\n  graphql: typeDefs,' : ''}
+  schemas,
   register(ctx) {
     const service = new ${P}Service({ repo: new ${P}Repository(ctx.mongo), ctx });
     ctx.provide(service);

@@ -1,7 +1,6 @@
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/checkout.js';
 import { resolvers } from './graphql/resolvers.js';
-import { typeDefs } from './graphql/schema.js';
 import { storeRoutes } from './http/store.js';
 import { adminRoutes } from './http/admin.js';
 import { CheckoutRepository } from './repository.js';
@@ -19,7 +18,6 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
-  graphql: typeDefs,
   register(ctx) {
     // sales tax: the launch rate table behind the TaxProvider port; a tax service adapter plugs in here later
     const service = new CheckoutService({ repo: new CheckoutRepository(ctx.mongo), ctx, tax: createDevTaxProvider() });
