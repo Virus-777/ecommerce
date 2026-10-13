@@ -357,8 +357,6 @@ describe('special intake rules', () => {
 });
 
 describe('kinds raised by other modules and the queue of each kind', () => {
-  const by = { kind: 'system' as const, name: 'test' };
-
   it('restriction reviews raised by sellers land in sellers.restrictions and close when the restriction is lifted (not when it changes)', async () => {
     const restrictionId = newId();
     const sellerId = newId();

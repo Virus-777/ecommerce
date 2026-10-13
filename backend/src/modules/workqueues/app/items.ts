@@ -7,13 +7,15 @@
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
+import { isDuplicateKey } from '../../../kernel/mongo/index.js';
 import type { Actor, Money, Page } from '../../../spec/common.js';
 import type { EscalationStep, SellerTask, WorkItem, WorkItemNote, WorkSubject } from '../../../spec/workqueues.js';
 import { ACTIVE_STATES, bump, CLOSED_STATES, DEDUPE_PREFIX_QUEUES, isActive, isArea, KIND_QUEUES, KINDS as ALL_KINDS, priorityRank, PRIORITIES, sellerScreen, type Kind, type Priority } from '../domain/catalog.js';
 import type { Link } from '../domain/intake.js';
 import { deadlineState, durationLabel, nextStep, parseDuration, stepTarget } from '../domain/rules.js';
 import { workItemMachine } from '../domain/state-machines.js';
-import type { ItemQuery, ItemRow, ItemSort, Match, QueueRow, WorkqueuesRepository } from '../ports.js';
+import type { ItemQuery, ItemRow, ItemSort, Match, QueueRow } from '../ports.js';
+import type { WorkqueuesRepository } from '../repository.js';
 import { SYSTEM, type By, type Core, type Viewer } from './core.js';
 
 const KINDS = new Set<string>(ALL_KINDS);
@@ -186,7 +188,7 @@ export class Items {
         }
         // two raises of the same key at once: the unique index refuses the second insert (MongoDB duplicate key,
         // which aborts that transaction); run it again and refresh instead
-        if (attempt < 3 && (err as { code?: unknown })?.code === 11000) continue;
+        if (attempt < 3 && isDuplicateKey(err)) continue;
         throw err;
       }
     }

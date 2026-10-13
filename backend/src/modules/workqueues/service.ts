@@ -15,7 +15,7 @@ import { Routines } from './app/routines.js';
 import { Sweep } from './app/sweep.js';
 import { AREAS, type Priority } from './domain/catalog.js';
 import { addDays, ageLabel } from './domain/rules.js';
-import type { WorkqueuesRepository } from './ports.js';
+import type { WorkqueuesRepository } from './repository.js';
 
 export interface WorkqueuesServiceDeps {
   repo: WorkqueuesRepository;
@@ -49,7 +49,7 @@ const EXPORT_COLUMNS = [
 ];
 
 /**
- * Work queues use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Work queues use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
  * Each method maps to a publicApi function, a consumed event or a job in docs/api/spec/modules/workqueues.json.
  * The work is done by the collaborators in app/: items (raise, close, people actions, lists), intake
  * (the event table), queues (definitions, counts, coverage, dashboard), sweep (deadlines, escalation,

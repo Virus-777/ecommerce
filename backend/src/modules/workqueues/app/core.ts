@@ -1,5 +1,5 @@
 /**
- * Shared context of the workqueues use cases: ports, settings, the install seed, lookups into
+ * Shared context of the workqueues use cases: the repository, settings, the install seed, lookups into
  * access (staff names, roles, away state; cached briefly and dropped on access events), the caller's
  * view (which queues and items they reach), row â†’ API mapping, events and audit.
  */
@@ -17,7 +17,8 @@ import { isActive, isPlaceholder, PLACEHOLDER_BACKUP, PLACEHOLDER_LEAD, QUEUE_SE
 import { intakeQueueKeys, intakeRuleDocs } from '../domain/intake.js';
 import { deadlineState, escalationLabel } from '../domain/rules.js';
 import { DEFAULT_TEMPLATES } from '../domain/routine-defaults.js';
-import type { ItemEventRow, ItemNoteRow, ItemRow, ItemVisibility, QueueRow, WorkqueuesRepository } from '../ports.js';
+import type { ItemEventRow, ItemNoteRow, ItemRow, ItemVisibility, QueueRow } from '../ports.js';
+import type { WorkqueuesRepository } from '../repository.js';
 
 export const SYSTEM: Actor = { kind: 'system', name: 'Work queues' };
 

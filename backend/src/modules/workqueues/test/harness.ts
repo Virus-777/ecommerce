@@ -126,10 +126,12 @@ export class World {
 
 export const MODULES = withDependencies(['workqueues', 'access', 'identity', 'audit', 'settings', 'notifications', 'reports']);
 
-export async function boot(opts: { clock?: ReturnType<typeof fixedClock> } = {}) {
+export async function boot() {
   const world = new World();
-  const clock = opts.clock ?? fixedClock(new Date());
+  const clock = fixedClock(new Date());
   const app: FastifyInstance = await buildTestApp({ modules: MODULES, clock, config: { launchPhase: 4, rateLimits: false }, apiStubs: world.stubs() as never });
+  // now, not the time before the boot: tokens signed after a slow boot would otherwise be issued in the app's future
+  clock.set(new Date());
   const service = app.kernel.boot.apis.get('workqueues') as WorkqueuesService;
   return { app, world, clock, service };
 }

@@ -1,9 +1,4 @@
-/**
- * What the workqueues service needs from the outside world, database-agnostic.
- * The MongoDB adapter is repository.ts.
- */
-import type { PageRequest } from '../../kernel/lib/pagination.js';
-import type { Page } from '../../spec/common.js';
+/** Row types and query shapes the workqueues repository and service share. */
 import type { WorkqueuesDb } from '../../spec/workqueues.js';
 
 export type QueueRow = WorkqueuesDb['queues'];
@@ -63,95 +58,5 @@ export interface OldestRow {
 export interface Match {
   type: string;
   id: string;
-}
-
-/** Persistence for this module's own tables: workqueues.queues, workqueues.intake_rules, workqueues.items, workqueues.item_events, workqueues.item_notes, workqueues.saved_filters, workqueues.day_end_reviews, workqueues.routine_templates, workqueues.routine_checks, workqueues.daily_counts. */
-export interface WorkqueuesRepository {
-  transaction<T>(fn: (repo: WorkqueuesRepository) => Promise<T>): Promise<T>;
-  /** Inbox (ctx.mongo.claim): true the first time this key is claimed; commits with the transaction it runs in */
-  claim(key: string): Promise<boolean>;
-
-  /* queues */
-  listQueues(): Promise<QueueRow[]>;
-  getQueue(key: string, opts?: { forUpdate?: boolean }): Promise<QueueRow | null>;
-  /** Insert unless the key exists; true when inserted */
-  insertQueue(row: QueueRow): Promise<boolean>;
-  updateQueue(key: string, patch: Partial<QueueRow>): Promise<QueueRow>;
-
-  /* intake rules */
-  upsertIntakeRules(rows: IntakeRuleRow[]): Promise<void>;
-  /** Rules the intake table no longer produces (an event re-routed to another queue) stop being active; returns how many */
-  deactivateIntakeRulesExcept(ids: string[]): Promise<number>;
-  listIntakeRules(filter?: { queueKey?: string }): Promise<IntakeRuleRow[]>;
-
-  /* items */
-  getItem(id: string, opts?: { forUpdate?: boolean }): Promise<ItemRow | null>;
-  activeByDedupe(dedupeKey: string, opts?: { forUpdate?: boolean }): Promise<ItemRow | null>;
-  latestClosedByDedupe(dedupeKey: string): Promise<ItemRow | null>;
-  insertItem(row: ItemRow): Promise<ItemRow>;
-  updateItem(id: string, patch: Partial<ItemRow>): Promise<ItemRow>;
-  listItems(query: ItemQuery, page: PageRequest, sort: ItemSort): Promise<Page<ItemRow>>;
-  /** Rows for exports: keyset on (opened_at, id) */
-  scanItems(query: ItemQuery, after: { openedAt: string; id: string } | null, limit: number): Promise<ItemRow[]>;
-  countItems(query: ItemQuery): Promise<number>;
-  /** Active items of these kinds whose subject or a related subject is one of `matches` */
-  activeMatching(kinds: string[], matches: Match[]): Promise<ItemRow[]>;
-  /** Items about a subject (subject or related subject; for sellers also seller_id) */
-  itemsAbout(type: string, id: string, opts: { activeOnly: boolean }): Promise<ItemRow[]>;
-  /** Active items with due_at at or before `until`, or whose stored deadline state is no longer on_time, oldest deadline first */
-  sweepBatch(until: Date, afterDue: { dueAt: Date; id: string } | null, limit: number): Promise<ItemRow[]>;
-  /** Active items marked due_soon/overdue whose deadline moved past `until` */
-  staleDeadlineStates(until: Date): Promise<ItemRow[]>;
-  queueCounts(now: Date, dueSoonMinutes: number): Promise<QueueCountRow[]>;
-  oldestOpen(): Promise<OldestRow[]>;
-  /** Active items assigned to the staff member, per queue */
-  assignedCounts(staffId: string): Promise<{ queue_key: string; n: number }[]>;
-  sellerTaskCounts(sellerId: string): Promise<{ kind: string; n: number }[]>;
-  /** Items opened / resolved in a time range, per queue (daily counts) */
-  openedBetween(from: Date, to: Date): Promise<{ queue_key: string; n: number }[]>;
-  resolvedBetween(from: Date, to: Date): Promise<{ queue_key: string; opened_at: Date; resolved_at: Date }[]>;
-  /** Mark closed items resolved before `before` archived (archived_at = at); rows, notes and history stay. Returns how many (at most `limit`) */
-  archiveClosedBefore(before: Date, at: Date, limit: number): Promise<number>;
-
-  /* history and notes */
-  insertEvent(row: ItemEventRow): Promise<void>;
-  eventsOf(itemId: string): Promise<ItemEventRow[]>;
-  eventsOfItems(itemIds: string[]): Promise<ItemEventRow[]>;
-  hasEvent(itemId: string, kind: string): Promise<boolean>;
-  insertNote(row: ItemNoteRow): Promise<void>;
-  notesOf(itemId: string): Promise<ItemNoteRow[]>;
-  notesOfItems(itemIds: string[]): Promise<ItemNoteRow[]>;
-
-  /* saved filters */
-  getSavedFilter(id: string): Promise<SavedFilterRow | null>;
-  listSavedFilters(staffId: string): Promise<SavedFilterRow[]>;
-  insertSavedFilter(row: SavedFilterRow): Promise<void>;
-  updateSavedFilter(id: string, patch: Partial<SavedFilterRow>): Promise<SavedFilterRow>;
-  deleteSavedFilter(id: string): Promise<void>;
-
-  /* day-end reviews */
-  reviewByDate(date: string, opts?: { forUpdate?: boolean }): Promise<DayEndReviewRow | null>;
-  getReview(id: string, opts?: { forUpdate?: boolean }): Promise<DayEndReviewRow | null>;
-  /** Insert unless the date exists; returns the row for the date */
-  insertReview(row: DayEndReviewRow): Promise<DayEndReviewRow>;
-  updateReview(id: string, patch: Partial<DayEndReviewRow>): Promise<DayEndReviewRow>;
-  listReviews(filter: { from?: string; to?: string; state?: string }, page: PageRequest): Promise<Page<DayEndReviewRow>>;
-
-  /* routines */
-  listTemplates(opts?: { activeOnly?: boolean }): Promise<RoutineTemplateRow[]>;
-  countTemplates(): Promise<number>;
-  upsertTemplate(row: RoutineTemplateRow): Promise<void>;
-  deactivateTemplatesExcept(ids: string[]): Promise<void>;
-  checksOn(date: string): Promise<RoutineCheckRow[]>;
-  getCheck(id: string, opts?: { forUpdate?: boolean }): Promise<RoutineCheckRow | null>;
-  /** Insert unless (template, date) exists */
-  insertCheck(row: RoutineCheckRow): Promise<void>;
-  updateCheck(id: string, patch: Partial<RoutineCheckRow>): Promise<RoutineCheckRow>;
-  /** not_done/in_progress checks of earlier dates, or due before `dueBefore` → late; returns how many */
-  markChecksLate(opts: { beforeDate?: string; dueBefore?: Date }): Promise<number>;
-
-  /* daily counts */
-  upsertDailyCounts(rows: DailyCountRow[]): Promise<void>;
-  dailyCounts(date: string): Promise<DailyCountRow[]>;
 }
 
