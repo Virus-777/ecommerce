@@ -55,7 +55,7 @@ declare module 'fastify' {
 /** Response headers a browser app needs to read across origins */
 export const EXPOSED_HEADERS = 'WWW-Authenticate, X-Request-Id, Idempotent-Replayed, Retry-After';
 /** Request headers the apps may send */
-export const ALLOWED_HEADERS = 'authorization, content-type, idempotency-key, x-app-proof, x-step-up-code, x-client, x-request-id, x-requested-with';
+export const ALLOWED_HEADERS = 'authorization, content-type, idempotency-key, x-app-proof, x-client, x-request-id, x-requested-with';
 
 function areaOf(url: string): AppArea | undefined {
   const m = /^\/(?:api|graphql)\/(store|seller|admin|public)\b/.exec(url);

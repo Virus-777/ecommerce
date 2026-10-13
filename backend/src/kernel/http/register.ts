@@ -101,7 +101,7 @@ function description(d: EndpointDef) {
       `**Also needs:** ${d.permissionWhen
         .map((r) => `\`${r.permission}\` when ${Object.entries(r.if).map(([k, v]) => `${k} ${v.startsWith('!') ? `is not the caller's own (${v.slice(1)})` : `= ${v}`}`).join(' and ')}`)
         .join('; ')}`,
-    d.stepUp && `**Step-up:** ${d.stepUp.kind === 'reauth' ? 'single-use re-auth token in the body' : '2-step code in X-Step-Up-Code'} (purpose \`${d.stepUp.purpose}\`)`,
+    d.stepUp && `**Step-up:** single-use re-auth token in the body (purpose \`${d.stepUp.purpose}\`)`,
     d.sellerContext === 'optional' && '**Seller context:** optional (works before a seller is chosen).',
     d.approval && `**Approval:** ${d.approval}`,
     d.idempotent && '**Idempotent:** send an Idempotency-Key.',
@@ -128,7 +128,6 @@ export function buildRouteSchema(r: EndpointRegistration) {
   else if (query) schema.querystring = query;
   const headers: Record<string, z.ZodType> = {};
   if (d.idempotent) headers['idempotency-key'] = z.string().min(1).max(255).describe(common.headers['Idempotency-Key']);
-  if (d.stepUp?.kind === 'code') headers['x-step-up-code'] = z.string().min(1).max(20).describe(common.headers['X-Step-Up-Code']);
   if (Object.keys(headers).length) schema.headers = z.looseObject(headers);
   if (d.body) schema.body = d.body();
   // a binary body is the raw request bytes (a Buffer), documented as application/octet-stream

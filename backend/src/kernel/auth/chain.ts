@@ -4,7 +4,7 @@
  *
  *   every URL (app onRequest)   IP rate limit → authenticate (token + revocation, and for staff: fresh revocations and session
  *                               liveness / idle timeout; app proof; file-link signature; defer for refresh and webhooks) → X-Client version gate
- *   each endpoint (onRequest)   launch phase → caller rate limit → audience → caller kind → seller context → permission → staff 2-step
+ *   each endpoint (onRequest)   launch phase → caller rate limit → audience → caller kind → seller context → permission
  *   (preValidation)             refresh token (+ Origin and X-Requested-With for the cookie) and its per-session limit · webhook
  *                               signature + replay check + per-provider limit · rate-limit classes · step-up proof present
  *   (preHandler)                conditional permissions → [idempotency, in register.ts] → step-up proof verified
@@ -292,9 +292,8 @@ export class AuthChain {
     if (d.permission && !(await this.can(auth, d.permission))) {
       throw this.k.ownerOnly.has(d.permission) && auth.sellerAccess ? new AppError('OWNER_ONLY') : forbidden(d.permission);
     }
-    if (d.area === 'admin' && !p.twoStepVerifiedAt) {
-      throw new AppError('STEP_UP_REQUIRED', 'Staff sessions need 2-step verification', { kind: 'two-step-sign-in' });
-    }
+    // no 2-step check for staff: they sign in with email and password (owner decision 2026-10-14) and confirm
+    // sensitive actions with a re-auth token (stepUp)
   }
 
   async memberAccess(claims: AccessClaims | undefined, p: Principal): Promise<SellerMemberAccess | null> {
@@ -359,7 +358,7 @@ export class AuthChain {
         if (key) await enforce(k.limits, `${rateClass}:${key}`, rule.limit);
       }
       // a missing step-up proof is a step-up problem (403), not a validation one: checked before the schema
-      if (d.stepUp && !stepUpProof(d.stepUp.kind, request)) throw stepUpRequired(d.stepUp);
+      if (d.stepUp && !stepUpProof(request)) throw stepUpRequired(d.stepUp);
     };
 
     const preHandlerBefore = async (request: FastifyRequest) => {
@@ -373,16 +372,12 @@ export class AuthChain {
     const preHandlerAfter = async (request: FastifyRequest) => {
       if (!d.stepUp) return;
       const p = request.auth?.principal;
-      const proof = stepUpProof(d.stepUp.kind, request);
+      const proof = stepUpProof(request);
       if (!p || !proof) throw stepUpRequired(d.stepUp);
-      if (d.stepUp.kind === 'reauth') {
-        // single use: claimed here, so a second request with the same token is refused even while this one runs
-        if (!(await k.authorities.verifyReauthToken(p, proof, d.stepUp.purpose))) throw stepUpRequired(d.stepUp);
-        if (!(await k.authorities.consumeReauthToken(proof))) throw stepUpRequired(d.stepUp);
-        request.reauthToken = proof; // put back if the request fails
-      } else if (!(await k.authorities.verifyStepUpCode(p, proof))) {
-        throw stepUpRequired(d.stepUp);
-      }
+      // single use: claimed here, so a second request with the same token is refused even while this one runs
+      if (!(await k.authorities.verifyReauthToken(p, proof, d.stepUp.purpose))) throw stepUpRequired(d.stepUp);
+      if (!(await k.authorities.consumeReauthToken(proof))) throw stepUpRequired(d.stepUp);
+      request.reauthToken = proof; // put back if the request fails
     };
 
     // Both run before the response leaves, so an immediate retry already sees them: a failed request gives its
@@ -466,9 +461,9 @@ export class AuthChain {
   }
 }
 
-/** The step-up proof a request carries: reauthToken in the body, or the X-Step-Up-Code header */
-function stepUpProof(kind: 'reauth' | 'code', request: FastifyRequest): string | undefined {
-  const v = kind === 'reauth' ? (request.body as { reauthToken?: unknown } | undefined)?.reauthToken : request.headers['x-step-up-code'];
+/** The step-up proof a request carries: the re-auth token in the body */
+function stepUpProof(request: FastifyRequest): string | undefined {
+  const v = (request.body as { reauthToken?: unknown } | undefined)?.reauthToken;
   return typeof v === 'string' && v ? v : undefined;
 }
 

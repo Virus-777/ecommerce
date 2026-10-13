@@ -50,7 +50,7 @@ const endpoints = defineEndpoints({
   security: { area: 'store', method: 'GET', path: '/security/{id}', auth: 'account', scope: 'public', summary: 'Any signed-in account', params: () => z.object({ id: z.string() }), response: () => z.object({ ok: z.boolean() }), status: 200, phase: 1 },
   changeBank: { area: 'seller', method: 'POST', path: '/bank-account', auth: 'seller', scope: 'own-seller', stepUp: { kind: 'reauth', purpose: 'payout-account' }, idempotent: true, summary: 'Idempotent, fresh proof', body: () => z.object({ reauthToken: z.string().optional(), fail: z.boolean().optional() }), response: null, status: 204, phase: 1 },
   closeShop: { area: 'seller', method: 'POST', path: '/closure', auth: 'seller', scope: 'own-seller', stepUp: { kind: 'reauth', purpose: 'seller-closure' }, summary: 'Proof required by the body schema', body: () => z.object({ reauthToken: z.string(), reason: z.string() }), response: null, status: 204, phase: 1 },
-  release: { area: 'admin', method: 'POST', path: '/payouts/{id}/release', auth: 'staff', scope: 'staff', stepUp: { kind: 'code', purpose: 'payout-release' }, summary: 'Fresh 2-step code', params: () => z.object({ id: z.uuid() }), response: null, status: 204, phase: 1 },
+  release: { area: 'admin', method: 'POST', path: '/payouts/{id}/release', auth: 'staff', scope: 'staff', stepUp: { kind: 'reauth', purpose: 'payout-release' }, summary: 'Staff confirm with the password', params: () => z.object({ id: z.uuid() }), body: () => z.object({ reauthToken: z.string().optional() }), response: null, status: 204, phase: 1 },
   exportItems: { area: 'admin', method: 'POST', path: '/items/exports', auth: 'staff', scope: 'staff', summary: 'Create an export', response: null, status: 202, phase: 1 },
   sendCode: { area: 'public', method: 'POST', path: '/codes', auth: 'visitor', scope: 'public', rateLimit: 'code', summary: 'Rate-limited class', response: null, status: 204, phase: 1 },
 });
@@ -228,10 +228,9 @@ describe('caller checks', () => {
     expect((await app.inject({ method: 'POST', url, headers: auth(callers.staff(['demo.items.review'])) })).statusCode).toBe(204);
   });
 
-  it('needs 2-step verification for staff', async () => {
+  it('lets staff in without 2-step verification (they sign in with email and password)', async () => {
     const res = await app.inject({ method: 'POST', url: `/api/admin/demo/items/${newId()}/approve`, headers: auth(callers.staff(undefined, { twoStepAt: undefined })) });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'two-step-sign-in' } });
+    expect(res.statusCode).toBe(204);
   });
 
   it('asks for the extra permission only when the request reaches further', async () => {
@@ -296,13 +295,14 @@ describe('caller checks', () => {
     const ok = await app.inject({ method: 'POST', url: '/api/seller/demo/closure', headers: auth(callers.seller()), payload: { reason: 'Retiring', reauthToken: 'dev-reauth.seller-closure' } });
     expect(ok.statusCode).toBe(204);
 
+    // staff too: a re-auth token for the endpoint's purpose (the retired X-Step-Up-Code header proves nothing)
     const url = `/api/admin/demo/payouts/${newId()}/release`;
-    for (const code of [undefined, '', '999999']) {
-      const res = await app.inject({ method: 'POST', url, headers: { ...auth(callers.staff()), ...(code === undefined ? {} : { 'x-step-up-code': code }) } });
-      expect(res.statusCode, String(code)).toBe(403);
-      expect(res.json().error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'code', purpose: 'payout-release' } });
+    for (const reauthToken of [undefined, '', 'dev-reauth.seller-closure']) {
+      const res = await app.inject({ method: 'POST', url, headers: { ...auth(callers.staff()), 'x-step-up-code': '000000' }, payload: reauthToken === undefined ? {} : { reauthToken } });
+      expect(res.statusCode, String(reauthToken)).toBe(403);
+      expect(res.json().error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'payout-release' } });
     }
-    expect((await app.inject({ method: 'POST', url, headers: { ...auth(callers.staff()), 'x-step-up-code': '000000' } })).statusCode).toBe(204);
+    expect((await app.inject({ method: 'POST', url, headers: auth(callers.staff()), payload: { reauthToken: 'dev-reauth.payout-release' } })).statusCode).toBe(204);
   });
 
   it('lets a visitor shop as a guest, scoped to the visitor session', async () => {

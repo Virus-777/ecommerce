@@ -23,7 +23,6 @@ export interface Authorities {
   consumeReauthToken(token: string): Promise<boolean>;
   /** The claiming request failed: the token can be used again */
   releaseReauthToken(token: string): Promise<void>;
-  verifyStepUpCode(p: Principal, code: string): Promise<boolean>;
   revocationsSince(cursor?: string): Promise<Revocations | null>;
   customerIdOf(accountId: string): Promise<string | null>;
   /** Admin requests: whether the staff session is live (and record the activity); null when identity can't answer */
@@ -54,7 +53,6 @@ export function moduleAuthorities(lookup: Lookup): Authorities {
     verifyReauthToken: (p, token, purpose) => ask(false, () => lookup('identity')?.verifyReauthToken(p as never, token, purpose)),
     consumeReauthToken: (token) => ask(false, () => lookup('identity')?.consumeReauthToken(token)),
     releaseReauthToken: (token) => ask(undefined, () => lookup('identity')?.releaseReauthToken(token)),
-    verifyStepUpCode: (p, code) => ask(false, () => (p.accountId ? lookup('identity')?.verifyStepUp(p.accountId, { code }) : undefined)),
     revocationsSince: (cursor) =>
       ask(null, async () => {
         const r = await lookup('identity')?.revocationsSince(cursor);
@@ -78,7 +76,7 @@ export function moduleAuthorities(lookup: Lookup): Authorities {
 
 /**
  * Development and tests only: dev-key tokens carry their own permissions and owner flag, and the
- * fixed proofs `dev-reauth.<purpose>` and step-up code `000000` are accepted. Everything else goes to `next`.
+ * fixed proofs `dev-reauth.<purpose>` are accepted. Everything else goes to `next`.
  */
 export function devAuthorities(next: Authorities, claimsOf: (p: Principal) => AccessClaims | undefined): Authorities {
   return {
@@ -95,9 +93,6 @@ export function devAuthorities(next: Authorities, claimsOf: (p: Principal) => Ac
     },
     async releaseReauthToken(token) {
       if (!token.startsWith('dev-reauth.')) await next.releaseReauthToken(token);
-    },
-    async verifyStepUpCode(p, code) {
-      return (claimsOf(p)?.dev !== undefined && code === '000000') || next.verifyStepUpCode(p, code); // dev-key tokens only
     },
   };
 }

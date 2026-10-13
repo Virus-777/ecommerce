@@ -21,7 +21,7 @@ export function createServer(config: Config): FastifyInstance {
         : {
             level: config.logLevel,
             // tokens, proofs and cookies never reach the logs
-            redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-app-proof"]', 'req.headers["x-step-up-code"]'],
+            redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-app-proof"]'],
             ...(config.env === 'development' ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } } } : {}),
           },
     genReqId: (req) => {

@@ -344,7 +344,7 @@ export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOpti
     const persisted = o.persisted?.[area] ?? Object.fromEntries(Object.entries(persistedQueries[area]).map(([id, q]) => [id, q.query]));
 
     await app.register(async (scope) => {
-      // the token was verified by the app-level middleware; here: audience, caller kind, seller context, staff 2-step
+      // the token was verified by the app-level middleware; here: audience, caller kind, seller context
       scope.addHook('preHandler', async (request) => {
         await o.auth.checkCaller(request, { area, auth: AREA_AUTH[area] });
       });

@@ -1,7 +1,7 @@
 /**
  * Development and test tokens: the same JWT format as identity's tokens, signed with the dev key.
  * Never accepted in production (config refuses DEV_TOKENS there). Every dev token carries a `dev` claim
- * (honoured only on dev-key tokens), which is what makes the dev step-up and re-auth proofs apply.
+ * (honoured only on dev-key tokens), which is what makes the dev re-auth proofs apply.
  */
 import { newId } from '../lib/ids.js';
 import type { AccessClaims, Audience } from './tokens.js';
@@ -31,6 +31,6 @@ export function devClaims(kind: DevKind, o: DevOptions = {}): DevClaims {
       return { aud: 'seller', kind, sub, sid, authAt: now, sellerId: o.sellerId ?? newId(), memberId: sub, dev: { isOwner: !o.permissions, permissions: o.permissions ?? [] } };
     }
     case 'staff':
-      return { aud: 'admin', kind, sub: o.accountId ?? newId(), sid, authAt: now, twoStepAt: now, dev: { permissions: o.permissions ?? ['*'] } };
+      return { aud: 'admin', kind, sub: o.accountId ?? newId(), sid, authAt: now, dev: { permissions: o.permissions ?? ['*'] } };
   }
 }
