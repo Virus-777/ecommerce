@@ -7,7 +7,7 @@ import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { publicRoutes } from './http/public.js';
 import { webhooksRoutes } from './http/webhooks.js';
-import { createMongoFinanceRepository } from './repository.js';
+import { FinanceRepository } from './repository.js';
 import { createDevPayoutProvider } from './providers/payouts.js';
 import { FinanceService } from './service.js';
 import { schemas } from './schema.js';
@@ -24,9 +24,9 @@ export default defineModule({
   schemas,
   graphql: typeDefs,
   register(ctx) {
-    // payout provider: the deterministic development adapter until a real one is wired behind the same port
+    // payout provider: the deterministic development provider until a real one is wired in its place
     const provider = createDevPayoutProvider(ctx.clock);
-    const service = new FinanceService({ repo: createMongoFinanceRepository(ctx.mongo), ctx, provider });
+    const service = new FinanceService({ repo: new FinanceRepository(ctx.mongo), ctx, provider });
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service), publicRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));

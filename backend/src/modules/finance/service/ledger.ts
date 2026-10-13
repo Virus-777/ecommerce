@@ -12,7 +12,8 @@ import type { LedgerEntry, Reference, RefundImpactPreview, SellerBalances } from
 import type * as orders from '../../../spec/orders.js';
 import { addDays, calculate, DAY, dayStart, detId, fmt, nextSlot, prorate, scheduleLabel, shortDate, TYPE_GROUPS, TYPE_LABELS, type EntryType } from '../domain/rules.js';
 import { toEntry, toHold } from '../mappers.js';
-import type { FeeChargeRec, FinanceRepository, FundingRec, LiabilityRec, LotRec, PlatformCostRec, TradingRec } from '../ports.js';
+import type { FeeChargeRec, FundingRec, LiabilityRec, LotRec, PlatformCostRec, TradingRec } from '../ports.js';
+import type { FinanceRepository } from '../repository.js';
 import { invalid, notFound, Outbox, Part, type NewEntry } from './core.js';
 
 type Item = orders.OrderItem;
@@ -73,25 +74,25 @@ export class LedgerPart extends Part {
   /** Official Store (company) trading only; marketplace facts go to the tables below */
   async trading(tx: FinanceRepository, key: string, row: Omit<TradingRec, 'id' | 'currency'> & { currency?: string }) {
     if (!row.amount) return;
-    await tx.insertIgnore('trading_entries', { ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
+    await tx.insertIfAbsent('trading_entries', { ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
   }
 
   /** A marketplace cost (positive) or recovery (negative) that is not Official Store trading */
   async platformCost(tx: FinanceRepository, key: string, row: Omit<PlatformCostRec, 'id' | 'currency' | 'order_item_id'> & { currency?: string; order_item_id?: string | null }) {
     if (!row.amount) return;
-    await tx.insertIgnore('platform_costs', { order_item_id: null, ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
+    await tx.insertIfAbsent('platform_costs', { order_item_id: null, ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
   }
 
   /** One funder's part of a coupon discount (reversals negative) */
   async funding(tx: FinanceRepository, key: string, row: Omit<FundingRec, 'id' | 'currency'> & { currency?: string }) {
     if (!row.amount) return;
-    await tx.insertIgnore('discount_funding', { ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
+    await tx.insertIfAbsent('discount_funding', { ...row, id: factId(key), currency: row.currency ?? this.core.currency() });
   }
 
   /** A movement of the store credit liability */
   async liability(tx: FinanceRepository, key: string, row: Omit<LiabilityRec, 'id' | 'at'>) {
     if (!row.amount) return;
-    await tx.insertIgnore('store_credit_liability', { ...row, id: factId(key), at: this.now() });
+    await tx.insertIfAbsent('store_credit_liability', { ...row, id: factId(key), at: this.now() });
   }
 
   /* ---------------------------------------------------------------- orders.order.accepted */
@@ -134,10 +135,10 @@ export class LedgerPart extends Part {
         // category fee rates apply to the product category at purchase (the order item's snapshot)
         const calc = calculate(rule, { categoryId: item.categoryId ?? null, itemPrice: item.lineSubtotal.amount, sellerDiscount: split.seller, platformDiscount: split.platform, shippingCharged: item.shippingShare.amount }, cur);
         const lotId = detId(`lot:${item.id}`);
-        await tx.insertIgnore('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null });
+        await tx.insertIfAbsent('earnings_lots', { id: lotId, seller_id: sellerId, order_id: order.id, order_item_id: item.id, state: 'pending', gross: item.lineSubtotal.amount, fee: calc.fee.amount, net: 0, delivered_at: null, available_at: null, payout_id: null });
         const lot = (await tx.findOne('earnings_lots', { order_item_id: item.id }))!;
         if (lot.id !== lotId || lot.seller_id !== sellerId) continue;
-        await tx.insertIgnore('fee_charges', { id: detId(`fee:${item.id}`), order_item_id: item.id, seller_id: sellerId, rule_set_id: ruleRow.id, basis_amount: calc.feeBasis.amount, rate_bps: calc.rateBps, fee: calc.fee.amount, refunded_fee: 0, status: 'charged', created_at: at });
+        await tx.insertIfAbsent('fee_charges', { id: detId(`fee:${item.id}`), order_item_id: item.id, seller_id: sellerId, rule_set_id: ruleRow.id, basis_amount: calc.feeBasis.amount, rate_bps: calc.rateBps, fee: calc.fee.amount, refunded_fee: 0, status: 'charged', created_at: at });
         const ref = { kind: 'order' as const, id: order.id, label: order.ref };
         const what = `${item.title}${item.variantLabel ? ` (${item.variantLabel})` : ''} × ${item.quantity}`;
         const entries: NewEntry[] = [
@@ -264,7 +265,7 @@ export class LedgerPart extends Part {
       else if (by === 'official_store') [seller, platform] = [0, 0];
       else [seller, platform] = [total, 0];
     }
-    await this.repo.insertIgnore('refund_allocations', {
+    await this.repo.insertIfAbsent('refund_allocations', {
       refund_request_id: e.refundRequestId,
       payment_refund_id: null,
       order_id: e.orderId,

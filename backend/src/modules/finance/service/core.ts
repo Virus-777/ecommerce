@@ -15,7 +15,8 @@ import type * as common from '../../../spec/common.js';
 import type { DestinationStatus, FeeTreatment, Reference } from '../../../spec/finance.js';
 import { DEFAULT_TREATMENT, detId, encodeActor, m, marketDate, SYSTEM, type EntryType, type RuleModel } from '../domain/rules.js';
 import { earningsLotMachine } from '../domain/state-machines.js';
-import type { AccountRec, DestinationRec, EntryRec, FinanceRepository, LotRec, PayoutProvider, ReviewRec, RuleSetRec } from '../ports.js';
+import type { AccountRec, DestinationRec, EntryRec, LotRec, PayoutProvider, ReviewRec, RuleSetRec } from '../ports.js';
+import type { FinanceRepository } from '../repository.js';
 
 export interface FinanceServiceDeps {
   repo: FinanceRepository;
@@ -207,7 +208,7 @@ export class Core {
   async ensureRules(): Promise<void> {
     this.#rulesReady ??= (async () => {
       if (await this.repo.count('fee_rule_sets', { status: 'active' })) return;
-      await this.repo.insertIgnore('fee_rule_sets', {
+      await this.repo.insertIfAbsent('fee_rule_sets', {
         id: detId('finance:fee_rule_set:default'),
         version: 'v1',
         status: 'active',
@@ -299,7 +300,7 @@ export class Core {
         recorded_by: encodeActor(e.recordedBy ?? null),
         source_event_id: e.key,
       };
-      if (!(await tx.insertIgnore('ledger_entries', row))) {
+      if (!(await tx.insertIfAbsent('ledger_entries', row))) {
         // a concurrent posting of the same fact won: undo the bucket change
         if (e.bucket === 'pending') pending -= e.amount;
         else if (e.bucket === 'held') held -= e.amount;

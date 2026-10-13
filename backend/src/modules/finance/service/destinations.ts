@@ -12,7 +12,8 @@ import type { DestinationCheck, DestinationReview, DestinationStatus } from '../
 import { decodeActor, detId, encodeActor } from '../domain/rules.js';
 import { destinationReviewMachine } from '../domain/state-machines.js';
 import { toReview } from '../mappers.js';
-import type { ReviewRec, Where } from '../ports.js';
+import type { ReviewRec } from '../ports.js';
+import type { Where } from '../../../kernel/mongo/index.js';
 import { notFound, Part, type By } from './core.js';
 
 const DEPOSITS = 'Micro-deposits confirmed';
@@ -67,8 +68,8 @@ export class DestinationsPart extends Part {
         await tx.update('destination_reviews', old.id, { status: this.core.step(destinationReviewMachine, old.status, 'reject'), decided_at: this.now(), decided_by: encodeActor(e.requestedBy), reason: 'Replaced by a newer payout account change' });
         await tx.updateWhere('payout_destinations', { id: old.destination_id, status: 'verification_pending' }, { status: 'rejected' });
       }
-      if (!(await tx.insertIgnore('payout_destinations', { id: destinationId, seller_id: e.sellerId, sellers_account_id: e.changeId, label: e.label, provider_destination_id: e.providerDestinationId, status: 'verification_pending', verified_at: null, active: false, pause_until: null, deposits_sent_at: sentAt, deposit_attempts: 0 }))) return;
-      await tx.insertIgnore('destination_reviews', { id: detId(`review:${e.changeId}`), seller_id: e.sellerId, destination_id: destinationId, from_label: e.isInitial ? null : (e.previousLabel ?? null), to_label: e.label, requested_by: encodeActor(e.requestedBy)!, requested_at: this.now(), status: destinationReviewMachine.initial, checks: checks as never, decided_by: null, decided_at: null, reason: null });
+      if (!(await tx.insertIfAbsent('payout_destinations', { id: destinationId, seller_id: e.sellerId, sellers_account_id: e.changeId, label: e.label, provider_destination_id: e.providerDestinationId, status: 'verification_pending', verified_at: null, active: false, pause_until: null, deposits_sent_at: sentAt, deposit_attempts: 0 }))) return;
+      await tx.insertIfAbsent('destination_reviews', { id: detId(`review:${e.changeId}`), seller_id: e.sellerId, destination_id: destinationId, from_label: e.isInitial ? null : (e.previousLabel ?? null), to_label: e.label, requested_by: encodeActor(e.requestedBy)!, requested_at: this.now(), status: destinationReviewMachine.initial, checks: checks as never, decided_by: null, decided_at: null, reason: null });
     });
   }
 

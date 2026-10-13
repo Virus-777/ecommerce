@@ -14,7 +14,8 @@ import type { DailySellerIncome, FinanceOverview, MarketplaceIncome, SellerFinan
 import type * as reports from '../../../spec/reports.js';
 import { addDays, dayStart, daysBetween, daysInMonth, encodeActor, isDate, isPeriod, marketDate, TYPE_LABELS, type EntryType } from '../domain/rules.js';
 import { toTarget } from '../mappers.js';
-import type { FundingRec, TargetRec, TradingRec, Where } from '../ports.js';
+import type { FundingRec, TargetRec, TradingRec } from '../ports.js';
+import type { Where } from '../../../kernel/mongo/index.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
 const DATASETS = ['finance.admin.ledger', 'finance.admin.payout_run', 'finance.admin.checks', 'finance.seller.ledger'] as const;

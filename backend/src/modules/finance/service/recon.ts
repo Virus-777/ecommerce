@@ -14,7 +14,8 @@ import type { Correction, CorrectionInput, ReconChecklistItem, ReconDay, ReconIt
 import { addDays, dayStart, decodeActor, detId, encodeActor, fmt, isDate, SYSTEM } from '../domain/rules.js';
 import { reconciliationItemMachine } from '../domain/state-machines.js';
 import { reference } from '../mappers.js';
-import type { ReconDayRec, ReconItemRec, Where } from '../ports.js';
+import type { ReconDayRec, ReconItemRec } from '../ports.js';
+import type { Where } from '../../../kernel/mongo/index.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
 const NIL = '00000000-0000-0000-0000-000000000000';
@@ -36,7 +37,7 @@ export class ReconPart extends Part {
     const existing = await this.repo.findOne('recon_days', { date });
     if (existing) return existing;
     const { owner, backup } = await this.owners();
-    await this.repo.insertIgnore('recon_days', { date, status: 'open', owner_staff_id: owner, backup_staff_id: backup, due_at: zonedTimeToUtc(addDays(date, 1), '12:00', this.core.tz()), checklist: [] as never, completed_by: null, completed_at: null });
+    await this.repo.insertIfAbsent('recon_days', { date, status: 'open', owner_staff_id: owner, backup_staff_id: backup, due_at: zonedTimeToUtc(addDays(date, 1), '12:00', this.core.tz()), checklist: [] as never, completed_by: null, completed_at: null });
     return (await this.repo.findOne('recon_days', { date }))!;
   }
 
@@ -170,7 +171,7 @@ export class ReconPart extends Part {
     const row = { ...input, credit: input.credit ?? 0 };
     await this.ensureDay(row.date);
     const matched = row.difference === 0;
-    const inserted = await this.repo.insertIgnore('recon_items', { ...row, currency: this.core.currency(), detected_at: this.now(), status: matched ? this.core.step(reconciliationItemMachine, 'open', 'autoMatch') : 'open', note: null, owner_staff_id: null, correction: null, approval_request_id: null });
+    const inserted = await this.repo.insertIfAbsent('recon_items', { ...row, currency: this.core.currency(), detected_at: this.now(), status: matched ? this.core.step(reconciliationItemMachine, 'open', 'autoMatch') : 'open', note: null, owner_staff_id: null, correction: null, approval_request_id: null });
     if (!inserted) {
       if (!matched) return;
       // compare-and-set: only the run that moves the item out of open publishes that it closed
@@ -198,7 +199,7 @@ export class ReconPart extends Part {
     const itemId = detId(`capture:${e.captureId}`);
     const order = await this.parts.ledger.order(e.orderId);
     if (isUuid(e.captureId)) {
-      await this.repo.insertIgnore('captures', {
+      await this.repo.insertIfAbsent('captures', {
         id: e.captureId,
         intent_id: isUuid(e.intentId) ? e.intentId : null,
         order_id: order && isUuid(e.orderId) ? e.orderId : null,

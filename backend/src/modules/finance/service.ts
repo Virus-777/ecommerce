@@ -18,7 +18,7 @@ import { StatementsPart } from './service/statements.js';
 export type { FinanceServiceDeps };
 
 /**
- * Finance use cases. Depends only on ports, the event bus, the clock and other modules' public APIs.
+ * Finance use cases. Depends only on its repository, the payout provider, the event bus, the clock and other modules' public APIs.
  * The work is split by area (service/*.ts); this class is the module's public API, its event consumers and jobs.
  */
 export class FinanceService implements FinancePublicApi {

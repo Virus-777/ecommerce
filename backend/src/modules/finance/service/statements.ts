@@ -14,7 +14,8 @@ import { renderPdf, type PdfLine } from '../domain/pdf.js';
 import { addDays, feeBasisNote, fmt, marketDate, sectionOf, SECTIONS, type EntryType, type SectionKey } from '../domain/rules.js';
 import { statementMachine } from '../domain/state-machines.js';
 import { reference, toStatementSummary } from '../mappers.js';
-import type { AccountRec, EntryRec, FinanceRepository, StatementRec } from '../ports.js';
+import type { AccountRec, EntryRec, StatementRec } from '../ports.js';
+import type { FinanceRepository } from '../repository.js';
 import { notFound, Part } from './core.js';
 
 export interface Prepared {
@@ -156,7 +157,7 @@ export class StatementsPart extends Part {
     const id = newId();
     const rule = await this.core.activeRule();
     const cur = this.core.currency();
-    await this.repo.insertIgnore('statements', { id, ref: await this.nextRef(sellerId, today), seller_id: sellerId, period_from: from, period_to: from <= today ? today : from, status: statementMachine.initial, issued_at: null, payout_id: null, sections: [] as never, reconciliation: { openingAvailable: { amount: 0, currency: cur }, lines: [], payout: { amount: 0, currency: cur }, closingAvailable: { amount: 0, currency: cur } } as never, rule_version: rule.version, pdf_media_id: null, csv_media_id: null });
+    await this.repo.insertIfAbsent('statements', { id, ref: await this.nextRef(sellerId, today), seller_id: sellerId, period_from: from, period_to: from <= today ? today : from, status: statementMachine.initial, issued_at: null, payout_id: null, sections: [] as never, reconciliation: { openingAvailable: { amount: 0, currency: cur }, lines: [], payout: { amount: 0, currency: cur }, closingAvailable: { amount: 0, currency: cur } } as never, rule_version: rule.version, pdf_media_id: null, csv_media_id: null });
     return this.repo.findOne('statements', { seller_id: sellerId, status: 'open' });
   }
 

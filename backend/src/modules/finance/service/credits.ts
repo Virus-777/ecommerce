@@ -12,7 +12,8 @@ import type { Reference, SellerCredit } from '../../../spec/finance.js';
 import { decodeActor, encodeActor, fmt, SYSTEM } from '../domain/rules.js';
 import { sellerCreditMachine } from '../domain/state-machines.js';
 import { toEntry } from '../mappers.js';
-import type { FinanceRepository, SellerCreditRec } from '../ports.js';
+import type { SellerCreditRec } from '../ports.js';
+import type { FinanceRepository } from '../repository.js';
 import { invalid, notFound, Outbox, Part, type By } from './core.js';
 
 const REFERENCE_KINDS: readonly Reference['kind'][] = ['order', 'order_item', 'return', 'refund', 'case', 'chargeback', 'payout', 'adjustment', 'ad_campaign', 'fulfillment_service', 'statement', 'seller', 'reconciliation'];
@@ -102,7 +103,7 @@ export class CreditsPart extends Part {
     if (input.amount.amount <= threshold) {
       const out = new Outbox();
       const saved = await this.repo.transaction(async (tx) => {
-        if (!(await tx.insertIgnore('seller_credits', row))) return null; // the same key won a race
+        if (!(await tx.insertIfAbsent('seller_credits', row))) return null; // the same key won a race
         return this.postIn(tx, row, out, SYSTEM);
       });
       this.core.flush(out, by);
@@ -123,7 +124,7 @@ export class CreditsPart extends Part {
       reason: row.reason,
     });
     const pending: SellerCreditRec = { ...row, status: sellerCreditMachine.initial as SellerCreditRec['status'], approval_request_id: req.id };
-    if (!(await this.repo.insertIgnore('seller_credits', pending))) {
+    if (!(await this.repo.insertIfAbsent('seller_credits', pending))) {
       // the same key won a race: withdraw this request, answer with the first credit
       await this.core.optionalDep(() => this.ctx.use('access').cancelApproval(req.id, SYSTEM, 'Duplicate seller credit request'));
       return this.view((await this.repo.findOne('seller_credits', { idempotency_key: input.idempotencyKey }))!);

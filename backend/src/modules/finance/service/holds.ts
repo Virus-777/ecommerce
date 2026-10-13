@@ -11,7 +11,9 @@ import type { Adjustment, AdjustmentInput, AmountOwed, Hold, HoldInput, Referenc
 import { addDays, DAY, detId, encodeActor, fmt, isDate, SYSTEM } from '../domain/rules.js';
 import { adjustmentMachine, amountOwedMachine, holdMachine } from '../domain/state-machines.js';
 import { toAdjustment, toHold, toOwed } from '../mappers.js';
-import type { AdjustmentRec, FinanceRepository, HoldRec, Where } from '../ports.js';
+import type { AdjustmentRec, HoldRec } from '../ports.js';
+import type { Where } from '../../../kernel/mongo/index.js';
+import type { FinanceRepository } from '../repository.js';
 import { invalid, notFound, Outbox, Part, type By, type NewEntry } from './core.js';
 
 const HOLD_DECISION = 'finance.holds.release';
@@ -110,7 +112,7 @@ export class HoldsPart extends Part {
     };
     const out = new Outbox();
     const inserted = await this.repo.transaction(async (tx) => {
-      if (!(await tx.insertIgnore('holds', row))) return false;
+      if (!(await tx.insertIfAbsent('holds', row))) return false;
       if (!approvalId) await this.core.post(tx, row.seller_id, this.holdEntries(row), out);
       return true;
     });
@@ -318,7 +320,7 @@ export class HoldsPart extends Part {
     };
     const out = new Outbox();
     const inserted = await this.repo.transaction(async (tx) => {
-      if (!(await tx.insertIgnore('adjustments', row))) return false;
+      if (!(await tx.insertIfAbsent('adjustments', row))) return false;
       if (!o.posted) await this.core.post(tx, row.seller_id, [this.adjustmentEntry(row)], out);
       return true;
     });
@@ -411,7 +413,7 @@ export class HoldsPart extends Part {
       const id = detId(`owed:${a.seller_id}:${a.negative_since!.toISOString()}`);
       const today = this.core.today();
       const row = { id, seller_id: a.seller_id, amount: owedNow, remaining: owedNow, currency: a.currency, since: today, due_by: addDays(today, 30), status: amountOwedMachine.initial, origin: causes.map((c) => ({ kind: c.ref_kind, id: c.ref_id, ref: c.ref_label })) as never, note: `Negative balance not covered within ${days} days`, write_off_amount: null, write_off_reason: null, approval_request_id: null };
-      if (await this.repo.insertIgnore('amounts_owed', row)) this.core.publish('finance.amount_owed.created', { amountOwedId: id, sellerId: a.seller_id, amount: this.money(owedNow), dueBy: row.due_by });
+      if (await this.repo.insertIfAbsent('amounts_owed', row)) this.core.publish('finance.amount_owed.created', { amountOwedId: id, sellerId: a.seller_id, amount: this.money(owedNow), dueBy: row.due_by });
     }
   }
 

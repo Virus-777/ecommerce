@@ -12,7 +12,8 @@ import type { DestinationReview, Payout, PayoutRun, PayoutWebhook, RunApproval, 
 import { addDays, fmt, lastSlot, marketDate, shortDate, SYSTEM } from '../domain/rules.js';
 import { payoutMachine, payoutRunMachine } from '../domain/state-machines.js';
 import { toPayout } from '../mappers.js';
-import type { PayoutRec, ProviderResult, RunRec, Where } from '../ports.js';
+import type { PayoutRec, ProviderResult, RunRec } from '../ports.js';
+import type { Where } from '../../../kernel/mongo/index.js';
 import { invalid, notFound, Outbox, Part, type By } from './core.js';
 
 const RELEASE_ACTION = 'finance.payouts.release';
@@ -225,7 +226,7 @@ export class PayoutsPart extends Part {
     let ref = `PO-RUN-${day}`;
     for (let n = 2; await this.repo.findOne('payout_runs', { ref }); n++) ref = `PO-RUN-${day}-${n}`;
     // one live run per cutoff (unique index): a concurrent create loses here instead of adding a second run
-    const created = await this.repo.insertIgnore('payout_runs', { id, ref, status: payoutRunMachine.initial, scheduled_release: release, cutoff_at: cutoff, total: 0, paying_now: 0, held: 0, negative_offset: 0, currency: this.core.currency(), approvals: [] as never, approval_request_id: null, created_at: this.now(), released_at: null, completed_at: null });
+    const created = await this.repo.insertIfAbsent('payout_runs', { id, ref, status: payoutRunMachine.initial, scheduled_release: release, cutoff_at: cutoff, total: 0, paying_now: 0, held: 0, negative_offset: 0, currency: this.core.currency(), approvals: [] as never, approval_request_id: null, created_at: this.now(), released_at: null, completed_at: null });
     if (!created) {
       const other = await this.repo.findOne('payout_runs', { cutoff_at: cutoff, status: { op: '<>', value: 'cancelled' } });
       throw this.ctx.error('RUN_ALREADY_EXISTS', 'A payout run already exists for this cutoff', { runId: other?.id ?? null });
