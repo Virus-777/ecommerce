@@ -864,7 +864,7 @@ Indexes: `(expires_at)`
 | `identity.two_step.changed` | 2-step verification is turned on, a method removed, or reset by staff | `{ accountId: uuid, enabled: bool, method: enum(totp|sms)?, by: Actor }` | notifications |
 | `identity.invitation.created` | A staff or seller-member invitation is sent or resent | `{ invitationId: uuid, purpose: enum(staff|seller_member), email: email, name: string, acceptUrl: url, contextRef: string?, contextLabel: string?, invitedBy: Actor, expiresAt: datetime }` | notifications |
 | `identity.invitation.accepted` | An invitation is accepted | `{ invitationId: uuid, accountId: uuid, purpose: enum(staff|seller_member), contextRef: string? }` | access, sellers |
-| `identity.invitation.revoked` | An invitation is cancelled | `{ invitationId: uuid, purpose: enum(staff|seller_member), contextRef: string? }` | - |
+| `identity.invitation.revoked` | An invitation is cancelled | `{ invitationId: uuid, purpose: enum(staff|seller_member), contextRef: string?, accountId: uuid? }` | access |
 | `identity.guest_session.claimed` | A guest session is attached to an account at sign-in or registration | `{ guestSessionId: uuid, accountId: uuid }` | cart, checkout, customers, search |
 
 | Consumes | From | Does |

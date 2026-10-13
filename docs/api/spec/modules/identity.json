@@ -2477,7 +2477,8 @@
         "payload": {
           "invitationId": "uuid",
           "purpose": "enum(staff|seller_member)",
-          "contextRef": "string?"
+          "contextRef": "string?",
+          "accountId": { "type": "uuid?", "desc": "The invited staff account, closed with the invitation (access ends its pending role assignments)" }
         }
       },
       {

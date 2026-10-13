@@ -389,7 +389,7 @@ export class Invitations {
     const row = result.row;
     if (result.changed) {
       const by = { actor: o.by, requestId: o.requestId, client: o.client };
-      this.core.publish('identity.invitation.revoked', { invitationId: row.id, purpose: row.purpose, contextRef: row.context_ref }, by);
+      this.core.publish('identity.invitation.revoked', { invitationId: row.id, purpose: row.purpose, contextRef: row.context_ref, accountId: row.account_id }, by);
       // seller member invitations are audited by sellers (the action the seller took)
       if (row.purpose === 'staff') {
         await this.core.audit({ action: 'identity.invitation.revoke', actionLabel: 'Cancelled staff invitation', target: { type: 'staff_invitation', id: row.id, label: `${row.name} (${row.email})`, screen: 'admin/staff' }, reason: o.reason }, by);

@@ -2299,6 +2299,7 @@ export const spec = defineModuleSpec({
     },
     consumes: {
       "identity.invitation.accepted": "Activate pending_acceptance role assignments of a newly accepted staff member (including sensitive grants already approved); assignments still pending_approval wait for their approval and then become active",
+      "identity.invitation.revoked": "End the role assignments still waiting for the revoked staff invitation (pending_acceptance revoked, pending_approval rejected and its approval request cancelled), so the roles can be granted again, e.g. a new Business Owner bootstrap",
       "identity.account.disabled": "Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap",
       "identity.account.locked": "Treat a locked staff member as unavailable for routing (backup receives) until unlocked",
       "identity.account.unlocked": "Restore routing to the unlocked staff member"

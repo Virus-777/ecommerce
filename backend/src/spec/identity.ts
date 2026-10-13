@@ -1040,12 +1040,15 @@ export interface IdentityInvitationRevokedEvent {
   invitationId: string;
   purpose: "staff" | "seller_member";
   contextRef?: string | null;
+  /** The invited staff account, closed with the invitation (access ends its pending role assignments) */
+  accountId?: string | null;
 }
 
 export const IdentityInvitationRevokedEvent: z.ZodType<IdentityInvitationRevokedEvent> = z.object({
   invitationId: z.uuid(),
   purpose: z.enum(["staff", "seller_member"]),
   contextRef: z.string().nullish(),
+  accountId: z.uuid().describe("The invited staff account, closed with the invitation (access ends its pending role assignments)").nullish(),
 });
 
 /** identity.guest_session.claimed: A guest session is attached to an account at sign-in or registration */

@@ -26,6 +26,7 @@ export default defineModule({
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("identity.invitation.accepted", (e) => service.onInvitationAcceptedFromIdentity(e.payload));
+    ctx.events.on("identity.invitation.revoked", (e) => service.onInvitationRevokedFromIdentity(e.payload));
     ctx.events.on("identity.account.disabled", (e) => service.onAccountDisabledFromIdentity(e.payload));
     ctx.events.on("identity.account.locked", (e) => service.onAccountLockedFromIdentity(e.payload));
     ctx.events.on("identity.account.unlocked", (e) => service.onAccountUnlockedFromIdentity(e.payload));

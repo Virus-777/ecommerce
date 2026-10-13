@@ -453,7 +453,8 @@
     ],
     "consumes": [
       { "name": "identity.invitation.accepted", "does": "Activate pending_acceptance role assignments of a newly accepted staff member (including sensitive grants already approved); assignments still pending_approval wait for their approval and then become active" },
-      { "name": "identity.account.disabled", "does": "Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap" },
+      { "name": "identity.invitation.revoked", "does": "End the role assignments still waiting for the revoked staff invitation (pending_acceptance revoked, pending_approval rejected and its approval request cancelled), so the roles can be granted again, e.g. a new Business Owner bootstrap" },
+      { "name": "identity.account.disabled", "does":"Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap" },
       { "name": "identity.account.locked", "does": "Treat a locked staff member as unavailable for routing (backup receives) until unlocked" },
       { "name": "identity.account.unlocked", "does": "Restore routing to the unlocked staff member" }
     ]

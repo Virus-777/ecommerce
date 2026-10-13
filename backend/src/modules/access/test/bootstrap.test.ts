@@ -156,4 +156,16 @@ describe('bootstrap with a deputy Business Owner', () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('approved');
   });
+
+  it('revoking an invitation ends the roles still waiting for it and cancels their approval request', async () => {
+    const { accountId, request } = await inviteFinanceManager(owner, 'gus@marketly.test', 'Gus Partridge');
+    const invitationId = f.events('identity.invitation.created').findLast((e) => e.email === 'gus@marketly.test')!.invitationId;
+    const identity = app.kernel.boot.apis.get('identity') as { revokeInvitation(id: string, input: { reason: string; by: unknown }): Promise<unknown> };
+    await identity.revokeInvitation(invitationId, { reason: 'Hired someone else', by: { kind: 'staff', id: owner.accountId } });
+    await app.kernel.events.drain();
+    expect((await assignmentsOf(owner.accessToken, accountId)).map((a) => [a.role.key, a.status])).toEqual([['finance_manager', 'revoked']]);
+    const after = await f.call('GET', `${ADMIN}/approval-requests/${request.requestId}`, { token: deputy.accessToken });
+    expect(after.status, JSON.stringify(after.body)).toBe(200);
+    expect(after.body.status).toBe('cancelled');
+  });
 });

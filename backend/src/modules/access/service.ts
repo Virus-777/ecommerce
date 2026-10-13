@@ -197,19 +197,23 @@ export class AccessService implements AccessPublicApi {
     await this.members.activateAcceptedAssignments(event.accountId);
   }
 
+  /**
+   * identity.invitation.revoked: End the role assignments still waiting for the revoked staff invitation, so the roles
+   * can be granted again (a Business Owner bootstrap stays blocked while one waits). Seller member invitations and
+   * events without an account (sent before identity added it) change nothing.
+   */
+  async onInvitationRevokedFromIdentity(event: EventPayload<'identity.invitation.revoked'>): Promise<void> {
+    if (event.purpose !== 'staff' || !event.accountId) return;
+    await this.core.ready();
+    await this.endOpenAssignments(event.accountId, SYSTEM_ACTOR, 'Invitation revoked');
+  }
+
   /** identity.account.disabled: Revoke all role assignments, remove the person as lead/backup, drop them from eligible approvers of open requests, and publish access.coverage.changed with the gap */
   async onAccountDisabledFromIdentity(event: EventPayload<'identity.account.disabled'>): Promise<void> {
     await this.core.ready();
     const accountId = event.accountId;
-    const open = await this.core.repo.listAssignments({ accountId, statuses: OPEN_ASSIGNMENT });
     const reason = `Account disabled: ${event.reason}`;
-    for (const a of open) {
-      try {
-        await this.members.endAssignment(a.id, a.status === 'pending_approval' ? 'reject' : 'revoke', event.by ?? SYSTEM_ACTOR, reason);
-      } catch (err) {
-        if (!(err instanceof AppError && err.code === 'ILLEGAL_TRANSITION')) throw err;
-      }
-    }
+    const open = await this.endOpenAssignments(accountId, event.by ?? SYSTEM_ACTOR, reason);
     const coverage = await this.core.repo.listCoverage();
     const touched: string[] = [];
     for (const c of coverage) {
@@ -323,5 +327,21 @@ export class AccessService implements AccessPublicApi {
         { actor: SYSTEM_ACTOR },
       );
     }
+  }
+
+  /**
+   * Ends every assignment of the account that is active or still waiting (a waiting approval is rejected); one already
+   * ended in between is skipped. Returns the assignments that were open.
+   */
+  private async endOpenAssignments(accountId: string, actor: common.Actor, reason: string) {
+    const open = await this.core.repo.listAssignments({ accountId, statuses: OPEN_ASSIGNMENT });
+    for (const a of open) {
+      try {
+        await this.members.endAssignment(a.id, a.status === 'pending_approval' ? 'reject' : 'revoke', actor, reason);
+      } catch (err) {
+        if (!(err instanceof AppError && err.code === 'ILLEGAL_TRANSITION')) throw err;
+      }
+    }
+    return open;
   }
 }
