@@ -9,6 +9,7 @@ import { hasZodFastifySchemaValidationErrors, isResponseSerializationError } fro
 import type { Config } from '../config/index.js';
 import { AppError, codeForStatus, isNotImplemented } from '../errors/index.js';
 import { newId } from '../lib/ids.js';
+import { installAdminApp } from './admin-app.js';
 import { installSecurity } from './security.js';
 
 /** Trust the nearest n proxies (TRUST_PROXY=<n>) */
@@ -60,6 +61,8 @@ export function createServer(config: Config): FastifyInstance {
     done();
   });
   installSecurity(app, config);
+  // the built Admin Center (ADMIN_APP_DIR) answers its pages before the auth middleware (installed later) runs
+  installAdminApp(app, config);
 
   // Fastify's JSON parser (with its prototype-poisoning protection), keeping the raw text for webhook signatures
   const parseJson = app.getDefaultJsonParser('error', 'error');

@@ -15,6 +15,8 @@ v1 was reviewed twice: a fact-check against every spec, and a security review. v
 
 **Every request to `/api/*`, `/graphql/*`, `/webhooks/*` and `/files/*` must carry a token.** Token verification is middleware (M4, §3): it runs before validation and before any module code. Handlers and services never read headers or tokens; they receive a verified `principal`. A request with no token, or with a token that fails verification, is refused with 401, including requests to URLs that don't exist (401 before 404), so the API can't be explored without a token. The only exceptions are CORS preflights, a plain `OPTIONS`, and `/docs` when it is enabled ("Other entry points" below).
 
+**Not endpoints: the Admin Center's web files.** When `ADMIN_APP_DIR` is set (the one-server deployment, `backend/deploy/linux/README.md`), the server also answers `GET`/`HEAD` outside `/api`, `/graphql`, `/files`, `/webhooks`, `/health` and `/docs` with the built Admin Center: its `index.html`, scripts, styles and images (`kernel/http/admin-app.ts`). These are the same static files any web server would hand out, hold no data, and carry no token; the app then starts a session and calls `/api` with tokens like any other client. Every path under `/api` and `/graphql`, including unknown ones, still requires a token. The plain-HTTP `HTTP_REDIRECT_PORT` (301 to the https address only) and the internal health port (`HEALTH_PORT`, loopback by default) are not part of the API either.
+
 ### Token kinds
 
 | Token | Who holds it | How it's obtained | Verified by M4 against | Lifetime |
