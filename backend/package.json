@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
-    "start": "node --env-file-if-exists=.env dist/main.js",
+    "start": "node --env-file-if-exists=.env dist/src/main.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -26,7 +26,16 @@
     "check": "npm run gen:check && npm run typecheck && npm run check:boundaries && npm run check:api && npm test && npm run test:http",
     "token": "tsx --env-file-if-exists=.env tools/token.ts",
     "bootstrap-owner": "tsx --env-file-if-exists=.env tools/bootstrap-owner.ts",
-    "staff-link": "tsx --env-file-if-exists=.env tools/staff-link.ts"
+    "staff-link": "tsx --env-file-if-exists=.env tools/staff-link.ts",
+    "keys": "tsx tools/keys.ts",
+    "db-setup": "tsx --env-file-if-exists=.env tools/db-setup.ts",
+    "package": "tsx tools/package.ts",
+    "prod:start": "node --enable-source-maps --env-file-if-exists=.env.production dist/src/main.js",
+    "prod:migrate": "node --enable-source-maps --env-file-if-exists=.env.production dist/tools/migrate.js",
+    "prod:bootstrap-owner": "node --enable-source-maps --env-file-if-exists=.env.production dist/tools/bootstrap-owner.js",
+    "prod:staff-link": "node --enable-source-maps --env-file-if-exists=.env.production dist/tools/staff-link.js",
+    "prod:keys": "node dist/tools/keys.js",
+    "prod:db-setup": "node --env-file-if-exists=.env.production dist/tools/db-setup.js"
   },
   "dependencies": {
     "@fastify/swagger": "^9.9.1",

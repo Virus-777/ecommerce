@@ -1,10 +1,20 @@
+// npm run build: the server (dist/src/main.js) and the tools production runs with plain node (dist/tools/*.js),
+// so the server needs no tsx or other development dependency
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "dist",
     "sourceMap": true
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/testing"]
+  "include": [
+    "src",
+    "tools/migrate.ts",
+    "tools/bootstrap-owner.ts",
+    "tools/staff-link.ts",
+    "tools/keys.ts",
+    "tools/db-setup.ts"
+  ],
+  // tests and their helpers (src/testing, src/modules/*/test) need vitest: never part of the build
+  "exclude": ["src/**/*.test.ts", "tools/**/*.test.ts", "src/testing", "src/modules/*/test"]
 }
