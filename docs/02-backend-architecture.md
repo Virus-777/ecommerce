@@ -56,7 +56,7 @@ backend/
 | `/files/*` | Anyone holding a link the API issued (`<img src>`, downloads) | The link's own signature (HMAC, expiring for private files, permanent for public renditions), verified by the auth middleware |
 | `/graphql/store`, `/graphql/seller`, `/graphql/admin` | Same audiences as the REST areas | Read-only GraphQL for complex screens; persisted queries in production (see [api/graphql/README.md](api/graphql/README.md)) |
 | `/docs` | Developers | OpenAPI generated from module schemas; only with `DOCS_ENABLED` (default: development; refused in production), then without a token |
-| `/health` | Load balancer | Internal port only (`HEALTH_PORT`, default `PORT`+1); not served on the public port |
+| `/health` | `deploy/linux/check.sh`, monitoring on the server | Internal port only (`HEALTH_PORT`, default `PORT`+1, plain HTTP on `HEALTH_HOST`, default `127.0.0.1`); not served on the public port |
 
 Each module registers routes into these scopes. The module name is the next path segment: `/api/store/catalog/products`, `/api/admin/finance/payouts`.
 

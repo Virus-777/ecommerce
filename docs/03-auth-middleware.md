@@ -84,7 +84,7 @@ GET /files/marketly-public/renditions/<uuid>/medium.webp?sig=<base64url HMAC>
 
 | Entry | Rule |
 |---|---|
-| `/health` | served on a separate internal port for the load balancer, not on the public listener |
+| `/health` | served on a separate internal port (`HEALTH_PORT`, on `127.0.0.1` by default) for the check script and monitoring, not on the public listener |
 | `/docs` (Swagger UI and OpenAPI) | only with `DOCS_ENABLED` (default: on in development, off elsewhere; production refuses to start with it). When on, `/docs` and `/docs/*` are served without a token, so a browser can open them; when off, `/docs` is an unknown URL (401 without a token) |
 | CORS preflight | `OPTIONS` with `Access-Control-Request-Method` is answered before authentication: 204, with the CORS headers for an allowed origin (§5). An `OPTIONS` without that header skips authentication too and gets 404 (no route answers `OPTIONS`) |
 | Email and SMS links (password reset, invitation, order link, unsubscribe) | the link opens an app page, which first gets a visitor token, then sends the link's one-time token in the request body |

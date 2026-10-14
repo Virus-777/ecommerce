@@ -39,6 +39,12 @@ chown "$MARKETLY_USER:$MARKETLY_USER" "$ETC_DIR" "$TLS_DIR" "$DATA_DIR" "$MEDIA_
 chmod 700 "$ETC_DIR" "$TLS_DIR"
 chmod 750 "$DATA_DIR" "$MEDIA_DIR"
 chmod 700 "$BACKUP_DIR"
+# settings unpacked from a backup of another server carry that server's user id: make them this server's
+if [ -f "$TLS_DIR/server.key" ]; then
+  chown "$MARKETLY_USER:$MARKETLY_USER" "$TLS_DIR/server.key" "$TLS_DIR/server.crt"
+  chmod 600 "$TLS_DIR/server.key"
+fi
+[ -d "$CA_DIR" ] && chown -R root:root "$CA_DIR"
 
 # ---------------------------------------------------------------- the release files (owned by root: the service cannot change its own code)
 if [ "$SOURCE" != "$TARGET" ]; then

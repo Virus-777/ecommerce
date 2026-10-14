@@ -175,20 +175,35 @@ edit does none of that.
 
 ## 7. Deploying
 
-1. `npm ci && npm run build` (compiles into `dist/`).
-2. Set the production environment (`NODE_ENV=production`): `backend/README.md` "Configuration" marks every
-   variable production requires (`MONGODB_URI`, `AUTH_JWKS`, `AUTH_SIGNING_JWK`, `APP_SECRET`, the app and API
-   URLs, `CORS_*_ORIGINS`, `WEBHOOK_SECRETS` …). The server refuses to start with a missing or unsafe value and
-   says which.
-3. `npm run migrate` against the production database (production never migrates on start).
-4. Start the API instances (`npm start`) behind the load balancer (`TRUST_PROXY` set), and one or more worker
-   instances with `JOBS_ENABLED=true` that run the scheduled jobs. Set `DEPLOY_ID` to the release (commit or
-   tag) on all of them.
-5. Health: `GET /health` on `HEALTH_PORT` (internal; `PORT`+1 by default).
-6. On a new database only: create the first admins (next section).
+Production is **one offline Ubuntu server** (owner decision 2026-10-15): MongoDB, the Marketly server (API,
+scheduled jobs and the Admin Center pages on one HTTPS address) and daily backups. The step-by-step, from what to
+download to renewing the certificate, is **[`backend/deploy/linux/README.md`](../backend/deploy/linux/README.md)**.
+In short:
 
-To roll back, deploy the previous build. Index changes are harmless both ways; a data migration that already
-ran stays applied, so write migrations the old code can live with.
+1. On the development PC: build the Admin Center, then `npm run package -- --admin <admin-center/dist>`
+   (`tools/package.ts`): a release folder and `release/marketly-<version>-<commit>.tar.gz` with the compiled server
+   (`dist/src/main.js`), the production tools (`dist/tools/*.js`: migrate, bootstrap-owner, staff-link, keys,
+   db-setup, run with plain `node`), production `node_modules`, `deploy/linux/` and `.env.production.example`.
+2. On the server: `sudo bash marketly-…/deploy/linux/install.sh`. It creates `/etc/marketly/marketly.env` with new
+   keys the first time (`npm run keys`), sets MongoDB up as the replica set `rs0` (`npm run db-setup`), applies the
+   schema (`migrate`; production never migrates on start), switches `/opt/marketly/current`, and (re)starts the
+   systemd service. One process runs the API and the jobs (`JOBS_ENABLED=true`, `JOBS_BACKEND=mongo`, `DEPLOY_ID`
+   set to the release name).
+3. The first time: `make-cert.sh` makes the HTTPS certificate (`TLS_CERT_FILE`, `TLS_KEY_FILE`), signed by a
+   root made on the server that each staff PC trusts once. HTTPS is required: the staff refresh cookie
+   (`__Secure-mk_refresh_admin`) only travels over HTTPS, and production on a non-loopback `HOST` refuses to start
+   without TLS (unless `TRUST_PROXY` says a proxy terminates it).
+4. Health: `GET /health` on `HEALTH_PORT` (plain HTTP on `127.0.0.1`); `sudo marketly check` checks it and
+   everything else.
+5. On a new database only: create the first admins (next section). On the server the commands are
+   `sudo marketly bootstrap-owner …` and `sudo marketly staff-link …` (the same tools, run as the service user with
+   the server's settings); on a development PC, `npm run bootstrap-owner -- …` as below.
+
+Every production setting and its reason is in `backend/.env.production.example`; `backend/README.md`
+"Configuration" lists them all. The server refuses to start with a missing or unsafe value and says which.
+
+To roll back, `sudo marketly rollback` (the previous release is kept). Index changes are harmless both ways; a
+data migration that already ran stays applied, so write migrations the old code can live with.
 
 ### The first admins, and staff links without email
 

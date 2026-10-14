@@ -90,7 +90,11 @@ Every module is built. A new module starts from its spec (`npm run module:new <n
 
 | Command | Does |
 |---|---|
-| `npm run dev` / `npm start` | Development server with reload / built server (`npm run build` first: `tsc -p tsconfig.build.json` into `dist/`). Both read `.env` when it exists |
+| `npm run dev` / `npm start` | Development server with reload / built server (`npm run build` first: `tsc -p tsconfig.build.json` compiles the server into `dist/src/` and the production tools into `dist/tools/`). Both read `.env` when it exists |
+| `npm run package -- [--admin <admin-center/dist>]` | A release for the offline Linux server: `release/marketly-<version>-<commit>/` and its `.tar.gz` (compiled server and tools, production `node_modules`, `deploy/linux/`, `.env.production.example`, the Admin Center). Installing it: [deploy/linux/README.md](deploy/linux/README.md) |
+| `npm run keys -- [--env <file>] [--rotate]` | Writes new production keys (`AUTH_SIGNING_JWK`, `AUTH_JWKS`, `APP_SECRET`) into an env file (default `.env.production`, created from `.env.production.example`); never overwrites; `--rotate` replaces the signing key and keeps the previous public key. Prints no secret |
+| `npm run db-setup` | Makes the MongoDB server in `MONGODB_URI` a one-member replica set (named by `replicaSet=` in the URI, default `rs0`) and waits for PRIMARY; harmless when it already is one |
+| `npm run prod:start`, `prod:migrate`, `prod:bootstrap-owner`, `prod:staff-link`, `prod:keys`, `prod:db-setup` | The same with plain `node` from `dist/` (no tsx), reading `.env.production`: what the release runs on the server (where `.env.production` links to `/etc/marketly/marketly.env`) |
 | `npm run check` | Everything CI runs, in order: `gen:check`, `typecheck`, `check:boundaries`, `check:api`, `test`, `test:http` |
 | `npm test` / `npm run test:watch` | Kernel tests, every module's contract and behaviour tests, and the flows in `src/integration` (Vitest, one in-memory MongoDB replica set) |
 | `npm run typecheck` | `tsc --noEmit` |
@@ -107,12 +111,16 @@ Every module is built. A new module starts from its spec (`npm run module:new <n
 
 ## Configuration
 
-Environment variables, read and checked at startup by `src/kernel/config/index.ts` (an invalid value stops the server). Every one has a working default for local development; [.env.example](.env.example) lists them with comments. The search engine's own variables (`SEARCH_ENGINE`, `OPENSEARCH_*`) are read by the search module (`src/modules/search/engine-config.ts`; [docs/02 §9](../docs/02-backend-architecture.md#9-search-engine-opensearch)).
+Environment variables, read and checked at startup by `src/kernel/config/index.ts` (an invalid value stops the server). Every one has a working default for local development; [.env.example](.env.example) lists them with comments, and [.env.production.example](.env.production.example) is the production settings file of the one-server offline deployment ([deploy/linux/README.md](deploy/linux/README.md)). The search engine's own variables (`SEARCH_ENGINE`, `OPENSEARCH_*`) are read by the search module (`src/modules/search/engine-config.ts`; [docs/02 §9](../docs/02-backend-architecture.md#9-search-engine-opensearch)).
 
 | Variable | Default | Production |
 |---|---|---|
 | `NODE_ENV` | `development` (`development`, `test`, `production`) | `production` |
-| `HOST` / `PORT` / `HEALTH_PORT` | `127.0.0.1` (`0.0.0.0` in production) / `4000` / `PORT`+1 (internal `GET /health`) | |
+| `HOST` / `PORT` | `127.0.0.1` (`0.0.0.0` in production) / `4000` | `0.0.0.0` / `443` on the offline server |
+| `HEALTH_PORT` / `HEALTH_HOST` | `PORT`+1 / `127.0.0.1`: the internal `GET /health` (plain HTTP, this machine only) | |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | none: plain HTTP | **required** on a non-loopback `HOST` unless `TRUST_PROXY` is set (a proxy terminates HTTPS): the staff refresh cookie `__Secure-…` only travels over HTTPS. PEM files, both or neither, read at startup (restart after renewing); `deploy/linux/make-cert.sh` makes them |
+| `HTTP_REDIRECT_PORT` | none | `80`: a plain-HTTP port that only answers 301 to the https address (`API_URL`'s origin). Needs TLS |
+| `ADMIN_APP_DIR` | none | the built Admin Center (`index.html`, `assets/`), served on the same address for `GET`/`HEAD` outside `/api`, `/graphql`, `/files`, `/webhooks`, `/health`, `/docs`: unknown paths get `index.html`, `/assets/*` is cached for a year, `index.html` never. Static files, no token ([docs/03 §0](../docs/03-auth-middleware.md)). The folder must contain `index.html` |
 | `LOG_LEVEL` | `info` (always `silent` in tests) | |
 | `MONGODB_URI` / `MONGO_DATA_DIR` | none: an embedded MongoDB replica set (mongodb-memory-server; an installed MongoDB is used when there is one), in memory or in `MONGO_DATA_DIR` | **required**: a MongoDB 6.0+ replica set. Every module keeps its data here, and so do the kernel's job queue, rate limits, idempotency keys, references and webhook records ([docs/04-mongodb-migration.md](../docs/04-mongodb-migration.md)) |
 | `MIGRATE_ON_START` | on outside production: apply the MongoDB schema at startup | off: run `npm run migrate` |
@@ -120,9 +128,9 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 | `MARKET_TIME_ZONE`, `MARKET_CURRENCY` | `America/Los_Angeles`, `USD` | |
 | `MARKET_DEFAULT_POSTAL_CODE`, `MARKET_DEFAULT_LOCATION_LABEL` | `97205`, `Portland`: the delivery location before the shopper gives one | |
 | `RESPONSE_VALIDATION` | on outside production | off by default |
-| `JOBS_ENABLED` | `false`: this process only enqueues | on for the worker instances |
+| `JOBS_ENABLED` | `false`: this process only enqueues | `true` on the one server (the same process works the jobs) |
 | `JOBS_BACKEND` | `mongo` with `MONGODB_URI`, else `inprocess` | `mongo` (the queue in `kernel.jobs`) |
-| `DEPLOY_ID` | none | the image tag or commit: `on boot` jobs run once per deploy |
+| `DEPLOY_ID` | none | the release name (install.sh sets it): `on boot` jobs run once per deploy |
 | `GRAPHQL_PERSISTED_ONLY` | on in production: store and seller GraphQL take persisted query ids only | |
 | `AUTH_JWKS` | none (development trusts the dev key) | **required** |
 | `AUTH_ISSUER` | `marketly-identity` | |
@@ -136,8 +144,8 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 | `DEV_TOKENS` / `DEV_SIGNING_KEY_FILE` | on outside production / `.data/dev-signing-key.json` | refused. With it on, startup also refuses a non-loopback `HOST` and a non-local `MONGODB_URI` |
 | `RATE_LIMITS` | `true` | `false` refused |
 | `RATE_LIMIT_STORE` | `mongo` with `MONGODB_URI`, else `memory` | `mongo` |
-| `TRUST_PROXY` | none: a hop count, `true`, or addresses/CIDRs | set behind a load balancer |
-| `CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS` | none: no browser origin is allowed | the apps' origins |
+| `TRUST_PROXY` | none: a hop count, `true`, or addresses/CIDRs | only when a proxy in front terminates HTTPS (not on the one-server deployment, which serves HTTPS itself) |
+| `CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS` | none: no browser origin is allowed | the apps' origins; on the one server, its own https address (sign-in refresh and sign-out check the Origin against them) |
 | `DOCS_ENABLED` | on with `NODE_ENV=development` only | refused (`/docs` is served without a token) |
 | `TURNSTILE_SECRET` | none | the website's app proof |
 | `MODULES` | none: `src/modules.config.ts` | |
@@ -146,6 +154,7 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 
 Found while building; the code follows the spec as written until these are decided.
 
+- **Starting a session on the offline server (open, needs a decision):** `POST /api/public/identity/app-sessions` requires an app proof; production accepts only `turnstile:<token>` (verified with Cloudflare over the internet) or `play:<token>`, and refuses `dev`. On the offline server the Admin Center therefore cannot start the visitor session it signs in with. Checked 2026-10-15 on a production-mode run: `APP_PROOF_INVALID` with no proof and with `dev`. The deployment works up to the sign-in page until an offline proof is decided.
 - **Type used but never defined:** `identity.AccountSecurity` (identity public API `accountSecurityOf`). It is typed `unknown` until the spec defines it (`npm run gen` lists it).
 - **`catalog.brand_stats`** declares `category_id` nullable ("null = all categories") inside its primary key. The key is a unique index on (brand_id, category_id) in which null counts as a value, so there is one "all categories" row per brand.
 - **`customers`** lists `orders.order.placed` twice under `consumes`. The two reactions share one handler.
