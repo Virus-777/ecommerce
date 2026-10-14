@@ -56,6 +56,10 @@ The proof travels in `X-App-Proof`:
 - **Android:** `play:<token>`, a Play Integrity verdict for the Marketly app, checked on the server. *Not wired yet:* until the deployment supplies a verifier, a `play:` proof answers 503 `SERVICE_UNAVAILABLE`.
 - **Website:** `turnstile:<token>`, a Cloudflare Turnstile challenge solved in the browser and checked with `TURNSTILE_SECRET` (503 without the secret).
 - **Development and tests:** the literal `dev` (only while development tokens are on, §16; refused at startup in production).
+- **Offline servers** (`APP_PROOF_LOCAL_NETWORK=true`, owner decision 2026-10-15): both checks above need the
+  internet, so a request from a loopback or private network address (10/8, 172.16/12, 192.168/16, IPv6 unique-local
+  and link-local) needs no proof. Any other address still does, so a server exposed by mistake keeps its session
+  start closed to the internet. Behind a proxy, `TRUST_PROXY` must be set so the address is the caller's.
 - Anything else, or a failed check: 401 `APP_PROOF_INVALID`.
 - **Strict rate limits:** per IP and per device installation (§11).
 - **Narrow output:** it issues only a visitor token, which can do no more than an anonymous visitor could in v2: read public data and keep a cart.

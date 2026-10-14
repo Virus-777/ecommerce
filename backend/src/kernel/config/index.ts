@@ -88,6 +88,8 @@ const schema = z.object({
   DOCS_ENABLED: flag,
   /** Cloudflare Turnstile secret for the website's app proof */
   TURNSTILE_SECRET: z.string().optional(),
+  /** Offline servers: an app started from a private network address needs no app proof (kernel/auth/app-proof.ts) */
+  APP_PROOF_LOCAL_NETWORK: flag,
   /** Comma-separated module list overriding src/modules.config.ts (tests, partial deployments) */
   MODULES: z.string().optional(),
 });
@@ -133,7 +135,7 @@ export interface Config {
   trustProxy: boolean | number | string[];
   cors: { store: string[]; seller: string[]; admin: string[] };
   docsEnabled: boolean;
-  appProof: { allowDev: boolean; turnstileSecret: string | undefined };
+  appProof: { allowDev: boolean; turnstileSecret: string | undefined; localNetwork: boolean };
   modules: string[] | undefined;
 }
 
@@ -205,7 +207,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     trustProxy: parseTrustProxy(e.TRUST_PROXY),
     cors: { store: e.CORS_STORE_ORIGINS, seller: e.CORS_SELLER_ORIGINS, admin: e.CORS_ADMIN_ORIGINS },
     docsEnabled: e.DOCS_ENABLED ?? e.NODE_ENV === 'development',
-    appProof: { allowDev: devTokens, turnstileSecret: e.TURNSTILE_SECRET || undefined },
+    appProof: { allowDev: devTokens, turnstileSecret: e.TURNSTILE_SECRET || undefined, localNetwork: e.APP_PROOF_LOCAL_NETWORK ?? false },
     modules: e.MODULES ? e.MODULES.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
     ...overrides,
   };

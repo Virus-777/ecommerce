@@ -148,13 +148,13 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 | `CORS_STORE_ORIGINS`, `CORS_SELLER_ORIGINS`, `CORS_ADMIN_ORIGINS` | none: no browser origin is allowed | the apps' origins; on the one server, its own https address (sign-in refresh and sign-out check the Origin against them) |
 | `DOCS_ENABLED` | on with `NODE_ENV=development` only | refused (`/docs` is served without a token) |
 | `TURNSTILE_SECRET` | none | the website's app proof |
+| `APP_PROOF_LOCAL_NETWORK` | `false` | `true` on an offline server: a session start from a private network address needs no app proof (the usual checks need the internet); other addresses still do |
 | `MODULES` | none: `src/modules.config.ts` | |
 
 ## Open points in the design
 
 Found while building; the code follows the spec as written until these are decided.
 
-- **Starting a session on the offline server (open, needs a decision):** `POST /api/public/identity/app-sessions` requires an app proof; production accepts only `turnstile:<token>` (verified with Cloudflare over the internet) or `play:<token>`, and refuses `dev`. On the offline server the Admin Center therefore cannot start the visitor session it signs in with. Checked 2026-10-15 on a production-mode run: `APP_PROOF_INVALID` with no proof and with `dev`. The deployment works up to the sign-in page until an offline proof is decided.
 - **Type used but never defined:** `identity.AccountSecurity` (identity public API `accountSecurityOf`). It is typed `unknown` until the spec defines it (`npm run gen` lists it).
 - **`catalog.brand_stats`** declares `category_id` nullable ("null = all categories") inside its primary key. The key is a unique index on (brand_id, category_id) in which null counts as a value, so there is one "all categories" row per brand.
 - **`customers`** lists `orders.order.placed` twice under `consumes`. The two reactions share one handler.
