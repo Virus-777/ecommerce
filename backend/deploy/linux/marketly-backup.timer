@@ -1,0 +1,12 @@
+# Daily Marketly backup at 02:30 (server time). Persistent: a backup missed while the server was off runs at the
+# next start. Next run: systemctl list-timers marketly-backup.timer
+[Unit]
+Description=Daily Marketly backup at 02:30
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+Unit=marketly-backup.service
+
+[Install]
+WantedBy=timers.target

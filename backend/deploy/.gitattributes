@@ -1,0 +1,3 @@
+# Scripts, systemd units and configuration files for the Linux server: Unix line endings on every checkout,
+# Windows included (bash and systemd fail on CRLF). npm run package refuses a file with CRLF.
+* text eol=lf

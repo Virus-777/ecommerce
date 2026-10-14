@@ -1,0 +1,13 @@
+# One Marketly backup (database, uploaded files, settings) into /var/backups/marketly; started daily by
+# marketly-backup.timer. Run one now: sudo systemctl start marketly-backup   (log: journalctl -u marketly-backup)
+[Unit]
+Description=Marketly backup (MongoDB, media, settings)
+After=mongod.service
+Requires=mongod.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/marketly/current/deploy/linux/backup.sh
+# a backup should not slow the server down
+Nice=10
+IOSchedulingClass=idle

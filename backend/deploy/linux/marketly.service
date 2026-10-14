@@ -1,0 +1,45 @@
+# The Marketly server: API, scheduled jobs and the Admin Center on https://<your address> (one process).
+# Installed as /etc/systemd/system/marketly.service by install.sh (which writes the path of node into ExecStart).
+#   sudo systemctl status marketly      is it running?
+#   sudo systemctl restart marketly     after changing /etc/marketly/marketly.env or the certificate
+#   journalctl -u marketly -f           its log
+[Unit]
+Description=Marketly server (API, jobs, Admin Center)
+Documentation=file:///opt/marketly/current/deploy/linux/README.md
+After=network-online.target mongod.service
+Wants=network-online.target mongod.service
+
+[Service]
+Type=simple
+User=marketly
+Group=marketly
+WorkingDirectory=/opt/marketly/current
+ExecStart=/usr/local/bin/node --enable-source-maps --env-file=/etc/marketly/marketly.env /opt/marketly/current/dist/src/main.js
+# a crash restarts it after 5 s; a clean stop (systemctl stop) does not
+Restart=on-failure
+RestartSec=5
+# SIGTERM lets requests and jobs finish before the process exits
+TimeoutStopSec=30
+LimitNOFILE=65536
+
+# ports 443 and 80 are below 1024: this one capability lets the unprivileged user bind them
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+
+# hardening: the process sees the system read-only and writes only the media folder
+ProtectSystem=strict
+ReadWritePaths=/var/lib/marketly/media
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

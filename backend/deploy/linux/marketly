@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# The Marketly server's everyday commands, as one command (install.sh links it as /usr/local/bin/marketly).
+# Each runs the current release's tool as the service user with the server's settings, so nothing else is needed.
+#
+#   sudo marketly bootstrap-owner --email owner@example.com --name "Ana Lee" --deputy-email deputy@example.com --deputy-name "Ben Ruiz"
+#   sudo marketly staff-link --email ana@example.com [--revoke "Mistyped email"]
+#   sudo marketly check | logs | status | restart | backup | rollback
+#   sudo marketly migrate | db-setup | keys [--rotate]
+set -euo pipefail
+
+# the real location of this script (it is called through the /usr/local/bin/marketly link)
+HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+# shellcheck source=lib.sh
+. "$HERE/lib.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: sudo marketly <command> [options]
+
+  bootstrap-owner --email E --name N [--deputy-email E --deputy-name N]
+                       invite the first Business Owner (and a deputy): prints each link and pass code
+  staff-link --email E [--revoke "reason"]
+                       a new invitation link and pass code, or a password reset link, for a staff member
+  check                check services, HTTPS, database, disk, backups and certificate
+  status               systemctl status of the server
+  logs                 follow the server's log (Ctrl+C to stop)
+  restart              restart the server (after changing /etc/marketly/marketly.env or the certificate)
+  backup               make a backup now
+  rollback             go back to the previous release
+  migrate              apply the database schema of the current release (install.sh does this)
+  db-setup             set up / show MongoDB's replica set (install.sh does this)
+  keys [--rotate]      fill missing keys in the settings; --rotate replaces the token signing key
+EOF
+}
+
+command=${1:-help}
+[ $# -gt 0 ] && shift
+case "$command" in
+  bootstrap-owner | staff-link | migrate | db-setup)
+    need_root
+    run_tool "$CURRENT_LINK" "$command" "$@"
+    ;;
+  keys)
+    need_root
+    runuser -u "$MARKETLY_USER" -- "$(node_bin)" "$CURRENT_LINK/dist/tools/keys.js" --env "$ENV_FILE" "$@"
+    ;;
+  check) exec bash "$HERE/check.sh" ;;
+  status) exec systemctl status marketly --no-pager ;;
+  logs) exec journalctl -u marketly -f ;;
+  restart)
+    need_root
+    systemctl restart marketly
+    sleep 2
+    systemctl is-active marketly
+    ;;
+  backup)
+    need_root
+    systemctl start marketly-backup.service
+    journalctl -u marketly-backup -n 8 --no-pager
+    ;;
+  rollback) exec bash "$HERE/rollback.sh" ;;
+  help | -h | --help) usage ;;
+  *)
+    usage
+    exit 1
+    ;;
+esac
