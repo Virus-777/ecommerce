@@ -42,7 +42,8 @@ case "$command" in
     ;;
   keys)
     need_root
-    runuser -u "$MARKETLY_USER" -- "$(node_bin)" "$CURRENT_LINK/dist/tools/keys.js" --env "$ENV_FILE" "$@"
+    node=$(node_bin)
+    (cd "$CURRENT_LINK" && runuser -u "$MARKETLY_USER" -- "$node" "$CURRENT_LINK/dist/tools/keys.js" --env "$ENV_FILE" "$@")
     ;;
   check) exec bash "$HERE/check.sh" ;;
   status) exec systemctl status marketly --no-pager ;;

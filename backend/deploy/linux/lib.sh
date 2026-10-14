@@ -59,11 +59,13 @@ node_bin() {
   command -v node || die "Node.js is not installed (deploy/linux/README.md, step 2)"
 }
 
-# Runs a production tool (dist/tools/<name>.js) of a release as the service user, with the server's settings
+# Runs a production tool (dist/tools/<name>.js) of a release as the service user, with the server's settings,
+# from the release folder (the caller's folder, e.g. /root, may be closed to that user)
 run_tool() {
-  local release=$1 tool=$2
+  local release=$1 tool=$2 node
   shift 2
-  runuser -u "$MARKETLY_USER" -- "$(node_bin)" --enable-source-maps --env-file="$ENV_FILE" "$release/dist/tools/$tool.js" "$@"
+  node=$(node_bin)
+  (cd "$release" && runuser -u "$MARKETLY_USER" -- "$node" --enable-source-maps --env-file="$ENV_FILE" "$release/dist/tools/$tool.js" "$@")
 }
 
 # The host name in a URL (https://marketly.lan:8443/x -> marketly.lan)

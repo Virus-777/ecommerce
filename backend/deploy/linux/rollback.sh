@@ -24,6 +24,8 @@ ln -sfn "$previous" "$CURRENT_LINK.new"
 mv -T "$CURRENT_LINK.new" "$CURRENT_LINK"
 ln -sfn "$current" "$PREVIOUS_LINK"
 set_env_value "$ENV_FILE" DEPLOY_ID "$(basename "$previous")"
+chown "$MARKETLY_USER:$MARKETLY_USER" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 
 # the unit file of the older release (node path, settings) applies again
 sed "s|/usr/local/bin/node|$(node_bin)|g" "$previous/deploy/linux/marketly.service" >/etc/systemd/system/marketly.service

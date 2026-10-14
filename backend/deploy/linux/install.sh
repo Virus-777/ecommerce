@@ -66,12 +66,12 @@ if [ ! -f "$ENV_FILE" ]; then
   FIRST_INSTALL=yes
   info "Creating $ENV_FILE from .env.production.example, with new keys"
   install -o "$MARKETLY_USER" -g "$MARKETLY_USER" -m 600 "$TARGET/.env.production.example" "$ENV_FILE"
-  runuser -u "$MARKETLY_USER" -- "$NODE" "$TARGET/dist/tools/keys.js" --env "$ENV_FILE"
+  (cd "$TARGET" && runuser -u "$MARKETLY_USER" -- "$NODE" "$TARGET/dist/tools/keys.js" --env "$ENV_FILE")
 fi
-chown "$MARKETLY_USER:$MARKETLY_USER" "$ENV_FILE"
-chmod 600 "$ENV_FILE"
 # "on boot" jobs run once per release
 set_env_value "$ENV_FILE" DEPLOY_ID "$NAME"
+chown "$MARKETLY_USER:$MARKETLY_USER" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 
 # ---------------------------------------------------------------- MongoDB: running, as replica set rs0, on this machine only
 [ -n "$(systemctl list-unit-files mongod.service --no-legend 2>/dev/null)" ] || die "MongoDB is not installed (deploy/linux/README.md, step 3)"
