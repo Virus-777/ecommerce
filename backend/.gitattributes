@@ -1,0 +1,2 @@
+# Becomes /etc/marketly/marketly.env on the Linux server: Unix line endings on every checkout
+.env.production.example text eol=lf
