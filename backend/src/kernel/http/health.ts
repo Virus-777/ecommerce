@@ -1,6 +1,7 @@
 /**
- * Load-balancer health check on an internal port. The public API answers nothing without a token,
- * so GET /health lives on its own listener (HEALTH_PORT), never exposed through the proxy.
+ * Health check on an internal port (HEALTH_PORT, plain HTTP, on HEALTH_HOST: this machine only by default). The
+ * public API answers nothing without a token, so GET /health lives on its own listener: deploy/linux/check.sh and any
+ * monitoring on the server read it; it is never exposed to the network.
  */
 import { createServer, type Server } from 'node:http';
 

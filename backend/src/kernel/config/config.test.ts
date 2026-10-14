@@ -40,6 +40,7 @@ describe('development tokens guard', () => {
       API_URL: 'https://api.marketly.example',
       AUTH_JWKS: '{"keys":[]}',
       MONGODB_URI: 'mongodb://u:p@db.internal:27017/marketly?replicaSet=rs0',
+      TRUST_PROXY: '1',
     };
     const c = loadConfig(prod);
     expect(c.host).toBe('0.0.0.0');
@@ -47,6 +48,39 @@ describe('development tokens guard', () => {
     expect(() => loadConfig(prod, { devTokens: true })).toThrow(/production/);
     expect(c.docsEnabled).toBe(false);
     expect(() => loadConfig({ ...prod, DOCS_ENABLED: 'true' })).toThrow(/DOCS_ENABLED/);
+  });
+
+  it('serves production beyond this machine only over HTTPS, its own or a proxy\'s', () => {
+    const prod = {
+      NODE_ENV: 'production',
+      APP_SECRET: 'x'.repeat(40),
+      STORE_URL: 'https://marketly.lan',
+      SELLER_URL: 'https://marketly.lan',
+      ADMIN_URL: 'https://marketly.lan',
+      API_URL: 'https://marketly.lan',
+      AUTH_JWKS: '{"keys":[]}',
+      MONGODB_URI: 'mongodb://127.0.0.1:27017/marketly?replicaSet=rs0',
+    };
+    // the staff refresh cookie (__Secure-…) only travels over HTTPS
+    expect(() => loadConfig(prod)).toThrow(/needs HTTPS: set TLS_CERT_FILE and TLS_KEY_FILE/);
+    expect(() => loadConfig({ ...prod, HOST: '192.168.1.10' })).toThrow(/needs HTTPS/);
+    const tls = loadConfig({ ...prod, TLS_CERT_FILE: '/etc/marketly/tls/server.crt', TLS_KEY_FILE: '/etc/marketly/tls/server.key', HTTP_REDIRECT_PORT: '80', PORT: '443' });
+    expect(tls.tls).toEqual({ certFile: '/etc/marketly/tls/server.crt', keyFile: '/etc/marketly/tls/server.key' });
+    expect(tls.httpRedirectPort).toBe(80);
+    expect(loadConfig({ ...prod, TRUST_PROXY: '1' }).tls).toBeUndefined();
+    expect(loadConfig({ ...prod, HOST: '127.0.0.1' }).tls).toBeUndefined();
+    // the health listener stays on this machine unless told otherwise
+    expect(tls.healthHost).toBe('127.0.0.1');
+    expect(tls.healthPort).toBe(444);
+  });
+
+  it('takes both TLS files or neither, and redirects only to HTTPS on a port of its own', () => {
+    expect(() => loadConfig({ TLS_CERT_FILE: 'a.crt' })).toThrow(/both TLS_CERT_FILE and TLS_KEY_FILE/);
+    expect(() => loadConfig({ TLS_KEY_FILE: 'a.key' })).toThrow(/both TLS_CERT_FILE and TLS_KEY_FILE/);
+    expect(() => loadConfig({ HTTP_REDIRECT_PORT: '8080' })).toThrow(/HTTP_REDIRECT_PORT redirects to HTTPS/);
+    expect(() => loadConfig({ TLS_CERT_FILE: 'a.crt', TLS_KEY_FILE: 'a.key', PORT: '8443', HTTP_REDIRECT_PORT: '8443' })).toThrow(/must differ/);
+    expect(loadConfig({}).tls).toBeUndefined();
+    expect(loadConfig({ ADMIN_APP_DIR: '/opt/marketly/current/admin' }).adminAppDir).toBe('/opt/marketly/current/admin');
   });
 
   it('knows loopback hosts and local MongoDB servers', () => {

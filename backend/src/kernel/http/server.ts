@@ -4,6 +4,7 @@
  * (register.ts); everything else (GraphQL, /docs) keeps Fastify's defaults.
  */
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import { readFileSync } from 'node:fs';
 import { hasZodFastifySchemaValidationErrors, isResponseSerializationError } from 'fastify-type-provider-zod';
 import type { Config } from '../config/index.js';
 import { AppError, codeForStatus, isNotImplemented } from '../errors/index.js';
@@ -13,8 +14,28 @@ import { installSecurity } from './security.js';
 /** Trust the nearest n proxies (TRUST_PROXY=<n>) */
 const hops = (n: number) => (_address: string, hop: number) => hop < n;
 
+/**
+ * HTTPS key and certificate (TLS_CERT_FILE, TLS_KEY_FILE), read once at startup: a renewed certificate takes effect
+ * when the service restarts. undefined = plain HTTP.
+ */
+function httpsOptions(config: Config): { key: Buffer; cert: Buffer; minVersion: 'TLSv1.2' } | undefined {
+  if (!config.tls) return undefined;
+  const read = (file: string, what: string) => {
+    try {
+      return readFileSync(file);
+    } catch (err) {
+      throw new Error(`Cannot read the HTTPS ${what} ${file}: ${(err as Error).message}`);
+    }
+  };
+  return { cert: read(config.tls.certFile, 'certificate (TLS_CERT_FILE)'), key: read(config.tls.keyFile, 'private key (TLS_KEY_FILE)'), minVersion: 'TLSv1.2' };
+}
+
 export function createServer(config: Config): FastifyInstance {
+  const https = httpsOptions(config);
+  // with `https` Fastify runs on an https.Server; routes, hooks and inject() work the same, so the rest of the code
+  // keeps the plain FastifyInstance type
   const app = Fastify({
+    ...(https ? { https } : {}),
     logger:
       config.logLevel === 'silent'
         ? false

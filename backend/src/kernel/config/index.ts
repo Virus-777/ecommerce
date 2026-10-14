@@ -16,8 +16,17 @@ const schema = z.object({
   /** Address to listen on; default 0.0.0.0 in production, 127.0.0.1 elsewhere (development tokens are only served on loopback) */
   HOST: z.string().optional(),
   PORT: z.coerce.number().int().default(4000),
-  /** Internal port for /health (load balancer); not the public listener */
+  /** Internal port for /health (check script, monitoring); plain HTTP, not the public listener */
   HEALTH_PORT: z.coerce.number().int().optional(),
+  /** Address of the health listener: default 127.0.0.1 (this machine only) */
+  HEALTH_HOST: z.string().optional(),
+  /** HTTPS: the certificate (PEM, with any intermediate after it) and its private key (PEM). Both or neither. */
+  TLS_CERT_FILE: z.string().optional(),
+  TLS_KEY_FILE: z.string().optional(),
+  /** With HTTPS: a plain-HTTP port (e.g. 80) that only answers 301 to the https address */
+  HTTP_REDIRECT_PORT: z.coerce.number().int().optional(),
+  /** Folder with the built Admin Center (index.html, assets/); served on this address outside /api, /graphql, /files … */
+  ADMIN_APP_DIR: z.string().optional(),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   /** mongodb://…/marketly?replicaSet=rs0 (a replica set: transactions need one); empty = an embedded replica set (development, tests) */
   MONGODB_URI: z.string().optional(),
@@ -88,6 +97,13 @@ export interface Config {
   host: string;
   port: number;
   healthPort: number;
+  healthHost: string;
+  /** HTTPS certificate and key files (PEM); undefined = plain HTTP (development, or a proxy terminates TLS) */
+  tls: { certFile: string; keyFile: string } | undefined;
+  /** Plain-HTTP port answering 301 to the https address (HTTPS only) */
+  httpRedirectPort: number | undefined;
+  /** Folder of the built Admin Center served by this server (undefined = not served) */
+  adminAppDir: string | undefined;
   logLevel: string;
   /** MongoDB: the server (undefined = embedded replica set) and, for the embedded one, its data folder */
   mongo: { uri: string | undefined; dataDir: string | undefined };
@@ -154,6 +170,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     host: e.HOST ?? (prod ? '0.0.0.0' : '127.0.0.1'),
     port: e.PORT,
     healthPort: e.HEALTH_PORT ?? e.PORT + 1,
+    healthHost: e.HEALTH_HOST || '127.0.0.1',
+    tls: e.TLS_CERT_FILE && e.TLS_KEY_FILE ? { certFile: e.TLS_CERT_FILE, keyFile: e.TLS_KEY_FILE } : undefined,
+    httpRedirectPort: e.HTTP_REDIRECT_PORT,
+    adminAppDir: e.ADMIN_APP_DIR || undefined,
     logLevel: e.NODE_ENV === 'test' ? 'silent' : e.LOG_LEVEL,
     mongo: { uri: e.MONGODB_URI || undefined, dataDir: e.MONGO_DATA_DIR || undefined },
     migrateOnStart: e.MIGRATE_ON_START ?? !prod,
@@ -209,5 +229,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (prod && !config.rateLimits) throw new Error('RATE_LIMITS cannot be turned off in production');
   if (prod && !config.mongo.uri) throw new Error('MONGODB_URI is required in production (a MongoDB replica set)');
   if (prod && !config.auth.jwks) throw new Error('AUTH_JWKS is required in production (the public keys that verify tokens)');
+  // HTTPS (deploy/linux/README.md): the staff refresh cookie is __Secure-…, which browsers keep only over HTTPS
+  if (Boolean(e.TLS_CERT_FILE) !== Boolean(e.TLS_KEY_FILE)) throw new Error('Set both TLS_CERT_FILE and TLS_KEY_FILE (HTTPS), or neither');
+  if (config.httpRedirectPort !== undefined) {
+    if (!config.tls) throw new Error('HTTP_REDIRECT_PORT redirects to HTTPS: set TLS_CERT_FILE and TLS_KEY_FILE too');
+    if (config.httpRedirectPort === config.port || config.httpRedirectPort === config.healthPort) throw new Error('HTTP_REDIRECT_PORT must differ from PORT and HEALTH_PORT');
+  }
+  if (prod && !config.tls && !isLoopbackHost(config.host) && config.trustProxy === false) {
+    throw new Error(
+      `Production on HOST ${config.host} needs HTTPS: set TLS_CERT_FILE and TLS_KEY_FILE (deploy/linux/make-cert.sh makes them), ` +
+        'or TRUST_PROXY when a proxy in front of this server terminates HTTPS',
+    );
+  }
   return config;
 }
