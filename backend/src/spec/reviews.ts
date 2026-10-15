@@ -88,6 +88,8 @@ export interface ProductReview {
   editedAt?: string | null;
   helpfulCount: number;
   viewerVotedHelpful?: boolean | null;
+  /** The signed-in customer has reported this review (open or decided), so the Report button can say Reported; null without a customer session */
+  viewerReported?: boolean | null;
   response?: SellerResponse | null;
 }
 
@@ -112,6 +114,7 @@ export const ProductReview: z.ZodType<ProductReview> = z.object({
   editedAt: z.iso.datetime({ offset: true }).nullish(),
   helpfulCount: z.number().int(),
   viewerVotedHelpful: z.boolean().nullish(),
+  viewerReported: z.boolean().describe("The signed-in customer has reported this review (open or decided), so the Report button can say Reported; null without a customer session").nullish(),
   get response() {
     return SellerResponse.nullish();
   },
@@ -138,6 +141,8 @@ export interface RatingSummary {
   writtenCount: number;
   distribution: RatingBucket[];
   answeredQuestions: number;
+  /** Published questions with no published answer yet (listQuestions state=awaiting) */
+  awaitingQuestions: number;
   withPhotos: number;
 }
 
@@ -151,6 +156,7 @@ export const RatingSummary: z.ZodType<RatingSummary> = z.object({
     return z.array(RatingBucket);
   },
   answeredQuestions: z.number().int(),
+  awaitingQuestions: z.number().int().describe("Published questions with no published answer yet (listQuestions state=awaiting)"),
   withPhotos: z.number().int(),
 }).register(common.apiTypes, { id: "reviews.RatingSummary" });
 
@@ -163,6 +169,8 @@ export interface Answer {
   label: "seller" | "marketly_staff" | "customer";
   answeredAt: string;
   helpfulCount: number;
+  /** The signed-in customer marked this answer helpful; null without a customer session and outside the store's question list */
+  viewerVotedHelpful?: boolean | null;
   status: "pending_review" | "published" | "edit_requested" | "removed";
 }
 
@@ -176,6 +184,7 @@ export const Answer: z.ZodType<Answer> = z.object({
   label: z.enum(["seller", "marketly_staff", "customer"]).describe("Shown as Answer from the seller / Marketly staff / Customer"),
   answeredAt: z.iso.datetime({ offset: true }),
   helpfulCount: z.number().int(),
+  viewerVotedHelpful: z.boolean().describe("The signed-in customer marked this answer helpful; null without a customer session and outside the store's question list").nullish(),
   status: z.enum(["pending_review", "published", "edit_requested", "removed"]),
 }).register(common.apiTypes, { id: "reviews.Answer" });
 
@@ -284,6 +293,8 @@ export interface SellerFeedbackSummary {
   average?: number | null;
   /** From shipping dispatch metrics, last 90 days */
   onTimeDispatchPct?: number | null;
+  /** The positive-feedback target sellers are measured against (setting sellerFeedbackTargetPct) and whether this summary meets it; always given by reviews */
+  target?: FeedbackTarget | null;
 }
 
 export const SellerFeedbackSummary: z.ZodType<SellerFeedbackSummary> = z.object({
@@ -300,7 +311,25 @@ export const SellerFeedbackSummary: z.ZodType<SellerFeedbackSummary> = z.object(
   label: z.string().describe("e.g. 98% positive · 4,812 ratings"),
   average: z.number().describe("Average overall score 1–5").nullish(),
   onTimeDispatchPct: z.number().describe("From shipping dispatch metrics, last 90 days").nullish(),
+  get target() {
+    return FeedbackTarget.nullish();
+  },
 }).register(common.apiTypes, { id: "reviews.SellerFeedbackSummary" });
+
+export interface FeedbackTarget {
+  /** Target positive percentage, e.g. 95 */
+  positivePct: number;
+  /** e.g. Target: at least 95% positive */
+  label: string;
+  /** positivePct of the summary >= the target; null until there is feedback in the period */
+  meets?: boolean | null;
+}
+
+export const FeedbackTarget: z.ZodType<FeedbackTarget> = z.object({
+  positivePct: z.number().int().describe("Target positive percentage, e.g. 95"),
+  label: z.string().describe("e.g. Target: at least 95% positive"),
+  meets: z.boolean().describe("positivePct of the summary >= the target; null until there is feedback in the period").nullish(),
+}).register(common.apiTypes, { id: "reviews.FeedbackTarget" });
 
 export interface ModerationOutcome {
   decision: "kept" | "removed" | "edit_requested" | "published" | "hidden_pending_review";
@@ -482,6 +511,8 @@ export interface ReviewContext {
     /** OFFICIAL_STORE_ID for the Official Store */
     id: string;
     name: string;
+    /** Storefront slug for /shop/{slug} (sellers' public API); null for the Official Store */
+    slug?: string | null;
   };
   existingReview?: MyReview | null;
   existingFeedback?: MyFeedback | null;
@@ -507,6 +538,7 @@ export const ReviewContext: z.ZodType<ReviewContext> = z.object({
     ownerType: z.enum(["official", "seller"]),
     id: z.uuid().describe("OFFICIAL_STORE_ID for the Official Store"),
     name: z.string(),
+    slug: z.string().describe("Storefront slug for /shop/{slug} (sellers' public API); null for the Official Store").nullish(),
   }),
   get existingReview() {
     return MyReview.nullish();
@@ -683,6 +715,8 @@ export interface SellerQuestionRow {
   productImage?: common.MediaRef | null;
   offerSku?: string | null;
   needsAnswer: boolean;
+  /** The seller skipped this question (skipQuestion): it leaves the open list; customers and other sellers can still answer it */
+  skipped: boolean;
 }
 
 export const SellerQuestionRow: z.ZodType<SellerQuestionRow> = z.object({
@@ -694,6 +728,7 @@ export const SellerQuestionRow: z.ZodType<SellerQuestionRow> = z.object({
   },
   offerSku: z.string().nullish(),
   needsAnswer: z.boolean(),
+  skipped: z.boolean().describe("The seller skipped this question (skipQuestion): it leaves the open list; customers and other sellers can still answer it"),
 }).register(common.apiTypes, { id: "reviews.SellerQuestionRow" });
 
 export interface AdminQuestionRow {
@@ -818,6 +853,8 @@ export interface ModerationItem {
   /** e.g. 1 d, 6 h */
   age: string;
   status: "open" | "decided";
+  /** The latest decision on a decided item; null while open */
+  decision?: ModerationDecisionView | null;
 }
 
 export const ModerationItem: z.ZodType<ModerationItem> = z.object({
@@ -848,7 +885,34 @@ export const ModerationItem: z.ZodType<ModerationItem> = z.object({
   firstReportedAt: z.iso.datetime({ offset: true }),
   age: z.string().describe("e.g. 1 d, 6 h"),
   status: z.enum(["open", "decided"]),
+  get decision() {
+    return ModerationDecisionView.nullish();
+  },
 }).register(common.apiTypes, { id: "reviews.ModerationItem" });
+
+export interface ModerationDecisionView {
+  /** What was decided (ModerationDecisionInput.decision) */
+  outcome: "keep" | "remove" | "request_edit" | "publish" | "reject_response";
+  /** e.g. Kept / Removed / Edit requested */
+  outcomeLabel: string;
+  reasonCode: string;
+  /** The policy reason in words, e.g. Personal information */
+  reason: string;
+  /** The moderator (name from access), or system for decisions carried out for a Trust and Risk enforcement */
+  by: common.Actor;
+  at: string;
+}
+
+export const ModerationDecisionView: z.ZodType<ModerationDecisionView> = z.object({
+  outcome: z.enum(["keep", "remove", "request_edit", "publish", "reject_response"]).describe("What was decided (ModerationDecisionInput.decision)"),
+  outcomeLabel: z.string().describe("e.g. Kept / Removed / Edit requested"),
+  reasonCode: z.string(),
+  reason: z.string().describe("The policy reason in words, e.g. Personal information"),
+  get by() {
+    return common.Actor;
+  },
+  at: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "reviews.ModerationDecisionView" });
 
 export interface ModerationDetail {
   item: ModerationItem;
@@ -1416,6 +1480,15 @@ export interface ReviewsDb {
     created_at: Date;
     published_at: Date | null;
   };
+  /** Questions a seller chose not to answer (skipQuestion); only that seller's open list changes */
+  question_skips: {
+    id: string;
+    seller_id: string;
+    question_id: string;
+    /** member account id */
+    skipped_by: string;
+    created_at: Date;
+  };
   helpful_votes: {
     target_type: string;
     target_id: string;
@@ -1553,6 +1626,7 @@ export const endpoints = defineEndpoints({
         rating: z.coerce.number().int().optional(),
         critical: z.stringbool().describe("1–2 stars").optional(),
         variantId: z.uuid().optional(),
+        q: z.string().describe("Keyword search in the headline, text and reviewer name (case-insensitive, all reviews of the product, not only the loaded page)").optional(),
         sort: z.enum(["most_helpful", "newest", "highest", "lowest"]).optional(),
       }),
     paging: true,
@@ -1607,6 +1681,7 @@ export const endpoints = defineEndpoints({
     query: () =>
       z.object({
         q: z.string().optional(),
+        state: z.enum(["answered", "awaiting"]).describe("answered: at least one published answer; awaiting: none yet (count: RatingSummary.awaitingQuestions)").optional(),
         sort: z.enum(["most_helpful", "newest"]).optional(),
       }),
     paging: true,
@@ -1945,13 +2020,48 @@ export const endpoints = defineEndpoints({
     summary: "Questions on products the seller offers",
     query: () =>
       z.object({
-        state: z.enum(["open", "answered", "all"]).optional(),
+        state: z.enum(["open", "answered", "skipped", "all"]).describe("open (default): not answered by the seller and not skipped; skipped: the seller skipped them").optional(),
         productId: z.uuid().optional(),
       }),
     paging: true,
     response: () => SellerQuestionRow,
     status: 200,
     screens: ["seller/customers","seller/dashboard"],
+    phase: 1,
+  },
+  skipQuestion: {
+    area: "seller",
+    method: "POST",
+    path: "/questions/{id}/skip",
+    auth: "seller",
+    permission: "reviews.responses.post",
+    scope: "own-seller",
+    summary: "Skip a product question (leave it unanswered)",
+    desc: "Takes the question off the seller's open list (state=skipped lists it). Nothing changes for shoppers: the question stays published and customers or other sellers may answer it. Repeating it is harmless.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => SellerQuestionRow,
+    status: 200,
+    screens: ["seller/customers"],
+    phase: 1,
+  },
+  unskipQuestion: {
+    area: "seller",
+    method: "DELETE",
+    path: "/questions/{id}/skip",
+    auth: "seller",
+    permission: "reviews.responses.post",
+    scope: "own-seller",
+    summary: "Put a skipped question back on the open list",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => SellerQuestionRow,
+    status: 200,
+    screens: ["seller/customers"],
     phase: 1,
   },
   answerAsSeller: {
@@ -2955,6 +3065,15 @@ export const spec = defineModuleSpec({
       "approval": "second_reviewer",
       "sellerVisible": true
     },
+    "sellerFeedbackTargetPct": {
+      "default": 95,
+      "desc": "Positive feedback percentage sellers are expected to keep (SellerFeedbackSummary.target), example",
+      "type": "int",
+      "min": 0,
+      "max": 100,
+      "unit": "%",
+      "sellerVisible": true
+    },
     "moderationTargetHours": {
       "default": 48,
       "desc": "Decision target for reported content (example)",
@@ -3663,6 +3782,74 @@ export const spec = defineModuleSpec({
           "key": {
             "seller_id": 1
           }
+        }
+      ],
+      "unenforced": []
+    },
+    "question_skips": {
+      "idField": "id",
+      "key": [
+        "id"
+      ],
+      "columns": [
+        "id",
+        "seller_id",
+        "question_id",
+        "skipped_by",
+        "created_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "created_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "seller_id",
+            "question_id",
+            "skipped_by",
+            "created_at"
+          ],
+          "properties": {
+            "_id": {
+              "bsonType": "string"
+            },
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "question_id": {
+              "bsonType": "string"
+            },
+            "skipped_by": {
+              "bsonType": "string"
+            },
+            "created_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "question_skips_seller_id_question_id_7debe0",
+          "key": {
+            "seller_id": 1,
+            "question_id": 1
+          },
+          "unique": true
         }
       ],
       "unenforced": []

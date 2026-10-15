@@ -40,7 +40,7 @@ describe('writing a review', () => {
   it('shows the honest no-reviews state for a product without reviews', async () => {
     const p = product(k);
     const res = await k.call('GET', `${STORE}/rating-summaries?productIds=${p.productId}`, tokens.visitor());
-    expect(res.body).toEqual([{ productId: p.productId, hasReviews: false, average: null, ratingCount: 0, writtenCount: 0, distribution: expect.any(Array), answeredQuestions: 0, withPhotos: 0 }]);
+    expect(res.body).toEqual([{ productId: p.productId, hasReviews: false, average: null, ratingCount: 0, writtenCount: 0, distribution: expect.any(Array), answeredQuestions: 0, awaitingQuestions: 0, withPhotos: 0 }]);
     expect((await k.call('GET', `${STORE}/rating-summaries?productIds=nope`, tokens.visitor())).status).toBe(400);
   });
 

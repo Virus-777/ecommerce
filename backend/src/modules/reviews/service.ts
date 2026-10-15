@@ -97,7 +97,9 @@ export class ReviewsService implements ReviewsPublicApi {
   async getOfferSellerRatings(offers: { offerId: string; ownerType: 'official' | 'seller'; sellerId: string | null }[]): Promise<Record<string, SellerFeedbackSummary>> {
     const keyOf = (o: (typeof offers)[number]) => (o.ownerType === 'official' ? OFFICIAL_STORE_ID : sellerKey(o.sellerId));
     const summaries = await this.feedback.summaries(offers.map(keyOf));
-    return Object.fromEntries(offers.map((o) => [o.offerId, summaries.get(keyOf(o)) ?? this.feedback.summaryOut(keyOf(o), undefined, undefined, 12, null)]));
+    const out: Record<string, SellerFeedbackSummary> = {};
+    for (const o of offers) out[o.offerId] = summaries.get(keyOf(o)) ?? (await this.feedback.emptySummary(keyOf(o)));
+    return out;
   }
 
   /** Account id (actor) → customer id (customers, optional) */

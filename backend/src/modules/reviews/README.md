@@ -57,6 +57,8 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
 | GET | `/api/seller/reviews/questions` | Questions on products the seller offers | seller | Page<SellerQuestionRow> |
+| POST | `/api/seller/reviews/questions/{id}/skip` | Skip a product question (leave it unanswered) | seller<br>`reviews.responses.post` | `SellerQuestionRow` |
+| DELETE | `/api/seller/reviews/questions/{id}/skip` | Put a skipped question back on the open list | seller<br>`reviews.responses.post` | `SellerQuestionRow` |
 | POST | `/api/seller/reviews/questions/{id}/answers` | Publish an answer labelled as from the seller | seller<br>`reviews.responses.post` | `{ text: text }` → `Answer` |
 | PATCH | `/api/seller/reviews/answers/{id}` | Edit the seller's answer, or fix and resubmit it after an edit request | seller<br>`reviews.responses.post` | `{ text: text }` → `Answer` |
 | GET | `/api/seller/reviews/feedback` | Seller feedback received | seller | Page<SellerFeedbackRow> |
@@ -142,6 +144,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | editedAt | `datetime?` |
 | helpfulCount | `int` |
 | viewerVotedHelpful | `bool?` |
+| viewerReported | `bool?` The signed-in customer has reported this review (open or decided), so the Report button can say Reported; null without a customer session |
 | response | `SellerResponse?` |
 
 ### RatingBucket
@@ -163,6 +166,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | writtenCount | `int` |
 | distribution | `RatingBucket[]` |
 | answeredQuestions | `int` |
+| awaitingQuestions | `int` Published questions with no published answer yet (listQuestions state=awaiting) |
 | withPhotos | `int` |
 
 ### Answer
@@ -176,6 +180,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | label | `enum(seller|marketly_staff|customer)` Shown as Answer from the seller / Marketly staff / Customer |
 | answeredAt | `datetime` |
 | helpfulCount | `int` |
+| viewerVotedHelpful | `bool?` The signed-in customer marked this answer helpful; null without a customer session and outside the store's question list |
 | status | `enum(pending_review|published|edit_requested|removed)` |
 
 ### Question
@@ -238,6 +243,15 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | label | `string` e.g. 98% positive · 4,812 ratings |
 | average | `number?` Average overall score 1–5 |
 | onTimeDispatchPct | `number?` From shipping dispatch metrics, last 90 days |
+| target | `FeedbackTarget?` The positive-feedback target sellers are measured against (setting sellerFeedbackTargetPct) and whether this summary meets it; always given by reviews |
+
+### FeedbackTarget
+
+| Field | Type |
+|---|---|
+| positivePct | `int` Target positive percentage, e.g. 95 |
+| label | `string` e.g. Target: at least 95% positive |
+| meets | `bool?` positivePct of the summary >= the target; null until there is feedback in the period |
 
 ### ModerationOutcome
 
@@ -335,7 +349,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | product | `{"id":"uuid","title":"string","imageUrl":"url?","variantLabel":"string?"}` |
 | deliveredAt | `datetime` |
 | verifiedPurchase | `bool` |
-| seller | `{"ownerType":"enum(official|seller)","id":{"type":"uuid","desc":"OFFICIAL_STORE_ID for the Official Store"},"name":"string"}` |
+| seller | `{"ownerType":"enum(official|seller)","id":{"type":"uuid","desc":"OFFICIAL_STORE_ID for the Official Store"},"name":"string","slug":{"type":"string?","desc":"Storefront slug for /shop/{slug} (sellers' public API); null for the Official Store"}}` |
 | existingReview | `MyReview?` |
 | existingFeedback | `MyFeedback?` |
 | feedbackEligible | `bool` |
@@ -445,6 +459,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | productImage | `MediaRef?` |
 | offerSku | `string?` |
 | needsAnswer | `bool` |
+| skipped | `bool` The seller skipped this question (skipQuestion): it leaves the open list; customers and other sellers can still answer it |
 
 ### AdminQuestionRow
 
@@ -519,6 +534,18 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | firstReportedAt | `datetime` |
 | age | `string` e.g. 1 d, 6 h |
 | status | `enum(open|decided)` |
+| decision | `ModerationDecisionView?` The latest decision on a decided item; null while open |
+
+### ModerationDecisionView
+
+| Field | Type |
+|---|---|
+| outcome | `enum(keep|remove|request_edit|publish|reject_response)` What was decided (ModerationDecisionInput.decision) |
+| outcomeLabel | `string` e.g. Kept / Removed / Edit requested |
+| reasonCode | `string` |
+| reason | `string` The policy reason in words, e.g. Personal information |
+| by | `Actor` The moderator (name from access), or system for decisions carried out for a Trust and Risk enforcement |
+| at | `datetime` |
 
 ### ModerationDetail
 
@@ -839,6 +866,18 @@ Indexes: `(product_id, status, created_at desc)`
 
 Indexes: `(question_id, status)`, `(seller_id)`
 
+**question_skips**: Questions a seller chose not to answer (skipQuestion); only that seller's open list changes
+
+| Column | Type |
+|---|---|
+| id | uuid pk |
+| seller_id | uuid |
+| question_id | uuid → questions |
+| skipped_by | text (member account id) |
+| created_at | timestamptz |
+
+Indexes: `(seller_id, question_id) unique`
+
 **helpful_votes**
 
 | Column | Type |
@@ -1077,6 +1116,7 @@ Indexes: `(state, due_at)`, `(customer_id)`
 | inviteDelayDays | `5` | duration, days, 0–… | Ask for a review this long after delivery |
 | sellerRatingPeriodMonths | `12` | duration, months, 1–…, approval: second reviewer, seller-visible | Period for the seller positive percentage |
 | positiveThreshold | `4` | int, 1–5, approval: second reviewer, seller-visible | Overall rating counted as positive (4–5); 3 is neutral |
+| sellerFeedbackTargetPct | `95` | int, %, 0–100, seller-visible | Positive feedback percentage sellers are expected to keep (SellerFeedbackSummary.target), example |
 | moderationTargetHours | `48` | duration, hours, 1–… | Decision target for reported content (example) |
 | reportCooldownDays | `30` | duration, days, 0–… | Repeat reports on decided content attach without reopening |
 | questionAnswerTargetBusinessDays | `1` | duration, business days, 1–…, seller-visible | Expected answer time shown under unanswered questions (Question.answerExpectation), example |

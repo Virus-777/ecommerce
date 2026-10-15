@@ -35,10 +35,26 @@ export class QaPart {
 
   /* ================================================================ public */
 
-  async listPublic(productId: string, search: string | null, sort: string | undefined, page: PageRequest): Promise<common.Page<Question>> {
+  /** state answered: with a published answer; awaiting: none yet. viewerCustomerId fills Answer.viewerVotedHelpful */
+  async listPublic(
+    productId: string,
+    search: string | null,
+    sort: string | undefined,
+    page: PageRequest,
+    o: { state?: 'answered' | 'awaiting'; viewerCustomerId?: string | null } = {},
+  ): Promise<common.Page<Question>> {
     if (!isUuid(productId)) return pageOf([], page);
-    const rows = await this.core.repo.listQuestions({ productId, publicOnly: true, ...(search?.trim() ? { q: search } : {}), sort: sort === 'newest' ? 'newest' : 'most_helpful' }, page);
-    return { ...rows, items: await this.views.questions(rows.items, { publicOnly: true }) };
+    const rows = await this.core.repo.listQuestions(
+      {
+        productId,
+        publicOnly: true,
+        ...(search?.trim() ? { q: search } : {}),
+        ...(o.state ? { answered: o.state === 'answered' } : {}),
+        sort: sort === 'newest' ? 'newest' : 'most_helpful',
+      },
+      page,
+    );
+    return { ...rows, items: await this.views.questions(rows.items, { publicOnly: true, viewerCustomerId: o.viewerCustomerId ?? null }) };
   }
 
   private textIssues(text: string, min: number) {
@@ -230,25 +246,48 @@ export class QaPart {
     let productIds = [...offered.keys()];
     if (filter.productId) productIds = productIds.filter((id) => id === filter.productId);
     const state = filter.state ?? 'open';
+    const skipped = await this.core.repo.skippedQuestionIds(sellerId);
     const rows = await this.core.repo.listQuestions(
       {
         productIds,
         publicOnly: true,
-        ...(state === 'all' ? {} : { answeredBySeller: { sellerId, value: state === 'answered' } }),
+        ...(state === 'open' || state === 'answered' ? { answeredBySeller: { sellerId, value: state === 'answered' } } : {}),
+        ...(state === 'open' ? { excludeIds: skipped } : {}),
+        ...(state === 'skipped' ? { ids: skipped } : {}),
         sort: state === 'open' ? 'oldest' : 'newest',
       },
       page,
     );
-    const [questions, products] = await Promise.all([this.views.questions(rows.items, { publicOnly: true }), this.core.products(rows.items.map((q) => q.product_id))]);
-    return {
-      ...rows,
-      items: questions.map((question) => ({
+    return { ...rows, items: await this.sellerRows(sellerId, rows.items, offered, new Set(skipped)) };
+  }
+
+  private async sellerRows(sellerId: string, rows: readonly QuestionRec[], offered: Map<string, offers.Offer>, skipped: Set<string>): Promise<SellerQuestionRow[]> {
+    const [questions, products] = await Promise.all([this.views.questions(rows, { publicOnly: true }), this.core.products(rows.map((q) => q.product_id))]);
+    return questions.map((question) => {
+      const answered = question.answers.some((a) => a.label === 'seller' && a.by.sellerId === sellerId && a.status === 'published');
+      return {
         question,
         productImage: this.core.productImage(products.get(question.productId)),
         offerSku: offered.get(question.productId)?.sellerSku ?? null,
-        needsAnswer: !question.answers.some((a) => a.label === 'seller' && a.by.sellerId === sellerId && a.status === 'published'),
-      })),
-    };
+        needsAnswer: !answered && !skipped.has(question.id),
+        skipped: skipped.has(question.id),
+      };
+    });
+  }
+
+  /**
+   * The seller skips (skip = true) or un-skips a question on a product it offers. Only the seller's own open list
+   * changes; the question stays published for everyone else.
+   */
+  async setSkipped(who: SellerWho, questionId: string, skip: boolean): Promise<SellerQuestionRow> {
+    const repo = this.core.repo;
+    const question = isUuid(questionId) ? await repo.get('questions', questionId) : undefined;
+    if (!question || question.status !== 'published' || (await repo.hiddenByReport('question', [question.id])).size) throw notFound('Question');
+    const offered = (await this.offeredProducts({ sellerId: who.sellerId })) ?? new Map<string, offers.Offer>();
+    if (!offered.has(question.product_id)) throw notFound('Question');
+    if (skip) await repo.skipQuestion({ id: newId(), seller_id: who.sellerId, question_id: question.id, skipped_by: who.actor.id ?? 'seller', created_at: this.core.now() });
+    else await repo.unskipQuestion(who.sellerId, question.id);
+    return (await this.sellerRows(who.sellerId, [question], offered, new Set(skip ? [question.id] : [])))[0]!;
   }
 
   async listForAdmin(

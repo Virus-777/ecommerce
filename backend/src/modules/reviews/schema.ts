@@ -127,6 +127,21 @@ const answers = new Schema(
 answers.index({"question_id":1,"status":1}, {"name":"answers_question_id_status_7a9641"});
 answers.index({"seller_id":1}, {"name":"answers_seller_id_b7adb7"});
 
+/** Questions a seller chose not to answer (skipQuestion); only that seller's open list changes */
+const question_skips = new Schema(
+  {
+    _id: { type: String, required: true }, // id
+    seller_id: { type: String, required: true },
+    question_id: { type: String, required: true },
+    skipped_by: { type: String, required: true }, // member account id
+    created_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("reviews.question_skips"),
+);
+question_skips.index({"seller_id":1,"question_id":1}, {"name":"question_skips_seller_id_question_id_7debe0","unique":true});
+
 const helpful_votes = new Schema(
   {
     target_type: { type: String, required: true },
@@ -310,6 +325,7 @@ export const schemas = {
   seller_responses: seller_responses,
   questions: questions,
   answers: answers,
+  question_skips: question_skips,
   helpful_votes: helpful_votes,
   reports: reports,
   moderation_items: moderation_items,

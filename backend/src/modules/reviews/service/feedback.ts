@@ -270,15 +270,21 @@ export class FeedbackPart {
     const keys = [...new Set(sellerIds.filter(isSellerId).map(sellerKey))];
     const out = new Map<string, SellerFeedbackSummary>();
     if (!keys.length) return out;
-    const months = await this.core.num('sellerRatingPeriodMonths');
+    const [months, targetPct] = await Promise.all([this.core.num('sellerRatingPeriodMonths'), this.core.num('sellerFeedbackTargetPct')]);
     const rows = await this.core.repo.sellerSummaries(keys);
     const dispatch = o.dispatch === false ? new Map<string, number | null>() : await this.onTime(keys);
     for (const id of keys) {
       const row = rows.find((r) => r.seller_id === id);
       // average overall rating from the summary row (overall_sum / count)
-      out.set(id, this.summaryOut(id, row, row && row.count ? row.overall_sum / row.count : undefined, months, dispatch.get(id) ?? null));
+      out.set(id, this.summaryOut(id, row, row && row.count ? row.overall_sum / row.count : undefined, months, dispatch.get(id) ?? null, targetPct));
     }
     return out;
+  }
+
+  /** An empty summary (no feedback yet), for ids that are not sellers */
+  async emptySummary(sellerId: string): Promise<SellerFeedbackSummary> {
+    const [months, targetPct] = await Promise.all([this.core.num('sellerRatingPeriodMonths'), this.core.num('sellerFeedbackTargetPct')]);
+    return this.summaryOut(sellerId, undefined, undefined, months, null, targetPct);
   }
 
   async summary(sellerId: string): Promise<SellerFeedbackSummary> {
@@ -286,7 +292,7 @@ export class FeedbackPart {
     return (await this.summaries([key])).get(key)!;
   }
 
-  summaryOut(sellerId: string, r: SellerSummaryRec | undefined, average: number | undefined, months: number, onTime: number | null): SellerFeedbackSummary {
+  summaryOut(sellerId: string, r: SellerSummaryRec | undefined, average: number | undefined, months: number, onTime: number | null, targetPct: number): SellerFeedbackSummary {
     const count = r?.count ?? 0;
     const positivePct = r ? pct(r.positive, count) : null;
     return {
@@ -303,6 +309,7 @@ export class FeedbackPart {
       label: feedbackLabel(positivePct, count),
       average: count && average != null ? round1(average) : null,
       onTimeDispatchPct: onTime,
+      target: { positivePct: targetPct, label: `Target: at least ${targetPct}% positive`, meets: positivePct == null ? null : positivePct >= targetPct },
     };
   }
 

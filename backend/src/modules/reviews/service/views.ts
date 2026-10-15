@@ -79,12 +79,14 @@ export class Views {
   async reviews(rows: readonly ReviewRec[], o: { viewerCustomerId?: string | null; internal?: boolean } = {}): Promise<ProductReview[]> {
     if (!rows.length) return [];
     const internal = Boolean(o.internal);
-    const [products, names, media, responses, voted] = await Promise.all([
+    const viewer = o.viewerCustomerId;
+    const [products, names, media, responses, voted, reported] = await Promise.all([
       this.core.products(rows.map((r) => r.product_id)),
       this.core.sellerNames(rows.map((r) => r.seller_id)),
       this.core.mediaRefs(rows.flatMap((r) => (r.media_ids as string[]) ?? [])),
       this.responses('product_review', rows.map((r) => r.id), internal),
-      o.viewerCustomerId ? this.core.repo.votedHelpful('product_review', rows.map((r) => r.id), o.viewerCustomerId) : Promise.resolve(null),
+      viewer ? this.core.repo.votedHelpful('product_review', rows.map((r) => r.id), viewer) : Promise.resolve(null),
+      viewer ? this.core.repo.reportedBy('product_review', rows.map((r) => r.id), { kind: 'customer', id: viewer }).then((ids) => new Set(ids)) : Promise.resolve(null),
     ]);
     return rows.map((r) => ({
       id: r.id,
@@ -100,6 +102,7 @@ export class Views {
       editedAt: r.edited_at?.toISOString() ?? null,
       helpfulCount: r.helpful_count,
       viewerVotedHelpful: voted ? voted.has(r.id) : null,
+      viewerReported: reported ? reported.has(r.id) : null,
       response: responses.get(r.id) ?? null,
     }));
   }
@@ -245,7 +248,8 @@ export class Views {
     return { kind: a.author_kind as Author['kind'], displayName: a.display_name, sellerId: a.seller_id, verifiedPurchase: false };
   }
 
-  answerOut(a: AnswerRec): Answer {
+  /** voted: the viewer's helpful votes on answers (store lists with a customer session), else null */
+  answerOut(a: AnswerRec, voted: Set<string> | null = null): Answer {
     return {
       id: a.id,
       questionId: a.question_id,
@@ -254,6 +258,7 @@ export class Views {
       label: a.author_kind === 'seller' ? 'seller' : a.author_kind === 'staff' ? 'marketly_staff' : 'customer',
       answeredAt: (a.published_at ?? a.created_at).toISOString(),
       helpfulCount: a.helpful_count,
+      viewerVotedHelpful: voted ? voted.has(a.id) : null,
       status: a.status as Answer['status'],
     };
   }
@@ -262,9 +267,10 @@ export class Views {
    * publicOnly: published answers not hidden by a report. answerExpectation is given while no answer is
    * published, from the product's main offer (offers, optional).
    */
-  async questions(rows: readonly QuestionRec[], o: { publicOnly: boolean }): Promise<Question[]> {
+  async questions(rows: readonly QuestionRec[], o: { publicOnly: boolean; viewerCustomerId?: string | null }): Promise<Question[]> {
     if (!rows.length) return [];
     const [answers, products] = await Promise.all([this.core.repo.answersOf(rows.map((q) => q.id), { publicOnly: o.publicOnly }), this.core.products(rows.map((q) => q.product_id))]);
+    const voted = o.viewerCustomerId ? await this.core.repo.votedHelpful('answer', answers.map((a) => a.id), o.viewerCustomerId) : null;
     const unanswered = rows.filter((q) => !answers.some((a) => a.question_id === q.id && a.status === 'published'));
     const expectations = await this.expectations([...new Set(unanswered.map((q) => q.product_id))]);
     return rows.map((q) => {
@@ -278,7 +284,7 @@ export class Views {
         askedBy: q.display_name,
         askedAt: q.created_at.toISOString(),
         status: q.status as Question['status'],
-        answers: own.map((a) => this.answerOut(a)),
+        answers: own.map((a) => this.answerOut(a, voted)),
         answerCount: q.answer_count,
         answerExpectation: hasPublished ? null : (expectations.get(q.product_id) ?? null),
       };

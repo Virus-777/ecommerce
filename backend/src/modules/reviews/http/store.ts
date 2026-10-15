@@ -35,6 +35,7 @@ export const storeRoutes = (service: ReviewsService) =>
           ...(query.verifiedOnly ? { verifiedOnly: true } : {}),
           ...(query.withPhotos ? { withPhotos: true } : {}),
           ...(query.variantId ? { variantId: query.variantId } : {}),
+          ...(query.q ? { q: query.q } : {}),
         },
         query.sort,
         page,
@@ -51,7 +52,11 @@ export const storeRoutes = (service: ReviewsService) =>
       return service.getRatingSummaries(ids);
     },
     /** GET /products/{productId}/questions: Questions with answers labelled Seller, Marketly staff or Customer */
-    listQuestions: async ({ params, query, page }) => service.qa.listPublic(params.productId, query.q ?? null, query.sort, page),
+    listQuestions: async ({ params, query, page, principal }) =>
+      service.qa.listPublic(params.productId, query.q ?? null, query.sort, page, {
+        ...(query.state ? { state: query.state } : {}),
+        viewerCustomerId: principal?.kind === 'customer' && principal.accountId ? await service.customerIdOf(principal.accountId) : null,
+      }),
     /** POST /products/{productId}/questions: Ask a question about the product */
     askQuestion: async (i) => service.qa.ask(customerWho(i), i.params.productId, i.body.text),
     /** POST /questions/{id}/answers: Answer another shopper's question (labelled Customer) */

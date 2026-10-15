@@ -14,6 +14,7 @@ export type FeedbackRec = Db['seller_feedback'];
 export type ResponseRec = Db['seller_responses'];
 export type QuestionRec = Db['questions'];
 export type AnswerRec = Db['answers'];
+export type QuestionSkipRec = Db['question_skips'];
 export type VoteRec = Db['helpful_votes'];
 export type ReportRec = Db['reports'];
 export type ItemRec = Db['moderation_items'];
@@ -54,6 +55,10 @@ export interface FeedbackListFilter {
 export interface QuestionListFilter {
   productId?: string;
   productIds?: string[];
+  /** Only these questions */
+  ids?: string[];
+  /** Leave these questions out (e.g. the ones a seller skipped) */
+  excludeIds?: string[];
   statuses?: string[];
   /** questions hidden by an open report are left out */
   publicOnly?: boolean;

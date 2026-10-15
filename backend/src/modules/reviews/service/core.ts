@@ -191,6 +191,14 @@ export class Core {
     return out;
   }
 
+  /** Storefront slugs of marketplace sellers (sellers.getSellers); the Official Store has none */
+  async sellerSlugs(ids: readonly string[]): Promise<Map<string, string>> {
+    const real = [...new Set(ids.filter((id) => isUuid(id) && !isOfficial(id)))];
+    if (!real.length) return new Map();
+    const list = await this.soft('sellers.getSellers', () => this.ctx.use('sellers').getSellers(real));
+    return new Map((list ?? []).map((s) => [s.id, s.slug]));
+  }
+
   sellerName = (names: Map<string, string>, id: string) => names.get(sellerKey(id)) ?? (isOfficial(id) ? OFFICIAL_STORE_NAME : 'Marketplace seller');
 
   /** Customers' full display names (customers, optional) */

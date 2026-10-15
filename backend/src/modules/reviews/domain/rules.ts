@@ -216,6 +216,15 @@ export const OUTCOME_OF: Record<string, 'kept' | 'removed' | 'edit_requested' | 
   reject_response: 'removed',
 };
 
+/** Decision verb → label for staff lists (ModerationDecisionView.outcomeLabel) */
+export const DECISION_LABEL: Record<string, string> = {
+  keep: 'Kept',
+  remove: 'Removed',
+  request_edit: 'Edit requested',
+  publish: 'Published',
+  reject_response: 'Response rejected',
+};
+
 /** Decisions against the author: they can be appealed */
 export const ADVERSE = new Set(['remove', 'request_edit', 'reject_response']);
 

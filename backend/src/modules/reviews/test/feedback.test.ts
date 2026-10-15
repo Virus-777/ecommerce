@@ -33,7 +33,7 @@ describe('leaving feedback', () => {
     expect(k.of('reviews.feedback.published')).toEqual([{ feedbackId: res.body.feedback.id, sellerId: s, orderId: b.orderId, sentiment: 'positive' }]);
     expect(k.of('reviews.rating.changed')).toEqual([{ productId: null, sellerId: s, average: 5, count: 1 }]);
     const summary = await k.call('GET', `${STORE}/sellers/${s}/feedback-summary`, tokens.visitor());
-    expect(summary.body).toEqual({ sellerId: s, official: false, periodMonths: 12, count: 1, positivePct: 100, neutralPct: 0, negativePct: 0, asDescribedPct: 100, avgDispatch: 5, avgCommunication: 4, label: '100% positive · 1 rating', average: 5, onTimeDispatchPct: 95 });
+    expect(summary.body).toEqual({ sellerId: s, official: false, periodMonths: 12, count: 1, positivePct: 100, neutralPct: 0, negativePct: 0, asDescribedPct: 100, avgDispatch: 5, avgCommunication: 4, label: '100% positive · 1 rating', average: 5, onTimeDispatchPct: 95, target: { positivePct: 95, label: 'Target: at least 95% positive', meets: true } });
     // never on the product page
     expect((await k.call('GET', `${STORE}/products/${b.productId}/rating-summary`, tokens.visitor())).body.ratingCount).toBe(0);
   });

@@ -51,7 +51,7 @@ export class SummariesPart {
     if (!isUuid(orderItemId)) return;
     await this.core.repo.updateWhere('review_invites', { order_item_id: orderItemId, state: 'pending' }, { state: 'cancelled', updated_at: this.core.now() });
   }
-  summaryOut(productId: string, r: ProductSummaryRec | undefined): RatingSummary {
+  summaryOut(productId: string, r: ProductSummaryRec | undefined, awaitingQuestions = 0): RatingSummary {
     const count = r?.rating_count ?? 0;
     return {
       productId,
@@ -61,6 +61,7 @@ export class SummariesPart {
       writtenCount: r?.written_count ?? 0,
       distribution: distribution((r?.distribution as Record<string, number>) ?? {}, count),
       answeredQuestions: r?.answered_questions ?? 0,
+      awaitingQuestions,
       withPhotos: r?.with_photos ?? 0,
     };
   }
@@ -68,8 +69,9 @@ export class SummariesPart {
   /** One read of the projection; products without reviews get the honest no-reviews state */
   async ratingSummaries(productIds: readonly string[]): Promise<RatingSummary[]> {
     const ids = [...new Set(productIds.filter(isUuid))];
-    const rows = new Map((await this.core.repo.productSummaries(ids)).map((r) => [r.product_id, r]));
-    return ids.map((id) => this.summaryOut(id, rows.get(id)));
+    const [summaries, awaiting] = await Promise.all([this.core.repo.productSummaries(ids), this.core.repo.awaitingQuestionCounts(ids)]);
+    const rows = new Map(summaries.map((r) => [r.product_id, r]));
+    return ids.map((id) => this.summaryOut(id, rows.get(id), awaiting.get(id) ?? 0));
   }
 
   /* ---------------------------------------------------------------- merges */

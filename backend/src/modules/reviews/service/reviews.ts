@@ -45,7 +45,7 @@ export class ReviewsPart {
 
   async listProductReviews(
     productId: string,
-    filter: { stars?: number; critical?: boolean; verifiedOnly?: boolean; withPhotos?: boolean; variantLabel?: string; variantId?: string },
+    filter: { stars?: number; critical?: boolean; verifiedOnly?: boolean; withPhotos?: boolean; variantLabel?: string; variantId?: string; q?: string },
     sort: string | undefined,
     page: PageRequest,
     viewerCustomerId: string | null,
@@ -67,6 +67,7 @@ export class ReviewsPart {
         ...(filter.verifiedOnly ? { verifiedOnly: true } : {}),
         ...(filter.withPhotos ? { withPhotos: true } : {}),
         ...(variantIds ? { variantIds } : {}),
+        ...(filter.q?.trim() ? { q: filter.q.trim() } : {}),
         sort: s,
       },
       page,
@@ -386,7 +387,8 @@ export class ReviewsPart {
     const pkg = order ? this.core.packagesOf(order).find((p) => p.groupId === item.groupId) : undefined;
     const fb = pkg ? await this.feedback.packageState(customerId, pkg) : { eligible: false, feedback: null };
     const product = await this.core.product(item.productId);
-    const [minTextLength, maxPhotos] = await Promise.all([this.core.num('minReviewLength'), this.core.num('maxReviewPhotos')]);
+    const sellerId = item.ownerType === 'official' ? OFFICIAL_STORE_ID : (item.sellerId ?? OFFICIAL_STORE_ID);
+    const [minTextLength, maxPhotos, slugs] = await Promise.all([this.core.num('minReviewLength'), this.core.num('maxReviewPhotos'), this.core.sellerSlugs([sellerId])]);
     return {
       orderItemId: item.orderItemId,
       orderId: item.orderId,
@@ -399,7 +401,7 @@ export class ReviewsPart {
       },
       deliveredAt: item.deliveredAt!.toISOString(),
       verifiedPurchase: true,
-      seller: { ownerType: item.ownerType, id: item.ownerType === 'official' ? OFFICIAL_STORE_ID : (item.sellerId ?? OFFICIAL_STORE_ID), name: item.sellerName },
+      seller: { ownerType: item.ownerType, id: sellerId, name: item.sellerName, slug: slugs.get(sellerId) ?? null },
       existingReview: existing ? (await this.views.myReviews([existing], customerId))[0]! : null,
       existingFeedback: fb.feedback ? (await this.views.myFeedback([fb.feedback]))[0]! : null,
       feedbackEligible: fb.eligible,

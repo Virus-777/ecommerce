@@ -177,6 +177,8 @@ export class ReviewsRepository {
     const and: Filter[] = [];
     if (f.productId) and.push({ product_id: f.productId });
     if (f.productIds) and.push({ product_id: { $in: f.productIds } });
+    if (f.ids) and.push({ id: { $in: f.ids } });
+    if (f.excludeIds?.length) and.push({ id: { $nin: f.excludeIds } });
     if (f.statuses?.length) and.push({ status: { $in: f.statuses } });
     if (f.publicOnly) and.push({ status: 'published', id: { $nin: await this.#hiddenIds('question') } });
     const stages: Filter[] = [{ $match: this.#questions.filter(and.length ? { $and: and } : {}) }];
@@ -398,6 +400,34 @@ export class ReviewsRepository {
     const out = new Map<string, number>();
     for (const q of qs) if (answered.has(q.id)) out.set(q.product_id, (out.get(q.product_id) ?? 0) + 1);
     return out;
+  }
+
+  /** Published questions without a published answer per product (hidden ones left out, like the public list) */
+  async awaitingQuestionCounts(productIds: readonly string[]): Promise<Map<string, number>> {
+    if (!productIds.length) return new Map();
+    const filter = { product_id: { $in: [...new Set(productIds)] }, status: 'published', answer_count: 0, id: { $nin: await this.#hiddenIds('question') } };
+    const rows = await this.#questions.aggregate<{ _id: string; n: number }>([{ $match: this.#questions.filter(filter) }, { $group: { _id: '$product_id', n: { $sum: 1 } } }]);
+    return new Map(rows.map((r) => [r._id, r.n]));
+  }
+
+  /** The seller skips a question (once: repeating it keeps the first row) */
+  async skipQuestion(row: Db['question_skips']): Promise<void> {
+    await this.#t('question_skips').insertIfAbsent(row);
+  }
+
+  async unskipQuestion(sellerId: string, questionId: string): Promise<void> {
+    await this.#t('question_skips').deleteMany({ seller_id: sellerId, question_id: questionId });
+  }
+
+  /** Question ids the seller skipped (all, or among ids) */
+  skippedQuestionIds(sellerId: string, ids?: readonly string[]): Promise<string[]> {
+    return this.#t('question_skips').distinct<string>('question_id', { seller_id: sellerId, ...(ids ? { question_id: { $in: [...new Set(ids)] } } : {}) });
+  }
+
+  /** Target ids among ids the reporter has reported (any status) */
+  reportedBy(targetType: string, targetIds: readonly string[], reporter: { kind: string; id: string }): Promise<string[]> {
+    if (!targetIds.length) return Promise.resolve([]);
+    return this.#t('reports').distinct<string>('target_id', { target_type: targetType, target_id: { $in: [...new Set(targetIds)] }, reporter_kind: reporter.kind, reporter_id: reporter.id });
   }
 
   /* ---------------------------------------------------------------- helpers */

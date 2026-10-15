@@ -13,6 +13,7 @@ import type {
   Author,
   ContentParty,
   ModerationDecisionInput,
+  ModerationDecisionView,
   ModerationDetail,
   ModerationItem,
   ModerationOutcome,
@@ -29,6 +30,7 @@ import {
   ageLabel,
   AUTHOR_TEXT,
   CONTENT_NOUN,
+  DECISION_LABEL,
   type CheckFailure,
   type ContentType,
   excerpt,
@@ -363,6 +365,7 @@ export class ModerationPart {
     const reportRows = await repo.find('reports', { moderation_item_id: rows.map((r) => r.id) }, { orderBy: [['created_at', 'asc']] });
     sellerIds.push(...reportRows.flatMap((r) => (r.reporter_kind === 'seller' && r.reporter_id ? [r.reporter_id] : [])));
     const [products, names] = await Promise.all([this.core.products(productIds), this.core.sellerNames(sellerIds)]);
+    const decisions = await this.latestDecisions(rows.filter((r) => r.status === 'decided').map((r) => r.id));
     const reports = reportRows;
     const now = this.core.now();
     const out: ModerationItem[] = [];
@@ -370,6 +373,7 @@ export class ModerationPart {
       const c = byKey.get(`${item.content_type}:${item.content_id}`);
       const own = reports.filter((r) => r.moderation_item_id === item.id);
       const base = {
+        decision: decisions.get(item.id) ?? null,
         id: item.id,
         contentType: item.content_type as ModerationItem['contentType'],
         contentId: item.content_id,
@@ -484,6 +488,27 @@ export class ModerationPart {
   }
 
   /* ================================================================ detail */
+
+  /** The latest decision of each decided item, with the moderator's name (access, optional) */
+  private async latestDecisions(itemIds: readonly string[]): Promise<Map<string, ModerationDecisionView>> {
+    const out = new Map<string, ModerationDecisionView>();
+    if (!itemIds.length) return out;
+    const rows = await this.core.repo.find('moderation_decisions', { moderation_item_id: [...itemIds] }, { orderBy: [['decided_at', 'desc']] });
+    const staff = await this.staffNames(rows.map((d) => d.moderator_id));
+    for (const d of rows) {
+      if (out.has(d.moderation_item_id)) continue;
+      const system = d.moderator_id === SYSTEM_MODERATOR_ID;
+      out.set(d.moderation_item_id, {
+        outcome: d.decision as ModerationDecisionView['outcome'],
+        outcomeLabel: DECISION_LABEL[d.decision] ?? d.decision,
+        reasonCode: d.reason_code,
+        reason: reasonLabel(d.reason_code),
+        by: system ? { kind: 'system', id: null, name: 'Trust and Risk enforcement' } : { kind: 'staff', id: d.moderator_id, name: staff.get(d.moderator_id) ?? null },
+        at: d.decided_at.toISOString(),
+      });
+    }
+    return out;
+  }
 
   async detail(id: string): Promise<ModerationDetail> {
     const repo = this.core.repo;

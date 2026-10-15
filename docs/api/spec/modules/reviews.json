@@ -64,6 +64,7 @@
       "editedAt": "datetime?",
       "helpfulCount": "int",
       "viewerVotedHelpful": "bool?",
+      "viewerReported": { "type": "bool?", "desc": "The signed-in customer has reported this review (open or decided), so the Report button can say Reported; null without a customer session" },
       "response": "SellerResponse?"
     },
     "RatingBucket": { "stars": "int", "count": "int", "pct": "int" },
@@ -75,6 +76,7 @@
       "writtenCount": "int",
       "distribution": "RatingBucket[]",
       "answeredQuestions": "int",
+      "awaitingQuestions": { "type": "int", "desc": "Published questions with no published answer yet (listQuestions state=awaiting)" },
       "withPhotos": "int"
     },
     "Answer": {
@@ -85,6 +87,7 @@
       "label": { "type": "enum(seller|marketly_staff|customer)", "desc": "Shown as Answer from the seller / Marketly staff / Customer" },
       "answeredAt": "datetime",
       "helpfulCount": "int",
+      "viewerVotedHelpful": { "type": "bool?", "desc": "The signed-in customer marked this answer helpful; null without a customer session and outside the store's question list" },
       "status": "enum(pending_review|published|edit_requested|removed)"
     },
     "Question": {
@@ -134,7 +137,13 @@
       "avgCommunication": "number?",
       "label": { "type": "string", "desc": "e.g. 98% positive · 4,812 ratings" },
       "average": { "type": "number?", "desc": "Average overall score 1–5" },
-      "onTimeDispatchPct": { "type": "number?", "desc": "From shipping dispatch metrics, last 90 days" }
+      "onTimeDispatchPct": { "type": "number?", "desc": "From shipping dispatch metrics, last 90 days" },
+      "target": { "type": "FeedbackTarget?", "desc": "The positive-feedback target sellers are measured against (setting sellerFeedbackTargetPct) and whether this summary meets it; always given by reviews" }
+    },
+    "FeedbackTarget": {
+      "positivePct": { "type": "int", "desc": "Target positive percentage, e.g. 95" },
+      "label": { "type": "string", "desc": "e.g. Target: at least 95% positive" },
+      "meets": { "type": "bool?", "desc": "positivePct of the summary >= the target; null until there is feedback in the period" }
     },
     "ModerationOutcome": {
       "decision": "enum(kept|removed|edit_requested|published|hidden_pending_review)",
@@ -178,7 +187,7 @@
       "product": { "id": "uuid", "title": "string", "imageUrl": "url?", "variantLabel": "string?" },
       "deliveredAt": "datetime",
       "verifiedPurchase": "bool",
-      "seller": { "ownerType": "enum(official|seller)", "id": { "type": "uuid", "desc": "OFFICIAL_STORE_ID for the Official Store" }, "name": "string" },
+      "seller": { "ownerType": "enum(official|seller)", "id": { "type": "uuid", "desc": "OFFICIAL_STORE_ID for the Official Store" }, "name": "string", "slug": { "type": "string?", "desc": "Storefront slug for /shop/{slug} (sellers' public API); null for the Official Store" } },
       "existingReview": "MyReview?",
       "existingFeedback": "MyFeedback?",
       "feedbackEligible": "bool",
@@ -219,7 +228,7 @@
     "AppealInput": { "targetType": "enum(product_review|seller_feedback|answer|seller_response)", "targetId": "uuid", "reason": "text" },
     "ResponseInput": { "targetType": "enum(product_review|seller_feedback)", "targetId": "uuid", "text": "text" },
     "SellerProductReviewRow": { "review": "ProductReview", "orderRef": "string", "canRespond": "bool", "respondNote": "string?" },
-    "SellerQuestionRow": { "question": "Question", "productImage": "MediaRef?", "offerSku": "string?", "needsAnswer": "bool" },
+    "SellerQuestionRow": { "question": "Question", "productImage": "MediaRef?", "offerSku": "string?", "needsAnswer": "bool", "skipped": { "type": "bool", "desc": "The seller skipped this question (skipQuestion): it leaves the open list; customers and other sellers can still answer it" } },
     "AdminQuestionRow": {
       "question": "Question",
       "productImage": "MediaRef?",
@@ -263,7 +272,16 @@
       "ruleCheck": "RuleCheck?",
       "firstReportedAt": "datetime",
       "age": { "type": "string", "desc": "e.g. 1 d, 6 h" },
-      "status": "enum(open|decided)"
+      "status": "enum(open|decided)",
+      "decision": { "type": "ModerationDecisionView?", "desc": "The latest decision on a decided item; null while open" }
+    },
+    "ModerationDecisionView": {
+      "outcome": { "type": "enum(keep|remove|request_edit|publish|reject_response)", "desc": "What was decided (ModerationDecisionInput.decision)" },
+      "outcomeLabel": { "type": "string", "desc": "e.g. Kept / Removed / Edit requested" },
+      "reasonCode": "string",
+      "reason": { "type": "string", "desc": "The policy reason in words, e.g. Personal information" },
+      "by": { "type": "Actor", "desc": "The moderator (name from access), or system for decisions carried out for a Trust and Risk enforcement" },
+      "at": "datetime"
     },
     "ModerationDetail": {
       "item": "ModerationItem",
@@ -319,6 +337,7 @@
     { "name": "seller_responses", "columns": { "id": "uuid pk", "target_type": "text", "target_id": "uuid", "seller_id": "uuid", "text": "text", "status": "text", "rule_check": "jsonb", "created_by": "text", "created_at": "timestamptz", "published_at": "timestamptz?", "editable_until": "timestamptz" }, "indexes": ["(target_type, target_id) unique", "(seller_id, status)"] },
     { "name": "questions", "columns": { "id": "uuid pk", "product_id": "uuid", "customer_id": "uuid", "display_name": "text", "text": "text", "status": "text", "answer_count": "int", "created_at": "timestamptz" }, "indexes": ["(product_id, status, created_at desc)"] },
     { "name": "answers", "columns": { "id": "uuid pk", "question_id": "uuid → questions", "author_kind": "text", "author_id": "text", "seller_id": "uuid?", "display_name": "text", "text": "text", "status": "text", "rule_check": "jsonb", "helpful_count": "int", "created_at": "timestamptz", "published_at": "timestamptz?" }, "indexes": ["(question_id, status)", "(seller_id)"] },
+    { "name": "question_skips", "desc": "Questions a seller chose not to answer (skipQuestion); only that seller's open list changes", "columns": { "id": "uuid pk", "seller_id": "uuid", "question_id": "uuid → questions", "skipped_by": "text (member account id)", "created_at": "timestamptz" }, "indexes": ["(seller_id, question_id) unique"] },
     { "name": "helpful_votes", "columns": { "target_type": "text", "target_id": "uuid", "customer_id": "uuid", "helpful": "bool", "at": "timestamptz" }, "indexes": ["(target_type, target_id, customer_id) unique"] },
     { "name": "reports", "columns": { "id": "uuid pk", "target_type": "text", "target_id": "uuid", "moderation_item_id": "uuid → moderation_items", "reporter_kind": "text", "reporter_id": "text?", "reason": "text", "note": "text?", "status": "text", "outcome_text": "text?", "created_at": "timestamptz", "decided_at": "timestamptz?" }, "indexes": ["(reporter_kind, reporter_id, created_at desc)", "(moderation_item_id)"] },
     { "name": "moderation_items", "desc": "One open item per piece of content under review; reports attach to it", "columns": { "id": "uuid pk", "content_type": "text", "content_id": "uuid", "queue": "text", "status": "text", "visibility": "text", "reasons": "jsonb", "report_count": "int", "first_reported_at": "timestamptz", "decided_at": "timestamptz?" }, "indexes": ["(status, queue, first_reported_at)", "(content_type, content_id)"] },
@@ -391,10 +410,10 @@
     }
   ],
   "endpoints": [
-    { "id": "listProductReviews", "area": "store", "method": "GET", "path": "/products/{productId}/reviews", "summary": "Published product reviews with filters and sorting", "auth": "visitor", "params": { "productId": "uuid" }, "paging": true, "query": { "verifiedOnly": "bool?", "withPhotos": "bool?", "rating": "int?", "critical": { "type": "bool?", "desc": "1–2 stars" }, "variantId": "uuid?", "sort": "enum(most_helpful|newest|highest|lowest)?" }, "response": "ProductReview", "screens": ["store/product"] },
+    { "id": "listProductReviews", "area": "store", "method": "GET", "path": "/products/{productId}/reviews", "summary": "Published product reviews with filters and sorting", "auth": "visitor", "params": { "productId": "uuid" }, "paging": true, "query": { "verifiedOnly": "bool?", "withPhotos": "bool?", "rating": "int?", "critical": { "type": "bool?", "desc": "1–2 stars" }, "variantId": "uuid?", "q": { "type": "string?", "desc": "Keyword search in the headline, text and reviewer name (case-insensitive, all reviews of the product, not only the loaded page)" }, "sort": "enum(most_helpful|newest|highest|lowest)?" }, "response": "ProductReview", "screens": ["store/product"] },
     { "id": "getRatingSummary", "area": "store", "method": "GET", "path": "/products/{productId}/rating-summary", "summary": "Average, count, distribution and answered questions (honest no-reviews state)", "auth": "visitor", "params": { "productId": "uuid" }, "response": "RatingSummary", "screens": ["store/product"] },
     { "id": "getRatingSummaries", "area": "store", "method": "GET", "path": "/rating-summaries", "summary": "Ratings for several products (cards)", "auth": "visitor", "query": { "productIds": { "type": "string", "desc": "Comma-separated, up to 100" } }, "response": "RatingSummary[]", "screens": ["store/search", "store/category", "store/home", "store/offers"] },
-    { "id": "listQuestions", "area": "store", "method": "GET", "path": "/products/{productId}/questions", "summary": "Questions with answers labelled Seller, Marketly staff or Customer", "auth": "visitor", "params": { "productId": "uuid" }, "paging": true, "query": { "q": "string?", "sort": "enum(most_helpful|newest)?" }, "response": "Question", "screens": ["store/product"] },
+    { "id": "listQuestions", "area": "store", "method": "GET", "path": "/products/{productId}/questions", "summary": "Questions with answers labelled Seller, Marketly staff or Customer", "auth": "visitor", "params": { "productId": "uuid" }, "paging": true, "query": { "q": "string?", "state": { "type": "enum(answered|awaiting)?", "desc": "answered: at least one published answer; awaiting: none yet (count: RatingSummary.awaitingQuestions)" }, "sort": "enum(most_helpful|newest)?" }, "response": "Question", "screens": ["store/product"] },
     { "id": "askQuestion", "area": "store", "method": "POST", "path": "/products/{productId}/questions", "summary": "Ask a question about the product", "desc": "Order-specific questions are redirected to order messages.", "auth": "customer", "params": { "productId": "uuid" }, "body": { "text": "text" }, "response": "Question", "status": 201, "events": ["reviews.question.asked"], "screens": ["store/product"] },
     { "id": "answerAsCustomer", "area": "store", "method": "POST", "path": "/questions/{id}/answers", "summary": "Answer another shopper's question (labelled Customer)", "auth": "customer", "params": { "id": "uuid" }, "body": { "text": "text" }, "response": "Answer", "status": 201, "events": ["reviews.answer.published"], "screens": ["store/product"] },
     { "id": "editMyAnswer", "area": "store", "method": "PATCH", "path": "/me/answers/{id}", "summary": "Edit my answer, or fix and resubmit it after an edit request", "desc": "Published answers go back through the automatic checks (edit); answers with an edit request are resubmitted for review (resubmit).", "auth": "customer", "params": { "id": "uuid" }, "body": { "text": "text" }, "response": "Answer", "errors": ["ILLEGAL_TRANSITION", "NOT_FOUND"], "events": ["reviews.answer.published"], "screens": ["store/product", "account/reviews"] },
@@ -416,7 +435,9 @@
     { "id": "deleteFeedback", "area": "store", "method": "DELETE", "path": "/me/feedback/{id}", "summary": "Delete seller feedback", "auth": "customer", "params": { "id": "uuid" }, "response": null, "status": 204, "events": ["reviews.feedback.removed"], "screens": ["account/reviews"] },
     { "id": "customerAppeal", "area": "store", "method": "POST", "path": "/me/appeals", "summary": "Appeal a moderation decision on my content", "auth": "customer", "body": "AppealInput", "response": "AppealView", "status": 201, "errors": ["APPEAL_WINDOW_CLOSED", "ILLEGAL_TRANSITION"], "events": ["reviews.appeal.submitted"], "screens": ["account/reviews"] },
 
-    { "id": "listSellerQuestions", "area": "seller", "method": "GET", "path": "/questions", "summary": "Questions on products the seller offers", "auth": "seller", "paging": true, "query": { "state": "enum(open|answered|all)?", "productId": "uuid?" }, "response": "SellerQuestionRow", "screens": ["seller/customers", "seller/dashboard"] },
+    { "id": "listSellerQuestions", "area": "seller", "method": "GET", "path": "/questions", "summary": "Questions on products the seller offers", "auth": "seller", "paging": true, "query": { "state": { "type": "enum(open|answered|skipped|all)?", "desc": "open (default): not answered by the seller and not skipped; skipped: the seller skipped them" }, "productId": "uuid?" }, "response": "SellerQuestionRow", "screens": ["seller/customers", "seller/dashboard"] },
+    { "id": "skipQuestion", "area": "seller", "method": "POST", "path": "/questions/{id}/skip", "summary": "Skip a product question (leave it unanswered)", "desc": "Takes the question off the seller's open list (state=skipped lists it). Nothing changes for shoppers: the question stays published and customers or other sellers may answer it. Repeating it is harmless.", "auth": "seller", "permission": "reviews.responses.post", "params": { "id": "uuid" }, "response": "SellerQuestionRow", "screens": ["seller/customers"] },
+    { "id": "unskipQuestion", "area": "seller", "method": "DELETE", "path": "/questions/{id}/skip", "summary": "Put a skipped question back on the open list", "auth": "seller", "permission": "reviews.responses.post", "params": { "id": "uuid" }, "response": "SellerQuestionRow", "screens": ["seller/customers"] },
     { "id": "answerAsSeller", "area": "seller", "method": "POST", "path": "/questions/{id}/answers", "summary": "Publish an answer labelled as from the seller", "auth": "seller", "permission": "reviews.responses.post", "params": { "id": "uuid" }, "body": { "text": "text" }, "response": "Answer", "status": 201, "errors": ["NOT_AN_OFFER_SELLER"], "events": ["reviews.answer.published"], "screens": ["seller/customers"] },
     { "id": "editSellerAnswer", "area": "seller", "method": "PATCH", "path": "/answers/{id}", "summary": "Edit the seller's answer, or fix and resubmit it after an edit request", "desc": "Only answers this seller wrote. Same moves as the customer edit: edit from published, resubmit from edit_requested.", "auth": "seller", "permission": "reviews.responses.post", "params": { "id": "uuid" }, "body": { "text": "text" }, "response": "Answer", "errors": ["ILLEGAL_TRANSITION", "NOT_FOUND"], "events": ["reviews.answer.published"], "screens": ["seller/customers"] },
     { "id": "listSellerFeedback", "area": "seller", "method": "GET", "path": "/feedback", "summary": "Seller feedback received", "auth": "seller", "paging": true, "query": { "needsResponse": "bool?", "sentiment": "enum(positive|neutral|negative)?" }, "response": "SellerFeedbackRow", "screens": ["seller/customers"] },
@@ -494,6 +515,7 @@
     { "key": "inviteDelayDays", "type": "duration", "default": 5, "desc": "Ask for a review this long after delivery", "unit": "days", "min": 0 },
     { "key": "sellerRatingPeriodMonths", "type": "duration", "default": 12, "desc": "Period for the seller positive percentage", "unit": "months", "min": 1, "approval": "second_reviewer", "sellerVisible": true },
     { "key": "positiveThreshold", "type": "int", "default": 4, "desc": "Overall rating counted as positive (4–5); 3 is neutral", "min": 1, "max": 5, "approval": "second_reviewer", "sellerVisible": true },
+    { "key": "sellerFeedbackTargetPct", "type": "int", "default": 95, "desc": "Positive feedback percentage sellers are expected to keep (SellerFeedbackSummary.target), example", "unit": "%", "min": 0, "max": 100, "sellerVisible": true },
     { "key": "moderationTargetHours", "type": "duration", "default": 48, "desc": "Decision target for reported content (example)", "unit": "hours", "min": 1 },
     { "key": "reportCooldownDays", "type": "duration", "default": 30, "desc": "Repeat reports on decided content attach without reopening", "unit": "days", "min": 0 },
     { "key": "questionAnswerTargetBusinessDays", "type": "duration", "default": 1, "desc": "Expected answer time shown under unanswered questions (Question.answerExpectation), example", "unit": "business days", "min": 1, "sellerVisible": true }

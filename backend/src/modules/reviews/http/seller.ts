@@ -11,6 +11,10 @@ export const sellerRoutes = (service: ReviewsService) =>
   routes(endpoints, 'seller', {
     /** GET /questions: Questions on products the seller offers */
     listSellerQuestions: async ({ sellerId, query, page }) => service.qa.listForSeller(sellerId, { ...(query.state ? { state: query.state } : {}), ...(query.productId ? { productId: query.productId } : {}) }, page),
+    /** POST /questions/{id}/skip: Skip a product question (leave it unanswered) */
+    skipQuestion: async ({ sellerId, params, actor, requestId }) => service.qa.setSkipped({ sellerId, actor, requestId }, params.id, true),
+    /** DELETE /questions/{id}/skip: Put a skipped question back on the open list */
+    unskipQuestion: async ({ sellerId, params, actor, requestId }) => service.qa.setSkipped({ sellerId, actor, requestId }, params.id, false),
     /** POST /questions/{id}/answers: Publish an answer labelled as from the seller */
     answerAsSeller: async ({ sellerId, params, body, actor, requestId }) => service.qa.answerAsSeller({ sellerId, actor, requestId }, params.id, body.text),
     /** GET /feedback: Seller feedback received */
