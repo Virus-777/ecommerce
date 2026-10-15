@@ -269,6 +269,7 @@ export const AppliedFilter: z.ZodType<AppliedFilter> = z.object({
 }).register(common.apiTypes, { id: "search.AppliedFilter" });
 
 export interface FacetValue {
+  /** The value the filter takes: category, brand and store slugs (official for the Official Store), condition codes, attribute values */
   value: string;
   label: string;
   /** Results if this value is added to the current filters */
@@ -279,7 +280,7 @@ export interface FacetValue {
 }
 
 export const FacetValue: z.ZodType<FacetValue> = z.object({
-  value: z.string(),
+  value: z.string().describe("The value the filter takes: category, brand and store slugs (official for the Official Store), condition codes, attribute values"),
   label: z.string(),
   count: z.number().int().describe("Results if this value is added to the current filters"),
   selected: z.boolean(),

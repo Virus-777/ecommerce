@@ -133,7 +133,7 @@
       "removeQuery": { "type": "string", "desc": "Query string for the same search without this filter" }
     },
     "FacetValue": {
-      "value": "string",
+      "value": { "type": "string", "desc": "The value the filter takes: category, brand and store slugs (official for the Official Store), condition codes, attribute values" },
       "label": "string",
       "count": { "type": "int", "desc": "Results if this value is added to the current filters" },
       "selected": "bool",

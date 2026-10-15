@@ -196,7 +196,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 
 | Field | Type |
 |---|---|
-| value | `string` |
+| value | `string` The value the filter takes: category, brand and store slugs (official for the Official Store), condition codes, attribute values |
 | label | `string` |
 | count | `int` Results if this value is added to the current filters |
 | selected | `bool` |
