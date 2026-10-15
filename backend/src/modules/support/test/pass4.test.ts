@@ -21,6 +21,18 @@ afterAll(async () => {
 
 const raw = async (x: Harness, id: string) => (await x.app.kernel.mongo.module('support', spec.collections, schemas).table<Record<string, any>>('cases').get(id))!;
 
+describe('order problem input', () => {
+  it('takes the help topic from problemType when category is left out; one of them is required', async () => {
+    const o = await sellerOrder(h);
+    const opened = await h.call('POST', '/api/store/support/cases', tokens.customer(o.customerId), { kind: 'order_problem', orderId: o.order.id, orderItemIds: [o.itemId], problemType: 'damaged', message: 'Cracked' }, idem());
+    expect(opened.status, JSON.stringify(opened.body)).toBe(201);
+    expect((await raw(h, opened.body.id)).category_key).toBe('item_damaged');
+    const neither = await h.call('POST', '/api/store/support/cases', tokens.customer(o.customerId), { kind: 'order_problem', orderId: o.order.id, orderItemIds: [o.itemId], message: 'Cracked' }, idem());
+    expect(neither.status).toBe(400);
+    expect(neither.body.error.details).toMatchObject({ issues: [{ path: 'category' }] });
+  });
+});
+
 describe('case facts in columns', () => {
   it('stores what the customer asked for, the seller reply, information requests and escalations in columns', async () => {
     const o = await sellerOrder(h);

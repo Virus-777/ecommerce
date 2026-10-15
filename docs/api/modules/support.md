@@ -318,7 +318,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | Field | Type |
 |---|---|
 | kind | `enum(customer_help|order_problem)` |
-| category | `string` |
+| category | `string?` Help topic key. May be left out when problemType is given: the topic is derived from it |
 | orderId | `uuid?` |
 | orderItemIds | `uuid[]?` |
 | problemType | `enum(missing_item|damaged|wrong_item|not_arrived|other)?` |

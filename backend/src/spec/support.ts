@@ -495,7 +495,8 @@ export const CaseSummary: z.ZodType<CaseSummary> = z.object({
 
 export interface CaseCreateInput {
   kind: "customer_help" | "order_problem";
-  category: string;
+  /** Help topic key. May be left out when problemType is given: the topic is derived from it */
+  category?: string | null;
   orderId?: string | null;
   orderItemIds?: string[] | null;
   problemType?: "missing_item" | "damaged" | "wrong_item" | "not_arrived" | "other" | null;
@@ -509,7 +510,7 @@ export interface CaseCreateInput {
 
 export const CaseCreateInput: z.ZodType<CaseCreateInput> = z.object({
   kind: z.enum(["customer_help", "order_problem"]),
-  category: z.string(),
+  category: z.string().describe("Help topic key. May be left out when problemType is given: the topic is derived from it").nullish(),
   orderId: z.uuid().nullish(),
   orderItemIds: z.array(z.uuid()).nullish(),
   problemType: z.enum(["missing_item", "damaged", "wrong_item", "not_arrived", "other"]).nullish(),

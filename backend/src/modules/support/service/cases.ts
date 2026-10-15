@@ -293,7 +293,8 @@ export class Cases {
 
   async createForShopper(body: CaseCreateInput, who: Shopper, by: By): Promise<Agg> {
     const cats = await this.core.categories();
-    let category = cats.get(body.category);
+    // the help topic, or the one derived from the problem type (an order-problem form may send only problemType)
+    let category = body.category ? cats.get(body.category) : undefined;
     if ((!category || !category.active || category.audience !== 'customer') && body.problemType) category = cats.get(PROBLEM_CATEGORY[body.problemType] ?? '');
     if (!category || !category.active || category.audience !== 'customer') throw invalidField('category', 'Choose one of the help topics');
     if (body.kind === 'order_problem' && !body.orderId) throw invalidField('orderId', 'Choose the order with the problem');
