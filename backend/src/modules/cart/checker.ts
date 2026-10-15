@@ -221,9 +221,11 @@ export class CartChecker {
     const to = dated.map((d) => d.arrivesTo!).sort().at(-1)!;
     const latest = dated.find((d) => d.arrivesTo === to)!;
     const cost = Math.max(0, ...est.map((d) => (d.free ? 0 : (d.shippingCost?.amount ?? 0))));
-    const free = est.every((d) => d.free);
     const freeOver = est.find((d) => d.freeOver)?.freeOver ?? null;
     const value = lines.filter((l) => !notShippable.has(l.item.id)).reduce((a, l) => a + l.unitPrice.amount * l.item.quantity, 0);
+    // free at package level: each estimate is per line, so lines each below a free-shipping threshold can
+    // together reach it (the package ships as one)
+    const free = est.every((d) => d.free || (d.freeOver !== null && d.freeOver !== undefined && value >= d.freeOver.amount));
     return {
       delivery: {
         methodName: latest.service ?? 'Standard',

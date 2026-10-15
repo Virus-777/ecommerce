@@ -159,7 +159,8 @@ describe('coupon preview', () => {
     expect(ok.body.result).toMatchObject({ code: 'SAVE10', status: 'applied', amount: { amount: 1000 }, label: '$10 off', fundedBy: 'platform', coverage: [{ itemId: itemA, amount: { amount: 1000 } }], notCovered: [{ itemId: itemM, reason: 'Already on sale' }] });
     expect(ok.body.cart.totals.discounts).toEqual([{ code: 'SAVE10', label: '$10 off', amount: { amount: 1000, currency: 'USD' }, fundedBy: 'platform' }]);
     expect(ok.body.cart.totals.itemsSubtotal.amount).toBe(8500);
-    expect(ok.body.cart.totals.total.amount).toBe(8500 - 1000 + 2 * 599);
+    // the $60 offer ships free on its own (over $35); the $30 one does not
+    expect(ok.body.cart.totals.total.amount).toBe(8500 - 1000 + 599);
 
     const bad = await k.call('POST', `${STORE}/cart/coupons`, { token: v.token, body: { code: 'BOGUS' } });
     expect(bad.body.result).toMatchObject({ code: 'BOGUS', status: 'rejected', reason: "We couldn't find that code." });

@@ -45,7 +45,8 @@ describe('cart lines', () => {
     });
     expect(add.body.cart).toMatchObject({ itemCount: 1, sellerCount: 1, packageCount: 1, checkoutReady: true });
     expect(add.body.cart.packages[0]).toMatchObject({ label: 'Package 1 of 1', shipsFrom: 'Reno, NV', returnTerms: '30-day returns.', notShippable: false });
-    expect(add.body.cart.packages[0].delivery).toMatchObject({ arrivalLabel: 'Arrives Wed, Oct 14 – Fri, Oct 16', shipping: { amount: 599 }, freeShippingNote: 'Free over $35', estimateBasis: 'default_region' });
+    // $94.99 is over the offer's $35 free-shipping threshold
+    expect(add.body.cart.packages[0].delivery).toMatchObject({ arrivalLabel: 'Arrives Wed, Oct 14 – Fri, Oct 16', shipping: { amount: 0 }, free: true, freeShippingNote: 'Free over $35', amountToFreeShipping: null, estimateBasis: 'default_region' });
     expect(k.of('cart.item.added').at(-1)).toMatchObject({ offerId: offer.id, quantity: 1, unitPrice: { amount: 9499 }, ownerKind: 'guest', source: 'product_page' });
 
     const more = await k.call('POST', `${STORE}/cart/items`, { token: v.token, body: { offerId: offer.id, quantity: 1 } });
@@ -69,9 +70,9 @@ describe('cart lines', () => {
 
   it('keeps a second offer for the same variant as its own line and groups packages by seller and ship-from', async () => {
     const { productId, variantIds } = await k.product();
-    const a = await k.offer({ productId, variantId: variantIds[0]!, price: 5000, sellerName: 'Northwind Audio' });
-    const b = await k.offer({ productId, variantId: variantIds[0]!, price: 4800, sellerName: 'Harbor Goods', shipsFrom: 'Austin, TX' });
-    const c = await k.offer({ productId, variantId: variantIds[0]!, price: 5200, official: true });
+    const a = await k.offer({ productId, variantId: variantIds[0]!, price: 3000, sellerName: 'Northwind Audio' });
+    const b = await k.offer({ productId, variantId: variantIds[0]!, price: 2800, sellerName: 'Harbor Goods', shipsFrom: 'Austin, TX' });
+    const c = await k.offer({ productId, variantId: variantIds[0]!, price: 3200, official: true });
     const v = k.visitor();
     for (const o of [a, b, c]) expect((await k.call('POST', `${STORE}/cart/items`, { token: v.token, body: { offerId: o.id, quantity: 1 } })).status).toBe(201);
     const view = (await k.call('GET', `${STORE}/cart`, { token: v.token })).body;
@@ -79,7 +80,7 @@ describe('cart lines', () => {
     expect(view.packages.map((p: any) => p.label)).toEqual(['Package 1 of 3', 'Package 2 of 3', 'Package 3 of 3']);
     expect(view.packages[2].seller).toMatchObject({ ownerType: 'official', official: true, id: null, name: 'Marketly Official Store' });
     expect(view).toMatchObject({ sellerCount: 3, packageCount: 3, itemCount: 3 });
-    expect(view.totals).toMatchObject({ itemCount: 3, itemsSubtotal: { amount: 15000 }, shippingTotal: { amount: 1797 }, total: { amount: 16797 }, excludedItemCount: 0 });
+    expect(view.totals).toMatchObject({ itemCount: 3, itemsSubtotal: { amount: 9000 }, shippingTotal: { amount: 1797 }, total: { amount: 10797 }, excludedItemCount: 0 });
     expect(view.totals.taxNote).toContain('Calculated after you enter an address');
   });
 
@@ -224,5 +225,19 @@ describe('addLine (public API, used by wishlist)', () => {
     const expected = (k.service as any).deps.ctx.config.market.defaultLocation.postalCode;
     expect(expected).toBeTruthy();
     expect(k.world.revalidatedFor).toEqual([expected]);
+  });
+
+  it('without a destination, lines each below the free-shipping threshold make a free package together', async () => {
+    const { productId, variantIds } = await k.product({ variants: 2 });
+    const sellerId = newId();
+    const a = await k.offer({ productId, variantId: variantIds[0]!, price: 2000, sellerId });
+    const b = await k.offer({ productId, variantId: variantIds[1]!, price: 2000, sellerId });
+    const v = k.visitor();
+    const one = await k.call('POST', `${STORE}/cart/items`, { token: v.token, body: { offerId: a.id, quantity: 1 } });
+    expect(one.body.cart.packages[0].delivery).toMatchObject({ shipping: { amount: 599 }, free: false, amountToFreeShipping: { amount: 1500 } });
+    const two = await k.call('POST', `${STORE}/cart/items`, { token: v.token, body: { offerId: b.id, quantity: 1 } });
+    expect(two.body.cart.packageCount).toBe(1);
+    expect(two.body.cart.packages[0].delivery).toMatchObject({ shipping: { amount: 0 }, free: true, amountToFreeShipping: null });
+    expect(two.body.cart.totals.shippingByPackage).toEqual([expect.objectContaining({ amount: { amount: 0, currency: 'USD' }, free: true })]);
   });
 });

@@ -69,7 +69,10 @@ export interface Kit {
   drain(): Promise<void>;
 }
 
-const viewOf = (o: offers.Offer, world: World): offers.OfferView => ({
+/** Free shipping threshold of every offer in the world (offers' estimate is per offer: price × quantity) */
+export const FREE_OVER = 3500;
+
+const viewOf = (o: offers.Offer, world: World, quantity = 1): offers.OfferView => ({
   offerId: o.id,
   seller: { sellerId: o.sellerId ?? null, name: o.sellerName, official: o.ownerType === 'official', verified: true, storeSlug: o.ownerType === 'official' ? 'official-store' : `store-${o.sellerName.toLowerCase().replace(/\W+/g, '-')}` },
   condition: o.condition,
@@ -83,9 +86,10 @@ const viewOf = (o: offers.Offer, world: World): offers.OfferView => ({
     arrivesFrom: '2026-10-14',
     arrivesTo: '2026-10-16',
     label: 'Arrives Wed, Oct 14 – Fri, Oct 16',
-    shippingCost: money(599),
-    free: false,
-    freeOver: money(3500),
+    // like offers: the estimate for this offer alone, free once its own value reaches the threshold
+    shippingCost: o.price.amount * quantity >= FREE_OVER ? money(0) : money(599),
+    free: o.price.amount * quantity >= FREE_OVER,
+    freeOver: money(FREE_OVER),
     shipsFrom: (o.shipping ?? o).dispatch.shipsFrom,
     dispatchLabel: (o.shipping ?? o).dispatch.label,
     fulfilledByLabel: o.fulfilledBy === 'marketly_service' ? 'Ships from Marketly' : null,
@@ -115,10 +119,10 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
       offers: {
         getOffer: async (id) => (world.offers.has(id) ? structuredClone(world.offers.get(id)!) : null),
         getOffers: async (ids) => Object.fromEntries(ids.map((id) => [id, world.offers.has(id) ? structuredClone(world.offers.get(id)!) : null])),
-        quoteOffer: async (id) => {
+        quoteOffer: async (id, quantity) => {
           const o = world.offers.get(id);
           if (!o) throw new Error('unknown offer');
-          return viewOf(o, world);
+          return viewOf(o, world, quantity);
         },
         revalidate: async (lines, postalCode) => {
           world.revalidatedFor.push(postalCode);
