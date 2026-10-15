@@ -6,7 +6,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { ChangeRequest, CollectionInput, ContactOptions, FeaturedCollection, PublicClaim, SellerSummary, StoreProfile, StoreProfileInput, Storefront } from '../../../spec/sellers.js';
+import type { ChangeRequest, CollectionInput, ContactOptions, FeaturedCollection, ProfileCategory, PublicClaim, SellerSummary, StoreProfile, StoreProfileInput, Storefront, StorefrontClaim } from '../../../spec/sellers.js';
 import { isWholeAccount, locationOf, normalizeScope, sameStoreName, type StoredVerification } from '../domain/rules.js';
 import { changeRequestMachine, publicClaimMachine } from '../domain/state-machines.js';
 import * as map from '../mappers.js';
@@ -85,7 +85,7 @@ export class StorefrontPart extends Part {
   }
 
   /** Categories from the application, paused where an active restriction stops new offers or sales */
-  private async categoriesOf(s: SellerRec) {
+  private async categoriesOf(s: SellerRec): Promise<ProfileCategory[]> {
     const app = await this.core.applicationOf(s);
     const ids = ((app?.business ?? {}) as { categoryIds?: string[] }).categoryIds ?? [];
     if (!ids.length) return [];
@@ -94,7 +94,7 @@ export class StorefrontPart extends Part {
     const walk = (list: { id: string; name: string; children?: unknown[] }[]) => list.forEach((c) => (names.set(c.id, c.name), walk((c.children ?? []) as never)));
     walk((tree ?? []) as never);
     const restrictions = await this.parts.enforcement.activeRestrictions(s.id);
-    return ids.map((id) => {
+    return ids.map((id): ProfileCategory => {
       const r = restrictions.find((x) => {
         const scope = normalizeScope(x.scope as never);
         const acts = map.strings(x.affected_activities);
@@ -622,7 +622,7 @@ export class StorefrontPart extends Part {
         medianReplyHours: replies?.averageReplyMinutes != null ? Math.round((replies.averageReplyMinutes / 60) * 10) / 10 : null,
       },
       verification: map.verificationLabel(s),
-      approvedClaims: claims.map((c) => ({ kind: c.kind, text: c.text })),
+      approvedClaims: claims.map((c) => ({ kind: c.kind as StorefrontClaim['kind'], text: c.text })),
       shipping: shippingSummary
         ? { shipsFrom: shippingSummary.shipsFrom, shipsTo: shippingSummary.coverageLabel, dispatch: shippingSummary.dispatchLabel, carriers: shippingSummary.carriers, cutoff: shippingSummary.sameDayCutoff }
         : null,

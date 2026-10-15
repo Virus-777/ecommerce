@@ -20,7 +20,9 @@ import type {
   ApplicationDocument,
   ApplicationRow,
   ApplicationVerificationInput,
+  FeeExample,
   InfoRequestItem,
+  InfoResponseItemInput,
   PayoutDetailsInput,
   RequiredDocument,
   RestrictionInput,
@@ -124,7 +126,7 @@ export class ApplicationsPart extends Part {
     const risky = (await this.core.setting('riskReviewCategories')) as readonly string[];
     const categories = await this.core.optional('catalog', 'categories', null, (c) => c.listCategories({}));
     const launchCategories = (categories ?? []).map((c) => ({ id: c.id, name: c.name, icon: c.slug, needsExtraApproval: riskCategoriesIn(c.name, risky).length > 0 }));
-    const feeExamples: unknown[] = [];
+    const feeExamples: FeeExample[] = [];
     for (const ex of PROGRAM.exampleFees) {
       const cat = (categories ?? []).find((c) => c.name.toLowerCase() === ex.categoryName.toLowerCase());
       const fee = await this.core.optional('finance', 'fees', null, (f) => f.calculateFee({ categoryId: cat?.id ?? null, itemPrice: { amount: 10000, currency: this.ctx.config.market.currency } }));
@@ -216,6 +218,10 @@ export class ApplicationsPart extends Part {
       informationRequest: request ? map.infoRequest(request, now) : null,
       decision: (a.decision as SellerApplication['decision']) ?? null,
       appealId: appeal?.id ?? null,
+      // G33d: the appeal's state and outcome, so the applicant can follow it here
+      appeal: appeal
+        ? { id: appeal.id, ref: appeal.ref, level: appeal.level, state: appeal.state as NonNullable<SellerApplication['appeal']>['state'], submittedAt: map.isoReq(appeal.submitted_at), decideBy: appeal.decide_by ? deadline(appeal.decide_by, now) : null, decision: map.appealDecision(appeal.decision) }
+        : null,
       timeline: [{ at: map.isoReq(a.created_at), label: 'Application started', detail: null, actor: null }, ...events.map(map.timelineEvent)],
       draftSavedAt: map.isoReq(a.draft_saved_at),
       submittedAt: map.iso(a.submitted_at),
@@ -622,14 +628,16 @@ export class ApplicationsPart extends Part {
     const sectionUpdated = a.draft_saved_at.getTime() > req.requested_at.getTime();
     for (const item of items.filter((i) => i.status === 'open')) {
       const ans = answers.find((x) => x?.itemId === item.id);
-      const prior = (item.response ?? {}) as { documentIds?: string[] };
+      const prior = (item.response ?? {}) as { documentIds?: string[]; note?: string | null };
       const docIds = [...new Set([...(ans?.documentIds ?? []), ...(prior.documentIds ?? [])])];
+      // a note saved in the draft counts unless this send gives another (G33c)
+      const note = ans?.note?.trim() || prior.note?.trim() || null;
       if (docIds.some((d) => !docs.has(d))) issues.push({ path: `items.${item.id}.documentIds`, message: 'Attach the documents to the application first' });
-      const ok = item.documentKind ? docIds.length > 0 : docIds.length > 0 || Boolean(ans?.note?.trim()) || sectionUpdated;
+      const ok = item.documentKind ? docIds.length > 0 : docIds.length > 0 || Boolean(note) || sectionUpdated;
       if (!ok) issues.push({ path: `items.${item.id}`, message: item.documentKind ? `Add the ${item.title}` : `Answer: ${item.title}` });
       else {
         item.status = 'provided';
-        item.response = { documentIds: docIds, note: ans?.note?.trim() || null };
+        item.response = { documentIds: docIds, note };
       }
     }
     if (issues.length) throw invalid(issues);
@@ -644,6 +652,33 @@ export class ApplicationsPart extends Part {
       }
     });
     this.core.publish('sellers.application.information_provided', { applicationId: a.id, sellerId: a.seller_id! }, by);
+    return this.view(await this.byId(a.id));
+  }
+
+  /**
+   * PUT /applications/{id}/response-draft (G33c): keeps notes and documents per open item without sending anything.
+   * Items left out keep their draft; documents add to those already attached to the item.
+   */
+  async saveResponseDraft(accountId: string, id: string, input: InfoResponseItemInput[]): Promise<SellerApplication> {
+    const a = await this.own(accountId, id);
+    if (a.state !== 'information_required') throw this.illegal(a, 'saveDraft', 'There is no information request to answer');
+    const req = await this.repo.findOne('information_requests', { application_id: a.id, state: 'open' });
+    if (!req) throw this.illegal(a, 'saveDraft', 'There is no information request to answer');
+    const docs = new Set((await this.repo.find('application_documents', { application_id: a.id })).map((d) => d.id));
+    const items = (req.items as unknown as InfoRequestItem[]).map((i) => ({ ...i }));
+    const issues: { path: string; message: string }[] = [];
+    for (const d of input ?? []) {
+      const item = items.find((i) => i.id === d.itemId && i.status === 'open');
+      if (!item) {
+        issues.push({ path: `items.${d.itemId}`, message: 'Not an open item of the information request' });
+        continue;
+      }
+      const docIds = [...new Set([...(d.documentIds ?? []), ...(item.response?.documentIds ?? [])])];
+      if (docIds.some((x) => !docs.has(x))) issues.push({ path: `items.${d.itemId}.documentIds`, message: 'Attach the documents to the application first' });
+      item.response = { documentIds: docIds, note: d.note?.trim() || null, draft: true };
+    }
+    if (issues.length) throw invalid(issues);
+    await this.repo.update('information_requests', req.id, { items: items as never, draft_saved_at: this.now() });
     return this.view(await this.byId(a.id));
   }
 
@@ -1018,6 +1053,7 @@ export class ApplicationsPart extends Part {
         due_at: new Date(body.dueAt),
         reminder: body.reminder,
         reminded_at: null,
+        draft_saved_at: null,
         requested_by: map.actorText(by.actor),
         requested_at: now,
         responded_at: null,

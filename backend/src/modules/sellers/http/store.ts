@@ -20,6 +20,7 @@ export const storeRoutes = (service: SellersService) => {
     },
     submitApplication: async ({ principal, params, body, actor, requestId }) => apps.submitApplication(principal.accountId!, params.id, body, { actor, requestId, principal }),
     respondToInformationRequest: async ({ principal, params, body, actor, requestId }) => apps.respondToInformationRequest(principal.accountId!, params.id, body, { actor, requestId, principal }),
+    saveInformationResponseDraft: async ({ principal, params, body }) => apps.saveResponseDraft(principal.accountId!, params.id, body.items),
     withdrawApplication: async ({ principal, params, body, actor, requestId }) => apps.withdrawApplication(principal.accountId!, params.id, body?.reason, { actor, requestId, principal }),
     appealApplicationDecision: async ({ principal, params, body, actor, requestId }) => apps.appealApplicationDecision(principal.accountId!, params.id, body, { actor, requestId, principal }),
     getStorefront: async ({ params }) => service.storefront.getStorefront(params.slug),

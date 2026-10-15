@@ -2,7 +2,7 @@
  * Static content of the sellers module: agreement defaults (used when content is off), the Sell with us
  * programme text, seller role templates and the seller permission catalogue, metric definitions.
  */
-import type { AgreementDocument, PermissionEntry, PerformanceTarget, SellerRoleTemplate } from '../../../spec/sellers.js';
+import type { AgreementDocument, FulfillmentModel, PermissionEntry, PerformanceTarget, SellerRoleTemplate } from '../../../spec/sellers.js';
 
 export const AGREEMENT_KEYS = ['seller_agreement', 'product_rules', 'fee_schedule', 'service_standards'] as const;
 export type AgreementKey = (typeof AGREEMENT_KEYS)[number];
@@ -54,7 +54,7 @@ export const PROGRAM = {
   fulfillmentModels: [
     { name: 'You ship', availability: 'launch', detail: 'You pack and ship each order within your dispatch time, with tracking.' },
     { name: 'Marketly fulfilment', availability: 'later', detail: 'Send stock to our warehouse and we ship for you (planned).' },
-  ],
+  ] as FulfillmentModel[],
   steps: ['Seller account', 'Business details', 'Verification', 'Payout account', 'Return address', 'Agreements'],
   verificationLabels: [
     {

@@ -57,9 +57,11 @@ export class MembersPart extends Part {
 
   /* ---------------------------------------------------------------- reads */
 
-  async listMembers(sellerId: string): Promise<SellerMember[]> {
+  /** Without a status, revoked invitations and removed members are left out (G49b); 'all' lists everyone */
+  async listMembers(sellerId: string, status?: string | null): Promise<SellerMember[]> {
     const rows = await this.repo.find('members', { seller_id: sellerId }, { orderBy: [['is_owner', 'desc'], ['invited_at', 'asc']] });
-    return rows.map(map.member);
+    const shown = status === 'all' ? rows : status ? rows.filter((m) => m.status === status) : rows.filter((m) => m.status !== 'revoked' && m.status !== 'removed');
+    return shown.map(map.member);
   }
 
   listRoleTemplates(): { roles: SellerRoleTemplate[]; permissions: PermissionEntry[] } {

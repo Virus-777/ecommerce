@@ -146,6 +146,7 @@ const information_requests = new Schema(
     requested_at: { type: Date, required: true },
     responded_at: { type: Date, default: null },
     state: { type: String, required: true, enum: ["open","answered","expired"] },
+    draft_saved_at: { type: Date, default: null }, // the applicant's last saved draft response
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },

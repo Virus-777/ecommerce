@@ -4,7 +4,9 @@ import { z } from 'zod';
 import type { Json } from '../kernel/lib/json.js';
 import { defineEndpoints, defineModuleSpec } from '../kernel/spec/define.js';
 import * as common from './common.js';
+import * as finance from './finance.js';
 import * as identity from './identity.js';
+import * as promotions from './promotions.js';
 import * as reports from './reports.js';
 
 /** Sellers: Seller admission and the seller account: the Sell with us programme and multi-step application, verification checks and review decisions, seller statuses with account status, product approval and payout readiness kept separate, setup and launch readiness, storefront profile and public storefront, seller members and permissions, performance against targets, warnings, restrictions, suspensions and appeals. */
@@ -158,10 +160,9 @@ export interface SellerAccount {
   launchReview: LaunchReview;
   /** New agreement versions waiting for the owner's acceptance */
   pendingAgreements: number;
-  /** { name, replyTarget } */
-  accountManager?: unknown | null;
-  /** The calling member: { memberId, role, permissions, isOwner } */
-  me?: unknown;
+  accountManager?: AccountManager | null;
+  /** The calling member; null for staff */
+  me?: MemberAccess | null;
   /** Staff answers only: the approval request of a closure waiting for a second reviewer (pendingChange); null for sellers */
   approval?: common.ApprovalInfo | null;
   /** Staff answers only: a closure waiting for a second reviewer; null for sellers */
@@ -193,8 +194,12 @@ export const SellerAccount: z.ZodType<SellerAccount> = z.object({
     return LaunchReview;
   },
   pendingAgreements: z.number().int().describe("New agreement versions waiting for the owner's acceptance"),
-  accountManager: z.unknown().describe("{ name, replyTarget }").nullish(),
-  me: z.unknown().describe("The calling member: { memberId, role, permissions, isOwner }"),
+  get accountManager() {
+    return AccountManager.nullish();
+  },
+  get me() {
+    return MemberAccess.nullish();
+  },
   get approval() {
     return common.ApprovalInfo.nullish();
   },
@@ -324,41 +329,44 @@ export const PerformanceTarget: z.ZodType<PerformanceTarget> = z.object({
 }).register(common.apiTypes, { id: "sellers.PerformanceTarget" });
 
 export interface SellerProgram {
-  /** { id, name, icon, needsExtraApproval } */
-  launchCategories: unknown[];
+  launchCategories: LaunchCategory[];
   /** e.g. digital goods, subscriptions, gift cards, perishable food, weapons, recalled items */
   notAllowed: string[];
-  /** { title, detail } */
-  requirements: unknown[];
-  /** { categoryName, ratePct, basis } from finance fee rules when enabled, else settings; marked isExample */
-  feeExamples: unknown[];
+  requirements: ProgramRequirement[];
+  /** From finance fee rules when enabled, else settings; marked isExample */
+  feeExamples: FeeExample[];
   feeNotes: string[];
-  /** { holdDaysAfterDelivery, schedule, arrival, isExample } */
-  payoutTiming?: unknown;
-  /** { name, availability: launch|later, detail } */
-  fulfillmentModels: unknown[];
+  payoutTiming: PayoutTiming;
+  fulfillmentModels: FulfillmentModel[];
   serviceTargets: PerformanceTarget[];
   agreements: AgreementDocument[];
   steps: string[];
-  /** { label, means, doesNotMean } */
-  verificationLabels: unknown[];
-  /** { q, a } */
-  faq: unknown[];
-  /** { email, phone, hours } */
-  contact?: unknown;
+  verificationLabels: VerificationLabelInfo[];
+  faq: FaqEntry[];
+  contact: ProgramContact;
   estimatedMinutes: number;
   /** False during invite-only launch unless the caller has a seller invitation */
   applicationsOpen: boolean;
 }
 
 export const SellerProgram: z.ZodType<SellerProgram> = z.object({
-  launchCategories: z.array(z.unknown()).describe("{ id, name, icon, needsExtraApproval }"),
+  get launchCategories() {
+    return z.array(LaunchCategory);
+  },
   notAllowed: z.array(z.string()).describe("e.g. digital goods, subscriptions, gift cards, perishable food, weapons, recalled items"),
-  requirements: z.array(z.unknown()).describe("{ title, detail }"),
-  feeExamples: z.array(z.unknown()).describe("{ categoryName, ratePct, basis } from finance fee rules when enabled, else settings; marked isExample"),
+  get requirements() {
+    return z.array(ProgramRequirement);
+  },
+  get feeExamples() {
+    return z.array(FeeExample);
+  },
   feeNotes: z.array(z.string()),
-  payoutTiming: z.unknown().describe("{ holdDaysAfterDelivery, schedule, arrival, isExample }"),
-  fulfillmentModels: z.array(z.unknown()).describe("{ name, availability: launch|later, detail }"),
+  get payoutTiming() {
+    return PayoutTiming;
+  },
+  get fulfillmentModels() {
+    return z.array(FulfillmentModel);
+  },
   get serviceTargets() {
     return z.array(PerformanceTarget);
   },
@@ -366,9 +374,15 @@ export const SellerProgram: z.ZodType<SellerProgram> = z.object({
     return z.array(AgreementDocument);
   },
   steps: z.array(z.string()),
-  verificationLabels: z.array(z.unknown()).describe("{ label, means, doesNotMean }"),
-  faq: z.array(z.unknown()).describe("{ q, a }"),
-  contact: z.unknown().describe("{ email, phone, hours }"),
+  get verificationLabels() {
+    return z.array(VerificationLabelInfo);
+  },
+  get faq() {
+    return z.array(FaqEntry);
+  },
+  get contact() {
+    return ProgramContact;
+  },
   estimatedMinutes: z.number().int(),
   applicationsOpen: z.boolean().describe("False during invite-only launch unless the caller has a seller invitation"),
 }).register(common.apiTypes, { id: "sellers.SellerProgram" });
@@ -581,8 +595,7 @@ export interface RiskReview {
   state: "not_needed" | "requested" | "completed";
   trustReportId?: string | null;
   level?: "low" | "medium" | "high" | null;
-  /** { severity: low|medium|high, text } */
-  flags: unknown[];
+  flags: RiskFlag[];
   recommendation?: string | null;
   reviewedBy?: common.Actor | null;
   reviewedAt?: string | null;
@@ -592,7 +605,9 @@ export const RiskReview: z.ZodType<RiskReview> = z.object({
   state: z.enum(["not_needed", "requested", "completed"]),
   trustReportId: z.uuid().nullish(),
   level: z.enum(["low", "medium", "high"]).nullish(),
-  flags: z.array(z.unknown()).describe("{ severity: low|medium|high, text }"),
+  get flags() {
+    return z.array(RiskFlag);
+  },
   recommendation: z.string().nullish(),
   get reviewedBy() {
     return common.Actor.nullish();
@@ -607,7 +622,8 @@ export interface InfoRequestItem {
   neededFor: "account" | "business" | "verification" | "payout" | "return_address" | "agreement" | "category";
   documentKind?: string | null;
   status: "open" | "provided" | "accepted" | "rejected";
-  response?: unknown | null;
+  /** What the applicant sent, or saved as a draft while the item is still open (G33c) */
+  response?: InfoRequestResponse | null;
 }
 
 export const InfoRequestItem: z.ZodType<InfoRequestItem> = z.object({
@@ -617,7 +633,9 @@ export const InfoRequestItem: z.ZodType<InfoRequestItem> = z.object({
   neededFor: z.enum(["account", "business", "verification", "payout", "return_address", "agreement", "category"]),
   documentKind: z.string().nullish(),
   status: z.enum(["open", "provided", "accepted", "rejected"]),
-  response: z.unknown().nullish(),
+  get response() {
+    return InfoRequestResponse.nullish();
+  },
 }).register(common.apiTypes, { id: "sellers.InfoRequestItem" });
 
 export interface InformationRequest {
@@ -630,6 +648,8 @@ export interface InformationRequest {
   requestedAt: string;
   respondedAt?: string | null;
   deadline: common.Deadline;
+  /** When the applicant last saved a draft response (PUT /applications/{id}/response-draft); null when none */
+  draftSavedAt?: string | null;
 }
 
 export const InformationRequest: z.ZodType<InformationRequest> = z.object({
@@ -648,6 +668,7 @@ export const InformationRequest: z.ZodType<InformationRequest> = z.object({
   get deadline() {
     return common.Deadline;
   },
+  draftSavedAt: z.iso.datetime({ offset: true }).describe("When the applicant last saved a draft response (PUT /applications/{id}/response-draft); null when none").nullish(),
 }).register(common.apiTypes, { id: "sellers.InformationRequest" });
 
 export interface ApplicationDecision {
@@ -695,19 +716,20 @@ export interface SellerApplication {
   percentComplete: number;
   /** Step → missing fields; submit is blocked until empty */
   missing: Record<string, string[]>;
-  account?: unknown | null;
-  business?: unknown | null;
-  /** owners (BusinessOwner[]), registrationDocumentIds, taxIdType, taxIdLast4, w9Method */
-  verification?: unknown | null;
+  account?: ApplicationAccountView | null;
+  business?: ApplicationBusinessView | null;
+  /** The tax id itself is never returned, only its last 4 digits */
+  verification?: ApplicationVerificationView | null;
   payout?: PayoutDetails | null;
-  /** { sameAsBusiness, contactName, phone, address } */
-  returnAddress?: unknown | null;
+  returnAddress?: ReturnAddressView | null;
   agreementsRequired: AgreementDocument[];
   agreementsAccepted: AgreementAcceptance[];
   documents: ApplicationDocument[];
   informationRequest?: InformationRequest | null;
   decision?: ApplicationDecision | null;
   appealId?: string | null;
+  /** The latest appeal against a rejection, with its state and outcome (G33d); null when none */
+  appeal?: ApplicationAppeal | null;
   timeline: common.TimelineEvent[];
   draftSavedAt: string;
   submittedAt?: string | null;
@@ -726,13 +748,21 @@ export const SellerApplication: z.ZodType<SellerApplication> = z.object({
   completedSteps: z.array(z.string()),
   percentComplete: z.number().int(),
   missing: z.record(z.string(), z.array(z.string())).describe("Step → missing fields; submit is blocked until empty"),
-  account: z.unknown().nullish(),
-  business: z.unknown().nullish(),
-  verification: z.unknown().describe("owners (BusinessOwner[]), registrationDocumentIds, taxIdType, taxIdLast4, w9Method").nullish(),
+  get account() {
+    return ApplicationAccountView.nullish();
+  },
+  get business() {
+    return ApplicationBusinessView.nullish();
+  },
+  get verification() {
+    return ApplicationVerificationView.nullish();
+  },
   get payout() {
     return PayoutDetails.nullish();
   },
-  returnAddress: z.unknown().describe("{ sameAsBusiness, contactName, phone, address }").nullish(),
+  get returnAddress() {
+    return ReturnAddressView.nullish();
+  },
   get agreementsRequired() {
     return z.array(AgreementDocument);
   },
@@ -749,6 +779,9 @@ export const SellerApplication: z.ZodType<SellerApplication> = z.object({
     return ApplicationDecision.nullish();
   },
   appealId: z.uuid().nullish(),
+  get appeal() {
+    return ApplicationAppeal.nullish();
+  },
   get timeline() {
     return z.array(common.TimelineEvent);
   },
@@ -857,8 +890,7 @@ export interface ApplicationRow {
   submittedAt?: string | null;
   deadline?: common.Deadline | null;
   reviewer?: common.Actor | null;
-  /** { passed, needsAttention, failed, pending } */
-  checks?: unknown;
+  checks: CheckCounts;
   riskLevel?: string | null;
   categories: string[];
   invited: boolean;
@@ -878,7 +910,9 @@ export const ApplicationRow: z.ZodType<ApplicationRow> = z.object({
   get reviewer() {
     return common.Actor.nullish();
   },
-  checks: z.unknown().describe("{ passed, needsAttention, failed, pending }"),
+  get checks() {
+    return CheckCounts;
+  },
   riskLevel: z.string().nullish(),
   categories: z.array(z.string()),
   invited: z.boolean(),
@@ -911,8 +945,7 @@ export interface SetupStep {
   state: "done" | "action_needed" | "pending" | "locked" | "not_started";
   /** Module that answers it: sellers, shipping, returns, finance, catalog */
   source: string;
-  /** { label, screen } */
-  cta?: unknown | null;
+  cta?: StepCta | null;
 }
 
 export const SetupStep: z.ZodType<SetupStep> = z.object({
@@ -921,7 +954,9 @@ export const SetupStep: z.ZodType<SetupStep> = z.object({
   detail: z.string(),
   state: z.enum(["done", "action_needed", "pending", "locked", "not_started"]),
   source: z.string().describe("Module that answers it: sellers, shipping, returns, finance, catalog"),
-  cta: z.unknown().describe("{ label, screen }").nullish(),
+  get cta() {
+    return StepCta.nullish();
+  },
 }).register(common.apiTypes, { id: "sellers.SetupStep" });
 
 export interface SetupChecklist {
@@ -933,10 +968,9 @@ export interface SetupChecklist {
   completed: number;
   total: number;
   launchReview: LaunchReview;
-  /** { productId, title, reviewState, outcome: will_go_live|waits_for_approval|stays_unpublished } */
-  goLivePreview: unknown[];
-  /** { name, replyTarget } */
-  accountManager?: unknown | null;
+  /** One row per product */
+  goLivePreview: GoLiveItem[];
+  accountManager?: AccountManager | null;
   unavailable: string[];
 }
 
@@ -957,8 +991,12 @@ export const SetupChecklist: z.ZodType<SetupChecklist> = z.object({
   get launchReview() {
     return LaunchReview;
   },
-  goLivePreview: z.array(z.unknown()).describe("{ productId, title, reviewState, outcome: will_go_live|waits_for_approval|stays_unpublished }"),
-  accountManager: z.unknown().describe("{ name, replyTarget }").nullish(),
+  get goLivePreview() {
+    return z.array(GoLiveItem);
+  },
+  get accountManager() {
+    return AccountManager.nullish();
+  },
   unavailable: z.array(z.string()),
 }).register(common.apiTypes, { id: "sellers.SetupChecklist" });
 
@@ -973,8 +1011,8 @@ export interface BusinessDetails {
   taxIdType: string;
   taxIdLast4: string;
   owners: BusinessOwner[];
-  /** { name, email, phone, supportHours } — editable without review */
-  contact?: unknown;
+  /** Editable without review */
+  contact: BusinessContact;
 }
 
 export const BusinessDetails: z.ZodType<BusinessDetails> = z.object({
@@ -992,7 +1030,9 @@ export const BusinessDetails: z.ZodType<BusinessDetails> = z.object({
   get owners() {
     return z.array(BusinessOwner);
   },
-  contact: z.unknown().describe("{ name, email, phone, supportHours } — editable without review"),
+  get contact() {
+    return BusinessContact;
+  },
 }).register(common.apiTypes, { id: "sellers.BusinessDetails" });
 
 export interface ChangeRequest {
@@ -1114,8 +1154,8 @@ export interface StoreProfile {
   location?: string | null;
   contactOptions: ContactOptions;
   warranty?: string | null;
-  /** { categoryId, name, state: active|paused, reason? } derived from offers and restrictions */
-  categories: unknown[];
+  /** Derived from offers and restrictions */
+  categories: ProfileCategory[];
   collections: FeaturedCollection[];
   claims: PublicClaim[];
   pendingChanges: ChangeRequest[];
@@ -1143,7 +1183,9 @@ export const StoreProfile: z.ZodType<StoreProfile> = z.object({
     return ContactOptions;
   },
   warranty: z.string().nullish(),
-  categories: z.array(z.unknown()).describe("{ categoryId, name, state: active|paused, reason? } derived from offers and restrictions"),
+  get categories() {
+    return z.array(ProfileCategory);
+  },
   get collections() {
     return z.array(FeaturedCollection);
   },
@@ -1210,23 +1252,20 @@ export interface Storefront {
   sellingSince: string;
   /** False while suspended; the page explains that existing orders are still looked after */
   sellingNow: boolean;
-  /** { positivePct, ratingCount, onTimeDispatchPct, repliesWithin24hPct, medianReplyHours } */
-  highlights?: unknown;
+  highlights: StorefrontHighlights;
   verification: VerificationLabel;
-  /** { kind, text } — only staff-approved claims */
-  approvedClaims: unknown[];
-  /** From shipping: { shipsFrom, shipsTo, dispatch, carriers, cutoff } */
-  shipping?: unknown | null;
-  /** From returns: { window, returnShipping, warranty } */
-  returns?: unknown | null;
-  /** { canMessage, productQuestions, replyTarget, phone? } */
-  contact?: unknown;
-  /** { categoryId, name, offerCount } from search when enabled */
-  categories: unknown[];
-  /** { id, title, image, offerIds, itemCount } */
-  collections: unknown[];
+  /** Only staff-approved claims */
+  approvedClaims: StorefrontClaim[];
+  /** From shipping */
+  shipping?: StorefrontShipping | null;
+  /** From returns */
+  returns?: StorefrontReturns | null;
+  contact: StorefrontContact;
+  /** From search when enabled */
+  categories: StorefrontCategory[];
+  collections: StorefrontCollection[];
   /** Active seller-funded promotion banner from promotions */
-  promotion?: unknown | null;
+  promotion?: promotions.PromoBanner | null;
   productCount: number;
   unavailable: string[];
   /** One-line store tagline under the store name */
@@ -1244,17 +1283,33 @@ export const Storefront: z.ZodType<Storefront> = z.object({
   warranty: z.string().describe("The seller's warranty statement (store profile)").nullish(),
   sellingSince: z.iso.date(),
   sellingNow: z.boolean().describe("False while suspended; the page explains that existing orders are still looked after"),
-  highlights: z.unknown().describe("{ positivePct, ratingCount, onTimeDispatchPct, repliesWithin24hPct, medianReplyHours }"),
+  get highlights() {
+    return StorefrontHighlights;
+  },
   get verification() {
     return VerificationLabel;
   },
-  approvedClaims: z.array(z.unknown()).describe("{ kind, text } — only staff-approved claims"),
-  shipping: z.unknown().describe("From shipping: { shipsFrom, shipsTo, dispatch, carriers, cutoff }").nullish(),
-  returns: z.unknown().describe("From returns: { window, returnShipping, warranty }").nullish(),
-  contact: z.unknown().describe("{ canMessage, productQuestions, replyTarget, phone? }"),
-  categories: z.array(z.unknown()).describe("{ categoryId, name, offerCount } from search when enabled"),
-  collections: z.array(z.unknown()).describe("{ id, title, image, offerIds, itemCount }"),
-  promotion: z.unknown().describe("Active seller-funded promotion banner from promotions").nullish(),
+  get approvedClaims() {
+    return z.array(StorefrontClaim);
+  },
+  get shipping() {
+    return StorefrontShipping.nullish();
+  },
+  get returns() {
+    return StorefrontReturns.nullish();
+  },
+  get contact() {
+    return StorefrontContact;
+  },
+  get categories() {
+    return z.array(StorefrontCategory);
+  },
+  get collections() {
+    return z.array(StorefrontCollection);
+  },
+  get promotion() {
+    return promotions.PromoBanner.nullish();
+  },
   productCount: z.number().int(),
   unavailable: z.array(z.string()),
   tagline: z.string().describe("One-line store tagline under the store name").nullish(),
@@ -1402,8 +1457,8 @@ export interface PerformanceSummary {
   orderCount: number;
   overall: "good" | "at_risk" | "action_needed";
   metrics: PerformanceMetric[];
-  /** { positivePct, ratingCount } from reviews */
-  feedback?: unknown | null;
+  /** From reviews */
+  feedback?: FeedbackSummary | null;
   warnings: SellerWarning[];
   /** Warnings and actions, last 12 months */
   history: common.TimelineEvent[];
@@ -1420,7 +1475,9 @@ export const PerformanceSummary: z.ZodType<PerformanceSummary> = z.object({
   get metrics() {
     return z.array(PerformanceMetric);
   },
-  feedback: z.unknown().describe("{ positivePct, ratingCount } from reviews").nullish(),
+  get feedback() {
+    return FeedbackSummary.nullish();
+  },
   get warnings() {
     return z.array(SellerWarning);
   },
@@ -1435,6 +1492,8 @@ export interface RestrictionScope {
   conditions?: string[] | null;
   offerIds?: string[] | null;
   productIds?: string[] | null;
+  /** Responses only: the scope's categories with their names from catalog (G58d); ignored on input */
+  categories?: ScopeCategory[] | null;
 }
 
 export const RestrictionScope: z.ZodType<RestrictionScope> = z.object({
@@ -1442,7 +1501,20 @@ export const RestrictionScope: z.ZodType<RestrictionScope> = z.object({
   conditions: z.array(z.string()).nullish(),
   offerIds: z.array(z.uuid()).nullish(),
   productIds: z.array(z.uuid()).nullish(),
+  get categories() {
+    return z.array(ScopeCategory).nullish();
+  },
 }).register(common.apiTypes, { id: "sellers.RestrictionScope" });
+
+export interface ScopeCategory {
+  id: string;
+  name: string;
+}
+
+export const ScopeCategory: z.ZodType<ScopeCategory> = z.object({
+  id: z.uuid(),
+  name: z.string(),
+}).register(common.apiTypes, { id: "sellers.ScopeCategory" });
 
 export interface AppealRoute {
   deadline: string;
@@ -1493,6 +1565,8 @@ export interface Restriction {
   pendingChange?: PendingStaffChange | null;
   appeals: Appeal[];
   resolutionEvidence: common.MediaRef[];
+  /** The resolution evidence with its document type, note and time (G58e); resolutionEvidence lists the same files */
+  evidence: ResolutionEvidence[];
   liftedAt?: string | null;
   liftReason?: string | null;
 }
@@ -1538,6 +1612,9 @@ export const Restriction: z.ZodType<Restriction> = z.object({
   },
   get resolutionEvidence() {
     return z.array(common.MediaRef);
+  },
+  get evidence() {
+    return z.array(ResolutionEvidence);
   },
   liftedAt: z.iso.datetime({ offset: true }).nullish(),
   liftReason: z.string().nullish(),
@@ -1609,10 +1686,10 @@ export interface SuspensionImpact {
   unshippedValue: common.Money;
   openReturns: number;
   openCases: number;
-  /** { available, pending } Money from finance; they move to Held with the review date */
-  balances?: unknown | null;
-  /** { area, effect } rows shown in the suspend dialog */
-  effects: unknown[];
+  /** From finance; they move to Held with the review date */
+  balances?: SuspensionBalances | null;
+  /** Rows shown in the suspend dialog */
+  effects: SuspensionEffect[];
   unavailable: string[];
 }
 
@@ -1625,8 +1702,12 @@ export const SuspensionImpact: z.ZodType<SuspensionImpact> = z.object({
   },
   openReturns: z.number().int(),
   openCases: z.number().int(),
-  balances: z.unknown().describe("{ available, pending } Money from finance; they move to Held with the review date").nullish(),
-  effects: z.array(z.unknown()).describe("{ area, effect } rows shown in the suspend dialog"),
+  get balances() {
+    return SuspensionBalances.nullish();
+  },
+  get effects() {
+    return z.array(SuspensionEffect);
+  },
   unavailable: z.array(z.string()),
 }).register(common.apiTypes, { id: "sellers.SuspensionImpact" });
 
@@ -1647,8 +1728,7 @@ export interface Appeal {
   reviewer?: common.Actor | null;
   originalDecider: common.Actor;
   decideBy: common.Deadline;
-  /** { outcome, explanation, changes, decidedBy, decidedAt } */
-  decision?: unknown | null;
+  decision?: AppealDecision | null;
   submittedAt: string;
   trustReportId?: string | null;
 }
@@ -1676,7 +1756,9 @@ export const Appeal: z.ZodType<Appeal> = z.object({
   get decideBy() {
     return common.Deadline;
   },
-  decision: z.unknown().describe("{ outcome, explanation, changes, decidedBy, decidedAt }").nullish(),
+  get decision() {
+    return AppealDecision.nullish();
+  },
   submittedAt: z.iso.datetime({ offset: true }),
   trustReportId: z.uuid().nullish(),
 }).register(common.apiTypes, { id: "sellers.Appeal" });
@@ -1710,13 +1792,14 @@ export const SellerNote: z.ZodType<SellerNote> = z.object({
 export interface SellerRow {
   id: string;
   ref: string;
+  /** Storefront slug (/shop/:slug); the admin seller detail also accepts it in place of the id (G69a) */
+  slug: string;
   storeName: string;
   logo?: common.MediaRef | null;
   location?: string | null;
   status: string;
   verified: boolean;
-  /** { positivePct, ratingCount } */
-  feedback?: unknown | null;
+  feedback?: FeedbackSummary | null;
   onTimeDispatchPct?: number | null;
   openCases: number;
   /** From finance; what is owed to the seller, not yet paid */
@@ -1731,6 +1814,7 @@ export interface SellerRow {
 export const SellerRow: z.ZodType<SellerRow> = z.object({
   id: z.uuid(),
   ref: z.string(),
+  slug: z.string().describe("Storefront slug (/shop/:slug); the admin seller detail also accepts it in place of the id (G69a)"),
   storeName: z.string(),
   get logo() {
     return common.MediaRef.nullish();
@@ -1738,7 +1822,9 @@ export const SellerRow: z.ZodType<SellerRow> = z.object({
   location: z.string().nullish(),
   status: z.string(),
   verified: z.boolean(),
-  feedback: z.unknown().describe("{ positivePct, ratingCount }").nullish(),
+  get feedback() {
+    return FeedbackSummary.nullish();
+  },
   onTimeDispatchPct: z.number().nullish(),
   openCases: z.number().int(),
   get balance() {
@@ -1759,8 +1845,8 @@ export interface SellerStats {
   belowDispatchTarget: number;
   restrictedOrSuspended: number;
   appealsUnderReview: number;
-  /** { total, held, negativeCount } from finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off */
-  balances?: unknown | null;
+  /** From finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off */
+  balances?: SellerBalanceTotals | null;
   byStatus: Record<string, number>;
   applicationsWaiting: number;
 }
@@ -1771,7 +1857,9 @@ export const SellerStats: z.ZodType<SellerStats> = z.object({
   belowDispatchTarget: z.number().int(),
   restrictedOrSuspended: z.number().int(),
   appealsUnderReview: z.number().int(),
-  balances: z.unknown().describe("{ total, held, negativeCount } from finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off").nullish(),
+  get balances() {
+    return SellerBalanceTotals.nullish();
+  },
   byStatus: z.record(z.string(), z.number().int()),
   applicationsWaiting: z.number().int(),
 }).register(common.apiTypes, { id: "sellers.SellerStats" });
@@ -1779,15 +1867,14 @@ export const SellerStats: z.ZodType<SellerStats> = z.object({
 export interface SellerAdminDetail {
   account: SellerAccount;
   business: BusinessDetails;
-  /** { name, email, phone } */
-  owner?: unknown;
+  owner: SellerOwnerContact;
   restrictions: Restriction[];
   performance: PerformanceSummary;
-  /** From orders, returns, support: { openOrders, overdueOrders: [{ orderId, orderRef, itemTitle, statusLabel, deadline }], openReturns: [{ id, ref }], openCases: [{ id, ref }] } */
-  obligations?: unknown | null;
+  /** From orders, returns and support; null when none of them answers */
+  obligations?: SellerObligations | null;
   appeals: Appeal[];
-  /** From finance: { pending, available, held, holds: [{ amount, reason, reviewDate, setBy }], nextPayout: { date, amount, destinationLabel, status } } */
-  payouts?: unknown | null;
+  /** From finance; null without finance.ledger.view or when finance is off */
+  payouts?: SellerPayoutsView | null;
   changeRequests: ChangeRequest[];
   notes: SellerNote[];
   history: common.TimelineEvent[];
@@ -1801,18 +1888,24 @@ export const SellerAdminDetail: z.ZodType<SellerAdminDetail> = z.object({
   get business() {
     return BusinessDetails;
   },
-  owner: z.unknown().describe("{ name, email, phone }"),
+  get owner() {
+    return SellerOwnerContact;
+  },
   get restrictions() {
     return z.array(Restriction);
   },
   get performance() {
     return PerformanceSummary;
   },
-  obligations: z.unknown().describe("From orders, returns, support: { openOrders, overdueOrders: [{ orderId, orderRef, itemTitle, statusLabel, deadline }], openReturns: [{ id, ref }], openCases: [{ id, ref }] }").nullish(),
+  get obligations() {
+    return SellerObligations.nullish();
+  },
   get appeals() {
     return z.array(Appeal);
   },
-  payouts: z.unknown().describe("From finance: { pending, available, held, holds: [{ amount, reason, reviewDate, setBy }], nextPayout: { date, amount, destinationLabel, status } }").nullish(),
+  get payouts() {
+    return SellerPayoutsView.nullish();
+  },
   get changeRequests() {
     return z.array(ChangeRequest);
   },
@@ -1824,6 +1917,623 @@ export const SellerAdminDetail: z.ZodType<SellerAdminDetail> = z.object({
   },
   unavailable: z.array(z.string()),
 }).register(common.apiTypes, { id: "sellers.SellerAdminDetail" });
+
+export interface AccountManager {
+  id: string;
+  name: string;
+  /** e.g. Replies within 1 business day */
+  replyTarget: string;
+}
+
+export const AccountManager: z.ZodType<AccountManager> = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  replyTarget: z.string().describe("e.g. Replies within 1 business day"),
+}).register(common.apiTypes, { id: "sellers.AccountManager" });
+
+export interface MemberAccess {
+  memberId: string;
+  role: string;
+  permissions: string[];
+  isOwner: boolean;
+}
+
+export const MemberAccess: z.ZodType<MemberAccess> = z.object({
+  memberId: z.uuid(),
+  role: z.string(),
+  permissions: z.array(z.string()),
+  isOwner: z.boolean(),
+}).register(common.apiTypes, { id: "sellers.MemberAccess" });
+
+export interface LaunchCategory {
+  id: string;
+  name: string;
+  /** Catalog category slug, used as the icon key */
+  icon?: string | null;
+  needsExtraApproval: boolean;
+}
+
+export const LaunchCategory: z.ZodType<LaunchCategory> = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  icon: z.string().describe("Catalog category slug, used as the icon key").nullish(),
+  needsExtraApproval: z.boolean(),
+}).register(common.apiTypes, { id: "sellers.LaunchCategory" });
+
+export interface ProgramRequirement {
+  title: string;
+  detail: string;
+}
+
+export const ProgramRequirement: z.ZodType<ProgramRequirement> = z.object({
+  title: z.string(),
+  detail: z.string(),
+}).register(common.apiTypes, { id: "sellers.ProgramRequirement" });
+
+export interface FeeExample {
+  categoryName: string;
+  ratePct: number;
+  basis: string;
+  isExample: boolean;
+}
+
+export const FeeExample: z.ZodType<FeeExample> = z.object({
+  categoryName: z.string(),
+  ratePct: z.number(),
+  basis: z.string(),
+  isExample: z.boolean(),
+}).register(common.apiTypes, { id: "sellers.FeeExample" });
+
+export interface PayoutTiming {
+  holdDaysAfterDelivery: number;
+  schedule: string;
+  arrival: string;
+  isExample: boolean;
+}
+
+export const PayoutTiming: z.ZodType<PayoutTiming> = z.object({
+  holdDaysAfterDelivery: z.number().int(),
+  schedule: z.string(),
+  arrival: z.string(),
+  isExample: z.boolean(),
+}).register(common.apiTypes, { id: "sellers.PayoutTiming" });
+
+export interface FulfillmentModel {
+  name: string;
+  availability: "launch" | "later";
+  detail: string;
+}
+
+export const FulfillmentModel: z.ZodType<FulfillmentModel> = z.object({
+  name: z.string(),
+  availability: z.enum(["launch", "later"]),
+  detail: z.string(),
+}).register(common.apiTypes, { id: "sellers.FulfillmentModel" });
+
+export interface VerificationLabelInfo {
+  label: string;
+  means: string;
+  doesNotMean: string;
+}
+
+export const VerificationLabelInfo: z.ZodType<VerificationLabelInfo> = z.object({
+  label: z.string(),
+  means: z.string(),
+  doesNotMean: z.string(),
+}).register(common.apiTypes, { id: "sellers.VerificationLabelInfo" });
+
+export interface FaqEntry {
+  q: string;
+  a: string;
+}
+
+export const FaqEntry: z.ZodType<FaqEntry> = z.object({
+  q: z.string(),
+  a: z.string(),
+}).register(common.apiTypes, { id: "sellers.FaqEntry" });
+
+export interface ProgramContact {
+  email: string;
+  phone: string;
+  hours: string;
+}
+
+export const ProgramContact: z.ZodType<ProgramContact> = z.object({
+  email: z.string(),
+  phone: z.string(),
+  hours: z.string(),
+}).register(common.apiTypes, { id: "sellers.ProgramContact" });
+
+export interface RiskFlag {
+  severity: "low" | "medium" | "high";
+  text: string;
+}
+
+export const RiskFlag: z.ZodType<RiskFlag> = z.object({
+  severity: z.enum(["low", "medium", "high"]),
+  text: z.string(),
+}).register(common.apiTypes, { id: "sellers.RiskFlag" });
+
+export interface InfoRequestResponse {
+  documentIds: string[];
+  note?: string | null;
+  /** True while it is only a saved draft (the item is still open) */
+  draft?: boolean | null;
+}
+
+export const InfoRequestResponse: z.ZodType<InfoRequestResponse> = z.object({
+  documentIds: z.array(z.uuid()),
+  note: z.string().nullish(),
+  draft: z.boolean().describe("True while it is only a saved draft (the item is still open)").nullish(),
+}).register(common.apiTypes, { id: "sellers.InfoRequestResponse" });
+
+export interface InfoResponseItemInput {
+  itemId: string;
+  documentIds?: string[] | null;
+  note?: string | null;
+}
+
+export const InfoResponseItemInput: z.ZodType<InfoResponseItemInput> = z.object({
+  itemId: z.uuid(),
+  documentIds: z.array(z.uuid()).nullish(),
+  note: z.string().nullish(),
+}).register(common.apiTypes, { id: "sellers.InfoResponseItemInput" });
+
+export interface ApplicationAccountView {
+  accountMode?: "existing_member" | "new_seller_login" | null;
+  contactName?: string | null;
+  contactPhone?: string | null;
+  workEmail?: string | null;
+  storeName?: string | null;
+  sellerType?: "business" | "individual" | null;
+  market?: string | null;
+  tipsOptIn?: boolean | null;
+}
+
+export const ApplicationAccountView: z.ZodType<ApplicationAccountView> = z.object({
+  accountMode: z.enum(["existing_member", "new_seller_login"]).nullish(),
+  contactName: z.string().nullish(),
+  contactPhone: z.string().nullish(),
+  workEmail: z.string().nullish(),
+  storeName: z.string().nullish(),
+  sellerType: z.enum(["business", "individual"]).nullish(),
+  market: z.string().nullish(),
+  tipsOptIn: z.boolean().nullish(),
+}).register(common.apiTypes, { id: "sellers.ApplicationAccountView" });
+
+export interface ApplicationBusinessView {
+  kind?: "registered_business" | "individual" | null;
+  legalName?: string | null;
+  storeName?: string | null;
+  businessType?: "llc" | "corporation" | "partnership" | "sole_proprietor" | null;
+  stateOfRegistration?: string | null;
+  registryNumber?: string | null;
+  address?: common.Address | null;
+  phone?: string | null;
+  website?: string | null;
+  categoryIds?: string[] | null;
+  plannedProductCount?: "1_20" | "21_100" | "101_500" | "over_500" | null;
+  plannedProducts?: string | null;
+  shippingPlan?: string | null;
+  supportHours?: string | null;
+}
+
+export const ApplicationBusinessView: z.ZodType<ApplicationBusinessView> = z.object({
+  kind: z.enum(["registered_business", "individual"]).nullish(),
+  legalName: z.string().nullish(),
+  storeName: z.string().nullish(),
+  businessType: z.enum(["llc", "corporation", "partnership", "sole_proprietor"]).nullish(),
+  stateOfRegistration: z.string().nullish(),
+  registryNumber: z.string().nullish(),
+  get address() {
+    return common.Address.nullish();
+  },
+  phone: z.string().nullish(),
+  website: z.string().nullish(),
+  categoryIds: z.array(z.uuid()).nullish(),
+  plannedProductCount: z.enum(["1_20", "21_100", "101_500", "over_500"]).nullish(),
+  plannedProducts: z.string().nullish(),
+  shippingPlan: z.string().nullish(),
+  supportHours: z.string().nullish(),
+}).register(common.apiTypes, { id: "sellers.ApplicationBusinessView" });
+
+export interface ApplicationVerificationView {
+  owners: BusinessOwner[];
+  registrationDocumentIds: string[];
+  taxIdType?: "ein" | "ssn" | null;
+  taxIdLast4?: string | null;
+  w9Method?: "online" | "uploaded" | null;
+  w9DocumentId?: string | null;
+}
+
+export const ApplicationVerificationView: z.ZodType<ApplicationVerificationView> = z.object({
+  get owners() {
+    return z.array(BusinessOwner);
+  },
+  registrationDocumentIds: z.array(z.uuid()),
+  taxIdType: z.enum(["ein", "ssn"]).nullish(),
+  taxIdLast4: z.string().nullish(),
+  w9Method: z.enum(["online", "uploaded"]).nullish(),
+  w9DocumentId: z.uuid().nullish(),
+}).register(common.apiTypes, { id: "sellers.ApplicationVerificationView" });
+
+export interface ReturnAddressView {
+  sameAsBusiness: boolean;
+  contactName: string;
+  phone: string;
+  address?: common.Address | null;
+}
+
+export const ReturnAddressView: z.ZodType<ReturnAddressView> = z.object({
+  sameAsBusiness: z.boolean(),
+  contactName: z.string(),
+  phone: z.string(),
+  get address() {
+    return common.Address.nullish();
+  },
+}).register(common.apiTypes, { id: "sellers.ReturnAddressView" });
+
+export interface ApplicationAppeal {
+  id: string;
+  ref: string;
+  level: number;
+  state: "submitted" | "under_review" | "upheld" | "overturned" | "partly_overturned" | "withdrawn";
+  submittedAt: string;
+  decideBy?: common.Deadline | null;
+  decision?: AppealDecision | null;
+}
+
+export const ApplicationAppeal: z.ZodType<ApplicationAppeal> = z.object({
+  id: z.uuid(),
+  ref: z.string(),
+  level: z.number().int(),
+  state: z.enum(["submitted", "under_review", "upheld", "overturned", "partly_overturned", "withdrawn"]),
+  submittedAt: z.iso.datetime({ offset: true }),
+  get decideBy() {
+    return common.Deadline.nullish();
+  },
+  get decision() {
+    return AppealDecision.nullish();
+  },
+}).register(common.apiTypes, { id: "sellers.ApplicationAppeal" });
+
+export interface CheckCounts {
+  passed: number;
+  needsAttention: number;
+  failed: number;
+  pending: number;
+}
+
+export const CheckCounts: z.ZodType<CheckCounts> = z.object({
+  passed: z.number().int(),
+  needsAttention: z.number().int(),
+  failed: z.number().int(),
+  pending: z.number().int(),
+}).register(common.apiTypes, { id: "sellers.CheckCounts" });
+
+export interface StepCta {
+  label: string;
+  /** Prototype screen id, e.g. seller/store */
+  screen: string;
+}
+
+export const StepCta: z.ZodType<StepCta> = z.object({
+  label: z.string(),
+  screen: z.string().describe("Prototype screen id, e.g. seller/store"),
+}).register(common.apiTypes, { id: "sellers.StepCta" });
+
+export interface GoLiveItem {
+  productId: string;
+  title: string;
+  reviewState: string;
+  outcome: "will_go_live" | "waits_for_approval" | "stays_unpublished";
+}
+
+export const GoLiveItem: z.ZodType<GoLiveItem> = z.object({
+  productId: z.uuid(),
+  title: z.string(),
+  reviewState: z.string(),
+  outcome: z.enum(["will_go_live", "waits_for_approval", "stays_unpublished"]),
+}).register(common.apiTypes, { id: "sellers.GoLiveItem" });
+
+export interface BusinessContact {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  supportHours?: string | null;
+}
+
+export const BusinessContact: z.ZodType<BusinessContact> = z.object({
+  name: z.string().nullish(),
+  email: z.string().nullish(),
+  phone: z.string().nullish(),
+  supportHours: z.string().nullish(),
+}).register(common.apiTypes, { id: "sellers.BusinessContact" });
+
+export interface ProfileCategory {
+  categoryId: string;
+  name: string;
+  state: "active" | "paused";
+  reason?: string | null;
+}
+
+export const ProfileCategory: z.ZodType<ProfileCategory> = z.object({
+  categoryId: z.uuid(),
+  name: z.string(),
+  state: z.enum(["active", "paused"]),
+  reason: z.string().nullish(),
+}).register(common.apiTypes, { id: "sellers.ProfileCategory" });
+
+export interface StorefrontHighlights {
+  positivePct?: number | null;
+  ratingCount?: number | null;
+  onTimeDispatchPct?: number | null;
+  repliesWithin24hPct?: number | null;
+  medianReplyHours?: number | null;
+}
+
+export const StorefrontHighlights: z.ZodType<StorefrontHighlights> = z.object({
+  positivePct: z.number().nullish(),
+  ratingCount: z.number().int().nullish(),
+  onTimeDispatchPct: z.number().nullish(),
+  repliesWithin24hPct: z.number().nullish(),
+  medianReplyHours: z.number().nullish(),
+}).register(common.apiTypes, { id: "sellers.StorefrontHighlights" });
+
+export interface StorefrontClaim {
+  kind: "brand_affiliation" | "authorized_retailer" | "certification" | "award" | "other";
+  text: string;
+}
+
+export const StorefrontClaim: z.ZodType<StorefrontClaim> = z.object({
+  kind: z.enum(["brand_affiliation", "authorized_retailer", "certification", "award", "other"]),
+  text: z.string(),
+}).register(common.apiTypes, { id: "sellers.StorefrontClaim" });
+
+export interface StorefrontShipping {
+  shipsFrom?: string | null;
+  /** Coverage label */
+  shipsTo: string;
+  /** e.g. Ships in 1 business day */
+  dispatch: string;
+  carriers: string[];
+  /** Same-day cutoff HH:MM, market time */
+  cutoff?: string | null;
+}
+
+export const StorefrontShipping: z.ZodType<StorefrontShipping> = z.object({
+  shipsFrom: z.string().nullish(),
+  shipsTo: z.string().describe("Coverage label"),
+  dispatch: z.string().describe("e.g. Ships in 1 business day"),
+  carriers: z.array(z.string()),
+  cutoff: z.string().describe("Same-day cutoff HH:MM, market time").nullish(),
+}).register(common.apiTypes, { id: "sellers.StorefrontShipping" });
+
+export interface StorefrontReturns {
+  /** e.g. 30 days */
+  window: string;
+  returnShipping: string;
+  warranty?: string | null;
+}
+
+export const StorefrontReturns: z.ZodType<StorefrontReturns> = z.object({
+  window: z.string().describe("e.g. 30 days"),
+  returnShipping: z.string(),
+  warranty: z.string().nullish(),
+}).register(common.apiTypes, { id: "sellers.StorefrontReturns" });
+
+export interface StorefrontContact {
+  canMessage: boolean;
+  productQuestions: boolean;
+  replyTarget: "within_12h" | "within_24h";
+  phone?: string | null;
+}
+
+export const StorefrontContact: z.ZodType<StorefrontContact> = z.object({
+  canMessage: z.boolean(),
+  productQuestions: z.boolean(),
+  replyTarget: z.enum(["within_12h", "within_24h"]),
+  phone: z.string().nullish(),
+}).register(common.apiTypes, { id: "sellers.StorefrontContact" });
+
+export interface StorefrontCategory {
+  categoryId: string;
+  name: string;
+  offerCount: number;
+}
+
+export const StorefrontCategory: z.ZodType<StorefrontCategory> = z.object({
+  categoryId: z.uuid(),
+  name: z.string(),
+  offerCount: z.number().int(),
+}).register(common.apiTypes, { id: "sellers.StorefrontCategory" });
+
+export interface StorefrontCollection {
+  id: string;
+  title: string;
+  image?: common.MediaRef | null;
+  offerIds: string[];
+  offerCount: number;
+  position: number;
+  visible: boolean;
+  itemCount: number;
+}
+
+export const StorefrontCollection: z.ZodType<StorefrontCollection> = z.object({
+  id: z.uuid(),
+  title: z.string(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  offerIds: z.array(z.uuid()),
+  offerCount: z.number().int(),
+  position: z.number().int(),
+  visible: z.boolean(),
+  itemCount: z.number().int(),
+}).register(common.apiTypes, { id: "sellers.StorefrontCollection" });
+
+export interface FeedbackSummary {
+  positivePct?: number | null;
+  ratingCount?: number | null;
+}
+
+export const FeedbackSummary: z.ZodType<FeedbackSummary> = z.object({
+  positivePct: z.number().nullish(),
+  ratingCount: z.number().int().nullish(),
+}).register(common.apiTypes, { id: "sellers.FeedbackSummary" });
+
+export interface ResolutionEvidence {
+  file?: common.MediaRef | null;
+  documentType?: "authorization_letter" | "invoice" | "certificate" | "test_report" | "license" | "other" | null;
+  note?: string | null;
+  at?: string | null;
+}
+
+export const ResolutionEvidence: z.ZodType<ResolutionEvidence> = z.object({
+  get file() {
+    return common.MediaRef.nullish();
+  },
+  documentType: z.enum(["authorization_letter", "invoice", "certificate", "test_report", "license", "other"]).nullish(),
+  note: z.string().nullish(),
+  at: z.iso.datetime({ offset: true }).nullish(),
+}).register(common.apiTypes, { id: "sellers.ResolutionEvidence" });
+
+export interface SuspensionBalances {
+  available: common.Money;
+  pending: common.Money;
+}
+
+export const SuspensionBalances: z.ZodType<SuspensionBalances> = z.object({
+  get available() {
+    return common.Money;
+  },
+  get pending() {
+    return common.Money;
+  },
+}).register(common.apiTypes, { id: "sellers.SuspensionBalances" });
+
+export interface SuspensionEffect {
+  area: string;
+  effect: string;
+}
+
+export const SuspensionEffect: z.ZodType<SuspensionEffect> = z.object({
+  area: z.string(),
+  effect: z.string(),
+}).register(common.apiTypes, { id: "sellers.SuspensionEffect" });
+
+export interface AppealDecision {
+  outcome: "upheld" | "overturned" | "partly_overturned";
+  explanation: string;
+  /** For partly_overturned: what changed (new scope, affected activities or review date) */
+  changes?: unknown | null;
+  decidedBy: common.Actor;
+  decidedAt: string;
+}
+
+export const AppealDecision: z.ZodType<AppealDecision> = z.object({
+  outcome: z.enum(["upheld", "overturned", "partly_overturned"]),
+  explanation: z.string(),
+  changes: z.unknown().describe("For partly_overturned: what changed (new scope, affected activities or review date)").nullish(),
+  get decidedBy() {
+    return common.Actor;
+  },
+  decidedAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "sellers.AppealDecision" });
+
+export interface SellerBalanceTotals {
+  total: common.Money;
+  held: common.Money;
+  negativeCount: number;
+}
+
+export const SellerBalanceTotals: z.ZodType<SellerBalanceTotals> = z.object({
+  get total() {
+    return common.Money;
+  },
+  get held() {
+    return common.Money;
+  },
+  negativeCount: z.number().int(),
+}).register(common.apiTypes, { id: "sellers.SellerBalanceTotals" });
+
+export interface SellerOwnerContact {
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+}
+
+export const SellerOwnerContact: z.ZodType<SellerOwnerContact> = z.object({
+  name: z.string(),
+  email: z.string().nullish(),
+  phone: z.string().nullish(),
+}).register(common.apiTypes, { id: "sellers.SellerOwnerContact" });
+
+export interface ObligationRef {
+  id?: string | null;
+  ref?: string | null;
+}
+
+export const ObligationRef: z.ZodType<ObligationRef> = z.object({
+  id: z.uuid().nullish(),
+  ref: z.string().nullish(),
+}).register(common.apiTypes, { id: "sellers.ObligationRef" });
+
+export interface OverdueOrderRef {
+  orderId: string;
+  orderRef: string;
+}
+
+export const OverdueOrderRef: z.ZodType<OverdueOrderRef> = z.object({
+  orderId: z.uuid(),
+  orderRef: z.string(),
+}).register(common.apiTypes, { id: "sellers.OverdueOrderRef" });
+
+export interface SellerObligations {
+  openOrders: number;
+  overdueOrders: OverdueOrderRef[];
+  openReturns: ObligationRef[];
+  openCases: ObligationRef[];
+}
+
+export const SellerObligations: z.ZodType<SellerObligations> = z.object({
+  openOrders: z.number().int(),
+  get overdueOrders() {
+    return z.array(OverdueOrderRef);
+  },
+  get openReturns() {
+    return z.array(ObligationRef);
+  },
+  get openCases() {
+    return z.array(ObligationRef);
+  },
+}).register(common.apiTypes, { id: "sellers.SellerObligations" });
+
+export interface SellerPayoutsView {
+  pending: common.Money;
+  available: common.Money;
+  held: common.Money;
+  holds: finance.Hold[];
+  nextPayout?: finance.NextPayout | null;
+}
+
+export const SellerPayoutsView: z.ZodType<SellerPayoutsView> = z.object({
+  get pending() {
+    return common.Money;
+  },
+  get available() {
+    return common.Money;
+  },
+  get held() {
+    return common.Money;
+  },
+  get holds() {
+    return z.array(finance.Hold);
+  },
+  get nextPayout() {
+    return finance.NextPayout.nullish();
+  },
+}).register(common.apiTypes, { id: "sellers.SellerPayoutsView" });
 
 export interface SellerInvitation {
   id: string;
@@ -2563,6 +3273,8 @@ export interface SellersDb {
     requested_at: Date;
     responded_at: Date | null;
     state: 'open' | 'answered' | 'expired';
+    /** the applicant's last saved draft response */
+    draft_saved_at: Date | null;
   };
   risk_reviews: {
     id: string;
@@ -3017,6 +3729,29 @@ export const endpoints = defineEndpoints({
     screens: ["sell/status"],
     phase: 1,
   },
+  saveInformationResponseDraft: {
+    area: "store",
+    method: "PUT",
+    path: "/applications/{id}/response-draft",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Save a draft answer to the information request (nothing is sent)",
+    desc: "Keeps notes and attached documents per open item (InfoRequestItem.response with draft true) so the applicant can come back; items left out keep their draft. POST /applications/{id}/respond sends it: a saved note counts as the answer unless the send gives another. G33c",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      get items() {
+        return z.array(InfoResponseItemInput);
+      },
+    }),
+    response: () => SellerApplication,
+    status: 200,
+    errors: ["VALIDATION_FAILED","ILLEGAL_TRANSITION"],
+    screens: ["sell/status"],
+    phase: 1,
+  },
   withdrawApplication: {
     area: "store",
     method: "POST",
@@ -3401,6 +4136,11 @@ export const endpoints = defineEndpoints({
     permission: "sellers.staff.manage",
     scope: "own-seller",
     summary: "Owner and staff with roles, status and last activity",
+    desc: "Without status, revoked invitations and removed members are left out (G49b); status=all lists everyone.",
+    query: () =>
+      z.object({
+        status: z.enum(["invited", "active", "suspended", "removed", "expired", "revoked", "all"]).optional(),
+      }),
     response: () => z.array(SellerMember),
     status: 200,
     screens: ["seller/staff"],
@@ -3637,6 +4377,7 @@ export const endpoints = defineEndpoints({
     body: () => z.object({
       evidenceIds: z.array(z.uuid()),
       note: z.string().nullish(),
+      documentType: z.enum(["authorization_letter", "invoice", "certificate", "test_report", "license", "other"]).describe("What the files are (G58e); kept with each file in Restriction.evidence").nullish(),
     }),
     response: () => Restriction,
     status: 200,
@@ -3865,10 +4606,11 @@ export const endpoints = defineEndpoints({
     summary: "Seller detail: account, restrictions, performance, open obligations, appeals, payouts, notes, history",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Seller id or storefront slug (G69a)"),
       }),
     response: () => SellerAdminDetail,
     status: 200,
+    errors: ["NOT_FOUND"],
     screens: ["admin/seller"],
     phase: 1,
   },
@@ -4191,7 +4933,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/applications",
     auth: "staff",
-    permission: "sellers.applications.review",
+    permission: "sellers.applications.view",
     scope: "staff",
     summary: "Application queue, oldest decision target first",
     query: () =>
@@ -4213,7 +4955,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/applications/{id}",
     auth: "staff",
-    permission: "sellers.applications.review",
+    permission: "sellers.applications.view",
     scope: "staff",
     summary: "Application with checks, risk flags, documents, notes and timeline",
     params: () =>
@@ -4743,6 +5485,11 @@ export const spec = defineModuleSpec({
       "key": "sellers.accounts.export",
       "audience": "staff",
       "desc": "Export seller lists"
+    },
+    {
+      "key": "sellers.applications.view",
+      "audience": "staff",
+      "desc": "View seller applications and their checks (read only)"
     },
     {
       "key": "sellers.applications.review",
@@ -6398,11 +7145,13 @@ export const spec = defineModuleSpec({
         "requested_by",
         "requested_at",
         "responded_at",
-        "state"
+        "state",
+        "draft_saved_at"
       ],
       "nullable": [
         "reminded_at",
-        "responded_at"
+        "responded_at",
+        "draft_saved_at"
       ],
       "decimal": [],
       "binary": [],
@@ -6410,7 +7159,8 @@ export const spec = defineModuleSpec({
         "due_at",
         "reminded_at",
         "requested_at",
-        "responded_at"
+        "responded_at",
+        "draft_saved_at"
       ],
       "identity": null,
       "validator": {
@@ -6475,6 +7225,12 @@ export const spec = defineModuleSpec({
                 "open",
                 "answered",
                 "expired"
+              ]
+            },
+            "draft_saved_at": {
+              "bsonType": [
+                "date",
+                "null"
               ]
             }
           },

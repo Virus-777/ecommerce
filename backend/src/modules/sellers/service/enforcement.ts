@@ -69,14 +69,27 @@ export class EnforcementPart extends Part {
     const appealViews = await this.appealViews(appeals, { refs, sellers, restrictions: rows });
     // staff see a change waiting for a second reviewer, and its approval in place of the restriction's own
     const changes = o.staff ? await this.core.pendingChangesFor('restriction_change', rows.map((r) => r.id)) : new Map<string, PendingChangeRec>();
+    const names = await this.categoryNames(rows.flatMap((r) => normalizeScope(r.scope as never).categoryIds ?? []));
     const out: Restriction[] = [];
     for (const r of rows) {
       const change = changes.get(r.id);
       const approval = o.staff ? await this.approvalInfo(change?.approval_request_id ?? r.approval_request_id) : null;
       const v = map.restriction(r, { appeals: appealViews.filter((a) => a.subjectId === r.id), refs, approval });
-      out.push({ ...v, appealRoute: this.route(r.appeal_route), pendingChange: change ? map.pendingStaffChange(change) : null });
+      // G58d: the scope's categories with their names, like the GraphQL scope
+      const scope = { ...v.scope, categories: (v.scope.categoryIds ?? []).map((id) => ({ id, name: names.get(id) ?? 'Category' })) };
+      out.push({ ...v, scope, appealRoute: this.route(r.appeal_route), pendingChange: change ? map.pendingStaffChange(change) : null });
     }
     return out;
+  }
+
+  /** Category names from catalog (ids catalog can't answer for are left out) */
+  private async categoryNames(ids: readonly string[]): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    if (!ids.length) return names;
+    const tree = await this.core.optional('catalog', 'categories', null, (c) => c.listCategories({ includeHidden: true }));
+    const walk = (list: { id: string; name: string; children?: unknown[] }[]) => list.forEach((c) => (names.set(c.id, c.name), walk((c.children ?? []) as never)));
+    walk((tree ?? []) as never);
+    return names;
   }
 
   private approvalInfo(id: string | null): Promise<common.ApprovalInfo | null> {
@@ -117,6 +130,7 @@ export class EnforcementPart extends Part {
       approval,
       appeals: await this.appealViews(appeals, { refs, sellers: new Map([[seller.id, seller]]), suspensions: [s] }),
       resolutionEvidence: [],
+      evidence: [],
       liftedAt: map.iso(s.ended_at),
       liftReason: s.end_reason,
     };
@@ -447,13 +461,14 @@ export class EnforcementPart extends Part {
     throw notFound('Restriction');
   }
 
-  async submitResolutionEvidence(sellerId: string, id: string, body: { evidenceIds: string[]; note?: string | null }, by: By): Promise<Restriction> {
+  async submitResolutionEvidence(sellerId: string, id: string, body: { evidenceIds: string[]; note?: string | null; documentType?: string | null }, by: By): Promise<Restriction> {
     const r = await this.restrictionOf(id, sellerId);
     if (r.state !== 'active') throw new AppError('ILLEGAL_TRANSITION', 'Evidence can only be sent for an active restriction', { from: r.state, event: 'submitEvidence' });
     if (!body.evidenceIds?.length) throw invalid([{ path: 'evidenceIds', message: 'Add at least one document' }]);
     await this.attachEvidence(body.evidenceIds, { kind: 'seller', id: sellerId }, r.id, r.ref);
     const at = this.now().toISOString();
-    const evidence = [...((r.resolution_evidence ?? []) as object[]), ...body.evidenceIds.map((mediaId) => ({ mediaId, note: body.note ?? null, at }))];
+    // the document type travels with each file (G58e)
+    const evidence = [...((r.resolution_evidence ?? []) as object[]), ...body.evidenceIds.map((mediaId) => ({ mediaId, documentType: body.documentType ?? null, note: body.note ?? null, at }))];
     const after = await this.repo.update('restrictions', r.id, { resolution_evidence: evidence as never });
     await this.core.timeline(this.repo, sellerId, { kind: 'restriction_evidence', title: `Documents sent for ${r.title}`, detail: body.note ?? null, actor: by.actor, ref: r.ref });
     this.core.publish('sellers.restriction.evidence_submitted', { sellerId, restrictionId: r.id }, by);

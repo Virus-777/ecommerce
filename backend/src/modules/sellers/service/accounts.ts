@@ -14,13 +14,16 @@ import type {
   AgreementAcceptance,
   AgreementDocument,
   BusinessDetails,
+  GoLiveItem,
   LaunchReview,
+  MemberAccess,
   PayoutDetails,
   PayoutDetailsInput,
   PayoutReadiness,
   ProductApprovalSummary,
   SellerAccount,
   SellerAdminDetail,
+  SellerPayoutsView,
   SellerRow,
   SellerSnapshot,
   SellerStats,
@@ -130,7 +133,7 @@ export class AccountsPart extends Part {
   }
 
   /** The account view; staff views also show a closure waiting for a second reviewer and its approval */
-  async account(s: SellerRec, me: unknown, unavailable: string[] = [], o: { staff?: boolean } = {}): Promise<SellerAccount> {
+  async account(s: SellerRec, me: MemberAccess | null, unavailable: string[] = [], o: { staff?: boolean } = {}): Promise<SellerAccount> {
     const app = await this.core.applicationOf(s);
     const closure = o.staff ? (await this.core.pendingChangesFor('closure', [s.id])).get(s.id) : undefined;
     return {
@@ -155,7 +158,7 @@ export class AccountsPart extends Part {
     };
   }
 
-  async getAccount(sellerId: string, me: unknown): Promise<SellerAccount> {
+  async getAccount(sellerId: string, me: MemberAccess | null): Promise<SellerAccount> {
     return this.account(await this.core.seller(sellerId), me);
   }
 
@@ -254,13 +257,13 @@ export class AccountsPart extends Part {
     };
   }
 
-  private async goLivePreview(s: SellerRec, unavailable: string[]) {
+  private async goLivePreview(s: SellerRec, unavailable: string[]): Promise<GoLiveItem[]> {
     const offers = await this.core.optional('offers', 'goLivePreview', unavailable, async (o) => (await o.listOffersAdmin({ sellerId: s.id }, { page: 1, limit: 20 })).items);
     if (!offers?.length) return [];
     // one row per product: each variant is its own offer, and the product goes live when any of them does
     const byProduct = new Map<string, typeof offers>();
     for (const offer of offers) byProduct.set(offer.productId, [...(byProduct.get(offer.productId) ?? []), offer]);
-    const out: unknown[] = [];
+    const out: GoLiveItem[] = [];
     for (const [productId, productOffers] of byProduct) {
       // catalog answers { product: ProductAdmin, ownsSubmission }; the title is on ProductAdmin.product
       const p = await this.core.optional('catalog', 'goLivePreview', unavailable, (c) => c.getProductForSeller(s.id, productId));
@@ -342,8 +345,17 @@ export class AccountsPart extends Part {
       taxIdType: s.tax_id_type,
       taxIdLast4: s.tax_id_last4,
       owners: (v.owners ?? []).map((o) => ({ id: o.id, name: o.name, ownershipPct: o.ownershipPct, isPrimary: o.isPrimary, idDocumentIds: o.idDocumentIds ?? [], verificationState: o.verificationState })),
-      contact: s.contact,
+      contact: map.businessContact(s.contact),
     };
+  }
+
+  /** GET /sellers/{id} (admin): the seller id or its storefront slug (G69a) */
+  async sellerIdOf(idOrSlug: string): Promise<string> {
+    const slug: string = idOrSlug.trim().toLowerCase();
+    if (isUuid(idOrSlug)) return idOrSlug;
+    const s = await this.repo.sellerBySlug(slug);
+    if (!s) throw notFound('Seller');
+    return s.id;
   }
 
   async getBusinessDetails(sellerId: string) {
@@ -762,6 +774,7 @@ export class AccountsPart extends Part {
       out.push({
         id: s.id,
         ref: s.ref,
+        slug: s.slug,
         storeName: s.store_name,
         logo: refs(p?.logo_media_id),
         location: p?.location ?? locationOf(s.business_address as unknown as common.Address),
@@ -829,7 +842,7 @@ export class AccountsPart extends Part {
     });
     const returns = await this.core.optional('returns', 'obligations', unavailable, (r) => r.listForSeller(s.id, { state: 'open' }, { limit: 20 }));
     const cases = await this.core.optional('support', 'obligations', unavailable, (x) => x.listCasesForSeller(s.id, { open: true }, { limit: 20 }));
-    let payouts: unknown = null;
+    let payouts: SellerPayoutsView | null = null;
     if (viewer.canSeeBalances) {
       const b = await this.core.optional('finance', 'payouts', unavailable, (f) => f.getSellerBalances(s.id));
       if (b) payouts = { pending: b.pending, available: b.available, held: b.held, holds: b.holds, nextPayout: b.nextPayout ?? null };

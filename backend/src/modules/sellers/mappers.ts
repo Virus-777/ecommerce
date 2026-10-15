@@ -3,7 +3,9 @@ import type * as common from '../../spec/common.js';
 import type {
   AgreementAcceptance,
   Appeal,
+  AppealDecision,
   ApplicationDocument,
+  BusinessContact,
   ChangeRequest,
   FeaturedCollection,
   InformationRequest,
@@ -13,8 +15,10 @@ import type {
   PendingStaffChange,
   PerformanceTarget,
   PublicClaim,
+  ResolutionEvidence,
   Restriction,
   RestrictionScope,
+  RiskFlag,
   RiskReview,
   SellerInvitation,
   SellerMember,
@@ -139,6 +143,36 @@ export function payoutReadiness(s: SellerRec, payout: StoredPayout | null | unde
 
 /* ------------------------------------------------------------------ restrictions, warnings, appeals */
 
+const DOCUMENT_TYPES: readonly string[] = ['authorization_letter', 'invoice', 'certificate', 'test_report', 'license', 'other'];
+
+/** restrictions.resolution_evidence ({ mediaId, documentType?, note, at } per file; very old rows hold bare ids) as ResolutionEvidence (G58e) */
+export function resolutionEvidence(stored: unknown, refs: Refs): ResolutionEvidence[] {
+  return (Array.isArray(stored) ? stored : []).map((e) => {
+    const x = (typeof e === 'string' ? { mediaId: e } : (e ?? {})) as { mediaId?: string; documentType?: string | null; note?: string | null; at?: string | null };
+    return {
+      file: x.mediaId ? (refs(x.mediaId) ?? null) : null,
+      documentType: x.documentType && DOCUMENT_TYPES.includes(x.documentType) ? (x.documentType as ResolutionEvidence['documentType']) : null,
+      note: x.note ?? null,
+      at: x.at ?? null,
+    };
+  });
+}
+
+/** sellers.contact ({ name, email, phone, supportHours }, each possibly missing) as BusinessContact */
+export function businessContact(stored: unknown): BusinessContact {
+  const c = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === 'string' ? v : null);
+  return { name: text(c.name), email: text(c.email), phone: text(c.phone), supportHours: text(c.supportHours) };
+}
+
+/** appeals.decision as AppealDecision (stored { outcome, explanation, changes, decidedBy, decidedAt }) */
+export function appealDecision(stored: unknown): AppealDecision | null {
+  if (!stored || typeof stored !== 'object') return null;
+  const d = stored as { outcome?: string; explanation?: string; changes?: unknown; decidedBy?: common.Actor; decidedAt?: string };
+  if (d.outcome !== 'upheld' && d.outcome !== 'overturned' && d.outcome !== 'partly_overturned') return null;
+  return { outcome: d.outcome, explanation: d.explanation ?? '', changes: (d.changes ?? null) as AppealDecision['changes'], decidedBy: d.decidedBy ?? { kind: 'system', id: null }, decidedAt: d.decidedAt ?? new Date(0).toISOString() };
+}
+
 export function restriction(r: RestrictionRec, extra: { appeals?: Appeal[]; refs: Refs; approval?: common.ApprovalInfo | null }): Restriction {
   return {
     id: r.id,
@@ -165,6 +199,7 @@ export function restriction(r: RestrictionRec, extra: { appeals?: Appeal[]; refs
     approval: extra.approval ?? null,
     appeals: extra.appeals ?? [],
     resolutionEvidence: refList(extra.refs, ((r.resolution_evidence ?? []) as { mediaId?: string }[]).map((e) => (typeof e === 'string' ? e : e.mediaId))),
+    evidence: resolutionEvidence(r.resolution_evidence, extra.refs),
     liftedAt: iso(r.lifted_at),
     liftReason: r.lift_reason,
   };
@@ -197,7 +232,7 @@ export const appeal = (a: AppealRec, x: { storeName: string; subjectRef: string;
   reviewer: a.reviewer_id ? { kind: 'staff', id: a.reviewer_id, ...(x.reviewerName ? { name: x.reviewerName } : {}) } : null,
   originalDecider: a.original_decider_id === 'system' ? { kind: 'system', id: null } : { kind: 'staff', id: a.original_decider_id },
   decideBy: deadline(a.decide_by, x.now),
-  decision: a.decision ?? null,
+  decision: appealDecision(a.decision),
   submittedAt: isoReq(a.submitted_at),
   trustReportId: a.trust_report_id,
 });
@@ -272,13 +307,22 @@ export const check = (c: CheckRec): VerificationCheck => ({
   acceptedWithNote: c.accepted_note,
 });
 
+/** Trust's flags as RiskFlag (trust sends { severity, text }; anything else is kept as text at medium severity) */
+export function riskFlags(stored: unknown): RiskFlag[] {
+  return (Array.isArray(stored) ? stored : []).map((f) => {
+    const x = (f && typeof f === 'object' ? f : { text: String(f ?? '') }) as { severity?: string; text?: string; label?: string };
+    const severity = x.severity === 'low' || x.severity === 'high' ? x.severity : 'medium';
+    return { severity, text: x.text ?? x.label ?? '' };
+  });
+}
+
 export const riskReview = (r: RiskReviewRec | undefined): RiskReview =>
   r
     ? {
         state: r.state as RiskReview['state'],
         trustReportId: r.trust_report_id,
         level: (r.level as RiskReview['level']) ?? null,
-        flags: Array.isArray(r.flags) ? r.flags : [],
+        flags: riskFlags(r.flags),
         recommendation: r.recommendation,
         reviewedBy: actorOf(r.reviewed_by),
         reviewedAt: iso(r.reviewed_at),
@@ -307,6 +351,7 @@ export const infoRequest = (r: InfoRequestRec, now: Date): InformationRequest =>
   requestedAt: isoReq(r.requested_at),
   respondedAt: iso(r.responded_at),
   deadline: deadline(r.due_at, now),
+  draftSavedAt: iso(r.draft_saved_at),
 });
 
 export const invitation = (i: InvitationRec): SellerInvitation => ({
@@ -335,9 +380,35 @@ export const acceptance = (a: AcceptanceRec): AgreementAcceptance => ({
   acceptedAt: isoReq(a.accepted_at),
 });
 
+/** Tone of each account event kind for the history (G58c); kinds not listed are info */
+const EVENT_STATE: Record<string, NonNullable<common.TimelineEvent['state']>> = {
+  approved: 'success',
+  payout_verified: 'success',
+  reinstated: 'success',
+  warning_resolved: 'success',
+  information_provided: 'success',
+  agreement_accepted: 'success',
+  member_joined: 'success',
+  information_requested: 'warning',
+  information_reminder: 'warning',
+  agreement_pending: 'warning',
+  warning: 'warning',
+  restriction_requested: 'warning',
+  suspension_requested: 'warning',
+  closure_requested: 'warning',
+  claim_revoked: 'warning',
+  expired: 'warning',
+  restricted: 'danger',
+  suspended: 'danger',
+  rejected: 'danger',
+  closed: 'danger',
+  owner_account_closed: 'danger',
+};
+
 export const timelineEvent = (e: AccountEventRec): common.TimelineEvent => ({
   at: isoReq(e.at),
   label: e.title,
   detail: e.detail,
   actor: e.actor_kind ? ({ kind: e.actor_kind as common.Actor['kind'], id: e.actor_id } as common.Actor) : null,
+  state: EVENT_STATE[e.kind] ?? 'info',
 });

@@ -29,7 +29,7 @@ export const sellerRoutes = (service: SellersService) => {
       await storefront.deleteCollection(sellerId, params.id, { actor, requestId });
     },
     reorderCollections: async ({ sellerId, body, actor, requestId }) => storefront.reorderCollections(sellerId, body.collectionIds, { actor, requestId }),
-    listMembers: async ({ sellerId }) => members.listMembers(sellerId),
+    listMembers: async ({ sellerId, query }) => members.listMembers(sellerId, query.status),
     listRoleTemplates: async () => members.listRoleTemplates(),
     inviteMember: async ({ sellerId, body, actor, requestId }) => members.inviteMember(sellerId, body, { actor, requestId }),
     resendInvitation: async ({ sellerId, params, actor, requestId }) => members.resendInvitation(sellerId, params.id, { actor, requestId }),

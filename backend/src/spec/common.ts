@@ -146,6 +146,8 @@ export interface TimelineEvent {
   label: string;
   detail?: string | null;
   actor?: Actor | null;
+  /** Tone of the event, so screens can colour the history the same way everywhere (G58c); absent where the owning module does not set one */
+  state?: "info" | "success" | "warning" | "danger" | null;
 }
 
 export const TimelineEvent: z.ZodType<TimelineEvent> = z.object({
@@ -155,6 +157,7 @@ export const TimelineEvent: z.ZodType<TimelineEvent> = z.object({
   get actor() {
     return Actor.nullish();
   },
+  state: z.enum(["info", "success", "warning", "danger"]).describe("Tone of the event, so screens can colour the history the same way everywhere (G58c); absent where the owning module does not set one").nullish(),
 }).register(apiTypes, { id: "TimelineEvent" });
 
 export interface ApprovalInfo {

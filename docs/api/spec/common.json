@@ -116,7 +116,8 @@
       "at": "datetime",
       "label": "string",
       "detail": "string?",
-      "actor": "Actor?"
+      "actor": "Actor?",
+      "state": { "type": "enum(info|success|warning|danger)?", "desc": "Tone of the event, so screens can colour the history the same way everywhere (G58c); absent where the owning module does not set one" }
     },
     "ApprovalInfo": {
       "required": "bool",

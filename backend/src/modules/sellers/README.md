@@ -46,6 +46,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | DELETE | `/api/store/sellers/applications/{id}/documents/{documentId}` | Remove a document from a draft or an open information request | customer | 204 No content |
 | POST | `/api/store/sellers/applications/{id}/submit` | Accept the agreements and submit | customer | `{ acceptances: json[], signedName: string }` → `SellerApplication` |
 | POST | `/api/store/sellers/applications/{id}/respond` | Send the requested information for review | customer | `{ items: json[] }` → `SellerApplication` |
+| PUT | `/api/store/sellers/applications/{id}/response-draft` | Save a draft answer to the information request (nothing is sent) | customer | `{ items: InfoResponseItemInput[] }` → `SellerApplication` |
 | POST | `/api/store/sellers/applications/{id}/withdraw` | Withdraw an application | customer | `{ reason: text? }` → `SellerApplication` |
 | POST | `/api/store/sellers/applications/{id}/appeal` | Appeal a rejection before the deadline | customer | `AppealInput` → `Appeal` |
 | GET | `/api/store/sellers/stores/{slug}` | Public seller storefront | visitor | `Storefront` |
@@ -84,7 +85,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | GET | `/api/seller/sellers/performance` | Account health: metrics vs targets, warnings and actions | seller | `PerformanceSummary` |
 | GET | `/api/seller/sellers/restrictions` | Active and past restrictions and suspensions | seller | Page<Restriction> |
 | GET | `/api/seller/sellers/restrictions/{id}` | One restriction: reason, affected activity, what still works, how to resolve, appeal route | seller | `Restriction` |
-| POST | `/api/seller/sellers/restrictions/{id}/evidence` | Upload documents that resolve a restriction (e.g. brand authorisation) | seller<br>`sellers.account-health.manage` | `{ evidenceIds: uuid[], note: text? }` → `Restriction` |
+| POST | `/api/seller/sellers/restrictions/{id}/evidence` | Upload documents that resolve a restriction (e.g. brand authorisation) | seller<br>`sellers.account-health.manage` | `{ evidenceIds: uuid[], note: text?, documentType: enum(authorization_letter|invoice|certificate|test_report|license|other)? }` → `Restriction` |
 | POST | `/api/seller/sellers/restrictions/{id}/appeals` | Appeal a restriction or suspension before the deadline | seller<br>`sellers.account-health.manage` | `AppealInput` → `Appeal` |
 | GET | `/api/seller/sellers/appeals` | My appeals and their outcomes | seller | Page<Appeal> |
 | POST | `/api/seller/sellers/appeals/{id}/withdraw` | Withdraw an appeal | seller<br>`sellers.account-health.manage` | `Appeal` |
@@ -114,8 +115,8 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | POST | `/api/admin/sellers/warnings/{id}/resolve` | Mark a warning resolved _(audited)_ | staff<br>`sellers.accounts.restrict` | `{ note: text }` → `SellerWarning` |
 | POST | `/api/admin/sellers/sellers/{id}/verification` | Grant or revoke the Verified seller label _(audited)_ | staff<br>`sellers.verification.manage` | `{ action: enum(grant|revoke), reason: text }` → `VerificationLabel` |
 | POST | `/api/admin/sellers/sellers/{id}/launch-review/decide` | Pass the launch readiness review or ask for changes _(audited)_ | staff<br>`sellers.applications.decide` | `{ outcome: enum(pass|changes_needed), issues: string[]?, note: text? }` → `LaunchReview` |
-| GET | `/api/admin/sellers/applications` | Application queue, oldest decision target first | staff<br>`sellers.applications.review` | Page<ApplicationRow> |
-| GET | `/api/admin/sellers/applications/{id}` | Application with checks, risk flags, documents, notes and timeline | staff<br>`sellers.applications.review` | `ApplicationAdmin` |
+| GET | `/api/admin/sellers/applications` | Application queue, oldest decision target first | staff<br>`sellers.applications.view` | Page<ApplicationRow> |
+| GET | `/api/admin/sellers/applications/{id}` | Application with checks, risk flags, documents, notes and timeline | staff<br>`sellers.applications.view` | `ApplicationAdmin` |
 | POST | `/api/admin/sellers/applications/{id}/assign` | Assign a reviewer _(audited)_ | staff<br>`sellers.applications.review` | `{ reviewerId: uuid }` → `ApplicationAdmin` |
 | POST | `/api/admin/sellers/applications/{id}/start-review` | Move a submitted application to Under review _(audited)_ | staff<br>`sellers.applications.review` | `ApplicationAdmin` |
 | POST | `/api/admin/sellers/applications/{id}/checks/{checkId}/rerun` | Run an automated check again (e.g. after a new document) | staff<br>`sellers.applications.review` | `VerificationCheck` |
@@ -236,8 +237,8 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | activeRestrictions | `RestrictionSummary[]` |
 | launchReview | `LaunchReview` |
 | pendingAgreements | `int` New agreement versions waiting for the owner's acceptance |
-| accountManager | `json?` { name, replyTarget } |
-| me | `json` The calling member: { memberId, role, permissions, isOwner } |
+| accountManager | `AccountManager?` |
+| me | `MemberAccess?` The calling member; null for staff |
 | approval | `ApprovalInfo?` Staff answers only: the approval request of a closure waiting for a second reviewer (pendingChange); null for sellers |
 | pendingChange | `PendingStaffChange?` Staff answers only: a closure waiting for a second reviewer; null for sellers |
 
@@ -305,19 +306,19 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 
 | Field | Type |
 |---|---|
-| launchCategories | `json[]` { id, name, icon, needsExtraApproval } |
+| launchCategories | `LaunchCategory[]` |
 | notAllowed | `string[]` e.g. digital goods, subscriptions, gift cards, perishable food, weapons, recalled items |
-| requirements | `json[]` { title, detail } |
-| feeExamples | `json[]` { categoryName, ratePct, basis } from finance fee rules when enabled, else settings; marked isExample |
+| requirements | `ProgramRequirement[]` |
+| feeExamples | `FeeExample[]` From finance fee rules when enabled, else settings; marked isExample |
 | feeNotes | `string[]` |
-| payoutTiming | `json` { holdDaysAfterDelivery, schedule, arrival, isExample } |
-| fulfillmentModels | `json[]` { name, availability: launch|later, detail } |
+| payoutTiming | `PayoutTiming` |
+| fulfillmentModels | `FulfillmentModel[]` |
 | serviceTargets | `PerformanceTarget[]` |
 | agreements | `AgreementDocument[]` |
 | steps | `string[]` |
-| verificationLabels | `json[]` { label, means, doesNotMean } |
-| faq | `json[]` { q, a } |
-| contact | `json` { email, phone, hours } |
+| verificationLabels | `VerificationLabelInfo[]` |
+| faq | `FaqEntry[]` |
+| contact | `ProgramContact` |
 | estimatedMinutes | `int` |
 | applicationsOpen | `bool` False during invite-only launch unless the caller has a seller invitation |
 
@@ -439,7 +440,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | state | `enum(not_needed|requested|completed)` |
 | trustReportId | `uuid?` |
 | level | `enum(low|medium|high)?` |
-| flags | `json[]` { severity: low|medium|high, text } |
+| flags | `RiskFlag[]` |
 | recommendation | `text?` |
 | reviewedBy | `Actor?` |
 | reviewedAt | `datetime?` |
@@ -454,7 +455,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | neededFor | `enum(account|business|verification|payout|return_address|agreement|category)` |
 | documentKind | `string?` |
 | status | `enum(open|provided|accepted|rejected)` |
-| response | `json?` |
+| response | `InfoRequestResponse?` What the applicant sent, or saved as a draft while the item is still open (G33c) |
 
 ### InformationRequest
 
@@ -469,6 +470,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | requestedAt | `datetime` |
 | respondedAt | `datetime?` |
 | deadline | `Deadline` |
+| draftSavedAt | `datetime?` When the applicant last saved a draft response (PUT /applications/{id}/response-draft); null when none |
 
 ### ApplicationDecision
 
@@ -498,17 +500,18 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | completedSteps | `string[]` |
 | percentComplete | `int` |
 | missing | `map<string[]>` Step → missing fields; submit is blocked until empty |
-| account | `json?` |
-| business | `json?` |
-| verification | `json?` owners (BusinessOwner[]), registrationDocumentIds, taxIdType, taxIdLast4, w9Method |
+| account | `ApplicationAccountView?` |
+| business | `ApplicationBusinessView?` |
+| verification | `ApplicationVerificationView?` The tax id itself is never returned, only its last 4 digits |
 | payout | `PayoutDetails?` |
-| returnAddress | `json?` { sameAsBusiness, contactName, phone, address } |
+| returnAddress | `ReturnAddressView?` |
 | agreementsRequired | `AgreementDocument[]` |
 | agreementsAccepted | `AgreementAcceptance[]` |
 | documents | `ApplicationDocument[]` |
 | informationRequest | `InformationRequest?` |
 | decision | `ApplicationDecision?` |
 | appealId | `uuid?` |
+| appeal | `ApplicationAppeal?` The latest appeal against a rejection, with its state and outcome (G33d); null when none |
 | timeline | `TimelineEvent[]` |
 | draftSavedAt | `datetime` |
 | submittedAt | `datetime?` |
@@ -564,7 +567,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | submittedAt | `datetime?` |
 | deadline | `Deadline?` |
 | reviewer | `Actor?` |
-| checks | `json` { passed, needsAttention, failed, pending } |
+| checks | `CheckCounts` |
 | riskLevel | `string?` |
 | categories | `string[]` |
 | invited | `bool` |
@@ -589,7 +592,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | detail | `text` |
 | state | `enum(done|action_needed|pending|locked|not_started)` |
 | source | `string` Module that answers it: sellers, shipping, returns, finance, catalog |
-| cta | `json?` { label, screen } |
+| cta | `StepCta?` |
 
 ### SetupChecklist
 
@@ -603,8 +606,8 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | completed | `int` |
 | total | `int` |
 | launchReview | `LaunchReview` |
-| goLivePreview | `json[]` { productId, title, reviewState, outcome: will_go_live|waits_for_approval|stays_unpublished } |
-| accountManager | `json?` { name, replyTarget } |
+| goLivePreview | `GoLiveItem[]` One row per product |
+| accountManager | `AccountManager?` |
 | unavailable | `string[]` |
 
 ### BusinessDetails
@@ -621,7 +624,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | taxIdType | `string` |
 | taxIdLast4 | `string` |
 | owners | `BusinessOwner[]` |
-| contact | `json` { name, email, phone, supportHours } — editable without review |
+| contact | `BusinessContact` Editable without review |
 
 ### ChangeRequest
 
@@ -692,7 +695,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | location | `string?` |
 | contactOptions | `ContactOptions` |
 | warranty | `text?` |
-| categories | `json[]` { categoryId, name, state: active|paused, reason? } derived from offers and restrictions |
+| categories | `ProfileCategory[]` Derived from offers and restrictions |
 | collections | `FeaturedCollection[]` |
 | claims | `PublicClaim[]` |
 | pendingChanges | `ChangeRequest[]` |
@@ -733,15 +736,15 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | warranty | `text?` The seller's warranty statement (store profile) |
 | sellingSince | `date` |
 | sellingNow | `bool` False while suspended; the page explains that existing orders are still looked after |
-| highlights | `json` { positivePct, ratingCount, onTimeDispatchPct, repliesWithin24hPct, medianReplyHours } |
+| highlights | `StorefrontHighlights` |
 | verification | `VerificationLabel` |
-| approvedClaims | `json[]` { kind, text } — only staff-approved claims |
-| shipping | `json?` From shipping: { shipsFrom, shipsTo, dispatch, carriers, cutoff } |
-| returns | `json?` From returns: { window, returnShipping, warranty } |
-| contact | `json` { canMessage, productQuestions, replyTarget, phone? } |
-| categories | `json[]` { categoryId, name, offerCount } from search when enabled |
-| collections | `json[]` { id, title, image, offerIds, itemCount } |
-| promotion | `json?` Active seller-funded promotion banner from promotions |
+| approvedClaims | `StorefrontClaim[]` Only staff-approved claims |
+| shipping | `StorefrontShipping?` From shipping |
+| returns | `StorefrontReturns?` From returns |
+| contact | `StorefrontContact` |
+| categories | `StorefrontCategory[]` From search when enabled |
+| collections | `StorefrontCollection[]` |
+| promotion | `promotions.PromoBanner?` Active seller-funded promotion banner from promotions |
 | productCount | `int` |
 | unavailable | `string[]` |
 | tagline | `string?` One-line store tagline under the store name |
@@ -829,7 +832,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | orderCount | `int` |
 | overall | `enum(good|at_risk|action_needed)` |
 | metrics | `PerformanceMetric[]` |
-| feedback | `json?` { positivePct, ratingCount } from reviews |
+| feedback | `FeedbackSummary?` From reviews |
 | warnings | `SellerWarning[]` |
 | history | `TimelineEvent[]` Warnings and actions, last 12 months |
 | updatedAt | `datetime` Recomputed daily at 06:00 market time |
@@ -842,6 +845,14 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | conditions | `string[]?` |
 | offerIds | `uuid[]?` |
 | productIds | `uuid[]?` |
+| categories | `ScopeCategory[]?` Responses only: the scope's categories with their names from catalog (G58d); ignored on input |
+
+### ScopeCategory
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| name | `string` |
 
 ### AppealRoute
 
@@ -881,6 +892,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | pendingChange | `PendingStaffChange?` Staff answers only: a change to this restriction waiting for a second reviewer; null for sellers |
 | appeals | `Appeal[]` |
 | resolutionEvidence | `MediaRef[]` |
+| evidence | `ResolutionEvidence[]` The resolution evidence with its document type, note and time (G58e); resolutionEvidence lists the same files |
 | liftedAt | `datetime?` |
 | liftReason | `text?` |
 
@@ -924,8 +936,8 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | unshippedValue | `Money` |
 | openReturns | `int` |
 | openCases | `int` |
-| balances | `json?` { available, pending } Money from finance; they move to Held with the review date |
-| effects | `json[]` { area, effect } rows shown in the suspend dialog |
+| balances | `SuspensionBalances?` From finance; they move to Held with the review date |
+| effects | `SuspensionEffect[]` Rows shown in the suspend dialog |
 | unavailable | `string[]` |
 
 ### Appeal
@@ -946,7 +958,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | reviewer | `Actor?` |
 | originalDecider | `Actor` |
 | decideBy | `Deadline` |
-| decision | `json?` { outcome, explanation, changes, decidedBy, decidedAt } |
+| decision | `AppealDecision?` |
 | submittedAt | `datetime` |
 | trustReportId | `uuid?` |
 
@@ -972,12 +984,13 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 |---|---|
 | id | `uuid` |
 | ref | `string` |
+| slug | `string` Storefront slug (/shop/:slug); the admin seller detail also accepts it in place of the id (G69a) |
 | storeName | `string` |
 | logo | `MediaRef?` |
 | location | `string?` |
 | status | `string` |
 | verified | `bool` |
-| feedback | `json?` { positivePct, ratingCount } |
+| feedback | `FeedbackSummary?` |
 | onTimeDispatchPct | `number?` |
 | openCases | `int` |
 | balance | `Money?` From finance; what is owed to the seller, not yet paid |
@@ -996,7 +1009,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | belowDispatchTarget | `int` |
 | restrictedOrSuspended | `int` |
 | appealsUnderReview | `int` |
-| balances | `json?` { total, held, negativeCount } from finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off |
+| balances | `SellerBalanceTotals?` From finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off |
 | byStatus | `map<int>` |
 | applicationsWaiting | `int` |
 
@@ -1006,16 +1019,382 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 |---|---|
 | account | `SellerAccount` |
 | business | `BusinessDetails` |
-| owner | `json` { name, email, phone } |
+| owner | `SellerOwnerContact` |
 | restrictions | `Restriction[]` |
 | performance | `PerformanceSummary` |
-| obligations | `json?` From orders, returns, support: { openOrders, overdueOrders: [{ orderId, orderRef, itemTitle, statusLabel, deadline }], openReturns: [{ id, ref }], openCases: [{ id, ref }] } |
+| obligations | `SellerObligations?` From orders, returns and support; null when none of them answers |
 | appeals | `Appeal[]` |
-| payouts | `json?` From finance: { pending, available, held, holds: [{ amount, reason, reviewDate, setBy }], nextPayout: { date, amount, destinationLabel, status } } |
+| payouts | `SellerPayoutsView?` From finance; null without finance.ledger.view or when finance is off |
 | changeRequests | `ChangeRequest[]` |
 | notes | `SellerNote[]` |
 | history | `TimelineEvent[]` |
 | unavailable | `string[]` |
+
+### AccountManager
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| name | `string` |
+| replyTarget | `string` e.g. Replies within 1 business day |
+
+### MemberAccess
+
+| Field | Type |
+|---|---|
+| memberId | `uuid` |
+| role | `string` |
+| permissions | `string[]` |
+| isOwner | `bool` |
+
+### LaunchCategory
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| name | `string` |
+| icon | `string?` Catalog category slug, used as the icon key |
+| needsExtraApproval | `bool` |
+
+### ProgramRequirement
+
+| Field | Type |
+|---|---|
+| title | `string` |
+| detail | `text` |
+
+### FeeExample
+
+| Field | Type |
+|---|---|
+| categoryName | `string` |
+| ratePct | `number` |
+| basis | `string` |
+| isExample | `bool` |
+
+### PayoutTiming
+
+| Field | Type |
+|---|---|
+| holdDaysAfterDelivery | `int` |
+| schedule | `string` |
+| arrival | `string` |
+| isExample | `bool` |
+
+### FulfillmentModel
+
+| Field | Type |
+|---|---|
+| name | `string` |
+| availability | `enum(launch|later)` |
+| detail | `text` |
+
+### VerificationLabelInfo
+
+| Field | Type |
+|---|---|
+| label | `string` |
+| means | `text` |
+| doesNotMean | `text` |
+
+### FaqEntry
+
+| Field | Type |
+|---|---|
+| q | `string` |
+| a | `text` |
+
+### ProgramContact
+
+| Field | Type |
+|---|---|
+| email | `string` |
+| phone | `string` |
+| hours | `string` |
+
+### RiskFlag
+
+| Field | Type |
+|---|---|
+| severity | `enum(low|medium|high)` |
+| text | `text` |
+
+### InfoRequestResponse
+
+| Field | Type |
+|---|---|
+| documentIds | `uuid[]` |
+| note | `text?` |
+| draft | `bool?` True while it is only a saved draft (the item is still open) |
+
+### InfoResponseItemInput
+
+| Field | Type |
+|---|---|
+| itemId | `uuid` |
+| documentIds | `uuid[]?` |
+| note | `text?` |
+
+### ApplicationAccountView
+
+| Field | Type |
+|---|---|
+| accountMode | `enum(existing_member|new_seller_login)?` |
+| contactName | `string?` |
+| contactPhone | `string?` |
+| workEmail | `string?` |
+| storeName | `string?` |
+| sellerType | `enum(business|individual)?` |
+| market | `string?` |
+| tipsOptIn | `bool?` |
+
+### ApplicationBusinessView
+
+| Field | Type |
+|---|---|
+| kind | `enum(registered_business|individual)?` |
+| legalName | `string?` |
+| storeName | `string?` |
+| businessType | `enum(llc|corporation|partnership|sole_proprietor)?` |
+| stateOfRegistration | `string?` |
+| registryNumber | `string?` |
+| address | `Address?` |
+| phone | `string?` |
+| website | `string?` |
+| categoryIds | `uuid[]?` |
+| plannedProductCount | `enum(1_20|21_100|101_500|over_500)?` |
+| plannedProducts | `text?` |
+| shippingPlan | `text?` |
+| supportHours | `string?` |
+
+### ApplicationVerificationView
+
+| Field | Type |
+|---|---|
+| owners | `BusinessOwner[]` |
+| registrationDocumentIds | `uuid[]` |
+| taxIdType | `enum(ein|ssn)?` |
+| taxIdLast4 | `string?` |
+| w9Method | `enum(online|uploaded)?` |
+| w9DocumentId | `uuid?` |
+
+### ReturnAddressView
+
+| Field | Type |
+|---|---|
+| sameAsBusiness | `bool` |
+| contactName | `string` |
+| phone | `string` |
+| address | `Address?` |
+
+### ApplicationAppeal
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` |
+| level | `int` |
+| state | `enum(submitted|under_review|upheld|overturned|partly_overturned|withdrawn)` |
+| submittedAt | `datetime` |
+| decideBy | `Deadline?` |
+| decision | `AppealDecision?` |
+
+### CheckCounts
+
+| Field | Type |
+|---|---|
+| passed | `int` |
+| needsAttention | `int` |
+| failed | `int` |
+| pending | `int` |
+
+### StepCta
+
+| Field | Type |
+|---|---|
+| label | `string` |
+| screen | `string` Prototype screen id, e.g. seller/store |
+
+### GoLiveItem
+
+| Field | Type |
+|---|---|
+| productId | `uuid` |
+| title | `string` |
+| reviewState | `string` |
+| outcome | `enum(will_go_live|waits_for_approval|stays_unpublished)` |
+
+### BusinessContact
+
+| Field | Type |
+|---|---|
+| name | `string?` |
+| email | `string?` |
+| phone | `string?` |
+| supportHours | `string?` |
+
+### ProfileCategory
+
+| Field | Type |
+|---|---|
+| categoryId | `uuid` |
+| name | `string` |
+| state | `enum(active|paused)` |
+| reason | `string?` |
+
+### StorefrontHighlights
+
+| Field | Type |
+|---|---|
+| positivePct | `number?` |
+| ratingCount | `int?` |
+| onTimeDispatchPct | `number?` |
+| repliesWithin24hPct | `number?` |
+| medianReplyHours | `number?` |
+
+### StorefrontClaim
+
+| Field | Type |
+|---|---|
+| kind | `enum(brand_affiliation|authorized_retailer|certification|award|other)` |
+| text | `string` |
+
+### StorefrontShipping
+
+| Field | Type |
+|---|---|
+| shipsFrom | `string?` |
+| shipsTo | `string` Coverage label |
+| dispatch | `string` e.g. Ships in 1 business day |
+| carriers | `string[]` |
+| cutoff | `string?` Same-day cutoff HH:MM, market time |
+
+### StorefrontReturns
+
+| Field | Type |
+|---|---|
+| window | `string` e.g. 30 days |
+| returnShipping | `string` |
+| warranty | `text?` |
+
+### StorefrontContact
+
+| Field | Type |
+|---|---|
+| canMessage | `bool` |
+| productQuestions | `bool` |
+| replyTarget | `enum(within_12h|within_24h)` |
+| phone | `string?` |
+
+### StorefrontCategory
+
+| Field | Type |
+|---|---|
+| categoryId | `uuid` |
+| name | `string` |
+| offerCount | `int` |
+
+### StorefrontCollection
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| title | `string` |
+| image | `MediaRef?` |
+| offerIds | `uuid[]` |
+| offerCount | `int` |
+| position | `int` |
+| visible | `bool` |
+| itemCount | `int` |
+
+### FeedbackSummary
+
+| Field | Type |
+|---|---|
+| positivePct | `number?` |
+| ratingCount | `int?` |
+
+### ResolutionEvidence
+
+| Field | Type |
+|---|---|
+| file | `MediaRef?` |
+| documentType | `enum(authorization_letter|invoice|certificate|test_report|license|other)?` |
+| note | `text?` |
+| at | `datetime?` |
+
+### SuspensionBalances
+
+| Field | Type |
+|---|---|
+| available | `Money` |
+| pending | `Money` |
+
+### SuspensionEffect
+
+| Field | Type |
+|---|---|
+| area | `string` |
+| effect | `string` |
+
+### AppealDecision
+
+| Field | Type |
+|---|---|
+| outcome | `enum(upheld|overturned|partly_overturned)` |
+| explanation | `text` |
+| changes | `json?` For partly_overturned: what changed (new scope, affected activities or review date) |
+| decidedBy | `Actor` |
+| decidedAt | `datetime` |
+
+### SellerBalanceTotals
+
+| Field | Type |
+|---|---|
+| total | `Money` |
+| held | `Money` |
+| negativeCount | `int` |
+
+### SellerOwnerContact
+
+| Field | Type |
+|---|---|
+| name | `string` |
+| email | `string?` |
+| phone | `string?` |
+
+### ObligationRef
+
+| Field | Type |
+|---|---|
+| id | `uuid?` |
+| ref | `string?` |
+
+### OverdueOrderRef
+
+| Field | Type |
+|---|---|
+| orderId | `uuid` |
+| orderRef | `string` |
+
+### SellerObligations
+
+| Field | Type |
+|---|---|
+| openOrders | `int` |
+| overdueOrders | `OverdueOrderRef[]` |
+| openReturns | `ObligationRef[]` |
+| openCases | `ObligationRef[]` |
+
+### SellerPayoutsView
+
+| Field | Type |
+|---|---|
+| pending | `Money` |
+| available | `Money` |
+| held | `Money` |
+| holds | `finance.Hold[]` |
+| nextPayout | `finance.NextPayout?` |
 
 ### SellerInvitation
 
@@ -1353,6 +1732,7 @@ Indexes: `(application_id)`, `(seller_id, kind)`, `unique(provider, provider_ref
 | requested_at | timestamptz |
 | responded_at | timestamptz? |
 | state | text (open|answered|expired) |
+| draft_saved_at | timestamptz? (the applicant's last saved draft response) |
 
 Indexes: `(state, due_at)`
 
@@ -1811,6 +2191,7 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.accounts.suspend` | staff | Request suspensions (always second reviewer) and reinstate |
 | `sellers.accounts.close` | staff | Close seller accounts |
 | `sellers.accounts.export` | staff | Export seller lists |
+| `sellers.applications.view` | staff | View seller applications and their checks (read only) |
 | `sellers.applications.review` | staff | Review applications, checks, notes, request information, refer to Trust and Risk |
 | `sellers.applications.decide` | staff | Approve or reject applications, decide launch readiness |
 | `sellers.appeals.decide` | staff | Assign and decide appeals (never your own decisions) |
