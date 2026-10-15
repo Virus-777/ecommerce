@@ -2,7 +2,7 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import { isUuid } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { AdminCaseDetail, CaseSummary, CaseView, SellerCaseRow, SupportPublicApi } from '../../spec/support.js';
+import type { AdminCaseDetail, CaseSummary, CaseView, ContactChannel, SellerCaseRow, SupportPublicApi } from '../../spec/support.js';
 import { UNRESOLVED_REMEDY } from './domain/rules.js';
 import { Automation } from './service/automation.js';
 import { Cases } from './service/cases.js';
@@ -120,6 +120,11 @@ export class SupportService implements SupportPublicApi {
   /** Customer data export hook: the customer's cases and the messages they can see on them */
   exportCustomerData(input: { customerId: string; accountId: string }): Promise<common.CustomerDataSection[]> {
     return this.reads.exportCustomerData(input);
+  }
+
+  /** The ways to reach Marketly (single source; content's Help Center and site navigation read them). No chat (G7). */
+  contactChannels(audience: 'customer' | 'seller'): Promise<ContactChannel[]> {
+    return this.reads.contactChannels(audience === 'seller' ? 'seller' : 'customer');
   }
 
   /* ---------------- events consumed */

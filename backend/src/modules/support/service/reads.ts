@@ -8,7 +8,7 @@ import { isUuid } from '../../../kernel/lib/ids.js';
 import { toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
-import type { AdminCaseDetail, AdminCaseRow, CaseAssignee, CaseStats, CaseSummary, CaseView, ContactOptions, ProblemContext, ProblemPackage, SellerCaseRow, SellerSupportOptions } from '../../../spec/support.js';
+import type { AdminCaseDetail, AdminCaseRow, CaseAssignee, CaseStats, CaseSummary, CaseView, ContactChannel, ContactOptions, ProblemContext, ProblemPackage, SellerCaseRow, SellerSupportOptions } from '../../../spec/support.js';
 import { CLOSED_STATUSES, median, OFFICIAL_STORE_NAME, OPEN_STATUSES, TEAM_ROLES, type Area, type Team } from '../domain/rules.js';
 import type { CaseFilter, CaseRec, CaseSort } from '../ports.js';
 import type { Cases, Shopper } from './cases.js';
@@ -49,21 +49,57 @@ export class Reads {
   async contactOptions(): Promise<ContactOptions> {
     const [cats, info, sellerDays] = await Promise.all([this.core.categories(), this.support(), this.core.setting('sellerReplyBusinessDays', 2)]);
     const topics = [...cats.values()].filter((c) => c.audience === 'customer' && c.active).map((c) => this.core.categoryView(c));
-    const fastest = Math.min(...topics.map((t) => t.firstResponseBusinessHours), 24);
-    const hours = info?.support.hoursLabel ?? 'Mon–Sat, 8 AM–8 PM PT';
-    const openNow = info?.support.openNow ?? true;
     return {
       topics,
-      channels: [
-        { kind: 'messages', label: 'Message the seller', expectedResponse: `Within ${sellerDays} business days`, available: true, hours: 'Any time' },
-        { kind: 'email', label: 'Email Marketly support', expectedResponse: fastest <= 8 ? `Within ${fastest} business hours` : 'Within 1 business day', available: true, hours: 'Any time; replies during support hours' },
-        { kind: 'chat', label: 'Chat with Marketly', expectedResponse: openNow ? 'About 2 minutes' : 'When support opens', available: openNow, hours: info?.support.chatHoursLabel ?? hours },
-        { kind: 'phone', label: 'Call Marketly', expectedResponse: openNow ? 'About 5 minutes' : 'When support opens', available: openNow, hours },
-      ],
-      hours,
+      channels: await this.contactChannels('customer'),
+      hours: info?.support.hoursLabel ?? 'Mon–Sat, 8 AM–8 PM PT',
       phone: info?.support.phone ?? '+1 800 555 0100',
       sellerFirstNote: `Marketplace items: the seller answers first, Marketly steps in after ${sellerDays} business days`,
     };
+  }
+
+  /**
+   * The contact channels (single source: GET /contact-options and content's Help Center read them). Live chat is
+   * not offered (decision G7).
+   */
+  async contactChannels(audience: 'customer' | 'seller'): Promise<ContactChannel[]> {
+    const [cats, info, sellerDays] = await Promise.all([this.core.categories(), this.support(), this.core.setting('sellerReplyBusinessDays', 2)]);
+    const hours = info?.support.hoursLabel ?? 'Mon–Sat, 8 AM–8 PM PT';
+    const openNow = info?.support.openNow ?? true;
+    const phone = info?.support.phone?.trim() || '+1 800 555 0100';
+    const fastest = Math.min(...[...cats.values()].filter((c) => c.audience === audience && c.active).map((c) => c.first_response_business_hours), 24);
+    const reply = fastest <= 8 ? `Within ${fastest} business hours` : 'Within 1 business day';
+    const channels: ContactChannel[] = [];
+    if (audience === 'customer') {
+      channels.push({
+        kind: 'messages',
+        label: 'Message the seller',
+        expectedResponse: `Within ${sellerDays} business days`,
+        available: true,
+        hours: 'Any time',
+        detail: 'For marketplace items the seller answers first',
+        action: { label: 'Go to my messages', url: '/account/messages', kind: 'help' },
+      });
+    }
+    channels.push({
+      kind: 'email',
+      label: audience === 'seller' ? 'Contact seller support' : 'Email Marketly support',
+      expectedResponse: reply,
+      available: true,
+      hours: 'Any time; replies during support hours',
+      detail: `We reply ${reply.charAt(0).toLowerCase()}${reply.slice(1)}`,
+      action: { label: 'Write to us', url: audience === 'seller' ? '/seller/help/contact' : '/help/contact', kind: 'help' },
+    });
+    channels.push({
+      kind: 'phone',
+      label: 'Call Marketly',
+      expectedResponse: openNow ? 'About 5 minutes' : 'When support opens',
+      available: openNow,
+      hours,
+      detail: phone,
+      action: { label: phone, url: `tel:${phone.replace(/[^\d+]/g, '')}`, kind: 'external' },
+    });
+    return channels;
   }
 
   async problemContext(orderId: string, who: Shopper, orderItemId?: string | null): Promise<ProblemContext> {

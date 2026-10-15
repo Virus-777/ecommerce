@@ -20,8 +20,20 @@ describe('contact options and the problem form', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.topics.map((t: { key: string }) => t.key)).toContain('item_damaged');
     expect(res.body.topics.every((t: { audience: string }) => t.audience === 'customer')).toBe(true);
-    expect(res.body.channels.map((c: { kind: string }) => c.kind)).toEqual(['messages', 'email', 'chat', 'phone']);
+    // no live chat (G7); every channel says where it opens
+    expect(res.body.channels.map((c: { kind: string }) => c.kind)).toEqual(['messages', 'email', 'phone']);
+    expect(res.body.channels.every((c: { action?: { url: string } }) => !!c.action?.url)).toBe(true);
     expect(res.body.sellerFirstNote).toMatch(/seller answers first/);
+  });
+
+  it('owns the contact channels for both audiences (content reads them through the public API, G31c)', async () => {
+    const customer = await h.service.contactChannels('customer');
+    expect(customer.map((c) => c.kind)).toEqual(['messages', 'email', 'phone']);
+    expect(customer.find((c) => c.kind === 'email')!.action).toMatchObject({ url: '/help/contact', kind: 'help' });
+    expect(customer.find((c) => c.kind === 'phone')!.action!.url).toMatch(/^tel:\+?\d+$/);
+    const seller = await h.service.contactChannels('seller');
+    expect(seller.map((c) => c.kind)).toEqual(['email', 'phone']);
+    expect(seller[0]!.action!.url).toBe('/seller/help/contact');
   });
 
   it('prepares the order problem form with the item preselected and who handles it first', async () => {

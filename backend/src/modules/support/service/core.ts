@@ -306,7 +306,8 @@ export class Core {
    * orders identity granted them, sellers only cases about their own orders (and their own requests), staff any.
    */
   async visible(caseId: string, v: Visibility): Promise<Agg> {
-    const agg = isUuid(caseId) ? await this.load(caseId) : undefined;
+    // REST takes the case id or its CS- reference (G69b)
+    const agg = isUuid(caseId) ? await this.load(caseId) : /^CS-/i.test(String(caseId).trim()) ? await this.byRef(caseId) : undefined;
     if (!agg || !(await this.canSee(agg.c, v))) throw notFound();
     return agg;
   }

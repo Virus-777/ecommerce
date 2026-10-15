@@ -70,6 +70,16 @@ describe('queue, assignment and priority', () => {
     const detail = await h.call('GET', `/api/admin/support/cases/${a.caseId}`, tokens.staff());
     expect(detail.body.case.priority).toBe('low');
     expect(detail.body.history.some((e: { label: string; detail: string }) => /Priority/.test(e.label) && /wait/.test(e.detail))).toBe(true);
+    // G68: the reason is optional; the default text is still recorded and audited
+    const noReason = await h.call('POST', '/api/admin/support/cases/priority', tokens.staff(), { caseIds: [a.caseId], priority: 'high' });
+    expect(noReason.body).toEqual({ updated: 1, failed: [] });
+    const after = await h.call('GET', `/api/admin/support/cases/${a.caseId}`, tokens.staff());
+    expect(after.body.case.priority).toBe('high');
+    expect(after.body.history.some((e: { detail: string }) => /case list/.test(e.detail ?? ''))).toBe(true);
+    // G69b: the CS- reference opens the case like its id
+    const byRef = await h.call('GET', `/api/admin/support/cases/${after.body.case.ref}`, tokens.staff());
+    expect(byRef.status, JSON.stringify(byRef.body)).toBe(200);
+    expect(byRef.body.case.id).toBe(a.caseId);
     const patch = await h.call('PATCH', `/api/admin/support/cases/${a.caseId}`, tokens.staff(), { category: 'delivery_late', reason: 'It is about the delay' });
     expect(patch.status).toBe(200);
     expect(patch.body.case.category.key).toBe('delivery_late');

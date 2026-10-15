@@ -504,6 +504,7 @@ export interface CaseCreateInput {
   message: string;
   mediaIds?: string[] | null;
   desiredRemedy?: "refund" | "keep_waiting" | "replacement" | "other" | null;
+  /** chat is accepted from older clients and answered by email (live chat is not offered, decision G7) */
   replyChannel?: "email" | "chat" | "phone" | null;
   callbackPhone?: string | null;
 }
@@ -518,26 +519,49 @@ export const CaseCreateInput: z.ZodType<CaseCreateInput> = z.object({
   message: z.string(),
   mediaIds: z.array(z.uuid()).nullish(),
   desiredRemedy: z.enum(["refund", "keep_waiting", "replacement", "other"]).nullish(),
-  replyChannel: z.enum(["email", "chat", "phone"]).nullish(),
+  replyChannel: z.enum(["email", "chat", "phone"]).describe("chat is accepted from older clients and answered by email (live chat is not offered, decision G7)").nullish(),
   callbackPhone: z.string().nullish(),
 }).register(common.apiTypes, { id: "support.CaseCreateInput" });
 
 export interface ContactChannel {
-  kind: "email" | "chat" | "phone" | "messages";
+  /** No chat: live chat is not offered (decision G7) */
+  kind: "email" | "phone" | "messages";
   label: string;
-  /** e.g. Within 1 business day / About 2 minutes */
+  /** e.g. Within 1 business day / About 5 minutes */
   expectedResponse: string;
   available: boolean;
   hours: string;
+  /** One line under the label, e.g. the phone number or We reply within one business day */
+  detail?: string | null;
+  /** Where the channel opens, e.g. Write to us → /help/contact, or tel: for the phone */
+  action?: ContactAction | null;
 }
 
 export const ContactChannel: z.ZodType<ContactChannel> = z.object({
-  kind: z.enum(["email", "chat", "phone", "messages"]),
+  kind: z.enum(["email", "phone", "messages"]).describe("No chat: live chat is not offered (decision G7)"),
   label: z.string(),
-  expectedResponse: z.string().describe("e.g. Within 1 business day / About 2 minutes"),
+  expectedResponse: z.string().describe("e.g. Within 1 business day / About 5 minutes"),
   available: z.boolean(),
   hours: z.string(),
+  detail: z.string().describe("One line under the label, e.g. the phone number or We reply within one business day").nullish(),
+  get action() {
+    return ContactAction.nullish();
+  },
 }).register(common.apiTypes, { id: "support.ContactChannel" });
+
+export interface ContactAction {
+  label: string;
+  /** Store or Seller Center path, or a tel: link */
+  url: string;
+  /** help: an app page; external: a tel: link */
+  kind: "help" | "external";
+}
+
+export const ContactAction: z.ZodType<ContactAction> = z.object({
+  label: z.string(),
+  url: z.string().describe("Store or Seller Center path, or a tel: link"),
+  kind: z.enum(["help", "external"]).describe("help: an app page; external: a tel: link"),
+}).register(common.apiTypes, { id: "support.ContactAction" });
 
 export interface ContactOptions {
   topics: CaseCategory[];
@@ -1330,6 +1354,8 @@ export interface SupportPublicApi {
   countOpenCasesForProducts(productIds: string[]): Promise<Record<string, number>>;
   /** Customer data export hook: one section (key support-cases) with the customer's cases (reference, topic, order, status, what they asked for, decision and remedies) and the messages they can see on each (no internal notes, no seller-only or staff-only messages, staff shown as Marketly support). attachmentIds are the files the customer attached. Used by: customers. */
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
+  /** The ways to reach Marketly, in display order, with hours, expected reply, a detail line and the link to open (the single source of the contact channels: content's Help Center and site navigation read them here; GET /contact-options lists the customer ones). Live chat is not offered (decision G7), so there is no chat channel. The phone number is settings support.phone (the same as ContactOptions.phone). Used by: content. */
+  contactChannels(audience: 'customer' | 'seller'): Promise<ContactChannel[]>;
 }
 
 /* ------------------------------------------------------------------ tables (row types) */
@@ -1601,7 +1627,7 @@ export const endpoints = defineEndpoints({
     summary: "Case detail: handler, next action and expected response, linked items, conversation, decision, remedy progress, appeal and reopen rules",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     response: () => CaseView,
     status: 200,
@@ -1618,7 +1644,7 @@ export const endpoints = defineEndpoints({
     summary: "Reply on a case (with photos)",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       body: z.string(),
@@ -1640,7 +1666,7 @@ export const endpoints = defineEndpoints({
     summary: "Ask Marketly to step in",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       reason: z.enum(["seller_no_reply", "disagree_with_seller", "refund_late", "other"]),
@@ -1662,7 +1688,7 @@ export const endpoints = defineEndpoints({
     summary: "Accept or decline the seller's offer",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
         offerId: z.uuid(),
       }),
     body: () => z.object({
@@ -1684,7 +1710,7 @@ export const endpoints = defineEndpoints({
     summary: "Appeal a decision before the appeal deadline",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       reason: z.string(),
@@ -1706,7 +1732,7 @@ export const endpoints = defineEndpoints({
     summary: "Reopen a resolved case within the reopen window",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       reason: z.string(),
@@ -1746,7 +1772,7 @@ export const endpoints = defineEndpoints({
     summary: "Case as the seller sees it (no internal notes)",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     response: () => CaseView,
     status: 200,
@@ -1764,7 +1790,7 @@ export const endpoints = defineEndpoints({
     summary: "Reply to the customer and Marketly support, optionally with an offer",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       body: z.string(),
@@ -1790,7 +1816,7 @@ export const endpoints = defineEndpoints({
     summary: "Add dispute evidence (photos, test videos, invoices, carrier records)",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => EvidenceInput,
     response: () => Evidence,
@@ -1809,7 +1835,7 @@ export const endpoints = defineEndpoints({
     summary: "Appeal a dispute decision before the deadline",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       reason: z.string(),
@@ -1900,7 +1926,7 @@ export const endpoints = defineEndpoints({
     summary: "Dispute review: parties, purchase terms at order time, shipment evidence, photos, conversation with internal notes, deadlines, holds",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     response: () => AdminCaseDetail,
     status: 200,
@@ -1959,7 +1985,7 @@ export const endpoints = defineEndpoints({
     body: () => z.object({
       caseIds: z.array(z.uuid()),
       priority: z.enum(["low", "medium", "high", "urgent"]),
-      reason: z.string(),
+      reason: z.string().describe("Optional (G68); left out: Priority changed from the case list (still recorded in each case history and the audit log)").nullish(),
     }),
     response: () => z.object({
       updated: z.number().int(),
@@ -1999,7 +2025,7 @@ export const endpoints = defineEndpoints({
     summary: "Assign or reassign the owner",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       ownerId: z.uuid(),
@@ -2022,7 +2048,7 @@ export const endpoints = defineEndpoints({
     summary: "Change category or priority with a reason",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       category: z.string().nullish(),
@@ -2045,7 +2071,7 @@ export const endpoints = defineEndpoints({
     summary: "Reply to both parties, one party, or add an internal note",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       body: z.string(),
@@ -2069,7 +2095,7 @@ export const endpoints = defineEndpoints({
     summary: "Ask the customer or the seller for information or evidence by a deadline",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       from: z.enum(["customer", "seller"]),
@@ -2093,7 +2119,7 @@ export const endpoints = defineEndpoints({
     summary: "Escalate to another team (Returns, Finance, Trust and Risk, Seller Manager, support lead)",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       to: z.enum(["returns", "finance", "trust", "seller_management", "support_lead"]),
@@ -2118,7 +2144,7 @@ export const endpoints = defineEndpoints({
     summary: "Attach evidence gathered by staff (carrier records, screenshots)",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => EvidenceInput,
     response: () => Evidence,
@@ -2138,7 +2164,7 @@ export const endpoints = defineEndpoints({
     desc: "Refund remedies create a refund request in returns (Finance approves within limits; approved is not sent). Goodwill credit needs the wallet module (GOODWILL_UNAVAILABLE while it is off, decision D-RT3); goodwill above the decider's limit needs approval through wallet and access. A guest has no wallet: their goodwill becomes a platform-funded partial refund through returns. Remedies left without items (goodwill, refunds) default to the case's items. A replacement is created by returns (returns.requestReplacement): it attaches to the case's open return when that return covers the item, otherwise it is a replacement without a return; REPLACEMENT_NEEDS_RETURN while the returns module is off. notifyParties=false still records and shows the decision but sends no email (notified=false). Platform-funded remedies above the decider's limit: the decision is saved pending (cases.approval_request_id) and the call answers 200 with AdminCaseDetail.pendingApproval; nothing is published until access.approval.decided. APPROVAL_REQUIRED (409, nothing saved) only while an earlier decision on the case still waits for approval.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => DecisionInput,
     response: () => AdminCaseDetail,
@@ -2162,7 +2188,7 @@ export const endpoints = defineEndpoints({
     desc: "Replaces the case's draft; nothing is published or sent to the parties. Deciding the case clears the draft.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => DecisionInput,
     response: () => DecisionDraft,
@@ -2181,7 +2207,7 @@ export const endpoints = defineEndpoints({
     summary: "Discard the decision draft",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     response: null,
     status: 204,
@@ -2199,7 +2225,7 @@ export const endpoints = defineEndpoints({
     desc: "Refused while a promised refund or replacement is unresolved.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       summary: z.string(),
@@ -2222,7 +2248,7 @@ export const endpoints = defineEndpoints({
     summary: "Reopen a resolved or closed case",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       reason: z.string(),
@@ -2246,7 +2272,7 @@ export const endpoints = defineEndpoints({
     desc: "Overturning cancels the earlier decision's refund requests that can still be cancelled and records the new remedies. New platform-funded remedies above the reviewer's limit are saved pending (200 with AdminCaseDetail.pendingApproval) and published on access.approval.decided; APPROVAL_REQUIRED only while an earlier decision still waits for approval.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
       }),
     body: () => z.object({
       overturn: z.boolean(),
@@ -2276,7 +2302,7 @@ export const endpoints = defineEndpoints({
     desc: "For remedies nothing in the system can finish (a refund recorded for Finance while returns is off, a remedy for a guest with no refund path), so the case can be resolved. Refused with REMEDY_NOT_SETTLEABLE while a returns refund request, a wallet grant or a replacement still drives the remedy, or when it is already completed or cancelled. The note and external reference go into the case history.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Case id or its CS- reference"),
         remedyId: z.uuid(),
       }),
     body: () => z.object({
@@ -2337,7 +2363,7 @@ export const spec = defineModuleSpec({
   summary: "Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules.",
   dependsOn: ["orders","access"],
   optionalDeps: ["returns","payments","shipping","sellers","messaging","media","finance","trust","wallet","workqueues","notifications","settings","audit","content","customers","identity","promotions","reports","warehouse"],
-  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts","exportCustomerData"],
+  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts","exportCustomerData","contactChannels"],
   permissions: [
     {
       "key": "support.cases.view",

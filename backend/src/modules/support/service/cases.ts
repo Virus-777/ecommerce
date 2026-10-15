@@ -64,6 +64,8 @@ interface Draft {
 
 /** Default of the priorityTargetFactors setting (decision D-S1) */
 const PRIORITY_FACTORS: Record<string, number> = { urgent: 0.5, high: 0.75, medium: 1, low: 1.5 };
+/** Recorded when a bulk priority change gives no reason (G68) */
+export const BULK_PRIORITY_REASON = 'Priority changed from the case list';
 
 export class Cases {
   constructor(
@@ -324,7 +326,8 @@ export class Cases {
         returnId: null,
         openedBy: by.actor,
         author: { role: 'customer', label: name },
-        replyChannel: body.replyChannel ?? null,
+        // no live chat (decision G7): an older client's chat choice is answered by email
+        replyChannel: body.replyChannel === 'chat' ? 'email' : (body.replyChannel ?? null),
         facts: { problemType: body.problemType ?? null, desiredRemedy: body.desiredRemedy ?? null, callbackPhone: body.callbackPhone?.trim() || null, customerName: name },
         ownerId: null,
         evidenceParty: 'customer',
@@ -859,15 +862,16 @@ export class Cases {
     return this.setPriority(agg.c.id, body.priority ?? (agg.c.priority as Priority), body.reason.trim(), by, { category: body.category ?? null });
   }
 
-  async bulkSetPriority(body: { caseIds: string[]; priority: Priority; reason: string }, by: By): Promise<{ updated: number; failed: string[] }> {
-    if (!body.reason?.trim()) throw invalidField('reason', 'Give a reason');
+  /** The reason is optional (G68): left out, a default text is recorded in each case history and the audit log */
+  async bulkSetPriority(body: { caseIds: string[]; priority: Priority; reason?: string | null }, by: By): Promise<{ updated: number; failed: string[] }> {
+    const reason = body.reason?.trim() || BULK_PRIORITY_REASON;
     const failed: string[] = [];
     let updated = 0;
     for (const id of [...new Set(body.caseIds)]) {
       try {
         const agg = isUuid(id) ? await this.core.load(id) : undefined;
         if (!agg || (CLOSED_STATUSES as readonly string[]).includes(agg.c.status)) throw notFound();
-        await this.setPriority(id, body.priority, body.reason.trim(), by);
+        await this.setPriority(id, body.priority, reason, by);
         updated++;
       } catch {
         failed.push(id);

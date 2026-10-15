@@ -63,7 +63,7 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | GET | `/api/admin/support/cases/{id}` | Dispute review: parties, purchase terms at order time, shipment evidence, photos, conversation with internal notes, deadlines, holds | staff<br>`support.cases.view` | `AdminCaseDetail` |
 | POST | `/api/admin/support/cases` | Open a case on behalf of a customer or seller _(audited)_ | staff<br>`support.cases.handle` | `StaffCaseInput` → `AdminCaseDetail` |
 | POST | `/api/admin/support/cases/assign` | Assign several cases to one owner _(audited)_ | staff<br>`support.cases.assign` | `{ caseIds: uuid[], ownerId: uuid, priority: enum(low|medium|high|urgent)? }` → `{ assigned: int, failed: uuid[] }` |
-| POST | `/api/admin/support/cases/priority` | Change the priority of several cases with one reason _(audited)_ | staff<br>`support.cases.handle` | `{ caseIds: uuid[], priority: enum(low|medium|high|urgent), reason: text }` → `{ updated: int, failed: uuid[] }` |
+| POST | `/api/admin/support/cases/priority` | Change the priority of several cases with one reason _(audited)_ | staff<br>`support.cases.handle` | `{ caseIds: uuid[], priority: enum(low|medium|high|urgent), reason: text? }` → `{ updated: int, failed: uuid[] }` |
 | GET | `/api/admin/support/assignees` | Staff who can own cases, with team and current open case count | staff<br>`support.cases.assign` | `CaseAssignee[]` |
 | POST | `/api/admin/support/cases/{id}/assign` | Assign or reassign the owner _(audited)_ | staff<br>`support.cases.assign` | `{ ownerId: uuid, reason: text? }` → `AdminCaseDetail` |
 | PATCH | `/api/admin/support/cases/{id}` | Change category or priority with a reason _(audited)_ | staff<br>`support.cases.handle` | `{ category: string?, priority: enum(low|medium|high|urgent)?, reason: text }` → `AdminCaseDetail` |
@@ -328,18 +328,28 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 | message | `text` |
 | mediaIds | `uuid[]?` |
 | desiredRemedy | `enum(refund|keep_waiting|replacement|other)?` |
-| replyChannel | `enum(email|chat|phone)?` |
+| replyChannel | `enum(email|chat|phone)?` chat is accepted from older clients and answered by email (live chat is not offered, decision G7) |
 | callbackPhone | `string?` |
 
 ### ContactChannel
 
 | Field | Type |
 |---|---|
-| kind | `enum(email|chat|phone|messages)` |
+| kind | `enum(email|phone|messages)` No chat: live chat is not offered (decision G7) |
 | label | `string` |
-| expectedResponse | `string` e.g. Within 1 business day / About 2 minutes |
+| expectedResponse | `string` e.g. Within 1 business day / About 5 minutes |
 | available | `bool` |
 | hours | `string` |
+| detail | `string?` One line under the label, e.g. the phone number or We reply within one business day |
+| action | `ContactAction?` Where the channel opens, e.g. Write to us → /help/contact, or tel: for the phone |
+
+### ContactAction
+
+| Field | Type |
+|---|---|
+| label | `string` |
+| url | `string` Store or Seller Center path, or a tel: link |
+| kind | `enum(help|external)` help: an app page; external: a tel: link |
 
 ### ContactOptions
 
@@ -952,6 +962,7 @@ Indexes: `(case_id, at)`
 | exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports dataset support.admin.cases (support cases) | reports |
 | countOpenCasesForProducts | `(productIds: uuid[]) => map<int>`<br>Open customer cases per product (cases linked to an order item of the product, not resolved or closed). Catalog publication-impact preview. | catalog |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>Customer data export hook: one section (key support-cases) with the customer's cases (reference, topic, order, status, what they asked for, decision and remedies) and the messages they can see on each (no internal notes, no seller-only or staff-only messages, staff shown as Marketly support). attachmentIds are the files the customer attached. | customers |
+| contactChannels | `(audience: 'customer' | 'seller') => ContactChannel[]`<br>The ways to reach Marketly, in display order, with hours, expected reply, a detail line and the link to open (the single source of the contact channels: content's Help Center and site navigation read them here; GET /contact-options lists the customer ones). Live chat is not offered (decision G7), so there is no chat channel. The phone number is settings support.phone (the same as ContactOptions.phone). | content |
 
 ## Permissions
 

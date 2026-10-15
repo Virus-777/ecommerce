@@ -20,7 +20,7 @@ export const sellerRoutes = (service: SupportService) => {
     sellerReply: async ({ params, body, sellerId, actor, requestId, principal }) => {
       const agg = await own(params.id, sellerId);
       await service.cases.sellerReply(agg, body, sellerId, { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/evidence: Add dispute evidence (photos, test videos, invoices, carrier records) */
     addSellerEvidence: async ({ params, body, sellerId, actor, requestId, principal }) => service.cases.addEvidence(await own(params.id, sellerId), body, 'seller', { actor, requestId, principal }),
@@ -28,7 +28,7 @@ export const sellerRoutes = (service: SupportService) => {
     sellerAppeal: async ({ params, body, sellerId, actor, requestId, principal }) => {
       const agg = await own(params.id, sellerId);
       await service.decisions.appeal(agg, body, 'seller', { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.c.id);
     },
     /** POST /requests: Contact seller support (Seller Manager team) */
     createSellerRequest: async ({ body, sellerId, actor, requestId, principal }) => service.views.view(await service.cases.createSellerRequest(body, sellerId, { actor, requestId, principal }), 'seller'),

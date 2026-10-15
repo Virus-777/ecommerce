@@ -44,31 +44,31 @@ export const storeRoutes = (service: SupportService) => {
     customerReply: async ({ params, body, scope, principal, actor, requestId }) => {
       const { who, agg } = await mine(params.id, scope, principal);
       await service.cases.customerReply(agg, body, who, { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/escalate: Ask Marketly to step in */
     customerEscalate: async ({ params, body, scope, principal, actor, requestId }) => {
       const { agg } = await mine(params.id, scope, principal);
       await service.cases.customerEscalate(agg, body, { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/offers/{offerId}/respond: Accept or decline the seller's offer */
     respondToOffer: async ({ params, body, scope, principal, actor, requestId }) => {
       const { agg } = await mine(params.id, scope, principal);
       await service.cases.respondToOffer(agg, params.offerId, body, { actor, requestId, principal }, { fromOffer: (a, o, by) => service.decisions.fromOffer(a, o, by) });
-      return detail(params.id);
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/appeal: Appeal a decision before the appeal deadline */
     customerAppeal: async ({ params, body, scope, principal, actor, requestId }) => {
       const { agg } = await mine(params.id, scope, principal);
       await service.decisions.appeal(agg, body, 'customer', { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/reopen: Reopen a resolved case within the reopen window */
     customerReopen: async ({ params, body, scope, principal, actor, requestId }) => {
       const { agg } = await mine(params.id, scope, principal);
       await service.decisions.reopen(agg, body, 'customer', { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.c.id);
     },
   });
 };

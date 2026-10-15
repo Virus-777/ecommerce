@@ -35,53 +35,61 @@ export const adminRoutes = (service: SupportService) => {
     listAssignees: async ({ query }) => service.reads.assignees(query),
     /** POST /cases/{id}/assign: Assign or reassign the owner */
     assignCase: async (i) => {
-      await any(i.params.id);
-      return service.views.adminDetail(await service.cases.assign(i.params.id, i.body.ownerId, { reason: i.body.reason ?? null }, by(i)));
+      const agg = await any(i.params.id);
+      return service.views.adminDetail(await service.cases.assign(agg.c.id, i.body.ownerId, { reason: i.body.reason ?? null }, by(i)));
     },
     /** PATCH /cases/{id}: Change category or priority with a reason */
     updateCase: async (i) => service.views.adminDetail(await service.cases.updateCase(await any(i.params.id), i.body, by(i))),
     /** POST /cases/{id}/messages: Reply to both parties, one party, or add an internal note */
     staffMessage: async (i) => {
-      await service.cases.staffMessage(await any(i.params.id), i.body, by(i));
-      return detail(i.params.id);
+      const agg = await any(i.params.id);
+      await service.cases.staffMessage(agg, i.body, by(i));
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/request-info: Ask the customer or the seller for information or evidence by a deadline */
     staffRequestInfo: async (i) => {
-      await service.cases.requestInfo(await any(i.params.id), i.body, by(i));
-      return detail(i.params.id);
+      const agg = await any(i.params.id);
+      await service.cases.requestInfo(agg, i.body, by(i));
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/escalate: Escalate to another team (Returns, Finance, Trust and Risk, Seller Manager, support lead) */
     staffEscalate: async (i) => {
-      await service.cases.staffEscalate(await any(i.params.id), i.body, by(i));
-      return detail(i.params.id);
+      const agg = await any(i.params.id);
+      await service.cases.staffEscalate(agg, i.body, by(i));
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/evidence: Attach evidence gathered by staff (carrier records, screenshots) */
     addStaffEvidence: async (i) => service.cases.addEvidence(await any(i.params.id), i.body, 'staff', by(i)),
     /** POST /cases/{id}/decide: Record the decision and remedy, publish the appeal deadline to both parties */
     decideCase: async (i) => {
-      await service.decisions.decide(await any(i.params.id), i.body, by(i));
-      return detail(i.params.id);
+      const agg = await any(i.params.id);
+      await service.decisions.decide(agg, i.body, by(i));
+      return detail(agg.c.id);
     },
     /** PUT /cases/{id}/decision-draft: Save an unpublished decision draft (staff only) */
     saveDecisionDraft: async (i) => service.decisions.saveDraft(await any(i.params.id), i.body, by(i)),
     /** DELETE /cases/{id}/decision-draft: Discard the decision draft */
     deleteDecisionDraft: async (i) => {
-      await service.decisions.deleteDraft(await any(i.params.id), by(i));
+      const agg = await any(i.params.id);
+      await service.decisions.deleteDraft(agg, by(i));
     },
     /** POST /cases/{id}/resolve: Resolve a case */
     resolveCase: async (i) => {
-      await service.decisions.resolve(await any(i.params.id), i.body, by(i));
-      return detail(i.params.id);
+      const agg = await any(i.params.id);
+      await service.decisions.resolve(agg, i.body, by(i));
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/reopen: Reopen a resolved or closed case */
     staffReopen: async (i) => {
-      await service.decisions.reopen(await any(i.params.id), i.body, 'staff', by(i));
-      return detail(i.params.id);
+      const agg = await any(i.params.id);
+      await service.decisions.reopen(agg, i.body, 'staff', by(i));
+      return detail(agg.c.id);
     },
     /** POST /cases/{id}/appeal/decide: Decide an appeal (reviewer must differ from the original decider) */
     decideAppeal: async (i) => {
-      await service.decisions.decideAppeal(await any(i.params.id), i.body, by(i));
-      return detail(i.params.id);
+      const agg = await any(i.params.id);
+      await service.decisions.decideAppeal(agg, i.body, by(i));
+      return detail(agg.c.id);
     },
     /** GET /categories: Case categories with priority, team and SLA targets */
     listCategories: async () => [...(await service.core.categories()).values()].map((c) => service.core.categoryView(c)),
@@ -89,8 +97,9 @@ export const adminRoutes = (service: SupportService) => {
     updateCategory: async (i) => service.cases.updateCategory(i.params.key, i.body, by(i)),
     /** POST /cases/{id}/remedies/{remedyId}/settle: Record that a remedy was completed or cancelled outside the system */
     settleRemedy: async (i) => {
-      await service.decisions.settleRemedy(await any(i.params.id), i.params.remedyId, i.body, by(i));
-      return detail(i.params.id);
+      const agg = await any(i.params.id);
+      await service.decisions.settleRemedy(agg, i.params.remedyId, i.body, by(i));
+      return detail(agg.c.id);
     },
   });
 };
