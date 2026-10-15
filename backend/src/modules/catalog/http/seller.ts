@@ -23,6 +23,10 @@ export const sellerRoutes = (service: CatalogService) =>
     updateDraft: async ({ params, body, sellerId, actor, requestId, principal }) => service.updateDraft(sellerId, params.id, body, { actor, requestId, principal }),
     /** POST /products/{id}/submit: Submit for review */
     submitProduct: async ({ params, body, sellerId, actor, requestId, principal }) => service.submitOwn(sellerId, params.id, body?.note, { actor, requestId, principal }),
+    /** POST /products/{id}/withdraw: Withdraw a submission waiting for review */
+    withdrawSubmission: async ({ params, body, sellerId, actor, requestId, principal }) => service.withdrawOwn(sellerId, params.id, body?.reason, { actor, requestId, principal }),
+    /** DELETE /products/{id}: Delete a draft product */
+    deleteDraft: async ({ params, sellerId, actor, requestId, principal }) => service.deleteOwnDraft(sellerId, params.id, { actor, requestId, principal }),
     /** POST /products/{id}/corrections: Suggest a correction to shared product content */
     suggestCorrection: async ({ params, body, sellerId, actor, requestId, principal }) => service.suggestCorrection(sellerId, params.id, body, { actor, requestId, principal }),
     /** GET /categories/{id}/attributes: Attributes (own and inherited) and image standards for a category (drives the submission form) */

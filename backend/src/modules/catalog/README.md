@@ -5,7 +5,7 @@
 What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.
 
 - **Group:** Catalog and stock · **Launch phase:** 1 · **Plan chapters:** 5, 8
-- **Depends on:** [media](../media/README.md) · **Optional:** [search](../search/README.md), [sellers](../sellers/README.md), [access](../access/README.md), [audit](../audit/README.md), [offers](../offers/README.md), [cart](../cart/README.md), [reviews](../reviews/README.md), [inventory](../inventory/README.md), [reports](../reports/README.md), [orders](../orders/README.md), [returns](../returns/README.md), [support](../support/README.md), [settings](../settings/README.md)
+- **Depends on:** [media](../media/README.md) · **Optional:** [search](../search/README.md), [sellers](../sellers/README.md), [access](../access/README.md), [audit](../audit/README.md), [offers](../offers/README.md), [cart](../cart/README.md), [reviews](../reviews/README.md), [inventory](../inventory/README.md), [reports](../reports/README.md), [orders](../orders/README.md), [returns](../returns/README.md), [support](../support/README.md), [settings](../settings/README.md), [workqueues](../workqueues/README.md)
 - **Required by:** [offers](../offers/README.md), [orders](../orders/README.md), [promotions](../promotions/README.md), [reviews](../reviews/README.md), [search](../search/README.md), [wishlist](../wishlist/README.md)
 
 ## Owns
@@ -46,6 +46,8 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | POST | `/api/seller/catalog/products` | Create a product draft | seller<br>`catalog.products.submit` | `ProductInput` → `ProductAdmin` |
 | PATCH | `/api/seller/catalog/products/{id}` | Edit a draft or a product with changes requested | seller<br>`catalog.products.submit` | `ProductInput` → `ProductAdmin` |
 | POST | `/api/seller/catalog/products/{id}/submit` | Submit for review | seller<br>`catalog.products.submit` | `{ note: text? }` → `ProductAdmin` |
+| POST | `/api/seller/catalog/products/{id}/withdraw` | Withdraw a submission waiting for review | seller<br>`catalog.products.submit` | `{ reason: text? }` → `ProductAdmin` |
+| DELETE | `/api/seller/catalog/products/{id}` | Delete a draft product | seller<br>`catalog.products.submit` | 204 No content |
 | POST | `/api/seller/catalog/products/{id}/corrections` | Suggest a correction to shared product content | seller | `{ field: string, proposed: text, evidenceIds: uuid[]? }` → `CorrectionSuggestion` |
 | GET | `/api/seller/catalog/categories/{id}/attributes` | Attributes (own and inherited) and image standards for a category (drives the submission form) | seller | `{ attributes: Attribute[], imageRules: ImageRule[] }` |
 
@@ -53,12 +55,13 @@ What a product is: categories, attributes, brands, products, variants, and the r
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/admin/catalog/review-queue` | Submissions waiting for review, oldest first | staff<br>`catalog.products.review` | Page<ProductAdmin> |
-| GET | `/api/admin/catalog/products` | All products with filters | staff | Page<ProductAdmin> |
-| GET | `/api/admin/catalog/products/stats` | Counts for the catalog product tabs and page header | staff | `ProductStats` |
+| GET | `/api/admin/catalog/review-queue` | Submissions waiting for review, oldest first | staff<br>`catalog.view` | Page<ProductAdmin> |
+| GET | `/api/admin/catalog/products` | All products with filters | staff<br>`catalog.view` | Page<ProductAdmin> |
+| GET | `/api/admin/catalog/products/stats` | Counts for the catalog product tabs and page header | staff<br>`catalog.view` | `ProductStats` |
 | POST | `/api/admin/catalog/products/exports` | Export the filtered product list _(audited)_ | staff<br>`catalog.products.export` | `{ filters: json, format: enum(csv|xlsx)? }` → `reports.ExportJob` |
-| GET | `/api/admin/catalog/products/{id}` | Product with review history and duplicate candidates | staff | `ProductAdmin` |
+| GET | `/api/admin/catalog/products/{id}` | Product with review history and duplicate candidates | staff<br>`catalog.view` | `ProductAdmin` |
 | POST | `/api/admin/catalog/products/{id}/checks/{kind}/dismiss` | Mark an automated check finding as not applicable (e.g. Not a duplicate) _(audited)_ | staff<br>`catalog.products.review` | `{ reason: text, matchedProductId: uuid? }` → `ProductAdmin` |
+| POST | `/api/admin/catalog/products/{id}/checks/{kind}/restore` | Undo a dismissed check finding _(audited)_ | staff<br>`catalog.products.review` | `{ reason: text?, matchedProductId: uuid? }` → `ProductAdmin` |
 | PUT | `/api/admin/catalog/products/{id}/review-draft` | Save the reviewer's unsent decision | staff<br>`catalog.products.review` | `{ decision: enum(approve|request_changes|reject)?, reason: text?, fields: map<string>? }` → `ReviewDraft` |
 | POST | `/api/admin/catalog/products` | Create an Official Store product draft | staff<br>`catalog.products.manage-official` | `ProductInput` → `ProductAdmin` |
 | PATCH | `/api/admin/catalog/products/{id}` | Edit an Official Store draft | staff<br>`catalog.products.manage-official` | `ProductInput` → `ProductAdmin` |
@@ -66,20 +69,20 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | POST | `/api/admin/catalog/products/{id}/approve` | Approve a submission _(audited)_ | staff<br>`catalog.products.review` | `{ note: text? }` → `ProductAdmin` |
 | POST | `/api/admin/catalog/products/{id}/request-changes` | Ask the submitter to fix specific fields _(audited)_ | staff<br>`catalog.products.review` | `{ reason: text, fields: map<string> }` → `ProductAdmin` |
 | POST | `/api/admin/catalog/products/{id}/reject` | Reject with a reason _(audited)_ | staff<br>`catalog.products.review` | `{ reason: text }` → `ProductAdmin` |
-| POST | `/api/admin/catalog/products/{id}/publication` | Set Active, Hidden or Suspended _(audited)_ | staff<br>`catalog.products.publish` | `{ publication: enum(active|hidden|suspended), reason: text, trustReportId: uuid? }` → `ProductAdmin` |
+| POST | `/api/admin/catalog/products/{id}/publication` | Set Active, Hidden or Suspended _(audited)_ | staff<br>`catalog.products.publish` | `{ publication: enum(active|hidden|suspended), reason: text?, trustReportId: uuid? }` → `ProductAdmin` |
 | PATCH | `/api/admin/catalog/products/{id}/variants/{variantId}` | Set a variant's shipping weight, dimensions and list price _(audited)_ | staff<br>`catalog.products.review` | `VariantDetailsInput` → `ProductAdmin` |
 | GET | `/api/admin/catalog/products/{id}/publication-impact` | What hiding or suspending the product would do | staff<br>`catalog.products.publish` | `PublicationImpact` |
 | POST | `/api/admin/catalog/products/merge` | Merge duplicates and submissions into the product to keep _(audited)_ | staff<br>`catalog.products.review` | `MergeRequest` → `MergeResult` |
 | POST | `/api/admin/catalog/products/merge/preview` | Preview what a merge moves before confirming | staff<br>`catalog.products.review` | `MergeRequest` → `MergePreview` |
 | POST | `/api/admin/catalog/products/bulk` | Bulk edit products (category, brand, publication) with preview _(audited, phase 2)_ | staff<br>`catalog.products.bulk-edit` | `{ productIds: uuid[], change: json, reason: text, dryRun: bool }` → `{ affected: int, preview: ProductSummary[], errors: json[] }` |
-| GET | `/api/admin/catalog/corrections` | Open correction suggestions | staff<br>`catalog.products.review` | Page<CorrectionSuggestion> |
+| GET | `/api/admin/catalog/corrections` | Open correction suggestions | staff<br>`catalog.view` | Page<CorrectionSuggestion> |
 | POST | `/api/admin/catalog/corrections/{id}/decide` | Accept or decline a correction _(audited)_ | staff<br>`catalog.products.review` | `{ accept: bool, reason: text }` → `CorrectionSuggestion` |
-| GET | `/api/admin/catalog/categories` | Full category tree including hidden, with product and offer counts | staff | `Category[]` |
+| GET | `/api/admin/catalog/categories` | Full category tree including hidden, with product and offer counts | staff<br>`catalog.view` | `Category[]` |
 | POST | `/api/admin/catalog/categories` | Create a category _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ name: string, parentId: uuid?, position: int?, visible: bool?, comingSoon: bool?, imageId: uuid? }` → `Category` |
 | PATCH | `/api/admin/catalog/categories/{id}` | Rename, move, hide or mark coming soon _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ name: string?, parentId: uuid?, position: int?, visible: bool?, comingSoon: bool?, imageId: uuid? }` → `Category` |
-| GET | `/api/admin/catalog/categories/{id}/attributes` | Category attributes with fill rates, inheritance and image standards | staff | `{ attributes: AttributeAdmin[], imageRules: ImageRule[] }` |
+| GET | `/api/admin/catalog/categories/{id}/attributes` | Category attributes with fill rates, inheritance and image standards | staff<br>`catalog.view` | `{ attributes: AttributeAdmin[], imageRules: ImageRule[] }` |
 | PUT | `/api/admin/catalog/categories/{id}/attributes` | Replace a category's attributes and image standards _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ attributes: AttributeInput[], imageRules: ImageRule[] }` → `Attribute[]` |
-| GET | `/api/admin/catalog/brands` | All brands with counts, seller authorization and status | staff | Page<BrandAdmin> |
+| GET | `/api/admin/catalog/brands` | All brands with counts, seller authorization and status | staff<br>`catalog.view` | Page<BrandAdmin> |
 | POST | `/api/admin/catalog/brands` | Create a brand _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ name: string, logoId: uuid?, description: text?, bannerId: uuid?, sellingPolicy: enum(open|authorized_list|official_only)?, authorizedSellerIds: uuid[]? }` → `BrandAdmin` |
 | PATCH | `/api/admin/catalog/brands/{id}` | Edit a brand, including who can sell _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ name: string?, logoId: uuid?, description: text?, bannerId: uuid?, sellingPolicy: enum(open|authorized_list|official_only)?, authorizedSellerIds: uuid[]?, reason: text? }` → `BrandAdmin` |
 | POST | `/api/admin/catalog/brands/{id}/status` | Activate, flag for review or block a brand (decides seller brand requests) _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ status: enum(active|under_review|blocked), reason: text, trustReportId: uuid? }` → `BrandAdmin` |
@@ -246,6 +249,8 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | variants | `Variant[]` |
 | updatedAt | `datetime` |
 | listedAt | `datetime?` When the product was first approved and listed (New listing / Listed on …) |
+| isNewListing | `bool?` Store product detail (GET /api/store/catalog/products/{id}) only: listed within search.newArrivalsWindowDays, the same rule as the New listing badge on search cards; null elsewhere |
+| bestSellerRank | `search.BestSellerRank?` Store product detail only: best-seller rank in its category from search (search.bestSellerRanks), e.g. #3 in Headphones; null without a rank, when search is off, and elsewhere |
 
 ### ProductAdmin
 
@@ -616,9 +621,10 @@ stateDiagram-v2
   submitted --> rejected: reject
   changes_requested --> submitted: submit
   approved --> submitted: reopen
+  submitted --> draft: withdraw
 ```
 
-Submit is blocked until required information is present (title, brand, category, description of 40+ characters, one image, one variant, required category attributes). Reopen is used after an accepted correction that changes what the product is.
+Submit is blocked until required information is present (title, brand, category, description of 40+ characters, one image, one variant, required category attributes). Reopen is used after an accepted correction that changes what the product is. Withdraw takes a seller's first submission (a product never listed) back to draft.
 
 ### Publication (`ProductAdmin.publication`)
 
@@ -988,6 +994,7 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 | `catalog.taxonomy.manage` | staff | Categories, attributes, image standards and brands |
 | `catalog.products.submit` | seller | Create drafts and submit products for review |
 | `catalog.products.export` | staff | Export the filtered product list (authorized, logged) |
+| `catalog.view` | staff | View products, the review queue, corrections, categories and brands in the Admin Center (read only) |
 
 ## Approval actions
 

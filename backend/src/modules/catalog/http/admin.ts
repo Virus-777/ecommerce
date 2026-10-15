@@ -25,6 +25,7 @@ export const adminRoutes = (service: CatalogService) =>
     getProductAdmin: async (i) => service.productAdminFor(i.params.id, staff(i)),
     /** POST /products/{id}/checks/{kind}/dismiss: Mark an automated check finding as not applicable (e.g. Not a duplicate) */
     dismissCheck: async (i) => service.dismissCheck(i.params.id, i.params.kind, i.body, by(i)),
+    restoreCheck: async (i) => service.restoreCheck(i.params.id, i.params.kind, i.body ?? {}, by(i)),
     /** PUT /products/{id}/review-draft: Save the reviewer's unsent decision */
     saveReviewDraft: async (i) => service.saveReviewDraft(i.params.id, i.body, by(i)),
     /** POST /products: Create an Official Store product draft */

@@ -311,6 +311,60 @@ export class CatalogProducts extends CatalogTaxonomy {
     return this.adminView(after, { kind: 'seller', sellerId });
   }
 
+  /**
+   * The seller takes a submission back before review (G52a): only a product never listed. The open submission is
+   * marked withdrawn and its review work item closes; the product is a draft again.
+   */
+  async withdrawOwn(sellerId: string, id: string, reason: string | null | undefined, by: By) {
+    const row = await this.ownProduct(sellerId, id);
+    if (row.listed_at) throw new AppError('ILLEGAL_TRANSITION', 'A listed product changes through correction suggestions.', { from: row.review_state, event: 'withdraw' });
+    productReviewMachine.next(row.review_state as never, 'withdraw');
+    const note = reason?.trim() || null;
+    const now = this.now();
+    const after = await this.repo.transaction(async (tx) => {
+      const locked = await tx.getProduct(id, { forUpdate: true });
+      if (!locked) throw notFound();
+      const state = productReviewMachine.next(locked.review_state as never, 'withdraw');
+      const open = await tx.openSubmission(id, { forUpdate: true });
+      if (open) {
+        await tx.updateSubmission(open.id, { state: 'withdrawn', decided_at: now });
+        await tx.deleteDrafts(open.id);
+      }
+      await tx.insertLog({ id: newId(), product_id: id, action: 'withdrawn', reason: note, fields: {} as never, actor_kind: by.actor.kind, actor_id: by.actor.id ?? null, at: now });
+      return tx.updateProduct(id, { review_state: state, updated_at: now });
+    });
+    // the product_review work item opened by catalog.product.submitted (workqueues, optional)
+    const workqueues = this.ctx.tryUse('workqueues');
+    if (workqueues) {
+      await workqueues
+        .resolveBySource(`product_review:${id}`, { note: 'Submission withdrawn by the seller', by: by.actor })
+        .catch((err) => this.ctx.log.warn({ err, productId: id }, 'catalog: review work item not closed'));
+    }
+    return this.adminView(after, { kind: 'seller', sellerId });
+  }
+
+  /**
+   * The seller deletes a draft (G52a): a draft or a product with changes requested that was never listed and has
+   * no open submission. Its rows go and its files are released.
+   */
+  async deleteOwnDraft(sellerId: string, id: string, by: By): Promise<void> {
+    const row = await this.ownProduct(sellerId, id);
+    const refuse = (message: string) => new AppError('ILLEGAL_TRANSITION', message, { from: row.review_state, event: 'delete' });
+    if (row.listed_at || !['draft', 'changes_requested'].includes(row.review_state)) throw refuse('Only drafts that were never listed can be deleted.');
+    if (await this.repo.openSubmission(id)) throw refuse('Withdraw the submission before deleting the draft.');
+    const variants = await this.repo.variantsOf([id]);
+    await this.repo.transaction((tx) => tx.deleteDraftProduct(id));
+    await this.detachAll(
+      [
+        ...strings(row.media_ids).map((assetId) => ({ assetId, kind: 'product_image' })),
+        ...(row.video_media_id ? [{ assetId: row.video_media_id, kind: 'product_video' }] : []),
+        ...variants.flatMap((v) => strings(v.media_ids)).map((assetId) => ({ assetId, kind: 'variant_image' })),
+      ],
+      id,
+    );
+    this.ctx.log.info({ productId: id, sellerId, by: by.actor.id }, 'catalog: seller deleted a draft product');
+  }
+
   async submitOfficial(id: string, by: By) {
     const row = await this.officialProduct(id);
     const after = await this.submit(row, { note: null, by });

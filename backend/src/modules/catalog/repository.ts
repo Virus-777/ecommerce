@@ -601,6 +601,32 @@ export class CatalogRepository {
     await this.#t.dismissals.insertManyIfAbsent(rows, ['check_id', 'matched_product_id']);
   }
 
+  /** Undo dismissals of a check for these candidates */
+  async deleteDismissals(checkId: string, matchedProductIds: string[]): Promise<void> {
+    if (matchedProductIds.length) await this.#t.dismissals.deleteMany({ check_id: checkId, matched_product_id: oneOf(matchedProductIds) });
+  }
+
+  /**
+   * Removes a draft product that was never listed with everything that belongs to it: variants, submissions with
+   * their checks, dismissals and review drafts, the review log, correction suggestions and listing stats.
+   */
+  async deleteDraftProduct(productId: string): Promise<void> {
+    const submissions = await this.#t.submissions.find({ product_id: productId });
+    const subIds = submissions.map((s) => s.id);
+    if (subIds.length) {
+      const checks = await this.#t.checks.find({ submission_id: oneOf(subIds) });
+      if (checks.length) await this.#t.dismissals.deleteMany({ check_id: oneOf(checks.map((c) => c.id)) });
+      await this.#t.checks.deleteMany({ submission_id: oneOf(subIds) });
+      await this.#t.drafts.deleteMany({ submission_id: oneOf(subIds) });
+      await this.#t.submissions.deleteMany({ product_id: productId });
+    }
+    await this.#t.variants.deleteMany({ product_id: productId });
+    await this.#t.log.deleteMany({ product_id: productId });
+    await this.#t.corrections.deleteMany({ product_id: productId });
+    await this.#t.listing.deleteMany({ product_id: productId });
+    await this.#t.products.deleteMany({ id: productId });
+  }
+
   async dismissalsOf(checkIds: string[]): Promise<CheckDismissalRow[]> {
     if (!checkIds.length) return [];
     return this.#t.dismissals.find({ check_id: oneOf(checkIds) });

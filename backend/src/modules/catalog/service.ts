@@ -267,7 +267,20 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     let row = await this.repo.getProduct(id);
     if (row?.merged_into_id) row = await this.repo.getProduct(row.merged_into_id);
     if (!row || row.merged_into_id || row.review_state !== 'approved' || row.publication !== 'active') throw new AppError('NOT_FOUND', 'Product not found');
-    return (await this.productViews([row])).get(row.id)!;
+    const product = (await this.productViews([row])).get(row.id)!;
+    // the store detail adds the new-listing flag and the best-seller rank (search, optional; G25e, G25f)
+    const search = this.ctx.tryUse('search');
+    const [ranks, windowDays] = await Promise.all([
+      search ? search.bestSellerRanks([row.id]).catch((err) => (this.ctx.log.debug({ err }, 'catalog: best-seller rank unavailable'), null)) : null,
+      // the window search's New listing badge uses (its spec default when settings is off)
+      this.ctx.settings.read('search.newArrivalsWindowDays').catch(() => null),
+    ]);
+    const days = Number(windowDays);
+    return {
+      ...product,
+      isNewListing: row.listed_at && Number.isFinite(days) && days > 0 ? this.now().getTime() - row.listed_at.getTime() <= days * 86_400_000 : null,
+      bestSellerRank: ranks?.[row.id] ?? null,
+    };
   }
 
   /* ---------------------------------------------------------------- events consumed */

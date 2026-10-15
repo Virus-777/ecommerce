@@ -14,6 +14,12 @@ type Publication = 'active' | 'hidden' | 'suspended';
 type Decision = 'approve' | 'requestChanges' | 'reject';
 
 const PUBLICATION_EVENT: Record<Publication, 'activate' | 'hide' | 'suspend'> = { active: 'activate', hidden: 'hide', suspended: 'suspend' };
+/** Recorded when staff change publication without a reason (setPublication, decision G68) */
+const PUBLICATION_DEFAULT_REASON: Record<Publication, string> = {
+  active: 'Shown in the store again by staff',
+  hidden: 'Hidden from the store by staff',
+  suspended: 'Suspended by staff',
+};
 const DECISION_LOG: Record<Decision, string> = { approve: 'approved', requestChanges: 'changes_requested', reject: 'rejected' };
 const DECISION_LABEL: Record<Decision, string> = { approve: 'Approved product', requestChanges: 'Requested product changes', reject: 'Rejected product' };
 
@@ -161,6 +167,52 @@ export class CatalogReview extends CatalogProducts {
     return this.adminView((await this.repo.getProduct(id))!, this.staffViewer(by));
   }
 
+  /**
+   * Undo a dismissal (G73): the finding of the latest submission is open again. For duplicates, matchedProductId
+   * restores one dismissed candidate; without it, all.
+   */
+  async restoreCheck(id: string, kind: string, body: { reason?: string | null; matchedProductId?: string | null }, by: By): Promise<ProductAdmin> {
+    const reason = body.reason?.trim() || null;
+    const product = await this.product(id);
+    const sub = (await this.repo.latestSubmissions([id]))[0];
+    const check = sub ? (await this.repo.checksOf([sub.id])).find((c) => c.kind === kind) : undefined;
+    if (!sub || !check) throw new AppError('NOT_FOUND', 'No such check on the latest submission');
+    const dismissed = (await this.repo.dismissalsOf([check.id])).map((d) => d.matched_product_id);
+    if (body.matchedProductId && !dismissed.includes(body.matchedProductId)) throw new AppError('NOT_FOUND', 'That product is not a dismissed finding of this check');
+    if (!check.dismissed_at && !dismissed.length) throw new AppError('NOT_FOUND', 'This check has no dismissed finding');
+    const now = this.now();
+    await this.repo.transaction(async (tx) => {
+      const restore = body.matchedProductId ? [body.matchedProductId] : dismissed;
+      await tx.deleteDismissals(check.id, restore);
+      const left = dismissed.filter((p) => !restore.includes(p));
+      // a dismissal of some candidates only keeps dismissed_matched_product_id set (the finding stays open)
+      await tx.updateCheck(check.id, left.length ? { dismissed_matched_product_id: left[0]! } : { dismissed_at: null, dismissed_by: null, dismiss_reason: null, dismissed_matched_product_id: null });
+      await tx.insertLog({
+        id: newId(),
+        product_id: id,
+        action: 'check_restored',
+        reason,
+        fields: { check: kind, ...(body.matchedProductId ? { matchedProductId: body.matchedProductId } : {}) } as never,
+        actor_kind: by.actor.kind,
+        actor_id: by.actor.id ?? null,
+        at: now,
+      });
+    });
+    await this.audit(
+      {
+        action: 'catalog.product.check_restore',
+        actionLabel: kind === 'duplicate' ? 'Marked as a possible duplicate again' : 'Restored a dismissed submission check',
+        category: 'catalog',
+        target: this.productTarget(product),
+        reason: reason ?? 'Dismissal undone',
+        before: { kind, dismissed: dismissed.length ? dismissed : Boolean(check.dismissed_at) },
+        after: { kind, matchedProductId: body.matchedProductId ?? null },
+      },
+      by,
+    );
+    return this.adminView((await this.repo.getProduct(id))!, this.staffViewer(by));
+  }
+
   /* ================================================================ publication */
 
   /** The trust report behind the current suspension, if any */
@@ -171,8 +223,10 @@ export class CatalogReview extends CatalogProducts {
     return log && f.to === 'suspended' && f.trustReportId ? { reportId: f.trustReportId, at: log.at } : null;
   }
 
-  async setPublication(id: string, body: { publication: Publication; reason: string; trustReportId?: string | null }, by: By): Promise<ProductAdmin> {
-    const after = await this.changePublication(id, { to: body.publication, reason: requireReason(body.reason), trustReportId: body.trustReportId ?? null }, by);
+  /** The reason is optional (owner decision G68): without one a default text is recorded and audited */
+  async setPublication(id: string, body: { publication: Publication; reason?: string | null; trustReportId?: string | null }, by: By): Promise<ProductAdmin> {
+    const reason = body.reason?.trim() || PUBLICATION_DEFAULT_REASON[body.publication];
+    const after = await this.changePublication(id, { to: body.publication, reason, trustReportId: body.trustReportId ?? null }, by);
     return this.adminView(after, this.staffViewer(by));
   }
 

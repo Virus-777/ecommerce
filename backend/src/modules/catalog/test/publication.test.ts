@@ -36,7 +36,6 @@ describe('publication', () => {
   it('hide → suspend → activate with reasons; events, review log, audit; store and purchasability follow', async () => {
     const sellerId = newId();
     const { id } = await sellerProduct(t, sellerId, { brandId, categoryId: cat.id, approve: true });
-    expect((await a.admin('POST', `/products/${id}/publication`, { publication: 'hidden', reason: '' })).statusCode).toBe(400);
     const hide = await a.admin('POST', `/products/${id}/publication`, { publication: 'hidden', reason: 'Recall check' });
     expect(hide.statusCode, hide.body).toBe(200);
     expect(hide.json()).toMatchObject({ publication: 'hidden', reviewState: 'approved' });

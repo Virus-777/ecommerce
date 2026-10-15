@@ -41,7 +41,8 @@
     "orders",
     "returns",
     "support",
-    "settings"
+    "settings",
+    "workqueues"
   ],
   "publicApi": [
     {
@@ -427,6 +428,14 @@
       "listedAt": {
         "type": "datetime?",
         "desc": "When the product was first approved and listed (New listing / Listed on …)"
+      },
+      "isNewListing": {
+        "type": "bool?",
+        "desc": "Store product detail (GET /api/store/catalog/products/{id}) only: listed within search.newArrivalsWindowDays, the same rule as the New listing badge on search cards; null elsewhere"
+      },
+      "bestSellerRank": {
+        "type": "search.BestSellerRank?",
+        "desc": "Store product detail only: best-seller rank in its category from search (search.bestSellerRanks), e.g. #3 in Headphones; null without a rank, when search is off, and elsewhere"
       }
     },
     "ProductAdmin": {
@@ -1266,9 +1275,14 @@
           "approved",
           "reopen",
           "submitted"
+        ],
+        [
+          "submitted",
+          "withdraw",
+          "draft"
         ]
       ],
-      "notes": "Submit is blocked until required information is present (title, brand, category, description of 40+ characters, one image, one variant, required category attributes). Reopen is used after an accepted correction that changes what the product is."
+      "notes": "Submit is blocked until required information is present (title, brand, category, description of 40+ characters, one image, one variant, required category attributes). Reopen is used after an accepted correction that changes what the product is. Withdraw takes a seller's first submission (a product never listed) back to draft."
     },
     {
       "name": "Publication",
@@ -1564,6 +1578,53 @@
       }
     },
     {
+      "id": "withdrawSubmission",
+      "area": "seller",
+      "method": "POST",
+      "path": "/products/{id}/withdraw",
+      "summary": "Withdraw a submission waiting for review",
+      "desc": "Only a product that was never listed (its first submission or a resubmission before approval): it goes back to draft, the open submission is marked withdrawn and leaves the review queue (its workqueues item closes). Products already listed change through correction suggestions.",
+      "auth": "seller",
+      "permission": "catalog.products.submit",
+      "params": {
+        "id": "uuid"
+      },
+      "body": {
+        "reason": {
+          "type": "text?",
+          "desc": "Kept in the review log"
+        }
+      },
+      "response": "ProductAdmin",
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
+      "id": "deleteDraft",
+      "area": "seller",
+      "method": "DELETE",
+      "path": "/products/{id}",
+      "summary": "Delete a draft product",
+      "desc": "Only drafts and products with changes requested that were never listed and have no open submission (withdraw it first). The product, its variants and review history are removed and its files are released.",
+      "auth": "seller",
+      "permission": "catalog.products.submit",
+      "params": {
+        "id": "uuid"
+      },
+      "response": null,
+      "status": 204,
+      "errors": [
+        "ILLEGAL_TRANSITION"
+      ],
+      "screens": [
+        "seller/products"
+      ]
+    },
+    {
       "id": "suggestCorrection",
       "area": "seller",
       "method": "POST",
@@ -1612,7 +1673,7 @@
       "path": "/review-queue",
       "summary": "Submissions waiting for review, oldest first",
       "auth": "staff",
-      "permission": "catalog.products.review",
+      "permission": "catalog.view",
       "paging": true,
       "query": {
         "kind": {
@@ -1634,6 +1695,7 @@
       "path": "/products",
       "summary": "All products with filters",
       "auth": "staff",
+      "permission": "catalog.view",
       "paging": true,
       "query": {
         "q": "string?",
@@ -1659,6 +1721,7 @@
       "summary": "Counts for the catalog product tabs and page header",
       "desc": "All, Active, Hidden, Suspended, Missing content, Duplicates suspected, open submissions (Review queue · 23) and total offers.",
       "auth": "staff",
+      "permission": "catalog.view",
       "response": "ProductStats",
       "screens": [
         "admin/catalog"
@@ -1695,6 +1758,7 @@
       "path": "/products/{id}",
       "summary": "Product with review history and duplicate candidates",
       "auth": "staff",
+      "permission": "catalog.view",
       "params": {
         "id": "uuid"
       },
@@ -1718,6 +1782,32 @@
       },
       "body": {
         "reason": "text",
+        "matchedProductId": "uuid?"
+      },
+      "response": "ProductAdmin",
+      "errors": [
+        "NOT_FOUND"
+      ],
+      "audited": true,
+      "screens": [
+        "admin/product-review"
+      ]
+    },
+    {
+      "id": "restoreCheck",
+      "area": "admin",
+      "method": "POST",
+      "path": "/products/{id}/checks/{kind}/restore",
+      "summary": "Undo a dismissed check finding",
+      "desc": "Opens the finding again on the latest submission. For duplicate checks, matchedProductId restores one dismissed candidate; omit it to restore all. Recorded in the review log; a duplicate finding puts the product back in Duplicates suspected.",
+      "auth": "staff",
+      "permission": "catalog.products.review",
+      "params": {
+        "id": "uuid",
+        "kind": "enum(duplicate|image_standard|category_fit|prohibited_claim|brand_authorization|restricted_item|identifier)"
+      },
+      "body": {
+        "reason": "text?",
         "matchedProductId": "uuid?"
       },
       "response": "ProductAdmin",
@@ -1894,7 +1984,10 @@
       },
       "body": {
         "publication": "enum(active|hidden|suspended)",
-        "reason": "text",
+        "reason": {
+          "type": "text?",
+          "desc": "Optional (owner decision G68); without one the change is recorded and audited with a default text, e.g. Hidden from the store by staff"
+        },
         "trustReportId": "uuid?"
       },
       "response": "ProductAdmin",
@@ -2031,7 +2124,7 @@
       "path": "/corrections",
       "summary": "Open correction suggestions",
       "auth": "staff",
-      "permission": "catalog.products.review",
+      "permission": "catalog.view",
       "paging": true,
       "query": {
         "state": "enum(open|accepted|declined)?"
@@ -2070,6 +2163,7 @@
       "path": "/categories",
       "summary": "Full category tree including hidden, with product and offer counts",
       "auth": "staff",
+      "permission": "catalog.view",
       "response": "Category[]",
       "screens": [
         "admin/categories"
@@ -2138,6 +2232,7 @@
       "summary": "Category attributes with fill rates, inheritance and image standards",
       "desc": "Attributes defined on an ancestor are listed with inheritedFrom and are edited there. filledCount / productCount shows how many products have a value; for required attributes the difference is the \"N products are missing Warranty\" alert (those products appear under Missing content).",
       "auth": "staff",
+      "permission": "catalog.view",
       "params": {
         "id": "uuid"
       },
@@ -2184,6 +2279,7 @@
       "summary": "All brands with counts, seller authorization and status",
       "desc": "Brands tab (page total = tab count), the Brand filter on the products list, and seller brand requests waiting (status=under_review, requested=true).",
       "auth": "staff",
+      "permission": "catalog.view",
       "paging": true,
       "query": {
         "q": "string?",
@@ -2498,6 +2594,11 @@
       "key": "catalog.products.export",
       "audience": "staff",
       "desc": "Export the filtered product list (authorized, logged)"
+    },
+    {
+      "key": "catalog.view",
+      "audience": "staff",
+      "desc": "View products, the review queue, corrections, categories and brands in the Admin Center (read only)"
     }
   ],
   "jobs": [

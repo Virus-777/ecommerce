@@ -6,6 +6,7 @@ import { defineEndpoints, defineModuleSpec } from '../kernel/spec/define.js';
 import * as common from './common.js';
 import * as identity from './identity.js';
 import * as reports from './reports.js';
+import * as search from './search.js';
 
 /** Catalog: What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers. */
 
@@ -312,6 +313,10 @@ export interface Product {
   updatedAt: string;
   /** When the product was first approved and listed (New listing / Listed on …) */
   listedAt?: string | null;
+  /** Store product detail (GET /api/store/catalog/products/{id}) only: listed within search.newArrivalsWindowDays, the same rule as the New listing badge on search cards; null elsewhere */
+  isNewListing?: boolean | null;
+  /** Store product detail only: best-seller rank in its category from search (search.bestSellerRanks), e.g. #3 in Headphones; null without a rank, when search is off, and elsewhere */
+  bestSellerRank?: search.BestSellerRank | null;
 }
 
 export const Product: z.ZodType<Product> = z.object({
@@ -342,6 +347,10 @@ export const Product: z.ZodType<Product> = z.object({
   },
   updatedAt: z.iso.datetime({ offset: true }),
   listedAt: z.iso.datetime({ offset: true }).describe("When the product was first approved and listed (New listing / Listed on …)").nullish(),
+  isNewListing: z.boolean().describe("Store product detail (GET /api/store/catalog/products/{id}) only: listed within search.newArrivalsWindowDays, the same rule as the New listing badge on search cards; null elsewhere").nullish(),
+  get bestSellerRank() {
+    return search.BestSellerRank.nullish();
+  },
 }).register(common.apiTypes, { id: "catalog.Product" });
 
 export interface ProductAdmin {
@@ -1764,6 +1773,47 @@ export const endpoints = defineEndpoints({
     screens: ["seller/product-new"],
     phase: 1,
   },
+  withdrawSubmission: {
+    area: "seller",
+    method: "POST",
+    path: "/products/{id}/withdraw",
+    auth: "seller",
+    permission: "catalog.products.submit",
+    scope: "own-seller",
+    summary: "Withdraw a submission waiting for review",
+    desc: "Only a product that was never listed (its first submission or a resubmission before approval): it goes back to draft, the open submission is marked withdrawn and leaves the review queue (its workqueues item closes). Products already listed change through correction suggestions.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      reason: z.string().describe("Kept in the review log").nullish(),
+    }),
+    response: () => ProductAdmin,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION"],
+    screens: ["seller/products"],
+    phase: 1,
+  },
+  deleteDraft: {
+    area: "seller",
+    method: "DELETE",
+    path: "/products/{id}",
+    auth: "seller",
+    permission: "catalog.products.submit",
+    scope: "own-seller",
+    summary: "Delete a draft product",
+    desc: "Only drafts and products with changes requested that were never listed and have no open submission (withdraw it first). The product, its variants and review history are removed and its files are released.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["ILLEGAL_TRANSITION"],
+    screens: ["seller/products"],
+    phase: 1,
+  },
   suggestCorrection: {
     area: "seller",
     method: "POST",
@@ -1814,7 +1864,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/review-queue",
     auth: "staff",
-    permission: "catalog.products.review",
+    permission: "catalog.view",
     scope: "staff",
     summary: "Submissions waiting for review, oldest first",
     query: () =>
@@ -1833,6 +1883,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products",
     auth: "staff",
+    permission: "catalog.view",
     scope: "staff",
     summary: "All products with filters",
     desc: "Rows carry ref, contentScore, missing, duplicateSuspected and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. Tab counts come from GET /products/stats.",
@@ -1858,6 +1909,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products/stats",
     auth: "staff",
+    permission: "catalog.view",
     scope: "staff",
     summary: "Counts for the catalog product tabs and page header",
     desc: "All, Active, Hidden, Suspended, Missing content, Duplicates suspected, open submissions (Review queue · 23) and total offers.",
@@ -1891,6 +1943,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/products/{id}",
     auth: "staff",
+    permission: "catalog.view",
     scope: "staff",
     summary: "Product with review history and duplicate candidates",
     params: () =>
@@ -1918,6 +1971,31 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       reason: z.string(),
+      matchedProductId: z.uuid().nullish(),
+    }),
+    response: () => ProductAdmin,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    audited: true,
+    screens: ["admin/product-review"],
+    phase: 1,
+  },
+  restoreCheck: {
+    area: "admin",
+    method: "POST",
+    path: "/products/{id}/checks/{kind}/restore",
+    auth: "staff",
+    permission: "catalog.products.review",
+    scope: "staff",
+    summary: "Undo a dismissed check finding",
+    desc: "Opens the finding again on the latest submission. For duplicate checks, matchedProductId restores one dismissed candidate; omit it to restore all. Recorded in the review log; a duplicate finding puts the product back in Duplicates suspected.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+        kind: z.enum(["duplicate", "image_standard", "category_fit", "prohibited_claim", "brand_authorization", "restricted_item", "identifier"]),
+      }),
+    body: () => z.object({
+      reason: z.string().nullish(),
       matchedProductId: z.uuid().nullish(),
     }),
     response: () => ProductAdmin,
@@ -2084,7 +2162,7 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       publication: z.enum(["active", "hidden", "suspended"]),
-      reason: z.string(),
+      reason: z.string().describe("Optional (owner decision G68); without one the change is recorded and audited with a default text, e.g. Hidden from the store by staff").nullish(),
       trustReportId: z.uuid().nullish(),
     }),
     response: () => ProductAdmin,
@@ -2205,7 +2283,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/corrections",
     auth: "staff",
-    permission: "catalog.products.review",
+    permission: "catalog.view",
     scope: "staff",
     summary: "Open correction suggestions",
     query: () =>
@@ -2246,6 +2324,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/categories",
     auth: "staff",
+    permission: "catalog.view",
     scope: "staff",
     summary: "Full category tree including hidden, with product and offer counts",
     desc: "productCount (active products with at least one eligible offer) and offerCount include subcategories; refreshed every 10 minutes.",
@@ -2309,6 +2388,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/categories/{id}/attributes",
     auth: "staff",
+    permission: "catalog.view",
     scope: "staff",
     summary: "Category attributes with fill rates, inheritance and image standards",
     desc: "Attributes defined on an ancestor are listed with inheritedFrom and are edited there. filledCount / productCount shows how many products have a value; for required attributes the difference is the \"N products are missing Warranty\" alert (those products appear under Missing content).",
@@ -2361,6 +2441,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/brands",
     auth: "staff",
+    permission: "catalog.view",
     scope: "staff",
     summary: "All brands with counts, seller authorization and status",
     desc: "Brands tab (page total = tab count), the Brand filter on the products list, and seller brand requests waiting (status=under_review, requested=true).",
@@ -2466,7 +2547,7 @@ export const spec = defineModuleSpec({
   chapters: [5,8],
   summary: "What a product is: categories, attributes, brands, products, variants, and the review workflow that decides whether a product may be sold. How a seller sells it (price, stock, condition) belongs to offers.",
   dependsOn: ["media"],
-  optionalDeps: ["search","sellers","access","audit","offers","cart","reviews","inventory","reports","orders","returns","support","settings"],
+  optionalDeps: ["search","sellers","access","audit","offers","cart","reviews","inventory","reports","orders","returns","support","settings","workqueues"],
   publicApi: ["getProduct","isPurchasable","snapshotForOrder","getProducts","searchProducts","listProductIds","getBrands","getVariants","getParcels","getCategoryPaths","listCategories","getCategoryBySlug","getBrandBySlug","getProductForSeller","getProductAdmin","listReviewQueue","countProductsForSellers","exportRows"],
   permissions: [
     {
@@ -2503,6 +2584,11 @@ export const spec = defineModuleSpec({
       "key": "catalog.products.export",
       "audience": "staff",
       "desc": "Export the filtered product list (authorized, logged)"
+    },
+    {
+      "key": "catalog.view",
+      "audience": "staff",
+      "desc": "View products, the review queue, corrections, categories and brands in the Admin Center (read only)"
     }
   ],
   approvalActions: [
@@ -2548,6 +2634,11 @@ export const spec = defineModuleSpec({
           "approved",
           "reopen",
           "submitted"
+        ],
+        [
+          "submitted",
+          "withdraw",
+          "draft"
         ]
       ]
     },
