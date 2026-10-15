@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { devClaims } from '../../../kernel/auth/dev.js';
+import { token } from '../../../testing/app.js';
 import { ADMIN, approvedSeller, boot, member, owner, payoutInput, SELLER, staff, STORE, type Kit } from './helpers.js';
 
 let kit: Kit;
@@ -301,6 +303,20 @@ describe('admin views', () => {
     expect(q.body.items.map((r: any) => r.id)).toEqual([s.sellerId]);
     const stats = await kit.call('GET', `${ADMIN}/sellers/stats`, staff());
     expect(stats.body.byStatus.approved).toBeGreaterThan(0);
+    expect(stats.body.balances).toBeNull(); // finance is off in this app
+    // with finance: its seller balance totals
+    const core = kit.svc.core;
+    const original = core.optional.bind(core);
+    const totals = { total: { amount: 482_100, currency: 'USD' }, held: { amount: 23_000, currency: 'USD' }, negativeCount: 2 };
+    core.optional = (async (module: string, section: string, unavailable: string[] | null, fn: (api: never) => Promise<unknown>) =>
+      module === 'finance' && section === 'balances' ? fn({ sellerBalanceTotals: async () => totals } as never) : original(module as never, section, unavailable, fn as never)) as typeof core.optional;
+    try {
+      expect((await kit.call('GET', `${ADMIN}/sellers/stats`, staff())).body.balances).toEqual(totals);
+      const noFinance = token({ ...devClaims('staff', { permissions: ['sellers.accounts.view'] }), sub: newId() }, 3600);
+      expect((await kit.call('GET', `${ADMIN}/sellers/stats`, noFinance)).body.balances).toBeNull();
+    } finally {
+      core.optional = original;
+    }
     const detail = await kit.call('GET', `${ADMIN}/sellers/${s.sellerId}`, staff());
     expect(detail.status).toBe(200);
     expect(detail.body).toMatchObject({ account: { id: s.sellerId, accountManager: { name: 'Sam Staff' } }, notes: [{ body: 'Prefers email' }], owner: { name: 'Ana Lopez' } });

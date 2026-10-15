@@ -438,7 +438,7 @@
     },
     "SellerStats": {
       "sellingNow": "int", "addedThisMonth": "int", "belowDispatchTarget": "int", "restrictedOrSuspended": "int", "appealsUnderReview": "int",
-      "balances": { "type": "json?", "desc": "{ total, held, negativeCount } from finance" },
+      "balances": { "type": "json?", "desc": "{ total, held, negativeCount } from finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off" },
       "byStatus": "map<int>", "applicationsWaiting": "int"
     },
     "SellerAdminDetail": {

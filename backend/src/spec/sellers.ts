@@ -1759,7 +1759,7 @@ export interface SellerStats {
   belowDispatchTarget: number;
   restrictedOrSuspended: number;
   appealsUnderReview: number;
-  /** { total, held, negativeCount } from finance */
+  /** { total, held, negativeCount } from finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off */
   balances?: unknown | null;
   byStatus: Record<string, number>;
   applicationsWaiting: number;
@@ -1771,7 +1771,7 @@ export const SellerStats: z.ZodType<SellerStats> = z.object({
   belowDispatchTarget: z.number().int(),
   restrictedOrSuspended: z.number().int(),
   appealsUnderReview: z.number().int(),
-  balances: z.unknown().describe("{ total, held, negativeCount } from finance").nullish(),
+  balances: z.unknown().describe("{ total, held, negativeCount } from finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off").nullish(),
   byStatus: z.record(z.string(), z.number().int()),
   applicationsWaiting: z.number().int(),
 }).register(common.apiTypes, { id: "sellers.SellerStats" });

@@ -2067,6 +2067,8 @@ export const FinanceReconciliationItemClosedEvent: z.ZodType<FinanceReconciliati
 export interface FinancePublicApi {
   /** Effect of a refund on seller earnings and fees, shown before deciding Used by: returns, support, orders. */
   previewRefundImpact(orderItemIds: string[], refund: common.Money, fundedBy: string): Promise<{ sellerEarningsChange: common.Money, feeReturned: common.Money, afterPayout: boolean, note: string }>;
+  /** All seller balances together for the sellers header (SellerStats.balances): total = pending + available + held across sellers, the held part, and how many sellers have a negative available balance Used by: sellers. */
+  sellerBalanceTotals(): Promise<{ total: common.Money, held: common.Money, negativeCount: number }>;
   /** What a sent refund changed on the seller ledger: the refund (or refund_after_payout) and fee_refund entries posted for it on these order items. Null until payments.refund.sent is booked (then a preview is all there is) Used by: returns. */
   bookedRefundImpact(paymentRefundId: string, orderItemIds: string[]): Promise<{ sellerEarningsChange: common.Money, feeReturned: common.Money, afterPayout: boolean, note: string } | null>;
   /** Fee and seller earnings for a price under the active fee rules Used by: offers, promotions, sellers. */
@@ -3670,7 +3672,7 @@ export const spec = defineModuleSpec({
   summary: "Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.",
   dependsOn: ["orders","payments","sellers","access"],
   optionalDeps: ["returns","advertising","promotions","purchasing","inventory","shipping","support","wallet","workqueues","notifications","audit","identity","media","reports","settings","offers"],
-  publicApi: ["previewRefundImpact","bookedRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
+  publicApi: ["previewRefundImpact","sellerBalanceTotals","bookedRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
   permissions: [
     {
       "key": "finance.ledger.view",

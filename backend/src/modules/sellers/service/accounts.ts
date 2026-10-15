@@ -799,8 +799,10 @@ export class AccountsPart extends Part {
     return pageOf(rows, page);
   }
 
-  async getSellerStats(): Promise<SellerStats> {
+  async getSellerStats(viewer: { canSeeBalances: boolean }): Promise<SellerStats> {
     const byStatus = await this.repo.countSellersByStatus();
+    // finance's figures, for staff who may see seller balances (like the list's balance columns)
+    const balances = viewer.canSeeBalances ? ((await this.core.optional('finance', 'balances', null, (f) => f.sellerBalanceTotals())) ?? null) : null;
     const now = this.now();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     return {
@@ -809,7 +811,7 @@ export class AccountsPart extends Part {
       belowDispatchTarget: await this.repo.countBelowDispatch(),
       restrictedOrSuspended: (byStatus.restricted ?? 0) + (byStatus.suspended ?? 0),
       appealsUnderReview: await this.repo.count('appeals', { state: ['submitted', 'under_review'] }),
-      balances: null,
+      balances,
       byStatus,
       applicationsWaiting: await this.repo.count('applications', { state: ['submitted', 'under_review', 'information_required'] }),
     };

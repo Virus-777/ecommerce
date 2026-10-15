@@ -169,6 +169,12 @@ describe('a refund after payout (scenario 6)', () => {
     expect(k.of('finance.balance.negative')).toEqual([expect.objectContaining({ sellerId: S, available: USD(-4779) })]);
     const bal = await k.call('GET', `${SELLER}/balances`, sellerTokenOf());
     expect(bal.body).toMatchObject({ negative: true, available: USD(-4779) });
+    // the sellers header totals count this seller's negative balance and include its balance
+    const totals = await k.svc.sellerBalanceTotals();
+    expect(totals.negativeCount).toBeGreaterThanOrEqual(1);
+    const all = await k.svc.core.repo.find('seller_accounts', {});
+    expect(totals.total).toEqual(USD(all.reduce((s, a) => s + a.pending + a.available + a.held, 0)));
+    expect(totals.held).toEqual(USD(all.reduce((s, a) => s + a.held, 0)));
   });
 
   it('turns a negative balance not covered in time into an amount owed, offset by new earnings first', async () => {

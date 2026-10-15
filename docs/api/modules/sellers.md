@@ -994,7 +994,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | belowDispatchTarget | `int` |
 | restrictedOrSuspended | `int` |
 | appealsUnderReview | `int` |
-| balances | `json?` { total, held, negativeCount } from finance |
+| balances | `json?` { total, held, negativeCount } from finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off |
 | byStatus | `map<int>` |
 | applicationsWaiting | `int` |
 
