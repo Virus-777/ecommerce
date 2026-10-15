@@ -189,6 +189,15 @@ export class Core {
     return out;
   }
 
+  /**
+   * Open delivery exception ids per order from shipping (G73), oldest due first. Undefined when shipping is off or
+   * did not answer: the views then fall back to orders' own exception facts.
+   */
+  async openExceptionIds(orderIds: readonly string[]): Promise<Record<string, string[]> | undefined> {
+    if (!orderIds.length) return {};
+    return this.soft('shipping', 'open exceptions', (s) => s.openExceptionIdsForOrders([...new Set(orderIds)]));
+  }
+
   /* ---------------------------------------------------------------- loading */
 
   async loadMany(orderIds: readonly string[], repo: OrdersRepository = this.repo): Promise<Map<string, Agg>> {

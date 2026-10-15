@@ -1333,7 +1333,7 @@ export interface AdminOrderRow {
   /** Who handles the overdue group (warehouse, seller or a named manager) */
   owner?: string | null;
   flags: OrderFlag[];
-  /** Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest first: the Admin Center reminds the seller through shipping's exception actions with these ids */
+  /** Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest due first, from shipping.openExceptionIdsForOrders (orders' own exception facts when shipping does not answer): the Admin Center reminds the seller with POST /api/admin/shipping/exceptions/{id}/notify-seller */
   openExceptionIds: string[];
 }
 
@@ -1359,7 +1359,7 @@ export const AdminOrderRow: z.ZodType<AdminOrderRow> = z.object({
   get flags() {
     return z.array(OrderFlag);
   },
-  openExceptionIds: z.array(z.uuid()).describe("Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest first: the Admin Center reminds the seller through shipping's exception actions with these ids"),
+  openExceptionIds: z.array(z.uuid()).describe("Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest due first, from shipping.openExceptionIdsForOrders (orders' own exception facts when shipping does not answer): the Admin Center reminds the seller with POST /api/admin/shipping/exceptions/{id}/notify-seller"),
 }).register(common.apiTypes, { id: "orders.AdminOrderRow" });
 
 export interface GroupMoney {
@@ -2799,7 +2799,7 @@ export const endpoints = defineEndpoints({
     permission: "orders.fulfillment.cancel",
     scope: "own-seller",
     summary: "Accept the buyer's cancellation and refund",
-    desc: "Does not count against the seller's cancellation rate.",
+    desc: "Does not count against the seller's cancellation rate. Refused while an item of the request is on a bought label the carrier has not scanned (CANCELLATION_NOT_ALLOWED: void the label, or decline because it ships).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2807,7 +2807,7 @@ export const endpoints = defineEndpoints({
       }),
     response: () => CancellationRequest,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY"],
+    errors: ["ILLEGAL_TRANSITION","FULFILLED_BY_MARKETLY","CANCELLATION_NOT_ALLOWED"],
     idempotent: true,
     events: ["orders.cancellation.decided","orders.item.cancelled"],
     screens: ["seller/orders","seller/order"],
@@ -3015,7 +3015,7 @@ export const endpoints = defineEndpoints({
     permission: "orders.orders.cancel",
     scope: "staff",
     summary: "Cancel unshipped items as staff, with a reason",
-    desc: "For sellers that cannot fulfill, long-overdue dispatch, risk or address problems. The response shows the effect on open shipments, cases and the refund. Shipped items cannot be cancelled; use returns or a case.",
+    desc: "For sellers that cannot fulfill, long-overdue dispatch, risk or address problems. The response shows the effect on open shipments, cases and the refund. Shipped items cannot be cancelled; use returns or a case. Items on a bought label the carrier has not scanned are refused (CANCELLATION_NOT_ALLOWED: void the label first; allowedActions leaves out cancel_items while every cancellable item is on one).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3050,6 +3050,7 @@ export const endpoints = defineEndpoints({
     permission: "orders.cancellations.decide",
     scope: "staff",
     summary: "Decide a customer's cancellation request for the seller (or override a decline)",
+    desc: "Accepting is refused while an item of the request is on a bought label the carrier has not scanned (CANCELLATION_NOT_ALLOWED: void the label first).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3061,7 +3062,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => CancellationRequest,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","CANCELLATION_NOT_ALLOWED"],
     idempotent: true,
     audited: true,
     events: ["orders.cancellation.decided","orders.item.cancelled"],
@@ -3218,7 +3219,7 @@ export const spec = defineModuleSpec({
   chapters: [7,8,11,12],
   summary: "The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents.",
   dependsOn: ["catalog","offers"],
-  optionalDeps: ["identity","finance","support","returns","promotions","messaging","content","audit","customers","fulfillment-service","inventory","media","notifications","payments","reports","sellers","settings","trust","warehouse","workqueues"],
+  optionalDeps: ["identity","finance","support","returns","promotions","messaging","content","audit","customers","fulfillment-service","inventory","media","notifications","payments","reports","sellers","settings","shipping","trust","warehouse","workqueues"],
   publicApi: ["createOrder","acceptOrder","cancelForDeclinedPayment","getOrder","getFulfillmentTask","canShipItems","setDispatchDeadline","getPaidAmounts","findGuestOrder","listGuestOrdersByEmail","countInProgress","listRecentForCustomer","listDelayedItemsForCustomer","countPurchased","hasPlacedOrder","isVerifiedPurchase","getOrderForViewer","listOrdersForCustomer","countOrdersByTab","getOrderForSeller","listOrdersForSeller","countSellerOrders","getOrderAdmin","listOrdersAdmin","getOrdersByIds","countOrdersForSellers","exportRows","countOrderItemsForProducts","getOrderItem","listDeliveredItems","countOpenOrdersInCategory","exportCustomerData"],
   permissions: [
     {

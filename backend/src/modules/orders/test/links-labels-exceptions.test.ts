@@ -132,4 +132,22 @@ describe('open delivery exceptions on admin rows (G73)', () => {
     expect(after.openExceptionIds).toEqual([]);
     expect(after.flags.map((f: any) => f.kind)).not.toContain('delivery_issue');
   });
+
+  it('takes the ids from shipping.openExceptionIdsForOrders when shipping answers', async () => {
+    const fromShipping = new Map<string, string[]>();
+    const h2 = await harness({ shippingExceptions: fromShipping });
+    try {
+      const sellerId = newId();
+      const p = product(h2, { title: 'Kettle', price: 3000, sellerId });
+      const o = await h2.service.createOrder(checkout([group(h2, [line(p, 1)], { sellerId })], { customerId: newId() }));
+      const ids = [newId(), newId()];
+      fromShipping.set(o.id, ids);
+      const staff = tokens.staff(['orders.orders.view']);
+      expect((await h2.call('GET', `/api/admin/orders/orders?q=${o.ref}`, staff)).body.items[0].openExceptionIds).toEqual(ids);
+      const gql = await h2.app.inject({ method: 'POST', url: '/graphql/admin', headers: auth(staff), payload: { query: `{ orderAdmin(ref: "${o.ref}") { openExceptionIds } }` } });
+      expect(gql.json().data.orderAdmin.openExceptionIds).toEqual(ids);
+    } finally {
+      await h2.app.close();
+    }
+  });
 });

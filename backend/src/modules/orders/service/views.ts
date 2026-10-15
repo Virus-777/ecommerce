@@ -781,9 +781,12 @@ export class Views {
     return Math.min(units, i.quantity);
   }
 
-  /** Open shipping delivery exceptions of the order, oldest first (G73: the Admin Center reminds the seller with them) */
-  openExceptionIds(agg: Agg): string[] {
-    return (agg.facts.deliveryIssues ?? []).map((d) => d.exceptionId);
+  /**
+   * Open shipping delivery exceptions of the order (G73: the Admin Center reminds the seller with them): shipping's
+   * answer (core.openExceptionIds) when given, else orders' own exception facts (resolved ones left out)
+   */
+  openExceptionIds(agg: Agg, fromShipping?: Record<string, string[]>): string[] {
+    return fromShipping?.[agg.order.id] ?? (agg.facts.deliveryIssues ?? []).map((d) => d.exceptionId);
   }
 
   sellerActions(agg: Agg, g: GroupRec): SellerOrderDetail['allowedActions'] {
@@ -1031,7 +1034,8 @@ export class Views {
     return { id: n.id, text: n.text, author: { kind: 'staff', id: n.author_id, name: n.author_name }, at: isoReq(n.at) };
   }
 
-  adminRow(agg: Agg): AdminOrderRow {
+  /** exceptions: shipping's open exception ids per order (core.openExceptionIds); without it orders' own facts */
+  adminRow(agg: Agg, exceptions?: Record<string, string[]>): AdminOrderRow {
     const now = this.core.now().getTime();
     const overdue = agg.groups.filter((g) => this.groupOpen(agg, g) && g.dispatch_by.getTime() < now).sort((a, b) => a.dispatch_by.getTime() - b.dispatch_by.getTime())[0];
     const status = this.status(agg);
@@ -1053,7 +1057,7 @@ export class Views {
       lateBy: overdue ? `Overdue ${human(now - overdue.dispatch_by.getTime())}` : null,
       owner: overdue ? (overdue.owner_type === 'official' ? 'Official Store warehouse' : isMarketlyService(overdue) ? `Marketly warehouse (Fulfilled by Marketly for ${overdue.seller_name})` : overdue.seller_name) : null,
       flags: this.flags(agg),
-      openExceptionIds: this.openExceptionIds(agg),
+      openExceptionIds: this.openExceptionIds(agg, exceptions),
     };
   }
 

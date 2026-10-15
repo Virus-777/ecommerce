@@ -5,7 +5,7 @@
 The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents.
 
 - **Group:** Buying · **Launch phase:** 1 · **Plan chapters:** 7, 8, 11, 12
-- **Depends on:** [catalog](../catalog/README.md), [offers](../offers/README.md) · **Optional:** [identity](../identity/README.md), [finance](../finance/README.md), [support](../support/README.md), [returns](../returns/README.md), [promotions](../promotions/README.md), [messaging](../messaging/README.md), [content](../content/README.md), [audit](../audit/README.md), [customers](../customers/README.md), [fulfillment-service](../fulfillment-service/README.md), [inventory](../inventory/README.md), [media](../media/README.md), [notifications](../notifications/README.md), [payments](../payments/README.md), [reports](../reports/README.md), [sellers](../sellers/README.md), [settings](../settings/README.md), [trust](../trust/README.md), [warehouse](../warehouse/README.md), [workqueues](../workqueues/README.md)
+- **Depends on:** [catalog](../catalog/README.md), [offers](../offers/README.md) · **Optional:** [identity](../identity/README.md), [finance](../finance/README.md), [support](../support/README.md), [returns](../returns/README.md), [promotions](../promotions/README.md), [messaging](../messaging/README.md), [content](../content/README.md), [audit](../audit/README.md), [customers](../customers/README.md), [fulfillment-service](../fulfillment-service/README.md), [inventory](../inventory/README.md), [media](../media/README.md), [notifications](../notifications/README.md), [payments](../payments/README.md), [reports](../reports/README.md), [sellers](../sellers/README.md), [settings](../settings/README.md), [shipping](../shipping/README.md), [trust](../trust/README.md), [warehouse](../warehouse/README.md), [workqueues](../workqueues/README.md)
 - **Required by:** [checkout](../checkout/README.md), [finance](../finance/README.md), [messaging](../messaging/README.md), [payments](../payments/README.md), [returns](../returns/README.md), [reviews](../reviews/README.md), [shipping](../shipping/README.md), [support](../support/README.md), [warehouse](../warehouse/README.md)
 
 ## Owns
@@ -707,7 +707,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | lateBy | `string?` 'Overdue 16 d' |
 | owner | `string?` Who handles the overdue group (warehouse, seller or a named manager) |
 | flags | `OrderFlag[]` |
-| openExceptionIds | `uuid[]` Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest first: the Admin Center reminds the seller through shipping's exception actions with these ids |
+| openExceptionIds | `uuid[]` Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest due first, from shipping.openExceptionIdsForOrders (orders' own exception facts when shipping does not answer): the Admin Center reminds the seller with POST /api/admin/shipping/exceptions/{id}/notify-seller |
 
 ### GroupMoney
 

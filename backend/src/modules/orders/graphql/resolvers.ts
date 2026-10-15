@@ -270,6 +270,15 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
     return order(v.order, { seller: groups, cancellations: cancellationsOf(agg, ids), buyerName: v.groups[0]?.buyerName });
   }
 
+  /** shipping's open exception ids for one order, batched per request (undefined: fall back to orders' facts) */
+  const openExceptions = async (ctx: GraphQLContext, orderId: string): Promise<Record<string, string[]> | undefined> => {
+    const ids = await load(ctx, 'openExceptions', orderId, async (orderIds) => {
+      const answer = await core.openExceptionIds(orderIds);
+      return new Map(orderIds.map((id) => [id, answer ? (answer[id] ?? []) : null]));
+    });
+    return ids ? { [orderId]: ids } : undefined;
+  };
+
   async function adminOrder(agg: Agg, ctx: GraphQLContext) {
     const cfg = await core.cfg();
     const a = await reads.adminDetail(agg, await canContact(ctx), cfg);
@@ -280,7 +289,7 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
       const row = views.sellerRow(agg, g, cfg);
       return { ...d, deadlineLabel: row.deadlineLabel, itemsSummary: row.itemsSummary, nextAction: row.nextAction };
     });
-    return order(a.order, { summary: views.summary(agg), admin: a, seller: groups, cancellations: cancellationsOf(agg), openExceptionIds: views.openExceptionIds(agg) });
+    return order(a.order, { summary: views.summary(agg), admin: a, seller: groups, cancellations: cancellationsOf(agg), openExceptionIds: views.openExceptionIds(agg, await openExceptions(ctx, agg.order.id)) });
   }
 
   const byRef = async (ref: string) => {

@@ -3,7 +3,7 @@
 The accepted purchase: one order per checkout, one seller group per seller package, and items with their own state (Confirmed, Preparing, Delayed, Shipped, Delivered, cancellation, return, refund). Keeps frozen purchase snapshots, derives the overall status from the items, tracks payment, delivery and returns progress separately, and runs item-level cancellations, seller fulfillment tasks with dispatch deadlines, timelines and purchase documents.
 
 - **Group:** Buying · **Launch phase:** 1 · **Plan chapters:** 7, 8, 11, 12
-- **Depends on:** [catalog](catalog.md), [offers](offers.md) · **Optional:** [identity](identity.md), [finance](finance.md), [support](support.md), [returns](returns.md), [promotions](promotions.md), [messaging](messaging.md), [content](content.md), [audit](audit.md), [customers](customers.md), [fulfillment-service](fulfillment-service.md), [inventory](inventory.md), [media](media.md), [notifications](notifications.md), [payments](payments.md), [reports](reports.md), [sellers](sellers.md), [settings](settings.md), [trust](trust.md), [warehouse](warehouse.md), [workqueues](workqueues.md)
+- **Depends on:** [catalog](catalog.md), [offers](offers.md) · **Optional:** [identity](identity.md), [finance](finance.md), [support](support.md), [returns](returns.md), [promotions](promotions.md), [messaging](messaging.md), [content](content.md), [audit](audit.md), [customers](customers.md), [fulfillment-service](fulfillment-service.md), [inventory](inventory.md), [media](media.md), [notifications](notifications.md), [payments](payments.md), [reports](reports.md), [sellers](sellers.md), [settings](settings.md), [shipping](shipping.md), [trust](trust.md), [warehouse](warehouse.md), [workqueues](workqueues.md)
 - **Required by:** [checkout](checkout.md), [finance](finance.md), [messaging](messaging.md), [payments](payments.md), [returns](returns.md), [reviews](reviews.md), [shipping](shipping.md), [support](support.md), [warehouse](warehouse.md)
 
 ## Owns
@@ -705,7 +705,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | lateBy | `string?` 'Overdue 16 d' |
 | owner | `string?` Who handles the overdue group (warehouse, seller or a named manager) |
 | flags | `OrderFlag[]` |
-| openExceptionIds | `uuid[]` Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest first: the Admin Center reminds the seller through shipping's exception actions with these ids |
+| openExceptionIds | `uuid[]` Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest due first, from shipping.openExceptionIdsForOrders (orders' own exception facts when shipping does not answer): the Admin Center reminds the seller with POST /api/admin/shipping/exceptions/{id}/notify-seller |
 
 ### GroupMoney
 

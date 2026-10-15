@@ -54,7 +54,7 @@ export const CATEGORY = { root: newId(), child: newId() };
  * fulfillmentService: orders sees fulfillment-service as on (an apiStubs entry answers its optional lookup without
  * booting it), with isServiceOffer answered from h.serviceOffers.
  */
-export async function harness(o: { fulfillmentService?: boolean } = {}): Promise<Harness> {
+export async function harness(o: { fulfillmentService?: boolean; shippingExceptions?: Map<string, string[]> } = {}): Promise<Harness> {
   const clock = movingClock();
   const h = {
     clock,
@@ -88,6 +88,8 @@ export async function harness(o: { fulfillmentService?: boolean } = {}): Promise
     config: { rateLimits: false, launchPhase: 4 },
     apiStubs: {
       ...(o.fulfillmentService ? { 'fulfillment-service': { isServiceOffer: async (offerId: string) => h.serviceOffers.has(offerId) } } : {}),
+      // shippingExceptions: shipping answers openExceptionIdsForOrders from this map (otherwise shipping is off)
+      ...(o.shippingExceptions ? { shipping: { openExceptionIdsForOrders: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, o.shippingExceptions!.get(id) ?? []])) } } : {}),
       offers: {
         snapshotForOrder: async (offerId) => {
           const o = h.offers.get(offerId);

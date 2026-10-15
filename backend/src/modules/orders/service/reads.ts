@@ -296,7 +296,8 @@ export class Reads {
   async adminRows(q: AdminListQuery, page: PageRequest, staffId: string | null): Promise<common.Page<AdminOrderRow>> {
     const rows = await this.core.repo.adminOrders(await this.adminFilter(q, staffId), page, this.core.now());
     const aggs = await this.core.loadMany(rows.items.map((r) => r.id));
-    return { ...rows, items: rows.items.map((r) => this.views.adminRow(aggs.get(r.id)!)) };
+    const exceptions = await this.core.openExceptionIds(rows.items.map((r) => r.id));
+    return { ...rows, items: rows.items.map((r) => this.views.adminRow(aggs.get(r.id)!, exceptions)) };
   }
 
   async adminDetail(agg: Agg, canViewContact: boolean, cfg?: Cfg): Promise<AdminOrderDetail> {
