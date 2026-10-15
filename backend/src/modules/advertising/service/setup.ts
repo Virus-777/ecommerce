@@ -56,10 +56,10 @@ export class SetupPart extends Part {
       ...(patch.enabled !== undefined && patch.enabled !== null ? { enabled: patch.enabled } : {}),
       ...(patch.eligiblePages ? { eligible_pages: [...new Set(patch.eligiblePages)] as never } : {}),
       ...(patch.formats ? { formats: patch.formats as never } : {}),
-      ...(patch.frequencyCap !== undefined ? { frequency_cap: (patch.frequencyCap ? { ...patch.frequencyCap, label: patch.frequencyCap.label?.trim() || frequencyLabel(patch.frequencyCap) } : null) as never } : {}),
+      ...(patch.frequencyCap !== undefined ? { frequency_cap: (patch.frequencyCap ? { ...patch.frequencyCap, label: frequencyLabel(patch.frequencyCap) } : null) as never } : {}),
       ...(patch.trigger !== undefined ? { trigger: (patch.trigger ?? null) as never } : {}),
-      ...(patch.rotation ? { rotation: { ...patch.rotation, label: patch.rotation.label?.trim() || rotationLabel(patch.rotation) } as never } : {}),
-      ...(patch.dismissal ? { dismissal: { ...patch.dismissal, label: patch.dismissal.label?.trim() || dismissalLabel(patch.dismissal) } as never } : {}),
+      ...(patch.rotation ? { rotation: { ...patch.rotation, label: rotationLabel(patch.rotation) } as never } : {}),
+      ...(patch.dismissal ? { dismissal: { ...patch.dismissal, label: dismissalLabel(patch.dismissal) } as never } : {}),
       ...(patch.maxPerPage !== undefined ? { max_per_page: patch.maxPerPage ?? null } : {}),
       ...(patch.positions !== undefined ? { positions: (patch.positions ?? null) as never } : {}),
     };

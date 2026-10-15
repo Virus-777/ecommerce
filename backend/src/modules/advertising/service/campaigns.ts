@@ -248,12 +248,19 @@ export class CampaignsPart extends Part {
     else if (input.name.trim().length > 120) issues.push({ path: 'name', message: '120 characters at most' });
 
     // frequency and dismissal
-    const capIn = input.frequencyCap ?? ((placement.frequency_cap ?? null) as FrequencyCap | null);
-    const cap: FrequencyCap = capIn ? { ...capIn, label: capIn.label?.trim() || frequencyLabel(capIn) } : { label: 'No cap' };
+    // labels are written here: the input has none, the placement's own rules keep theirs
+    const placementCap = (placement.frequency_cap ?? null) as FrequencyCap | null;
+    const cap: FrequencyCap = input.frequencyCap
+      ? { ...input.frequencyCap, label: frequencyLabel(input.frequencyCap) }
+      : placementCap
+        ? { ...placementCap, label: placementCap.label?.trim() || frequencyLabel(placementCap) }
+        : { label: 'No cap' };
     for (const [k, v] of [['perSession', cap.perSession], ['perDay', cap.perDay], ['perCampaign', cap.perCampaign]] as const) if (v !== undefined && v !== null && (!Number.isInteger(v) || v < 1)) issues.push({ path: `frequencyCap.${k}`, message: 'Whole number, 1 or more' });
     if (cap.perWindow && (!Number.isInteger(cap.perWindow.count) || cap.perWindow.count < 1 || !Number.isInteger(cap.perWindow.days) || cap.perWindow.days < 1 || cap.perWindow.days > 30)) issues.push({ path: 'frequencyCap.perWindow', message: 'A count of 1 or more within 1 to 30 days' });
-    const dIn = input.dismissal ?? (placement.dismissal as unknown as DismissalRule);
-    const dismissal: DismissalRule = { ...dIn, label: dIn.label?.trim() || dismissalLabel(dIn) };
+    const placementDismissal = placement.dismissal as unknown as DismissalRule;
+    const dismissal: DismissalRule = input.dismissal
+      ? { ...input.dismissal, label: dismissalLabel(input.dismissal) }
+      : { ...placementDismissal, label: placementDismissal.label?.trim() || dismissalLabel(placementDismissal) };
     if (dismissal.mode === 'days' && (!Number.isInteger(dismissal.days) || (dismissal.days ?? 0) < 1)) issues.push({ path: 'dismissal.days', message: 'How many days a dismissal hides the campaign' });
     if (OVERLAY_KEYS.includes(placement.key) && dismissal.mode === 'not_dismissible') issues.push({ path: 'dismissal.mode', message: 'Overlays always have a visible close control' });
 

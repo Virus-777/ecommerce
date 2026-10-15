@@ -110,6 +110,15 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | perCampaign | `int?` |
 | label | `string` e.g. Once per session · max 3 per visitor per 7 days |
 
+### FrequencyCapInput
+
+| Field | Type |
+|---|---|
+| perSession | `int?` |
+| perDay | `int?` |
+| perWindow | `FrequencyWindow?` |
+| perCampaign | `int?` |
+
 ### FrequencyWindow
 
 | Field | Type |
@@ -125,6 +134,13 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | days | `int?` |
 | label | `string` e.g. Closing hides that campaign for 7 days |
 
+### DismissalRuleInput
+
+| Field | Type |
+|---|---|
+| mode | `enum(not_dismissible|session|days|campaign)` |
+| days | `int?` |
+
 ### RotationRule
 
 | Field | Type |
@@ -134,6 +150,15 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | maxInRotation | `int?` |
 | pauseOnHoverAndFocus | `bool` |
 | label | `string` |
+
+### RotationRuleInput
+
+| Field | Type |
+|---|---|
+| mode | `enum(priority_then_even|relevance_then_priority|category_match_then_priority|carousel)` |
+| carouselSeconds | `int?` |
+| maxInRotation | `int?` |
+| pauseOnHoverAndFocus | `bool` |
 
 ### PopupTrigger
 
@@ -176,10 +201,10 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | enabled | `bool?` |
 | eligiblePages | `string[]?` |
 | formats | `CreativeFormat[]?` |
-| frequencyCap | `FrequencyCap?` |
+| frequencyCap | `FrequencyCapInput?` The label is written by the server |
 | trigger | `PopupTrigger?` |
-| rotation | `RotationRule?` |
-| dismissal | `DismissalRule?` |
+| rotation | `RotationRuleInput?` The label is written by the server |
+| dismissal | `DismissalRuleInput?` The label is written by the server |
 | maxPerPage | `int?` |
 | positions | `int[]?` |
 | reason | `text` |
@@ -256,6 +281,16 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | spent | `Money` |
 | remaining | `Money?` |
 
+### AdBudgetInput
+
+| Field | Type |
+|---|---|
+| billing | `enum(none|cpc|cpm|fixed_daily)` |
+| rate | `Money?` |
+| dailyLimit | `Money?` Spending limit per market day (see AdBudget.dailyLimit) |
+| totalLimit | `Money?` |
+| deliveryCap | `int?` Maximum displays (own promotions have no budget charge) |
+
 ### AdvertiserRef
 
 | Field | Type |
@@ -284,11 +319,11 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | startsAt | `datetime` |
 | endsAt | `datetime` |
 | timeZone | `string` |
-| frequencyCap | `FrequencyCap?` Defaults to the placement cap |
-| dismissal | `DismissalRule?` |
+| frequencyCap | `FrequencyCapInput?` Defaults to the placement cap; the label is written by the server |
+| dismissal | `DismissalRuleInput?` Defaults to the placement rule; the label is written by the server |
 | priority | `int` 1 low, 2 normal, 3 high; equal priority rotates evenly |
-| budget | `AdBudget?` |
-| stopWithPromotion | `bool` Stop when the linked promotion ends or its budget runs out |
+| budget | `AdBudgetInput?` Spent and remaining are kept by the server (AdCampaign.budget) |
+| stopWithPromotion | `bool?` Stop when the linked promotion ends or its budget runs out. Default false; true needs linkedPromotionId |
 | creativeIds | `uuid[]` |
 | afterApproval | `enum(schedule|activate)?` What happens when the last approval step lands: schedule for startsAt (default) or go live at once. activate is refused at submit (PROMOTION_NOT_STARTED) when AdCampaign.activateBlockedReason is set. |
 | noteToReviewers | `text?` |

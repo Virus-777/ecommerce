@@ -27,9 +27,9 @@ describe('placements', () => {
     let res = await k.call('PATCH', `${ADMIN}/placements/${popup.id}`, k.staff, { eligiblePages: ['home', 'checkout'], reason: 'x', version: 1 });
     expect(res.status, JSON.stringify(res.body)).toBe(422);
     expect(res.body.error.code).toBe('PAGE_NOT_ELIGIBLE');
-    res = await k.call('PATCH', `${ADMIN}/placements/${popup.id}`, k.staff, { dismissal: { mode: 'not_dismissible', label: '' }, reason: 'x', version: 1 });
+    res = await k.call('PATCH', `${ADMIN}/placements/${popup.id}`, k.staff, { dismissal: { mode: 'not_dismissible' }, reason: 'x', version: 1 });
     expect(res.status).toBe(400);
-    res = await k.call('PATCH', `${ADMIN}/placements/${popup.id}`, k.staff, { frequencyCap: { perSession: 1, perWindow: { count: 2, days: 7 }, label: '' }, reason: 'Fewer pop-ups', version: 1 });
+    res = await k.call('PATCH', `${ADMIN}/placements/${popup.id}`, k.staff, { frequencyCap: { perSession: 1, perWindow: { count: 2, days: 7 } }, reason: 'Fewer pop-ups', version: 1 });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ frequencyCap: { label: 'Once per session · max 2 per visitor per 7 days' }, updatedBy: { kind: 'staff' } });
     expect(k.of('advertising.placement.updated')).toContainEqual({ placementKey: 'popup', enabled: true, version: 2 });
@@ -177,7 +177,7 @@ describe('reactions to other modules', () => {
 describe('jobs', () => {
   it('starts scheduled campaigns, finishes at the delivery cap and reminds before the end', async () => {
     const start = new Date(k.clock.now().getTime() + 3_600_000).toISOString();
-    const c = await liveCampaign(k, { name: 'Starts later', startsAt: start, endsAt: new Date(k.clock.now().getTime() + 2 * 86_400_000).toISOString(), budget: { billing: 'none', deliveryCap: 1, spent: { amount: 0, currency: 'USD' } } });
+    const c = await liveCampaign(k, { name: 'Starts later', startsAt: start, endsAt: new Date(k.clock.now().getTime() + 2 * 86_400_000).toISOString(), budget: { billing: 'none', deliveryCap: 1 } });
     expect(c.status).toBe('scheduled');
     k.clock.advance(2 * 3_600_000);
     await k.job('advertising.start-due');

@@ -30,6 +30,23 @@ describe('campaign drafts', () => {
     expect(k.audits.some((a) => a.action === 'advertising.campaign.create' && a.target.id === res.body.id)).toBe(true);
   });
 
+  it('takes inputs without server values: no budget.spent, stopWithPromotion optional, caps and dismissal without labels (G67)', async () => {
+    const { stopWithPromotion: _omitted, ...input } = campaignInput(k);
+    const res = await k.call('POST', `${ADMIN}/campaigns`, k.staff, {
+      ...input,
+      budget: { billing: 'none', deliveryCap: 500 },
+      frequencyCap: { perSession: 1, perDay: 2 },
+      dismissal: { mode: 'days', days: 3 },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({
+      stopWithPromotion: false,
+      budget: { billing: 'none', deliveryCap: 500, spent: { amount: 0, currency: 'USD' } },
+      frequencyCap: { perSession: 1, perDay: 2, label: 'Once per session · twice a day' },
+      dismissal: { mode: 'days', days: 3, label: 'Closing hides that campaign for 3 days' },
+    });
+  });
+
   it('refuses blocked or ineligible pages (PAGE_NOT_ELIGIBLE) and placements that are off (PLACEMENT_DISABLED)', async () => {
     let res = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { pages: ['home', 'checkout'] }));
     expect(res.status).toBe(422);

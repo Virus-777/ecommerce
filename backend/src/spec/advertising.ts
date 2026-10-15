@@ -47,6 +47,22 @@ export const FrequencyCap: z.ZodType<FrequencyCap> = z.object({
   label: z.string().describe("e.g. Once per session · max 3 per visitor per 7 days"),
 }).register(common.apiTypes, { id: "advertising.FrequencyCap" });
 
+export interface FrequencyCapInput {
+  perSession?: number | null;
+  perDay?: number | null;
+  perWindow?: FrequencyWindow | null;
+  perCampaign?: number | null;
+}
+
+export const FrequencyCapInput: z.ZodType<FrequencyCapInput> = z.object({
+  perSession: z.number().int().nullish(),
+  perDay: z.number().int().nullish(),
+  get perWindow() {
+    return FrequencyWindow.nullish();
+  },
+  perCampaign: z.number().int().nullish(),
+}).register(common.apiTypes, { id: "advertising.FrequencyCapInput" });
+
 export interface FrequencyWindow {
   count: number;
   days: number;
@@ -70,6 +86,16 @@ export const DismissalRule: z.ZodType<DismissalRule> = z.object({
   label: z.string().describe("e.g. Closing hides that campaign for 7 days"),
 }).register(common.apiTypes, { id: "advertising.DismissalRule" });
 
+export interface DismissalRuleInput {
+  mode: "not_dismissible" | "session" | "days" | "campaign";
+  days?: number | null;
+}
+
+export const DismissalRuleInput: z.ZodType<DismissalRuleInput> = z.object({
+  mode: z.enum(["not_dismissible", "session", "days", "campaign"]),
+  days: z.number().int().nullish(),
+}).register(common.apiTypes, { id: "advertising.DismissalRuleInput" });
+
 export interface RotationRule {
   mode: "priority_then_even" | "relevance_then_priority" | "category_match_then_priority" | "carousel";
   carouselSeconds?: number | null;
@@ -85,6 +111,20 @@ export const RotationRule: z.ZodType<RotationRule> = z.object({
   pauseOnHoverAndFocus: z.boolean(),
   label: z.string(),
 }).register(common.apiTypes, { id: "advertising.RotationRule" });
+
+export interface RotationRuleInput {
+  mode: "priority_then_even" | "relevance_then_priority" | "category_match_then_priority" | "carousel";
+  carouselSeconds?: number | null;
+  maxInRotation?: number | null;
+  pauseOnHoverAndFocus: boolean;
+}
+
+export const RotationRuleInput: z.ZodType<RotationRuleInput> = z.object({
+  mode: z.enum(["priority_then_even", "relevance_then_priority", "category_match_then_priority", "carousel"]),
+  carouselSeconds: z.number().int().nullish(),
+  maxInRotation: z.number().int().nullish(),
+  pauseOnHoverAndFocus: z.boolean(),
+}).register(common.apiTypes, { id: "advertising.RotationRuleInput" });
 
 export interface PopupTrigger {
   afterSeconds?: number | null;
@@ -167,10 +207,13 @@ export interface PlacementPatch {
   enabled?: boolean | null;
   eligiblePages?: string[] | null;
   formats?: CreativeFormat[] | null;
-  frequencyCap?: FrequencyCap | null;
+  /** The label is written by the server */
+  frequencyCap?: FrequencyCapInput | null;
   trigger?: PopupTrigger | null;
-  rotation?: RotationRule | null;
-  dismissal?: DismissalRule | null;
+  /** The label is written by the server */
+  rotation?: RotationRuleInput | null;
+  /** The label is written by the server */
+  dismissal?: DismissalRuleInput | null;
   maxPerPage?: number | null;
   positions?: number[] | null;
   reason: string;
@@ -184,16 +227,16 @@ export const PlacementPatch: z.ZodType<PlacementPatch> = z.object({
     return z.array(CreativeFormat).nullish();
   },
   get frequencyCap() {
-    return FrequencyCap.nullish();
+    return FrequencyCapInput.nullish();
   },
   get trigger() {
     return PopupTrigger.nullish();
   },
   get rotation() {
-    return RotationRule.nullish();
+    return RotationRuleInput.nullish();
   },
   get dismissal() {
-    return DismissalRule.nullish();
+    return DismissalRuleInput.nullish();
   },
   maxPerPage: z.number().int().nullish(),
   positions: z.array(z.number().int()).nullish(),
@@ -339,6 +382,30 @@ export const AdBudget: z.ZodType<AdBudget> = z.object({
   },
 }).register(common.apiTypes, { id: "advertising.AdBudget" });
 
+export interface AdBudgetInput {
+  billing: "none" | "cpc" | "cpm" | "fixed_daily";
+  rate?: common.Money | null;
+  /** Spending limit per market day (see AdBudget.dailyLimit) */
+  dailyLimit?: common.Money | null;
+  totalLimit?: common.Money | null;
+  /** Maximum displays (own promotions have no budget charge) */
+  deliveryCap?: number | null;
+}
+
+export const AdBudgetInput: z.ZodType<AdBudgetInput> = z.object({
+  billing: z.enum(["none", "cpc", "cpm", "fixed_daily"]),
+  get rate() {
+    return common.Money.nullish();
+  },
+  get dailyLimit() {
+    return common.Money.nullish();
+  },
+  get totalLimit() {
+    return common.Money.nullish();
+  },
+  deliveryCap: z.number().int().describe("Maximum displays (own promotions have no budget charge)").nullish(),
+}).register(common.apiTypes, { id: "advertising.AdBudgetInput" });
+
 export interface AdvertiserRef {
   kind: "platform" | "official_store" | "seller" | "brand";
   sellerId?: string | null;
@@ -376,14 +443,16 @@ export interface AdCampaignInput {
   startsAt: string;
   endsAt: string;
   timeZone: string;
-  /** Defaults to the placement cap */
-  frequencyCap?: FrequencyCap | null;
-  dismissal?: DismissalRule | null;
+  /** Defaults to the placement cap; the label is written by the server */
+  frequencyCap?: FrequencyCapInput | null;
+  /** Defaults to the placement rule; the label is written by the server */
+  dismissal?: DismissalRuleInput | null;
   /** 1 low, 2 normal, 3 high; equal priority rotates evenly */
   priority: number;
-  budget?: AdBudget | null;
-  /** Stop when the linked promotion ends or its budget runs out */
-  stopWithPromotion: boolean;
+  /** Spent and remaining are kept by the server (AdCampaign.budget) */
+  budget?: AdBudgetInput | null;
+  /** Stop when the linked promotion ends or its budget runs out. Default false; true needs linkedPromotionId */
+  stopWithPromotion?: boolean | null;
   creativeIds: string[];
   /** What happens when the last approval step lands: schedule for startsAt (default) or go live at once. activate is refused at submit (PROMOTION_NOT_STARTED) when AdCampaign.activateBlockedReason is set. */
   afterApproval?: "schedule" | "activate" | null;
@@ -416,16 +485,16 @@ export const AdCampaignInput: z.ZodType<AdCampaignInput> = z.object({
   endsAt: z.iso.datetime({ offset: true }),
   timeZone: z.string(),
   get frequencyCap() {
-    return FrequencyCap.nullish();
+    return FrequencyCapInput.nullish();
   },
   get dismissal() {
-    return DismissalRule.nullish();
+    return DismissalRuleInput.nullish();
   },
   priority: z.number().int().describe("1 low, 2 normal, 3 high; equal priority rotates evenly"),
   get budget() {
-    return AdBudget.nullish();
+    return AdBudgetInput.nullish();
   },
-  stopWithPromotion: z.boolean().describe("Stop when the linked promotion ends or its budget runs out"),
+  stopWithPromotion: z.boolean().describe("Stop when the linked promotion ends or its budget runs out. Default false; true needs linkedPromotionId").nullish(),
   creativeIds: z.array(z.uuid()),
   afterApproval: z.enum(["schedule", "activate"]).describe("What happens when the last approval step lands: schedule for startsAt (default) or go live at once. activate is refused at submit (PROMOTION_NOT_STARTED) when AdCampaign.activateBlockedReason is set.").nullish(),
   noteToReviewers: z.string().nullish(),

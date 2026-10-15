@@ -42,13 +42,20 @@
       "perCampaign": "int?",
       "label": { "type": "string", "desc": "e.g. Once per session · max 3 per visitor per 7 days" }
     },
+    "FrequencyCapInput": { "perSession": "int?", "perDay": "int?", "perWindow": "FrequencyWindow?", "perCampaign": "int?" },
     "FrequencyWindow": { "count": "int", "days": "int" },
     "DismissalRule": { "mode": "enum(not_dismissible|session|days|campaign)", "days": "int?", "label": { "type": "string", "desc": "e.g. Closing hides that campaign for 7 days" } },
+    "DismissalRuleInput": { "mode": "enum(not_dismissible|session|days|campaign)", "days": "int?" },
     "RotationRule": {
       "mode": "enum(priority_then_even|relevance_then_priority|category_match_then_priority|carousel)",
       "carouselSeconds": "int?", "maxInRotation": "int?",
       "pauseOnHoverAndFocus": "bool",
       "label": "string"
+    },
+    "RotationRuleInput": {
+      "mode": "enum(priority_then_even|relevance_then_priority|category_match_then_priority|carousel)",
+      "carouselSeconds": "int?", "maxInRotation": "int?",
+      "pauseOnHoverAndFocus": "bool"
     },
     "PopupTrigger": { "afterSeconds": "int?", "scrollPct": "int?", "skipIfOverlayShownThisSession": "bool" },
     "Placement": {
@@ -74,8 +81,10 @@
       "updatedAt": "datetime", "updatedBy": "Actor?"
     },
     "PlacementPatch": {
-      "enabled": "bool?", "eligiblePages": "string[]?", "formats": "CreativeFormat[]?", "frequencyCap": "FrequencyCap?", "trigger": "PopupTrigger?",
-      "rotation": "RotationRule?", "dismissal": "DismissalRule?", "maxPerPage": "int?", "positions": "int[]?",
+      "enabled": "bool?", "eligiblePages": "string[]?", "formats": "CreativeFormat[]?",
+      "frequencyCap": { "type": "FrequencyCapInput?", "desc": "The label is written by the server" }, "trigger": "PopupTrigger?",
+      "rotation": { "type": "RotationRuleInput?", "desc": "The label is written by the server" },
+      "dismissal": { "type": "DismissalRuleInput?", "desc": "The label is written by the server" }, "maxPerPage": "int?", "positions": "int[]?",
       "reason": "text", "version": "int"
     },
     "GlobalRules": {
@@ -114,6 +123,13 @@
       "deliveryCap": { "type": "int?", "desc": "Maximum displays (own promotions have no budget charge)" },
       "spent": "Money", "remaining": "Money?"
     },
+    "AdBudgetInput": {
+      "billing": "enum(none|cpc|cpm|fixed_daily)",
+      "rate": "Money?",
+      "dailyLimit": { "type": "Money?", "desc": "Spending limit per market day (see AdBudget.dailyLimit)" },
+      "totalLimit": "Money?",
+      "deliveryCap": { "type": "int?", "desc": "Maximum displays (own promotions have no budget charge)" }
+    },
     "AdvertiserRef": { "kind": "enum(platform|official_store|seller|brand)", "sellerId": "uuid?", "brandId": "uuid?", "name": "string", "paid": "bool" },
     "AdCampaignInput": {
       "name": "string",
@@ -128,11 +144,11 @@
       "destination": "Destination",
       "promoted": "PromotedItem[]?",
       "startsAt": "datetime", "endsAt": "datetime", "timeZone": "string",
-      "frequencyCap": { "type": "FrequencyCap?", "desc": "Defaults to the placement cap" },
-      "dismissal": "DismissalRule?",
+      "frequencyCap": { "type": "FrequencyCapInput?", "desc": "Defaults to the placement cap; the label is written by the server" },
+      "dismissal": { "type": "DismissalRuleInput?", "desc": "Defaults to the placement rule; the label is written by the server" },
       "priority": { "type": "int", "desc": "1 low, 2 normal, 3 high; equal priority rotates evenly" },
-      "budget": "AdBudget?",
-      "stopWithPromotion": { "type": "bool", "desc": "Stop when the linked promotion ends or its budget runs out" },
+      "budget": { "type": "AdBudgetInput?", "desc": "Spent and remaining are kept by the server (AdCampaign.budget)" },
+      "stopWithPromotion": { "type": "bool?", "desc": "Stop when the linked promotion ends or its budget runs out. Default false; true needs linkedPromotionId" },
       "creativeIds": "uuid[]",
       "afterApproval": { "type": "enum(schedule|activate)?", "desc": "What happens when the last approval step lands: schedule for startsAt (default) or go live at once. activate is refused at submit (PROMOTION_NOT_STARTED) when AdCampaign.activateBlockedReason is set." },
       "noteToReviewers": "text?"

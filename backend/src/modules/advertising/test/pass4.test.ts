@@ -21,7 +21,7 @@ const row = (id: string) => k.svc.core.repo.get('campaigns', id);
 
 describe('frequency counters', () => {
   it('a perCampaign cap counts displays on frequency_state and survives the hourly expiry while the campaign runs', async () => {
-    const c = await liveCampaign(k, { name: 'Twice per visitor', frequencyCap: { perCampaign: 2, label: '' }, endsAt: new Date(k.clock.now().getTime() + 90 * DAY).toISOString() });
+    const c = await liveCampaign(k, { name: 'Twice per visitor', frequencyCap: { perCampaign: 2 }, endsAt: new Date(k.clock.now().getTime() + 90 * DAY).toISOString() });
     for (const s of ['s-1', 's-2']) {
       const d = await serve(k, { visitorId: 'v-total', sessionId: s });
       expect(d.overlay?.campaignId).toBe(c.id);

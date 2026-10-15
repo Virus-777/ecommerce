@@ -199,7 +199,7 @@ export class SellerPart extends Part {
       endsAt: input.endsAt,
       timeZone: this.core.tz(),
       priority: 2,
-      budget: { billing: input.billing, rate: this.core.money(rate), dailyLimit: input.dailyLimit, totalLimit: input.totalLimit, spent: this.core.money(0) },
+      budget: { billing: input.billing, rate: this.core.money(rate), dailyLimit: input.dailyLimit, totalLimit: input.totalLimit },
       stopWithPromotion: false,
       creativeIds: [...new Set(creativeIds)],
       afterApproval: 'schedule',
