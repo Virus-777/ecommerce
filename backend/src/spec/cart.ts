@@ -347,14 +347,14 @@ export const CouponCoverage: z.ZodType<CouponCoverage> = z.object({
 export interface CouponExclusion {
   itemId: string;
   title: string;
-  /** e.g. 'already on a seller markdown' */
+  /** 'Already on sale' or 'Not included in this coupon' (the same wording at checkout) */
   reason: string;
 }
 
 export const CouponExclusion: z.ZodType<CouponExclusion> = z.object({
   itemId: z.uuid(),
   title: z.string(),
-  reason: z.string().describe("e.g. 'already on a seller markdown'"),
+  reason: z.string().describe("'Already on sale' or 'Not included in this coupon' (the same wording at checkout)"),
 }).register(common.apiTypes, { id: "cart.CouponExclusion" });
 
 export interface CartTotals {

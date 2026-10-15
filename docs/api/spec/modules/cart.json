@@ -124,7 +124,7 @@
       "notCovered": "CouponExclusion[]"
     },
     "CouponCoverage": { "itemId": "uuid", "title": "string", "amount": "Money" },
-    "CouponExclusion": { "itemId": "uuid", "title": "string", "reason": { "type": "string", "desc": "e.g. 'already on a seller markdown'" } },
+    "CouponExclusion": { "itemId": "uuid", "title": "string", "reason": { "type": "string", "desc": "'Already on sale' or 'Not included in this coupon' (the same wording at checkout)" } },
     "CartTotals": {
       "itemCount": "int",
       "itemsSubtotal": { "type": "Money", "desc": "Eligible items only" },

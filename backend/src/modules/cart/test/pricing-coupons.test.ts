@@ -43,7 +43,7 @@ beforeAll(async () => {
           evalInputs.push(input);
           const applied: promotions.AppliedPromotion[] = [];
           const rejected: promotions.RejectedCode[] = [];
-          const lines: promotions.LineDiscount[] = input.lines.map((l) => ({ lineId: l.lineId, regularUnitPrice: l.unitPrice, unitPrice: l.unitPrice, allocations: [], lineDiscount: money(0), limitExceeded: false, discountedQuantity: l.quantity }));
+          const lines: promotions.LineDiscount[] = input.lines.map((l) => ({ lineId: l.lineId, regularUnitPrice: l.unitPrice, unitPrice: promo.get(l.offerId)?.price ?? l.unitPrice, allocations: [], lineDiscount: money(0), limitExceeded: false, discountedQuantity: l.quantity }));
           for (const code of input.codes) {
             const rule = codes.get(code) ?? { reject: 'not_found' as const };
             if ('reject' in rule || (code === 'MEMBER' && !input.customerId)) {
@@ -156,7 +156,7 @@ describe('coupon preview', () => {
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     const itemA = lineOf(ok.body.cart, a.id).id;
     const itemM = lineOf(ok.body.cart, marked.id).id;
-    expect(ok.body.result).toMatchObject({ code: 'SAVE10', status: 'applied', amount: { amount: 1000 }, label: '$10 off', fundedBy: 'platform', coverage: [{ itemId: itemA, amount: { amount: 1000 } }], notCovered: [{ itemId: itemM, reason: 'already on a seller markdown' }] });
+    expect(ok.body.result).toMatchObject({ code: 'SAVE10', status: 'applied', amount: { amount: 1000 }, label: '$10 off', fundedBy: 'platform', coverage: [{ itemId: itemA, amount: { amount: 1000 } }], notCovered: [{ itemId: itemM, reason: 'Already on sale' }] });
     expect(ok.body.cart.totals.discounts).toEqual([{ code: 'SAVE10', label: '$10 off', amount: { amount: 1000, currency: 'USD' }, fundedBy: 'platform' }]);
     expect(ok.body.cart.totals.itemsSubtotal.amount).toBe(8500);
     expect(ok.body.cart.totals.total.amount).toBe(8500 - 1000 + 2 * 599);

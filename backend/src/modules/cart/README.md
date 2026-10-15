@@ -212,7 +212,7 @@ One cart across the Official Store and marketplace sellers for customers and gue
 |---|---|
 | itemId | `uuid` |
 | title | `string` |
-| reason | `string` e.g. 'already on a seller markdown' |
+| reason | `string` 'Already on sale' or 'Not included in this coupon' (the same wording at checkout) |
 
 ### CartTotals
 
@@ -778,7 +778,7 @@ type CartCouponCoverage @areas(in: [STORE]) {
 type CartCouponExclusion @areas(in: [STORE]) {
   itemId: UUID!
   title: String!
-  "e.g. 'already on a seller markdown'"
+  "'Already on sale' or 'Not included in this coupon' (the same wording at checkout)"
   reason: String!
 }
 

@@ -190,7 +190,7 @@ Turns a cart (or a Buy now offer) into an accepted order: identify the customer 
 |---|---|
 | lineId | `string` |
 | title | `string` |
-| reason | `string` |
+| reason | `string` 'Already on sale' or 'Not included in this coupon' (the same wording as the cart) |
 
 ### CouponResult
 

@@ -3,6 +3,7 @@
  * authorize result and the attempt number, the card token cleared after authorize, terms_changed, an Official
  * Store item under a coupon, and guests without an email in the support list.
  */
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { callers } from '../../../testing/app.js';
 import { STORE, USD, fillCart, key, placeBody, readyCheckout, world, type World } from './helpers.js';
@@ -152,6 +153,52 @@ describe('an Official Store item under a coupon', () => {
       expect(placed.body.outcome).toBe('accepted');
       const order = await w.api('orders').getOrder(placed.body.orderId);
       expect(order.totals.discountTotal).toEqual(USD(300));
+    } finally {
+      promo.evaluateCart = evaluate;
+    }
+  });
+});
+
+describe('coupon "not covered" reasons (G15c)', () => {
+  it('explains the lines an applied coupon leaves out with the same wording as the cart', async () => {
+    const promo = w.api('promotions') as { evaluateCart(input: any): Promise<unknown> };
+    const evaluate = promo.evaluateCart.bind(promo);
+    const campaignId = randomUUID();
+    // the coupon covers the first line; the second already has a sale price
+    promo.evaluateCart = async (input: any) => {
+      const [first, second] = input.lines;
+      return {
+        evaluationId: randomUUID(),
+        validUntil: new Date(w.clock.now().getTime() + 600_000).toISOString(),
+        lines: input.lines.map((l: any) => ({
+          lineId: l.lineId,
+          regularUnitPrice: l.unitPrice,
+          unitPrice: l.lineId === second.lineId ? USD(l.unitPrice.amount - 100) : l.unitPrice,
+          allocations: l.lineId === first.lineId && input.codes.includes('G15C') ? [{ campaignId, code: 'G15C', label: '$1 off', amount: USD(100), platformPart: USD(100), sellerPart: USD(0) }] : [],
+          lineDiscount: USD(0),
+          limitExceeded: false,
+          discountedQuantity: l.quantity,
+        })),
+        packages: [],
+        applied: input.codes.includes('G15C') ? [{ campaignId, code: 'G15C', label: '$1 off', amount: USD(100), coversLineIds: [first.lineId], source: 'code' }] : [],
+        rejected: [],
+        skipped: [],
+        totals: { total: USD(0), platform: USD(0), seller: USD(0) },
+        changes: [],
+      };
+    };
+    try {
+      const gus = await w.customer('gus-coupon@example.com');
+      await fillCart(w, gus.token, [
+        { offerId: w.offers.black, quantity: 1 },
+        { offerId: w.offers.white, quantity: 1 },
+      ]);
+      const v = await readyCheckout(w, gus.token, { source: 'cart' });
+      const applied = await w.call('POST', `${STORE}/sessions/${v.id}/coupons`, gus.token, { code: 'G15C' });
+      expect(applied.body.result, JSON.stringify(applied.body)).toMatchObject({ status: 'applied', amount: USD(100) });
+      expect(applied.body.result.coverage).toHaveLength(1);
+      expect(applied.body.result.notCovered).toEqual([{ lineId: expect.any(String), title: expect.any(String), reason: 'Already on sale' }]);
+      expect(applied.body.result.notCovered[0].lineId).not.toBe(applied.body.result.coverage[0].lineId);
     } finally {
       promo.evaluateCart = evaluate;
     }

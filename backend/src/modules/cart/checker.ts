@@ -22,6 +22,7 @@ import type {
 import type * as offers from '../../spec/offers.js';
 import type * as shipping from '../../spec/shipping.js';
 import { evaluateLine, type LineEval, type OfferFacts, type ProductFacts } from './domain/check.js';
+import { couponNotCovered } from './domain/coupons.js';
 import {
   addDays,
   desired,
@@ -556,9 +557,7 @@ export class CartChecker {
             return { itemId: id, title: titleOf(e), amount: money(amount, currency) };
           })
           .filter((x): x is NonNullable<typeof x> => x !== null);
-        const notCovered = eligible
-          .filter((e) => !applied.coversLineIds.includes(e.item.id))
-          .map((e) => ({ itemId: e.item.id, title: titleOf(e), reason: e.facts.promo?.campaignId ? 'already on a seller markdown' : 'not included in this offer' }));
+        const notCovered = couponNotCovered(applied.coversLineIds, eligible.map((e) => ({ lineId: e.item.id, title: titleOf(e) })), ev).map((x) => ({ itemId: x.lineId, title: x.title, reason: x.reason }));
         out.previews.push({ code: c.code, status: 'applied', amount: applied.amount, label: applied.label, fundedBy: fundingOf(applied.campaignId), reason: null, coverage, notCovered });
         for (const id of c.covered) if (!applied.coversLineIds.includes(id) && eligible.some((e) => e.item.id === id)) out.uncovered.push([id, c.code]);
         next.push({ code: c.code, covered: [...applied.coversLineIds].sort() });

@@ -24,6 +24,7 @@ import {
   type StoredCredit,
   type StoredQuote,
 } from '../domain/rules.js';
+import { couponNotCovered } from '../../cart/contract.js';
 import type { LineRow, PackageRow, SessionRow, TaxProvider } from '../ports.js';
 import type { Core } from './core.js';
 
@@ -354,7 +355,7 @@ export class Quoter {
         coverage: lines
           .filter((l) => covered.has(l.id))
           .map((l) => ({ lineId: l.id, title: titleOf(l.id), amount: m(parts.filter((p) => p.l.id === l.id).reduce((s, p) => s + p.x.amount.amount, 0), cur) })),
-        notCovered: covered.size ? lines.filter((l) => !covered.has(l.id)).map((l) => ({ lineId: l.id, title: titleOf(l.id), reason: 'Not included in this offer' })) : [],
+        notCovered: couponNotCovered(a.coversLineIds, lines.map((l) => ({ lineId: l.id, title: titleOf(l.id) })), ev ?? { lines: [] }),
         otherDiscountsNote: appliedCodes.length > 1 ? 'Your other discount is unchanged.' : null,
       };
     };

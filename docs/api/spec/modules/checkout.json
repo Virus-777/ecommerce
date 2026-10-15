@@ -75,7 +75,7 @@
       "totals": "PackageTotals"
     },
     "CouponCoverage": { "lineId": "string", "title": "string", "amount": "Money" },
-    "CouponExclusion": { "lineId": "string", "title": "string", "reason": "string" },
+    "CouponExclusion": { "lineId": "string", "title": "string", "reason": { "type": "string", "desc": "'Already on sale' or 'Not included in this coupon' (the same wording as the cart)" } },
     "CouponResult": {
       "code": "string",
       "status": "enum(applied|rejected|needs_sign_in)",
