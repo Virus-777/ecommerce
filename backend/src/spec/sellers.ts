@@ -261,7 +261,8 @@ export interface AgreementDocument {
   policyVersionId?: string | null;
   effectiveFrom: string;
   summary: string;
-  url: string;
+  /** Store page of the published policy, <store>/policies/<key> with the content policy key (e.g. /policies/seller_agreement); null while no version is published (content off) */
+  url?: string | null;
   /** Fee schedule shows example rates during the preview */
   isExample: boolean;
 }
@@ -273,7 +274,7 @@ export const AgreementDocument: z.ZodType<AgreementDocument> = z.object({
   policyVersionId: z.uuid().describe("content policy version when content is enabled").nullish(),
   effectiveFrom: z.iso.date(),
   summary: z.string(),
-  url: z.url(),
+  url: z.url().describe("Store page of the published policy, <store>/policies/<key> with the content policy key (e.g. /policies/seller_agreement); null while no version is published (content off)").nullish(),
   isExample: z.boolean().describe("Fee schedule shows example rates during the preview"),
 }).register(common.apiTypes, { id: "sellers.AgreementDocument" });
 

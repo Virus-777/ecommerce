@@ -29,7 +29,8 @@ export function agreementDocument(
     policyVersionId: version.policyVersionId ?? null,
     effectiveFrom: version.effectiveFrom,
     summary: AGREEMENT_TEXT[key].summary,
-    url: `${baseUrl.replace(/\/$/, '')}/policies/${key.replace(/_/g, '-')}`,
+    // the published content policy, under the same key content uses (seller_agreement); nothing to link before one is published
+    url: version.policyVersionId ? `${baseUrl.replace(/\/$/, '')}/policies/${key}` : null,
     isExample: key === 'fee_schedule',
   };
 }

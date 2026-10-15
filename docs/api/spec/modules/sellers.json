@@ -106,7 +106,7 @@
     "AgreementDocument": {
       "key": "enum(seller_agreement|product_rules|fee_schedule|service_standards)", "title": "string", "versionLabel": { "type": "string", "desc": "e.g. v1.4" },
       "policyVersionId": { "type": "uuid?", "desc": "content policy version when content is enabled" },
-      "effectiveFrom": "date", "summary": "string", "url": "url", "isExample": { "type": "bool", "desc": "Fee schedule shows example rates during the preview" }
+      "effectiveFrom": "date", "summary": "string", "url": { "type": "url?", "desc": "Store page of the published policy, <store>/policies/<key> with the content policy key (e.g. /policies/seller_agreement); null while no version is published (content off)" }, "isExample": { "type": "bool", "desc": "Fee schedule shows example rates during the preview" }
     },
     "AgreementAcceptance": { "key": "string", "versionLabel": "string", "policyVersionId": "uuid?", "signedName": "string", "acceptedBy": "Actor", "acceptedAt": "datetime" },
     "PerformanceTarget": {

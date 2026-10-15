@@ -271,7 +271,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | policyVersionId | `uuid?` content policy version when content is enabled |
 | effectiveFrom | `date` |
 | summary | `string` |
-| url | `url` |
+| url | `url?` Store page of the published policy, <store>/policies/<key> with the content policy key (e.g. /policies/seller_agreement); null while no version is published (content off) |
 | isExample | `bool` Fee schedule shows example rates during the preview |
 
 ### AgreementAcceptance

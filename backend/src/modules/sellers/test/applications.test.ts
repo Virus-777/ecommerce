@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { signWebhook } from '../../../testing/app.js';
 import { accountInput, ADMIN, approvedSeller, boot, customer, invitation, payoutInput, staff, STORE, submitted, type Kit } from './helpers.js';
+import { agreementDocument } from '../domain/catalogue.js';
 
 let kit: Kit;
 beforeAll(async () => {
@@ -17,6 +18,14 @@ describe('Sell with us programme', () => {
     expect(res.body.agreements.map((a: any) => a.key)).toEqual(['seller_agreement', 'product_rules', 'fee_schedule', 'service_standards']);
     expect(res.body.serviceTargets.find((t: any) => t.metric === 'dispatch_reliability')).toMatchObject({ threshold: 95, isExample: true, display: 'At least 95%' });
     expect(res.body.feeExamples.every((f: any) => f.isExample)).toBe(true);
+    // content is off here: no published policy to link
+    expect(res.body.agreements.map((a: any) => a.url)).toEqual([null, null, null, null]);
+  });
+
+  it('links a published agreement under the content policy key', () => {
+    const published = agreementDocument('seller_agreement', { versionLabel: 'v1.4', policyVersionId: newId(), effectiveFrom: '2026-10-01' }, 'https://marketly.example/');
+    expect(published.url).toBe('https://marketly.example/policies/seller_agreement');
+    expect(agreementDocument('service_standards', { versionLabel: 'v1.0', policyVersionId: null, effectiveFrom: '2026-01-01' }, 'https://marketly.example').url).toBeNull();
   });
 });
 
