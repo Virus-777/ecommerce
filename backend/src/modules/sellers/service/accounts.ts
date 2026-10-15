@@ -257,12 +257,17 @@ export class AccountsPart extends Part {
   private async goLivePreview(s: SellerRec, unavailable: string[]) {
     const offers = await this.core.optional('offers', 'goLivePreview', unavailable, async (o) => (await o.listOffersAdmin({ sellerId: s.id }, { page: 1, limit: 20 })).items);
     if (!offers?.length) return [];
+    // one row per product: each variant is its own offer, and the product goes live when any of them does
+    const byProduct = new Map<string, typeof offers>();
+    for (const offer of offers) byProduct.set(offer.productId, [...(byProduct.get(offer.productId) ?? []), offer]);
     const out: unknown[] = [];
-    for (const offer of offers.slice(0, 20)) {
-      const p = await this.core.optional('catalog', 'goLivePreview', unavailable, (c) => c.getProductForSeller(s.id, offer.productId));
-      const reviewState = String((p?.product as { reviewState?: string; status?: string } | undefined)?.reviewState ?? (p?.product as { status?: string } | undefined)?.status ?? 'approved');
-      const outcome = reviewState !== 'approved' ? 'waits_for_approval' : offer.status === 'draft' || offer.status === 'paused' || offer.status === 'active' ? 'will_go_live' : 'stays_unpublished';
-      out.push({ productId: offer.productId, title: (p?.product as { title?: string } | undefined)?.title ?? offer.sellerSku, reviewState, outcome });
+    for (const [productId, productOffers] of byProduct) {
+      // catalog answers { product: ProductAdmin, ownsSubmission }; the title is on ProductAdmin.product
+      const p = await this.core.optional('catalog', 'goLivePreview', unavailable, (c) => c.getProductForSeller(s.id, productId));
+      const reviewState = String(p?.product.reviewState ?? 'approved');
+      const goesLive = productOffers.some((o) => o.status === 'draft' || o.status === 'paused' || o.status === 'active');
+      const outcome = reviewState !== 'approved' ? 'waits_for_approval' : goesLive ? 'will_go_live' : 'stays_unpublished';
+      out.push({ productId, title: p?.product.product.title ?? productOffers[0]!.sellerSku, reviewState, outcome });
     }
     return out;
   }

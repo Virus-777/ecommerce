@@ -19,6 +19,26 @@ describe('account, setup and launch review', () => {
     expect((await kit.call('GET', `${SELLER}/account`, owner(newId()))).status).toBe(404);
   });
 
+  it('What goes live: one row per product, titled with the product title (not the SKU)', async () => {
+    const s = await approvedSeller(kit);
+    const lamp = newId();
+    const core = kit.svc.core;
+    const original = core.optional.bind(core);
+    // offers and catalog are off in this app: answer for them here
+    core.optional = (async (module: string, section: string, unavailable: string[] | null, fn: (api: never) => Promise<unknown>) => {
+      if (section === 'goLivePreview' && module === 'offers') return fn({ listOffersAdmin: async () => ({ items: [{ productId: lamp, sellerSku: 'LAMP-BLK', status: 'draft' }, { productId: lamp, sellerSku: 'LAMP-WHT', status: 'paused' }] }) } as never);
+      if (section === 'goLivePreview' && module === 'catalog') return fn({ getProductForSeller: async () => ({ product: { reviewState: 'approved', product: { title: 'Aurora Desk Lamp' } }, ownsSubmission: true }) } as never);
+      return original(module as never, section, unavailable, fn as never);
+    }) as typeof core.optional;
+    try {
+      const setup = await kit.call('GET', `${SELLER}/setup`, s.sellerToken);
+      expect(setup.status, JSON.stringify(setup.body)).toBe(200);
+      expect(setup.body.goLivePreview).toEqual([{ productId: lamp, title: 'Aurora Desk Lamp', reviewState: 'approved', outcome: 'will_go_live' }]);
+    } finally {
+      core.optional = original;
+    }
+  });
+
   it('setup checklist; the launch review unlocks after payout verification and a first submission', async () => {
     const s = await approvedSeller(kit);
     const early = await kit.call('POST', `${SELLER}/setup/launch-review`, s.sellerToken, {});
