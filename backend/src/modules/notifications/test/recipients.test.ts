@@ -61,6 +61,8 @@ describe('customers named by the event', () => {
     const [mail] = emailsTo(email);
     expect(mail!.message.subject).toBe('An item in MK-261010-40002 was cancelled');
     expect(mail!.message.text).toContain(`https://marketly.example/orders/link/${p.orderId}-token`);
+    // the link is minted with the order reference, so the redeemed link names the order
+    expect(world.orderLinks.filter((l) => l.orderId === p.orderId)).toEqual([{ orderId: p.orderId, email, orderRef: 'MK-261010-40002' }]);
     expect(await deliveriesTo(email)).toMatchObject([{ topicKey: 'customer.order.item_cancelled', recipientKind: 'guest_email', status: 'delivered' }]);
 
     // events without the order reference take it from the guest's order confirmation

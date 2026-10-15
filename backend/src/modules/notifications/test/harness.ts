@@ -50,6 +50,8 @@ export class World {
   readonly coverage: access.RoleCoverage[] = [];
   readonly audits: audit.RecordInput[] = [];
   readonly sellersList: string[] = [];
+  /** identity.issueOrderLink calls (guest order links) */
+  readonly orderLinks: { orderId: string; email: string; orderRef?: string }[] = [];
 
   customer(o: Partial<CustomerFixture> = {}): CustomerFixture {
     const id = uniq();
@@ -111,7 +113,10 @@ export class World {
           return p ? this.summary(p) : null;
         },
         getAccounts: async (ids) => ids.flatMap((id) => (this.accounts.get(id) ? [this.summary(this.accounts.get(id)!)] : [])),
-        issueOrderLink: async (orderId) => ({ url: `https://marketly.example/orders/link/${orderId}-token`, expiresAt: new Date(Date.now() + 86_400_000).toISOString() }),
+        issueOrderLink: async (orderId, email, orderRef) => {
+          this.orderLinks.push({ orderId, email, orderRef });
+          return { url: `https://marketly.example/orders/link/${orderId}-token`, expiresAt: new Date(Date.now() + 86_400_000).toISOString() };
+        },
       },
       customers: {
         getCustomer: async (id) => (this.customers.get(id) ? this.snapshot(this.customers.get(id)!) : null),

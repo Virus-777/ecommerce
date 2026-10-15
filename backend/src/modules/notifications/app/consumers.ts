@@ -132,7 +132,8 @@ export class Consumers {
     }
     if (send.guestOrderLink) {
       try {
-        const { url } = await core.identity.issueOrderLink(send.guestOrderLink.orderId, send.guestOrderLink.email);
+        // the order reference lets the redeemed link name the order (orderRef) without another lookup
+        const { url } = await core.identity.issueOrderLink(send.guestOrderLink.orderId, send.guestOrderLink.email, subjects.orderRef);
         link.url = url;
         context.guest = { url };
       } catch (err) {
