@@ -287,7 +287,7 @@ export interface OverviewAlert {
   orderRef?: string | null;
   caseRef?: string | null;
   returnRef?: string | null;
-  /** e.g. wait, cancel_item, view_case */
+  /** e.g. wait, cancel_item, view_case, view_return, view_order */
   actions: string[];
 }
 
@@ -299,7 +299,7 @@ export const OverviewAlert: z.ZodType<OverviewAlert> = z.object({
   orderRef: z.string().nullish(),
   caseRef: z.string().nullish(),
   returnRef: z.string().nullish(),
-  actions: z.array(z.string()).describe("e.g. wait, cancel_item, view_case"),
+  actions: z.array(z.string()).describe("e.g. wait, cancel_item, view_case, view_return, view_order"),
 }).register(common.apiTypes, { id: "customers.OverviewAlert" });
 
 export interface OverviewOrder {
@@ -356,6 +356,10 @@ export interface OverviewReturn {
   returnId: string;
   ref: string;
   productTitle: string;
+  /** For the product link /p/{productSlug}/{productId} */
+  productId?: string | null;
+  /** Current product slug; null when the catalog did not answer */
+  productSlug?: string | null;
   image?: common.MediaRef | null;
   returnStatus: string;
   /** Requested, Under review, Approved, Processing, Sent or Failed. Approved does not mean the money has arrived. */
@@ -366,6 +370,8 @@ export const OverviewReturn: z.ZodType<OverviewReturn> = z.object({
   returnId: z.uuid(),
   ref: z.string(),
   productTitle: z.string(),
+  productId: z.uuid().describe("For the product link /p/{productSlug}/{productId}").nullish(),
+  productSlug: z.string().describe("Current product slug; null when the catalog did not answer").nullish(),
   get image() {
     return common.MediaRef.nullish();
   },
@@ -1139,7 +1145,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Account tab home: tiles, alerts, recent orders, open cases and returns",
-    desc: "One call renders account/overview on web and Android. Aggregated in-process with a 300 ms budget per source: orders.countInProgress + orders.listRecentForCustomer + orders.listDelayedItemsForCustomer (orders in progress, recent orders, delay alerts), returns.listOpenForCustomer (open returns tile and list), messaging.unreadCount (unread messages), support.listOpenCasesForCustomer (open cases), wallet.getBalance (store credit, phase 3; otherwise available=false). A source that is disabled or times out is listed in `unavailable` instead of failing the page.",
+    desc: "One call renders account/overview on web and Android. Aggregated in-process with a 300 ms budget per source: orders.countInProgress + orders.listRecentForCustomer + orders.listDelayedItemsForCustomer (orders in progress, recent orders, delay alerts), returns.listOpenForCustomer (open returns tile and list), messaging.unreadCount (unread messages), support.listOpenCasesForCustomer (open cases), wallet.getBalance (store credit, phase 3; otherwise available=false), payments.listFailedPaymentsForCustomer (payments that failed after the order was placed, last 7 days). A source that is disabled or times out is listed in `unavailable` instead of failing the page. Alerts: item_delayed (delayed packages), payment_being_checked (recent orders whose payment is being checked), payment_failed (an order cancelled because its payment finally failed, last 7 days), return_action_needed (an open return waiting on the customer: a question to answer, or approved and to be sent back), case_waiting_on_you (an open case waiting on the customer).",
     response: () => AccountOverview,
     status: 200,
     screens: ["account/overview"],
@@ -1379,6 +1385,11 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "My export and closure requests",
+    desc: "Newest first. Cancelled data exports are left out unless includeCancelled is true (they are kept for the audit trail).",
+    query: () =>
+      z.object({
+        includeCancelled: z.stringbool().describe("Also list cancelled data exports").optional(),
+      }),
     response: () => z.array(DataRequest),
     status: 200,
     screens: ["account/profile"],
@@ -1441,14 +1452,14 @@ export const endpoints = defineEndpoints({
     auth: "shopper",
     scope: "own-customer",
     summary: "Find a guest order by reference and checkout email",
-    desc: "Verifies the pair with orders (orders.findGuestOrder), then calls identity.grantGuestOrderAccess(guestSessionId, orderId, email, 'lookup') so the caller's guest session can open the order in orders, shipping, returns and support. Wrong combinations return the same GUEST_ORDER_NOT_FOUND without saying which part was wrong. Limited per IP and per email.",
+    desc: "Verifies the pair with orders (orders.findGuestOrder), then calls identity.grantGuestOrderAccess(guestSessionId, orderId, email, 'lookup') so the caller's guest session can open the order in orders, shipping, returns and support. Wrong combinations return the same GUEST_ORDER_NOT_FOUND without saying which part was wrong. Only guest orders open this way (owner decision G29e): a reference that belongs to a registered customer's order answers GUEST_ORDER_SIGN_IN_REQUIRED whatever email was given, so the answer never confirms the email. Limited per IP and per email.",
     body: () => z.object({
       orderRef: z.string(),
       email: z.email(),
     }),
     response: () => GuestOrderAccess,
     status: 200,
-    errors: ["GUEST_ORDER_NOT_FOUND","RATE_LIMITED"],
+    errors: ["GUEST_ORDER_NOT_FOUND","GUEST_ORDER_SIGN_IN_REQUIRED","RATE_LIMITED"],
     screens: ["auth/guest-orders"],
     phase: 1,
   },
@@ -2016,6 +2027,10 @@ export const spec = defineModuleSpec({
     "GUEST_ORDER_NOT_FOUND": {
       "status": 404,
       "meaning": "No guest order matches that reference and email"
+    },
+    "GUEST_ORDER_SIGN_IN_REQUIRED": {
+      "status": 403,
+      "meaning": "The order belongs to a registered customer: sign in to see it (answered whatever email was given, so it never confirms the email)"
     },
     "UNSUBSCRIBE_TOKEN_INVALID": {
       "status": 400,

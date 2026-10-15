@@ -172,6 +172,8 @@ Charging customers through provider adapters (card, digital wallet): payment int
 | amount | `Money` |
 | orderId | `uuid?` |
 | orderRef | `string?` |
+| placedAt | `datetime?` When the order was placed (orders' placedAt); null while no order exists |
+| failedAt | `datetime?` When the payment failed (state failed only) |
 | lastCheckedAt | `datetime?` |
 | nextCheckInSeconds | `int?` |
 | decline | `Decline?` |
@@ -569,7 +571,7 @@ The provider takes the money back when a chargeback opens; finance holds the sel
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) where status in ('created','authorizing','requires_action','pending_check','authorized','partially_captured','captured')`, `(order_id)`, `(status, next_check_at)`, `(provider, provider_ref)`, `(status, updated_at, id)`
+Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) where status in ('created','authorizing','requires_action','pending_check','authorized','partially_captured','captured')`, `(order_id)`, `(status, next_check_at)`, `(provider, provider_ref)`, `(status, updated_at, id)`, `(customer_id, status, updated_at)`
 
 **allocations**: Captured money per seller group
 
@@ -809,6 +811,7 @@ Indexes: `unique (kind, day)`
 | listRefundsForOrder | `(orderId: uuid) => Refund[]`<br>Refund executions of an order, newest first, with items and status (Requested, Processing, Sent, Failed, Cancelled) | graphql |
 | listDisputesForOrder | `(orderId: uuid) => Dispute[]`<br>Chargebacks and payment disputes on an order (order 360, dispute case) | graphql |
 | listSavedMethods | `(customerId: uuid) => SavedPaymentMethod[]`<br>The customer's saved cards and wallets, default first | graphql |
+| listFailedPaymentsForCustomer | `(customerId: uuid, since: datetime) => PaymentStatusView[]`<br>Payments of the customer that failed after their order was placed (an uncertain payment finally declined, so orders cancelled the order), failed since `since`, newest first, at most 5. For the account overview's payment_failed alert | customers |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's payment data for the personal data export: saved payment methods masked (brand, last 4, expiry, label, billing city and postal code; never a provider token), payments (reference, order, amount, method label, status, dates; declines with their plain reason) and refunds (reference, order, amount, destination label, status, dates). No provider references, card fingerprints or staff notes. Export hook called by customers.build-data-exports | customers |
 
 ## Permissions
@@ -990,6 +993,8 @@ type PaymentStatus @areas(in: [STORE]) {
   methodLabel: String!
   amount: Money!
   orderRef: String
+  "When the order was placed; null while no order exists"
+  placedAt: DateTime
   lastCheckedAt: DateTime
   nextCheckInSeconds: Int
   decline: PaymentDecline

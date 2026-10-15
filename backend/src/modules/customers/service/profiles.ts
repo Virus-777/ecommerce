@@ -23,6 +23,9 @@ import * as map from '../mappers.js';
 import type { CustomerRow, PreferencesRow } from '../ports.js';
 import { type Core, type By, type PrefKey, PREFS, invalid, notFound, plural } from './core.js';
 
+/** payment_failed alerts cover payments that failed in the last days */
+const FAILED_PAYMENT_ALERT_DAYS = 7;
+
 export class Profiles {
   constructor(readonly core: Core) {}
 
@@ -229,19 +232,16 @@ export class Profiles {
     const budget = await this.core.ctx.settings.get('overviewSourceTimeoutMs');
     const missing: string[] = [];
     const orders = this.core.ctx.tryUse('orders');
-    const returns = this.core.ctx.tryUse('returns');
     const messaging = this.core.ctx.tryUse('messaging');
-    const support = this.core.ctx.tryUse('support');
     const wallet = this.core.ctx.tryUse('wallet');
-    const [progress, recent, delayed, openReturns, unread, cases, credit] = await Promise.all([
+    // recent orders, open returns and cases are read with the alert sources
+    const [progress, unread, credit, sources] = await Promise.all([
       this.gather('orders_in_progress', missing, budget, orders && (() => orders.countInProgress(c.id))),
-      this.gather('recent_orders', missing, budget, orders && (() => orders.listRecentForCustomer(c.id, 3))),
-      this.gather('delay_alerts', missing, budget, orders && (() => orders.listDelayedItemsForCustomer(c.id))),
-      this.gather('open_returns', missing, budget, returns && (() => returns.listOpenForCustomer(c.id, 2))),
       this.gather('unread_messages', missing, budget, messaging && (() => messaging.unreadCount({ kind: 'customer', id: c.id }))),
-      this.gather('open_cases', missing, budget, support && (() => support.listOpenCasesForCustomer(c.id, 3))),
       this.gather('store_credit', missing, budget, wallet && (() => wallet.getBalance(c.id))),
+      this.alertSources(c.id, missing, budget),
     ]);
+    const { recent, openReturns, cases } = sources;
 
     const tiles: OverviewTile[] = [
       {
@@ -255,38 +255,17 @@ export class Profiles {
       { key: 'store_credit', amount: credit?.available ?? null, available: credit !== undefined },
     ];
 
-    const alerts: OverviewAlert[] = [];
-    for (const d of delayed ?? []) {
-      alerts.push({
-        kind: 'item_delayed',
-        title: `${d.title} is delayed`,
-        body: `${d.sellerName} needs more time${d.newDispatchBy ? `; it should ship by ${dateInZone(new Date(d.newDispatchBy), this.core.tz)}` : ''}.`,
-        orderId: d.orderId,
-        orderRef: d.orderRef,
-        caseRef: d.caseRef ?? null,
-        actions: d.options,
-      });
-    }
-    for (const o of recent ?? []) {
-      if (o.status?.flags?.includes('payment_checking')) {
-        alerts.push({ kind: 'payment_being_checked', title: 'We’re checking your payment', body: `Order ${o.ref} starts as soon as the payment is confirmed.`, orderId: o.id, orderRef: o.ref, actions: ['wait'] });
-      }
-    }
-    for (const k of cases?.items ?? []) {
-      if (k.nextAction?.youNeedToAct) {
-        alerts.push({ kind: 'case_waiting_on_you', title: `Case ${k.ref} is waiting on you`, body: k.nextAction.label, caseRef: k.ref, orderRef: k.orderRef ?? null, orderId: k.orderId ?? null, actions: ['view_case'] });
-      }
-    }
-
     const menuCounts: Record<string, number> = {};
     if (progress) menuCounts['account/orders'] = progress.inProgress;
     if (openReturns) menuCounts['account/returns'] = openReturns.total;
     if (unread !== undefined) menuCounts['account/messages'] = unread;
 
+    const shownReturns = (openReturns?.items ?? []).slice(0, 2);
+    const slugs = await this.productSlugs(shownReturns.map((r) => r.item?.productId).filter((id): id is string => !!id), budget);
     return {
       customer: { firstName: c.first_name, displayName: displayName(c.first_name, c.last_name), email: c.email, memberSince: dateInZone(c.created_at, this.core.tz) },
       tiles,
-      alerts,
+      alerts: this.alertsOf(sources),
       recentOrders: (recent ?? []).slice(0, 3).map((o) => ({ orderId: o.id, ref: o.ref, placedAt: o.placedAt, total: o.total, statusLabel: o.statusLabel, packageCount: o.packageCount, thumbnails: o.thumbnails ?? [], itemStates: o.itemStates ?? {} })),
       openCases: (cases?.items ?? []).slice(0, 3).map((k) => ({
         caseId: k.id,
@@ -298,10 +277,12 @@ export class Profiles {
         orderRef: k.orderRef ?? null,
         sellerName: k.handledBy?.kind === 'seller' ? k.handledBy.name : null,
       })),
-      openReturns: (openReturns?.items ?? []).slice(0, 2).map((r) => ({
+      openReturns: shownReturns.map((r) => ({
         returnId: r.id,
         ref: r.ref,
         productTitle: r.item?.title ?? '',
+        productId: r.item?.productId ?? null,
+        productSlug: (r.item?.productId && slugs.get(r.item.productId)) || null,
         image: null,
         returnStatus: r.statusLabel,
         refundStatus: r.refundStatus ?? 'Requested',
@@ -310,6 +291,89 @@ export class Profiles {
       unavailable: [...new Set(missing)],
       generatedAt: map.iso(this.core.now()),
     };
+  }
+
+  /** The account overview's alerts on their own (GraphQL Customer.overviewAlerts): sources that do not answer are left out */
+  async overviewAlerts(customerId: string): Promise<OverviewAlert[]> {
+    const budget = await this.core.ctx.settings.get('overviewSourceTimeoutMs');
+    return this.alertsOf(await this.alertSources(customerId, [], budget));
+  }
+
+  /** The sources the alerts (and the recent orders, open returns and cases lists) are read from, each within the budget */
+  private async alertSources(customerId: string, missing: string[], budget: number) {
+    const orders = this.core.ctx.tryUse('orders');
+    const returns = this.core.ctx.tryUse('returns');
+    const support = this.core.ctx.tryUse('support');
+    const payments = this.core.ctx.tryUse('payments');
+    const since = new Date(this.core.now().getTime() - FAILED_PAYMENT_ALERT_DAYS * 24 * 3_600_000).toISOString();
+    const [recent, delayed, openReturns, cases, failedPayments] = await Promise.all([
+      this.gather('recent_orders', missing, budget, orders && (() => orders.listRecentForCustomer(customerId, 3))),
+      this.gather('delay_alerts', missing, budget, orders && (() => orders.listDelayedItemsForCustomer(customerId))),
+      // more than the two listed, so a return waiting on the customer further down still raises its alert
+      this.gather('open_returns', missing, budget, returns && (() => returns.listOpenForCustomer(customerId, 10))),
+      this.gather('open_cases', missing, budget, support && (() => support.listOpenCasesForCustomer(customerId, 3))),
+      this.gather('failed_payments', missing, budget, payments && (() => payments.listFailedPaymentsForCustomer(customerId, since))),
+    ]);
+    return { recent, delayed, openReturns, cases, failedPayments };
+  }
+
+  /** Alerts in a fixed order: delays, failed payments, payments being checked, returns and cases waiting on the customer */
+  private alertsOf(s: Awaited<ReturnType<Profiles['alertSources']>>): OverviewAlert[] {
+    const alerts: OverviewAlert[] = [];
+    for (const d of s.delayed ?? []) {
+      alerts.push({
+        kind: 'item_delayed',
+        title: `${d.title} is delayed`,
+        body: `${d.sellerName} needs more time${d.newDispatchBy ? `; it should ship by ${dateInZone(new Date(d.newDispatchBy), this.core.tz)}` : ''}.`,
+        orderId: d.orderId,
+        orderRef: d.orderRef,
+        caseRef: d.caseRef ?? null,
+        actions: d.options,
+      });
+    }
+    for (const p of s.failedPayments ?? []) {
+      alerts.push({
+        kind: 'payment_failed',
+        title: p.orderRef ? `Payment for order ${p.orderRef} didn’t go through` : 'Your payment didn’t go through',
+        body: `${p.message} The order was cancelled and nothing was charged.`,
+        orderId: p.orderId ?? null,
+        orderRef: p.orderRef ?? null,
+        actions: ['view_order'],
+      });
+    }
+    for (const o of s.recent ?? []) {
+      if (o.status?.flags?.includes('payment_checking')) {
+        alerts.push({ kind: 'payment_being_checked', title: 'We’re checking your payment', body: `Order ${o.ref} starts as soon as the payment is confirmed.`, orderId: o.id, orderRef: o.ref, actions: ['wait'] });
+      }
+    }
+    for (const r of s.openReturns?.items ?? []) {
+      // returns' customer labels: info_requested = Waiting for you, approved = Approved (send it back)
+      if (r.status !== 'info_requested' && r.status !== 'approved') continue;
+      const title = r.item?.title ?? 'your item';
+      alerts.push({
+        kind: 'return_action_needed',
+        title: r.status === 'info_requested' ? `Return ${r.ref} is waiting on you` : `Send back ${title}`,
+        body: r.nextStep || (r.status === 'info_requested' ? `${r.sellerName} asked a question about ${title}.` : `Your return ${r.ref} is approved; send the item back.`),
+        orderId: r.orderId,
+        orderRef: r.orderRef,
+        returnRef: r.ref,
+        actions: ['view_return'],
+      });
+    }
+    for (const k of s.cases?.items ?? []) {
+      if (k.nextAction?.youNeedToAct) {
+        alerts.push({ kind: 'case_waiting_on_you', title: `Case ${k.ref} is waiting on you`, body: k.nextAction.label, caseRef: k.ref, orderRef: k.orderRef ?? null, orderId: k.orderId ?? null, actions: ['view_case'] });
+      }
+    }
+    return alerts;
+  }
+
+  /** Current product slugs for product links, within the budget; empty when catalog is off or slow */
+  private async productSlugs(productIds: string[], budget: number): Promise<Map<string, string>> {
+    if (!productIds.length) return new Map();
+    const catalog = this.core.ctx.tryUse('catalog');
+    const rows = await this.gather('product_links', [], budget, catalog && (() => catalog.getProducts([...new Set(productIds)])));
+    return new Map((rows ?? []).map((r) => [r.product.id, r.product.slug]));
   }
 
   /** identity.user.registered: profile, default preferences and the first consent rows; the guest buyer row goes */

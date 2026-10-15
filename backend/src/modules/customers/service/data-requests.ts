@@ -107,14 +107,17 @@ export class DataRequests {
   }
 
   /** The customer's requests; ready exports carry a fresh signed link */
-  async listDataRequests(scope: Scope, principal: Principal | null): Promise<DataRequest[]> {
+  async listDataRequests(scope: Scope, principal: Principal | null, o: { includeCancelled?: boolean } = {}): Promise<DataRequest[]> {
     const c = await this.profiles.ownCustomer(scope);
-    return this.dataRequestsOf(c.id, principal);
+    return this.dataRequestsOf(c.id, principal, o);
   }
 
-  /** Data requests newest first; `principal` (the customer) gets download links for ready exports */
-  async dataRequestsOf(customerId: string, principal: Principal | null): Promise<DataRequest[]> {
-    const rows = await this.core.repo.listDataRequests(customerId);
+  /**
+   * Data requests newest first; `principal` (the customer) gets download links for ready exports. Cancelled data
+   * exports are left out unless includeCancelled (G33e: kept for the audit trail, not shown by default).
+   */
+  async dataRequestsOf(customerId: string, principal: Principal | null, o: { includeCancelled?: boolean } = {}): Promise<DataRequest[]> {
+    const rows = (await this.core.repo.listDataRequests(customerId)).filter((r) => o.includeCancelled || !(r.kind === 'export' && r.state === 'cancelled'));
     const media = principal ? this.core.ctx.tryUse('media') : undefined;
     return Promise.all(
       rows.map(async (r) => {

@@ -35,8 +35,10 @@ type Customer {
   "Saved addresses, default first (at most maxAddresses, 20)"
   addresses: [CustomerAddress!]! @areas(in: [STORE, ADMIN])
   marketingPreferences: CustomerMarketingPreferences! @areas(in: [STORE, ADMIN])
-  "Data export and closure requests, newest first"
-  dataRequests: [CustomerDataRequest!]! @areas(in: [STORE, ADMIN])
+  "Data export and closure requests, newest first. Cancelled data exports are left out unless includeCancelled (kept for the audit trail)."
+  dataRequests(includeCancelled: Boolean = false): [CustomerDataRequest!]! @areas(in: [STORE, ADMIN])
+  "Account overview alerts (same as REST GET /overview alerts): delays, failed payments, payments being checked, returns and cases waiting on the customer. Sources that do not answer in time are left out."
+  overviewAlerts: [CustomerOverviewAlert!]! @areas(in: [STORE]) @cost(weight: 10)
 
   # ---- Admin Center only (customer 360)
   "City and state from the default address, for lists"
@@ -50,6 +52,27 @@ type Customer {
   notes: [CustomerNote!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
   "Recorded account actions (reset link, sign-out, restrict, suspend, close) with reason, newest first"
   accountActions(limit: Int = 20): [CustomerAccountAction!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
+}
+
+"An alert on the Account tab home"
+type CustomerOverviewAlert @areas(in: [STORE]) {
+  kind: CustomerOverviewAlertKind!
+  title: String!
+  body: String!
+  orderId: UUID
+  orderRef: String
+  caseRef: String
+  returnRef: String
+  "What the app offers, e.g. wait, cancel_item, view_case, view_return, view_order"
+  actions: [String!]!
+}
+
+enum CustomerOverviewAlertKind @areas(in: [STORE]) {
+  ITEM_DELAYED
+  PAYMENT_BEING_CHECKED
+  RETURN_ACTION_NEEDED
+  CASE_WAITING_ON_YOU
+  PAYMENT_FAILED
 }
 
 enum CustomerAccountStatus {

@@ -163,11 +163,21 @@ describe('uncertain results (scenario 3)', () => {
   });
 
   it('names the order reference when the payment of a placed order fails (payment-failed notice)', async () => {
-    const placed = await placeOrder(h, { customerId: newId(), products: [[{ price: 4006 }]], token: 'tok_visa' }); // …06 declines after the check
+    const customerId = newId();
+    const since = h.clock.now().toISOString();
+    const placed = await placeOrder(h, { customerId, products: [[{ price: 4006 }]], token: 'tok_visa' }); // …06 declines after the check
     expect(placed.state).toBe('pending_check');
+    // G26e: the payment-result page shows when the order was placed
+    expect(await h.service.getIntentStatus(placed.intentId)).toMatchObject({ state: 'pending', orderRef: placed.order.ref, placedAt: placed.order.placedAt, failedAt: null });
+    expect(await h.service.listFailedPaymentsForCustomer(customerId, since)).toEqual([]);
     h.clock.advance(31_000);
     await h.run('payments.check-uncertain');
     expect(h.named('payments.payment.failed').find((e) => e.intentId === placed.intentId)).toMatchObject({ orderId: placed.order.id, orderRef: placed.order.ref });
+    // G26c: the account overview's payment_failed alert reads it
+    const failed = await h.service.listFailedPaymentsForCustomer(customerId, since);
+    expect(failed).toEqual([expect.objectContaining({ intentId: placed.intentId, state: 'failed', orderRef: placed.order.ref, failedAt: expect.any(String) })]);
+    expect(await h.service.listFailedPaymentsForCustomer(customerId, h.clock.now().toISOString().replace(/^\d{4}/, '2999'))).toEqual([]);
+    expect(await h.service.listFailedPaymentsForCustomer(newId(), since)).toEqual([]);
   });
 
   it('raises a check that stays unanswered past uncertainMaxHours to Finance once', async () => {

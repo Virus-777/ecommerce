@@ -53,6 +53,7 @@ intents.index({"order_id":1}, {"name":"intents_order_id_4c5e85"});
 intents.index({"status":1,"next_check_at":1}, {"name":"intents_status_next_check_at_dd88c3"});
 intents.index({"provider":1,"provider_ref":1}, {"name":"intents_provider_provider_ref_178b7f"});
 intents.index({"status":1,"updated_at":1,"_id":1}, {"name":"intents_status_updated_at__id_3b6830"});
+intents.index({"customer_id":1,"status":1,"updated_at":1}, {"name":"intents_customer_id_status_updated_at_bc92c4"});
 
 /** Captured money per seller group */
 const allocations = new Schema(

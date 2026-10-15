@@ -94,6 +94,8 @@ type PaymentStatus @areas(in: [STORE]) {
   methodLabel: String!
   amount: Money!
   orderRef: String
+  "When the order was placed; null while no order exists"
+  placedAt: DateTime
   lastCheckedAt: DateTime
   nextCheckInSeconds: Int
   decline: PaymentDecline

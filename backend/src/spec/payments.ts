@@ -182,6 +182,10 @@ export interface PaymentStatusView {
   amount: common.Money;
   orderId?: string | null;
   orderRef?: string | null;
+  /** When the order was placed (orders' placedAt); null while no order exists */
+  placedAt?: string | null;
+  /** When the payment failed (state failed only) */
+  failedAt?: string | null;
   lastCheckedAt?: string | null;
   nextCheckInSeconds?: number | null;
   decline?: Decline | null;
@@ -203,6 +207,8 @@ export const PaymentStatusView: z.ZodType<PaymentStatusView> = z.object({
   },
   orderId: z.uuid().nullish(),
   orderRef: z.string().nullish(),
+  placedAt: z.iso.datetime({ offset: true }).describe("When the order was placed (orders' placedAt); null while no order exists").nullish(),
+  failedAt: z.iso.datetime({ offset: true }).describe("When the payment failed (state failed only)").nullish(),
   lastCheckedAt: z.iso.datetime({ offset: true }).nullish(),
   nextCheckInSeconds: z.number().int().nullish(),
   get decline() {
@@ -1261,6 +1267,8 @@ export interface PaymentsPublicApi {
   listDisputesForOrder(orderId: string): Promise<Dispute[]>;
   /** The customer's saved cards and wallets, default first Used by: graphql. */
   listSavedMethods(customerId: string): Promise<SavedPaymentMethod[]>;
+  /** Payments of the customer that failed after their order was placed (an uncertain payment finally declined, so orders cancelled the order), failed since `since`, newest first, at most 5. For the account overview's payment_failed alert Used by: customers. */
+  listFailedPaymentsForCustomer(customerId: string, since: string): Promise<PaymentStatusView[]>;
   /** The customer's payment data for the personal data export: saved payment methods masked (brand, last 4, expiry, label, billing city and postal code; never a provider token), payments (reference, order, amount, method label, status, dates; declines with their plain reason) and refunds (reference, order, amount, destination label, status, dates). No provider references, card fingerprints or staff notes. Export hook called by customers.build-data-exports Used by: customers. */
   exportCustomerData(input: { customerId: string, accountId: string }): Promise<common.CustomerDataSection[]>;
 }
@@ -2128,7 +2136,7 @@ export const spec = defineModuleSpec({
   summary: "Charging customers through provider adapters (card, digital wallet): payment intents per checkout attempt, authorization and capture per order and seller group, declines with retry, uncertain results resolved by a status-check job, refund execution (Requested → Processing → Sent / Failed) capped at the remaining refundable amount, chargebacks and payment disputes, saved payment methods and provider webhooks.",
   dependsOn: ["orders"],
   optionalDeps: ["access","customers","media","wallet","audit","checkout","inventory","promotions","support","trust"],
-  publicApi: ["listOptions","authorize","linkOrder","completeAction","getIntentStatus","voidIntent","remainingRefundable","startRefund","getRefund","methodLabel","getPaymentForOrder","listRefundsForOrder","listDisputesForOrder","listSavedMethods","exportCustomerData"],
+  publicApi: ["listOptions","authorize","linkOrder","completeAction","getIntentStatus","voidIntent","remainingRefundable","startRefund","getRefund","methodLabel","getPaymentForOrder","listRefundsForOrder","listDisputesForOrder","listSavedMethods","listFailedPaymentsForCustomer","exportCustomerData"],
   permissions: [
     {
       "key": "payments.payments.view",
@@ -2818,6 +2826,14 @@ export const spec = defineModuleSpec({
             "status": 1,
             "updated_at": 1,
             "_id": 1
+          }
+        },
+        {
+          "name": "intents_customer_id_status_updated_at_bc92c4",
+          "key": {
+            "customer_id": 1,
+            "status": 1,
+            "updated_at": 1
           }
         }
       ],

@@ -119,6 +119,11 @@ export class PaymentsService implements PaymentsPublicApi {
     return this.methods.listSavedMethods(customerId);
   }
 
+  /** Payments that failed after their order was placed, since `since` (account overview payment_failed alert) */
+  listFailedPaymentsForCustomer(customerId: string, since: string): Promise<PaymentStatusView[]> {
+    return this.intents.listFailedForCustomer(customerId, new Date(since));
+  }
+
   /**
    * Export hook (FORMAT.md, Customer data export hook): saved methods masked (never a provider token), the
    * customer's payments and their refunds. No provider references or staff notes.

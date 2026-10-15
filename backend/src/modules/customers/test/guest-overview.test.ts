@@ -4,16 +4,56 @@ import type * as notifications from '../../../spec/notifications.js';
 import { boot, STORE, type Kit } from './helpers.js';
 
 const ORDER = { orderId: newId(), ref: 'MK-261009-48213', email: 'guest.buyer@example.com' };
+/** An order placed by a registered customer: the guest lookup asks to sign in, whatever email is given */
+const MEMBER_ORDER = { ref: 'MK-261009-50000' };
+const PRODUCT_ID = newId();
 const notify = vi.fn(async (_i: notifications.NotifyInput) => ({ noticeIds: [], deliveryIds: [] }));
 const slow = { cases: false };
+
+const returnSummary = (ref: string, status: string, nextStep: string) => ({
+  id: newId(),
+  ref,
+  orderId: ORDER.orderId,
+  orderRef: ORDER.ref,
+  ownerType: 'seller' as const,
+  sellerName: 'Casa Verde Home',
+  item: { orderItemId: newId(), productId: PRODUCT_ID, variantId: newId(), title: 'Desk lamp', options: {}, quantity: 1, unitPrice: { amount: 4500, currency: 'USD' } },
+  itemCount: 1,
+  status,
+  statusLabel: status === 'info_requested' ? 'Waiting for you' : 'Requested',
+  refundStatus: null,
+  openedAt: new Date().toISOString(),
+  nextStep,
+  open: true,
+});
 
 let kit: Kit;
 beforeAll(async () => {
   kit = await boot({
     only: ['orders', 'support', 'messaging', 'notifications'],
     apiStubs: {
+      returns: {
+        listOpenForCustomer: async () => ({ items: [returnSummary('RT-261009-0001', 'requested', 'The seller reviews your request.'), returnSummary('RT-261009-0002', 'info_requested', 'Answer the seller’s question by Oct 12.')], total: 2 }),
+      },
+      payments: {
+        listFailedPaymentsForCustomer: async () => [
+          {
+            intentId: newId(),
+            checkoutSessionId: newId(),
+            state: 'failed',
+            title: 'Payment not accepted',
+            message: 'Your bank declined Visa •••• 0002.',
+            methodLabel: 'Visa •••• 0002',
+            amount: { amount: 2999, currency: 'USD' },
+            orderId: newId(),
+            orderRef: 'MK-261009-40000',
+            retryAllowed: true,
+          },
+        ],
+      },
+      catalog: { getProducts: async (ids) => ids.map((id) => ({ product: { id, slug: 'desk-lamp' } }) as never) },
       orders: {
-        findGuestOrder: async (ref, email) => (ref === ORDER.ref && email === ORDER.email ? { orderId: ORDER.orderId } : null),
+        findGuestOrder: async (ref, email) => (ref === MEMBER_ORDER.ref ? { signInRequired: true } : ref === ORDER.ref && email === ORDER.email ? { orderId: ORDER.orderId, signInRequired: false } : null),
         listGuestOrdersByEmail: async (email) => (email === ORDER.email ? [{ orderId: ORDER.orderId, ref: ORDER.ref, placedAt: new Date().toISOString() }] : []),
         countInProgress: async () => ({ inProgress: 2, delayedPackages: 1 }),
         listRecentForCustomer: async () => [
@@ -33,6 +73,7 @@ beforeAll(async () => {
               { label: 'Package 2', sellerName: 'B', status: 'Delayed', note: '' },
             ],
             thumbnails: [],
+            items: [],
             actions: ['view'],
           },
         ],
@@ -75,6 +116,12 @@ describe('guest order lookup', () => {
     expect([wrongRef.status, wrongEmail.status]).toEqual([404, 404]);
     expect(wrongRef.body.error).toEqual(wrongEmail.body.error);
     expect(wrongRef.body.error.code).toBe('GUEST_ORDER_NOT_FOUND');
+    // G29e: a registered customer's order asks to sign in, with the right email or a wrong one alike
+    const member = await kit.call('POST', `${STORE}/guest-orders/lookup`, { token: v.accessToken, body: { orderRef: MEMBER_ORDER.ref, email: 'anyone@example.com' } });
+    const member2 = await kit.call('POST', `${STORE}/guest-orders/lookup`, { token: v.accessToken, body: { orderRef: MEMBER_ORDER.ref, email: ORDER.email } });
+    expect([member.status, member2.status]).toEqual([403, 403]);
+    expect(member.body.error).toEqual(member2.body.error);
+    expect(member.body.error.code).toBe('GUEST_ORDER_SIGN_IN_REQUIRED');
     let last = wrongEmail;
     for (let i = 0; i < 12 && last.status !== 429; i++) {
       last = await kit.call('POST', `${STORE}/guest-orders/lookup`, { token: v.accessToken, body: { orderRef: 'MK-000000-00001', email: 'probe@example.com' } });
@@ -106,14 +153,27 @@ describe('account overview', () => {
     expect(o.customer).toMatchObject({ firstName: 'Ana', displayName: 'Ana Lopez', email: c.email });
     expect(o.tiles).toEqual([
       { key: 'orders_in_progress', count: 2, note: '1 package delayed', available: true },
-      { key: 'open_returns', count: null, available: false },
+      { key: 'open_returns', count: 2, available: true },
       { key: 'unread_messages', count: 4, available: true },
       { key: 'store_credit', amount: null, available: false },
     ]);
-    expect(o.alerts.map((a: any) => a.kind)).toEqual(['item_delayed', 'payment_being_checked']);
+    // G26c: failed payments and returns waiting on the customer raise their alerts too
+    expect(o.alerts.map((a: any) => a.kind)).toEqual(['item_delayed', 'payment_failed', 'payment_being_checked', 'return_action_needed']);
+    expect(o.alerts[1]).toMatchObject({ title: 'Payment for order MK-261009-40000 didn’t go through', orderRef: 'MK-261009-40000', actions: ['view_order'] });
+    expect(o.alerts[3]).toMatchObject({ title: 'Return RT-261009-0002 is waiting on you', body: 'Answer the seller’s question by Oct 12.', returnRef: 'RT-261009-0002', orderRef: ORDER.ref });
     expect(o.recentOrders[0]).toMatchObject({ ref: ORDER.ref, packageCount: 2, itemStates: { shipped: 3, accepted: 1 } });
-    expect(o.menuCounts).toEqual({ 'account/orders': 2, 'account/messages': 4 });
-    expect(o.unavailable.sort()).toEqual(['open_returns', 'store_credit']);
+    // G19: open returns link to the product
+    expect(o.openReturns[0]).toMatchObject({ ref: 'RT-261009-0001', productTitle: 'Desk lamp', productId: PRODUCT_ID, productSlug: 'desk-lamp' });
+    expect(o.menuCounts).toEqual({ 'account/orders': 2, 'account/returns': 2, 'account/messages': 4 });
+    expect(o.unavailable.sort()).toEqual(['store_credit']);
+  });
+
+  it('GraphQL Customer.overviewAlerts answers the same alerts', async () => {
+    const c = await kit.customer();
+    const res = await kit.app.inject({ method: 'POST', url: '/graphql/store', headers: { authorization: `Bearer ${c.token}` }, payload: { query: '{ me { overviewAlerts { kind title returnRef actions } } }' } });
+    const body = res.json();
+    expect(body.errors).toBeUndefined();
+    expect(body.data.me.overviewAlerts.map((a: any) => a.kind)).toEqual(['ITEM_DELAYED', 'PAYMENT_FAILED', 'PAYMENT_BEING_CHECKED', 'RETURN_ACTION_NEEDED']);
   });
 
   it('a source slower than overviewSourceTimeoutMs is reported, not awaited', async () => {

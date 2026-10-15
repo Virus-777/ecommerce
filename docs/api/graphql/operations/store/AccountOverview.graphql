@@ -8,6 +8,7 @@ query AccountOverview($recentOrdersPaging: PageInput, $openCasesLimit: Int = 3, 
     firstName
     email
     memberSince
+    overviewAlerts { kind title body orderId orderRef caseRef returnRef actions }
     orderCounts { inProgress delayedPackages }
     delayedItems {
       orderId

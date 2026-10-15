@@ -41,7 +41,7 @@ export const storeRoutes = (service: CustomersService) =>
     /** POST /data-requests/exports: Request a copy of my data */
     requestDataExport: async ({ scope, actor, requestId }) => service.dataRequests.requestDataExport(scope, { actor, requestId }),
     /** GET /data-requests: My export and closure requests */
-    listDataRequests: async ({ scope, principal }) => service.dataRequests.listDataRequests(scope, principal),
+    listDataRequests: async ({ scope, principal, query }) => service.dataRequests.listDataRequests(scope, principal, { includeCancelled: query.includeCancelled === true }),
     /** GET /closure-eligibility: Can I close my account now, and what blocks it */
     getClosureEligibility: async ({ scope }) => service.dataRequests.getClosureEligibility(scope),
     /** POST /data-requests/closure: Request account closure (the re-auth token is verified by the middleware) */

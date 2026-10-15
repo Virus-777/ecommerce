@@ -393,6 +393,17 @@ export class Intents {
     return this.views.statusView(i, this.core.lookup());
   }
 
+  /**
+   * Payments of the customer that failed after their order was placed (an uncertain payment finally declined:
+   * orders cancelled the order), newest first, at most 5. Failures at checkout, before an order exists, are
+   * shown on the spot and left out.
+   */
+  async listFailedForCustomer(customerId: string, since: Date): Promise<PaymentStatusView[]> {
+    const rows = await this.repo.find('intents', { customer_id: customerId, status: 'failed', order_id: { op: 'is not', value: null }, updated_at: { op: '>=', value: since } }, { orderBy: [['updated_at', 'desc']], limit: 5 });
+    const lookup = this.core.lookup();
+    return Promise.all(rows.map((i) => this.views.statusView(i, lookup)));
+  }
+
   /* ---------------------------------------------------------------- order link */
 
   private allocationsOfOrder(order: OrderInfo): Allocation[] {

@@ -41,9 +41,12 @@ export class GuestOrders {
     await this.limitLookups(hash, ip);
     const orders = this.core.ctx.tryUse('orders');
     const ref = body.orderRef.trim().toUpperCase();
-    const found = orders && ref ? await orders.findGuestOrder(ref, email) : null;
+    const match = orders && ref ? await orders.findGuestOrder(ref, email) : null;
+    const found = match?.orderId ? { orderId: match.orderId } : null;
     const guestSessionId = principal.kind === 'visitor' && isUuid(principal.sessionId) ? principal.sessionId : null;
     await this.core.repo.insertLookupAttempt({ id: newId(), email_hash: hash, ip, guest_session_id: guestSessionId, succeeded: !!found, order_id: found?.orderId ?? null, at: this.core.now() });
+    // only guest orders open here (G29e): a registered customer's order asks to sign in, whatever email was given
+    if (match?.signInRequired) throw this.core.ctx.error('GUEST_ORDER_SIGN_IN_REQUIRED', 'This order belongs to a Marketly account. Sign in to see it.');
     // the same answer whichever part was wrong
     if (!found) throw new AppError('GUEST_ORDER_NOT_FOUND', 'No order matches that order number and email');
     const identityApi = this.core.ctx.use('identity');
@@ -70,7 +73,7 @@ export class GuestOrders {
       if (!list.length) return;
       const identityApi = this.core.ctx.use('identity');
       const recent = [...list].sort((a, b) => b.placedAt.localeCompare(a.placedAt)).slice(0, 20);
-      const links = await Promise.all(recent.map(async (o) => ({ ...o, ...(await identityApi.issueOrderLink(o.orderId, email)) })));
+      const links = await Promise.all(recent.map(async (o) => ({ ...o, ...(await identityApi.issueOrderLink(o.orderId, email, o.ref)) })));
       const first = links[0]!;
       await this.core.ctx.tryUse('notifications')?.notify({
         topic: 'customer.order.guest_link',

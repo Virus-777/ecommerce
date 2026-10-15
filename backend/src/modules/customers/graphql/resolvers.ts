@@ -45,7 +45,10 @@ export const resolvers = (service: CustomersService): ModuleResolvers => {
       addresses: async () => (await service.admin.addressesOf(r.id)).map(gqlAddress),
       marketingPreferences: () => service.admin.preferencesOf(r),
       // download links only for the customer, in the store
-      dataRequests: async () => (await service.dataRequests.dataRequestsOf(r.id, ctx.area === 'store' ? ctx.principal : null)).map(gqlRequest),
+      dataRequests: async (args: { includeCancelled?: boolean | null }) =>
+        (await service.dataRequests.dataRequestsOf(r.id, ctx.area === 'store' ? ctx.principal : null, { includeCancelled: args?.includeCancelled === true })).map(gqlRequest),
+      // the account overview's alerts (store): delays, failed or checked payments, returns and cases waiting on the customer
+      overviewAlerts: async () => (await service.profiles.overviewAlerts(r.id)).map((a) => ({ ...a, kind: upper(a.kind), orderId: a.orderId ?? null, orderRef: a.orderRef ?? null, caseRef: a.caseRef ?? null, returnRef: a.returnRef ?? null })),
       location: location !== undefined ? location : async () => map.location((await service.admin.defaultAddressesOf([r.id])).get(r.id)),
       orderCount: r.order_count,
       totalSpend: gqlMoney({ amount: Number(r.total_spend_minor), currency: r.currency }),

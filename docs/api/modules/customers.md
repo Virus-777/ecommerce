@@ -227,7 +227,7 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 | orderRef | `string?` |
 | caseRef | `string?` |
 | returnRef | `string?` |
-| actions | `string[]` e.g. wait, cancel_item, view_case |
+| actions | `string[]` e.g. wait, cancel_item, view_case, view_return, view_order |
 
 ### OverviewOrder
 
@@ -262,6 +262,8 @@ The customer side of an account: profile, saved addresses, marketing consent, re
 | returnId | `uuid` |
 | ref | `string` |
 | productTitle | `string` |
+| productId | `uuid?` For the product link /p/{productSlug}/{productId} |
+| productSlug | `string?` Current product slug; null when the catalog did not answer |
 | image | `MediaRef?` |
 | returnStatus | `string` |
 | refundStatus | `string` Requested, Under review, Approved, Processing, Sent or Failed. Approved does not mean the money has arrived. |
@@ -761,6 +763,7 @@ Checked through the access module (limits per role, second reviewer).
 | `CLOSURE_BLOCKED` | 409 | Open orders, returns, cases, pending refunds or credit; details.blockers lists them |
 | `DATA_REQUEST_IN_PROGRESS` | 409 | A request of the same kind is already open |
 | `GUEST_ORDER_NOT_FOUND` | 404 | No guest order matches that reference and email |
+| `GUEST_ORDER_SIGN_IN_REQUIRED` | 403 | The order belongs to a registered customer: sign in to see it (answered whatever email was given, so it never confirms the email) |
 | `UNSUBSCRIBE_TOKEN_INVALID` | 400 | The unsubscribe link is invalid or expired |
 
 ## Background jobs
@@ -844,8 +847,10 @@ type Customer {
   "Saved addresses, default first (at most maxAddresses, 20)"
   addresses: [CustomerAddress!]! @areas(in: [STORE, ADMIN])
   marketingPreferences: CustomerMarketingPreferences! @areas(in: [STORE, ADMIN])
-  "Data export and closure requests, newest first"
-  dataRequests: [CustomerDataRequest!]! @areas(in: [STORE, ADMIN])
+  "Data export and closure requests, newest first. Cancelled data exports are left out unless includeCancelled (kept for the audit trail)."
+  dataRequests(includeCancelled: Boolean = false): [CustomerDataRequest!]! @areas(in: [STORE, ADMIN])
+  "Account overview alerts (same as REST GET /overview alerts): delays, failed payments, payments being checked, returns and cases waiting on the customer. Sources that do not answer in time are left out."
+  overviewAlerts: [CustomerOverviewAlert!]! @areas(in: [STORE]) @cost(weight: 10)
 
   # ---- Admin Center only (customer 360)
   "City and state from the default address, for lists"
@@ -859,6 +864,27 @@ type Customer {
   notes: [CustomerNote!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
   "Recorded account actions (reset link, sign-out, restrict, suspend, close) with reason, newest first"
   accountActions(limit: Int = 20): [CustomerAccountAction!] @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "customers.accounts.view")
+}
+
+"An alert on the Account tab home"
+type CustomerOverviewAlert @areas(in: [STORE]) {
+  kind: CustomerOverviewAlertKind!
+  title: String!
+  body: String!
+  orderId: UUID
+  orderRef: String
+  caseRef: String
+  returnRef: String
+  "What the app offers, e.g. wait, cancel_item, view_case, view_return, view_order"
+  actions: [String!]!
+}
+
+enum CustomerOverviewAlertKind @areas(in: [STORE]) {
+  ITEM_DELAYED
+  PAYMENT_BEING_CHECKED
+  RETURN_ACTION_NEEDED
+  CASE_WAITING_ON_YOU
+  PAYMENT_FAILED
 }
 
 enum CustomerAccountStatus {

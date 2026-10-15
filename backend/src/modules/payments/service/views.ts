@@ -133,7 +133,17 @@ export class Views {
     const amount = this.m(i.amount, i.currency);
     const label = i.method.label;
     const order = await lookup.order(i.order_id);
-    const base = { intentId: i.id, checkoutSessionId: i.checkout_session_id, methodLabel: label, amount, orderId: i.order_id, orderRef: order?.ref ?? null, lastCheckedAt: iso(i.last_checked_at) };
+    const base = {
+      intentId: i.id,
+      checkoutSessionId: i.checkout_session_id,
+      methodLabel: label,
+      amount,
+      orderId: i.order_id,
+      orderRef: order?.ref ?? null,
+      placedAt: order?.placedAt ?? null,
+      failedAt: i.status === 'failed' ? i.updated_at.toISOString() : null,
+      lastCheckedAt: iso(i.last_checked_at),
+    };
     if (is(ACCEPTED, i.status) || (i.status === 'voided' && i.order_id)) {
       return { ...base, state: 'accepted', title: 'Payment accepted', message: `${label} was accepted. Your card is charged once, when the order is accepted.`, retryAllowed: false, decline: null, nextCheckInSeconds: null, holdNote: null, nextAction: null };
     }

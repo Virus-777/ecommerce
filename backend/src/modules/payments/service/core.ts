@@ -65,6 +65,7 @@ export const illegal = (message: string, details: Record<string, unknown> = {}) 
 export interface OrderInfo {
   id: string;
   ref: string;
+  placedAt: string;
   customerId: string | null;
   contactName: string;
   contactEmail: string;
@@ -84,6 +85,7 @@ export function orderInfoOf(o: OrderDetail): OrderInfo {
   return {
     id: o.id,
     ref: o.ref,
+    placedAt: o.placedAt,
     customerId: o.contact.customerId ?? null,
     contactName: o.contact.name,
     contactEmail: o.contact.email,

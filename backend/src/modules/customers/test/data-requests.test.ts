@@ -82,6 +82,10 @@ describe('data export', () => {
     const twice = await kit.call('POST', `${STORE}/data-requests/${r.id}/cancel`, { token: c.token });
     expect(twice.status).toBe(409);
     expect(twice.body.error.code).toBe('ILLEGAL_TRANSITION');
+    // G33e: the cancelled export is kept but left out of the default list
+    expect((await kit.call('GET', `${STORE}/data-requests`, { token: c.token })).body.map((x: any) => x.id)).not.toContain(r.id);
+    const all = await kit.call('GET', `${STORE}/data-requests?includeCancelled=true`, { token: c.token });
+    expect(all.body.find((x: any) => x.id === r.id)).toMatchObject({ state: 'cancelled' });
   });
 
   it('failed exports show in the privacy queue and staff can retry them', async () => {
