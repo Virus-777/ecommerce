@@ -38,13 +38,14 @@ export class PricingPart extends Part {
   /**
    * Checks a was-price. lowest_30_days: the offer's own price history must cover the look-back window
    * before the sale and the was-price may not exceed the lowest price charged in it. list_price: the
-   * manufacturer list price on file (product specs). Unverifiable → WAS_PRICE_NOT_VERIFIED.
+   * manufacturer list price on file (the variant's list price, else the product specs). Unverifiable →
+   * WAS_PRICE_NOT_VERIFIED.
    */
-  async verifyCompareAt(c: CompareAtInput, price: common.Money, o: { product: catalog.ProductAdmin | null; history: readonly PriceSpan[]; saleStart: Date }): Promise<{ amount: common.Money; basis: CompareAtInput['basis'] }> {
+  async verifyCompareAt(c: CompareAtInput, price: common.Money, o: { product: catalog.ProductAdmin | null; variantId: string; history: readonly PriceSpan[]; saleStart: Date }): Promise<{ amount: common.Money; basis: CompareAtInput['basis'] }> {
     if (c.amount.currency !== this.core.currency || !Number.isInteger(c.amount.amount) || c.amount.amount <= 0) throw invalidField('compareAt.amount', `Enter the was-price in ${this.core.currency}`);
     if (c.amount.amount <= price.amount) throw this.core.error('WAS_PRICE_NOT_VERIFIED', 'The was-price must be higher than the price', { basis: c.basis });
     if (c.basis === 'list_price') {
-      const list = listPriceOnFile(o.product?.product.specs);
+      const list = listPriceOnFile(o.product?.product, o.variantId, this.core.currency);
       if (list === null) throw this.core.error('WAS_PRICE_NOT_VERIFIED', 'There is no manufacturer list price on file for this product', { basis: c.basis });
       if (c.amount.amount > list) throw this.core.error('WAS_PRICE_NOT_VERIFIED', `The was-price is above the list price on file (${formatMoney(this.core.money(list))})`, { basis: c.basis, listPrice: this.core.money(list) });
       return { amount: c.amount, basis: c.basis };
@@ -184,7 +185,7 @@ export class PricingPart extends Part {
     const history = await this.history(row.id);
     let compareAt: { amount: number; basis: string } | null = null;
     if (item.compareAt) {
-      const v = await this.verifyCompareAt(item.compareAt, item.price, { product, history, saleStart: this.now() });
+      const v = await this.verifyCompareAt(item.compareAt, item.price, { product, variantId: row.variant_id, history, saleStart: this.now() });
       compareAt = { amount: v.amount.amount, basis: v.basis };
     }
     if (item.saleEndsAt) this.parts.manage.checkSaleEnd(item.saleEndsAt);
@@ -279,7 +280,7 @@ export class PricingPart extends Part {
     if (body.price.amount === Number(row.price_amount) && !body.compareAt) throw invalidField('price', 'The new price is the same as the current price');
     let compareAt: { amount: number; basis: string } | null = null;
     if (body.compareAt) {
-      const v = await this.verifyCompareAt(body.compareAt, body.price, { product, history: await this.history(row.id), saleStart: startsAt && startsAt > now ? startsAt : now });
+      const v = await this.verifyCompareAt(body.compareAt, body.price, { product, variantId: row.variant_id, history: await this.history(row.id), saleStart: startsAt && startsAt > now ? startsAt : now });
       compareAt = { amount: v.amount.amount, basis: v.basis };
     }
     const from = Number(row.price_amount);
@@ -489,7 +490,7 @@ export class PricingPart extends Part {
       if (holds && row.sale_ends_at && row.sale_ends_at <= now) holds = false;
       if (holds && row.compare_at_basis === 'list_price') {
         const product = await this.core.productAdmin(row.product_id, cache);
-        const list = listPriceOnFile(product?.product.specs);
+        const list = listPriceOnFile(product?.product, row.variant_id, this.core.currency);
         holds = list !== null && Number(row.compare_at_amount) <= list;
       }
       if (holds && row.compare_at_basis === 'lowest_30_days') {

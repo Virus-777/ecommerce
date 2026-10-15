@@ -119,8 +119,22 @@ export function verifyLowestBasis(spans: readonly PriceSpan[], wasAmount: number
   return { verified: true, lowest };
 }
 
-/** A list price on file in the product specs (e.g. "List price": "$249.00" or "MSRP": "249") */
-export function listPriceOnFile(specs: Record<string, string> | null | undefined): number | null {
+/**
+ * The manufacturer list price on file for one variant: the variant's own list price (in the market
+ * currency) first, else a list price in the product specs.
+ */
+export function listPriceOnFile(
+  product: { specs?: Record<string, string> | null; variants?: readonly { id: string; listPrice?: { amount: number; currency: string } | null }[] } | null | undefined,
+  variantId: string,
+  currency: string,
+): number | null {
+  const own = product?.variants?.find((v) => v.id === variantId)?.listPrice;
+  if (own && own.currency === currency && own.amount > 0) return own.amount;
+  return listPriceInSpecs(product?.specs);
+}
+
+/** A list price in the product specs (e.g. "List price": "$249.00" or "MSRP": "249") */
+export function listPriceInSpecs(specs: Record<string, string> | null | undefined): number | null {
   if (!specs) return null;
   for (const [k, v] of Object.entries(specs)) {
     if (!/^(list price|msrp|rrp|manufacturer list price)$/i.test(k.trim())) continue;

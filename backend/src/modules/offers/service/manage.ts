@@ -178,9 +178,9 @@ export class ManagePart extends Part {
   }
 
   /** compareAt on a new offer: only a list price on file can back it (no price history yet) */
-  async compareAtForNew(c: CompareAtInput | null | undefined, price: common.Money, product: catalog.ProductAdmin) {
+  async compareAtForNew(c: CompareAtInput | null | undefined, price: common.Money, product: catalog.ProductAdmin, variantId: string) {
     if (!c) return null;
-    return this.parts.pricing.verifyCompareAt(c, price, { product, history: [], saleStart: this.now() });
+    return this.parts.pricing.verifyCompareAt(c, price, { product, variantId, history: [], saleStart: this.now() });
   }
 
   async checkSeller(sellerId: string, activity: 'new_offers' | 'new_listings' | 'sales' | 'offer_reactivation', o: { categoryId?: string | null; condition?: string; offerId?: string }) {
@@ -224,7 +224,7 @@ export class ManagePart extends Part {
     const returns = this.returnTerms(input.returnTerms, b);
     const warranty = this.warranty(input.warranty);
     await this.checkPrice(input.price, res.categoryId);
-    const compareAt = await this.compareAtForNew(input.compareAt, input.price, res.product);
+    const compareAt = await this.compareAtForNew(input.compareAt, input.price, res.product, input.variantId);
     const origin = await this.origin(sellerId);
     await this.checkShippingProfile(input.shippingProfileId, { businessDays: input.dispatchBusinessDays, ...origin }, { ownerType: 'seller', sellerId });
 
@@ -274,7 +274,7 @@ export class ManagePart extends Part {
     const returns = this.returnTerms(input.returnTerms, b);
     const warranty = this.warranty(input.warranty);
     await this.checkPrice(input.price, res.categoryId);
-    const compareAt = await this.compareAtForNew(input.compareAt, input.price, res.product);
+    const compareAt = await this.compareAtForNew(input.compareAt, input.price, res.product, input.variantId);
     const origin = await this.origin(null);
     await this.checkShippingProfile(input.shippingProfileId, { businessDays: input.dispatchBusinessDays, ...origin }, { ownerType: 'official', sellerId: null });
 
@@ -686,7 +686,7 @@ export class ManagePart extends Part {
         set('compare_at_verified', false, 'compareAt');
       } else {
         const history = await this.parts.pricing.history(row.id);
-        await this.parts.pricing.verifyCompareAt(body.compareAt, this.core.money(row.price_amount), { product, history, saleStart: this.parts.pricing.saleStartOf(row, history) });
+        await this.parts.pricing.verifyCompareAt(body.compareAt, this.core.money(row.price_amount), { product, variantId, history, saleStart: this.parts.pricing.saleStartOf(row, history) });
         set('compare_at_amount', body.compareAt.amount.amount, 'compareAt');
         set('compare_at_basis', body.compareAt.basis, 'compareAt');
         set('compare_at_verified', true, 'compareAt');

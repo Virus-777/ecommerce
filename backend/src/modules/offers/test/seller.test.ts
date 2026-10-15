@@ -76,6 +76,16 @@ describe('creating and publishing seller offers', () => {
     const ok = await asSeller(h, sellerId, 'POST', '/offers', offerInput(withList.id, withList.variants[0]!, prof, { compareAt: { amount: { amount: 24900, currency: 'USD' }, basis: 'list_price' } }));
     expect(ok.statusCode, ok.body).toBe(201);
     expect(ok.json().offer.compareAt).toMatchObject({ verified: true, basis: 'list_price', amount: { amount: 24900 } });
+
+    // G10: the variant's own list price backs a list_price was-price (and wins over the specs)
+    const variantList = addProduct(h, { listPrices: [29900, null], specs: { 'List price': '$199.00' } });
+    const wasList = (variantId: string, amount: number) => offerInput(variantList.id, variantId, prof, { compareAt: { amount: { amount, currency: 'USD' }, basis: 'list_price' } });
+    const byVariant = await asSeller(h, sellerId, 'POST', '/offers', wasList(variantList.variants[0]!, 29900));
+    expect(byVariant.statusCode, byVariant.body).toBe(201);
+    expect(byVariant.json().offer.compareAt).toMatchObject({ verified: true, basis: 'list_price', amount: { amount: 29900 } });
+    // the other variant has no list price of its own: the specs apply
+    const above = await asSeller(h, sellerId, 'POST', '/offers', wasList(variantList.variants[1]!, 29900));
+    expect(above.json().error).toMatchObject({ code: 'WAS_PRICE_NOT_VERIFIED', details: { listPrice: { amount: 19900 } } });
   });
 
   it('refuses restricted sellers and products that cannot be sold', async () => {

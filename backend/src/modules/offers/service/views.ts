@@ -260,7 +260,7 @@ export class ViewsPart extends Part {
     let compareAtCheck: OfferPreview['compareAtCheck'] = null;
     if (input.compareAt) {
       try {
-        const v = await m.compareAtForNew(input.compareAt, input.price, res.product);
+        const v = await m.compareAtForNew(input.compareAt, input.price, res.product, input.variantId);
         compareAtCheck = v ? { amount: v.amount, basis: v.basis, verified: true, explanation: 'Was-price matches the list price on file.' } : null;
       } catch (err) {
         compareAtCheck = { amount: input.compareAt.amount, basis: input.compareAt.basis, verified: false, explanation: (err as Error).message };

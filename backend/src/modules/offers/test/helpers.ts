@@ -366,9 +366,9 @@ export function addSeller(h: Harness, over: Partial<SellerState> = {}): string {
   return id;
 }
 
-export function addProduct(h: Harness, over: { reviewState?: catalog.ProductAdmin['reviewState']; publication?: catalog.ProductAdmin['publication']; ownerSellerId?: string | null; variants?: number; includedItems?: string[]; specs?: Record<string, string>; categoryId?: string } = {}) {
+export function addProduct(h: Harness, over: { reviewState?: catalog.ProductAdmin['reviewState']; publication?: catalog.ProductAdmin['publication']; ownerSellerId?: string | null; variants?: number; includedItems?: string[]; specs?: Record<string, string>; categoryId?: string; listPrices?: (number | null)[] } = {}) {
   const id = newId();
-  const variants = Array.from({ length: over.variants ?? 2 }, (_, i) => ({ id: newId(), options: { Color: ['Black', 'Silver', 'Sage'][i] ?? `C${i}` }, gtin: null, images: [] }));
+  const variants = Array.from({ length: over.variants ?? 2 }, (_, i) => ({ id: newId(), options: { Color: ['Black', 'Silver', 'Sage'][i] ?? `C${i}` }, gtin: null, images: [], listPrice: over.listPrices?.[i] ? { amount: over.listPrices[i]!, currency: 'USD' } : null }));
   const p = {
     product: {
       id,
