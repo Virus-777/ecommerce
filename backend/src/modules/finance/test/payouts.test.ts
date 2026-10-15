@@ -88,6 +88,10 @@ describe('payout destinations', () => {
     // only the owner confirms deposits
     const member = await k.call('POST', `${SELLER}/payout-destination/confirm-deposits`, k.sellerToken(S, { permissions: ['finance.balances.view'] }), { amounts: [USD(1), USD(2)] });
     expect(member.status).toBe(403);
+    // not delegable: a member granted the permission is still refused
+    const granted = await k.call('POST', `${SELLER}/payout-destination/confirm-deposits`, k.sellerToken(S, { permissions: ['finance.destinations.confirm'] }), { amounts: [USD(1), USD(2)] });
+    expect(granted.status).toBe(403);
+    expect(granted.body.error.code).toBe('OWNER_ONLY');
     const [a, b] = k.provider.testDepositsFor(providerDestinationId);
     const ok = await k.call('POST', `${SELLER}/payout-destination/confirm-deposits`, token, { amounts: [USD(b), USD(a)] });
     expect(ok.status).toBe(200);

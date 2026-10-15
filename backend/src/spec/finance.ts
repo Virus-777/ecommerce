@@ -2703,7 +2703,7 @@ export const endpoints = defineEndpoints({
       },
     }),
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","DEPOSIT_AMOUNTS_INCORRECT","DEPOSIT_ATTEMPTS_EXCEEDED","RATE_LIMITED"],
+    errors: ["OWNER_ONLY","ILLEGAL_TRANSITION","DEPOSIT_AMOUNTS_INCORRECT","DEPOSIT_ATTEMPTS_EXCEEDED","RATE_LIMITED"],
     audited: true,
     events: ["finance.destination.verified"],
     screens: ["seller/setup","seller/finance"],
@@ -3727,7 +3727,8 @@ export const spec = defineModuleSpec({
     {
       "key": "finance.destinations.confirm",
       "audience": "seller",
-      "desc": "Confirm the test deposits of the payout account (store owner only, like changing the account; not delegable)"
+      "desc": "Confirm the test deposits of the payout account (store owner only, like changing the account; not delegable)",
+      "ownerOnly": true
     },
     {
       "key": "finance.balances.view",
