@@ -356,6 +356,8 @@ export class Profiles {
       pendingChange: pending[0] ? { effectiveFrom: pending[0].at.toISOString(), summary: pending.map((p) => p.summary).join('; ') } : null,
       customerPreview: def ? await this.preview(owner, { postalCode: cfg.marketDefaultPostalCode, profileId: def.id }) : emptyPreview(),
       history,
+      // read-only for the seller (setting sellerHandlingRange, the only source; G40c)
+      allowedHandlingDays: { min: cfg.sellerHandlingRange[0], max: cfg.sellerHandlingRange[1] },
       applyNote: APPLY_NOTE,
     };
   }

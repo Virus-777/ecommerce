@@ -17,7 +17,7 @@ type Shipment {
   groupId: UUID!
   "Set for return parcels"
   returnId: UUID
-  "'Package 2 of 3'"
+  "'Shipment 2 of 3': this shipment among the order's shipments (orders' 'Package x of y' is the seller group); 'Return parcel' for returns"
   packageLabel: String!
   sellerName: String!
   shipFrom: String!
@@ -125,6 +125,8 @@ type ShipmentLabel @areas(in: [SELLER, ADMIN]) {
   serviceName: String!
   cost: Money!
   trackingNumber: String!
+  "Download link of the label file (PDF or ZPL), signed for the caller as on REST Label.labelUrl"
+  labelUrl: URL
   status: ShipmentLabelStatus!
   purchasedBy: Actor!
   purchasedAt: DateTime!
@@ -198,6 +200,8 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   itemsSummary: String!
   "The order items the exception is about (empty when it covers the whole group)"
   orderItemIds: [UUID!]!
+  "orderItemIds with the units concerned, in the same order"
+  items: [DeliveryExceptionItem!]!
   "e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"
   situation: String!
   "The plan's required response for the kind"
@@ -221,6 +225,12 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   "Carrier claim filed for a lost or damaged package"
   claimId: UUID @areas(in: [ADMIN])
   openedBy: Actor! @areas(in: [ADMIN])
+}
+
+type DeliveryExceptionItem @areas(in: [SELLER, ADMIN]) {
+  orderItemId: UUID!
+  "Units of the order item the exception is about; null on exceptions opened before quantities were kept"
+  quantity: Int
 }
 
 type DeliverySellerResponse @areas(in: [SELLER, ADMIN]) {

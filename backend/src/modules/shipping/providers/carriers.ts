@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { money } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import { labelPdf } from '../domain/pdf.js';
-import { CarrierRefused, type CarrierPort, type CarrierScan } from '../ports.js';
+import { CarrierRefused, CarrierUnreachable, type CarrierPort, type CarrierScan } from '../ports.js';
 
 const BASE: Record<string, number> = { ground: 795, two_day: 1495, overnight: 2995, freight: 8900 };
 const PER_KG: Record<string, number> = { ground: 90, two_day: 180, overnight: 350, freight: 60 };
@@ -54,7 +54,9 @@ export function devCarrierAdapter(): CarrierPort {
     },
 
     async buyLabel(input) {
-      if (input.parcel.weightGrams % 1000 === 13) throw new CarrierRefused(`${input.carrierName} did not answer the label request`);
+      // test hooks: a weight ending in 13 g is a carrier that does not answer, 14 g one that refuses the address
+      if (input.parcel.weightGrams % 1000 === 13) throw new CarrierUnreachable(`${input.carrierName} did not answer the label request`);
+      if (input.parcel.weightGrams % 1000 === 14) throw new CarrierRefused(`${input.carrierName} could not validate the delivery address`);
       if (input.parcel.weightGrams > 68_000) throw new CarrierRefused('The parcel is over the carrier weight limit (68 kg)');
       const trackingNumber = devTrackingNumber(input.carrierCode, input.reference);
       const to = input.to;

@@ -131,7 +131,15 @@ export interface CarrierScan {
   location?: string | null;
 }
 
+/** The carrier answered and refused (e.g. over its weight limit): LABEL_FAILED 422 */
 export class CarrierRefused extends Error {
+  constructor(readonly carrierMessage: string) {
+    super(carrierMessage);
+  }
+}
+
+/** The carrier could not be reached or did not answer: LABEL_FAILED 502 (decision G42) */
+export class CarrierUnreachable extends Error {
   constructor(readonly carrierMessage: string) {
     super(carrierMessage);
   }
@@ -144,7 +152,7 @@ export class CarrierRefused extends Error {
 export interface CarrierPort {
   /** Label price for a parcel (minor units); throws CarrierRefused when the carrier will not carry it */
   rate(input: { carrierCode: string; serviceCode: string; speed: string; parcel: Parcel; fromPostalCode: string | null; toPostalCode: string; currency: string }): Promise<common.Money>;
-  /** Buys a label; throws CarrierRefused when the carrier refuses or does not answer (nothing charged) */
+  /** Buys a label; throws CarrierRefused when the carrier refuses, CarrierUnreachable when it does not answer (nothing charged) */
   buyLabel(input: {
     carrierCode: string;
     carrierName: string;

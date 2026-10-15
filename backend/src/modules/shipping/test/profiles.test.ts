@@ -58,11 +58,16 @@ describe('seller shipping settings', () => {
     const fresh = await h.call('GET', `${SELLER}/settings`, token);
     expect(fresh.status).toBe(200);
     expect(fresh.body).toMatchObject({ coverage: { area: 'contiguous_48_dc' }, dispatch: { handlingDays: 2, businessDays: ['mon', 'tue', 'wed', 'thu', 'fri'] }, profiles: [], pendingChange: null, applyNote: expect.stringContaining('Existing orders keep') });
+    // G40b/G40c: the seller reads the allowed range, 0–3 business days (0 = same business day)
+    expect(fresh.body.allowedHandlingDays).toEqual({ min: 0, max: 3 });
     expect(await h.service.hasCoverage(sellerId)).toBe(false);
 
     const out = await h.call('PUT', `${SELLER}/settings`, token, settingsInput({ handlingDays: 9 }));
     expect(out.status).toBe(422);
-    expect(out.body.error).toMatchObject({ code: 'HANDLING_OUT_OF_RANGE', details: { min: 1, max: 3 } });
+    expect(out.body.error).toMatchObject({ code: 'HANDLING_OUT_OF_RANGE', details: { min: 0, max: 3 } });
+    const sameDay = await h.call('PUT', `${SELLER}/settings`, token, settingsInput({ handlingDays: 0 }));
+    expect(sameDay.status, JSON.stringify(sameDay.body)).toBe(200);
+    expect(sameDay.body.dispatch.handlingDays).toBe(0);
     expect((await h.call('PUT', `${SELLER}/settings`, token, settingsInput({ cutoff: '9am' }))).status).toBe(400);
     const saved = await h.call('PUT', `${SELLER}/settings`, token, settingsInput({ handlingDays: 1 }));
     expect(saved.body.dispatch).toMatchObject({ handlingDays: 1, sameDayCutoff: '12:00' });

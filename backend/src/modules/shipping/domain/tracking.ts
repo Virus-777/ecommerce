@@ -68,7 +68,8 @@ export const CARRIER_CATALOG: Record<string, CarrierDef> = {
   other: { code: 'other', name: 'Other carrier', trackingUrl: null, services: [{ code: 'standard', name: 'Other carrier', transit: { min: 2, max: 7 }, labelSupported: false, trackingPattern: null, speed: 'ground' }] },
 };
 
-export const DEFAULT_CARRIERS = ['ups', 'usps', 'fedex'];
+/** Carriers every install has (decision G40a); seeded at start, so existing installs get new ones too */
+export const DEFAULT_CARRIERS = ['ups', 'usps', 'fedex', 'ontrac', 'other'];
 
 export const normalizeTracking = (s: string | null | undefined) => (s ?? '').replace(/[\s-]/g, '').toUpperCase();
 

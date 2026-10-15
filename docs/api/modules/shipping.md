@@ -92,6 +92,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | POST | `/api/admin/shipping/notices/preview` | Preview a draft notice at checkout for a postal code: customer message and adjusted arrival estimates | staff<br>`shipping.notices.manage` | `{ notice: NoticeInput, postalCode: string, surface: enum(product|cart|checkout|tracking)?, profileId: uuid?, at: datetime? }` → `NoticePreview` |
 | PATCH | `/api/admin/shipping/notices/{id}` | Edit a draft, scheduled or live notice _(audited)_ | staff<br>`shipping.notices.manage` | `NoticeInput` → `ServiceNotice` |
 | POST | `/api/admin/shipping/notices/{id}/publish` | Publish now or schedule a notice _(audited)_ | staff<br>`shipping.notices.manage` | `{ mode: enum(now|scheduled) }` → `ServiceNotice` |
+| DELETE | `/api/admin/shipping/notices/{id}` | Delete a draft notice _(audited)_ | staff<br>`shipping.notices.manage` | 204 No content |
 | POST | `/api/admin/shipping/notices/{id}/withdraw` | Withdraw a notice _(audited)_ | staff<br>`shipping.notices.manage` | `{ reason: text }` → `ServiceNotice` |
 | GET | `/api/admin/shipping/free-shipping-rules` | Free-shipping rules with who funds them | staff<br>`shipping.settings.view` | `FreeShippingRule[]` |
 | POST | `/api/admin/shipping/free-shipping-rules` | Add a free-shipping rule _(audited)_ | staff<br>`shipping.settings.manage` | `FreeShippingRuleInput` → `FreeShippingRule` |
@@ -389,7 +390,15 @@ How things get delivered: carriers and services, destinations and excluded areas
 | pendingChange | `PendingChange?` Saved change waiting for its effective date |
 | customerPreview | `CustomerPreview` |
 | history | `TimelineEvent[]` |
+| allowedHandlingDays | `HandlingRange` Handling days the seller may choose (setting sellerHandlingRange, default 0–3; 0 = same business day). updateSellerSettings refuses others with HANDLING_OUT_OF_RANGE |
 | applyNote | `string` 'New settings apply to orders placed after the effective time. Existing orders keep the delivery terms and prices the customer accepted.' |
+
+### HandlingRange
+
+| Field | Type |
+|---|---|
+| min | `int` |
+| max | `int` |
 
 ### PendingChange
 
@@ -797,7 +806,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | ownerType | `enum(official|seller)` |
 | sellerId | `uuid?` |
 | sellerName | `string` |
-| packageLabel | `string` 'Package 2 of 3' |
+| packageLabel | `string` 'Shipment 2 of 3': this shipment among the order's shipments (orders' 'Package x of y' is the seller group); 'Return parcel' for returns |
 | carrierCode | `string?` |
 | carrierName | `string?` |
 | serviceName | `string?` |
@@ -926,6 +935,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | sellerName | `string` |
 | itemsSummary | `string` |
 | orderItemIds | `uuid[]` The order items the exception is about (empty when it covers the whole group) |
+| items | `ExceptionItem[]` orderItemIds with the units concerned (G75), in the same order |
 | situation | `string` e.g. 'USPS number not recognized' or 'Label created, no scan 36 h' |
 | requiredResponse | `string` The plan's required response for the kind |
 | nextStep | `string` e.g. 'Cancel item, refund $112.00' |
@@ -943,6 +953,13 @@ How things get delivered: carriers and services, destinations and excluded areas
 | history | `TimelineEvent[]` |
 | openedBy | `Actor` |
 | openedAt | `datetime` |
+
+### ExceptionItem
+
+| Field | Type |
+|---|---|
+| orderItemId | `uuid` |
+| quantity | `int?` Units of the order item the exception is about; null on exceptions opened before quantities were kept |
 
 ### ExceptionOwner
 
@@ -1456,6 +1473,7 @@ Indexes: `(due_at) where overdue_since is null`
 | fulfilled_by | text (official_warehouse|seller|marketly_service) |
 | items_summary | text |
 | order_item_ids | uuid[] (the order items the exception is about, as on shipping.shipment.exception) |
+| item_quantities | jsonb? ([{ order_item_id, quantity }]: units of each order item the exception is about; null on rows opened before G75) |
 | situation | text |
 | next_step | text |
 | status | text |
@@ -1530,10 +1548,10 @@ Indexes: `unique (carrier_code, external_id)`
 | Publishes | When | Payload | Consumed by |
 |---|---|---|---|
 | `shipping.shipment.created` | A shipment is recorded or a label is bought | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, groupId: uuid, returnId: uuid?, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), packageLabel: string, carrierCode: string?, carrierName: string?, serviceName: string?, trackingNumber: string?, trackingUrl: url?, lines: ShipmentLine[], status: string }` | orders |
-| `shipping.shipment.dispatched` | A package is handed to the carrier (seller record, warehouse hand-over or first scan) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), lines: ShipmentLine[], shippedAt: datetime, dispatchDueAt: datetime?, onTime: bool?, trackingValid: bool, estimatedArrival: DateRange? }` | fulfillment-service, inventory, notifications, orders, payments, reports, returns, sellers, support, warehouse, workqueues |
+| `shipping.shipment.dispatched` | A package is handed to the carrier (seller record, warehouse hand-over or first scan) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, orderRef: string?, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), lines: ShipmentLine[], shippedAt: datetime, dispatchDueAt: datetime?, onTime: bool?, trackingValid: bool, estimatedArrival: DateRange? }` | fulfillment-service, inventory, notifications, orders, payments, reports, returns, sellers, support, warehouse, workqueues |
 | `shipping.shipment.status_changed` | Any shipment status change | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, groupId: uuid, returnId: uuid?, from: string, to: string, statusLabel: string, estimatedArrival: DateRange?, at: datetime }` | orders, returns |
-| `shipping.shipment.delivered` | The carrier confirms delivery (or pickup) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), lines: ShipmentLine[], deliveredAt: datetime }` | notifications, orders, returns, sellers, support, workqueues |
-| `shipping.shipment.exception` | A delivery exception is opened | `{ exceptionId: uuid, kind: enum(seller_cannot_fulfill|late_dispatch|missing_tracking|lost_or_damaged|failed_delivery), orderId: uuid, customerId: uuid?, contactEmail: email?, groupId: uuid, shipmentId: uuid?, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), orderItemIds: uuid[], dueAt: datetime, customerAction: string?, source: enum(carrier|system|staff|seller|customer_report), caseRef: string? }` | notifications, orders, reports, returns, support, workqueues |
+| `shipping.shipment.delivered` | The carrier confirms delivery (or pickup) | `{ shipmentId: uuid, kind: enum(outbound|replacement|return), orderId: uuid, orderRef: string?, customerId: uuid?, contactEmail: email?, groupId: uuid, returnId: uuid?, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), lines: ShipmentLine[], deliveredAt: datetime }` | notifications, orders, returns, sellers, support, workqueues |
+| `shipping.shipment.exception` | A delivery exception is opened | `{ exceptionId: uuid, kind: enum(seller_cannot_fulfill|late_dispatch|missing_tracking|lost_or_damaged|failed_delivery), orderId: uuid, orderRef: string?, customerId: uuid?, contactEmail: email?, groupId: uuid, shipmentId: uuid?, sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), orderItemIds: uuid[], dueAt: datetime, customerAction: string?, source: enum(carrier|system|staff|seller|customer_report), caseRef: string? }` | notifications, orders, reports, returns, support, workqueues |
 | `shipping.exception.updated` | An exception is assigned, escalated, notified or answered by the seller | `{ exceptionId: uuid, action: string, by: Actor }` | - |
 | `shipping.exception.resolved` | An exception is resolved or its condition clears | `{ exceptionId: uuid, kind: string, orderId: uuid, groupId: uuid, resolution: string }` | - |
 | `shipping.dispatch.overdue` | A seller group passes its dispatch deadline with unshipped items | `{ orderId: uuid, orderRef: string, groupId: uuid, ownerType: enum(official|seller), sellerId: uuid?, fulfilledBy: enum(official_warehouse|seller|marketly_service), orderItemIds: uuid[], dueAt: datetime, exceptionId: uuid }` | notifications, orders, reports, sellers, support, warehouse, workqueues |
@@ -1578,6 +1596,7 @@ Indexes: `unique (carrier_code, external_id)`
 | listShipmentsForGroups | `(groupIds: uuid[], kinds?: ('outbound'|'replacement'|'return')[]) => Map<uuid, Shipment[]>`<br>Shipments per seller group with contents, tracking events and failed-delivery options (batched per request). Default kinds: outbound and replacement. | graphql, warehouse |
 | getShipment | `(viewer: { customerId?: uuid, guestSessionId?: uuid, sellerId?: uuid, staff?: bool }, shipmentId: uuid) => Shipment | null`<br>One package with tracking view fields (headline, steps, estimate note, notices). Store: the customer's or guest's own order; seller: own shipments; staff: any (shipping.shipments.view). Otherwise null. | graphql, warehouse |
 | estimateOffers | `(offerIds: uuid[], postalCode?: string, viewer?: { customerId?: uuid, guestSessionId?: uuid }) => OfferEstimate[]`<br>Default delivery option per offer at a location (resolves offer → profile and dispatch through offers' effective Offer.shipping, so Marketly-fulfilled offers are quoted with the service profile and dispatch). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. | graphql |
+| openExceptionIdsForOrders | `(orderIds: uuid[]) => map<uuid[]>`<br>Ids of the open delivery exceptions (open, in progress, escalated) per order, oldest due first; every asked order is a key (empty list when none). Orders' admin rows link to them (G73: remind a seller about an overdue order through POST /exceptions/{id}/notify-seller). | orders |
 | listExceptionsForOrder | `(orderId: uuid, sellerId?: uuid) => DeliveryException[]`<br>Delivery exceptions on an order; with sellerId only that seller's groups | graphql |
 | listExceptions | `(filter: { kind?: string, status?: string, sellerType?: string, ownerStaffId?: uuid, customerNotNotified?: bool, q?: string }, page: PageInput) => Page<DeliveryException>`<br>Dispatch and delivery exceptions for staff (same filters as admin GET /exceptions) | graphql |
 | countOpenExceptions | `() => ExceptionCounts`<br>Open exceptions per kind and not-yet-notified customers (queue tiles) | graphql, workqueues |
@@ -1622,7 +1641,7 @@ Checked through the access module (limits per role, second reviewer).
 | `TRACKING_FORMAT_INVALID` | 422 | The tracking number does not match the carrier's format. Resend with acknowledgeFormatWarning=true to save it anyway (a missing_tracking check stays open until a carrier scan). |
 | `TRACKING_ALREADY_USED` | 409 | This tracking number is on another active shipment. |
 | `LABELS_NOT_SUPPORTED` | 422 | No label-capable service for this package; enter tracking manually. |
-| `LABEL_FAILED` | 502 | The carrier refused or did not answer the label request; nothing was charged. details.carrierMessage. |
+| `LABEL_FAILED` | 422 | The carrier did not sell the label; nothing was charged. 422 when the carrier refused (change the package or service), 502 when the carrier could not be reached (try again; decision G42). details.carrierMessage, details.carrierReached (bool). |
 | `QUOTE_EXPIRED` | 409 | The label quote expired; get a new quote. |
 | `HANDLING_OUT_OF_RANGE` | 422 | Handling days are outside the platform's allowed range. details.min, details.max. |
 | `PROFILE_IN_USE` | 409 | Active offers use this profile. details.offerCount. |
@@ -1649,7 +1668,7 @@ Checked through the access module (limits per role, second reviewer).
 | Key | Default | Rules | Meaning |
 |---|---|---|---|
 | defaultSellerHandlingDays | `2` | duration, business days, 1–…, approval: second reviewer, seller-visible | Dispatch within business days when a seller sets nothing |
-| sellerHandlingRange | `[1,3]` | json, approval: second reviewer, seller-visible | Allowed seller handling days [min, max] (HANDLING_OUT_OF_RANGE outside). The only source of the range: dispatch targets show it read-only |
+| sellerHandlingRange | `[0,3]` | json, approval: second reviewer, seller-visible | Allowed seller handling days [min, max] (HANDLING_OUT_OF_RANGE outside); 0 = ships the same business day (decision G40b). The only source of the range: dispatch targets show it read-only and sellers read it as SellerShippingSettings.allowedHandlingDays |
 | officialCutoff | `"14:00"` | time | Official Store same-day cutoff, market time |
 | dispatchDueTime | `"17:00"` | time, seller-visible | Local time a dispatch deadline falls on |
 | validTrackingWithinHours | `24` | duration, hours, 1–…, seller-visible | Tracking must be valid this long after dispatch |
@@ -1674,7 +1693,7 @@ Checked through the access module (limits per role, second reviewer).
 - Service notices are scoped by carrier or single carrier services, by states, ZIP prefixes or zones, and by seller scope (all, Official Store only, marketplace sellers only). activeNotices matches a location by postal prefix and state; POST /notices/preview shows the checkout message and the moved arrival estimates before publishing. Notices change arrival estimates, never dispatch deadlines, unless noDispatch is set.
 - Carrier contacts (plan ch. 2: the Shipping Manager maintains carrier contacts) are stored on the carrier (account manager, operations, claims, billing, escalation) and edited with POST/PATCH /carriers; they are never returned to sellers.
 - Official Store: ownerType official with sellerId null (as in offers). Its profile and dispatch schedule are edited in the admin area.
-- Carriers and carrier services (decision D-S1) are defined by the carrier adapters and seeded by a shipping migration (codes, services, transit, label support, tracking patterns); there are no create endpoints for services or methods. POST /carriers only records the account of a carrier an adapter supports; staff then enable services and set transit with PATCH.
+- Carriers and carrier services (decision D-S1) are defined by the carrier adapters and seeded by a shipping migration (codes, services, transit, label support, tracking patterns). Seeded carriers (decision G40a): UPS, USPS, FedEx, OnTrac and Other carrier (tracking optional: a shipment without a number is recorded with tracking missing); existing installs get the missing ones at the next start; there are no create endpoints for services or methods. POST /carriers only records the account of a carrier an adapter supports; staff then enable services and set transit with PATCH.
 - Seller handling range (decision D-S2): the sellerHandlingRange setting is the only source of the allowed handling days; dispatch targets show it read-only and updateSellerSettings checks against it (HANDLING_OUT_OF_RANGE).
 - Ships from: each seller's ships-from text is stored in its shipping settings (seller_settings.ships_from, set in PUT /settings), so storefront summaries and dispatch labels for many sellers are read in one query; shipping never calls sellers for it (sellers calls shipping, so a call back would be circular).
 - Delivery exceptions are unique per (group, kind, package) while open (decision D-S3): a second lost or late package of the same group gets its own exception; exceptions without a package stay one per group and kind.
@@ -1707,7 +1726,7 @@ type Shipment {
   groupId: UUID!
   "Set for return parcels"
   returnId: UUID
-  "'Package 2 of 3'"
+  "'Shipment 2 of 3': this shipment among the order's shipments (orders' 'Package x of y' is the seller group); 'Return parcel' for returns"
   packageLabel: String!
   sellerName: String!
   shipFrom: String!
@@ -1815,6 +1834,8 @@ type ShipmentLabel @areas(in: [SELLER, ADMIN]) {
   serviceName: String!
   cost: Money!
   trackingNumber: String!
+  "Download link of the label file (PDF or ZPL), signed for the caller as on REST Label.labelUrl"
+  labelUrl: URL
   status: ShipmentLabelStatus!
   purchasedBy: Actor!
   purchasedAt: DateTime!
@@ -1888,6 +1909,8 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   itemsSummary: String!
   "The order items the exception is about (empty when it covers the whole group)"
   orderItemIds: [UUID!]!
+  "orderItemIds with the units concerned, in the same order"
+  items: [DeliveryExceptionItem!]!
   "e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"
   situation: String!
   "The plan's required response for the kind"
@@ -1911,6 +1934,12 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   "Carrier claim filed for a lost or damaged package"
   claimId: UUID @areas(in: [ADMIN])
   openedBy: Actor! @areas(in: [ADMIN])
+}
+
+type DeliveryExceptionItem @areas(in: [SELLER, ADMIN]) {
+  orderItemId: UUID!
+  "Units of the order item the exception is about; null on exceptions opened before quantities were kept"
+  quantity: Int
 }
 
 type DeliverySellerResponse @areas(in: [SELLER, ADMIN]) {

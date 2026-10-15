@@ -365,6 +365,7 @@ const exceptions = new Schema(
     fulfilled_by: { type: String, required: true, enum: ["official_warehouse","seller","marketly_service"] },
     items_summary: { type: String, required: true },
     order_item_ids: { type: [String], default: undefined }, // the order items the exception is about, as on shipping.shipment.exception
+    item_quantities: { type: Schema.Types.Mixed, default: null }, // [{ order_item_id, quantity }]: units of each order item the exception is about; null on rows opened before G75
     situation: { type: String, required: true },
     next_step: { type: String, required: true },
     status: { type: String, required: true },

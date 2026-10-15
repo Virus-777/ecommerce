@@ -192,7 +192,8 @@ export class Views {
   packageLabel(s: ShipmentRec, parts: ShipmentParts) {
     if (s.kind === 'return') return 'Return parcel';
     const total = Math.max(parts.packagesInOrder.get(s.order_id) ?? 1, s.package_no);
-    return `Package ${s.package_no} of ${total}`;
+    // "Shipment x of y": shipments of the order (orders' "Package x of y" is the seller group, decision G26d)
+    return `Shipment ${s.package_no} of ${total}`;
   }
 
   contents(lines: readonly LineRec[]) {
@@ -324,6 +325,7 @@ export class Views {
       sellerName: this.core.nameOf(names, e.owner_type, e.seller_id),
       itemsSummary: e.items_summary,
       orderItemIds: e.order_item_ids ?? [],
+      items: (e.order_item_ids ?? []).map((id) => ({ orderItemId: id, quantity: ((e.item_quantities as { order_item_id: string; quantity: number }[] | null) ?? []).find((q) => q.order_item_id === id)?.quantity ?? null })),
       situation: e.situation,
       requiredResponse: (e.fulfilled_by === 'marketly_service' ? MARKETLY_REQUIRED_RESPONSE[kind] : undefined) ?? REQUIRED_RESPONSE[kind] ?? '',
       nextStep: e.next_step,

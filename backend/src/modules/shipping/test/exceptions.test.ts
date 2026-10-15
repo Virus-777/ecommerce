@@ -41,6 +41,14 @@ describe('late shipment (scenario 5)', () => {
     const ex = list.body.items[0];
     expect(ex).toMatchObject({ id: overdue[0].exceptionId, kind: 'late_dispatch', status: 'open', sellerName: 'Casa Verde Home', requiredResponse: expect.stringContaining('notify the seller'), deadline: { state: 'on_time' } });
     expect(ex.sellerNotifiedAt).toBeTruthy();
+    // G75: the items come with their units
+    expect(ex.items).toEqual(expect.arrayContaining([{ orderItemId: o.lamp.id, quantity: expect.any(Number) }]));
+    expect(ex.items.map((i: any) => i.orderItemId)).toEqual(ex.orderItemIds);
+    // G73: orders reads the open exception ids per order
+    const other = newId();
+    const open = await h.service.openExceptionIdsForOrders([o.order.id, other]);
+    expect(open[o.order.id]).toContain(ex.id);
+    expect(open[other]).toEqual([]);
     const counts = await h.call('GET', `${ADMIN}/exceptions/counts`, staff);
     expect(counts.body.lateDispatch).toBeGreaterThanOrEqual(1);
     const mine = await h.call('GET', `${SELLER}/exceptions`, tokens.seller(o.sellerId));
@@ -119,7 +127,7 @@ describe('staff handling of exceptions', () => {
     const opened = await h.call('POST', `${ADMIN}/exceptions`, staff, { kind: 'lost_or_damaged', groupId: o.groupId, orderItemIds: [o.lamp.id], situation: 'Customer called: box crushed' });
     expect(opened.status, JSON.stringify(opened.body)).toBe(201);
     expect(opened.body).toMatchObject({ kind: 'lost_or_damaged', status: 'open', itemsSummary: expect.stringContaining('Desk Lamp'), openedBy: { kind: 'staff' } });
-    expect(h.named('shipping.shipment.exception').at(-1)).toMatchObject({ exceptionId: opened.body.id, orderItemIds: [o.lamp.id], customerId: o.customerId, contactEmail: 'jordan@example.com' });
+    expect(h.named('shipping.shipment.exception').at(-1)).toMatchObject({ exceptionId: opened.body.id, orderRef: o.order.ref, orderItemIds: [o.lamp.id], customerId: o.customerId, contactEmail: 'jordan@example.com' });
     expect(h.audits.at(-1)).toMatchObject({ action: 'shipping.exception.open' });
     const dup = await h.call('POST', `${ADMIN}/exceptions`, staff, { kind: 'lost_or_damaged', groupId: o.groupId, situation: 'again' });
     expect(dup.status).toBe(409);

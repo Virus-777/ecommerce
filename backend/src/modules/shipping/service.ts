@@ -26,6 +26,7 @@ import type {
   TransitRange,
   CoverageCheck,
 } from '../../spec/shipping.js';
+import { OPEN_STATUSES } from './domain/exceptions.js';
 import { Core, type ShippingServiceDeps } from './service/core.js';
 import { Estimates } from './service/estimates.js';
 import { Exceptions } from './service/exceptions.js';
@@ -160,6 +161,16 @@ export class ShippingService implements ShippingPublicApi {
         out.push({ offerId, shipsToLocation: false, reason: 'Delivery options are not available for this offer', option: null, otherOptions: 0 });
       }
     }
+    return out;
+  }
+
+  /** Open exception ids per order, oldest due first (orders' admin rows, G73) */
+  async openExceptionIdsForOrders(orderIds: string[]): Promise<Record<string, string[]>> {
+    const ids = [...new Set(orderIds.filter(isUuid))];
+    const out: Record<string, string[]> = Object.fromEntries(orderIds.map((id) => [id, [] as string[]]));
+    if (!ids.length) return out;
+    const rows = await this.core.repo.find('exceptions', { order_id: ids, status: OPEN_STATUSES }, { orderBy: [['due_at', 'asc']] });
+    for (const r of rows) out[r.order_id]!.push(r.id);
     return out;
   }
 

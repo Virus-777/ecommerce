@@ -506,6 +506,8 @@ export interface SellerShippingSettings {
   pendingChange?: PendingChange | null;
   customerPreview: CustomerPreview;
   history: common.TimelineEvent[];
+  /** Handling days the seller may choose (setting sellerHandlingRange, default 0–3; 0 = same business day). updateSellerSettings refuses others with HANDLING_OUT_OF_RANGE */
+  allowedHandlingDays: HandlingRange;
   /** 'New settings apply to orders placed after the effective time. Existing orders keep the delivery terms and prices the customer accepted.' */
   applyNote: string;
 }
@@ -533,8 +535,21 @@ export const SellerShippingSettings: z.ZodType<SellerShippingSettings> = z.objec
   get history() {
     return z.array(common.TimelineEvent);
   },
+  get allowedHandlingDays() {
+    return HandlingRange;
+  },
   applyNote: z.string().describe("'New settings apply to orders placed after the effective time. Existing orders keep the delivery terms and prices the customer accepted.'"),
 }).register(common.apiTypes, { id: "shipping.SellerShippingSettings" });
+
+export interface HandlingRange {
+  min: number;
+  max: number;
+}
+
+export const HandlingRange: z.ZodType<HandlingRange> = z.object({
+  min: z.number().int(),
+  max: z.number().int(),
+}).register(common.apiTypes, { id: "shipping.HandlingRange" });
 
 export interface PendingChange {
   effectiveFrom: string;
@@ -1324,7 +1339,7 @@ export interface Shipment {
   ownerType: "official" | "seller";
   sellerId?: string | null;
   sellerName: string;
-  /** 'Package 2 of 3' */
+  /** 'Shipment 2 of 3': this shipment among the order's shipments (orders' 'Package x of y' is the seller group); 'Return parcel' for returns */
   packageLabel: string;
   carrierCode?: string | null;
   carrierName?: string | null;
@@ -1361,7 +1376,7 @@ export const Shipment: z.ZodType<Shipment> = z.object({
   ownerType: z.enum(["official", "seller"]),
   sellerId: z.uuid().nullish(),
   sellerName: z.string(),
-  packageLabel: z.string().describe("'Package 2 of 3'"),
+  packageLabel: z.string().describe("'Shipment 2 of 3': this shipment among the order's shipments (orders' 'Package x of y' is the seller group); 'Return parcel' for returns"),
   carrierCode: z.string().nullish(),
   carrierName: z.string().nullish(),
   serviceName: z.string().nullish(),
@@ -1597,6 +1612,8 @@ export interface DeliveryException {
   itemsSummary: string;
   /** The order items the exception is about (empty when it covers the whole group) */
   orderItemIds: string[];
+  /** orderItemIds with the units concerned (G75), in the same order */
+  items: ExceptionItem[];
   /** e.g. 'USPS number not recognized' or 'Label created, no scan 36 h' */
   situation: string;
   /** The plan's required response for the kind */
@@ -1631,6 +1648,9 @@ export const DeliveryException: z.ZodType<DeliveryException> = z.object({
   sellerName: z.string(),
   itemsSummary: z.string(),
   orderItemIds: z.array(z.uuid()).describe("The order items the exception is about (empty when it covers the whole group)"),
+  get items() {
+    return z.array(ExceptionItem);
+  },
   situation: z.string().describe("e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"),
   requiredResponse: z.string().describe("The plan's required response for the kind"),
   nextStep: z.string().describe("e.g. 'Cancel item, refund $112.00'"),
@@ -1661,6 +1681,17 @@ export const DeliveryException: z.ZodType<DeliveryException> = z.object({
   },
   openedAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "shipping.DeliveryException" });
+
+export interface ExceptionItem {
+  orderItemId: string;
+  /** Units of the order item the exception is about; null on exceptions opened before quantities were kept */
+  quantity?: number | null;
+}
+
+export const ExceptionItem: z.ZodType<ExceptionItem> = z.object({
+  orderItemId: z.uuid(),
+  quantity: z.number().int().describe("Units of the order item the exception is about; null on exceptions opened before quantities were kept").nullish(),
+}).register(common.apiTypes, { id: "shipping.ExceptionItem" });
 
 export interface ExceptionOwner {
   staffId?: string | null;
@@ -1898,6 +1929,8 @@ export interface ShippingShipmentDispatchedEvent {
   shipmentId: string;
   kind: "outbound" | "replacement" | "return";
   orderId: string;
+  /** The order reference customers see, for notices (always set by shipping; absent on events from before it was added) */
+  orderRef?: string | null;
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -1920,6 +1953,7 @@ export const ShippingShipmentDispatchedEvent: z.ZodType<ShippingShipmentDispatch
   shipmentId: z.uuid(),
   kind: z.enum(["outbound", "replacement", "return"]),
   orderId: z.uuid(),
+  orderRef: z.string().describe("The order reference customers see, for notices (always set by shipping; absent on events from before it was added)").nullish(),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
@@ -1973,6 +2007,8 @@ export interface ShippingShipmentDeliveredEvent {
   shipmentId: string;
   kind: "outbound" | "replacement" | "return";
   orderId: string;
+  /** The order reference customers see, for notices (always set by shipping; absent on events from before it was added) */
+  orderRef?: string | null;
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -1990,6 +2026,7 @@ export const ShippingShipmentDeliveredEvent: z.ZodType<ShippingShipmentDelivered
   shipmentId: z.uuid(),
   kind: z.enum(["outbound", "replacement", "return"]),
   orderId: z.uuid(),
+  orderRef: z.string().describe("The order reference customers see, for notices (always set by shipping; absent on events from before it was added)").nullish(),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
@@ -2007,6 +2044,8 @@ export interface ShippingShipmentExceptionEvent {
   exceptionId: string;
   kind: "seller_cannot_fulfill" | "late_dispatch" | "missing_tracking" | "lost_or_damaged" | "failed_delivery";
   orderId: string;
+  /** The order reference customers see, for notices (always set by shipping; absent on events from before it was added) */
+  orderRef?: string | null;
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -2030,6 +2069,7 @@ export const ShippingShipmentExceptionEvent: z.ZodType<ShippingShipmentException
   exceptionId: z.uuid(),
   kind: z.enum(["seller_cannot_fulfill", "late_dispatch", "missing_tracking", "lost_or_damaged", "failed_delivery"]),
   orderId: z.uuid(),
+  orderRef: z.string().describe("The order reference customers see, for notices (always set by shipping; absent on events from before it was added)").nullish(),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   groupId: z.uuid(),
@@ -2291,6 +2331,8 @@ export interface ShippingPublicApi {
   getShipment(viewer: { customerId?: string, guestSessionId?: string, sellerId?: string, staff?: boolean }, shipmentId: string): Promise<Shipment | null>;
   /** Default delivery option per offer at a location (resolves offer → profile and dispatch through offers' effective Offer.shipping, so Marketly-fulfilled offers are quoted with the service profile and dispatch). Without a postal code uses the shopper's saved or cart location, else the market default; batched per request. Used by: graphql. */
   estimateOffers(offerIds: string[], postalCode?: string, viewer?: { customerId?: string, guestSessionId?: string }): Promise<OfferEstimate[]>;
+  /** Ids of the open delivery exceptions (open, in progress, escalated) per order, oldest due first; every asked order is a key (empty list when none). Orders' admin rows link to them (G73: remind a seller about an overdue order through POST /exceptions/{id}/notify-seller). Used by: orders. */
+  openExceptionIdsForOrders(orderIds: string[]): Promise<Record<string, string[]>>;
   /** Delivery exceptions on an order; with sellerId only that seller's groups Used by: graphql. */
   listExceptionsForOrder(orderId: string, sellerId?: string): Promise<DeliveryException[]>;
   /** Dispatch and delivery exceptions for staff (same filters as admin GET /exceptions) Used by: graphql. */
@@ -2561,6 +2603,8 @@ export interface ShippingDb {
     items_summary: string;
     /** the order items the exception is about, as on shipping.shipment.exception */
     order_item_ids: string[];
+    /** [{ order_item_id, quantity }]: units of each order item the exception is about; null on rows opened before G75 */
+    item_quantities: Json | null;
     situation: string;
     next_step: string;
     status: string;
@@ -3503,6 +3547,26 @@ export const endpoints = defineEndpoints({
     screens: ["admin/shipping"],
     phase: 1,
   },
+  deleteNotice: {
+    area: "admin",
+    method: "DELETE",
+    path: "/notices/{id}",
+    auth: "staff",
+    permission: "shipping.notices.manage",
+    scope: "staff",
+    summary: "Delete a draft notice",
+    desc: "Only drafts (never published or scheduled) can be deleted; a scheduled, live or ended notice is withdrawn instead (ILLEGAL_TRANSITION). The deletion is audited with the draft as it was.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: null,
+    status: 204,
+    errors: ["NOT_FOUND","ILLEGAL_TRANSITION"],
+    audited: true,
+    screens: ["admin/shipping"],
+    phase: 1,
+  },
   withdrawNotice: {
     area: "admin",
     method: "POST",
@@ -4008,7 +4072,7 @@ export const spec = defineModuleSpec({
   summary: "How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims.",
   dependsOn: ["orders"],
   optionalDeps: ["offers","sellers","media","support","access","settings","audit","finance","fulfillment-service","identity","notifications","returns","reports"],
-  publicApi: ["quote","quoteOptions","checkCoverage","hasCoverage","dispatchDeadline","activeNotices","quoteLabelOptions","createLabel","voidLabel","handOver","getShipmentsForOrder","dispatchMetrics","registerReturnTracking","findDropOffPoints","listShipmentsForGroups","getShipment","estimateOffers","listExceptionsForOrder","listExceptions","countOpenExceptions","getSellerShippingSummaries","shipmentsForReplacements","getProfileOwners","getOfficialFreeShipping","getOfficialDefaultProfile","getSellerShippingSetup","exportRows"],
+  publicApi: ["quote","quoteOptions","checkCoverage","hasCoverage","dispatchDeadline","activeNotices","quoteLabelOptions","createLabel","voidLabel","handOver","getShipmentsForOrder","dispatchMetrics","registerReturnTracking","findDropOffPoints","listShipmentsForGroups","getShipment","estimateOffers","openExceptionIdsForOrders","listExceptionsForOrder","listExceptions","countOpenExceptions","getSellerShippingSummaries","shipmentsForReplacements","getProfileOwners","getOfficialFreeShipping","getOfficialDefaultProfile","getSellerShippingSetup","exportRows"],
   permissions: [
     {
       "key": "shipping.settings.view",
@@ -4444,10 +4508,10 @@ export const spec = defineModuleSpec({
     },
     "sellerHandlingRange": {
       "default": [
-        1,
+        0,
         3
       ],
-      "desc": "Allowed seller handling days [min, max] (HANDLING_OUT_OF_RANGE outside). The only source of the range: dispatch targets show it read-only",
+      "desc": "Allowed seller handling days [min, max] (HANDLING_OUT_OF_RANGE outside); 0 = ships the same business day (decision G40b). The only source of the range: dispatch targets show it read-only and sellers read it as SellerShippingSettings.allowedHandlingDays",
       "type": "json",
       "approval": "second_reviewer",
       "sellerVisible": true
@@ -4532,8 +4596,8 @@ export const spec = defineModuleSpec({
       "meaning": "No label-capable service for this package; enter tracking manually."
     },
     "LABEL_FAILED": {
-      "status": 502,
-      "meaning": "The carrier refused or did not answer the label request; nothing was charged. details.carrierMessage."
+      "status": 422,
+      "meaning": "The carrier did not sell the label; nothing was charged. 422 when the carrier refused (change the package or service), 502 when the carrier could not be reached (try again; decision G42). details.carrierMessage, details.carrierReached (bool)."
     },
     "QUOTE_EXPIRED": {
       "status": 409,
@@ -6391,6 +6455,7 @@ export const spec = defineModuleSpec({
         "fulfilled_by",
         "items_summary",
         "order_item_ids",
+        "item_quantities",
         "situation",
         "next_step",
         "status",
@@ -6411,6 +6476,7 @@ export const spec = defineModuleSpec({
       "nullable": [
         "shipment_id",
         "seller_id",
+        "item_quantities",
         "owner_staff_id",
         "owner_name",
         "owner_role",
@@ -6506,6 +6572,7 @@ export const spec = defineModuleSpec({
                 "bsonType": "string"
               }
             },
+            "item_quantities": {},
             "situation": {
               "bsonType": "string"
             },

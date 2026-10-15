@@ -66,7 +66,8 @@ export class Exceptions {
     kind: ExceptionKind;
     group: GroupFacts;
     shipmentId?: string | null;
-    itemIds: string[];
+    /** The order items concerned with their units (G75: exceptions carry quantities) */
+    items: { id: string; quantity: number }[];
     itemsSummary: string;
     situation: string;
     nextStep?: string;
@@ -95,7 +96,8 @@ export class Exceptions {
         seller_id: o.group.sellerId,
         fulfilled_by: o.group.fulfilledBy,
         items_summary: o.itemsSummary,
-        order_item_ids: o.itemIds,
+        order_item_ids: o.items.map((i) => i.id),
+        item_quantities: o.items.map((i) => ({ order_item_id: i.id, quantity: i.quantity })),
         situation: o.situation,
         next_step: o.nextStep ?? (marketly ? MARKETLY_NEXT_STEP[o.kind] : undefined) ?? DEFAULT_NEXT_STEP[o.kind],
         status: o.owner ? 'in_progress' : 'open',
@@ -127,7 +129,7 @@ export class Exceptions {
     if (o.publish !== false) {
       this.core.publish(
         'shipping.shipment.exception',
-        { exceptionId: id, kind: o.kind, orderId: row.order_id, ...(await this.core.recipientOf(row.order_id)), groupId: row.group_id, shipmentId: row.shipment_id, sellerId: row.seller_id, fulfilledBy: fulfilledByOf(row.owner_type, row.fulfilled_by), orderItemIds: o.itemIds, dueAt: row.due_at.toISOString(), customerAction: CUSTOMER_ACTION[o.kind], source: o.source, caseRef: row.case_ref },
+        { exceptionId: id, kind: o.kind, orderId: row.order_id, orderRef: row.order_ref, ...(await this.core.recipientOf(row.order_id)), groupId: row.group_id, shipmentId: row.shipment_id, sellerId: row.seller_id, fulfilledBy: fulfilledByOf(row.owner_type, row.fulfilled_by), orderItemIds: o.items.map((i) => i.id), dueAt: row.due_at.toISOString(), customerAction: CUSTOMER_ACTION[o.kind], source: o.source, caseRef: row.case_ref },
         o.by,
       );
     }
@@ -170,20 +172,20 @@ export class Exceptions {
 
   private async linesOf(shipmentId: string) {
     const lines = await this.repo.find('shipment_lines', { shipment_id: shipmentId });
-    return { ids: lines.map((l) => l.order_item_id), summary: itemsSummary(lines.map((l) => ({ title: l.title, variantLabel: l.variant_label, quantity: l.quantity }))) };
+    return { items: lines.map((l) => ({ id: l.order_item_id, quantity: l.quantity })), summary: itemsSummary(lines.map((l) => ({ title: l.title, variantLabel: l.variant_label, quantity: l.quantity }))) };
   }
 
   async openMissingTracking(s: ShipmentRec, situation: string, by: By) {
     const cfg = await this.core.cfg();
     const lines = await this.linesOf(s.id);
-    await this.open({ kind: 'missing_tracking', group: this.factsOf(s), shipmentId: s.id, itemIds: lines.ids, itemsSummary: lines.summary, situation, dueAt: new Date(this.core.now().getTime() + cfg.validTrackingWithinHours * HOUR_MS), by, source: by.actor.kind === 'staff' ? 'staff' : 'system' });
+    await this.open({ kind: 'missing_tracking', group: this.factsOf(s), shipmentId: s.id, items: lines.items, itemsSummary: lines.summary, situation, dueAt: new Date(this.core.now().getTime() + cfg.validTrackingWithinHours * HOUR_MS), by, source: by.actor.kind === 'staff' ? 'staff' : 'system' });
   }
 
   async openFailedDelivery(s: ShipmentRec, detail: string | null) {
     const lines = await this.linesOf(s.id);
     const chooseBy = s.failed_delivery ? new Date(s.failed_delivery.chooseBy) : new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS.failed_delivery * HOUR_MS);
     const situation = `Delivery attempt failed${detail ? `: ${detail}` : ''}`;
-    const { row, created } = await this.open({ kind: 'failed_delivery', group: this.factsOf(s), shipmentId: s.id, itemIds: lines.ids, itemsSummary: lines.summary, situation, dueAt: chooseBy, by: { actor: SYSTEM }, source: 'carrier' });
+    const { row, created } = await this.open({ kind: 'failed_delivery', group: this.factsOf(s), shipmentId: s.id, items: lines.items, itemsSummary: lines.summary, situation, dueAt: chooseBy, by: { actor: SYSTEM }, source: 'carrier' });
     if (!created && row.shipment_id !== s.id) await this.log(row.id, 'opened', `Another package failed: ${situation}`, SYSTEM);
   }
 
@@ -287,7 +289,7 @@ export class Exceptions {
       kind,
       group: { orderId: g.task.orderId, orderRef: g.task.orderRef, groupId: g.task.groupId, ownerType: g.owner.ownerType, sellerId: g.owner.sellerId, fulfilledBy: g.fulfilledBy },
       shipmentId,
-      itemIds: lines.map((l) => l.id),
+      items: lines.map((l) => ({ id: l.id, quantity: l.quantity })),
       itemsSummary: itemsSummary(lines),
       situation: input.situation.trim(),
       dueAt,
@@ -496,7 +498,7 @@ export class Exceptions {
         kind: 'seller_cannot_fulfill',
         group: { orderId: e.order_id, orderRef: e.order_ref, groupId: e.group_id, ownerType: e.owner_type as 'seller', sellerId: e.seller_id, fulfilledBy: fulfilledByOf(e.owner_type, e.fulfilled_by) },
         shipmentId: e.shipment_id,
-        itemIds: [],
+        items: [],
         itemsSummary: e.items_summary,
         situation: `Seller cannot fulfill: ${body.note!.trim()}`,
         dueAt: new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS.seller_cannot_fulfill * HOUR_MS),
@@ -594,7 +596,7 @@ export class Exceptions {
       const { row } = await this.open({
         kind: 'late_dispatch',
         group: { orderId: task.orderId, orderRef: task.orderRef, groupId: w.group_id, ownerType: w.owner_type as 'seller', sellerId: w.seller_id, fulfilledBy },
-        itemIds: open.map((l) => l.orderItemId),
+        items: open.map((l) => ({ id: l.orderItemId, quantity: l.quantityToShip })),
         itemsSummary: itemsSummary(open.map((l) => ({ title: l.title, variantLabel: l.variantLabel, quantity: l.quantityToShip }))),
         situation: `Not dispatched by ${instantLabel(w.due_at, this.core.tz)}`,
         dueAt: respondBy,
@@ -651,7 +653,7 @@ export class Exceptions {
         kind: 'lost_or_damaged',
         group: this.factsOf(s),
         shipmentId: s.id,
-        itemIds: lines.ids,
+        items: lines.items,
         itemsSummary: lines.summary,
         situation: `No carrier scan for ${Math.floor((now.getTime() - since.getTime()) / DAY_MS)} days`,
         nextStep: 'Check with the carrier; agree a remedy with the customer if the package is lost',
@@ -676,7 +678,7 @@ export class Exceptions {
       const { row, created } = await this.open({
         kind: 'seller_cannot_fulfill',
         group: { orderId: e.orderId, orderRef: e.ref, groupId: e.groupId, ownerType: e.ownerType, sellerId: e.sellerId ?? null, fulfilledBy: fulfilledByOf(e.ownerType, e.fulfilledBy ?? w?.fulfilled_by) },
-        itemIds: [e.itemId],
+        items: [{ id: e.itemId, quantity: e.quantity }],
         itemsSummary: summary,
         situation,
         nextStep: refund ? `Cancel item, refund ${refund}` : DEFAULT_NEXT_STEP.seller_cannot_fulfill,
@@ -685,7 +687,10 @@ export class Exceptions {
         source: 'seller',
       });
       if (!created && !row.items_summary.includes(summary)) {
-        await this.repo.update('exceptions', row.id, { items_summary: `${row.items_summary}; ${summary}`, situation: `${row.situation}; ${situation}` });
+        // the item joins the open exception with its units
+        const ids = row.order_item_ids.includes(e.itemId) ? row.order_item_ids : [...row.order_item_ids, e.itemId];
+        const quantities = [...((row.item_quantities as { order_item_id: string; quantity: number }[] | null) ?? []).filter((q) => q.order_item_id !== e.itemId), { order_item_id: e.itemId, quantity: e.quantity }];
+        await this.repo.update('exceptions', row.id, { items_summary: `${row.items_summary}; ${summary}`, situation: `${row.situation}; ${situation}`, order_item_ids: ids, item_quantities: quantities as never });
         await this.log(row.id, 'opened', situation, SYSTEM);
       }
     }
@@ -735,7 +740,7 @@ export class Exceptions {
         kind: 'lost_or_damaged',
         group: { orderId: order.id, orderRef: order.ref, groupId, ownerType: g.seller.ownerType, sellerId: g.seller.ownerType === 'official' ? null : (g.seller.id ?? null), fulfilledBy: fulfilledByOf(g.seller.ownerType, g.fulfilledBy) },
         shipmentId: shipment?.id ?? null,
-        itemIds: own.map((i) => i.id),
+        items: own.map((i) => ({ id: i.id, quantity: i.quantity })),
         itemsSummary: itemsSummary(own.map((i) => ({ title: i.title, variantLabel: i.variantLabel, quantity: i.quantity }))),
         situation: `Customer reported: ${e.category.replace(/_/g, ' ')} (case ${e.ref})`,
         dueAt: new Date(this.core.now().getTime() + FIRST_DEADLINE_HOURS.lost_or_damaged * HOUR_MS),

@@ -136,7 +136,8 @@ export class Core {
       s.get('claimFinanceApprovalAbove'),
       s.get('marketDefaultPostalCode'),
     ]);
-    const range = Array.isArray(b) && b.length === 2 ? ([num(b[0], 1), num(b[1], 3)] as [number, number]) : ([1, 3] as [number, number]);
+    // default 0–3 business days, 0 = ships the same business day (decision G40b)
+    const range = Array.isArray(b) && b.length === 2 ? ([num(b[0], 0), num(b[1], 3)] as [number, number]) : ([0, 3] as [number, number]);
     const limit = (i ?? {}) as Partial<common.Money>;
     return {
       defaultSellerHandlingDays: num(a, 2),
@@ -256,10 +257,11 @@ export class Core {
         id: carrierSeedId(code),
         code,
         name: def.name,
-        account_label: `Marketly ${def.name} account`,
+        // Other carrier has no account and no tracking feed: numbers are checked by format only
+        account_label: code === 'other' ? null : `Marketly ${def.name} account`,
         status: 'active',
-        tracking_mode: 'webhook',
-        credentials_ref: `carrier/${code}`,
+        tracking_mode: code === 'other' ? 'manual' : code === 'ontrac' ? 'polling' : 'webhook',
+        credentials_ref: code === 'other' ? null : `carrier/${code}`,
         contacts: [],
         last_event_at: null,
         on_time_rate_30d: null,

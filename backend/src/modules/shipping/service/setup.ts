@@ -385,6 +385,15 @@ export class Setup {
     return this.views.notice(after);
   }
 
+  /** Deletes a draft notice (G73); anything published or scheduled is withdrawn instead */
+  async deleteNotice(id: string, by: By): Promise<void> {
+    const before = await this.repo.get('notices', id);
+    if (!before) throw notFound('Notice');
+    if (before.status !== 'draft') throw new AppError('ILLEGAL_TRANSITION', `A ${before.status} notice cannot be deleted; withdraw it instead`, { machine: 'Service notice', from: before.status, event: 'delete', allowed: ['withdraw'] });
+    await this.repo.removeWhere('notices', { id, status: 'draft' });
+    await this.core.audit({ action: 'shipping.notice.delete', actionLabel: 'Deleted a draft service notice', category: 'shipping', target: { type: 'service_notice', id, label: before.title }, before, after: null }, by);
+  }
+
   /** Job: scheduled → live at showFrom (or the from date); live → ended after the to date */
   async noticeSchedule(only?: string[]): Promise<void> {
     const now = this.core.now();

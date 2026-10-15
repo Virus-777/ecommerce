@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
+import { auth } from '../../../testing/app.js';
 import { checkout, group, harness, idem, line, product, sellerOrder, tokens, ups, usps, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -21,11 +22,11 @@ describe('recording shipments (seller)', () => {
     const tn = ups();
     const res = await h.call('POST', `${SELLER}/shipments`, seller, { groupId: o.groupId, carrierCode: 'ups', serviceName: 'UPS Ground', trackingNumber: tn, shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.speaker.id, quantity: 1 }] });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body).toMatchObject({ kind: 'outbound', status: 'shipped', statusLabel: 'Shipped, tracking pending', trackingState: 'pending', trackingNumber: tn, carrierName: 'UPS', dispatchedOnTime: true, packageLabel: 'Package 1 of 1' });
+    expect(res.body).toMatchObject({ kind: 'outbound', status: 'shipped', statusLabel: 'Shipped, tracking pending', trackingState: 'pending', trackingNumber: tn, carrierName: 'UPS', dispatchedOnTime: true, packageLabel: 'Shipment 1 of 1' });
     expect(res.body.contents).toEqual([{ orderItemId: o.speaker.id, title: 'Pocket Speaker', variantLabel: expect.any(String), quantity: 1 }]);
     expect(res.body.trackingUrl).toContain(tn);
     expect(h.named('shipping.shipment.created').at(-1)).toMatchObject({ shipmentId: res.body.id, orderId: o.order.id, trackingNumber: tn, lines: [expect.objectContaining({ quantity: 1 })] });
-    expect(h.named('shipping.shipment.dispatched').at(-1)).toMatchObject({ shipmentId: res.body.id, ownerType: 'seller', sellerId: o.sellerId, onTime: true, trackingValid: true, customerId: o.customerId, contactEmail: 'jordan@example.com' });
+    expect(h.named('shipping.shipment.dispatched').at(-1)).toMatchObject({ shipmentId: res.body.id, orderRef: o.order.ref, ownerType: 'seller', sellerId: o.sellerId, onTime: true, trackingValid: true, customerId: o.customerId, contactEmail: 'jordan@example.com' });
     const order = (await h.orders.getOrder(o.order.id))!;
     const items = order.groups[0]!.items;
     expect(items.filter((i) => i.state === 'shipped').map((i) => i.quantity)).toEqual([1]);
@@ -131,7 +132,7 @@ describe('carrier tracking (webhooks) and the customer view', () => {
     await h.webhook('ups', { id: `evt-${tn}-2`, trackingNumber: tn, code: 'delivered', at: at(2), location: 'Portland, OR' });
     view = (await h.call('GET', `${ADMIN}/shipments/${s.id}`, tokens.staff())).body;
     expect(view).toMatchObject({ status: 'delivered', statusLabel: 'Delivered' });
-    expect(h.named('shipping.shipment.delivered').at(-1)).toMatchObject({ shipmentId: s.id, customerId: o.customerId, contactEmail: 'jordan@example.com', lines: expect.arrayContaining([expect.objectContaining({ orderItemId: o.lamp.id })]) });
+    expect(h.named('shipping.shipment.delivered').at(-1)).toMatchObject({ shipmentId: s.id, orderRef: o.order.ref, customerId: o.customerId, contactEmail: 'jordan@example.com', lines: expect.arrayContaining([expect.objectContaining({ orderItemId: o.lamp.id })]) });
     const order = (await h.orders.getOrder(o.order.id))!;
     expect(order.groups[0]!.items.every((i) => i.state === 'delivered')).toBe(true);
   });
@@ -223,6 +224,12 @@ describe('labels', () => {
     expect(h.named('shipping.label.purchased').at(-1)).toMatchObject({ labelId: bought.body.label.id, billedTo: 'seller', sellerId: o.sellerId, cost: q.cost, kind: 'outbound' });
     const again = await h.call('POST', `${SELLER}/labels`, seller, { quoteId: q.id, items: [{ orderItemId: o.speaker.id, quantity: 2 }] }, key);
     expect(again.body.label.id).toBe(bought.body.label.id);
+    // G54c1: GraphQL ShipmentLabel carries the same label link as REST
+    expect(bought.body.label.labelUrl).toBeTruthy();
+    const gql = await h.app.inject({ method: 'POST', url: '/graphql/seller', headers: { ...auth(seller), 'content-type': 'application/json' }, payload: { query: 'query($id: UUID!) { shipment(id: $id) { label { id labelUrl } } }', variables: { id: bought.body.shipment.id } } });
+    const data = JSON.parse(gql.body);
+    expect(data.errors).toBeUndefined();
+    expect(data.data.shipment.label).toMatchObject({ id: bought.body.label.id, labelUrl: expect.stringMatching(/^https?:\/\//) });
     // the units on the label cannot be recorded again
     const dup = await h.call('POST', `${SELLER}/shipments`, seller, { groupId: o.groupId, carrierCode: 'ups', trackingNumber: ups(), shippedAt: h.clock.now().toISOString(), items: [{ orderItemId: o.speaker.id, quantity: 1 }] });
     expect(dup.body.error.code).toBe('ITEMS_NOT_SHIPPABLE');
@@ -250,8 +257,13 @@ describe('labels', () => {
     const seller = tokens.seller(o.sellerId);
     const failing = (await h.call('POST', `${SELLER}/labels/quotes`, seller, { groupId: o.groupId, items: [{ orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 1013 } })).body[0];
     const failed = await h.call('POST', `${SELLER}/labels`, seller, { quoteId: failing.id, items: [{ orderItemId: o.lamp.id, quantity: 1 }] }, idem());
+    // G42: a carrier that does not answer is a 502, one that refuses a 422 (both LABEL_FAILED, nothing charged)
     expect(failed.status).toBe(502);
-    expect(failed.body.error).toMatchObject({ code: 'LABEL_FAILED', details: { carrierMessage: expect.any(String) } });
+    expect(failed.body.error).toMatchObject({ code: 'LABEL_FAILED', details: { carrierMessage: expect.any(String), carrierReached: false } });
+    const refusing = (await h.call('POST', `${SELLER}/labels/quotes`, seller, { groupId: o.groupId, items: [{ orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 1014 } })).body[0];
+    const refused = await h.call('POST', `${SELLER}/labels`, seller, { quoteId: refusing.id, items: [{ orderItemId: o.lamp.id, quantity: 1 }] }, idem());
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toMatchObject({ code: 'LABEL_FAILED', details: { carrierMessage: expect.stringContaining('address'), carrierReached: true } });
     expect(h.named('shipping.label.purchased').some((e) => e.groupId === o.groupId)).toBe(false);
     const q = (await h.call('POST', `${SELLER}/labels/quotes`, seller, { groupId: o.groupId, items: [{ orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 900 } })).body[0];
     h.clock.advance(31 * 60_000);

@@ -30,7 +30,7 @@ import type {
 import { addDays, arrivalRange, HOUR_MS, DAY_MS, MON_FRI, onOrAfter, type DayRules } from '../domain/calendar.js';
 import { labelMachine, shipmentMachine } from '../domain/state-machines.js';
 import { EVENT_LABELS, formatOk, MOVING, normalizeCode, normalizeTracking, pathFor, STEPS, stepOf, statusLabel, trackingUrlOf, type ShipmentStatus, type TrackingCode } from '../domain/tracking.js';
-import { CarrierRefused, type CarrierRec, type CarrierScan, type LabelRec, type LineRec, type ServiceRec, type ShipmentRec } from '../ports.js';
+import { CarrierRefused, CarrierUnreachable, type CarrierRec, type CarrierScan, type LabelRec, type LineRec, type ServiceRec, type ShipmentRec } from '../ports.js';
 import { Batch, byMarketly, fulfilledByOf, invalid, iso, notFound, SYSTEM, type By, type Core, type FulfilledBy } from './core.js';
 import type { Estimates, Owner } from './estimates.js';
 import type { Exceptions } from './exceptions.js';
@@ -321,6 +321,7 @@ export class Shipments {
       shipmentId: s.id,
       kind: s.kind as 'outbound',
       orderId: s.order_id,
+      orderRef: s.order_ref,
       groupId: s.group_id,
       returnId: s.return_id,
       ownerType: s.owner_type as 'seller',
@@ -469,7 +470,7 @@ export class Shipments {
         estimated_arrival: this.estimateAfter(shippedAt, service ? { min: service.transit_min, max: service.transit_max } : null, g.task.delivery.arrival),
       });
       await tx.insert('tracking_events', { id: newId(), shipment_id: id, code: 'info', label: source === 'warehouse' ? 'Handed to the carrier by the warehouse' : 'Shipment recorded by the seller', detail: tracking ? `${carrier.name} ${tracking}` : `${carrier.name}, no tracking number`, location: null, source, carrier_event_id: null, at: shippedAt });
-      this.created(batch, { ...after, status: 'label_created' }, lines, `Package ${packageNo}`);
+      this.created(batch, { ...after, status: 'label_created' }, lines, `Shipment ${packageNo}`);
       this.statusChanged(batch, after, 'label_created', after.status, shippedAt);
       this.dispatched(batch, after, lines);
       return after;
@@ -568,7 +569,7 @@ export class Shipments {
       try {
         cost = await this.core.carriers.rate({ carrierCode: carrier.code, serviceCode: service.code, speed: this.speedOf(service), parcel, fromPostalCode: fromZip, toPostalCode: toZip, currency: this.core.currency });
       } catch (err) {
-        if (err instanceof CarrierRefused) continue;
+        if (err instanceof CarrierRefused || err instanceof CarrierUnreachable) continue;
         throw err;
       }
       const estimatedArrival = this.estimateAfter(now, { min: service.transit_min, max: service.transit_max }, null)!;
@@ -702,7 +703,9 @@ export class Shipments {
     try {
       bought = await this.core.carriers.buyLabel({ carrierCode: carrier.code, carrierName: carrier.name, serviceCode: service.code, serviceName: service.name, parcel: o.parcel, from: o.from, to: o.to, reference: labelId, qr: o.qr, format: o.format });
     } catch (err) {
-      if (err instanceof CarrierRefused) throw this.core.error('LABEL_FAILED', 'The carrier did not sell the label. Nothing was charged; try again or choose another service.', { carrierMessage: err.carrierMessage });
+      // G42: 422 when the carrier refused (change the package or service), 502 when it could not be reached
+      if (err instanceof CarrierRefused) throw new AppError('LABEL_FAILED', 'The carrier did not sell the label. Nothing was charged; change the package or choose another service.', { carrierMessage: err.carrierMessage, carrierReached: true }, 422);
+      if (err instanceof CarrierUnreachable) throw new AppError('LABEL_FAILED', 'The carrier did not answer. Nothing was charged; try again in a few minutes.', { carrierMessage: err.carrierMessage, carrierReached: false }, 502);
       throw err;
     }
     const tracking = normalizeTracking(bought.trackingNumber);
@@ -766,7 +769,7 @@ export class Shipments {
         purchased_at: now,
         voided_at: null,
       });
-      this.created(batch, s, lines, o.kind === 'return' ? 'Return parcel' : `Package ${packageNo}`);
+      this.created(batch, s, lines, o.kind === 'return' ? 'Return parcel' : `Shipment ${packageNo}`);
       batch.push('shipping.label.purchased', { labelId, shipmentId: id, orderId: g.task.orderId, groupId: g.task.groupId, sellerId: g.owner.sellerId, billedTo: o.billedTo, cost: o.cost, kind: kindInfo.kind, returnId: kindInfo.returnId });
       return l;
     });
@@ -893,7 +896,7 @@ export class Shipments {
         current = await tx.update('shipments', s.id, step);
         this.statusChanged(batch, current, status, next, e.at);
         if (ev === 'hand_over') this.dispatched(batch, current, lines);
-        if (next === 'delivered') batch.push('shipping.shipment.delivered', { shipmentId: s.id, kind: s.kind as 'outbound', orderId: s.order_id, groupId: s.group_id, returnId: s.return_id, sellerId: s.seller_id, fulfilledBy: fulfilledByOf(s.owner_type, s.fulfilled_by), lines: this.views.contents(lines), deliveredAt: e.at.toISOString() });
+        if (next === 'delivered') batch.push('shipping.shipment.delivered', { shipmentId: s.id, kind: s.kind as 'outbound', orderId: s.order_id, orderRef: s.order_ref, groupId: s.group_id, returnId: s.return_id, sellerId: s.seller_id, fulfilledBy: fulfilledByOf(s.owner_type, s.fulfilled_by), lines: this.views.contents(lines), deliveredAt: e.at.toISOString() });
         status = next;
       }
       if (!path?.events.length && Object.keys(patch).length) current = await tx.update('shipments', s.id, patch);

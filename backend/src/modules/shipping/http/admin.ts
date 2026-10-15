@@ -56,6 +56,10 @@ export const adminRoutes = (service: ShippingService) =>
     updateNotice: async ({ params, body, actor, requestId, principal }) => service.setup.updateNotice(params.id, body, { actor, requestId, principal }),
     /** POST /notices/{id}/publish: Publish now or schedule a notice */
     publishNotice: async ({ params, body, actor, requestId, principal }) => service.setup.publishNotice(params.id, body.mode, { actor, requestId, principal }),
+    /** DELETE /notices/{id}: Delete a draft notice */
+    deleteNotice: async ({ params, actor, requestId, principal }) => {
+      await service.setup.deleteNotice(params.id, { actor, requestId, principal });
+    },
     /** POST /notices/{id}/withdraw: Withdraw a notice */
     withdrawNotice: async ({ params, body, actor, requestId, principal }) => service.setup.withdrawNotice(params.id, body.reason, { actor, requestId, principal }),
     /** GET /free-shipping-rules: Free-shipping rules with who funds them */

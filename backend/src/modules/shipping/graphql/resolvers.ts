@@ -83,7 +83,7 @@ function shipment(s: Shipment, extra: { estimateNote: string | null; notices: Cu
     trackingState: upper(s.trackingState),
     dispatchedOnTime: s.dispatchedOnTime ?? null,
     label: s.label
-      ? { id: s.label.id, carrierName: s.label.carrierName, serviceName: s.label.serviceName, cost: money(s.label.cost), trackingNumber: s.label.trackingNumber, status: upper(s.label.status), purchasedBy: actor(s.label.purchasedBy), purchasedAt: s.label.purchasedAt, voidedAt: s.label.voidedAt ?? null }
+      ? { id: s.label.id, carrierName: s.label.carrierName, serviceName: s.label.serviceName, cost: money(s.label.cost), trackingNumber: s.label.trackingNumber, labelUrl: s.label.labelUrl ?? null, status: upper(s.label.status), purchasedBy: actor(s.label.purchasedBy), purchasedAt: s.label.purchasedAt, voidedAt: s.label.voidedAt ?? null }
       : null,
     corrections: s.corrections.map((c) => ({ ...c, by: actor(c.by) })),
     openExceptions: extra.openExceptions.map(exception),
@@ -186,13 +186,14 @@ export const resolvers = (service: ShippingService): ModuleResolvers => {
       },
       shipment: async (_root, args: { id: string }, ctx) => {
         if (!isUuid(args.id)) return null;
-        if (ctx.area === 'seller') return one(await service.getShipment({ sellerId: sellerIdOf(ctx) }, args.id), ctx);
+        // the caller's principal signs the label link, as on REST (G54c1)
+        if (ctx.area === 'seller') return one(await service.shipments.getForViewer({ sellerId: sellerIdOf(ctx) }, args.id, ctx.principal), ctx);
         const customerId = (await ctx.customerId()) ?? undefined;
         const guestSessionId = guestOf(ctx);
         if (!customerId && !guestSessionId) return null;
         return one(await service.getShipment({ ...(customerId ? { customerId } : {}), ...(guestSessionId ? { guestSessionId } : {}) }, args.id), ctx);
       },
-      shipmentAdmin: async (_root, args: { id: string }, ctx) => (isUuid(args.id) ? one(await service.getShipment({ staff: true }, args.id), ctx) : null),
+      shipmentAdmin: async (_root, args: { id: string }, ctx) => (isUuid(args.id) ? one(await service.shipments.getForViewer({ staff: true }, args.id, ctx.principal), ctx) : null),
       deliveryExceptions: async (_root, args: { filter?: Record<string, unknown> | null; paging?: common.PageInput | null }) => {
         const f = args.filter ?? {};
         const str = (k: string) => (typeof f[k] === 'string' && f[k] ? (f[k] as string) : undefined);
@@ -217,7 +218,7 @@ export const resolvers = (service: ShippingService): ModuleResolvers => {
         const kinds = (args?.kinds?.length ? args.kinds.map((k) => k.toLowerCase()) : ['outbound', 'replacement']) as ('outbound' | 'replacement' | 'return')[];
         const list =
           (await load(ctx, `groupShipments:${kinds.join(',')}`, root.id, async (ids) => {
-            const m = await service.listShipmentsForGroups(ids, kinds);
+            const m = await service.shipments.forGroups(ids, kinds, ctx.principal);
             const all = [...m.values()].flat();
             const enriched = await enrich(all, ctx);
             return new Map([...m].map(([g, l]) => [g, l.map((s) => enriched.get(s.id)!).filter(Boolean)]));

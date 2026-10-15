@@ -20,7 +20,9 @@ describe('carriers, methods and zones', () => {
   it('starts with the market reference data and keeps carrier contacts from sellers', async () => {
     const staff = tokens.staff();
     const carriers = (await h.call('GET', `${ADMIN}/carriers`, staff)).body;
-    expect(carriers.map((c: any) => c.code).sort()).toEqual(['fedex', 'ups', 'usps']);
+    // G40a: OnTrac and Other carrier are seeded too (Other has no tracking feed)
+    expect(carriers.map((c: any) => c.code).sort()).toEqual(['fedex', 'ontrac', 'other', 'ups', 'usps']);
+    expect(carriers.find((c: any) => c.code === 'other')).toMatchObject({ trackingMode: 'manual', trackingConnected: false });
     const ups = carriers.find((c: any) => c.code === 'ups');
     expect(ups.services.map((s: any) => s.name)).toContain('UPS Ground');
     expect(ups.services[0].trackingPattern).toBeTruthy();
@@ -41,10 +43,10 @@ describe('carriers, methods and zones', () => {
 
   it('adds carriers with their services and changes services, methods and zones', async () => {
     const staff = tokens.staff();
-    const created = await h.call('POST', `${ADMIN}/carriers`, staff, { code: 'ontrac', name: 'OnTrac', trackingMode: 'polling' });
+    const created = await h.call('POST', `${ADMIN}/carriers`, staff, { code: 'lasership', name: 'LaserShip', trackingMode: 'polling' });
     expect(created.status).toBe(201);
-    expect(created.body.services).toEqual([expect.objectContaining({ name: 'OnTrac Ground', labelSupported: false })]);
-    expect((await h.call('POST', `${ADMIN}/carriers`, staff, { code: 'ontrac', name: 'Again', trackingMode: 'webhook' })).status).toBe(409);
+    expect(created.body.services).toEqual([expect.objectContaining({ name: 'LaserShip Standard', labelSupported: false })]);
+    expect((await h.call('POST', `${ADMIN}/carriers`, staff, { code: 'lasership', name: 'Again', trackingMode: 'webhook' })).status).toBe(409);
     const svc = created.body.services[0];
     const changed = await h.call('PATCH', `${ADMIN}/carriers/${created.body.id}/services/${svc.id}`, staff, { transit: { min: 1, max: 2 }, enabled: false });
     expect(changed.body).toMatchObject({ enabled: false, transit: { min: 1, max: 2 } });
@@ -70,18 +72,18 @@ describe('carriers, methods and zones', () => {
   it('sets dispatch targets and free-shipping rules', async () => {
     const staff = tokens.staff();
     const t = (await h.call('GET', `${ADMIN}/dispatch-targets`, staff)).body;
-    expect(t).toMatchObject({ official: { cutoff: '14:00' }, sellerDefault: { dispatchWithinBusinessDays: 2, allowedMinDays: 1, allowedMaxDays: 3 }, note: expect.stringContaining('Example targets') });
+    expect(t).toMatchObject({ official: { cutoff: '14:00' }, sellerDefault: { dispatchWithinBusinessDays: 2, allowedMinDays: 0, allowedMaxDays: 3 }, note: expect.stringContaining('Example targets') });
     const bad = await h.call('PUT', `${ADMIN}/dispatch-targets`, staff, { official: { ...t.official, cutoff: '25:00' }, sellerDefault: t.sellerDefault, effectiveFrom: h.clock.now().toISOString(), reason: 'x' });
     expect(bad.status).toBe(400);
     const seller = { dispatchWithinBusinessDays: 3, validTrackingWithinHours: t.sellerDefault.validTrackingWithinHours, onTimeTargetPct: t.sellerDefault.onTimeTargetPct };
-    // the allowed range comes only from the sellerHandlingRange setting ([1, 3]): a default outside it is refused
+    // the allowed range comes only from the sellerHandlingRange setting ([0, 3]): a default outside it is refused
     const outside = await h.call('PUT', `${ADMIN}/dispatch-targets`, staff, { official: t.official, sellerDefault: { ...seller, dispatchWithinBusinessDays: 4 }, effectiveFrom: h.clock.now().toISOString(), reason: 'Longer' });
     expect(outside.status).toBe(400);
     expect(outside.body.error.details.issues).toEqual([expect.objectContaining({ path: 'sellerDefault.dispatchWithinBusinessDays' })]);
     const put = await h.call('PUT', `${ADMIN}/dispatch-targets`, staff, { official: { ...t.official, cutoff: '13:00' }, sellerDefault: seller, effectiveFrom: h.clock.now().toISOString(), reason: 'Holiday season' });
     expect(put.status, JSON.stringify(put.body)).toBe(200);
     expect(put.body.official.cutoff).toBe('13:00');
-    expect((await h.call('GET', `${ADMIN}/dispatch-targets`, staff)).body.sellerDefault).toEqual({ dispatchWithinBusinessDays: 3, allowedMinDays: 1, allowedMaxDays: 3, validTrackingWithinHours: seller.validTrackingWithinHours, onTimeTargetPct: seller.onTimeTargetPct });
+    expect((await h.call('GET', `${ADMIN}/dispatch-targets`, staff)).body.sellerDefault).toEqual({ dispatchWithinBusinessDays: 3, allowedMinDays: 0, allowedMaxDays: 3, validTrackingWithinHours: seller.validTrackingWithinHours, onTimeTargetPct: seller.onTimeTargetPct });
     expect(h.audits.at(-1)).toMatchObject({ action: 'shipping.dispatch_targets.update', reason: 'Holiday season' });
 
     const later = await h.call('POST', `${ADMIN}/free-shipping-rules`, staff, { name: 'Holiday free shipping', scope: 'official_store', minOrderValue: { amount: 2500, currency: 'USD' }, methodCode: 'standard', fundedBy: 'company', window: { from: day(10), to: day(20) }, reason: 'Campaign' });
@@ -135,6 +137,14 @@ describe('holiday and service notices', () => {
     expect((await h.call('POST', `${ADMIN}/notices/${draft.body.id}/withdraw`, staff, { reason: 'again' })).status).toBe(409);
     expect((await h.call('PATCH', `${ADMIN}/notices/${draft.body.id}`, staff, input())).status).toBe(409);
     expect(h.audits.at(-1)).toMatchObject({ action: 'shipping.notice.withdraw', reason: 'Storm passed' });
+    // G73: a withdrawn notice cannot be deleted, a draft can
+    expect((await h.call('DELETE', `${ADMIN}/notices/${draft.body.id}`, staff)).status).toBe(409);
+    const scrap = await h.call('POST', `${ADMIN}/notices`, staff, { ...input(), title: 'Scrap draft' });
+    const gone = await h.call('DELETE', `${ADMIN}/notices/${scrap.body.id}`, staff);
+    expect(gone.status, JSON.stringify(gone.body)).toBe(204);
+    expect(h.audits.at(-1)).toMatchObject({ action: 'shipping.notice.delete', target: { id: scrap.body.id } });
+    expect((await h.call('GET', `${ADMIN}/notices`, staff)).body.items.map((x: any) => x.id)).not.toContain(scrap.body.id);
+    expect((await h.call('DELETE', `${ADMIN}/notices/${scrap.body.id}`, staff)).status).toBe(404);
   });
 
   it('schedules notices: live at showFrom, ended after the to date', async () => {
