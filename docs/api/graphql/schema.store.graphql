@@ -390,7 +390,7 @@ type CartCouponCoverage @areas(in: [STORE]) {
 type CartCouponExclusion @areas(in: [STORE]) {
   itemId: UUID!
   title: String!
-  "e.g. 'already on a seller markdown'"
+  "'Already on sale' or 'Not included in this coupon' (the same wording at checkout)"
   reason: String!
 }
 
@@ -3603,7 +3603,7 @@ type Return {
   sellerId: UUID
   sellerName: String!
   status: ReturnStatus!
-  "Customer wording, e.g. Approved: send it back"
+  "Store: customer wording, e.g. Approved: send it back. Seller and Admin Center: seller and staff wording, as their lists show it, e.g. Return requested"
   statusLabel: String!
   "Item track: Requested, Approved, Sent back, Received, Inspected, Refunded (or Replaced)"
   track: [ReturnTrackStep!]!

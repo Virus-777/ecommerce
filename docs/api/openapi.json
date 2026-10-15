@@ -17309,7 +17309,7 @@
                   "attributes": {
                     "type": "array",
                     "items": {
-                      "$ref": "#/components/schemas/catalog.Attribute"
+                      "$ref": "#/components/schemas/catalog.AttributeInput"
                     }
                   },
                   "imageRules": {
@@ -31774,7 +31774,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nOWNER_ONLY: Only the seller owner can do this.",
             "content": {
               "application/json": {
                 "schema": {
@@ -43016,7 +43016,7 @@
             }
           },
           "401": {
-            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.\nINVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock.",
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.\nINVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes.",
             "content": {
               "application/json": {
                 "schema": {
@@ -43950,7 +43950,7 @@
           "Public API · Identity"
         ],
         "summary": "Open an order from an emailed link",
-        "description": "Grants the (new or given) guest session access to that order. Signed-in customers whose verified email matches see it in their account instead.\n\n**Screens:** auth/guest-orders, account/order",
+        "description": "Visitors: grants the (new or given) guest session access to that order. A signed-in customer gets the order id and ref without any guest access (guestSession null): the order opens in their account when it is theirs. Returns orderRef when the link recorded it.\n\n**Screens:** auth/guest-orders, account/order",
         "security": [
           {
             "bearer": []
@@ -44169,7 +44169,7 @@
             }
           },
           "401": {
-            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.\nINVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock.",
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.\nINVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes.",
             "content": {
               "application/json": {
                 "schema": {
@@ -44294,7 +44294,7 @@
             }
           },
           "401": {
-            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.\nINVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock.",
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.\nINVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes.",
             "content": {
               "application/json": {
                 "schema": {
@@ -44453,6 +44453,16 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PASSWORD_NOT_SET: The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one.",
             "content": {
               "application/json": {
                 "schema": {
@@ -44652,6 +44662,16 @@
               }
             }
           },
+          "409": {
+            "description": "PASSWORD_NOT_SET: The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "429": {
             "description": "RATE_LIMITED: Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds).",
             "content": {
@@ -44729,6 +44749,16 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PASSWORD_NOT_SET: The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one.",
             "content": {
               "application/json": {
                 "schema": {
@@ -44898,6 +44928,16 @@
           },
           "403": {
             "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nTWO_STEP_NOT_FOR_STAFF: Staff accounts sign in with email and password only; they cannot add a 2-step method.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "PASSWORD_NOT_SET: The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one.",
             "content": {
               "application/json": {
                 "schema": {
@@ -53009,8 +53049,8 @@
         "tags": [
           "Seller API · Media"
         ],
-        "summary": "Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files)",
-        "description": "**Permission:** `media.assets.upload`\n\n**Screens:** seller/product-new, seller/offer, seller/store, seller/ad-request, seller/bulk-update, seller/return, seller/returns, seller/setup",
+        "summary": "Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, return evidence, case evidence, bulk files)",
+        "description": "return_evidence: files for a return's evidence before any case (POST /api/seller/returns/requests/{id}/evidence attaches them with usage return_evidence, which takes only this purpose).\n\n**Permission:** `media.assets.upload`\n\n**Screens:** seller/product-new, seller/offer, seller/store, seller/ad-request, seller/bulk-update, seller/return, seller/returns, seller/setup",
         "security": [
           {
             "bearer": []
@@ -71164,7 +71204,7 @@
           "Seller API · Orders"
         ],
         "summary": "Cancel items the seller cannot fulfill",
-        "description": "Only unshipped items. The buyer is notified and refunded for the cancelled items under the cancellation policy; seller cancellations count toward the cancellation rate.\n\n**Permission:** `orders.fulfillment.cancel`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Publishes:** `orders.item.cancelled`\n\n**Screens:** seller/order",
+        "description": "Only unshipped items, and not items on a bought label the carrier has not scanned (CANCELLATION_NOT_ALLOWED: void the label first; allowedActions leaves out cancel_items while every cancellable item is on one). The buyer is notified and refunded for the cancelled items under the cancellation policy; seller cancellations count toward the cancellation rate.\n\n**Permission:** `orders.fulfillment.cancel`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Publishes:** `orders.item.cancelled`\n\n**Screens:** seller/order",
         "security": [
           {
             "bearer": []
@@ -148593,6 +148633,39 @@
           "label"
         ]
       },
+      "advertising.FrequencyCapInput": {
+        "type": "object",
+        "properties": {
+          "perSession": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "perDay": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "perWindow": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/advertising.FrequencyWindow"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "perCampaign": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
       "advertising.FrequencyWindow": {
         "type": "object",
         "properties": {
@@ -148636,6 +148709,29 @@
           "label"
         ]
       },
+      "advertising.DismissalRuleInput": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "not_dismissible",
+              "session",
+              "days",
+              "campaign"
+            ]
+          },
+          "days": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
       "advertising.RotationRule": {
         "type": "object",
         "properties": {
@@ -148671,6 +148767,39 @@
           "mode",
           "pauseOnHoverAndFocus",
           "label"
+        ]
+      },
+      "advertising.RotationRuleInput": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "priority_then_even",
+              "relevance_then_priority",
+              "category_match_then_priority",
+              "carousel"
+            ]
+          },
+          "carouselSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "maxInRotation": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "pauseOnHoverAndFocus": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "mode",
+          "pauseOnHoverAndFocus"
         ]
       },
       "advertising.PopupTrigger": {
@@ -148882,12 +149011,13 @@
           "frequencyCap": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/advertising.FrequencyCap"
+                "$ref": "#/components/schemas/advertising.FrequencyCapInput"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The label is written by the server"
           },
           "trigger": {
             "anyOf": [
@@ -148902,22 +149032,24 @@
           "rotation": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/advertising.RotationRule"
+                "$ref": "#/components/schemas/advertising.RotationRuleInput"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The label is written by the server"
           },
           "dismissal": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/advertising.DismissalRule"
+                "$ref": "#/components/schemas/advertising.DismissalRuleInput"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The label is written by the server"
           },
           "maxPerPage": {
             "type": [
@@ -149270,6 +149402,61 @@
           "spent"
         ]
       },
+      "advertising.AdBudgetInput": {
+        "type": "object",
+        "properties": {
+          "billing": {
+            "type": "string",
+            "enum": [
+              "none",
+              "cpc",
+              "cpm",
+              "fixed_daily"
+            ]
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dailyLimit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Spending limit per market day (see AdBudget.dailyLimit)"
+          },
+          "totalLimit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deliveryCap": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Maximum displays (own promotions have no budget charge)"
+          }
+        },
+        "required": [
+          "billing"
+        ]
+      },
       "advertising.AdvertiserRef": {
         "type": "object",
         "properties": {
@@ -149419,23 +149606,24 @@
           "frequencyCap": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/advertising.FrequencyCap"
+                "$ref": "#/components/schemas/advertising.FrequencyCapInput"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Defaults to the placement cap"
+            "description": "Defaults to the placement cap; the label is written by the server"
           },
           "dismissal": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/advertising.DismissalRule"
+                "$ref": "#/components/schemas/advertising.DismissalRuleInput"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Defaults to the placement rule; the label is written by the server"
           },
           "priority": {
             "type": "integer",
@@ -149444,16 +149632,20 @@
           "budget": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/advertising.AdBudget"
+                "$ref": "#/components/schemas/advertising.AdBudgetInput"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Spent and remaining are kept by the server (AdCampaign.budget)"
           },
           "stopWithPromotion": {
-            "type": "boolean",
-            "description": "Stop when the linked promotion ends or its budget runs out"
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Stop when the linked promotion ends or its budget runs out. Default false; true needs linkedPromotionId"
           },
           "creativeIds": {
             "type": "array",
@@ -149492,7 +149684,6 @@
           "endsAt",
           "timeZone",
           "priority",
-          "stopWithPromotion",
           "creativeIds"
         ]
       },
@@ -153026,7 +153217,7 @@
           },
           "reason": {
             "type": "string",
-            "description": "e.g. 'already on a seller markdown'"
+            "description": "'Already on sale' or 'Not included in this coupon' (the same wording at checkout)"
           }
         },
         "required": [
@@ -153777,6 +153968,66 @@
           "name",
           "kind",
           "options",
+          "required",
+          "filterable",
+          "variantDefining"
+        ]
+      },
+      "catalog.AttributeInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "An attribute of this category to keep (its id stays, so product values keep pointing at it); omitted for a new attribute"
+          },
+          "name": {
+            "type": "string",
+            "description": "e.g. Screen size"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "number",
+              "enum",
+              "bool"
+            ]
+          },
+          "unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "options": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The values to choose from (kind enum)"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "filterable": {
+            "type": "boolean",
+            "description": "Shown as a category filter in the store"
+          },
+          "variantDefining": {
+            "type": "boolean",
+            "description": "Creates variants (colour, size)"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
           "required",
           "filterable",
           "variantDefining"
@@ -156399,7 +156650,8 @@
             "type": "string"
           },
           "reason": {
-            "type": "string"
+            "type": "string",
+            "description": "'Already on sale' or 'Not included in this coupon' (the same wording as the cart)"
           }
         },
         "required": [
@@ -168081,6 +168333,10 @@
             ],
             "format": "date-time"
           },
+          "hasPassword": {
+            "type": "boolean",
+            "description": "False for accounts that sign in with Google or Apple only; password actions (change password, confirm with password) answer PASSWORD_NOT_SET"
+          },
           "email": {
             "$ref": "#/components/schemas/identity.EmailStatus"
           },
@@ -168110,6 +168366,7 @@
         },
         "required": [
           "account",
+          "hasPassword",
           "email",
           "twoStep",
           "devices",
@@ -168629,18 +168886,32 @@
         "type": "object",
         "properties": {
           "guestSession": {
-            "$ref": "#/components/schemas/identity.GuestSession"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/identity.GuestSession"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The guest session that may now open the order; null for a signed-in customer (no guest access is created: the order opens in their account when it is theirs)"
           },
           "orderId": {
             "type": "string",
             "format": "uuid"
+          },
+          "orderRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The order's reference, as screens show it; null for links issued before it was recorded or by an issuer that did not pass it"
           },
           "emailMasked": {
             "type": "string"
           }
         },
         "required": [
-          "guestSession",
           "orderId",
           "emailMasked"
         ]
@@ -172649,7 +172920,7 @@
               "string",
               "null"
             ],
-            "description": "MK-260914-48213, RT-261002-0520, CS-261005-3381, PO-261005-3381"
+            "description": "Reference of the record the screen opens, next to its id: MK-260914-48213 for order, shipment (tracking) and seller order links (refund notices link to the order, the return or the case and carry that reference, never the RF- one), RT-261002-0520, CS-261005-3381, PO-261005-3381"
           },
           "label": {
             "type": [
@@ -172830,7 +173101,7 @@
               "string",
               "null"
             ],
-            "description": "Icon name from the design system, e.g. truck"
+            "description": "Lucide icon name as lucide-react 1.x names it, e.g. truck, triangle-alert, circle-x (never the old aliases alert-triangle, x-circle)"
           },
           "tone": {
             "type": "string",
@@ -173310,7 +173581,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Email preview line with {{variables}}; shortened to 90 characters after rendering (never inside a variable)"
           },
           "title": {
             "type": [
@@ -173321,7 +173593,7 @@
           },
           "body": {
             "type": "string",
-            "description": "Plain text with {{variables}}; email HTML is rendered from the layout"
+            "description": "Plain text with {{variables}}; email HTML is rendered from the layout; push bodies are shortened to 140 characters after rendering"
           },
           "button": {
             "anyOf": [
@@ -178827,6 +179099,13 @@
           "itemCount": {
             "type": "integer"
           },
+          "itemStates": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Units per item state, e.g. { shipped: 2, delivered: 1 }; adds up to itemCount"
+          },
           "sellerCount": {
             "type": "integer"
           },
@@ -178874,6 +179153,7 @@
           "statusLabel",
           "total",
           "itemCount",
+          "itemStates",
           "sellerCount",
           "packageCount",
           "packages",
@@ -192211,10 +192491,12 @@
             "$ref": "#/components/schemas/Money"
           },
           "sellerEarningsChange": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "Before the refund is booked a preview (finance.previewRefundImpact); once payments sent it and finance booked it, the posted refund entries (finance.bookedRefundImpact)"
           },
           "feeReturned": {
-            "$ref": "#/components/schemas/Money"
+            "$ref": "#/components/schemas/Money",
+            "description": "Preview before booking; the posted fee_refund entries after"
           },
           "labelCharge": {
             "anyOf": [
@@ -192550,6 +192832,10 @@
           "detail": {
             "$ref": "#/components/schemas/returns.ReturnDetail"
           },
+          "statusLabel": {
+            "type": "string",
+            "description": "Seller and staff wording, as the seller and admin lists show it, e.g. Return requested, Waiting on customer (detail.statusLabel is the customer's wording)"
+          },
           "customer": {
             "type": "object",
             "properties": {
@@ -192791,6 +193077,7 @@
         },
         "required": [
           "detail",
+          "statusLabel",
           "customer",
           "payment",
           "policyApplied",
@@ -193113,7 +193400,8 @@
             "type": "integer"
           },
           "exceptions": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Returns with a refund-without-return exception, open or completed: the Exceptions tab (same as tabCounts.exceptions)"
           },
           "tabCounts": {
             "type": "object",
@@ -196039,7 +196327,8 @@
         "type": "object",
         "properties": {
           "value": {
-            "type": "string"
+            "type": "string",
+            "description": "The value the filter takes: category, brand and store slugs (official for the Official Store), condition codes, attribute values"
           },
           "label": {
             "type": "string"
@@ -197875,8 +198164,12 @@
             "type": "string"
           },
           "url": {
-            "type": "string",
-            "format": "uri"
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Store page of the published policy, <store>/policies/<key> with the content policy key (e.g. /policies/seller_agreement); null while no version is published (content off)"
           },
           "isExample": {
             "type": "boolean",
@@ -197889,7 +198182,6 @@
           "versionLabel",
           "effectiveFrom",
           "summary",
-          "url",
           "isExample"
         ]
       },
@@ -198310,8 +198602,11 @@
             ]
           },
           "taxId": {
-            "type": "string",
-            "description": "Sent once; stored encrypted, only the last 4 digits are ever returned"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Sent once; stored encrypted, only the last 4 digits are ever returned. Leave it out on later saves to keep the stored one (submitting needs one)"
           },
           "w9Method": {
             "type": "string",
@@ -198331,7 +198626,6 @@
         "required": [
           "owners",
           "taxIdType",
-          "taxId",
           "w9Method"
         ]
       },
@@ -201185,7 +201479,7 @@
             "type": "integer"
           },
           "balances": {
-            "description": "{ total, held, negativeCount } from finance"
+            "description": "{ total, held, negativeCount } from finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off"
           },
           "byStatus": {
             "type": "object",
@@ -204616,6 +204910,17 @@
                 "type": "null"
               }
             ]
+          },
+          "freeOver": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lowest order value that makes the default option's method free (method free-over, profile threshold or an active free-shipping rule); null when there is none or it is always free"
           }
         },
         "required": [
@@ -207742,7 +208047,11 @@
             ]
           },
           "category": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Help topic key. May be left out when problemType is given: the topic is derived from it"
           },
           "orderId": {
             "type": [
@@ -207825,7 +208134,6 @@
         },
         "required": [
           "kind",
-          "category",
           "message"
         ]
       },
