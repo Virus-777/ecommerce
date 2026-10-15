@@ -25,7 +25,7 @@ export const adminRoutes = (service: SettingsService) =>
     /** POST /changes/{id}/preview: Recalculate the impact preview */
     previewChange: async ({ params }) => service.previewChange(params.id),
     /** POST /changes/{id}/submit: Save: schedule, or send for approval */
-    submitChange: async ({ params, actor, principal, requestId, can }) => service.submitChange(params.id, { actor, principal, requestId, can }),
+    submitChange: async ({ params, body, actor, principal, requestId, can }) => service.submitChange(params.id, { actor, principal, requestId, can }, body ?? {}),
     /** POST /changes/{id}/cancel: Cancel a draft, pending or scheduled change */
     cancelChange: async ({ params, body, actor, principal, requestId }) => service.cancelChange(params.id, body.reason, { actor, principal, requestId }),
     /** GET /changes: Setting changes (scheduled by default) */

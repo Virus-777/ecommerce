@@ -38,7 +38,7 @@ describe('app-config', () => {
         locale: 'en-US',
         serviceRegionLabel: 'United States, 48 contiguous states',
         legalName: 'Marketly, Inc.',
-        companyLine: 'Marketly, Inc. · 500 Market St, San Francisco, CA',
+        companyLine: 'Marketly, Inc. · Portland, OR',
       },
       support: { hoursLabel: 'Mon–Sat, 8 AM–8 PM PT', phone: expect.any(String), openNow: expect.any(Boolean), closedLabel: 'Closed Sundays and US holidays' },
       checkout: { guestCheckoutEnabled: true, offerAccountAfterGuestPurchase: true },
@@ -121,7 +121,7 @@ describe('market and business calendar', () => {
     expect(m).toMatchObject({ country: 'US', currency: 'USD', timeZone: 'America/Los_Angeles', businessHoursLabel: 'Mon–Sat, 8:00 AM – 8:00 PM PT', serviceRegion: { code: 'US-48' } });
     expect(m.businessHours).toHaveLength(6);
     expect(m.support.closedLabel).toBe('Closed Sundays and US holidays');
-    expect(m).toMatchObject({ legalName: 'Marketly, Inc.', companyLine: 'Marketly, Inc. · 500 Market St, San Francisco, CA' });
+    expect(m).toMatchObject({ legalName: 'Marketly, Inc.', companyLine: 'Marketly, Inc. · Portland, OR' });
   });
 
   it('GET /business-calendar gives open hours per day minus closures', async () => {

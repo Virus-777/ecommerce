@@ -75,6 +75,10 @@ export interface MarketSettings {
   legalName: string;
   /** market.companyLine */
   companyLine: string;
+  /** market.defaultDeliveryLocation: where prices and delivery dates are estimated before a visitor gives an address */
+  defaultDeliveryLocation?: DeliveryLocation | null;
+  /** Public company facts (market.* keys) */
+  company?: CompanyFacts | null;
 }
 
 export const MarketSettings: z.ZodType<MarketSettings> = z.object({
@@ -97,7 +101,49 @@ export const MarketSettings: z.ZodType<MarketSettings> = z.object({
   },
   legalName: z.string().describe("market.legalName"),
   companyLine: z.string().describe("market.companyLine"),
+  get defaultDeliveryLocation() {
+    return DeliveryLocation.nullish();
+  },
+  get company() {
+    return CompanyFacts.nullish();
+  },
 }).register(common.apiTypes, { id: "settings.MarketSettings" });
+
+export interface DeliveryLocation {
+  /** e.g. 97205 */
+  postalCode: string;
+  /** e.g. Portland, OR 97205, shown as Deliver to Portland, OR 97205 */
+  label: string;
+}
+
+export const DeliveryLocation: z.ZodType<DeliveryLocation> = z.object({
+  postalCode: z.string().describe("e.g. 97205"),
+  label: z.string().describe("e.g. Portland, OR 97205, shown as Deliver to Portland, OR 97205"),
+}).register(common.apiTypes, { id: "settings.DeliveryLocation" });
+
+export interface CompanyFacts {
+  /** market.helpEmail */
+  helpEmail?: string | null;
+  /** market.sellersEmail (seller enquiries) */
+  sellersEmail?: string | null;
+  /** market.pressEmail */
+  pressEmail?: string | null;
+  /** market.postalAddress, one line */
+  postalAddress?: string | null;
+  /** market.foundedYear */
+  foundedYear?: number | null;
+  /** market.headquarters, e.g. Portland, OR */
+  headquarters?: string | null;
+}
+
+export const CompanyFacts: z.ZodType<CompanyFacts> = z.object({
+  helpEmail: z.email().describe("market.helpEmail").nullish(),
+  sellersEmail: z.email().describe("market.sellersEmail (seller enquiries)").nullish(),
+  pressEmail: z.email().describe("market.pressEmail").nullish(),
+  postalAddress: z.string().describe("market.postalAddress, one line").nullish(),
+  foundedYear: z.number().int().describe("market.foundedYear").nullish(),
+  headquarters: z.string().describe("market.headquarters, e.g. Portland, OR").nullish(),
+}).register(common.apiTypes, { id: "settings.CompanyFacts" });
 
 export interface ServiceRegion {
   code: string;
@@ -179,8 +225,12 @@ export interface PublicMarket {
   serviceRegionLabel: string;
   /** Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts) */
   legalName: string;
-  /** One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA */
+  /** One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR */
   companyLine: string;
+  /** Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given */
+  defaultDeliveryLocation?: DeliveryLocation | null;
+  /** Contact emails, postal address, founding year and headquarters for the About and contact pages; always given */
+  company?: CompanyFacts | null;
 }
 
 export const PublicMarket: z.ZodType<PublicMarket> = z.object({
@@ -190,7 +240,13 @@ export const PublicMarket: z.ZodType<PublicMarket> = z.object({
   locale: z.string(),
   serviceRegionLabel: z.string(),
   legalName: z.string().describe("Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"),
-  companyLine: z.string().describe("One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"),
+  companyLine: z.string().describe("One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"),
+  get defaultDeliveryLocation() {
+    return DeliveryLocation.nullish();
+  },
+  get company() {
+    return CompanyFacts.nullish();
+  },
 }).register(common.apiTypes, { id: "settings.PublicMarket" });
 
 export interface PublicSupport {
@@ -364,7 +420,8 @@ export interface ChangeInput {
   effectiveAt: string;
   /** new_only: orders placed on or after the effective date; open_commitments: also orders not yet delivered (only where the definition allows) */
   applyScope: "new_only" | "open_commitments";
-  reason: string;
+  /** Why. Optional while drafting and previewing; required by submitChange (given here or in its body) */
+  reason?: string | null;
 }
 
 export const ChangeInput: z.ZodType<ChangeInput> = z.object({
@@ -373,8 +430,17 @@ export const ChangeInput: z.ZodType<ChangeInput> = z.object({
   },
   effectiveAt: z.iso.datetime({ offset: true }).describe("Must respect each item's minLeadDays"),
   applyScope: z.enum(["new_only", "open_commitments"]).describe("new_only: orders placed on or after the effective date; open_commitments: also orders not yet delivered (only where the definition allows)"),
-  reason: z.string(),
+  reason: z.string().describe("Why. Optional while drafting and previewing; required by submitChange (given here or in its body)").nullish(),
 }).register(common.apiTypes, { id: "settings.ChangeInput" });
+
+export interface SubmitChangeInput {
+  /** Why the change is made; replaces the draft's reason. Required when the draft has none */
+  reason?: string | null;
+}
+
+export const SubmitChangeInput: z.ZodType<SubmitChangeInput> = z.object({
+  reason: z.string().describe("Why the change is made; replaces the draft's reason. Required when the draft has none").nullish(),
+}).register(common.apiTypes, { id: "settings.SubmitChangeInput" });
 
 export interface ChangeItem {
   key: string;
@@ -447,7 +513,8 @@ export interface SettingChange {
   items: ChangeItem[];
   effectiveAt: string;
   applyScope: "new_only" | "open_commitments";
-  reason: string;
+  /** Null on a draft saved without one (the reason is asked at submit) */
+  reason?: string | null;
   impact: ImpactPreview;
   createdBy: common.Actor;
   createdAt: string;
@@ -467,7 +534,7 @@ export const SettingChange: z.ZodType<SettingChange> = z.object({
   },
   effectiveAt: z.iso.datetime({ offset: true }),
   applyScope: z.enum(["new_only", "open_commitments"]),
-  reason: z.string(),
+  reason: z.string().describe("Null on a draft saved without one (the reason is asked at submit)").nullish(),
   get impact() {
     return ImpactPreview;
   },
@@ -487,20 +554,52 @@ export const SettingChange: z.ZodType<SettingChange> = z.object({
 }).register(common.apiTypes, { id: "settings.SettingChange" });
 
 export interface SectionValue {
+  /** The setting key (definition key) for values settings owns: edit it with POST /changes; for values another module reports, that module's own key or null */
   key?: string | null;
   label: string;
   valueText: string;
+  /** The raw value in force (what ChangeItemInput.value takes); null for values another module reports without one */
+  value?: unknown | null;
+  /** SettingDefinition.valueType for settings-owned values */
+  valueType?: string | null;
   hint?: string | null;
   exampleValue: boolean;
 }
 
 export const SectionValue: z.ZodType<SectionValue> = z.object({
-  key: z.string().nullish(),
+  key: z.string().describe("The setting key (definition key) for values settings owns: edit it with POST /changes; for values another module reports, that module's own key or null").nullish(),
   label: z.string(),
   valueText: z.string(),
+  value: z.unknown().describe("The raw value in force (what ChangeItemInput.value takes); null for values another module reports without one").nullish(),
+  valueType: z.string().describe("SettingDefinition.valueType for settings-owned values").nullish(),
   hint: z.string().nullish(),
   exampleValue: z.boolean(),
 }).register(common.apiTypes, { id: "settings.SectionValue" });
+
+export interface SellerSettingValue {
+  /** e.g. catalog.minDescriptionLength */
+  key: string;
+  module: string;
+  label: string;
+  description: string;
+  valueType: string;
+  unit?: string | null;
+  /** The value in force now */
+  value?: unknown;
+  /** e.g. 40 characters */
+  valueText: string;
+}
+
+export const SellerSettingValue: z.ZodType<SellerSettingValue> = z.object({
+  key: z.string().describe("e.g. catalog.minDescriptionLength"),
+  module: z.string(),
+  label: z.string(),
+  description: z.string(),
+  valueType: z.string(),
+  unit: z.string().nullish(),
+  value: z.unknown().describe("The value in force now"),
+  valueText: z.string().describe("e.g. 40 characters"),
+}).register(common.apiTypes, { id: "settings.SellerSettingValue" });
 
 export interface SectionLink {
   module: string;
@@ -926,6 +1025,20 @@ export const endpoints = defineEndpoints({
     screens: ["seller/dashboard","seller/help"],
     phase: 1,
   },
+  listCurrentSellerSettings: {
+    area: "seller",
+    method: "GET",
+    path: "/current",
+    auth: "seller",
+    sellerContext: "optional",
+    scope: "own-seller",
+    summary: "Current values of the settings sellers can see",
+    desc: "Every setting marked sellerVisible (definitions of enabled modules), with the value in force now, e.g. catalog.minDescriptionLength, inventory.defaultLowStockThreshold. Read-only; scheduled changes are in upcoming-changes.",
+    response: () => z.array(SellerSettingValue),
+    status: 200,
+    screens: ["seller/product-new","seller/inventory","seller/bulk-update"],
+    phase: 1,
+  },
   getOverview: {
     area: "admin",
     method: "GET",
@@ -1070,14 +1183,15 @@ export const endpoints = defineEndpoints({
     permission: "settings.changes.propose",
     scope: "staff",
     summary: "Save: schedule, or send for approval",
-    desc: "Settings that need approval go to access (Business Owner or second reviewer) and are scheduled only after approval. Sellers are notified of seller-visible changes when scheduled.",
+    desc: "Settings that need approval go to access (Business Owner or second reviewer) and are scheduled only after approval. Sellers are notified of seller-visible changes when scheduled. The reason is asked here: the body's reason replaces the draft's; without either the call answers VALIDATION_FAILED (path reason). The body may be left out when the draft has a reason.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
+    body: () => SubmitChangeInput.nullish(),
     response: () => SettingChange,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","IMPACT_BLOCKING","CHANGE_CONFLICT","LEAD_TIME_TOO_SHORT"],
+    errors: ["VALIDATION_FAILED","ILLEGAL_TRANSITION","IMPACT_BLOCKING","CHANGE_CONFLICT","LEAD_TIME_TOO_SHORT"],
     audited: true,
     approval: "Approval action settings.changes.apply (second reviewer), or settings.changes.apply-owner when any item needs the Business Owner. Per definition: none, second reviewer, or Business Owner",
     events: ["settings.change.submitted","settings.change.scheduled"],

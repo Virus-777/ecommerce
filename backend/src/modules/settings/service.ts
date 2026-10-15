@@ -17,6 +17,8 @@ import type {
   ChangeItem,
   Closure,
   DayHours,
+  DeliveryLocation,
+  SellerSettingValue,
   FeatureFlag,
   ImpactItem,
   ImpactPreview,
@@ -80,6 +82,13 @@ const MARKET_KEYS = [
   'market.locale',
   'market.legalName',
   'market.companyLine',
+  'market.defaultDeliveryLocation',
+  'market.helpEmail',
+  'market.sellersEmail',
+  'market.pressEmail',
+  'market.postalAddress',
+  'market.foundedYear',
+  'market.headquarters',
   'support.businessHours',
   'support.closures',
   'support.phone',
@@ -265,6 +274,15 @@ export class SettingsService implements SettingsPublicApi {
       locale: (v['market.locale'] as string) ?? 'en-US',
       legalName: (v['market.legalName'] as string) ?? '',
       companyLine: (v['market.companyLine'] as string) ?? '',
+      defaultDeliveryLocation: (v['market.defaultDeliveryLocation'] as DeliveryLocation | null) ?? null,
+      company: {
+        helpEmail: (v['market.helpEmail'] as string | null) ?? null,
+        sellersEmail: (v['market.sellersEmail'] as string | null) ?? null,
+        pressEmail: (v['market.pressEmail'] as string | null) ?? null,
+        postalAddress: (v['market.postalAddress'] as string | null) ?? null,
+        foundedYear: (v['market.foundedYear'] as number | null) ?? null,
+        headquarters: (v['market.headquarters'] as string | null) ?? null,
+      },
       businessHours: hours,
       businessHoursLabel: hoursLabel(hours, timeZone),
       closures,
@@ -425,7 +443,12 @@ export class SettingsService implements SettingsPublicApi {
       .update(JSON.stringify({ raw, flags: publicFlags.map((f) => [f.key, f.enabled, f.rollout, f.percentage, this.#enabled.has(f.module)]) }))
       .digest('hex')
       .slice(0, 16);
-    const market: PublicMarket = { country: m.country, currency: m.currency, timeZone: m.timeZone, locale: m.locale, serviceRegionLabel: m.serviceRegion?.label ?? m.country, legalName: m.legalName, companyLine: m.companyLine };
+    const market: PublicMarket = { country: m.country, currency: m.currency, timeZone: m.timeZone, locale: m.locale, serviceRegionLabel: m.serviceRegion?.label ?? m.country,
+      legalName: m.legalName,
+      companyLine: m.companyLine,
+      defaultDeliveryLocation: m.defaultDeliveryLocation ?? null,
+      company: m.company ?? null,
+    };
     const support: PublicSupport = {
       hoursLabel: m.support.phoneHoursLabel,
       openNow,
@@ -473,10 +496,14 @@ export class SettingsService implements SettingsPublicApi {
         inSection.map(async (d) => {
           const next = scheduled.find((c) => c.status === 'scheduled' && c.items.some((i) => i.key === d.key));
           const item = next?.items.find((i) => i.key === d.key);
+          const value = await this.#valueOf(d.key);
           return {
             key: d.key,
             label: d.label,
-            valueText: valueText(d, await this.#valueOf(d.key), tz),
+            valueText: valueText(d, value, tz),
+            // the raw value and its type next to the text, so the page can open the editor without another request (G75)
+            value: value ?? null,
+            valueType: d.valueType,
             hint: item && next ? `Changes to ${item.toText} on ${dateText(next.effectiveAt, tz)}` : d.editable ? null : 'Read-only',
             exampleValue: d.exampleValue,
           };
@@ -531,11 +558,24 @@ export class SettingsService implements SettingsPublicApi {
       providers.map(async (p) => {
         try {
           const s = await p.load();
-          return { ...s, key: s.key ?? p.key, ownedHere: false, scheduled: s.scheduled ?? [], values: s.values ?? [] };
+          const values = (s.values ?? []).map((v) => ({ ...v, value: v.value ?? null, valueType: v.valueType ?? null }));
+          return { ...s, key: s.key ?? p.key, ownedHere: false, scheduled: s.scheduled ?? [], values };
         } catch (err) {
           this.ctx.log.warn({ err, section: p.key }, 'settings: section provider failed');
           return { key: p.key, title: p.key, subtitle: 'Could not load this section', ownerModule: 'unknown', ownedHere: false, values: [], lastChange: null, scheduled: [], link: null, available: false };
         }
+      }),
+    );
+  }
+
+  /** GET /api/seller/settings/current: the value in force of every seller-visible setting (G52c) */
+  async currentSellerSettings(): Promise<SellerSettingValue[]> {
+    const [defs, tz] = await Promise.all([this.#defs(), this.#timeZone()]);
+    const visible = [...defs.values()].filter((d) => d.available && d.sellerVisible).sort((a, b) => a.key.localeCompare(b.key));
+    return Promise.all(
+      visible.map(async (d) => {
+        const value = await this.#valueOf(d.key);
+        return { key: d.key, module: d.module, label: d.label, description: d.description, valueType: d.valueType, unit: d.unit ?? null, value: value ?? null, valueText: valueText(d, value, tz) };
       }),
     );
   }
@@ -627,7 +667,7 @@ export class SettingsService implements SettingsPublicApi {
       items,
       effectiveAt,
       applyScope: input.applyScope,
-      reason: input.reason.trim(),
+      reason: input.reason?.trim() ?? '',
       meta: { preview, timeline: [{ at: now.toISOString(), label: 'Draft created', actor: by.actor }], createdBy: by.actor, approvedBy: null, scheduledAt: null, approvalNote: null },
       createdByKind: by.actor.kind,
       createdById: by.actor.id ?? 'unknown',
@@ -657,7 +697,8 @@ export class SettingsService implements SettingsPublicApi {
         items,
         effectiveAt,
         applyScope: input.applyScope,
-        reason: input.reason.trim(),
+        // a PATCH without a reason keeps the draft's
+        ...(input.reason?.trim() ? { reason: input.reason.trim() } : {}),
         meta: { ...c.meta, preview, timeline: [...c.meta.timeline, { at: this.now().toISOString(), label: 'Draft edited', actor: by.actor }] },
       });
     });
@@ -677,9 +718,14 @@ export class SettingsService implements SettingsPublicApi {
   }
 
   /** POST /changes/{id}/submit: schedule, or send for approval through access */
-  async submitChange(id: string, by: StaffBy): Promise<SettingChange> {
-    const c = await this.#change(id);
-    if (c.status !== 'draft') settingChangeMachine.next(c.status, 'submit'); // throws ILLEGAL_TRANSITION
+  async submitChange(id: string, by: StaffBy, input: { reason?: string | null } = {}): Promise<SettingChange> {
+    const draft = await this.#change(id);
+    if (draft.status !== 'draft') settingChangeMachine.next(draft.status, 'submit'); // throws ILLEGAL_TRANSITION
+    // the reason is asked here (owner decision G68): the body's replaces the draft's
+    const reason = input.reason?.trim() || draft.reason.trim();
+    if (!reason) throw new AppError('VALIDATION_FAILED', 'Say why the setting changes', { issues: [{ path: 'reason', message: 'Say why the setting changes' }] });
+    if (reason !== draft.reason) await this.repo.updateChange(id, { reason });
+    const c = { ...draft, reason };
     const now = this.now();
     const defs = await this.#defs();
     const items = await this.#refreshFrom(c.items);
@@ -801,7 +847,7 @@ export class SettingsService implements SettingsPublicApi {
     const issues: Issue[] = [];
     const effectiveAt = new Date(input.effectiveAt);
     if (Number.isNaN(effectiveAt.getTime())) issues.push({ path: 'effectiveAt', message: 'Must be a date-time' });
-    if (!input.reason?.trim()) issues.push({ path: 'reason', message: 'Say why the setting changes' });
+    // the reason is optional on a draft: it is asked at submit (owner decision G68)
     if (!input.items?.length) issues.push({ path: 'items', message: 'Change at least one setting' });
     const seen = new Set<string>();
     const tz = await this.#timeZone();
@@ -1275,7 +1321,7 @@ export class SettingsService implements SettingsPublicApi {
       items: c.items,
       effectiveAt: c.effectiveAt.toISOString(),
       applyScope: c.applyScope,
-      reason: c.reason,
+      reason: c.reason || null,
       impact: c.meta.preview,
       createdBy: c.meta.createdBy,
       createdAt: c.createdAt.toISOString(),

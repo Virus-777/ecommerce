@@ -29,8 +29,31 @@ type StoreInfoMarket {
   serviceRegionLabel: String!
   "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"
   legalName: String!
-  "One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"
+  "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"
   companyLine: String!
+  "Where prices and delivery dates are estimated before a visitor gives an address (Deliver to Portland, OR 97205)"
+  defaultDeliveryLocation: StoreInfoDeliveryLocation
+  "Contact emails, postal address, founding year and headquarters for the About and contact pages"
+  company: StoreInfoCompany
+}
+
+type StoreInfoDeliveryLocation {
+  "e.g. 97205"
+  postalCode: String!
+  "e.g. Portland, OR 97205"
+  label: String!
+}
+
+type StoreInfoCompany {
+  helpEmail: Email
+  "Selling on Marketly enquiries"
+  sellersEmail: Email
+  pressEmail: Email
+  "Mailing address on one line"
+  postalAddress: String
+  foundedYear: Int
+  "e.g. Portland, OR"
+  headquarters: String
 }
 
 type StoreInfoSupport {

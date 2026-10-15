@@ -11,4 +11,6 @@ export const sellerRoutes = (service: SettingsService) =>
   routes(endpoints, 'seller', {
     /** GET /upcoming-changes: Scheduled platform changes that affect sellers (a bounded list, paged in memory) */
     listUpcomingChanges: async ({ principal, page }) => pageOf(await service.upcomingChangesForSellers(principal), page),
+    /** GET /current: Current values of the settings sellers can see */
+    listCurrentSellerSettings: async () => service.currentSellerSettings(),
   });

@@ -53,7 +53,18 @@
       "closures": "Closure[]",
       "support": "SupportContacts",
       "legalName": { "type": "string", "desc": "market.legalName" },
-      "companyLine": { "type": "string", "desc": "market.companyLine" }
+      "companyLine": { "type": "string", "desc": "market.companyLine" },
+      "defaultDeliveryLocation": { "type": "DeliveryLocation?", "desc": "market.defaultDeliveryLocation: where prices and delivery dates are estimated before a visitor gives an address" },
+      "company": { "type": "CompanyFacts?", "desc": "Public company facts (market.* keys)" }
+    },
+    "DeliveryLocation": { "postalCode": { "type": "string", "desc": "e.g. 97205" }, "label": { "type": "string", "desc": "e.g. Portland, OR 97205, shown as Deliver to Portland, OR 97205" } },
+    "CompanyFacts": {
+      "helpEmail": { "type": "email?", "desc": "market.helpEmail" },
+      "sellersEmail": { "type": "email?", "desc": "market.sellersEmail (seller enquiries)" },
+      "pressEmail": { "type": "email?", "desc": "market.pressEmail" },
+      "postalAddress": { "type": "string?", "desc": "market.postalAddress, one line" },
+      "foundedYear": { "type": "int?", "desc": "market.foundedYear" },
+      "headquarters": { "type": "string?", "desc": "market.headquarters, e.g. Portland, OR" }
     },
     "ServiceRegion": { "code": "string", "label": { "type": "string", "desc": "United States, 48 contiguous states" }, "includedRegions": { "type": "string[]", "desc": "State codes" }, "note": "string?" },
     "AndroidConfig": {
@@ -75,7 +86,7 @@
       "android": "AndroidConfig",
       "maintenance": "MaintenanceNotice"
     },
-    "PublicMarket": { "country": "string", "currency": "string", "timeZone": "string", "locale": "string", "serviceRegionLabel": "string", "legalName": { "type": "string", "desc": "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)" }, "companyLine": { "type": "string", "desc": "One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA" } },
+    "PublicMarket": { "country": "string", "currency": "string", "timeZone": "string", "locale": "string", "serviceRegionLabel": "string", "legalName": { "type": "string", "desc": "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)" }, "companyLine": { "type": "string", "desc": "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR" }, "defaultDeliveryLocation": { "type": "DeliveryLocation?", "desc": "Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given" }, "company": { "type": "CompanyFacts?", "desc": "Contact emails, postal address, founding year and headquarters for the About and contact pages; always given" } },
     "PublicSupport": { "hoursLabel": "string", "openNow": "bool", "nextOpenAt": "datetime?", "phone": "string", "chatHoursLabel": "string", "closedLabel": "string?" },
     "CheckoutSettings": { "guestCheckoutEnabled": "bool", "offerAccountAfterGuestPurchase": "bool" },
     "MaintenanceNotice": { "active": "bool", "kind": { "type": "enum(maintenance|incident)?", "desc": "maintenance = planned work; incident = live service problem (the error page shows it as a status note)" }, "message": "string?", "until": "datetime?", "updatedAt": { "type": "datetime?", "desc": "When the notice was last changed, shown as Updated 9:42 AM PT" } },
@@ -119,8 +130,9 @@
       "items": "ChangeItemInput[]",
       "effectiveAt": { "type": "datetime", "desc": "Must respect each item's minLeadDays" },
       "applyScope": { "type": "enum(new_only|open_commitments)", "desc": "new_only: orders placed on or after the effective date; open_commitments: also orders not yet delivered (only where the definition allows)" },
-      "reason": "text"
+      "reason": { "type": "text?", "desc": "Why. Optional while drafting and previewing; required by submitChange (given here or in its body)" }
     },
+    "SubmitChangeInput": { "reason": { "type": "text?", "desc": "Why the change is made; replaces the draft's reason. Required when the draft has none" } },
     "ChangeItem": { "key": "string", "label": "string", "section": "string", "from": "json", "to": "json", "fromText": "string", "toText": "string" },
     "ImpactItem": {
       "module": "string",
@@ -146,7 +158,7 @@
       "items": "ChangeItem[]",
       "effectiveAt": "datetime",
       "applyScope": "enum(new_only|open_commitments)",
-      "reason": "text",
+      "reason": { "type": "text?", "desc": "Null on a draft saved without one (the reason is asked at submit)" },
       "impact": "ImpactPreview",
       "createdBy": "Actor",
       "createdAt": "datetime",
@@ -156,7 +168,25 @@
       "cancelReason": "text?",
       "timeline": "TimelineEvent[]"
     },
-    "SectionValue": { "key": "string?", "label": "string", "valueText": "string", "hint": "string?", "exampleValue": "bool" },
+    "SectionValue": {
+      "key": { "type": "string?", "desc": "The setting key (definition key) for values settings owns: edit it with POST /changes; for values another module reports, that module's own key or null" },
+      "label": "string",
+      "valueText": "string",
+      "value": { "type": "json?", "desc": "The raw value in force (what ChangeItemInput.value takes); null for values another module reports without one" },
+      "valueType": { "type": "string?", "desc": "SettingDefinition.valueType for settings-owned values" },
+      "hint": "string?",
+      "exampleValue": "bool"
+    },
+    "SellerSettingValue": {
+      "key": { "type": "string", "desc": "e.g. catalog.minDescriptionLength" },
+      "module": "string",
+      "label": "string",
+      "description": "text",
+      "valueType": "string",
+      "unit": "string?",
+      "value": { "type": "json", "desc": "The value in force now" },
+      "valueText": { "type": "string", "desc": "e.g. 40 characters" }
+    },
     "SectionLink": { "module": "string", "area": "enum(admin)", "path": { "type": "string", "desc": "Owning module endpoint that edits this section, e.g. /api/admin/returns/policies" }, "screen": "string?" },
     "ScheduledChange": {
       "source": "enum(settings|module)",
@@ -227,6 +257,7 @@
     { "id": "getAppConfig", "area": "public", "method": "GET", "path": "/app-config", "summary": "Configuration for the website and Android app", "desc": "Market, support hours (open now?), guest checkout, public feature flags, Android minimum/latest version and maintenance notice in one cacheable response (ETag = configVersion, Cache-Control max-age appConfigCacheSeconds). The app calls it at start and when resumed.", "auth": "visitor", "query": { "appVersionCode": { "type": "int?", "desc": "Android versionCode, to compute updateRequired" }, "platform": "enum(web|android)?" }, "response": "AppConfig", "screens": ["store/home", "auth/sign-in", "store/checkout", "help/contact", "help/center", "store/not-found", "account/overview"] },
 
     { "id": "listUpcomingChanges", "area": "seller", "method": "GET", "path": "/upcoming-changes", "summary": "Scheduled platform changes that affect sellers", "desc": "Seller-visible scheduled setting changes plus scheduled changes reported by owning modules' sections (e.g. returns baseline, fee rules).", "auth": "seller", "paging": true, "response": "UpcomingChange", "screens": ["seller/dashboard", "seller/help"] },
+    { "id": "listCurrentSellerSettings", "area": "seller", "method": "GET", "path": "/current", "summary": "Current values of the settings sellers can see", "desc": "Every setting marked sellerVisible (definitions of enabled modules), with the value in force now, e.g. catalog.minDescriptionLength, inventory.defaultLowStockThreshold. Read-only; scheduled changes are in upcoming-changes.", "auth": "seller", "sellerContext": "optional", "response": "SellerSettingValue[]", "screens": ["seller/product-new", "seller/inventory", "seller/bulk-update"] },
 
     { "id": "getOverview", "area": "admin", "method": "GET", "path": "/overview", "summary": "Settings page: market, every section and all scheduled changes", "auth": "staff", "permission": "settings.view", "response": "SettingsOverview", "screens": ["admin/settings"] },
     { "id": "listDefinitions", "area": "admin", "method": "GET", "path": "/definitions", "summary": "Runtime setting definitions", "auth": "staff", "permission": "settings.view", "query": { "module": "string?", "section": "string?" }, "response": "SettingDefinition[]", "screens": ["admin/settings"] },
@@ -236,7 +267,7 @@
     { "id": "createChange", "area": "admin", "method": "POST", "path": "/changes", "summary": "Draft a change and see its impact before saving", "desc": "Validates each value against its definition and returns the draft with an impact preview from the owning modules' estimators (open orders keeping their terms, sellers notified, content to update).", "auth": "staff", "permission": "settings.changes.propose", "body": "ChangeInput", "response": "SettingChange", "status": 201, "errors": ["UNKNOWN_SETTING", "SETTING_NOT_EDITABLE", "VALIDATION_FAILED"], "screens": ["admin/settings"] },
     { "id": "updateChange", "area": "admin", "method": "PATCH", "path": "/changes/{id}", "summary": "Edit a draft (values, effective date, scope, reason)", "auth": "staff", "permission": "settings.changes.propose", "params": { "id": "uuid" }, "body": "ChangeInput", "response": "SettingChange", "errors": ["ILLEGAL_TRANSITION", "UNKNOWN_SETTING", "VALIDATION_FAILED"], "screens": ["admin/settings"] },
     { "id": "previewChange", "area": "admin", "method": "POST", "path": "/changes/{id}/preview", "summary": "Recalculate the impact preview", "auth": "staff", "permission": "settings.view", "params": { "id": "uuid" }, "response": "ImpactPreview", "screens": ["admin/settings"] },
-    { "id": "submitChange", "area": "admin", "method": "POST", "path": "/changes/{id}/submit", "summary": "Save: schedule, or send for approval", "desc": "Settings that need approval go to access (Business Owner or second reviewer) and are scheduled only after approval. Sellers are notified of seller-visible changes when scheduled.", "auth": "staff", "permission": "settings.changes.propose", "params": { "id": "uuid" }, "response": "SettingChange", "errors": ["ILLEGAL_TRANSITION", "IMPACT_BLOCKING", "CHANGE_CONFLICT", "LEAD_TIME_TOO_SHORT"], "audited": true, "approval": "Approval action settings.changes.apply (second reviewer), or settings.changes.apply-owner when any item needs the Business Owner. Per definition: none, second reviewer, or Business Owner", "events": ["settings.change.submitted", "settings.change.scheduled"], "screens": ["admin/settings"] },
+    { "id": "submitChange", "area": "admin", "method": "POST", "path": "/changes/{id}/submit", "summary": "Save: schedule, or send for approval", "desc": "Settings that need approval go to access (Business Owner or second reviewer) and are scheduled only after approval. Sellers are notified of seller-visible changes when scheduled. The reason is asked here: the body's reason replaces the draft's; without either the call answers VALIDATION_FAILED (path reason). The body may be left out when the draft has a reason.", "auth": "staff", "permission": "settings.changes.propose", "params": { "id": "uuid" }, "body": "SubmitChangeInput?", "response": "SettingChange", "errors": ["VALIDATION_FAILED", "ILLEGAL_TRANSITION", "IMPACT_BLOCKING", "CHANGE_CONFLICT", "LEAD_TIME_TOO_SHORT"], "audited": true, "approval": "Approval action settings.changes.apply (second reviewer), or settings.changes.apply-owner when any item needs the Business Owner. Per definition: none, second reviewer, or Business Owner", "events": ["settings.change.submitted", "settings.change.scheduled"], "screens": ["admin/settings"] },
     { "id": "cancelChange", "area": "admin", "method": "POST", "path": "/changes/{id}/cancel", "summary": "Cancel a draft, pending or scheduled change", "auth": "staff", "permission": "settings.changes.propose", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "SettingChange", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["settings.change.cancelled"], "screens": ["admin/settings"] },
     { "id": "listChanges", "area": "admin", "method": "GET", "path": "/changes", "summary": "Setting changes (scheduled by default)", "auth": "staff", "permission": "settings.view", "paging": true, "query": { "status": "enum(draft|pending_approval|scheduled|applied|rejected|cancelled)?", "key": "string?", "section": "string?" }, "response": "SettingChange", "screens": ["admin/settings", "admin/audit"] },
     { "id": "getChange", "area": "admin", "method": "GET", "path": "/changes/{id}", "summary": "One change with impact, approval and timeline", "auth": "staff", "permission": "settings.view", "params": { "id": "uuid" }, "response": "SettingChange", "screens": ["admin/settings"] },

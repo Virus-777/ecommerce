@@ -31,6 +31,7 @@ Market-level platform settings: country and service region, currency, time zone,
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
 | GET | `/api/seller/settings/upcoming-changes` | Scheduled platform changes that affect sellers | seller | Page<UpcomingChange> |
+| GET | `/api/seller/settings/current` | Current values of the settings sellers can see _(before seller is chosen)_ | seller | `SellerSettingValue[]` |
 
 ## Admin API
 
@@ -44,7 +45,7 @@ Market-level platform settings: country and service region, currency, time zone,
 | POST | `/api/admin/settings/changes` | Draft a change and see its impact before saving | staff<br>`settings.changes.propose` | `ChangeInput` → `SettingChange` |
 | PATCH | `/api/admin/settings/changes/{id}` | Edit a draft (values, effective date, scope, reason) | staff<br>`settings.changes.propose` | `ChangeInput` → `SettingChange` |
 | POST | `/api/admin/settings/changes/{id}/preview` | Recalculate the impact preview | staff<br>`settings.view` | `ImpactPreview` |
-| POST | `/api/admin/settings/changes/{id}/submit` | Save: schedule, or send for approval _(audited)_ | staff<br>`settings.changes.propose` | `SettingChange` |
+| POST | `/api/admin/settings/changes/{id}/submit` | Save: schedule, or send for approval _(audited)_ | staff<br>`settings.changes.propose` | `SubmitChangeInput?` → `SettingChange` |
 | POST | `/api/admin/settings/changes/{id}/cancel` | Cancel a draft, pending or scheduled change _(audited)_ | staff<br>`settings.changes.propose` | `{ reason: text }` → `SettingChange` |
 | GET | `/api/admin/settings/changes` | Setting changes (scheduled by default) | staff<br>`settings.view` | Page<SettingChange> |
 | GET | `/api/admin/settings/changes/{id}` | One change with impact, approval and timeline | staff<br>`settings.view` | `SettingChange` |
@@ -102,6 +103,26 @@ Market-level platform settings: country and service region, currency, time zone,
 | support | `SupportContacts` |
 | legalName | `string` market.legalName |
 | companyLine | `string` market.companyLine |
+| defaultDeliveryLocation | `DeliveryLocation?` market.defaultDeliveryLocation: where prices and delivery dates are estimated before a visitor gives an address |
+| company | `CompanyFacts?` Public company facts (market.* keys) |
+
+### DeliveryLocation
+
+| Field | Type |
+|---|---|
+| postalCode | `string` e.g. 97205 |
+| label | `string` e.g. Portland, OR 97205, shown as Deliver to Portland, OR 97205 |
+
+### CompanyFacts
+
+| Field | Type |
+|---|---|
+| helpEmail | `email?` market.helpEmail |
+| sellersEmail | `email?` market.sellersEmail (seller enquiries) |
+| pressEmail | `email?` market.pressEmail |
+| postalAddress | `string?` market.postalAddress, one line |
+| foundedYear | `int?` market.foundedYear |
+| headquarters | `string?` market.headquarters, e.g. Portland, OR |
 
 ### ServiceRegion
 
@@ -147,7 +168,9 @@ Market-level platform settings: country and service region, currency, time zone,
 | locale | `string` |
 | serviceRegionLabel | `string` |
 | legalName | `string` Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts) |
-| companyLine | `string` One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA |
+| companyLine | `string` One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR |
+| defaultDeliveryLocation | `DeliveryLocation?` Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given |
+| company | `CompanyFacts?` Contact emails, postal address, founding year and headquarters for the About and contact pages; always given |
 
 ### PublicSupport
 
@@ -240,7 +263,13 @@ Market-level platform settings: country and service region, currency, time zone,
 | items | `ChangeItemInput[]` |
 | effectiveAt | `datetime` Must respect each item's minLeadDays |
 | applyScope | `enum(new_only|open_commitments)` new_only: orders placed on or after the effective date; open_commitments: also orders not yet delivered (only where the definition allows) |
-| reason | `text` |
+| reason | `text?` Why. Optional while drafting and previewing; required by submitChange (given here or in its body) |
+
+### SubmitChangeInput
+
+| Field | Type |
+|---|---|
+| reason | `text?` Why the change is made; replaces the draft's reason. Required when the draft has none |
 
 ### ChangeItem
 
@@ -287,7 +316,7 @@ Market-level platform settings: country and service region, currency, time zone,
 | items | `ChangeItem[]` |
 | effectiveAt | `datetime` |
 | applyScope | `enum(new_only|open_commitments)` |
-| reason | `text` |
+| reason | `text?` Null on a draft saved without one (the reason is asked at submit) |
 | impact | `ImpactPreview` |
 | createdBy | `Actor` |
 | createdAt | `datetime` |
@@ -301,11 +330,26 @@ Market-level platform settings: country and service region, currency, time zone,
 
 | Field | Type |
 |---|---|
-| key | `string?` |
+| key | `string?` The setting key (definition key) for values settings owns: edit it with POST /changes; for values another module reports, that module's own key or null |
 | label | `string` |
 | valueText | `string` |
+| value | `json?` The raw value in force (what ChangeItemInput.value takes); null for values another module reports without one |
+| valueType | `string?` SettingDefinition.valueType for settings-owned values |
 | hint | `string?` |
 | exampleValue | `bool` |
+
+### SellerSettingValue
+
+| Field | Type |
+|---|---|
+| key | `string` e.g. catalog.minDescriptionLength |
+| module | `string` |
+| label | `string` |
+| description | `text` |
+| valueType | `string` |
+| unit | `string?` |
+| value | `json` The value in force now |
+| valueText | `string` e.g. 40 characters |
 
 ### SectionLink
 
@@ -636,8 +680,31 @@ type StoreInfoMarket {
   serviceRegionLabel: String!
   "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"
   legalName: String!
-  "One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"
+  "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"
   companyLine: String!
+  "Where prices and delivery dates are estimated before a visitor gives an address (Deliver to Portland, OR 97205)"
+  defaultDeliveryLocation: StoreInfoDeliveryLocation
+  "Contact emails, postal address, founding year and headquarters for the About and contact pages"
+  company: StoreInfoCompany
+}
+
+type StoreInfoDeliveryLocation {
+  "e.g. 97205"
+  postalCode: String!
+  "e.g. Portland, OR 97205"
+  label: String!
+}
+
+type StoreInfoCompany {
+  helpEmail: Email
+  "Selling on Marketly enquiries"
+  sellersEmail: Email
+  pressEmail: Email
+  "Mailing address on one line"
+  postalAddress: String
+  foundedYear: Int
+  "e.g. Portland, OR"
+  headquarters: String
 }
 
 type StoreInfoSupport {
