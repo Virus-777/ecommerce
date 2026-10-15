@@ -1,6 +1,7 @@
 import type { EventPayload } from '../../kernel/events/index.js';
 import { isUuid } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
+import type * as identity from '../../spec/identity.js';
 import type { AdCampaignSummary, AdsDashboard, AdvertisingPublicApi, CampaignDayPerformance, SponsoredProductSlot } from '../../spec/advertising.js';
 import type { PageTypeName } from './domain/rules.js';
 import { placementSeedRows, rulesSeedRow } from './domain/seed.js';
@@ -54,6 +55,11 @@ export class AdvertisingService implements AdvertisingPublicApi {
   }
 
   /* ---------------- public API (in-process) */
+
+  /** Export rows for the reports dataset advertising.admin.campaigns (G72) */
+  exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
+    return this.reports.exportRows(dataset, filters, principal, cursor);
+  }
 
   /** Sponsored product cards and their positions for a results list (max per page from the placement; relevance first, then priority). Only eligible, in-stock offers are returned. */
   sponsoredForResults(ctx: { page: PageTypeName; query?: string; categoryId?: string; productId?: string; visitorId: string; sessionId: string; device: string; organicOfferIds: string[]; personalizationAllowed: boolean; customerId?: string }): Promise<SponsoredProductSlot[]> {

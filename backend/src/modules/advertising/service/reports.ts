@@ -4,6 +4,9 @@
  */
 import type { AdCampaignSummary, AdsDashboard, CampaignDayPerformance, DailyAdPoint, PerformanceReport, PlacementStat } from '../../../spec/advertising.js';
 import type * as common from '../../../spec/common.js';
+import type * as identity from '../../../spec/identity.js';
+import type * as reports from '../../../spec/reports.js';
+import { AppError } from '../../../kernel/errors/index.js';
 import { advertiserIsOwn, sourceKinds } from '../domain/rules.js';
 import type { CampaignRec, StatRec, StatTotals } from '../ports.js';
 import { invalid, notFound, Part } from './core.js';
@@ -19,7 +22,67 @@ const add = (a: StatTotals, r: StatRec): StatTotals => ({
   attributedSales: a.attributedSales + r.attributed_sales,
 });
 
+/**
+ * The admin campaign list export (G72). reports must list the key in its export dataset registry (ExportDatasetKey and
+ * the exportDatasets setting): until then registering it is refused and the dataset is not offered.
+ */
+export const CAMPAIGNS_DATASET = 'advertising.admin.campaigns';
+const EXPORT_PAGE = 500;
+
 export class ReportsPart extends Part {
+  /* ---------------------------------------------------------------- exports */
+
+  async registerDataset(): Promise<void> {
+    const api = this.ctx.tryUse('reports');
+    if (!api) return;
+    const columns = [
+      ['ref', 'Campaign'],
+      ['name', 'Name'],
+      ['advertiser', 'Advertiser'],
+      ['placement', 'Placement'],
+      ['pages', 'Pages'],
+      ['period', 'Period'],
+      ['startsAt', 'Starts'],
+      ['endsAt', 'Ends'],
+      ['budget', 'Budget'],
+      ['displays', 'Displays'],
+      ['clicks', 'Clicks'],
+      ['status', 'Status'],
+    ].map(([key, label]) => ({ key: key!, label: label! }));
+    try {
+      await api.registerDataset({ key: CAMPAIGNS_DATASET as reports.ExportDataset['key'], owner: 'advertising', title: 'Ad campaigns', permission: 'advertising.campaigns.view', audience: 'staff', screens: ['admin/ads'], available: true, phase: 1, columns });
+    } catch (err) {
+      this.ctx.log.debug({ err, dataset: CAMPAIGNS_DATASET }, 'advertising: export dataset not registered');
+    }
+  }
+
+  /** Rows of the campaign list export: the admin list filters, staff only, 500 a page */
+  async exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[]; nextCursor?: string }> {
+    if (dataset !== CAMPAIGNS_DATASET) throw new AppError('NOT_FOUND', `Unknown dataset ${dataset}`);
+    if (principal?.kind !== 'staff') throw new AppError('FORBIDDEN', 'Ad campaigns are exported by staff only');
+    const f = (filters && typeof filters === 'object' ? filters : {}) as Record<string, unknown>;
+    const text = (k: string) => (typeof f[k] === 'string' && f[k] ? (f[k] as string) : undefined);
+    const q = { q: text('q'), source: text('source'), placementKey: text('placementKey'), status: text('status'), linkedPromotionId: text('linkedPromotionId') };
+    const page = await this.parts.campaigns.list(Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined)), { mode: 'cursor', cursor: cursor ?? null, limit: EXPORT_PAGE });
+    const rows = page.items.map((c: AdCampaignSummary) => ({
+      ref: c.ref,
+      name: c.name,
+      advertiser: c.advertiser.name,
+      placement: c.placementName,
+      pages: c.pagesLabel,
+      period: c.periodLabel,
+      startsAt: c.startsAt ?? '',
+      endsAt: c.endsAt ?? '',
+      budget: c.budgetLabel,
+      displays: c.displays,
+      clicks: c.clicks,
+      status: c.status,
+    }));
+    return { rows, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+  }
+
+  /* ---------------------------------------------------------------- reads */
+
   private range(from: string | undefined, to: string | undefined, fallbackDays = 7): common.DateRange {
     const t = to ?? this.core.today();
     const f = from ?? this.core.addDays(t, -(fallbackDays - 1));

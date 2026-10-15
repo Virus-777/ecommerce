@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Json } from '../kernel/lib/json.js';
 import { defineEndpoints, defineModuleSpec } from '../kernel/spec/define.js';
 import * as common from './common.js';
+import * as identity from './identity.js';
 
 /** Advertising: Ad placements and their rules, ad campaigns through the full lifecycle, creatives and their review, audiences, schedules, frequency caps and dismissal suppression, rotation and priority, the serving decision for each page view, display/click/dismissal tracking with attribution, and seller sponsored campaigns with spending limits and ad charges kept separate from commission. */
 
@@ -1679,6 +1680,8 @@ export interface AdvertisingPublicApi {
   dailyPerformance(range: common.DateRange, filter?: { campaignId?: string, sellerId?: string }): Promise<CampaignDayPerformance[]>;
   /** Read-only advertising summary for the Admin dashboard tile: live now (own and paid), starting in 7 days, ending soon, waiting approval, spend this month and short campaign lists. Records nothing; ad serving stays on POST /api/store/advertising/decisions. Used by: graphql, reports. */
   dashboardSummary(opts?: { listLimit?: number }): Promise<AdsDashboard>;
+  /** Export rows for the reports dataset advertising.admin.campaigns (G72): the admin campaign list with its filters (q, source, placementKey, status, linkedPromotionId), staff only Used by: reports. */
+  exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
 }
 
 /* ------------------------------------------------------------------ tables (row types) */
@@ -1973,9 +1976,10 @@ export const endpoints = defineEndpoints({
     permission: "advertising.campaigns.view",
     scope: "staff",
     summary: "Own promotions and paid ads in every lifecycle status",
+    desc: "Exported through reports (POST /api/admin/reports/exports) as dataset advertising.admin.campaigns with the same filters (q, source, placementKey, status, linkedPromotionId): one row per campaign (G72).",
     query: () =>
       z.object({
-        q: z.string().describe("Campaign or advertiser").optional(),
+        q: z.string().describe("Campaign name or AD- ref").optional(),
         source: z.enum(["all", "own", "seller", "brand"]).optional(),
         placementKey: z.string().optional(),
         status: z.string().optional(),
@@ -2011,12 +2015,14 @@ export const endpoints = defineEndpoints({
     permission: "advertising.campaigns.view",
     scope: "staff",
     summary: "Campaign with approvals, checks, conflicts, creatives and metrics",
+    desc: "The campaign id or its AD- ref (G69c), so links can carry the ref.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Campaign id or ref (AD-…)"),
       }),
     response: () => AdCampaign,
     status: 200,
+    errors: ["NOT_FOUND"],
     screens: ["admin/ad-campaign","admin/ads"],
     phase: 1,
   },
@@ -2227,12 +2233,13 @@ export const endpoints = defineEndpoints({
     permission: "advertising.campaigns.publish",
     scope: "staff",
     summary: "Pause immediately (off the site within 1 minute)",
+    desc: "The reason is optional (G68): without one the history and the audit entry say 'Paused by the Advertising team'.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
-      reason: z.string(),
+      reason: z.string().nullish(),
     }),
     response: () => AdCampaign,
     status: 200,
@@ -2273,13 +2280,13 @@ export const endpoints = defineEndpoints({
     permission: "advertising.campaigns.publish",
     scope: "staff",
     summary: "Finish a scheduled, live or paused campaign early",
-    desc: "Paid campaigns are charged only for delivery so far.",
+    desc: "Paid campaigns are charged only for delivery so far. The reason is optional (G68): without one the history and the audit entry say 'Finished early by the Advertising team'.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
-      reason: z.string(),
+      reason: z.string().nullish(),
     }),
     response: () => AdCampaign,
     status: 200,
@@ -2885,7 +2892,7 @@ export const spec = defineModuleSpec({
   summary: "Ad placements and their rules, ad campaigns through the full lifecycle, creatives and their review, audiences, schedules, frequency caps and dismissal suppression, rotation and priority, the serving decision for each page view, display/click/dismissal tracking with attribution, and seller sponsored campaigns with spending limits and ad charges kept separate from commission.",
   dependsOn: ["media","access"],
   optionalDeps: ["promotions","offers","catalog","inventory","sellers","orders","content","finance","search","reports","notifications","audit","customers","settings"],
-  publicApi: ["sponsoredForResults","adPositionsFor","campaignsForPromotion","isAdBlockedPage","dailyPerformance","dashboardSummary"],
+  publicApi: ["sponsoredForResults","adPositionsFor","campaignsForPromotion","isAdBlockedPage","dailyPerformance","dashboardSummary","exportRows"],
   permissions: [
     {
       "key": "advertising.campaigns.view",

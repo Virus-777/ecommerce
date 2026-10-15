@@ -25,6 +25,7 @@ export default defineModule({
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
+    ctx.afterBoot(() => service.reports.registerDataset());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("promotions.campaign.ended", (e) => service.onCampaignEndedFromPromotions(e.payload));

@@ -75,6 +75,15 @@ export class CampaignsPart extends Part {
     return this.parts.views.campaign(await this.parts.views.model(id, o));
   }
 
+  /** GET /campaigns/{id} (admin): the id or the AD- ref (G69c) */
+  async viewByIdOrRef(idOrRef: string): Promise<AdCampaign> {
+    const key: string = idOrRef.trim();
+    if (!/^AD-/i.test(key)) return this.view(key);
+    const row = (await this.repo.findOne('campaigns', { ref: key })) ?? (await this.repo.findOne('campaigns', { ref: key.toUpperCase() }));
+    if (!row) throw notFound('Campaign');
+    return this.view(row.id);
+  }
+
   async check(id: string): Promise<CampaignCheckResult> {
     if (!isUuid(id)) throw notFound('Campaign');
     const m = await this.parts.views.model(id);

@@ -2116,7 +2116,7 @@ export interface FinancePublicApi {
   getNextPayoutRun(): Promise<PayoutRun | null>;
   /** previewRefundImpact for staff decision panels: resolves the order's items and refundable amounts, then the seller earnings, fee and balance effect Used by: support, returns, graphql. */
   previewRefundImpactForOrder(orderRef: string, items: { orderItemId: string, quantity?: number }[] | null, refund: common.Money | null, fundedBy: string): Promise<RefundImpactPreview>;
-  /** Export rows for reports datasets finance.admin.ledger, finance.admin.payout_run, finance.admin.checks and finance.seller.ledger (seller rows scoped to the principal's seller) Used by: reports. */
+  /** Export rows for reports datasets finance.admin.ledger, finance.admin.payout_run, finance.admin.checks, finance.admin.overview (one row per overview figure, filters from, to, basis; G72) and finance.seller.ledger (seller rows scoped to the principal's seller) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
 }
 

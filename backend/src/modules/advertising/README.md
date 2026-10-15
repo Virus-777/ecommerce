@@ -68,9 +68,9 @@ Ad placements and their rules, ad campaigns through the full lifecycle, creative
 | POST | `/api/admin/advertising/campaigns/{id}/reject` | Reject a request (e.g. promoted offer suspended) _(audited)_ | staff<br>`advertising.campaigns.review` | `{ reason: text }` → `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/schedule` | Schedule an approved campaign for its start time _(audited)_ | staff<br>`advertising.campaigns.publish` | `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/activate` | Activate an approved campaign now _(audited)_ | staff<br>`advertising.campaigns.publish` | `AdCampaign` |
-| POST | `/api/admin/advertising/campaigns/{id}/pause` | Pause immediately (off the site within 1 minute) _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text }` → `AdCampaign` |
+| POST | `/api/admin/advertising/campaigns/{id}/pause` | Pause immediately (off the site within 1 minute) _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/resume` | Resume a paused campaign _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `AdCampaign` |
-| POST | `/api/admin/advertising/campaigns/{id}/finish` | Finish a scheduled, live or paused campaign early _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text }` → `AdCampaign` |
+| POST | `/api/admin/advertising/campaigns/{id}/finish` | Finish a scheduled, live or paused campaign early _(audited)_ | staff<br>`advertising.campaigns.publish` | `{ reason: text? }` → `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/archive` | Archive a finished or rejected campaign | staff<br>`advertising.campaigns.manage` | `AdCampaign` |
 | POST | `/api/admin/advertising/campaigns/{id}/renew` | Create a new draft from a finished or ending campaign (renew deliberately) _(audited)_ | staff<br>`advertising.campaigns.manage` | `{ startsAt: datetime, endsAt: datetime }` → `AdCampaign` |
 | GET | `/api/admin/advertising/campaigns/{id}/report` | Displays, clicks, dismissals, spend and attributed purchases by day | staff<br>`advertising.reports.view` | `PerformanceReport` |
@@ -1182,6 +1182,7 @@ Indexes: `unique (campaign_id, day)`, `(seller_id, state)`
 | isAdBlockedPage | `(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help') => bool`<br>True for checkout, payment results, order tracking and returns; used by front-end shells to skip the serve call. | content |
 | dailyPerformance | `(range: DateRange, filter?: { campaignId?: uuid, sellerId?: uuid }) => CampaignDayPerformance[]`<br>Displays, clicks, dismissals, attributed purchases and spend per campaign and day, from the daily_stats read model (days still open are marked partial). | reports |
 | dashboardSummary | `(opts?: { listLimit?: int }) => AdsDashboard`<br>Read-only advertising summary for the Admin dashboard tile: live now (own and paid), starting in 7 days, ending soon, waiting approval, spend this month and short campaign lists. Records nothing; ad serving stays on POST /api/store/advertising/decisions. | graphql, reports |
+| exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for the reports dataset advertising.admin.campaigns (G72): the admin campaign list with its filters (q, source, placementKey, status, linkedPromotionId), staff only | reports |
 
 ## Permissions
 

@@ -1,6 +1,5 @@
 import { routes } from '../../../kernel/http/index.js';
 import { endpoints } from '../../../spec/advertising.js';
-import { invalid } from '../service/core.js';
 import type { AdvertisingService } from '../service.js';
 
 /**
@@ -21,7 +20,7 @@ export const adminRoutes = (service: AdvertisingService) => {
     /** POST /campaigns: Create an ad campaign draft */
     createAdCampaign: async ({ body, actor, requestId, principal }) => c.create(body, { actor, requestId, principal }),
     /** GET /campaigns/{id}: Campaign with approvals, checks, conflicts, creatives and metrics */
-    getAdCampaign: async ({ params }) => c.view(params.id),
+    getAdCampaign: async ({ params }) => c.viewByIdOrRef(params.id),
     /** PATCH /campaigns/{id}: Edit a draft (or an approved campaign, which returns it to draft) */
     updateAdCampaign: async ({ params, body, actor, requestId, principal }) => c.update(params.id, body, { actor, requestId, principal }),
     /** POST /campaigns/{id}/check: Run checks: blocked pages, overlaps, labels, claims vs promotion, availability, links, reach estimate */
@@ -50,7 +49,8 @@ export const adminRoutes = (service: AdvertisingService) => {
     activateAdCampaign: async ({ params, actor, requestId, principal }) => c.activate(params.id, { actor, requestId, principal }),
     /** POST /campaigns/{id}/pause: Pause immediately (off the site within 1 minute) */
     pauseAdCampaign: async ({ params, body, actor, requestId, principal }) => {
-      await c.pause(params.id, body.reason, { actor, requestId, principal }, { audit: true });
+      // the reason is optional (G68): a default keeps the history and the audit entry readable
+      await c.pause(params.id, body.reason?.trim() || 'Paused by the Advertising team', { actor, requestId, principal }, { audit: true });
       return c.view(params.id);
     },
     /** POST /campaigns/{id}/resume: Resume a paused campaign */
@@ -60,8 +60,7 @@ export const adminRoutes = (service: AdvertisingService) => {
     },
     /** POST /campaigns/{id}/finish: Finish a scheduled, live or paused campaign early */
     finishAdCampaign: async ({ params, body, actor, requestId, principal }) => {
-      if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
-      await c.finish(params.id, 'stopped_early', body.reason.trim(), { actor, requestId, principal }, { audit: true });
+      await c.finish(params.id, 'stopped_early', body.reason?.trim() || 'Finished early by the Advertising team', { actor, requestId, principal }, { audit: true });
       return c.view(params.id);
     },
     /** POST /campaigns/{id}/archive: Archive a finished or rejected campaign */

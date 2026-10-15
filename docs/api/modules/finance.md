@@ -1528,7 +1528,7 @@ Indexes: `(at)`
 | previewOfferEarnings | `(items: { offerId: uuid, sellerId: uuid, categoryId: uuid | null, price: Money }[]) => map<EarningsPreview>`<br>Fee and earnings at a price on the seller's own offer form (calculateFee under the active rules, with the fee basis explained) | offers, graphql |
 | getNextPayoutRun | `() => PayoutRun | null`<br>The next payout run to be released (draft, pending approval or approved), for the admin dashboard | reports, graphql |
 | previewRefundImpactForOrder | `(orderRef: string, items: { orderItemId: uuid, quantity?: int }[] | null, refund: Money | null, fundedBy: string) => RefundImpactPreview`<br>previewRefundImpact for staff decision panels: resolves the order's items and refundable amounts, then the seller earnings, fee and balance effect | support, returns, graphql |
-| exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets finance.admin.ledger, finance.admin.payout_run, finance.admin.checks and finance.seller.ledger (seller rows scoped to the principal's seller) | reports |
+| exportRows | `(dataset: string, filters: json, principal: identity.Principal, cursor?: string) => { rows: json[], nextCursor?: string }`<br>Export rows for reports datasets finance.admin.ledger, finance.admin.payout_run, finance.admin.checks, finance.admin.overview (one row per overview figure, filters from, to, basis; G72) and finance.seller.ledger (seller rows scoped to the principal's seller) | reports |
 
 ## Permissions
 
