@@ -881,7 +881,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | awaitingInspection | `int` |
 | refundsPending | `Money` |
 | refundsPendingCount | `int` |
-| exceptions | `int` |
+| exceptions | `int` Returns with a refund-without-return exception, open or completed: the Exceptions tab (same as tabCounts.exceptions) |
 | tabCounts | `{"allOpen":"int","needsDecision":"int","inTransit":"int","inspecting":"int","refundPending":"int","exceptions":"int"}` |
 | queueOwner | `{"lead":"string?","backup":"string?","escalation":"string?"}` |
 

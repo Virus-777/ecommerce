@@ -259,19 +259,19 @@ export class Reads {
     const repo = this.core.repo;
     const now = this.core.now();
     const tab = (t: AdminTab) => repo.countReturns(this.adminFilter({ tab: t }));
-    const [open, openOfficial, pastDeadline, sellerRepliesOverdue, awaitingInspection, exceptions, allOpen, needsDecision, inTransit, inspecting, refundPending, exceptionsTab] = await Promise.all([
+    // the Exceptions tile opens the Exceptions tab: both count the tab's filter
+    const [open, openOfficial, pastDeadline, sellerRepliesOverdue, awaitingInspection, exceptions, allOpen, needsDecision, inTransit, inspecting, refundPending] = await Promise.all([
       repo.countReturns({ statuses: ACTIVE_STATUSES }),
       repo.countReturns({ statuses: ACTIVE_STATUSES, ownerType: 'official' }),
       repo.countReturns({ statuses: ['requested'], dueBefore: now }),
       repo.countReturns({ statuses: ['requested'], ownerType: 'seller', platformHandling: false, dueBefore: now }),
       repo.countReturns({ statuses: ['received'] }),
-      repo.countReturns({ statuses: ACTIVE_STATUSES, hasException: true }),
+      tab('exceptions'),
       tab('all_open'),
       tab('needs_decision'),
       tab('in_transit'),
       tab('inspecting'),
       tab('refund_pending'),
-      tab('exceptions'),
     ]);
     const pending = await repo.find('refund_requests', { status: PENDING_REFUND }, { limit: 5000 });
     const recipients = await this.core.soft('access', 'queue owner', (a) => a.resolveRecipients('returns_manager'));
@@ -294,7 +294,7 @@ export class Reads {
       ),
       refundsPendingCount: pending.length,
       exceptions,
-      tabCounts: { allOpen, needsDecision, inTransit, inspecting, refundPending, exceptions: exceptionsTab },
+      tabCounts: { allOpen, needsDecision, inTransit, inspecting, refundPending, exceptions },
       queueOwner: { lead: lead ?? null, backup: backup ?? null, escalation: recipients?.escalationRoleKey ? recipients.escalationRoleKey.replace(/_/g, ' ') : null },
     };
   }

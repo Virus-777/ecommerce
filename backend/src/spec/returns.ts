@@ -1718,6 +1718,7 @@ export interface ReturnStats {
   awaitingInspection: number;
   refundsPending: common.Money;
   refundsPendingCount: number;
+  /** Returns with a refund-without-return exception, open or completed: the Exceptions tab (same as tabCounts.exceptions) */
   exceptions: number;
   tabCounts: {
     allOpen: number;
@@ -1745,7 +1746,7 @@ export const ReturnStats: z.ZodType<ReturnStats> = z.object({
     return common.Money;
   },
   refundsPendingCount: z.number().int(),
-  exceptions: z.number().int(),
+  exceptions: z.number().int().describe("Returns with a refund-without-return exception, open or completed: the Exceptions tab (same as tabCounts.exceptions)"),
   tabCounts: z.object({
     allOpen: z.number().int(),
     needsDecision: z.number().int(),

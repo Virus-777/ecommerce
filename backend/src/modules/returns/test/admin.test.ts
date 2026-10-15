@@ -282,6 +282,12 @@ describe('queues and views', () => {
     expect(stats.status).toBe(200);
     expect(stats.body.open).toBeGreaterThan(0);
     expect(stats.body.queueOwner.lead).toBe('Rita Returns');
+    // a completed return with a refund-without-return exception: the tile and the tab count the same returns
+    const done = await sellerReturn();
+    await h.service.core.repo.update('returns', done.ret.id, { status: 'completed', exception: { reasonCode: 'damaged_in_transit', details: 'Carrier damage', proposedBy: { kind: 'staff', id: newId() }, proposedAt: now() } as never });
+    const after = (await h.call('GET', '/api/admin/returns/requests/stats', staff())).body;
+    expect(after.exceptions).toBeGreaterThan(0);
+    expect(after.exceptions).toBe(after.tabCounts.exceptions);
     const list = await h.call('GET', `/api/admin/returns/requests?tab=needs_decision&sellerId=${m.sellerId}`, staff());
     expect(list.body.items.map((r: any) => r.id)).toEqual([m.ret.id]);
     expect(list.body.items[0]).toMatchObject({ seller: { ownerType: 'seller', id: m.sellerId }, status: 'Return requested' });
