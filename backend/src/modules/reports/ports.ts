@@ -30,7 +30,7 @@ export interface SalesFilter {
   productId?: string;
 }
 
-export type SalesGroup = 'bucket' | 'owner_type' | 'seller_id' | 'product_id' | 'category_id' | 'cancelled_by' | 'customer' | 'none';
+export type SalesGroup = 'bucket' | 'owner_type' | 'seller_id' | 'product_id' | 'offer_id' | 'category_id' | 'cancelled_by' | 'customer' | 'none';
 
 export interface SalesAgg {
   key: string | null;

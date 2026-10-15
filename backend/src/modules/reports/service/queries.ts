@@ -2,7 +2,7 @@
  * Report queries and dashboards from the read models. Every result states its range, date basis,
  * currency, time zone, tax treatment, freshness and the definition versions it used (plan ch. 19).
  */
-import type { Money } from '../../../spec/common.js';
+import type { MediaRef, Money } from '../../../spec/common.js';
 import type { AdminDashboard, KpiValue, MetricDefinition, ReportQuery, ReportResult, Series, SellerDashboard, SellerWorkTile } from '../../../spec/reports.js';
 import { OFFICIAL_KEY, metricSeed } from '../domain/catalogue.js';
 import {
@@ -277,7 +277,23 @@ export class Queries {
       case 'seller.product_sales':
         return this.productSalesReport(rq, scope, cfg);
       case 'seller.order_trend':
+      case 'commerce.orders':
         return this.salesReport(rq, scope, cfg, false);
+      case 'marketplace.discount_funding':
+        return this.discountFundingReport(rq, scope, cfg);
+      case 'marketplace.owed_to_sellers':
+        return this.sellerBalancesReport(rq, scope, cfg);
+      case 'marketplace.payouts':
+        return this.payoutsReport(rq, scope);
+      case 'discovery.stockouts':
+        return this.stockoutsReport(rq);
+      case 'service.dispatch':
+      case 'service.delivery_issues':
+      case 'service.cancellations':
+      case 'service.cases':
+        return this.serviceFocusReport(key, rq, scope);
+      case 'ads.performance':
+        return this.adsReport(rq);
       default:
         return { kpis: [], series: [], callouts: [{ kind: 'warning', title: 'No figures yet', body: 'This report has no figures in this version.' }], unavailable: [key], models: [] };
     }
@@ -336,24 +352,112 @@ export class Queries {
     return { kpis, series, split, table, callouts, unavailable: [], models: ['order_items'] };
   }
 
+  /**
+   * Seller product sales (G47b, G48a): per product the SKUs sold (offers.getOffers), the main image
+   * (catalog.getProducts), whether a discount is live now (promotions.priceOffers), units returned and the
+   * return rate; the return rate KPI compares with the previous period when asked.
+   */
   private async productSalesReport(rq: ResolvedQuery, scope: ReportScope, cfg: Settings): Promise<Part> {
     const c = rq.currency;
     const total = await this.salesTotals(rq, scope, rq.range);
     const prev = rq.compare ? await this.salesTotals(rq, scope, rq.compare) : null;
     const rows = (await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range), 'product_id')).sort((a, b) => b.gross - a.gross);
-    const names = await this.productNames(rows.map((r) => r.key!).slice(0, 100));
+    const ids = rows.map((r) => r.key!).slice(0, 100);
+    const [info, offers, rate, prevRate, returned] = await Promise.all([
+      this.productInfo(ids),
+      this.offersByProduct(rq, scope),
+      this.returnRate(rq, scope, rq.range),
+      rq.compare ? this.returnRate(rq, scope, rq.compare) : Promise.resolve(null),
+      this.core.repo.returnsAgg(this.returnsFilter(rq, scope, rq.range), 'product_id'),
+    ]);
+    const returnedUnits = new Map(returned.map((r) => [r.key, r.units]));
     return {
-      kpis: [this.kpi('commerce.gross_sales', this.gross(total, cfg), c, prev ? this.gross(prev, cfg) : null), this.kpi('commerce.units_sold', total.units, c, prev?.units ?? null), this.kpi('commerce.orders', total.orders, c, prev?.orders ?? null)],
+      kpis: [
+        this.kpi('commerce.gross_sales', this.gross(total, cfg), c, prev ? this.gross(prev, cfg) : null),
+        this.kpi('commerce.units_sold', total.units, c, prev?.units ?? null),
+        this.kpi('commerce.orders', total.orders, c, prev?.orders ?? null),
+        this.kpi('service.return_rate', rate.rate, c, prevRate?.rate ?? null, `${rate.returned} of ${rate.sold} units`),
+      ],
       series: [],
       table: {
-        columns: [col('product', 'Product'), col('units', 'Units', 'count'), col('orders', 'Orders', 'count'), col('gross', 'Item sales', 'money'), col('cancelled', 'Cancelled', 'money'), col('refunded', 'Refunded', 'money')],
-        rows: rows.map((r) => ({ productId: r.key, product: names.get(r.key!) ?? r.key, units: r.units, orders: r.orders, gross: this.money(this.gross(r, cfg), c), cancelled: this.money(r.cancelled, c), refunded: this.money(r.refunded, c) })),
-        totals: { units: total.units, orders: total.orders, gross: this.money(this.gross(total, cfg), c), cancelled: this.money(total.cancelled, c), refunded: this.money(total.refunded, c) },
+        columns: [col('product', 'Product'), col('sku', 'SKU'), col('units', 'Units', 'count'), col('orders', 'Orders', 'count'), col('gross', 'Item sales', 'money'), col('averagePrice', 'Average price', 'money'), col('returnedUnits', 'Returns', 'count'), col('returnRate', 'Return rate', 'percent'), col('cancelled', 'Cancelled', 'money'), col('refunded', 'Refunded', 'money')],
+        rows: rows.map((r) => {
+          const p = info.get(r.key!);
+          const o = offers.get(r.key!);
+          const back = returnedUnits.get(r.key) ?? 0;
+          const gross = this.gross(r, cfg);
+          return {
+            productId: r.key,
+            product: p?.title ?? r.key,
+            image: p?.image ?? null,
+            sku: o?.skus.join(' / ') || null,
+            skus: o?.skus ?? [],
+            liveDiscount: o?.liveDiscount ?? false,
+            units: r.units,
+            orders: r.orders,
+            gross: this.money(gross, c),
+            averagePrice: this.money(r.units ? Math.round(gross / r.units) : 0, c),
+            returnedUnits: back,
+            returnRate: pct(back, r.units),
+            cancelled: this.money(r.cancelled, c),
+            refunded: this.money(r.refunded, c),
+          };
+        }),
+        totals: { units: total.units, orders: total.orders, gross: this.money(this.gross(total, cfg), c), averagePrice: this.money(total.units ? Math.round(this.gross(total, cfg) / total.units) : 0, c), returnedUnits: rate.returned, returnRate: rate.rate, cancelled: this.money(total.cancelled, c), refunded: this.money(total.refunded, c) },
       },
-      callouts: [{ kind: 'info', title: 'Item sales before fees, by order date', body: 'Your item sales after customer discounts, before marketplace fees, cancellations and refunds. Shipping and tax are not included.' }],
+      callouts: [
+        { kind: 'info', title: 'Item sales before fees, by order date', body: 'Your item sales after customer discounts, before marketplace fees, cancellations and refunds. Shipping and tax are not included.' },
+        { kind: 'info', title: 'Return rate', body: 'Units customers asked to return in the range, divided by the units sold in the same range.' },
+      ],
       unavailable: [],
-      models: ['order_items'],
+      models: ['order_items', 'returns'],
     };
+  }
+
+  private returnsFilter(rq: ResolvedQuery, scope: ReportScope, range: DayRange) {
+    const sellerId = this.sellerOf(rq, scope);
+    return { ...instantsOf(range, rq.timeZone), timeZone: rq.timeZone, ...(sellerId ? { sellerId } : {}), ...(rq.productId ? { productId: rq.productId } : {}) };
+  }
+
+  /** G48a: units asked to return in the range ÷ units sold (placed) in the range, in percent */
+  private async returnRate(rq: ResolvedQuery, scope: ReportScope, range: DayRange): Promise<{ rate: number; returned: number; sold: number }> {
+    const [returned] = await this.core.repo.returnsAgg(this.returnsFilter(rq, scope, range), 'none');
+    const sold = (await this.salesTotals(rq, scope, range, { basis: 'placed_at' })).units;
+    const units = returned?.units ?? 0;
+    return { rate: pct(units, sold), returned: units, sold };
+  }
+
+  /** Title and main image per product (catalog.getProducts; empty when catalog is off) */
+  private async productInfo(ids: string[]): Promise<Map<string, { title: string; image: MediaRef | null }>> {
+    const out = new Map<string, { title: string; image: MediaRef | null }>();
+    const catalog = this.core.api('catalog');
+    if (!catalog || !ids.length) return out;
+    for (const r of (await this.core.soft('catalog.getProducts', () => catalog.getProducts(ids))) ?? []) out.set(r.product.id, { title: r.product.title, image: r.product.images[0] ?? null });
+    return out;
+  }
+
+  /**
+   * Per product, the SKUs of the offers sold in the range (offers.getOffers) and whether one of them has a discount
+   * live now (promotions.priceOffers: a markdown or flash price below the regular price, or an automatic discount).
+   */
+  private async offersByProduct(rq: ResolvedQuery, scope: ReportScope): Promise<Map<string, { skus: string[]; liveDiscount: boolean }>> {
+    const out = new Map<string, { skus: string[]; liveDiscount: boolean }>();
+    const offerIds = (await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range), 'offer_id')).map((r) => r.key!).filter(Boolean).slice(0, 200);
+    const offersApi = this.core.api('offers');
+    if (!offerIds.length || !offersApi) return out;
+    const offers = (await this.core.soft('offers.getOffers', () => offersApi.getOffers(offerIds))) ?? {};
+    const promotions = this.core.api('promotions');
+    const prices = promotions ? ((await this.core.soft('promotions.priceOffers', () => promotions.priceOffers(offerIds, {}))) ?? []) : [];
+    const discounted = new Set(prices.filter((p) => p.price.amount < p.regularPrice.amount || (p.automaticDiscount?.amount ?? 0) > 0).map((p) => p.offerId));
+    for (const id of offerIds) {
+      const o = offers[id];
+      if (!o) continue;
+      const entry = out.get(o.productId) ?? { skus: [], liveDiscount: false };
+      if (o.sellerSku && !entry.skus.includes(o.sellerSku)) entry.skus.push(o.sellerSku);
+      entry.liveDiscount ||= discounted.has(id);
+      out.set(o.productId, entry);
+    }
+    return out;
   }
 
   private async refundsReport(rq: ResolvedQuery, scope: ReportScope, cfg: Settings): Promise<Part> {
@@ -595,17 +699,21 @@ export class Queries {
 
   private async returnsReport(rq: ResolvedQuery, scope: ReportScope, _cfg: Settings): Promise<Part> {
     const c = rq.currency;
-    const sellerId = this.sellerOf(rq, scope);
-    const f = (r: DayRange) => ({ ...instantsOf(r, rq.timeZone), timeZone: rq.timeZone, ...(sellerId ? { sellerId } : {}), ...(rq.productId ? { productId: rq.productId } : {}) });
+    const f = (r: DayRange) => this.returnsFilter(rq, scope, r);
     const [total] = await this.core.repo.returnsAgg(f(rq.range), 'none');
     const prev = rq.compare ? (await this.core.repo.returnsAgg(f(rq.compare), 'none'))[0] : undefined;
+    const rate = await this.returnRate(rq, scope, rq.range);
+    const prevRate = rq.compare ? await this.returnRate(rq, scope, rq.compare) : null;
     const reasons = await this.core.repo.returnsAgg(f(rq.range), 'reason');
     const outcomes = await this.core.repo.returnsAgg(f(rq.range), 'outcome');
     const products = (await this.core.repo.returnsAgg(f(rq.range), 'product_id')).slice(0, 100);
     const names = await this.productNames(products.map((p) => p.key!));
     const requests = total?.requests ?? 0;
     return {
-      kpis: [this.kpi('service.return_requests', requests, c, rq.compare ? (prev?.requests ?? 0) : null, `${total?.units ?? 0} units`)],
+      kpis: [
+        this.kpi('service.return_requests', requests, c, rq.compare ? (prev?.requests ?? 0) : null, `${total?.units ?? 0} units`),
+        this.kpi('service.return_rate', rate.rate, c, prevRate?.rate ?? null, `${rate.returned} of ${rate.sold} units`),
+      ],
       series: [],
       breakdowns: [
         { key: 'reason', label: 'Returns by reason', rows: reasons.map((r) => ({ key: r.key, label: humanize(r.key ?? 'other'), requests: r.requests, units: r.units, sharePct: pct(r.requests, requests) })) },
@@ -671,6 +779,242 @@ export class Queries {
       },
       callouts: [{ kind: 'info', title: 'Campaign detail lives with each campaign', body: 'Promotions and advertising show each campaign’s own results; this report sums them across campaigns.' }],
       unavailable: [...(this.core.running('promotions') ? [] : ['marketing.discount_cost', 'marketing.redemptions']), ...(this.core.running('advertising') ? [] : ['ads.spend', 'ads.displays', 'ads.clicks'])],
+      models: ['campaigns'],
+    };
+  }
+
+  /* ---------------------------------------------------------------- G74: more of the design's report library */
+
+  /** Discounts on marketplace seller items: platform-funded and seller-funded, per period and seller (order items) */
+  private async discountFundingReport(rq: ResolvedQuery, scope: ReportScope, cfg: Settings): Promise<Part> {
+    const c = rq.currency;
+    const marketplace = { ownerType: 'seller' as const };
+    const total = await this.salesTotals(rq, scope, rq.range, marketplace);
+    const prev = rq.compare ? await this.salesTotals(rq, scope, rq.compare, marketplace) : null;
+    const buckets = bucketsOf(rq.range, rq.granularity);
+    const byBucket = await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range, marketplace), 'bucket', rq.granularity);
+    const bySeller = (await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range, marketplace), 'seller_id')).filter((s) => s.platformDiscount || s.sellerDiscount).sort((a, b) => b.platformDiscount - a.platformDiscount);
+    const names = await this.sellerNames(bySeller.map((s) => s.key!));
+    return {
+      kpis: [
+        this.kpi('marketplace.discount_funding', total.platformDiscount, c, prev?.platformDiscount ?? null, `sellers funded ${displayMoney(total.sellerDiscount, c)}`),
+        this.kpi('marketplace.seller_sales', this.gross(total, cfg), c, prev ? this.gross(prev, cfg) : null),
+      ],
+      series: [
+        this.series('platform_discount', 'Platform-funded discounts', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.platformDiscount]))),
+        this.series('seller_discount', 'Seller-funded discounts', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.sellerDiscount]))),
+      ],
+      table: {
+        columns: [col('seller', 'Seller'), col('sales', 'Marketplace sales', 'money'), col('platformDiscount', 'Platform-funded', 'money'), col('sellerDiscount', 'Seller-funded', 'money')],
+        rows: bySeller.map((s) => ({ sellerId: s.key, seller: names.get(s.key!) ?? s.key, sales: this.money(this.gross(s, cfg), c), platformDiscount: this.money(s.platformDiscount, c), sellerDiscount: this.money(s.sellerDiscount, c) })),
+        totals: { sales: this.money(this.gross(total, cfg), c), platformDiscount: this.money(total.platformDiscount, c), sellerDiscount: this.money(total.sellerDiscount, c) },
+      },
+      callouts: [{ kind: 'info', title: 'Discounts are on the items they were given on', body: 'Customer discounts count on the day of the item’s date basis, split by who paid for them. Shared campaigns count each side’s share.' }],
+      unavailable: [],
+      models: ['order_items'],
+    };
+  }
+
+  /** Seller balances now (finance.sellerBalanceTotals, getSellerBalances) for the sellers active in the range */
+  private async sellerBalancesReport(rq: ResolvedQuery, scope: ReportScope, cfg: Settings): Promise<Part> {
+    const c = rq.currency;
+    const finance = this.core.api('finance');
+    if (!finance || !this.core.running('finance')) return { kpis: [], series: [], callouts: [], unavailable: ['marketplace.seller_balances', 'marketplace.amounts_owed'], models: [] };
+    const sellerId = this.sellerOf(rq, scope);
+    const totals = sellerId ? undefined : await this.core.soft('finance.sellerBalanceTotals', () => finance.sellerBalanceTotals());
+    const [fin] = await this.core.repo.dailySums('fact_marketplace_finance_daily', { from: rq.range.from, to: rq.range.to, ...(sellerId ? { sellerId } : {}) }, ['owed_minor'], 'none');
+    const active = sellerId
+      ? [sellerId]
+      : [
+          ...new Set([
+            ...(await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range, { ownerType: 'seller' }), 'seller_id')).map((s) => s.key!),
+            ...(await this.core.repo.dailySums('fact_marketplace_finance_daily', { from: rq.range.from, to: rq.range.to }, ['owed_minor'], 'seller_id')).map((s) => s.key!),
+          ]),
+        ].filter((id) => id && id !== OFFICIAL_KEY).slice(0, 100);
+    const names = await this.sellerNames(active);
+    const balances = (await Promise.all(active.map(async (id) => ({ id, b: await this.core.soft('finance.getSellerBalances', () => finance.getSellerBalances(id)) })))).filter((x) => x.b);
+    const amount = (m: Money | null | undefined) => m?.amount ?? 0;
+    const rows = balances
+      .map(({ id, b }) => ({ sellerId: id, seller: names.get(id) ?? id, pending: this.money(amount(b!.pending), c), available: this.money(amount(b!.available), c), held: this.money(amount(b!.held), c), total: this.money(amount(b!.pending) + amount(b!.available) + amount(b!.held), c), negative: Boolean(b!.negative), amountOwed: this.money(amount(b!.amountOwed), c) }))
+      .sort((a, b) => b.total.amount - a.total.amount);
+    const listed = rows.reduce((n, r) => n + r.total.amount, 0);
+    return {
+      kpis: [
+        this.kpi('marketplace.seller_balances', totals ? amount(totals.total) : listed, c, null, totals ? `${displayMoney(amount(totals.held), c)} held · ${totals.negativeCount} negative` : null),
+        this.kpi('marketplace.amounts_owed', fin?.owed_minor ?? 0, c, null),
+      ],
+      series: [],
+      table: {
+        columns: [col('seller', 'Seller'), col('pending', 'Pending', 'money'), col('available', 'Available', 'money'), col('held', 'Held', 'money'), col('total', 'Owed to the seller', 'money'), col('amountOwed', 'Owed by the seller', 'money')],
+        rows,
+        totals: { total: this.money(listed, c) },
+      },
+      callouts: [{ kind: 'info', title: 'Balances are as of now', body: 'Seller balances are read from finance when the report runs; the date range picks which sellers are listed (those with sales or finance activity in it). Amounts owed by sellers are for the range.' }],
+      unavailable: [],
+      models: ['order_items', 'marketplace_finance'],
+    };
+  }
+
+  /** Holds and payouts per period and seller (fact_marketplace_finance_daily) */
+  private async payoutsReport(rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
+    const c = rq.currency;
+    const sellerId = this.sellerOf(rq, scope);
+    const COLS = ['held_minor', 'payouts_paid_minor', 'payouts_failed'];
+    const f = (r: DayRange) => ({ from: r.from, to: r.to, ...(sellerId ? { sellerId } : {}) });
+    const total = (await this.core.repo.dailySums('fact_marketplace_finance_daily', f(rq.range), COLS, 'none'))[0] ?? zeros(COLS);
+    const prev = rq.compare ? ((await this.core.repo.dailySums('fact_marketplace_finance_daily', f(rq.compare), COLS, 'none'))[0] ?? zeros(COLS)) : null;
+    const buckets = bucketsOf(rq.range, rq.granularity);
+    const byBucket = await this.core.repo.dailySums('fact_marketplace_finance_daily', f(rq.range), COLS, 'bucket', rq.granularity);
+    const bySeller = (await this.core.repo.dailySums('fact_marketplace_finance_daily', f(rq.range), COLS, 'seller_id')).filter((s) => s.held_minor || s.payouts_paid_minor || s.payouts_failed).sort((a, b) => b.payouts_paid_minor! - a.payouts_paid_minor!);
+    const names = await this.sellerNames(bySeller.map((s) => s.key!));
+    return {
+      kpis: [
+        this.kpi('marketplace.held', total.held_minor!, c, prev?.held_minor ?? null),
+        this.kpi('marketplace.payouts_paid', total.payouts_paid_minor!, c, prev?.payouts_paid_minor ?? null, total.payouts_failed ? `${total.payouts_failed} failed` : null),
+      ],
+      series: [
+        this.series('payouts_paid', 'Payouts paid', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.payouts_paid_minor!]))),
+        this.series('held', 'Holds placed (net)', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.held_minor!]))),
+      ],
+      table: {
+        columns: [col('seller', 'Seller'), col('held', 'Holds (net)', 'money'), col('payoutsPaid', 'Payouts paid', 'money'), col('payoutsFailed', 'Failed payouts', 'count')],
+        rows: bySeller.map((s) => ({ sellerId: s.key, seller: names.get(s.key!) ?? s.key, held: this.money(s.held_minor!, c), payoutsPaid: this.money(s.payouts_paid_minor!, c), payoutsFailed: s.payouts_failed })),
+        totals: { held: this.money(total.held_minor!, c), payoutsPaid: this.money(total.payouts_paid_minor!, c), payoutsFailed: total.payouts_failed },
+      },
+      callouts: [],
+      unavailable: this.core.running('finance') ? [] : ['marketplace.held', 'marketplace.payouts_paid'],
+      models: ['marketplace_finance'],
+    };
+  }
+
+  /** Products out of stock in the range, longest first (fact_discovery_daily) */
+  private async stockoutsReport(rq: ResolvedQuery): Promise<Part> {
+    const c = rq.currency;
+    const COLS = ['views', 'stockout_minutes'];
+    const f = (r: DayRange) => ({ from: r.from, to: r.to, ...(rq.productId ? { productId: rq.productId } : {}) });
+    const hours = (minutes: number) => Math.round((minutes / 60) * 10) / 10;
+    const total = (await this.core.repo.dailySums('fact_discovery_daily', f(rq.range), COLS, 'none'))[0] ?? zeros(COLS);
+    const prev = rq.compare ? ((await this.core.repo.dailySums('fact_discovery_daily', f(rq.compare), COLS, 'none'))[0] ?? zeros(COLS)) : null;
+    const buckets = bucketsOf(rq.range, rq.granularity);
+    const byBucket = await this.core.repo.dailySums('fact_discovery_daily', f(rq.range), COLS, 'bucket', rq.granularity);
+    const byProduct = (await this.core.repo.dailySums('fact_discovery_daily', f(rq.range), COLS, 'product_id')).filter((p) => p.stockout_minutes! > 0).sort((a, b) => b.stockout_minutes! - a.stockout_minutes!).slice(0, 200);
+    const names = await this.productNames(byProduct.map((p) => p.key!));
+    return {
+      kpis: [this.kpi('discovery.stockout_hours', hours(total.stockout_minutes!), c, prev ? hours(prev.stockout_minutes!) : null, `${byProduct.length} products out of stock`)],
+      series: [this.series('stockout_hours', 'Out-of-stock hours', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, hours(b.stockout_minutes!)])))],
+      table: {
+        columns: [col('product', 'Product'), col('stockoutHours', 'Out-of-stock hours', 'duration_hours'), col('views', 'Views', 'count')],
+        rows: byProduct.map((p) => ({ productId: p.key, product: names.get(p.key!) ?? p.key, stockoutHours: hours(p.stockout_minutes!), views: p.views })),
+        totals: { stockoutHours: hours(total.stockout_minutes!), views: total.views },
+      },
+      callouts: [{ kind: 'info', title: 'Views include out-of-stock time', body: 'Views are all views of the product in the range, in stock or not.' }],
+      unavailable: this.core.running('inventory') ? [] : ['discovery.stockout_hours'],
+      models: ['discovery'],
+    };
+  }
+
+  /** One service area of fact_service_daily per report: dispatch, delivery issues, seller cancellations or cases */
+  private async serviceFocusReport(key: string, rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
+    const c = rq.currency;
+    const sellerId = this.sellerOf(rq, scope);
+    const COLS = ['dispatched', 'dispatched_on_time', 'overdue', 'valid_tracking', 'seller_cancellations', 'delivery_exceptions', 'messages_received', 'cases_opened'];
+    const f = (r: DayRange) => ({ from: r.from, to: r.to, ...(sellerId ? { sellerId } : {}) });
+    const total = (await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'none'))[0] ?? zeros(COLS);
+    const prev = rq.compare ? ((await this.core.repo.dailySums('fact_service_daily', f(rq.compare), COLS, 'none'))[0] ?? zeros(COLS)) : null;
+    const buckets = bucketsOf(rq.range, rq.granularity);
+    const byBucket = await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'bucket', rq.granularity);
+    const bySeller = await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'seller_id');
+    const names = await this.sellerNames(bySeller.map((s) => s.key!));
+    const onTime = (t: Record<string, number | null>) => pct(t.dispatched_on_time!, t.dispatched!);
+    const tracking = (t: Record<string, number | null>) => pct(t.valid_tracking!, t.dispatched!);
+    const seller = (s: { key: string | null }) => ({ sellerId: s.key === OFFICIAL_KEY ? null : s.key, seller: names.get(s.key!) ?? s.key });
+    const by = (field: string) => [...bySeller].sort((a, b) => b[field]! - a[field]!);
+    const part = (p: Omit<Part, 'callouts' | 'unavailable' | 'models'> & Partial<Pick<Part, 'callouts' | 'unavailable'>>): Part => ({ callouts: [], unavailable: [], models: ['service'], ...p });
+    switch (key) {
+      case 'service.dispatch':
+        return part({
+          kpis: [
+            this.kpi('service.on_time_dispatch', onTime(total), c, prev ? onTime(prev) : null, `${total.dispatched_on_time} of ${total.dispatched} packages`),
+            this.kpi('service.valid_tracking', tracking(total), c, prev ? tracking(prev) : null),
+            this.kpi('service.overdue_dispatch', total.overdue!, c, prev?.overdue ?? null),
+          ],
+          series: [this.series('on_time_dispatch', 'On-time dispatch %', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, onTime(b)])))],
+          table: {
+            columns: [col('seller', 'Seller'), col('dispatched', 'Dispatched', 'count'), col('onTimePct', 'On time', 'percent'), col('trackingPct', 'Valid tracking', 'percent'), col('overdue', 'Overdue', 'count')],
+            rows: by('overdue').map((s) => ({ ...seller(s), dispatched: s.dispatched, onTimePct: onTime(s), trackingPct: tracking(s), overdue: s.overdue })),
+            totals: { dispatched: total.dispatched, onTimePct: onTime(total), trackingPct: tracking(total), overdue: total.overdue },
+          },
+        });
+      case 'service.delivery_issues':
+        return part({
+          kpis: [this.kpi('service.delivery_exceptions', total.delivery_exceptions!, c, prev?.delivery_exceptions ?? null, `${pct(total.delivery_exceptions!, total.dispatched!)}% of ${total.dispatched} packages`)],
+          series: [this.series('delivery_exceptions', 'Delivery issues', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.delivery_exceptions!])))],
+          table: {
+            columns: [col('seller', 'Seller'), col('deliveryExceptions', 'Delivery issues', 'count'), col('dispatched', 'Dispatched', 'count'), col('issueRate', 'Of dispatched', 'percent')],
+            rows: by('delivery_exceptions').map((s) => ({ ...seller(s), deliveryExceptions: s.delivery_exceptions, dispatched: s.dispatched, issueRate: pct(s.delivery_exceptions!, s.dispatched!) })),
+            totals: { deliveryExceptions: total.delivery_exceptions, dispatched: total.dispatched, issueRate: pct(total.delivery_exceptions!, total.dispatched!) },
+          },
+        });
+      case 'service.cancellations':
+        return part({
+          kpis: [this.kpi('service.seller_cancellations', total.seller_cancellations!, c, prev?.seller_cancellations ?? null)],
+          series: [this.series('seller_cancellations', 'Seller cancellations', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.seller_cancellations!])))],
+          table: {
+            columns: [col('seller', 'Seller'), col('sellerCancellations', 'Seller cancellations', 'count'), col('dispatched', 'Dispatched', 'count')],
+            rows: by('seller_cancellations').map((s) => ({ ...seller(s), sellerCancellations: s.seller_cancellations, dispatched: s.dispatched })),
+            totals: { sellerCancellations: total.seller_cancellations, dispatched: total.dispatched },
+          },
+        });
+      default:
+        return part({
+          kpis: [
+            this.kpi('service.cases_opened', total.cases_opened!, c, prev?.cases_opened ?? null),
+            this.kpi('service.case_backlog', await this.core.repo.caseBacklog(rq.range.to, sellerId), c, rq.compare ? await this.core.repo.caseBacklog(rq.compare.to, sellerId) : null, `open at the end of ${dayLabel(rq.range.to)}`),
+            this.kpi('service.messages_received', total.messages_received!, c, prev?.messages_received ?? null),
+          ],
+          series: [
+            this.series('cases_opened', 'Support cases opened', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.cases_opened!]))),
+            this.series('messages_received', 'Customer messages', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.messages_received!]))),
+          ],
+          table: {
+            columns: [col('seller', 'Seller'), col('casesOpened', 'Cases opened', 'count'), col('messages', 'Messages', 'count')],
+            rows: by('cases_opened').map((s) => ({ ...seller(s), casesOpened: s.cases_opened, messages: s.messages_received })),
+            totals: { casesOpened: total.cases_opened, messages: total.messages_received },
+          },
+          callouts: [{ kind: 'info', title: 'Response times are not collected yet', body: 'First-response times for cases and messages need support and messaging to record them; this report shows volumes and the backlog.' }],
+          unavailable: ['service.response_time'],
+        });
+    }
+  }
+
+  /** Ads per period and campaign (fact_campaigns_daily, kind ad; displays, clicks and dismissals pulled daily from advertising) */
+  private async adsReport(rq: ResolvedQuery): Promise<Part> {
+    const c = rq.currency;
+    const COLS = ['displays', 'clicks', 'dismissals', 'spend_minor', 'attributed_purchases'];
+    const f = (r: DayRange) => ({ from: r.from, to: r.to, campaignKind: 'ad' as const });
+    const total = (await this.core.repo.dailySums('fact_campaigns_daily', f(rq.range), COLS, 'none'))[0] ?? zeros(COLS);
+    const prev = rq.compare ? ((await this.core.repo.dailySums('fact_campaigns_daily', f(rq.compare), COLS, 'none'))[0] ?? zeros(COLS)) : null;
+    const buckets = bucketsOf(rq.range, rq.granularity);
+    const byBucket = await this.core.repo.dailySums('fact_campaigns_daily', f(rq.range), COLS, 'bucket', rq.granularity);
+    const byCampaign = (await this.core.repo.dailySums('fact_campaigns_daily', f(rq.range), COLS, 'campaign')).sort((a, b) => b.displays! - a.displays!);
+    return {
+      kpis: [
+        this.kpi('ads.displays', total.displays!, c, prev?.displays ?? null),
+        this.kpi('ads.clicks', total.clicks!, c, prev?.clicks ?? null, total.displays ? `${pct(total.clicks!, total.displays!)}% of displays` : null),
+        this.kpi('ads.dismissals', total.dismissals!, c, prev?.dismissals ?? null, total.displays ? `${pct(total.dismissals!, total.displays!)}% of displays` : null),
+        this.kpi('ads.spend', total.spend_minor!, c, prev?.spend_minor ?? null),
+      ],
+      series: [
+        this.series('displays', 'Ad displays', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.displays!]))),
+        this.series('clicks', 'Ad clicks', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.clicks!]))),
+      ],
+      table: {
+        columns: [col('campaignId', 'Campaign'), col('displays', 'Displays', 'count'), col('clicks', 'Clicks', 'count'), col('clickRate', 'Click rate', 'percent'), col('dismissals', 'Dismissals', 'count'), col('spend', 'Ad spending', 'money'), col('attributedPurchases', 'Attributed purchases', 'count')],
+        rows: byCampaign.map((r) => ({ campaignId: String(r.key).split(':')[1] ?? r.key, displays: r.displays, clicks: r.clicks, clickRate: pct(r.clicks!, r.displays!), dismissals: r.dismissals, spend: this.money(r.spend_minor!, c), attributedPurchases: r.attributed_purchases })),
+        totals: { displays: total.displays, clicks: total.clicks, clickRate: pct(total.clicks!, total.displays!), dismissals: total.dismissals, spend: this.money(total.spend_minor!, c), attributedPurchases: total.attributed_purchases },
+      },
+      callouts: [{ kind: 'info', title: 'Updated daily', body: 'Displays, clicks and dismissals are added overnight from advertising.' }],
+      unavailable: this.core.running('advertising') ? [] : ['ads.displays', 'ads.clicks', 'ads.dismissals', 'ads.spend'],
       models: ['campaigns'],
     };
   }

@@ -60,6 +60,12 @@ export async function harness() {
   const adPerf: { date: string; campaignId: string; displays: number; clicks: number; dismissals: number; attributedOrders: number }[] = [];
   const zeroResults: { query: string; normalized: string; count: number }[] = [];
   const offerProducts = new Map<string, string>();
+  /** offers.getOffers: the seller's SKU of an offer (with offerProducts for its product) */
+  const offerSkus = new Map<string, string>();
+  /** promotions.priceOffers: offers with a live discount */
+  const discountedOffers = new Set<string>();
+  /** catalog.getProducts / getProduct: title and main image */
+  const products = new Map<string, { title: string; imageUrl?: string }>();
   const unitCosts = new Map<string, number>();
   const exportRowsCalls: { dataset: string; filters: unknown; principal: unknown; cursor?: string }[] = [];
 
@@ -110,7 +116,17 @@ export async function harness() {
         dailyPerformance: async (range) => adPerf.filter((r) => r.date >= range.from && r.date <= range.to).map((r) => ({ ...r, campaignRef: 'AD-1', sellerId: null, attributedSales: usd(0), spend: usd(0), partial: false })),
       },
       search: { zeroResultStats: async () => zeroResults.map((z) => ({ ...z, lastAt: clock.now().toISOString(), correctionOffered: false })) },
-      offers: { getOffer: async (id) => (offerProducts.has(id) ? ({ id, productId: offerProducts.get(id)! } as never) : null) },
+      offers: {
+        getOffer: async (id) => (offerProducts.has(id) ? ({ id, productId: offerProducts.get(id)! } as never) : null),
+        getOffers: async (ids) => Object.fromEntries(ids.map((id) => [id, offerProducts.has(id) ? ({ id, productId: offerProducts.get(id)!, sellerSku: offerSkus.get(id) ?? '' } as never) : null])),
+      },
+      promotions: {
+        priceOffers: async (ids) => ids.map((offerId) => ({ offerId, regularPrice: usd(5000), price: usd(discountedOffers.has(offerId) ? 4000 : 5000), badges: [], sellerPromos: [] })),
+      },
+      catalog: {
+        getProduct: async (id) => (products.has(id) ? ({ id, title: products.get(id)!.title } as never) : null),
+        getProducts: async (ids) => ids.filter((id) => products.has(id)).map((id) => ({ product: { id, title: products.get(id)!.title, images: products.get(id)!.imageUrl ? [{ id: newId(), url: products.get(id)!.imageUrl, alt: products.get(id)!.title }] : [] } }) as never),
+      },
       inventory: {
         getUnitCost: async (stockItemId) => (unitCosts.has(stockItemId) ? usd(unitCosts.get(stockItemId)!) : null),
         getSellerStockSummary: async () => ({ inStockSkus: 4, inStockUnits: 40, lowStockSkus: 1, outOfStockSkus: 1, reservedUnits: 2, outOfStockLabels: ['Aurora, Silver'] }),
@@ -213,7 +229,7 @@ export async function harness() {
     visitor: () => callers.visitor(),
   };
 
-  return { app, service, clock, audits, files, staff, denied, ordersById, sellerCounts, rows, settings, income, adPerf, zeroResults, offerProducts, unitCosts, exportRowsCalls, call, gql, person, order, placed, publish, drain, tokens };
+  return { app, service, clock, audits, files, staff, denied, ordersById, sellerCounts, rows, settings, income, adPerf, zeroResults, offerProducts, offerSkus, discountedOffers, products, unitCosts, exportRowsCalls, call, gql, person, order, placed, publish, drain, tokens };
 }
 
 export type Harness = Awaited<ReturnType<typeof harness>>;

@@ -173,6 +173,13 @@ export const METRICS: MetricSeed[] = [
     dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['commerce.refunds'],
   },
   {
+    key: 'marketplace.seller_balances', name: 'Seller balances', group: 'marketplace_finance', unit: 'money', audience: 'staff',
+    definition: 'Money Marketly holds for sellers now: pending and available earnings plus held amounts, across sellers. A balance, not a figure for the range.',
+    formula: 'finance.sellerBalanceTotals().total (pending + available + held), read when the report runs',
+    includes: ['Pending earnings', 'Available for payout', 'Held amounts'], excludes: ['Payouts already paid'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['marketplace.payouts_paid', 'marketplace.amounts_owed'],
+  },
+  {
     key: 'marketplace.ad_income', name: 'Advertising charges', group: 'marketplace_finance', unit: 'money', audience: 'staff',
     definition: 'Paid seller advertising charged, minus credits.',
     formula: 'Sum of fact_marketplace_finance_daily.ad_charges_minor',
@@ -287,6 +294,13 @@ export const METRICS: MetricSeed[] = [
     dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: [],
   },
   {
+    key: 'service.return_rate', name: 'Return rate', group: 'service_sellers', unit: 'percent', audience: 'both', higherIsBetter: false,
+    definition: 'Units customers asked to return, as a share of the units sold in the same range.',
+    formula: 'Σ fact_returns.units (requested in the range) ÷ Σ fact_order_items.quantity (placed in the range) × 100',
+    includes: ['Every return request, whatever its outcome'], excludes: ['Cancelled items (never shipped)'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['service.return_requests', 'commerce.units_sold'],
+  },
+  {
     key: 'service.messages_received', name: 'Customer messages', group: 'service_sellers', unit: 'count', audience: 'both',
     definition: 'Messages customers sent to sellers.',
     formula: 'Σ fact_service_daily.messages_received',
@@ -354,6 +368,13 @@ export const METRICS: MetricSeed[] = [
     key: 'ads.clicks', name: 'Ad clicks', group: 'customers_marketing_ads', unit: 'count', audience: 'staff',
     definition: 'Clicks on ads (advertising daily totals).',
     formula: 'Σ fact_campaigns_daily.clicks',
+    includes: [], excludes: [],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['ads.displays'],
+  },
+  {
+    key: 'ads.dismissals', name: 'Ad dismissals', group: 'customers_marketing_ads', unit: 'count', audience: 'staff', higherIsBetter: false,
+    definition: 'Times shoppers closed or hid an ad (advertising daily totals).',
+    formula: 'Σ fact_campaigns_daily.dismissals (advertising.dailyPerformance, pulled daily)',
     includes: [], excludes: [],
     dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['ads.displays'],
   },
@@ -425,8 +446,8 @@ export const REPORTS: ReportSeed[] = [
   },
   {
     key: 'service.returns', title: 'Returns by reason', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
-    description: 'Return requests by the reason customers gave, with inspection outcomes.',
-    metrics: ['service.return_requests'],
+    description: 'Return requests by the reason customers gave, with inspection outcomes and the return rate.',
+    metrics: ['service.return_requests', 'service.return_rate'],
     dimensions: ['reason', 'seller', 'product'], filters: [RANGE, SELLER, PRODUCT],
     layout: ['kpis', 'breakdown', 'table', 'definitions'],
   },
@@ -444,11 +465,87 @@ export const REPORTS: ReportSeed[] = [
     dimensions: ['campaign'], filters: [RANGE],
     layout: ['kpis', 'table', 'definitions'],
   },
+  /*
+   * G74: the design's report library (23 reports in six areas) beyond the ten above, from the same read models and
+   * public APIs. Not here yet because their figures are not collected: Purchasing cost, Discounts and shipping
+   * expense, Returns cost (finance's company costs per day), Complaint patterns (support case reasons per day) and
+   * response times (support and messaging).
+   */
+  {
+    key: 'commerce.orders', title: 'Orders and average order value', group: 'commerce', audience: 'staff', permission: 'reports.commerce.view',
+    description: 'Orders, item sales and average order value per day, week or month.',
+    metrics: ['commerce.orders', 'commerce.gross_sales', 'commerce.average_order_value'],
+    dimensions: ['day', 'sold_by', 'seller', 'category'], filters: [RANGE, BASIS, SOLD_BY, SELLER, CATEGORY],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'marketplace.discount_funding', title: 'Discount funding', group: 'marketplace_finance', audience: 'staff', permission: 'reports.marketplace-finance.view',
+    description: 'Customer discounts on marketplace seller items: what the platform paid for and what sellers paid for, by seller.',
+    metrics: ['marketplace.discount_funding', 'marketplace.seller_sales'],
+    dimensions: ['day', 'seller'], filters: [RANGE, BASIS, SELLER],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'marketplace.owed_to_sellers', title: 'Amounts owed to sellers', group: 'marketplace_finance', audience: 'staff', permission: 'reports.marketplace-finance.view',
+    description: 'Seller balances now (pending, available and held) and negative balances, for the sellers with sales or finance activity in the range.',
+    metrics: ['marketplace.seller_balances', 'marketplace.amounts_owed'],
+    dimensions: ['seller'], filters: [RANGE, SELLER],
+    layout: ['kpis', 'table', 'definitions', 'callouts'],
+  },
+  {
+    key: 'marketplace.payouts', title: 'Holds and completed payouts', group: 'marketplace_finance', audience: 'staff', permission: 'reports.marketplace-finance.view',
+    description: 'Holds placed and released, and payouts paid or failed, per day and seller.',
+    metrics: ['marketplace.held', 'marketplace.payouts_paid'],
+    dimensions: ['day', 'seller'], filters: [RANGE, SELLER],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'discovery.stockouts', title: 'Stockouts', group: 'products_discovery', audience: 'staff', permission: 'reports.discovery.view',
+    description: 'Products that were out of stock, for how long, and the views they had meanwhile.',
+    metrics: ['discovery.stockout_hours'],
+    dimensions: ['day', 'product'], filters: [RANGE, PRODUCT],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'service.dispatch', title: 'On-time dispatch', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
+    description: 'Packages dispatched on time, overdue and with valid tracking, by seller.',
+    metrics: ['service.on_time_dispatch', 'service.valid_tracking', 'service.overdue_dispatch'],
+    dimensions: ['day', 'seller'], filters: [RANGE, SELLER],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'service.delivery_issues', title: 'Delivery issues', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
+    description: 'Delivery exceptions reported by carriers (late, damaged, lost, returned to sender), by seller.',
+    metrics: ['service.delivery_exceptions'],
+    dimensions: ['day', 'seller'], filters: [RANGE, SELLER],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'service.cancellations', title: 'Seller cancellations', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
+    description: 'Items sellers cancelled, against the packages they dispatched, by seller.',
+    metrics: ['service.seller_cancellations'],
+    dimensions: ['day', 'seller'], filters: [RANGE, SELLER],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'service.cases', title: 'Case backlog and customer messages', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
+    description: 'Support cases opened, the open case backlog and customer messages to sellers, by seller. Response times are not collected yet.',
+    metrics: ['service.cases_opened', 'service.case_backlog', 'service.messages_received'],
+    dimensions: ['day', 'seller'], filters: [RANGE, SELLER],
+    layout: ['kpis', 'series', 'table', 'definitions', 'callouts'],
+  },
+  {
+    key: 'ads.performance', title: 'Ad displays, clicks, dismissals and spend', group: 'customers_marketing_ads', audience: 'staff', permission: 'reports.customers-marketing.view',
+    description: 'Ad displays, clicks, dismissals and spending per day and per ad campaign.',
+    metrics: ['ads.displays', 'ads.clicks', 'ads.dismissals', 'ads.spend'],
+    dimensions: ['day', 'campaign'], filters: [RANGE],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
   /* ---------------------------------------------------------------- seller reports (always the caller's own seller) */
   {
     key: 'seller.product_sales', title: 'Product sales', group: SELLER_GROUP, audience: 'seller', permission: SELLER_PERMISSION,
     description: 'Your item sales and units by product, by order date.',
-    metrics: ['commerce.gross_sales', 'commerce.units_sold', 'commerce.orders'],
+    metrics: ['commerce.gross_sales', 'commerce.units_sold', 'commerce.orders', 'service.return_rate'],
     dimensions: ['product'], filters: [RANGE, PRODUCT],
     layout: ['kpis', 'table', 'definitions'],
   },
@@ -461,8 +558,8 @@ export const REPORTS: ReportSeed[] = [
   },
   {
     key: 'seller.returns_by_reason', title: 'Returns by reason', group: SELLER_GROUP, audience: 'seller', permission: SELLER_PERMISSION,
-    description: 'Return requests on your items by the reason customers gave.',
-    metrics: ['service.return_requests'],
+    description: 'Return requests on your items by the reason customers gave, and your return rate.',
+    metrics: ['service.return_requests', 'service.return_rate'],
     dimensions: ['reason', 'product'], filters: [RANGE, PRODUCT],
     layout: ['kpis', 'breakdown', 'table', 'definitions'],
   },
