@@ -48,7 +48,7 @@ export interface Harness {
   labels: { input: shipping.LabelRequest; key: string; id: string; shipmentId: string; tracking: string; voided: boolean }[];
   /** media.attach calls: [assetId, usage, owner] */
   attached: unknown[][];
-  knobs: { labelFails: boolean; slowServicesOnly: boolean };
+  knobs: { labelFails: false | 422 | 502; slowServicesOnly: boolean };
   /** fulfillment-service.getServiceLocation (harness({ fulfillmentService: true })) */
   serviceLocation: { locationId: string; address: common.Address; shipsFrom: string } | null;
   events: { name: string; payload: any }[];
@@ -97,7 +97,7 @@ export async function harness(opts: { fulfillmentService?: boolean } = {}): Prom
     quotes: [] as shipping.LabelRequest[],
     labels: [] as Harness['labels'],
     attached: [] as unknown[][],
-    knobs: { labelFails: false, slowServicesOnly: false },
+    knobs: { labelFails: false as false | 422 | 502, slowServicesOnly: false },
     serviceLocation: null as Harness['serviceLocation'],
     events: [] as { name: string; payload: any }[],
   };
@@ -181,7 +181,7 @@ export async function harness(opts: { fulfillmentService?: boolean } = {}): Prom
         createLabel: async (input, key) => {
           const existing = h.labels.find((l) => l.key === key);
           if (existing) return { label: labelOf(existing, svcOf(existing)), shipment: shipmentOf(existing) };
-          if (h.knobs.labelFails) throw new AppError('LABEL_FAILED', 'The carrier did not sell the label', { carrierMessage: 'Address not found' }, 502);
+          if (h.knobs.labelFails) throw new AppError('LABEL_FAILED', 'The carrier did not sell the label', { carrierMessage: 'Address not found' }, h.knobs.labelFails);
           const l = { input, key, id: newId(), shipmentId: newId(), tracking: `1Z${String(h.labels.length + 1).padStart(16, '0')}`, voided: false };
           h.labels.push(l);
           return { label: labelOf(l, svcOf(l)), shipment: shipmentOf(l) };

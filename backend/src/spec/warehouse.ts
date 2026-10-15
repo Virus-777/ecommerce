@@ -2004,7 +2004,7 @@ export const spec = defineModuleSpec({
     },
     "LABEL_FAILED": {
       "status": 502,
-      "meaning": "The carrier did not return a label; retry with the same Idempotency-Key. details.carrierMessage"
+      "meaning": "The carrier did not return a label. 502 when it could not be reached (retry with the same Idempotency-Key); 422 when it refused the parcel or service (change them), as shipping answers. details.carrierMessage"
     },
     "SERVICE_BREAKS_PROMISE": {
       "status": 409,

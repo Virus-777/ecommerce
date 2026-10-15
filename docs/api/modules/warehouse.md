@@ -726,7 +726,7 @@ Indexes: `(status, expected_by)`, `(return_id)`, `(tracking_number)`
 | `DISCREPANCY_OPEN` | 409 | Inventory has not resolved the shortage or damage yet |
 | `PACKAGE_INCOMPLETE` | 409 | Not every item is scanned, or box/weight is missing. details.missing |
 | `LABEL_REQUIRED` | 409 | The package has no valid label |
-| `LABEL_FAILED` | 502 | The carrier did not return a label; retry with the same Idempotency-Key. details.carrierMessage |
+| `LABEL_FAILED` | 502 | The carrier did not return a label. 502 when it could not be reached (retry with the same Idempotency-Key); 422 when it refused the parcel or service (change them), as shipping answers. details.carrierMessage |
 | `SERVICE_BREAKS_PROMISE` | 409 | That carrier service arrives after the date the customer was promised |
 | `BIN_CODE_TAKEN` | 409 | A bin with this code already exists at the location |
 | `BIN_NOT_EMPTY` | 409 | Bin still has stock items assigned |

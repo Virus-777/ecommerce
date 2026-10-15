@@ -98,8 +98,11 @@ describe('packing station', () => {
     await h.call('PATCH', `/packages/${pkg.id}`, { boxTypeId: box.id, weight: { value: 3, unit: 'lb' } });
     expect((await h.call('GET', `/packages/${pkg.id}/label`)).body.error.code).toBe('LABEL_REQUIRED');
     expect((await h.call('POST', `/packages/${pkg.id}/pack`)).body.error.code).toBe('LABEL_REQUIRED');
-    // the carrier refuses: 502, nothing changes, retry with the same key
-    h.knobs.labelFails = true;
+    // the carrier refuses the parcel: 422 as shipping answers (change the parcel or service)
+    h.knobs.labelFails = 422;
+    expect((await h.call('POST', `/packages/${pkg.id}/label`, {}, { headers: idem() })).status).toBe(422);
+    // the carrier can't be reached: 502, nothing changes, retry with the same key
+    h.knobs.labelFails = 502;
     const key = idem();
     const failed = await h.call('POST', `/packages/${pkg.id}/label`, {}, { headers: key });
     expect(failed.status).toBe(502);

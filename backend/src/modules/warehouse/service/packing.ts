@@ -306,7 +306,8 @@ export class Packing {
         key,
       );
     } catch (err) {
-      if (isAppError(err) && err.code === 'LABEL_FAILED') throw this.core.error('LABEL_FAILED', err.message, err.details ?? { carrierMessage: null });
+      // keep shipping's status: 422 when the carrier refused the parcel or service (change it), 502 when it could not be reached (retry)
+      if (isAppError(err) && err.code === 'LABEL_FAILED') throw new AppError('LABEL_FAILED', err.message, err.details ?? { carrierMessage: null }, err.status);
       throw err;
     }
     const { label, shipment } = result;
