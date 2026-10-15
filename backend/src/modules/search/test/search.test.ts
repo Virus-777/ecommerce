@@ -146,7 +146,7 @@ describe('search context', () => {
     const facet = (key: string) => c.facets.find((f: any) => f.key === key);
     // brand counts ignore the brand filter itself
     expect(facet('brand').values).toEqual(
-      expect.arrayContaining([expect.objectContaining({ value: s.aurora.id, label: 'Aurora', count: 1, selected: true }), expect.objectContaining({ value: s.halcyon.id, label: 'Halcyon', count: 1, selected: false })]),
+      expect.arrayContaining([expect.objectContaining({ value: 'aurora', label: 'Aurora', count: 1, selected: true }), expect.objectContaining({ value: 'halcyon', label: 'Halcyon', count: 1, selected: false })]),
     );
     expect(facet('condition').values).toEqual([
       { value: 'new', label: 'New', count: 1, selected: true },
@@ -154,6 +154,8 @@ describe('search context', () => {
       { value: 'refurbished', label: 'Refurbished', count: 0, selected: false },
     ]);
     expect(facet('seller').values[0]).toMatchObject({ value: 'official', label: OFFICIAL_STORE_NAME, count: 1, note: 'Shows company offers at the prices listed' });
+    // G22a: brand and seller values are the slugs the filters take
+    expect(facet('seller').values).toEqual(expect.arrayContaining([expect.objectContaining({ value: s.grove.slug, label: 'Gadget Grove' })]));
     expect(facet('price').range).toMatchObject({ min: { amount: 18900 }, max: { amount: 18900 } });
     const anc = facet('noise_cancelling');
     expect(anc).toMatchObject({ group: 'category', groupLabel: 'Headphones features', kind: 'attribute', label: 'Noise cancelling' });

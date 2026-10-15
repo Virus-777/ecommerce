@@ -125,7 +125,7 @@ describe('search with the real catalog', () => {
     expect((await call('GET', `/api/store/search/products?category=${parent.body.slug}`, undefined, visitor)).body.items).toHaveLength(1);
     const ctx = (await call('GET', `/api/store/search/facets?category=${cat.body.slug}`, undefined, visitor)).body;
     expect(ctx.category.breadcrumb.map((c: any) => c.slug)).toEqual([parent.body.slug, cat.body.slug]);
-    expect(ctx.facets.find((f: any) => f.key === 'brand').values).toEqual([expect.objectContaining({ value: brand.body.brand.id, label: 'Aurora Sound', count: 1 })]);
+    expect(ctx.facets.find((f: any) => f.key === 'brand').values).toEqual([expect.objectContaining({ value: brand.body.brand.slug, label: 'Aurora Sound', count: 1 })]);
     expect((await call('GET', `/api/store/search/barcodes/${gtin}`, undefined, visitor)).body).toMatchObject({ match: true, productId: id });
     // hiding the product in catalog takes it out of results
     const hidden = await call('POST', `/api/admin/catalog/products/${id}/publication`, { publication: 'hidden', reason: 'Checking a complaint' });

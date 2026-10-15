@@ -245,6 +245,7 @@ export class World {
           const { active: _a, ...rest } = b;
           return rest;
         },
+        getBrands: async (ids: string[]) => [...w.brands.values()].filter((b) => ids.includes(b.id)).map(({ active: _a, ...rest }) => rest),
       },
       offers: {
         listOffersAdmin: async (filter: { productId?: string; status?: string[]; q?: string }) => {

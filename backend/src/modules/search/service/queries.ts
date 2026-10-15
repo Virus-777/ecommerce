@@ -289,12 +289,17 @@ export class SearchQueries extends SearchIndexer {
 
   /** Store names of sellers (sellers optional: unknown names fall back to a neutral label) */
   protected async sellerNames(ids: (string | null | undefined)[]): Promise<Map<string, string>> {
+    return new Map([...(await this.sellerLabels(ids))].map(([id, s]) => [id, s.name]));
+  }
+
+  /** Store names and slugs of sellers; the slug is null when sellers could not answer */
+  protected async sellerLabels(ids: (string | null | undefined)[]): Promise<Map<string, { name: string; slug: string | null }>> {
     const unique = [...new Set(ids.filter((i): i is string => Boolean(i)))];
     if (!unique.length) return new Map();
     const found = await this.optional('sellers', 'store names', (s) => s.getSellers(unique));
-    const map = new Map((found ?? []).map((s) => [s.id, s.storeName]));
+    const map = new Map<string, { name: string; slug: string | null }>((found ?? []).map((s) => [s.id, { name: s.storeName, slug: s.slug }]));
     const missing = unique.filter((id) => !map.has(id));
-    if (missing.length) for (const t of await this.repo.terms('store', missing)) if (t.target_id) map.set(t.target_id, t.term);
+    if (missing.length) for (const t of await this.repo.terms('store', missing)) if (t.target_id) map.set(t.target_id, { name: t.term, slug: null });
     return map;
   }
 
@@ -439,7 +444,7 @@ export class SearchQueries extends SearchIndexer {
     return f;
   }
 
-  protected async facetsOf(p: Prepared, counts: FacetCounts, sellerNames: Map<string, string>): Promise<Facet[]> {
+  protected async facetsOf(p: Prepared, counts: FacetCounts, sellers: Map<string, { name: string; slug: string | null }>): Promise<Facet[]> {
     const f = p.engineQuery.filters;
     const currency = this.ctx.config.market.currency;
     const facets: Facet[] = [];
@@ -471,7 +476,10 @@ export class SearchQueries extends SearchIndexer {
       },
       collapsed: false,
     });
-    const brandValues = counts.brands.map((b): FacetValue => ({ value: b.id, label: b.name, count: b.count, selected: Boolean(f.brandIds?.includes(b.id)) }));
+    // facet values are the slugs the brand and seller filters take (the id when the slug is unknown)
+    const brands = counts.brands.length ? ((await this.optional('catalog', 'brand slugs', (c) => c.getBrands(counts.brands.map((b) => b.id)))) ?? []) : [];
+    const brandSlugs = new Map(brands.map((b) => [b.id, b.slug]));
+    const brandValues = counts.brands.map((b): FacetValue => ({ value: brandSlugs.get(b.id) ?? b.id, label: b.name, count: b.count, selected: Boolean(f.brandIds?.includes(b.id)) }));
     const brandShown = [...brandValues.filter((v) => v.selected), ...brandValues.filter((v) => !v.selected)].slice(0, Math.max(FACET_VALUES, brandValues.filter((v) => v.selected).length));
     facets.push({ key: 'brand', label: 'Brand', group: 'universal', kind: 'brand', multiSelect: true, values: brandShown, moreCount: brandValues.length > brandShown.length ? brandValues.length - brandShown.length : null, collapsed: false });
     facets.push({
@@ -487,7 +495,7 @@ export class SearchQueries extends SearchIndexer {
       const sellerValues: FacetValue[] = [];
       if (counts.official || f.official) sellerValues.push({ value: 'official', label: OFFICIAL_STORE_NAME, count: counts.official, selected: Boolean(f.official), note: 'Shows company offers at the prices listed' });
       const others = [...counts.sellers.entries()]
-        .map(([id, n]): FacetValue => ({ value: id, label: sellerNames.get(id) ?? 'Marketplace seller', count: n, selected: Boolean(f.sellerIds?.includes(id)) }))
+        .map(([id, n]): FacetValue => ({ value: sellers.get(id)?.slug ?? id, label: sellers.get(id)?.name ?? 'Marketplace seller', count: n, selected: Boolean(f.sellerIds?.includes(id)) }))
         .sort((a, b) => Number(b.selected) - Number(a.selected) || b.count - a.count || a.label.localeCompare(b.label));
       const shown = others.slice(0, FACET_VALUES);
       facets.push({ key: 'seller', label: 'Seller', group: 'universal', kind: 'seller', multiSelect: true, values: [...sellerValues, ...shown], moreCount: others.length > shown.length ? others.length - shown.length : null, collapsed: false });
@@ -648,7 +656,8 @@ export class SearchQueries extends SearchIndexer {
   async context(p: Prepared, searchId: string): Promise<SearchContext> {
     const [summary, counts] = await Promise.all([this.engine.summary(p.engineQuery), this.engine.facets(p.engineQuery, p.attributeKeys)]);
     const sellerIds = [...counts.sellers.keys(), ...(p.engineQuery.filters.sellerIds ?? [])];
-    const names = await this.sellerNames(sellerIds);
+    const sellers = await this.sellerLabels(sellerIds);
+    const names = new Map([...sellers].map(([id, s]) => [id, s.name]));
     const labels: Labels = {
       category: p.category ? p.tree.crumb(p.category.node) : null,
       brands: [...p.brandTokens].map(([token, id]) => ({ key: token, name: counts.brands.find((b) => b.id === id)?.name ?? token })),
@@ -675,7 +684,7 @@ export class SearchQueries extends SearchIndexer {
       totalLabel,
       appliedFilters: applied.map((c) => this.appliedFilter(c, p)),
       clearAllQuery: toQueryString(clearAll(p.state, { categoryIsFilter: p.categoryIsFilter })),
-      facets: await this.facetsOf(p, counts, names),
+      facets: await this.facetsOf(p, counts, sellers),
       sorts: this.sortsOf(p),
       storeMatch: await this.storeMatchOf(p),
       category: await this.categoryContextOf(p, counts, summary.sellers),
