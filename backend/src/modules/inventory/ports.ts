@@ -39,7 +39,7 @@ export interface ItemListFilter extends ItemFilter {
   /** bin prefix */
   zone?: string;
   /** threshold of seller items without their own */
-  defaultSellerThreshold: number;
+  defaultThreshold: number;
 }
 
 export interface MovementFilter {

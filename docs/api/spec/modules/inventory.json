@@ -163,7 +163,7 @@
       "reasonCode": "enum(received_stock|count_correction|damaged_or_defective|lost_or_missing|returned_item_restocked|moved_to_another_channel|other)",
       "note": "text?"
     },
-    "SellerAdjustmentItem": { "stockItemId": "uuid", "newAvailable": "int", "reasonCode": "enum(received_stock|count_correction|damaged_or_defective|lost_or_missing|returned_item_restocked|moved_to_another_channel|other)" },
+    "SellerAdjustmentItem": { "stockItemId": "uuid", "newAvailable": "int", "reasonCode": { "type": "enum(received_stock|count_correction|damaged_or_defective|lost_or_missing|returned_item_restocked|moved_to_another_channel|bulk_update|other)", "desc": "bulk_update: the row is part of a bulk stock edit (recorded as Bulk update, G53b)" } },
     "AdjustmentResult": { "stockItemId": "uuid", "ok": "bool", "movement": "Movement?", "error": "ErrorBody?" },
     "SellerStockRow": {
       "stockItemId": "uuid",
@@ -565,7 +565,7 @@
   "settings": [
     { "key": "holdMinutes", "type": "duration", "default": 15, "desc": "Checkout hold lifetime", "unit": "minutes", "min": 1, "max": 60, "sellerVisible": false },
     { "key": "pendingPaymentHoldMinutes", "type": "duration", "default": 60, "desc": "Maximum hold extension while a payment result is being checked", "unit": "minutes", "min": 1, "sellerVisible": false },
-    { "key": "defaultLowStockThreshold", "type": "int", "default": 3, "desc": "Seller items without their own threshold", "min": 0, "sellerVisible": true },
+    { "key": "defaultLowStockThreshold", "type": "int", "default": 3, "desc": "Low-stock threshold of stock items without their own (seller items and company SKUs)", "min": 0, "sellerVisible": true },
     { "key": "lowStockAlertCooldownHours", "type": "duration", "default": 24, "desc": "Minimum time between inventory.stock.low events for one item", "unit": "hours", "min": 1, "sellerVisible": false },
     { "key": "costingMethod", "type": "enum", "default": "weighted_average", "desc": "Company stock valuation", "choices": ["weighted_average", "fifo"], "approval": "business_owner", "sellerVisible": false },
     { "key": "allowSellerNegativeAvailable", "type": "bool", "default": false, "desc": "Never sell beyond available quantity (plan ch. 9)", "editable": false, "sellerVisible": false }

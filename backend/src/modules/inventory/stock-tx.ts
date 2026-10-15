@@ -202,14 +202,14 @@ export class StockTx {
    * Events for the items whose Available or Reserved changed, and low-stock alerts for items that
    * dropped to or below their threshold (once per cooldown, remembered in low_since).
    */
-  async finish(cause: string, opts: { defaultSellerThreshold: number; cooldownHours: number }): Promise<StockEvents> {
+  async finish(cause: string, opts: { defaultThreshold: number; cooldownHours: number }): Promise<StockEvents> {
     const out: StockEvents = { changed: [], low: [] };
     for (const [id, before] of this.#before) {
       const item = this.items.get(id)!;
       const available = this.sellableAvailable(id);
       const reserved = this.total(id).reserved;
       if (available === before.available && reserved === before.reserved && !this.#touched.has(id)) continue;
-      const threshold = item.low_stock_threshold ?? (item.owner_type === 'seller' ? opts.defaultSellerThreshold : null);
+      const threshold = item.low_stock_threshold ?? opts.defaultThreshold;
       const state = item.archived ? 'out_of_stock' : stockState(available, threshold);
       out.changed.push({
         stockItemId: id,

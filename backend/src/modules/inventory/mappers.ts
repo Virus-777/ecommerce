@@ -43,8 +43,9 @@ export const isoOrNull = (d: Date | null | undefined) => (d ? d.toISOString() : 
 export const unitCostOf = (item: Row<'stock_items'>): Money | null =>
   item.owner_type === 'official' && item.unit_cost_amount !== null ? money(Number(item.unit_cost_amount), item.currency.trim()) : null;
 
-export const effectiveThreshold = (item: Row<'stock_items'>, defaultSellerThreshold: number): number | null =>
-  item.low_stock_threshold ?? (item.owner_type === 'seller' ? defaultSellerThreshold : null);
+/** The item's own low-stock threshold, else the defaultLowStockThreshold setting (seller items and company SKUs, G74) */
+export const effectiveThreshold = (item: Row<'stock_items'>, defaultThreshold: number): number =>
+  item.low_stock_threshold ?? defaultThreshold;
 
 export const incomingCue = (e: Row<'incoming_expectations'>): IncomingCue => ({ quantity: e.quantity_open, expectedDate: e.expected_date, purchaseOrderRef: e.source_ref });
 
@@ -68,7 +69,7 @@ export interface ItemContext {
   levels: Row<'stock_levels'>[];
   locations: Map<string, Row<'locations'>>;
   expectations: Row<'incoming_expectations'>[];
-  defaultSellerThreshold: number;
+  defaultThreshold: number;
   /** Quantities at this location only */
   locationId?: string;
   /** From catalog: the variant's first image, else the product's */
@@ -90,7 +91,7 @@ export function toStockItem(item: Row<'stock_items'>, c: ItemContext): StockItem
   const levels = c.locationId ? c.levels.filter((l) => l.location_id === c.locationId) : service ? c.levels.filter((l) => l.location_id === item.service_location_id) : c.levels;
   const quantities = sumQty(levels);
   const available = sellableAvailable(item, c.levels, c.locations);
-  const threshold = effectiveThreshold(item, c.defaultSellerThreshold);
+  const threshold = effectiveThreshold(item, c.defaultThreshold);
   const unitCost = unitCostOf(item);
   const next = c.expectations.find((e) => e.quantity_open > 0);
   return {

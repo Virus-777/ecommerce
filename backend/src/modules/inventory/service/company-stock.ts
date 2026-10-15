@@ -18,7 +18,7 @@ export class CompanyStock {
       ...(q.filter ? { filter: q.filter } : {}),
       ...(q.locationId ? { locationId: q.locationId } : {}),
       ...(q.zone ? { zone: q.zone } : {}),
-      defaultSellerThreshold: def,
+      defaultThreshold: def,
     };
   }
 
@@ -105,7 +105,7 @@ export class CompanyStock {
 
   async listLowStock(query: { ownerType?: 'official' | 'seller'; locationId?: string }, page: PageRequest): Promise<common.Page<LowStockRow>> {
     const def = await this.core.defaultThreshold();
-    const p = await this.core.repo.pageItemIds({ ownerType: query.ownerType ?? 'official', filter: 'low_or_out', ...(query.locationId ? { locationId: query.locationId } : {}), defaultSellerThreshold: def }, page);
+    const p = await this.core.repo.pageItemIds({ ownerType: query.ownerType ?? 'official', filter: 'low_or_out', ...(query.locationId ? { locationId: query.locationId } : {}), defaultThreshold: def }, page);
     const items = await this.core.itemsApi(await this.core.rowsInOrder(p.items.map((r) => r.id)));
     const sold = await this.core.repo.dispatchedSince(items.map((i) => i.id), new Date(this.core.now().getTime() - 30 * 86_400_000));
     return {

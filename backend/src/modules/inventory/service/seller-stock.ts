@@ -58,7 +58,7 @@ export class SellerStock {
   }
 
   async sellerListFilter(sellerId: string, q: { q?: string; state?: ItemListFilter['state']; categoryId?: string }): Promise<ItemListFilter> {
-    const filter: ItemListFilter = { ownerType: 'seller', sellerId, defaultSellerThreshold: await this.core.defaultThreshold(), ...(q.q ? { q: q.q } : {}), ...(q.state ? { state: q.state } : {}) };
+    const filter: ItemListFilter = { ownerType: 'seller', sellerId, defaultThreshold: await this.core.defaultThreshold(), ...(q.q ? { q: q.q } : {}), ...(q.state ? { state: q.state } : {}) };
     if (q.categoryId) filter.productIds = await this.#productsInCategory((await this.core.repo.items({ ownerType: 'seller', sellerId })).map((i) => i.product_id), q.categoryId);
     return filter;
   }

@@ -223,7 +223,7 @@ export class InventoryRepository {
           _damaged: { $sum: '$lv.damaged_held' },
           _returned: { $sum: '$lv.returned' },
           _incoming: { $sum: '$lv.incoming' },
-          _threshold: { $ifNull: ['$low_stock_threshold', { $cond: [{ $eq: ['$owner_type', 'seller'] }, f.defaultSellerThreshold, null] }] },
+          _threshold: { $ifNull: ['$low_stock_threshold', f.defaultThreshold] },
         },
       },
       {

@@ -233,7 +233,7 @@ How many units exist and in which stock group: stock items per offer/SKU with Av
 |---|---|
 | stockItemId | `uuid` |
 | newAvailable | `int` |
-| reasonCode | `enum(received_stock|count_correction|damaged_or_defective|lost_or_missing|returned_item_restocked|moved_to_another_channel|other)` |
+| reasonCode | `enum(received_stock|count_correction|damaged_or_defective|lost_or_missing|returned_item_restocked|moved_to_another_channel|bulk_update|other)` bulk_update: the row is part of a bulk stock edit (recorded as Bulk update, G53b) |
 
 ### AdjustmentResult
 
@@ -1103,7 +1103,7 @@ Checked through the access module (limits per role, second reviewer).
 |---|---|---|---|
 | holdMinutes | `15` | duration, minutes, 1–60 | Checkout hold lifetime |
 | pendingPaymentHoldMinutes | `60` | duration, minutes, 1–… | Maximum hold extension while a payment result is being checked |
-| defaultLowStockThreshold | `3` | int, 0–…, seller-visible | Seller items without their own threshold |
+| defaultLowStockThreshold | `3` | int, 0–…, seller-visible | Low-stock threshold of stock items without their own (seller items and company SKUs) |
 | lowStockAlertCooldownHours | `24` | duration, hours, 1–… | Minimum time between inventory.stock.low events for one item |
 | costingMethod | `"weighted_average"` | enum (weighted_average \| fifo), approval: business owner | Company stock valuation |
 | allowSellerNegativeAvailable | `false` | bool, read-only | Never sell beyond available quantity (plan ch. 9) |

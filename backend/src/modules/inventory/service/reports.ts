@@ -201,7 +201,7 @@ export class Reports {
     const owners = new Map<string, { ownerType: 'official' | 'seller'; sellerId: string | null; entries: Entry[]; low: number; out: number }>();
     let count = 0;
     for (let offset = 0; ; offset += BATCH) {
-      const ids = await this.core.repo.itemIds({ filter: 'low_or_out', defaultSellerThreshold: def }, BATCH, offset);
+      const ids = await this.core.repo.itemIds({ filter: 'low_or_out', defaultThreshold: def }, BATCH, offset);
       const rows = await this.core.rowsInOrder(ids);
       const items = await this.core.itemsApi(rows);
       for (const [i, row] of rows.entries()) {

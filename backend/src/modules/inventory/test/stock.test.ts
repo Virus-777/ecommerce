@@ -229,7 +229,7 @@ describe('company stock items and locations', () => {
     const item = await officialItem(h, reno.id, 5);
     const res = await admin(h, 'PATCH', `/stock-items/${item.id}`, { lowStockThreshold: 5, reorderQuantity: 12 });
     expect(res.json()).toMatchObject({ lowStockThreshold: 5, reorderQuantity: 12, state: 'low_stock' });
-    expect(h.audits.at(-1)).toMatchObject({ action: 'inventory.stock_item.update', before: expect.objectContaining({ lowStockThreshold: null }), after: expect.objectContaining({ lowStockThreshold: 5 }) });
+    expect(h.audits.at(-1)).toMatchObject({ action: 'inventory.stock_item.update', before: expect.objectContaining({ lowStockThreshold: 3 }) /* the default (G74) */, after: expect.objectContaining({ lowStockThreshold: 5 }) });
     const archived = await admin(h, 'PATCH', `/stock-items/${item.id}`, { archived: true });
     expect(archived.json()).toMatchObject({ archived: true });
     const sellers = await sellerItem(h, avery, 1);

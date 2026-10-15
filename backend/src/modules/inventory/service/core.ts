@@ -95,12 +95,12 @@ export class Core {
 
   /** Runs stock work in one transaction and publishes stock.changed / stock.low once it has committed. */
   async stock<T>(cause: string, fn: (st: StockTx) => Promise<T>, meta: PublishMeta = {}): Promise<T> {
-    const [defaultSellerThreshold, cooldownHours] = await Promise.all([this.defaultThreshold(), this.ctx.settings.get('lowStockAlertCooldownHours')]);
+    const [defaultThreshold, cooldownHours] = await Promise.all([this.defaultThreshold(), this.ctx.settings.get('lowStockAlertCooldownHours')]);
     let events: StockEvents = { changed: [], low: [] };
     const result = await this.repo.transaction(async (tx) => {
       const st = new StockTx(tx, this.now());
       const r = await fn(st);
-      events = await st.finish(cause, { defaultSellerThreshold, cooldownHours: Number(cooldownHours) });
+      events = await st.finish(cause, { defaultThreshold, cooldownHours: Number(cooldownHours) });
       return r;
     });
     for (const e of events.changed) this.ctx.events.publish('inventory.stock.changed', e, meta);
@@ -127,7 +127,7 @@ export class Core {
         levels: levels.filter((l) => l.stock_item_id === item.id),
         locations,
         expectations: expectations.filter((e) => e.stock_item_id === item.id),
-        defaultSellerThreshold: def,
+        defaultThreshold: def,
         locationId: opts.locationId,
         image: images.get(item.id) ?? null,
       }),

@@ -314,13 +314,14 @@ export const SellerAdjustmentRequest: z.ZodType<SellerAdjustmentRequest> = z.obj
 export interface SellerAdjustmentItem {
   stockItemId: string;
   newAvailable: number;
-  reasonCode: "received_stock" | "count_correction" | "damaged_or_defective" | "lost_or_missing" | "returned_item_restocked" | "moved_to_another_channel" | "other";
+  /** bulk_update: the row is part of a bulk stock edit (recorded as Bulk update, G53b) */
+  reasonCode: "received_stock" | "count_correction" | "damaged_or_defective" | "lost_or_missing" | "returned_item_restocked" | "moved_to_another_channel" | "bulk_update" | "other";
 }
 
 export const SellerAdjustmentItem: z.ZodType<SellerAdjustmentItem> = z.object({
   stockItemId: z.uuid(),
   newAvailable: z.number().int(),
-  reasonCode: z.enum(["received_stock", "count_correction", "damaged_or_defective", "lost_or_missing", "returned_item_restocked", "moved_to_another_channel", "other"]),
+  reasonCode: z.enum(["received_stock", "count_correction", "damaged_or_defective", "lost_or_missing", "returned_item_restocked", "moved_to_another_channel", "bulk_update", "other"]).describe("bulk_update: the row is part of a bulk stock edit (recorded as Bulk update, G53b)"),
 }).register(common.apiTypes, { id: "inventory.SellerAdjustmentItem" });
 
 export interface AdjustmentResult {
@@ -2712,7 +2713,7 @@ export const spec = defineModuleSpec({
     },
     "defaultLowStockThreshold": {
       "default": 3,
-      "desc": "Seller items without their own threshold",
+      "desc": "Low-stock threshold of stock items without their own (seller items and company SKUs)",
       "type": "int",
       "min": 0,
       "sellerVisible": true
