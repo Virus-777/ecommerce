@@ -178,6 +178,24 @@ describe('cancellations', () => {
     expect(h.named('orders.cancellation.decided').find((e) => e.cancellationId === req.id)).toMatchObject({ outcome: 'declined' });
   });
 
+  it('refuses a seller cancellation of items on a bought label until the label is voided (G41c)', async () => {
+    const m = await mixed();
+    const seller = tokens.seller(m.sellerB);
+    const itemB = m.groupB.items[0]!;
+    const shipmentId = newId();
+    await h.publish('shipping', 'shipping.shipment.created', { shipmentId, kind: 'outbound', orderId: m.order.id, groupId: m.groupB.id, sellerId: m.sellerB, fulfilledBy: 'seller', packageLabel: 'Package 2 of 3', carrierCode: 'ups', carrierName: 'UPS', serviceName: 'Ground', trackingNumber: '1Z998', trackingUrl: null, lines: [{ orderItemId: itemB.id, title: 'Duvet', variantLabel: 'Teal', quantity: 1 }], status: 'label_created' });
+    const detail = await h.call('GET', `/api/seller/orders/orders/${m.groupB.id}`, seller);
+    expect(detail.body.allowedActions).not.toContain('cancel_items');
+    const cancel = () => h.call('POST', `/api/seller/orders/orders/${m.groupB.id}/cancel-items`, seller, { items: [{ itemId: itemB.id, quantity: 1 }], reasonCode: 'out_of_stock' }, idem());
+    const refused = await cancel();
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatchObject({ code: 'CANCELLATION_NOT_ALLOWED', details: { items: [{ itemId: itemB.id, reason: expect.stringContaining('Void the label first') }] } });
+    // the label is voided: the shipment is cancelled and the item can be cancelled
+    await h.publish('shipping', 'shipping.shipment.status_changed', { shipmentId, kind: 'outbound', orderId: m.order.id, groupId: m.groupB.id, from: 'label_created', to: 'cancelled', statusLabel: 'Cancelled', estimatedArrival: null, at: new Date().toISOString() });
+    expect((await h.call('GET', `/api/seller/orders/orders/${m.groupB.id}`, seller)).body.allowedActions).toContain('cancel_items');
+    expect((await cancel()).status).toBe(201);
+  });
+
   it('auto-accepts requests past respondBy when nothing shipped', async () => {
     const m = await mixed();
     const me = tokens.customer(m.customerId);

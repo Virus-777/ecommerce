@@ -746,13 +746,20 @@ export class Views {
     return { name: buyerName(a.name), line1: 'Address hidden after the return window', line2: null, city: a.city, region: a.region, postalCode: a.postalCode, country: a.country, phone: null };
   }
 
+  /** The item is on a bought label the carrier has not scanned yet (shipment still label_created) */
+  onUnusedLabel(agg: Agg, itemId: string): boolean {
+    return agg.shipments.some((s) => s.status === 'label_created' && s.item_ids.includes(itemId));
+  }
+
   sellerActions(agg: Agg, g: GroupRec): SellerOrderDetail['allowedActions'] {
     if (isMarketlyService(g)) return []; // Marketly picks, packs and ships; the seller only views (decision D6)
     const items = agg.items.filter((i) => i.group_id === g.id);
     const paid = agg.order.lifecycle === 'open';
     const out: SellerOrderDetail['allowedActions'] = [];
     if (paid && items.some((i) => i.state === 'confirmed' || i.state === 'delayed')) out.push('start_preparing');
-    if (paid && items.some((i) => is(CANCELLABLE, i.state))) out.push('report_delay', 'record_shipment', 'cancel_items');
+    if (paid && items.some((i) => is(CANCELLABLE, i.state))) out.push('report_delay', 'record_shipment');
+    // items on a bought label the carrier does not have yet are cancelled only after the label is voided
+    if (paid && items.some((i) => is(CANCELLABLE, i.state) && !this.onUnusedLabel(agg, i.id))) out.push('cancel_items');
     if (agg.cancellations.some((c) => c.group_id === g.id && c.status === 'requested')) out.push('respond_cancellation');
     if (paid && items.some((i) => is(UNSHIPPED, i.state))) out.push('print_packing_slip');
     return out;

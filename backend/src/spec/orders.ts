@@ -2725,7 +2725,7 @@ export const endpoints = defineEndpoints({
     permission: "orders.fulfillment.cancel",
     scope: "own-seller",
     summary: "Cancel items the seller cannot fulfill",
-    desc: "Only unshipped items. The buyer is notified and refunded for the cancelled items under the cancellation policy; seller cancellations count toward the cancellation rate.",
+    desc: "Only unshipped items, and not items on a bought label the carrier has not scanned (CANCELLATION_NOT_ALLOWED: void the label first; allowedActions leaves out cancel_items while every cancellable item is on one). The buyer is notified and refunded for the cancelled items under the cancellation policy; seller cancellations count toward the cancellation rate.",
     params: () =>
       z.object({
         id: z.uuid(),

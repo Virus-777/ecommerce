@@ -443,6 +443,13 @@ export class Cancellations {
       const group = agg.groups.find((g) => g.id === groupId)!;
       this.core.refuseMarketly(group, 'cancel its items');
       const lines = this.resolve(agg, input.items, { groupId });
+      // shipping voids a label only when its whole parcel is cancelled: the seller voids it first
+      const onLabel = lines.filter((l) => this.views.onUnusedLabel(agg, l.item.id));
+      if (onLabel.length) {
+        throw this.core.error('CANCELLATION_NOT_ALLOWED', 'Some items are on a shipping label. Void the label first, then cancel the items.', {
+          items: onLabel.map((l) => ({ itemId: l.item.id, reason: 'This item is on a shipping label the carrier does not have yet. Void the label first.', alternative: null })),
+        });
+      }
       return this.createDirect(tx, batch, agg, group, lines, { initiatedBy: 'seller', reasonCode: input.reasonCode, reason: input.note ?? null, idempotencyKey: key, pending: null, countsAgainstSeller: true });
     });
     return this.one(orderId, id);
