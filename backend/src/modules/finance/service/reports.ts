@@ -18,7 +18,12 @@ import type { FundingRec, TargetRec, TradingRec } from '../ports.js';
 import type { Where } from '../../../kernel/mongo/index.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
-const DATASETS = ['finance.admin.ledger', 'finance.admin.payout_run', 'finance.admin.checks', 'finance.seller.ledger'] as const;
+/**
+ * The finance overview export (G72). reports must list the key in its export dataset registry (ExportDatasetKey and
+ * the exportDatasets setting): until then registering it is refused and the dataset is not offered.
+ */
+const OVERVIEW_DATASET = 'finance.admin.overview';
+const DATASETS = ['finance.admin.ledger', 'finance.admin.payout_run', 'finance.admin.checks', 'finance.seller.ledger', OVERVIEW_DATASET] as const;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const pctOf = (part: number, whole: number) => (whole ? round2((part / whole) * 100) : 0);
 
@@ -306,6 +311,7 @@ export class ReportsPart extends Part {
       { key: 'finance.seller.ledger', owner: 'finance', title: 'Ledger', permission: 'finance.balances.view', columns, audience: 'seller', screens: ['seller/finance'], available: true, phase: 1 },
       { key: 'finance.admin.ledger', owner: 'finance', title: 'Seller ledger', permission: 'finance.ledger.view', columns: [{ key: 'seller', label: 'Seller' }, ...columns], audience: 'staff', screens: ['admin/seller', 'admin/finance'], available: true, phase: 1 },
       { key: 'finance.admin.payout_run', owner: 'finance', title: 'Payout run', permission: 'finance.ledger.view', columns: [{ key: 'payout', label: 'Payout' }, { key: 'seller', label: 'Seller' }, { key: 'amount', label: 'Amount' }, { key: 'status', label: 'Status' }, { key: 'failure', label: 'Failure' }], audience: 'staff', screens: ['admin/payouts'], available: true, phase: 1 },
+      { key: OVERVIEW_DATASET as reports.ExportDataset['key'], owner: 'finance', title: 'Finance overview', permission: 'finance.ledger.view', columns: [{ key: 'figure', label: 'Figure' }, { key: 'value', label: 'Amount' }, { key: 'count', label: 'Count' }], audience: 'staff', screens: ['admin/finance'], available: true, phase: 1 },
       { key: 'finance.admin.checks', owner: 'finance', title: 'Finance checks', permission: 'finance.reconciliation.work', columns: [{ key: 'date', label: 'Date' }, { key: 'check', label: 'Check' }, { key: 'subject', label: 'Subject' }, { key: 'expected', label: 'Expected' }, { key: 'actual', label: 'Actual' }, { key: 'credit', label: 'Store credit' }, { key: 'difference', label: 'Difference' }, { key: 'status', label: 'Status' }], audience: 'staff', screens: ['ops/finance-checks'], available: true, phase: 1 },
     ];
     for (const s of sets) {
@@ -362,7 +368,40 @@ export class ReportsPart extends Part {
       const names = await this.core.sellerInfo(rows.map((r) => r.seller_id));
       return { rows: rows.slice(0, limit).map((r) => ({ payout: r.ref, seller: names.get(r.seller_id)?.name ?? r.seller_id, amount: money(r.amount), status: r.status, failure: r.failure_reason ?? '' })), ...(rows.length > limit ? { nextCursor: String(offset + limit) } : {}) };
     }
+    if (dataset === OVERVIEW_DATASET) return { rows: await this.overviewRows(f as { from?: string; to?: string; basis?: string }) };
     const rows = await this.repo.find('recon_items', f.date && isDate(f.date) ? { date: f.date } : {}, { orderBy: [['detected_at', 'desc'], ['id', 'asc']], offset, limit: limit + 1 });
     return { rows: rows.slice(0, limit).map((r) => ({ date: r.date, check: r.check, subject: r.subject, expected: money(r.expected), actual: money(r.actual), credit: money(r.credit), difference: money(r.difference), status: r.status })), ...(rows.length > limit ? { nextCursor: String(offset + limit) } : {}) };
+  }
+
+  /** G72: the finance overview of a range as one row per figure (the range defaults to the last 30 market days) */
+  async overviewRows(f: { from?: string; to?: string; basis?: string }): Promise<{ figure: string; value: string; count: string }[]> {
+    const to = f.to && isDate(f.to) ? f.to : this.core.today();
+    const from = f.from && isDate(f.from) ? f.from : addDays(to, -29);
+    const o = await this.overview({ from, to, basis: f.basis === 'order_date' ? 'order_date' : 'payment_date' });
+    const amount = (m: common.Money) => (m.amount / 100).toFixed(2);
+    const row = (figure: string, value: common.Money | null, count?: number | null) => ({ figure, value: value ? amount(value) : '', count: count === undefined || count === null ? '' : String(count) });
+    return [
+      row(`Range ${from} to ${to} (${o.basis})`, null),
+      row('Collected payments', o.collectedPayments, o.collectedCount),
+      row('Official Store sales', o.companySales),
+      row('Seller sales', o.sellerSales),
+      row('Shipping collected', o.shippingCollected),
+      row('Marketplace fee income', o.marketplaceFeeIncome),
+      row('Seller earnings', o.sellerEarnings),
+      row('Owed to sellers', o.owedToSellers),
+      row('Owed to sellers, pending', o.owedPending),
+      row('Owed to sellers, available', o.owedAvailable),
+      row('Refunds sent', o.refundsSent, o.refundsSentCount),
+      row('Refunds failing', null, o.refundsFailing),
+      row('Held', o.holds, o.holdSellers),
+      row(`Paid out${o.lastRunRef ? ` (last run ${o.lastRunRef})` : ''}`, o.paidOut),
+      row('Discounts: platform coupons', o.discountFunding.platformCoupons),
+      row('Discounts: seller markdowns', o.discountFunding.sellerMarkdowns),
+      row('Discounts: shared campaigns', o.discountFunding.sharedCampaigns),
+      row('Discounts: total', o.discountFunding.total),
+      row('Checks: unexplained amounts', null, o.queueCounts.unexplained),
+      row('Checks: mismatches', null, o.queueCounts.mismatches),
+      row('Failed payouts', null, o.queueCounts.failedPayouts),
+    ];
   }
 }

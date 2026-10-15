@@ -14,7 +14,7 @@ import { renderPdf, type PdfLine } from '../domain/pdf.js';
 import { addDays, feeBasisNote, fmt, marketDate, sectionOf, SECTIONS, type EntryType, type SectionKey } from '../domain/rules.js';
 import { statementMachine } from '../domain/state-machines.js';
 import { reference, toStatementSummary } from '../mappers.js';
-import type { AccountRec, EntryRec, StatementRec } from '../ports.js';
+import type { AccountRec, EntryRec, LotRec, StatementRec } from '../ports.js';
 import type { FinanceRepository } from '../repository.js';
 import { notFound, Part } from './core.js';
 
@@ -57,6 +57,7 @@ export class StatementsPart extends Part {
       const c = lot ? charges.find((x) => x.order_item_id === lot.order_item_id) : undefined;
       return c ? { basis: c.basis_amount, rate: c.rate_bps } : null;
     };
+    const skus = await this.skusOf(lots);
     const byKey = new Map<SectionKey, { lines: StatementLine[]; total: number }>(SECTIONS.map((s) => [s.key, { lines: [], total: 0 }]));
     const otherLines: FeeLine[] = [];
     const notices: string[] = [];
@@ -75,6 +76,7 @@ export class StatementsPart extends Part {
       sec.lines.push({
         date: marketDate(e.at, tz),
         reference: reference(e.ref_kind, e.ref_id, e.ref_label),
+        sku: e.lot_id ? (skus.get(e.lot_id) ?? null) : null,
         description: e.description,
         detail: counted ? null : `${fmt(e.amount, cur)} taken from held earnings (already withheld)`,
         units: null,
@@ -88,6 +90,25 @@ export class StatementsPart extends Part {
     const sections = SECTIONS.map((s): StatementSection => ({ key: s.key, title: s.title, subtitle: s.subtitle, lines: byKey.get(s.key)!.lines, total: { amount: byKey.get(s.key)!.total, currency: cur }, totalLabel: s.totalLabel }));
     const net = sections.reduce((x, s) => x + s.total.amount, 0) + otherLines.reduce((x, l) => x + l.amount.amount, 0);
     return { sections, net, otherLines, notices };
+  }
+
+  /**
+   * Seller SKU per lot (G47a): the order item's offer snapshot, read from orders once per order. Orders that can't be
+   * read leave their lines without a SKU.
+   */
+  async skusOf(lots: readonly LotRec[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const orderIds = [...new Set(lots.map((l) => l.order_id))];
+    const skuByItem = new Map<string, string>();
+    for (let i = 0; i < orderIds.length; i += 20) {
+      const orders = await Promise.all(orderIds.slice(i, i + 20).map((id) => this.parts.ledger.order(id)));
+      for (const o of orders) for (const item of o ? this.parts.ledger.itemsOf(o) : []) if (item.offer?.sellerSku) skuByItem.set(item.id, item.offer.sellerSku);
+    }
+    for (const l of lots) {
+      const sku = skuByItem.get(l.order_item_id);
+      if (sku) out.set(l.id, sku);
+    }
+    return out;
   }
 
   async nextRef(sellerId: string, periodTo: string): Promise<string> {
@@ -240,11 +261,17 @@ export class StatementsPart extends Part {
     return { ...res, items: await Promise.all(res.items.map((r) => this.view(r))) };
   }
 
-  /** A statement by id; a seller only reaches its own (others → 404) */
-  async get(id: string, sellerId?: string): Promise<Statement> {
-    const row = isUuid(id) ? await this.repo.get('statements', id) : undefined;
+  /** A statement by id or ref (ST-…, G46); a seller only reaches its own (others → 404) */
+  async rowOf(idOrRef: string, sellerId?: string): Promise<StatementRec> {
+    const key = idOrRef.trim();
+    const byRef = async () => (await this.repo.findOne('statements', { ref: key })) ?? (await this.repo.findOne('statements', { ref: key.toUpperCase() }));
+    const row = isUuid(key) ? await this.repo.get('statements', key) : /^ST-/i.test(key) ? await byRef() : undefined;
     if (!row || (sellerId && row.seller_id !== sellerId)) throw notFound('Statement');
-    return this.view(row);
+    return row;
+  }
+
+  async get(idOrRef: string, sellerId?: string): Promise<Statement> {
+    return this.view(await this.rowOf(idOrRef, sellerId));
   }
 
   async byRef(ref: string, sellerId?: string): Promise<Statement | null> {
@@ -255,9 +282,8 @@ export class StatementsPart extends Part {
 
   /* ---------------------------------------------------------------- download */
 
-  async download(sellerId: string, id: string, format: 'pdf' | 'csv', principal: Principal): Promise<{ url: string; expiresAt: string }> {
-    const row = isUuid(id) ? await this.repo.get('statements', id) : undefined;
-    if (!row || row.seller_id !== sellerId) throw notFound('Statement');
+  async download(sellerId: string, idOrRef: string, format: 'pdf' | 'csv', principal: Principal): Promise<{ url: string; expiresAt: string }> {
+    const row = await this.rowOf(idOrRef, sellerId);
     if (row.status !== 'issued') throw this.ctx.error('STATEMENT_NOT_READY', 'The statement period is still open');
     const media = this.ctx.tryUse('media');
     if (!media) throw new AppError('NOT_IMPLEMENTED', 'Statement files need the media module', { reason: 'module_off' });
@@ -276,9 +302,9 @@ export class StatementsPart extends Part {
 
   csv(st: Statement): string {
     const q = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-    const rows = [['section', 'date', 'reference', 'description', 'basis', 'amount'].join(',')];
-    for (const s of st.sections) for (const l of s.lines) rows.push([s.key, l.date ?? '', l.reference?.ref ?? l.reference?.id ?? '', l.description, l.basis ? (l.basis.amount / 100).toFixed(2) : '', (l.amount.amount / 100).toFixed(2)].map(q).join(','));
-    rows.push(['payout', '', st.payout?.ref ?? '', 'Payout', '', (st.reconciliation.payout.amount / 100).toFixed(2)].map(q).join(','));
+    const rows = [['section', 'date', 'reference', 'sku', 'description', 'basis', 'amount'].join(',')];
+    for (const s of st.sections) for (const l of s.lines) rows.push([s.key, l.date ?? '', l.reference?.ref ?? l.reference?.id ?? '', l.sku ?? '', l.description, l.basis ? (l.basis.amount / 100).toFixed(2) : '', (l.amount.amount / 100).toFixed(2)].map(q).join(','));
+    rows.push(['payout', '', st.payout?.ref ?? '', '', 'Payout', '', (st.reconciliation.payout.amount / 100).toFixed(2)].map(q).join(','));
     return `${rows.join('\n')}\n`;
   }
 

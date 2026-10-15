@@ -13,6 +13,7 @@ import { decodeActor, detId, encodeActor } from '../domain/rules.js';
 import { destinationReviewMachine } from '../domain/state-machines.js';
 import { toReview } from '../mappers.js';
 import type { ReviewRec } from '../ports.js';
+import type { DevPayoutProvider } from '../providers/payouts.js';
 import type { Where } from '../../../kernel/mongo/index.js';
 import { notFound, Part, type By } from './core.js';
 
@@ -71,6 +72,20 @@ export class DestinationsPart extends Part {
       if (!(await tx.insertIfAbsent('payout_destinations', { id: destinationId, seller_id: e.sellerId, sellers_account_id: e.changeId, label: e.label, provider_destination_id: e.providerDestinationId, status: 'verification_pending', verified_at: null, active: false, pause_until: null, deposits_sent_at: sentAt, deposit_attempts: 0 }))) return;
       await tx.insertIfAbsent('destination_reviews', { id: detId(`review:${e.changeId}`), seller_id: e.sellerId, destination_id: destinationId, from_label: e.isInitial ? null : (e.previousLabel ?? null), to_label: e.label, requested_by: encodeActor(e.requestedBy)!, requested_at: this.now(), status: destinationReviewMachine.initial, checks: checks as never, decided_by: null, decided_at: null, reason: null });
     });
+  }
+
+  /**
+   * Development only (G11, GET /api/dev/finance/test-deposits): the two amounts the development payout provider
+   * "sent" to the seller's destination waiting for confirmation, so seeds and testers can confirm it. Null when
+   * nothing waits or the provider is not the development one.
+   */
+  async devTestDeposits(sellerId: string): Promise<{ sellerId: string; destinationId: string; label: string; amounts: common.Money[] } | null> {
+    const provider = this.core.provider as Partial<DevPayoutProvider>;
+    if (!isUuid(sellerId) || typeof provider.testDepositsFor !== 'function') return null;
+    const pending = await this.repo.findOne('payout_destinations', { seller_id: sellerId, status: 'verification_pending' }, { orderBy: [['deposits_sent_at', 'desc']] });
+    if (!pending) return null;
+    const cur = this.core.currency();
+    return { sellerId, destinationId: pending.id, label: pending.label, amounts: provider.testDepositsFor(pending.provider_destination_id ?? pending.id).map((amount) => ({ amount, currency: cur })) };
   }
 
   async confirmDeposits(sellerId: string, amounts: common.Money[], by: By): Promise<{ destination: DestinationStatus; review?: DestinationReview | null }> {

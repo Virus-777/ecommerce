@@ -38,6 +38,8 @@ export interface FakeItem {
   /** order item state (default confirmed) and whether a refund was sent for it */
   state?: string;
   refunded?: boolean;
+  /** seller SKU on the order's offer snapshot */
+  sku?: string;
 }
 
 export interface FakeGroup {
@@ -105,6 +107,7 @@ function orderDetail(o: FakeOrder): any {
         afterSales: { refundStatus: i.refunded ? 'sent' : 'none', refundedAmount: USD(i.refunded ? sub - disc + (i.shipping ?? 0) : 0) },
         splitFromItemId: i.splitFromItemId ?? null,
         categoryId: i.categoryId ?? null,
+        ...(i.sku ? { offer: { sellerSku: i.sku } } : {}),
       };
     });
     const total = items.reduce((s, i) => s + i.paidAmount.amount, 0);

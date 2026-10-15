@@ -485,6 +485,7 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 |---|---|
 | date | `date?` |
 | reference | `Reference?` |
+| sku | `string?` Seller SKU of the order item the line is about (sales, fees and refunds of an item, from the order's offer snapshot); null for other lines |
 | description | `string` |
 | detail | `string?` |
 | units | `int?` |

@@ -840,6 +840,8 @@ export const DestinationReview: z.ZodType<DestinationReview> = z.object({
 export interface StatementLine {
   date?: string | null;
   reference?: Reference | null;
+  /** Seller SKU of the order item the line is about (sales, fees and refunds of an item, from the order's offer snapshot); null for other lines */
+  sku?: string | null;
   description: string;
   detail?: string | null;
   units?: number | null;
@@ -854,6 +856,7 @@ export const StatementLine: z.ZodType<StatementLine> = z.object({
   get reference() {
     return Reference.nullish();
   },
+  sku: z.string().describe("Seller SKU of the order item the line is about (sales, fees and refunds of an item, from the order's offer snapshot); null for other lines").nullish(),
   description: z.string(),
   detail: z.string().nullish(),
   units: z.number().int().nullish(),
@@ -2636,10 +2639,11 @@ export const endpoints = defineEndpoints({
     summary: "Itemised statement: sales, fees with basis, refunds (incl. after payout), holds, adjustments with reasons, ad charges, reconciliation to the payout",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Statement id or ref (ST-…)"),
       }),
     response: () => Statement,
     status: 200,
+    errors: ["NOT_FOUND"],
     screens: ["seller/statement"],
     phase: 1,
   },
@@ -2653,7 +2657,7 @@ export const endpoints = defineEndpoints({
     summary: "PDF or CSV of a statement",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Statement id or ref (ST-…)"),
       }),
     query: () =>
       z.object({
@@ -2738,6 +2742,7 @@ export const endpoints = defineEndpoints({
     permission: "finance.ledger.view",
     scope: "staff",
     summary: "Collected payments, company sales, fee income, owed to sellers, refunds, holds and discount funding",
+    desc: "Exported through reports (POST /api/admin/reports/exports) as dataset finance.admin.overview with filters { from, to, basis }: one row per figure (G72).",
     query: () =>
       z.object({
         from: z.iso.date(),
@@ -2983,10 +2988,11 @@ export const endpoints = defineEndpoints({
     summary: "A statement as the seller sees it",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Statement id or ref (ST-…)"),
       }),
     response: () => Statement,
     status: 200,
+    errors: ["NOT_FOUND"],
     screens: ["admin/seller","ops/finance-checks"],
     phase: 1,
   },
