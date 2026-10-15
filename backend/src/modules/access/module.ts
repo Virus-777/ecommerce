@@ -2,6 +2,7 @@ import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/access.js';
 import { resolvers } from './graphql/resolvers.js';
 import { adminRoutes } from './http/admin.js';
+import { mongoMigrations } from './migrations.js';
 import { AccessRepository } from './repository.js';
 import { schemas } from './schema.js';
 import { AccessService } from './service.js';
@@ -16,6 +17,7 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     const service = new AccessService({ repo: new AccessRepository(ctx.mongo), ctx });
     ctx.provide(service);

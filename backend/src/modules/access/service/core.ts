@@ -199,6 +199,8 @@ export class Core {
     );
     await this.repo.transaction(async (tx) => {
       await tx.lockRegistry();
+      // keys this sync registers for the first time (G77: new view keys reach an existing Business Owner role)
+      const known = new Set((await tx.listPermissions()).map((p) => p.key));
       await tx.upsertPermissions(permissions);
       await tx.markPermissionsUnavailable(permissions.map((p) => p.key), now);
       await tx.upsertActions(actions);
@@ -256,6 +258,12 @@ export class Core {
         const rows: LimitRow[] = [];
         for (const key of actionKeys) if (!(await tx.limitRowExists(bo.id, key))) rows.push(this.parts.limits.limitRow(bo.id, key, normalizeLimit({ authority: 'permitted' }), now, null));
         await tx.insertLimits(rows);
+        // G77: the Business Owner reads everything (`*.view`). A view key registered after the role was seeded is
+        // added once, when it first appears; a view key the owner later removes from the role is not added back.
+        if (bo.system && !bo.archived_at) {
+          const newViews = expandPermissions(['*.view'], staffKeys.filter((k) => !known.has(k)));
+          await tx.addRolePermissions(bo.id, newViews, 'system', now);
+        }
       }
     });
   }
