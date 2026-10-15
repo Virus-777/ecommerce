@@ -66,6 +66,10 @@ describe('GET /api/dev/notifications/outbox', () => {
     expect((await outbox('?since=yesterday')).statusCode).toBe(400);
   });
 
+  it('answers every web app cross-origin', async () => {
+    expect(app.corsRoutes.ruleFor('/api/dev/notifications/outbox?to=x')).toEqual({ anyApp: true });
+  });
+
   it('needs a token', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/dev/notifications/outbox' })).statusCode).toBe(401);
     expect((await app.inject({ method: 'DELETE', url: '/api/dev/notifications/outbox' })).statusCode).toBe(401);
