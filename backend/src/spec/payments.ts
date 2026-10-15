@@ -922,6 +922,8 @@ export interface PaymentsPaymentFailedEvent {
   intentId: string;
   checkoutSessionId: string;
   orderId?: string | null;
+  /** MK- reference of the order; null while no order exists */
+  orderRef?: string | null;
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -935,6 +937,7 @@ export const PaymentsPaymentFailedEvent: z.ZodType<PaymentsPaymentFailedEvent> =
   intentId: z.uuid(),
   checkoutSessionId: z.uuid(),
   orderId: z.uuid().nullish(),
+  orderRef: z.string().describe("MK- reference of the order; null while no order exists").nullish(),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   declineCategory: z.string(),
@@ -1041,6 +1044,8 @@ export interface PaymentsRefundSentEvent {
   refundId: string;
   ref: string;
   orderId: string;
+  /** MK- reference of the order; null for an orphan payment refund (no order) */
+  orderRef?: string | null;
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -1057,6 +1062,7 @@ export const PaymentsRefundSentEvent: z.ZodType<PaymentsRefundSentEvent> = z.obj
   refundId: z.uuid(),
   ref: z.string(),
   orderId: z.uuid(),
+  orderRef: z.string().describe("MK- reference of the order; null for an orphan payment refund (no order)").nullish(),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   origin: z.string(),
@@ -1076,6 +1082,8 @@ export interface PaymentsRefundFailedEvent {
   refundId: string;
   ref: string;
   orderId: string;
+  /** MK- reference of the order; null for an orphan payment refund (no order) */
+  orderRef?: string | null;
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -1092,6 +1100,7 @@ export const PaymentsRefundFailedEvent: z.ZodType<PaymentsRefundFailedEvent> = z
   refundId: z.uuid(),
   ref: z.string(),
   orderId: z.uuid(),
+  orderRef: z.string().describe("MK- reference of the order; null for an orphan payment refund (no order)").nullish(),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   origin: z.string(),

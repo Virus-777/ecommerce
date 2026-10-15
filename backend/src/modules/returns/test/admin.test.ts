@@ -102,7 +102,7 @@ describe('Official Store returns', () => {
     const approved = await h.call('GET', `/api/admin/returns/refunds/${rr.id}`, staff());
     expect(approved.body).toMatchObject({ status: 'processing', approvedBy: { name: 'Olivia Owner' } });
     expect(h.calls.refunds.find((r) => r.originId === rr.id)).toMatchObject({ origin: 'return', orderId: m.order.id });
-    expect(h.named('returns.refund.approved').find((e) => e.refundRequestId === rr.id)).toMatchObject({ source: 'return', ownerType: 'official', fundedBy: 'official_store' });
+    expect(h.named('returns.refund.approved').find((e) => e.refundRequestId === rr.id)).toMatchObject({ source: 'return', ownerType: 'official', fundedBy: 'official_store', orderRef: m.order.ref, returnRef: m.ret.ref, caseRef: null });
     const store = await h.call('GET', `/api/store/returns/requests/${m.ret.id}`, m.token);
     expect(store.body.refund).toMatchObject({ status: 'processing', explanation: expect.any(String) });
     expect(store.body.status).toBe('awaiting_remedy');
@@ -150,7 +150,7 @@ describe('Official Store returns', () => {
     expect(rep.status, JSON.stringify(rep.body)).toBe(200);
     expect(rep.body.detail.replacement).toMatchObject({ kind: 'replacement', status: 'reserved', quantity: 1 });
     const created = h.named('returns.replacement.created').find((e) => e.returnId === m.ret.id);
-    expect(created).toMatchObject({ orderId: m.order.id, ownerType: 'official', variantId: m.p.variantId, offerId: m.p.offerId, quantity: 1, kind: 'replacement' });
+    expect(created).toMatchObject({ orderId: m.order.id, orderRef: m.order.ref, ownerType: 'official', variantId: m.p.variantId, offerId: m.p.offerId, quantity: 1, kind: 'replacement' });
     // orders adds the zero-charge replacement line
     expect((await h.orders.getOrder(m.order.id))!.groups[0]!.items.some((i) => i.replacementOfItemId === m.items[0]![0]!)).toBe(true);
     await h.publish('shipping', 'shipping.shipment.dispatched', { shipmentId: newId(), kind: 'replacement', orderId: m.order.id, groupId: m.order.groups[0]!.id, returnId: m.ret.id, ownerType: 'official', fulfilledBy: 'official_warehouse', sellerId: null, lines: [], shippedAt: now(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });

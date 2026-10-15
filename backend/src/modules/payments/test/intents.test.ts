@@ -162,6 +162,14 @@ describe('uncertain results (scenario 3)', () => {
     expect(detail).toMatchObject({ status: 'captured', customerState: 'accepted', capturedAmount: USD(placed.total) });
   });
 
+  it('names the order reference when the payment of a placed order fails (payment-failed notice)', async () => {
+    const placed = await placeOrder(h, { customerId: newId(), products: [[{ price: 4006 }]], token: 'tok_visa' }); // …06 declines after the check
+    expect(placed.state).toBe('pending_check');
+    h.clock.advance(31_000);
+    await h.run('payments.check-uncertain');
+    expect(h.named('payments.payment.failed').find((e) => e.intentId === placed.intentId)).toMatchObject({ orderId: placed.order.id, orderRef: placed.order.ref });
+  });
+
   it('raises a check that stays unanswered past uncertainMaxHours to Finance once', async () => {
     const r = await h.service.authorize(authorizeInput({ amount: 4000, token: 'tok_timeout' }), newId());
     // the provider never answers the checks

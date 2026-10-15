@@ -308,7 +308,7 @@ export class Handling {
           delivered_at: null,
         });
         await this.core.timeline(tx, r.id, [{ kind: 'replacement', label: s.kind === 'exchange' ? 'Exchange on the way' : 'Replacement on the way', detail: `${item.title} × ${quantity}, no charge`, visibility: 'customer', actor: by.actor }]);
-        batch.push('returns.replacement.created', { replacementId, returnId: r.id, caseId: null, orderId: r.order_id, ...this.core.recipient(a.ret), orderItemId: item.order_item_id, ownerType: r.owner_type, sellerId: r.seller_id, variantId: s.variantId, offerId: s.offerId, quantity, kind: s.kind });
+        batch.push('returns.replacement.created', { replacementId, returnId: r.id, caseId: null, orderId: r.order_id, orderRef: r.order_ref, ...this.core.recipient(a.ret), orderItemId: item.order_item_id, ownerType: r.owner_type, sellerId: r.seller_id, variantId: s.variantId, offerId: s.offerId, quantity, kind: s.kind });
       });
     } catch (err) {
       await this.release(reservationId, 'The replacement could not be recorded');
@@ -390,6 +390,7 @@ export class Handling {
         returnId: ret?.id ?? null,
         caseId: input.caseId,
         orderId: info.orderId,
+        orderRef: order?.ref ?? ret?.order_ref ?? null,
         customerId: info.customerId ?? order?.contact.customerId ?? null,
         contactEmail: order?.contact.email ?? null,
         orderItemId: info.id,

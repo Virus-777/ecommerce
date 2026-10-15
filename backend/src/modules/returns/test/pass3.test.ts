@@ -185,7 +185,7 @@ describe('replacements: allocated, cancelled with a release', () => {
     expect((await h.service.requestReplacement(input, 'case-rep-2')).id).toBe(rep.id);
     expect(h.calls.allocations.length).toBe(allocations);
     await h.app.kernel.events.drain();
-    expect(h.named('returns.replacement.created').find((e) => e.replacementId === rep.id)).toMatchObject({ returnId: null, caseId, orderId: m.order.id, customerId: m.customerId, ownerType: 'seller', sellerId, variantId: p.variantId, offerId: p.offerId, quantity: 1, kind: 'replacement' });
+    expect(h.named('returns.replacement.created').find((e) => e.replacementId === rep.id)).toMatchObject({ returnId: null, caseId, orderId: m.order.id, orderRef: m.order.ref, customerId: m.customerId, ownerType: 'seller', sellerId, variantId: p.variantId, offerId: p.offerId, quantity: 1, kind: 'replacement' });
 
     // shipping matches the parcel by the replacement's order items (no return id)
     const shipmentId = newId();

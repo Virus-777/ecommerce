@@ -509,7 +509,10 @@ export class Refunds {
     let changed: { r: RefundRec; from: RefundStatus } | null = null;
     const pre = await this.repo.get('refunds', refundId);
     const payer = pre ? await this.repo.get('intents', pre.intent_id) : undefined;
-    const who = payer ? await this.core.contactOf({ customer_id: payer.customer_id, guest_email: payer.guest_email, order_id: pre!.order_id }) : { customerId: null, contactEmail: null };
+    const lookup = this.core.lookup();
+    const who = payer ? await this.core.contactOf({ customer_id: payer.customer_id, guest_email: payer.guest_email, order_id: pre!.order_id }, lookup) : { customerId: null, contactEmail: null };
+    // refund notices link to the order screen: they carry its reference, not the refund's RF- reference
+    const orderRef = (await lookup.order(pre?.order_id))?.ref ?? null;
     const after = await this.repo.transaction(async (tx) => {
       const r = (await tx.get('refunds', refundId, { forUpdate: true }))!;
       if (r.status !== 'processing') return r;
@@ -543,7 +546,7 @@ export class Refunds {
         updated_at: now,
       });
       await this.log(tx, r.id, 'processing', to, f.reason, by.actor);
-      batch.push('payments.refund.failed', { refundId: r.id, ref: r.ref, orderId: refundOrderKey(r), ...who, origin: r.origin, originId: r.origin_id, amount: this.m(r.amount, r.currency), reason: f.reason, attempts: r.attempts, finalAttempt: final });
+      batch.push('payments.refund.failed', { refundId: r.id, ref: r.ref, orderId: refundOrderKey(r), orderRef, ...who, origin: r.origin, originId: r.origin_id, amount: this.m(r.amount, r.currency), reason: f.reason, attempts: r.attempts, finalAttempt: final });
       changed = { r: updated, from: 'processing' };
       return updated;
     });
@@ -552,7 +555,7 @@ export class Refunds {
       await this.publishChange(c.r, c.from, c.r.status, by);
       if (c.r.status === 'sent') {
         const items = await this.views.refundItems(c.r, await this.repo.find('refund_items', { refund_id: c.r.id }), this.core.lookup());
-        this.core.publish('payments.refund.sent', { refundId: c.r.id, ref: c.r.ref, orderId: refundOrderKey(c.r), ...who, origin: c.r.origin, originId: c.r.origin_id, amount: this.m(c.r.amount, c.r.currency), items, destination: c.r.destination, sentAt: c.r.sent_at!.toISOString() }, by);
+        this.core.publish('payments.refund.sent', { refundId: c.r.id, ref: c.r.ref, orderId: refundOrderKey(c.r), orderRef, ...who, origin: c.r.origin, originId: c.r.origin_id, amount: this.m(c.r.amount, c.r.currency), items, destination: c.r.destination, sentAt: c.r.sent_at!.toISOString() }, by);
       }
     }
     this.core.flush(batch, by);

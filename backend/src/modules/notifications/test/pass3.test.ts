@@ -190,7 +190,7 @@ describe('new topics', () => {
     const orderId = newId();
     await publish(app, 'payments.refund.destination_requested', { refundId, ref: 'RF-261010-0001', orderId, orderRef: 'MK-261010-30010', customerId: c.customerId, contactEmail: null, amount: money(4900), failureReason: 'The card was closed', message: null });
     let [n] = await inbox(as.customer(c), 'store');
-    expect(n).toMatchObject({ topicKey: 'customer.refund.destination_needed', group: 'returns_refunds', actionRequired: true, state: 'open', link: { kind: 'refund', id: refundId } });
+    expect(n).toMatchObject({ topicKey: 'customer.refund.destination_needed', group: 'returns_refunds', actionRequired: true, state: 'open', link: { kind: 'order', id: orderId, ref: 'MK-261010-30010', screen: 'account/order' } });
     expect(n.body).toContain('$49.00');
     await publish(app, 'payments.refund.sent', { refundId, ref: 'RF-261010-0001', orderId, customerId: c.customerId, contactEmail: null, origin: 'return', originId: null, amount: money(4900), items: [], destination: 'Store credit', sentAt: new Date().toISOString() });
     n = (await inbox(as.customer(c), 'store')).find((x) => x.topicKey === 'customer.refund.destination_needed');

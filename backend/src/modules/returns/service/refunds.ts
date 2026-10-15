@@ -576,7 +576,8 @@ export class Refunds {
       return updated;
     });
     if (!after) return;
-    const recipient = await this.core.refundRecipient(after, after.return_id ? await this.repo.get('returns', after.return_id) : null);
+    const ret = after.return_id ? await this.repo.get('returns', after.return_id) : null;
+    const recipient = await this.core.refundRecipient(after, ret);
     this.core.publish(
       'returns.refund.approved',
       {
@@ -584,6 +585,10 @@ export class Refunds {
         returnId: after.return_id,
         caseId: after.case_id,
         orderId: after.order_id,
+        // the refund notice opens the return, the case or the order: it carries that record's reference
+        orderRef: ret?.order_ref ?? after.order_ref ?? null,
+        returnRef: ret?.ref ?? null,
+        caseRef: after.case_id ? await this.caseRef(after.order_id, after.case_id) : null,
         ...recipient,
         orderItemIds: after.order_item_ids,
         items: await this.itemsOf(after),
@@ -602,6 +607,14 @@ export class Refunds {
     );
     if (after.return_id) await this.approveException(after.return_id, approver, by);
     this.core.flush(batch);
+  }
+
+  /** CS- reference of a support case of the order (null when support is off or does not answer) */
+  private async caseRef(orderId: string, caseId: string): Promise<string | null> {
+    const support = this.core.ctx.tryUse('support');
+    if (!support) return null;
+    const cases = await this.core.quiet('case reference', () => support.casesForOrder(orderId));
+    return cases?.find((c) => c.caseId === caseId)?.ref ?? null;
   }
 
   /** Refunded quantity per item: stored on the request, else the return's units, else one unit per item */

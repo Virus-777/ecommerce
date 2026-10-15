@@ -103,7 +103,7 @@ describe('execution', () => {
     expect(sent!.sentAt).toBeTruthy();
     expect(sent!.history.map((x) => x.label)).toEqual(['Requested', 'Processing', 'Sent']);
     expect(h.named('payments.refund.status_changed').filter((e) => e.refundId === r.id).map((e) => `${e.from}>${e.to}`)).toEqual(['null>requested', 'requested>processing', 'processing>sent']);
-    expect(h.named('payments.refund.sent')).toEqual([expect.objectContaining({ refundId: r.id, orderId: placed.order.id, amount: USD(8000), destination: 'original_method' })]);
+    expect(h.named('payments.refund.sent')).toEqual([expect.objectContaining({ refundId: r.id, orderId: placed.order.id, orderRef: placed.order.ref, amount: USD(8000), destination: 'original_method' })]);
     expect(await h.service.getPaymentForOrder(placed.order.id)).toMatchObject({ customerState: 'partly_refunded', refundedAmount: USD(8000) });
     // orders mirrors the refund on the item (real orders consumer)
     const order = await h.orders.getOrder(placed.order.id);

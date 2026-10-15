@@ -40,7 +40,7 @@ export interface NoticeLink {
   /** order, order_item, shipment, return, refund, case, conversation, product, seller_order, payout, statement, hold, restriction, approval, queue, setting_change, account, campaign */
   kind: string;
   id: string;
-  /** MK-260914-48213, RT-261002-0520, CS-261005-3381, PO-261005-3381 */
+  /** Reference of the record the screen opens, next to its id: MK-260914-48213 for order, shipment (tracking) and seller order links (refund notices link to the order, the return or the case and carry that reference, never the RF- one), RT-261002-0520, CS-261005-3381, PO-261005-3381 */
   ref?: string | null;
   /** Button text, e.g. Open dispatch queue */
   label?: string | null;
@@ -52,7 +52,7 @@ export interface NoticeLink {
 export const NoticeLink: z.ZodType<NoticeLink> = z.object({
   kind: z.string().describe("order, order_item, shipment, return, refund, case, conversation, product, seller_order, payout, statement, hold, restriction, approval, queue, setting_change, account, campaign"),
   id: z.string(),
-  ref: z.string().describe("MK-260914-48213, RT-261002-0520, CS-261005-3381, PO-261005-3381").nullish(),
+  ref: z.string().describe("Reference of the record the screen opens, next to its id: MK-260914-48213 for order, shipment (tracking) and seller order links (refund notices link to the order, the return or the case and carry that reference, never the RF- one), RT-261002-0520, CS-261005-3381, PO-261005-3381").nullish(),
   label: z.string().describe("Button text, e.g. Open dispatch queue").nullish(),
   screen: z.string().describe("App route / prototype screen id (design/prototype catalogue), the screen where the publishing module shows the record (its endpoint screens), e.g. account/tracking, seller/order, ops/dispatch. Invitation emails carry url and use accept-invitation (identity lists no screen for it)"),
   url: z.url().nullish(),

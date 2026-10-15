@@ -2171,6 +2171,12 @@ export interface ReturnsRefundApprovedEvent {
   returnId?: string | null;
   caseId?: string | null;
   orderId: string;
+  /** MK- reference of the order */
+  orderRef?: string | null;
+  /** RT- reference of the return (return refunds) */
+  returnRef?: string | null;
+  /** CS- reference of the support case (case refunds), when support answers */
+  caseRef?: string | null;
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -2195,6 +2201,9 @@ export const ReturnsRefundApprovedEvent: z.ZodType<ReturnsRefundApprovedEvent> =
   returnId: z.uuid().nullish(),
   caseId: z.uuid().nullish(),
   orderId: z.uuid(),
+  orderRef: z.string().describe("MK- reference of the order").nullish(),
+  returnRef: z.string().describe("RT- reference of the return (return refunds)").nullish(),
+  caseRef: z.string().describe("CS- reference of the support case (case refunds), when support answers").nullish(),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   orderItemIds: z.array(z.uuid()),
@@ -2294,6 +2303,8 @@ export interface ReturnsReplacementCreatedEvent {
   returnId?: string | null;
   caseId?: string | null;
   orderId: string;
+  /** MK- reference of the order */
+  orderRef?: string | null;
   /** Customers-module id; null for guests */
   customerId?: string | null;
   /** Order contact email, for guests */
@@ -2312,6 +2323,7 @@ export const ReturnsReplacementCreatedEvent: z.ZodType<ReturnsReplacementCreated
   returnId: z.uuid().describe("Null for a replacement decided on a support case without a return").nullish(),
   caseId: z.uuid().nullish(),
   orderId: z.uuid(),
+  orderRef: z.string().describe("MK- reference of the order").nullish(),
   customerId: z.uuid().describe("Customers-module id; null for guests").nullish(),
   contactEmail: z.email().describe("Order contact email, for guests").nullish(),
   orderItemId: z.uuid(),

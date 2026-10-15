@@ -22,6 +22,8 @@ const REF_FIELDS: [string, string][] = [
   ['return', 'returnRef'],
   ['case', 'caseRef'],
 ];
+/** Link kinds whose reference is the order's (MK-…) */
+const ORDER_SCREENS = new Set(['order', 'shipment', 'seller_order']);
 
 /** Schedules a notice; with a claim key, only the first time (null when the key was already claimed) */
 export type Scheduler = (input: NotifyInput, sendAt: string, createdBy: string, claimKey?: string | null) => Promise<string | null>;
@@ -124,7 +126,8 @@ export class Consumers {
     }
     const link = { ...send.link };
     if (!link.ref) {
-      const ref = link.kind === 'order' ? subjects.orderRef : link.kind === 'return' ? subjects.returnRef : link.kind === 'case' ? subjects.caseRef : undefined;
+      // the reference of the record the screen opens: a package (tracking) and a seller order show their order's
+      const ref = ORDER_SCREENS.has(link.kind) ? subjects.orderRef : link.kind === 'return' ? subjects.returnRef : link.kind === 'case' ? subjects.caseRef : undefined;
       if (ref) link.ref = ref;
     }
     if (send.guestOrderLink) {

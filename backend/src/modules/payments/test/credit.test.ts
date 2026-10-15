@@ -361,6 +361,6 @@ describe('who the payment events are about', () => {
     expect(h.named('payments.payment.pending_check').find((e) => e.intentId === uncertain.intentId)).toMatchObject({ customerId: null, contactEmail: 'gia@example.com' });
     const r = await h.service.startRefund(refundOf(m.order.id, [{ orderItemId: m.items[0]!, amount: 2_012 }]), newId()); // …12: card closed
     await h.run('payments.process-refunds');
-    expect(h.named('payments.refund.failed').find((e) => e.refundId === r.id)).toMatchObject({ customerId: m.customerId, contactEmail: 'sam@example.com', finalAttempt: true });
+    expect(h.named('payments.refund.failed').find((e) => e.refundId === r.id)).toMatchObject({ customerId: m.customerId, contactEmail: 'sam@example.com', finalAttempt: true, orderRef: m.order.ref });
   });
 });

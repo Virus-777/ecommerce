@@ -374,3 +374,46 @@ describe('events published', () => {
     expect(seen.find((e) => e.payload.accountId === c.accountId)).toMatchObject({ payload: { topicKey: 'customer.order.accepted', channel: 'email', recipientKind: 'customer' } });
   });
 });
+
+describe('notice links carry the id and reference of the screen they open', () => {
+  const at = () => new Date().toISOString();
+
+  it('payment failed: the order ref, even before the order notice', async () => {
+    const c = world.customer();
+    const orderId = newId();
+    await publish(app, 'payments.payment.failed', { intentId: newId(), checkoutSessionId: newId(), orderId, orderRef: 'MK-261009-55501', customerId: c.customerId, contactEmail: c.email, declineCategory: 'card_declined', afterPendingCheck: false, at: at() });
+    const [n] = await inbox(as.customer(c), 'store');
+    expect(n).toMatchObject({ topicKey: 'customer.payment.failed', link: { kind: 'order', id: orderId, ref: 'MK-261009-55501', screen: 'account/order' } });
+    expect(n.body).toContain('The payment for order MK-261009-55501 was declined');
+  });
+
+  it('shipments: the tracking link carries the order ref; an exception without a package opens the order', async () => {
+    const c = world.customer();
+    const { payload, orderId, groupId } = orderAccepted({ customerId: c.customerId, email: c.email });
+    await publish(app, 'orders.order.accepted', payload);
+    const shipmentId = newId();
+    await publish(app, 'shipping.shipment.dispatched', { shipmentId, kind: 'outbound', orderId, groupId, returnId: null, ownerType: 'official', sellerId: null, fulfilledBy: 'official_warehouse', lines: [{ orderItemId: newId(), title: 'Lamp', variantLabel: 'Black', quantity: 1 }], shippedAt: at(), dispatchDueAt: null, onTime: true, trackingValid: true, estimatedArrival: null });
+    await publish(app, 'shipping.shipment.exception', { exceptionId: newId(), kind: 'seller_cannot_fulfill', orderId, groupId, shipmentId: null, sellerId: null, fulfilledBy: 'official_warehouse', orderItemIds: [newId()], dueAt: at(), customerAction: 'choose a refund or a replacement', source: 'system', caseRef: null });
+    const mine = await inbox(as.customer(c), 'store');
+    expect(mine.find((n) => n.topicKey === 'customer.shipment.dispatched').link).toMatchObject({ kind: 'shipment', id: shipmentId, ref: payload.ref, screen: 'account/tracking' });
+    expect(mine.find((n) => n.topicKey === 'customer.shipment.exception').link).toMatchObject({ kind: 'order', id: orderId, ref: payload.ref, screen: 'account/order' });
+  });
+
+  it('refunds: the order screen with the order ref (never the RF- ref); approved refunds open the return', async () => {
+    const c = world.customer();
+    const orderId = newId();
+    const orderRef = 'MK-261009-55502';
+    const refund = { refundId: newId(), ref: 'RF-261009-0007', orderId, orderRef, customerId: c.customerId, contactEmail: c.email, origin: 'return', originId: null, amount: money(2500), items: [] };
+    await publish(app, 'payments.refund.sent', { ...refund, destination: 'original_method', sentAt: at() });
+    await publish(app, 'payments.refund.failed', { ...refund, refundId: newId(), ref: 'RF-261009-0008', reason: 'Card closed', attempts: 3, finalAttempt: true });
+    await publish(app, 'payments.refund.destination_requested', { refundId: newId(), ref: 'RF-261009-0009', orderId, orderRef, customerId: c.customerId, contactEmail: c.email, amount: money(2500), failureReason: null, message: null });
+    const returnId = newId();
+    await publish(app, 'returns.refund.approved', { refundRequestId: newId(), returnId, caseId: null, orderId, orderRef, returnRef: 'RT-261009-0042', caseRef: null, customerId: c.customerId, contactEmail: c.email, orderItemIds: [], items: [], ownerType: 'official', sellerId: null, source: 'return', trustReportId: null, total: money(2500), breakdown: { itemAmount: money(2500), discountShare: money(0), shippingRefund: money(0), returnShippingDeduction: money(0), deductions: [], total: money(2500), maxRefundable: money(2500), destination: 'original_method', isEstimate: false }, fundedBy: 'platform', sellerShare: null, platformShare: null, approvedBy: { kind: 'system', id: null } });
+    await publish(app, 'returns.label.created', { returnId, ref: 'RT-261009-0042', orderId, orderRef, customerId: c.customerId, contactEmail: c.email, ownerType: 'official', sellerId: null, labelId: newId(), cost: money(0), paidBy: 'platform' });
+    const mine = await inbox(as.customer(c), 'store');
+    const link = (topic: string) => mine.find((n) => n.topicKey === topic).link;
+    for (const topic of ['customer.refund.sent', 'customer.refund.failed', 'customer.refund.destination_needed']) expect(link(topic), topic).toMatchObject({ kind: 'order', id: orderId, ref: orderRef, screen: 'account/order' });
+    expect(link('customer.refund.approved')).toMatchObject({ kind: 'return', id: returnId, ref: 'RT-261009-0042', screen: 'account/return' });
+    expect(link('customer.return.label_ready')).toMatchObject({ kind: 'return', id: returnId, ref: 'RT-261009-0042', screen: 'account/return' });
+  });
+});

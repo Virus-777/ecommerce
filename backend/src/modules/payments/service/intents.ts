@@ -202,7 +202,10 @@ export class Intents {
     const batch = new Batch();
     let releaseHold: string | null = null;
     const pre = await this.repo.get('intents', intentId);
-    const who = pre ? await this.core.contactOf(pre) : { customerId: null, contactEmail: null };
+    const lookup = this.core.lookup();
+    const who = pre ? await this.core.contactOf(pre, lookup) : { customerId: null, contactEmail: null };
+    // the order reference for the payment-failed notice ("The payment for order MK-… was declined")
+    const orderRef = (await lookup.order(pre?.order_id))?.ref ?? null;
     const after = await this.repo.transaction(async (tx) => {
       const i = await tx.get('intents', intentId, { forUpdate: true });
       if (!i) throw notFound();
@@ -266,7 +269,7 @@ export class Intents {
           patch.decline = declineOf(d.code, d.category, i.method.label);
           patch.next_check_at = null;
           patch.next_action = null;
-          batch.push('payments.payment.failed', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, ...who, declineCategory: d.category, afterPendingCheck: wasPending, at: now.toISOString() });
+          batch.push('payments.payment.failed', { intentId: i.id, checkoutSessionId: i.checkout_session_id, orderId: i.order_id, orderRef: i.order_id ? orderRef : null, ...who, declineCategory: d.category, afterPendingCheck: wasPending, at: now.toISOString() });
           releaseHold = i.tenders.find((t) => t.creditHoldId)?.creditHoldId ?? null;
           break;
         }
