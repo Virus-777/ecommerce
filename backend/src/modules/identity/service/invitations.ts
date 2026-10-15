@@ -214,7 +214,7 @@ export class Invitations {
         opened.after();
       };
       const fresh = (await repo.getAccount(account.id))!;
-      return { result: { status: 'signed_in', account: await this.core.summaryOf(fresh, repo), tokens: this.core.sessionTokens(opened.session, opened.refreshToken, s) } };
+      return { result: { status: 'signed_in', account: await this.core.summaryOf(fresh, repo), tokens: this.core.sessionTokens(opened.session, fresh, opened.refreshToken, s) } };
     });
     after();
     if ('error' in outcome) throw outcome.error;

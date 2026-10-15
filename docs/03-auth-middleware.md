@@ -220,7 +220,7 @@ Two things stay out of middleware on purpose:
 **Access token**, issued by identity:
 - **Format:** JWT signed with **EdDSA** (Ed25519). Verifiers accept only that algorithm.
 - **Keys:** the private key lives only in identity and comes from the secret store. The kernel reads public keys by `kid` from config (`AUTH_JWKS`). During rotation the old key stays valid for at least token TTL + leeway.
-- **Header and claims:** `typ: at+jwt`, `iss: marketly-identity`, `aud: store|seller|admin` (exact match), `kind: visitor|customer|seller|staff`, `sub` (account; absent for visitors), `sid` (session; for store visitors this is the guest session), `sellerId`, `memberId`, `authAt`, `twoStepAt`, `iat`, `exp`, `jti`.
+- **Header and claims:** `typ: at+jwt`, `iss: marketly-identity`, `aud: store|seller|admin` (exact match), `kind: visitor|customer|seller|staff`, `sub` (account; absent for visitors), `sid` (session; for store visitors this is the guest session), `sellerId`, `memberId`, `authAt`, `twoStepAt`, `name` (display name for recorded actors, at most 80 characters; set at sign-in and refresh), `iat`, `exp`, `jti`.
 - **Lifetime:** 15 minutes, with 60 s of clock leeway, for visitor and signed-in tokens alike. Visitor and signed-in tokens are the same format and go through the same middleware; only `kind` and what it unlocks differ.
 
 **Other signed or secret tokens:**

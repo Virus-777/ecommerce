@@ -156,7 +156,7 @@ export class Registration {
           this.core.publish('identity.user.verified', { accountId: account.id, channel: 'email', email: verified.email, phone: null, guestSessionId: opened.claimed ?? visitorSessionId ?? null, at: map.iso(now) }, caller);
           opened.after();
         };
-        return { result: { verified: true, account: await this.core.summaryOf(fresh, repo), tokens: this.core.sessionTokens(opened.session, opened.refreshToken, s) } };
+        return { result: { verified: true, account: await this.core.summaryOf(fresh, repo), tokens: this.core.sessionTokens(opened.session, fresh, opened.refreshToken, s) } };
       }
 
       if (c.purpose === 'email_change') {

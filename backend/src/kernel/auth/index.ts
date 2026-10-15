@@ -58,7 +58,7 @@ export const principalOf = (c: AccessClaims): Principal => ({
   guestSessionId: c.kind === 'visitor' && c.aud === 'store' ? c.sid : null,
   authenticatedAt: c.authAt ? new Date(c.authAt * 1000).toISOString() : null,
   twoStepVerifiedAt: c.twoStepAt ? new Date(c.twoStepAt * 1000).toISOString() : null,
-  name: c.dev?.name ?? null,
+  name: c.name ?? c.dev?.name ?? null,
 });
 
 /* ------------------------------------------------------------------ errors */

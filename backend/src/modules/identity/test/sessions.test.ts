@@ -213,6 +213,20 @@ describe('sign-in', () => {
     expect(devices.body.filter((d: any) => d.current)).toHaveLength(1);
   });
 
+  it('puts the display name in the access token, so what the person does records their name (G44/G70)', async () => {
+    const c = await customer(kit);
+    const claims = (token: string) => JSON.parse(Buffer.from(token.split('.')[1]!, 'base64url').toString('utf8'));
+    expect(claims(c.tokens.accessToken).name).toBe('Ana Lopez');
+    const res = await signIn(kit, { email: c.email, password: c.password });
+    expect(claims(res.body.tokens.accessToken).name).toBe('Ana Lopez');
+    const refreshed = await kit.call('POST', `${PUBLIC}/sessions/refresh`, { body: { refreshToken: res.body.tokens.refreshToken } });
+    expect(claims(refreshed.body.accessToken).name).toBe('Ana Lopez');
+    // the recorded actor carries the name
+    const ok = await kit.call('PUT', `${STORE}/password`, { token: refreshed.body.accessToken, body: { currentPassword: c.password, newPassword: 'Brand-New-Pass-7', signOutOtherDevices: false } });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(204);
+    expect(kit.events.filter((e) => e.name === 'identity.password.changed').at(-1)!.actor).toEqual({ kind: 'customer', id: c.accountId, name: 'Ana Lopez' });
+  });
+
   it('counts wrong passwords, then locks for lockoutMinutes (unknown emails answer the same)', async () => {
     const c = await customer(kit);
     for (let i = 4; i >= 1; i--) {

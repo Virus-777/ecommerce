@@ -131,6 +131,9 @@ export const isReauthPurpose = (v: unknown): v is ReauthRequest['purpose'] => ty
 
 export const seconds = (d: Date) => Math.floor(d.getTime() / 1000);
 const truncSecond = (d: Date) => new Date(seconds(d) * 1000);
+/** The name carried in access tokens: trimmed and capped, so every token stays small */
+const TOKEN_NAME_MAX = 80;
+export const tokenName = (displayName: string | null | undefined) => [...(displayName ?? '').trim()].slice(0, TOKEN_NAME_MAX).join('');
 export const audienceOk = (v: unknown): v is Audience => v === 'store' || v === 'seller' || v === 'admin';
 export const issue = (path: string, message: string) => ({ issues: [{ path, message }] });
 
@@ -368,13 +371,16 @@ export class Core {
     return { token, expiresAt: new Date((seconds(now) + ttlMinutes * 60) * 1000) };
   }
 
-  sessionTokens(session: SessionRow, refreshToken: string, s: { accessTokenTtlMinutes: number }): SessionTokens {
+  /** `account` gives the name recorded with what the person does (actors); a name change shows after the next refresh. */
+  sessionTokens(session: SessionRow, account: Pick<AccountRow, 'display_name'>, refreshToken: string, s: { accessTokenTtlMinutes: number }): SessionTokens {
+    const name = tokenName(account.display_name);
     const access = this.signAccess(
       {
         aud: session.audience,
         kind: KIND_OF[session.audience],
         sub: session.account_id,
         sid: session.id,
+        ...(name ? { name } : {}),
         ...(session.seller_id ? { sellerId: session.seller_id } : {}),
         ...(session.seller_member_id ? { memberId: session.seller_member_id } : {}),
         authAt: seconds(session.created_at),
@@ -595,7 +601,7 @@ export class Core {
       seller = contexts.length === 1 ? contexts[0]! : (contexts.find((c) => c.seller_id === o.sellerId) ?? null);
     }
     const opened = await this.openSession(repo, account, { ...o, seller }, s, now);
-    const tokens = this.sessionTokens(opened.session, opened.refreshToken, s);
+    const tokens = this.sessionTokens(opened.session, account, opened.refreshToken, s);
     return {
       result: {
         status: o.audience === 'seller' && !seller ? 'seller_context_required' : 'signed_in',

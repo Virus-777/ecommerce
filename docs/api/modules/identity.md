@@ -1000,7 +1000,7 @@ Indexes: `(expires_at)`
 - Rate limits: sign-in 10/min per IP and 5/15 min per email; registration and password reset 5/hour per email and 20/hour per IP; guest sessions 30/hour per IP.
 - Business values (lockout length, password rules, token lifetimes) are defaults to confirm; screen copy differs (register says 10 characters, the security page says 12): proposal is 10 for members and 12 for staff.
 - Every request carries a token (auth design v3, docs/03-auth-middleware.md). Visitor tokens come from POST /api/public/identity/app-sessions (bootstrap, app proof) and have the same JWT format as access tokens with kind visitor. The store visitor session is the guest session (guest_sessions table); X-Guest-Session is retired. Sign-in and registration called with a visitor token claim that session.
-- Access and visitor tokens are EdDSA JWTs: typ at+jwt, iss marketly-identity, aud store|seller|admin, kind, sub, sid, sellerId, memberId, authAt, twoStepAt, iat, exp, jti; public keys published by kid (AUTH_JWKS). Re-auth, reset, invitation and order-link tokens are opaque and travel in request bodies, never in URL paths.
+- Access and visitor tokens are EdDSA JWTs: typ at+jwt, iss marketly-identity, aud store|seller|admin, kind, sub, sid, sellerId, memberId, authAt, twoStepAt, name (the display name recorded with what the person does, at most 80 characters; a name change shows after the next refresh), iat, exp, jti; public keys published by kid (AUTH_JWKS). Re-auth, reset, invitation and order-link tokens are opaque and travel in request bodies, never in URL paths.
 
 ## GraphQL (read layer)
 

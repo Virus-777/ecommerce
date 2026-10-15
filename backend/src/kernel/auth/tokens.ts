@@ -27,6 +27,8 @@ export interface AccessClaims {
   memberId?: string;
   authAt?: number;
   twoStepAt?: number;
+  /** The person's display name, recorded with what they do (actors). Set at sign-in and refresh, so a change shows after the next refresh. */
+  name?: string;
   iat: number;
   exp: number;
   jti: string;

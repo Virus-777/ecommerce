@@ -143,7 +143,7 @@ export class Sessions {
         await repo.updateDevice(session.device_id, { last_active_at: now, last_ip: caller.client.ip });
         await repo.updateAccount(account.id, { last_active_at: now });
       }
-      return this.core.sessionTokens(row, next, s);
+      return this.core.sessionTokens(row, account, next, s);
     });
     if (out instanceof AppError) {
       // the middleware accepted the token a moment ago: it was revoked or rotated in between
@@ -202,7 +202,7 @@ export class Sessions {
       await repo.updateSellerAccess(a.id, access.seller_id, { last_used_at: now });
       const device = await repo.getDevice(session.device_id);
       await this.core.securityEvent(repo, a.id, 'seller_context_switched', 'completed', { audience: 'seller', device, client: caller.client, detail: { sellerName: access.seller_name } });
-      return { tokens: this.core.sessionTokens({ ...session, ...patch }, refreshToken, s), web: device?.kind === 'web' };
+      return { tokens: this.core.sessionTokens({ ...session, ...patch }, a, refreshToken, s), web: device?.kind === 'web' };
     });
     const d = this.core.deliver({ tokens: out.tokens }, out.web, now);
     return { result: d.result.tokens!, cookie: d.cookie };
