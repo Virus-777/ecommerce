@@ -7,7 +7,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { group, harness, idem, line, makeServiceGroup, now, placeOrder, product, tokens, type Harness } from './helpers.js';
+import { group, harness, idem, line, makeServiceGroup, now, placeOrder, product, tokens, USD, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -143,8 +143,14 @@ describe('Fulfilled by Marketly returns', () => {
 
     // the seller sees it all read-only, with the earnings impact of the refund it funds
     const view = await h.call('GET', `/api/seller/returns/requests/${ret.id}`, m.seller);
-    expect(view.body).toMatchObject({ fulfilledBy: 'marketly_service', refundRequest: { fundedBy: 'seller' }, earningsImpact: { refundToCustomer: { amount: 6000 } } });
+    expect(view.body).toMatchObject({ fulfilledBy: 'marketly_service', refundRequest: { fundedBy: 'seller' }, earningsImpact: { refundToCustomer: { amount: 6000 }, feeReturned: { amount: 600 } } });
     expect(view.body.allowedActions).toEqual(['evidence']);
+
+    // once finance booked the sent refund, the card shows what was posted, not a new preview
+    expect(ok.body.paymentRefundId).toBeTruthy();
+    h.booked.set(ok.body.paymentRefundId, { sellerEarningsChange: USD(-6000), feeReturned: USD(540), afterPayout: false, note: 'Booked: earnings of $60.00 reversed; $5.40 fee returned' });
+    const booked = await h.call('GET', `/api/seller/returns/requests/${ret.id}`, m.seller);
+    expect(booked.body.earningsImpact).toMatchObject({ sellerEarningsChange: { amount: -6000 }, feeReturned: { amount: 540 }, note: 'Booked: earnings of $60.00 reversed; $5.40 fee returned' });
   });
 
   it('keeps fulfilledBy official_warehouse and seller on other returns', async () => {

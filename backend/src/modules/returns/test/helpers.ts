@@ -24,6 +24,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import type * as catalog from '../../../spec/catalog.js';
+import type * as common from '../../../spec/common.js';
 import type * as inventory from '../../../spec/inventory.js';
 import type * as notifications from '../../../spec/notifications.js';
 import type * as offers from '../../../spec/offers.js';
@@ -57,6 +58,8 @@ export interface Harness {
   categoryPaths: Map<string, catalog.CategoryPath>;
   /** Setting values in force by full key ('returns.autoApproveServiceWithinWindow'); others are their defaults */
   settings: Map<string, unknown>;
+  /** What finance.bookedRefundImpact answers per payment refund id (unset: not booked yet) */
+  booked: Map<string, { sellerEarningsChange: common.Money; feeReturned: common.Money; afterPayout: boolean; note: string }>;
   calls: {
     labels: shipping.LabelRequest[];
     voided: string[];
@@ -121,6 +124,7 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
     ownOffers: new Map<string, offers.Offer[]>(),
     categoryPaths: new Map<string, catalog.CategoryPath>(),
     settings: new Map<string, unknown>(),
+    booked: new Map() as Harness['booked'],
     calls: { labels: [], voided: [], tracking: [], refunds: [], holds: [], allocations: [], released: [], approvals: [], decided: [], cancelledApprovals: [], cases: [], notices: [], exports: [] } as Harness['calls'],
   };
   const refunded = new Map<string, number>();
@@ -264,6 +268,7 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
       },
       finance: {
         previewRefundImpact: async (_ids, refund) => ({ sellerEarningsChange: USD(-refund.amount), feeReturned: USD(Math.round(refund.amount / 10)), afterPayout: false, note: 'Deducted from the next payout' }),
+        bookedRefundImpact: async (paymentRefundId) => h.booked.get(paymentRefundId) ?? null,
       },
       reports: {
         registerDataset: async () => undefined,

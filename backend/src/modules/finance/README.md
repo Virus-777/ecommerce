@@ -1506,6 +1506,7 @@ Indexes: `(at)`
 | Function | Signature | Used by |
 |---|---|---|
 | previewRefundImpact | `(orderItemIds: uuid[], refund: Money, fundedBy: string) => { sellerEarningsChange: Money, feeReturned: Money, afterPayout: bool, note: string }`<br>Effect of a refund on seller earnings and fees, shown before deciding | returns, support, orders |
+| bookedRefundImpact | `(paymentRefundId: uuid, orderItemIds: uuid[]) => { sellerEarningsChange: Money, feeReturned: Money, afterPayout: bool, note: string } | null`<br>What a sent refund changed on the seller ledger: the refund (or refund_after_payout) and fee_refund entries posted for it on these order items. Null until payments.refund.sent is booked (then a preview is all there is) | returns |
 | calculateFee | `(input: FeeCalcInput) => FeeCalculation`<br>Fee and seller earnings for a price under the active fee rules | offers, promotions, sellers |
 | getSellerBalances | `(sellerId: uuid) => SellerBalances`<br>Balances for dashboards and seller detail | sellers, reports, graphql |
 | recordAdCharge | `(input: { sellerId: uuid, campaignId: uuid, campaignRef: string, period: DateRange, amount: Money, description: string }) => LedgerEntry`<br>Posts a seller ad charge, kept separate from commission | advertising |

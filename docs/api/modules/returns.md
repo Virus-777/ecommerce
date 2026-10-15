@@ -724,8 +724,8 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | Field | Type |
 |---|---|
 | refundToCustomer | `Money` |
-| sellerEarningsChange | `Money` |
-| feeReturned | `Money` |
+| sellerEarningsChange | `Money` Before the refund is booked a preview (finance.previewRefundImpact); once payments sent it and finance booked it, the posted refund entries (finance.bookedRefundImpact) |
+| feeReturned | `Money` Preview before booking; the posted fee_refund entries after |
 | labelCharge | `Money?` |
 | totalBalanceChange | `Money` |
 | afterPayout | `bool` True when the sale was already paid out; the amount is deducted from the next payout |

@@ -156,10 +156,13 @@ describe('a refund after payout (scenario 6)', () => {
     const refundRequestId = newId();
     await k.emit('returns.refund.approved', { refundRequestId, returnId: newId(), caseId: null, orderId: orderA.id, orderItemIds: [item.id], items: [{ orderItemId: item.id, quantity: 1 }], ownerType: 'seller', sellerId: S, source: 'return', trustReportId: null, total: USD(5560), breakdown: { itemAmount: USD(5900), discountShare: USD(340), shippingRefund: USD(0), returnShippingDeduction: USD(0), deductions: [], total: USD(5560), maxRefundable: USD(11319), destination: 'Visa •••• 4417', isEstimate: false }, fundedBy: 'shared', sellerShare: USD(5310), platformShare: USD(250), approvedBy: { kind: 'staff', id: newId() } });
     const sent = { refundId: newId(), ref: 'RT-261020-0533', orderId: orderA.id, origin: 'return', originId: refundRequestId, amount: USD(5560), items: [{ orderItemId: item.id, title: 'Pocket speaker', groupId: orderA.groups[0]!.id, sellerId: S, amount: USD(5560) }], destination: 'Visa •••• 4417', sentAt: k.clock.now().toISOString() };
+    expect(await k.svc.bookedRefundImpact(sent.refundId, [item.id])).toBeNull(); // not booked yet: returns shows a preview
     await k.emit('payments.refund.sent', sent);
     await k.emit('payments.refund.sent', sent); // redelivered
     const t = await expectLedgerMatches(k, S);
     expect(t.available).toBe(-5310 + 531);
+    // the earnings card after booking: the posted amounts, not a new preview
+    expect(await k.svc.bookedRefundImpact(sent.refundId, [item.id])).toMatchObject({ sellerEarningsChange: USD(-5310), feeReturned: USD(531), afterPayout: true });
     const entries = await k.call('GET', `${SELLER}/ledger?type=refunds`, sellerTokenOf());
     expect(entries.body.items[0]).toMatchObject({ type: 'refund_after_payout', amount: USD(-5310) });
     expect(entries.body.items[0].description).toContain('after payout');

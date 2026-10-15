@@ -475,7 +475,10 @@ export class Views {
     const refund = rr ? this.m(rr.total, rr.currency) : this.amountOf(agg);
     const shipment = this.core.shipmentOf(agg);
     const labelCharge = shipment?.paid_by === 'seller' && shipment.cost ? this.m(shipment.cost) : null;
-    const preview = await this.core.soft('finance', 'refund impact', (f) => f.previewRefundImpact(agg.items.map((i) => i.order_item_id), refund, rr?.funded_by ?? 'seller'));
+    const items = agg.items.map((i) => i.order_item_id);
+    // once the refund is booked, what finance posted; a new preview would no longer find the fee it already returned
+    const booked = rr?.payment_refund_id ? await this.core.soft('finance', 'booked refund impact', (f) => f.bookedRefundImpact(rr.payment_refund_id!, items)) : null;
+    const preview = booked ?? (await this.core.soft('finance', 'refund impact', (f) => f.previewRefundImpact(items, refund, rr?.funded_by ?? 'seller')));
     if (!preview) return null;
     return {
       refundToCustomer: refund,

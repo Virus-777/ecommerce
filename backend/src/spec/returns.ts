@@ -1287,7 +1287,9 @@ export const ExceptionRefundInput: z.ZodType<ExceptionRefundInput> = z.object({
 
 export interface EarningsImpact {
   refundToCustomer: common.Money;
+  /** Before the refund is booked a preview (finance.previewRefundImpact); once payments sent it and finance booked it, the posted refund entries (finance.bookedRefundImpact) */
   sellerEarningsChange: common.Money;
+  /** Preview before booking; the posted fee_refund entries after */
   feeReturned: common.Money;
   labelCharge?: common.Money | null;
   totalBalanceChange: common.Money;

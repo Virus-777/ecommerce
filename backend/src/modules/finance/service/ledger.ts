@@ -731,6 +731,27 @@ export class LedgerPart extends Part {
     return { sellerEarningsChange: { amount: -sellerShare, currency: cur }, feeReturned: { amount: feeReturned, currency: cur }, afterPayout, note, platformShare: refund.amount - sellerShare, sellerId: lots[0]!.seller_id };
   }
 
+  /**
+   * What a sent refund changed on the seller ledger (onRefundSent posts refund:<refundId>:<item> and
+   * refund_fee:<refundId>:<item>). Null while it is not booked yet; zeros when it was booked with no seller entry
+   * (funded by Marketly).
+   */
+  async bookedRefundImpact(paymentRefundId: string, orderItemIds: string[]): Promise<{ sellerEarningsChange: common.Money; feeReturned: common.Money; afterPayout: boolean; note: string } | null> {
+    if (!isUuid(paymentRefundId) || !orderItemIds.length) return null;
+    const keys = orderItemIds.flatMap((id) => [`refund:${paymentRefundId}:${id}`, `refund_fee:${paymentRefundId}:${id}`]);
+    const rows = await this.repo.find('ledger_entries', { source_event_id: keys });
+    if (!rows.length) {
+      const alloc = await this.repo.findOne('refund_allocations', { payment_refund_id: paymentRefundId });
+      if (!alloc?.applied_at) return null;
+    }
+    const cur = rows[0]?.currency ?? this.core.currency();
+    const earnings = rows.filter((r) => r.type === 'refund' || r.type === 'refund_after_payout').reduce((s, r) => s + r.amount, 0);
+    const fee = rows.filter((r) => r.type === 'fee_refund').reduce((s, r) => s + r.amount, 0);
+    const afterPayout = rows.some((r) => r.type === 'refund_after_payout');
+    const note = `Booked: earnings of ${fmt(-earnings, cur)} reversed; ${fmt(fee, cur)} fee returned${afterPayout ? '; the sale was already paid out, so it comes off the next payout or becomes an amount owed' : ''}`;
+    return { sellerEarningsChange: { amount: earnings, currency: cur }, feeReturned: { amount: fee, currency: cur }, afterPayout, note };
+  }
+
   async previewRefundImpactForOrder(orderRef: string, items: { orderItemId: string; quantity?: number }[] | null, refund: common.Money | null, fundedBy: string): Promise<RefundImpactPreview> {
     const admin = await this.ctx.use('orders').getOrderAdmin(orderRef);
     if (!admin) throw notFound('Order');

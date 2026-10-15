@@ -450,8 +450,8 @@
     },
     "EarningsImpact": {
       "refundToCustomer": "Money",
-      "sellerEarningsChange": "Money",
-      "feeReturned": "Money",
+      "sellerEarningsChange": { "type": "Money", "desc": "Before the refund is booked a preview (finance.previewRefundImpact); once payments sent it and finance booked it, the posted refund entries (finance.bookedRefundImpact)" },
+      "feeReturned": { "type": "Money", "desc": "Preview before booking; the posted fee_refund entries after" },
       "labelCharge": "Money?",
       "totalBalanceChange": "Money",
       "afterPayout": { "type": "bool", "desc": "True when the sale was already paid out; the amount is deducted from the next payout" },

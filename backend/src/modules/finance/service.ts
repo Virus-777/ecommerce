@@ -55,6 +55,11 @@ export class FinanceService implements FinancePublicApi {
     return { sellerEarningsChange: p.sellerEarningsChange, feeReturned: p.feeReturned, afterPayout: p.afterPayout, note: p.note };
   }
 
+  /** What a sent refund changed on the seller ledger (refund and fee_refund entries); null until it is booked */
+  bookedRefundImpact(paymentRefundId: string, orderItemIds: string[]): Promise<{ sellerEarningsChange: common.Money; feeReturned: common.Money; afterPayout: boolean; note: string } | null> {
+    return this.ledger.bookedRefundImpact(paymentRefundId, orderItemIds);
+  }
+
   /** Fee and seller earnings for a price under the active fee rules */
   calculateFee(input: FeeCalcInput): Promise<FeeCalculation> {
     return this.fees.calculate(input);
