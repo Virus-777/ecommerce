@@ -426,3 +426,28 @@ describe('changes before charging (scenario 2)', () => {
     }
   });
 });
+
+describe('development tooling (G30a)', () => {
+  it('makes the next check find a price change or a stock shortage, needs a token and stays out of OpenAPI', async () => {
+    const cleo = await w.customer('cleo@example.com');
+    const v = await readyCheckout(w, cleo.token, { source: 'buy_now', offerId: w.offers.white, quantity: 1 });
+    const url = `/api/dev/checkout/sessions/${v.id}/changes`;
+    expect((await w.app.inject({ method: 'POST', url, payload: {} })).statusCode).toBe(401);
+
+    const price = await w.call('POST', url, cleo.token, {});
+    expect(price.status, JSON.stringify(price.body)).toBe(200);
+    expect(price.body).toMatchObject({ outcome: 'changes_found', checkout: { status: 'changes_pending' } });
+    const unit = v.packages[0].lines[0].unitPrice.amount; // the offer's price now (an earlier test may have changed it)
+    expect(price.body.changeSet.changes[0]).toMatchObject({ kind: 'price_increased', previousAmount: USD(Math.round(unit * 0.9)), currentAmount: USD(unit) });
+    const accepted = await w.call('POST', `${STORE}/sessions/${v.id}/changes/${price.body.changeSet.id}/accept`, cleo.token, { decisions: [{ changeId: price.body.changeSet.changes[0].id, choice: 'accept' }], acceptPartialOrder: false });
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
+    expect(accepted.body.packages[0].lines[0].unitPrice).toEqual(USD(unit));
+
+    const stock = await w.call('POST', url, cleo.token, { stock: true });
+    expect(stock.status, JSON.stringify(stock.body)).toBe(200);
+    expect(stock.body.changeSet.changes.map((c: any) => c.kind)).toContain('quantity_reduced');
+    // a checkout waiting on changes cannot be given more
+    expect((await w.call('POST', url, cleo.token, {})).status).toBe(409);
+    expect(Object.keys((w.app.swagger() as any).paths).some((p) => p.startsWith('/api/dev'))).toBe(false);
+  });
+});

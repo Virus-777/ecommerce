@@ -122,6 +122,32 @@ describe('uncertain results (scenario 3)', () => {
     expect((await h.call('GET', `/api/store/payments/intents/${r.intentId}`, tokens.customer(newId()))).status).toBe(404);
   });
 
+  it('holds a tok_pending payment through the status checks until a development settle answers it (G60)', async () => {
+    const customerId = newId();
+    const owner = tokens.customer(customerId);
+    const held = await h.service.authorize(authorizeInput({ customerId, amount: 3000, token: 'tok_pending' }), newId());
+    expect(held.state).toBe('pending_check');
+    for (let n = 0; n < 3; n++) {
+      h.clock.advance(5 * 60_000);
+      await h.run('payments.check-uncertain');
+    }
+    expect((await h.service.getIntentStatus(held.intentId)).state).toBe('pending');
+    expect((await h.call('POST', `/api/dev/payments/intents/${held.intentId}/settle`, null, { outcome: 'authorized' })).status).toBe(401);
+    expect((await h.call('POST', `/api/dev/payments/intents/${held.intentId}/settle`, owner, { outcome: 'maybe' })).status).toBe(400);
+    const settled = await h.call('POST', `/api/dev/payments/intents/${held.intentId}/settle`, owner, { outcome: 'authorized' });
+    expect(settled.status, JSON.stringify(settled.body)).toBe(200);
+    expect(settled.body).toMatchObject({ intentId: held.intentId, state: 'accepted' });
+    // settled once: nothing held any more
+    expect((await h.call('POST', `/api/dev/payments/intents/${held.intentId}/settle`, owner, { outcome: 'declined' })).status).toBe(409);
+
+    const other = await h.service.authorize(authorizeInput({ customerId, amount: 3000, token: 'tok_pending' }), newId());
+    const declined = await h.call('POST', `/api/dev/payments/intents/${other.intentId}/settle`, owner, { outcome: 'declined' });
+    expect(declined.body).toMatchObject({ state: 'failed', decline: { code: '05' } });
+    // a timed-out payment the processor did answer is not a held one
+    const timedOut = await h.service.authorize(authorizeInput({ customerId, amount: 3000, token: 'tok_timeout' }), newId());
+    expect((await h.call('POST', `/api/dev/payments/intents/${timedOut.intentId}/settle`, owner, { outcome: 'declined' })).status).toBe(400);
+  });
+
   it('rate-limits Check now', async () => {
     const customerId = newId();
     const r = await h.service.authorize(authorizeInput({ customerId, amount: 3000, token: 'tok_timeout_lost' }), newId());

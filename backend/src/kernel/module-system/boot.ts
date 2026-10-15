@@ -10,6 +10,7 @@ import type { Principal } from '../auth/index.js';
 import { isAppError, isNotImplemented, moduleError, notImplemented } from '../errors/index.js';
 import { moduleEvents, type EventBus } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
+import type { DevRoute, ModuleDevRoute } from '../http/dev-routes.js';
 import type { FileRoute, ModuleFileRoute } from '../http/files.js';
 import type { RouteSet } from '../http/index.js';
 import { registrationsOf, type EndpointRegistration, type WebhookVerifier } from '../http/register.js';
@@ -45,6 +46,8 @@ export interface BootResult {
   fileRoutes: ModuleFileRoute[];
   /** Operations (`module.id`) whose responses set or clear the website's refresh cookie: credentialed CORS */
   sessionCookie: Set<string>;
+  /** Development-only routes (registered by the app only while DEV_TOKENS is on) */
+  devRoutes: ModuleDevRoute[];
   /** Public APIs provided by enabled modules */
   apis: Map<string, object>;
   warnings: string[];
@@ -99,7 +102,7 @@ function checkRoutes(spec: ModuleSpecDef, sets: readonly RouteSet[]) {
 export async function bootModules(defs: ModuleDefinition[], k: KernelServices): Promise<BootResult> {
   const enabled = new Set(defs.map((d) => d.spec.name));
   const stubbed = new Set(k.stubbed ?? []);
-  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), fileRoutes: [], sessionCookie: new Set(), apis: new Map(), warnings: [], runAfterBoot: async () => {} };
+  const result: BootResult = { endpoints: [], resolvers: new Map(), webhookVerifiers: new Map(), fileRoutes: [], sessionCookie: new Set(), devRoutes: [], apis: new Map(), warnings: [], runAfterBoot: async () => {} };
   const { apis, resolvers, webhookVerifiers, warnings } = result;
   const proxies = new Map<string, object>();
   const afterBoot: { module: string; fn: () => unknown }[] = [];
@@ -193,6 +196,7 @@ export async function bootModules(defs: ModuleDefinition[], k: KernelServices): 
             result.sessionCookie.add(`${name}.${id}`);
           }
         },
+        devRoutes: (...routes: DevRoute[]) => result.devRoutes.push(...routes.map((r) => ({ ...r, module: name }))),
       },
       graphql: {
         resolvers: (r: ModuleResolvers) => resolvers.set(name, { ...resolvers.get(name), ...r }),

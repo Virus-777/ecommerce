@@ -25,6 +25,19 @@ export default defineModule({
     ctx.http.routes(storeRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
 
+    // Development only (registered while DEV_TOKENS is on, hidden from OpenAPI): test tooling, never a feature
+    ctx.http.devRoutes({
+      method: 'POST',
+      path: '/sessions/:id/changes',
+      summary: "Make the next check of an open checkout find a price change (or with stock: true, a stock shortage) and return the change set",
+      handler: ({ params, body, actor, requestId }) =>
+        service.devForceChanges(
+          params.id!,
+          { lineId: typeof body.lineId === 'string' ? body.lineId : undefined, unitPrice: typeof body.unitPrice === 'number' ? body.unitPrice : undefined, stock: body.stock === true },
+          { actor, requestId },
+        ),
+    });
+
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("payments.payment.authorized", (e) => service.onPaymentAuthorizedFromPayments(e.payload));
     ctx.events.on("payments.payment.failed", (e) => service.onPaymentFailedFromPayments(e.payload));

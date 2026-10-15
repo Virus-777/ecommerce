@@ -1,7 +1,7 @@
 import type { Scope } from '../../kernel/auth/scope.js';
 import { AppError, isAppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
-import { newId } from '../../kernel/lib/ids.js';
+import { isUuid, newId } from '../../kernel/lib/ids.js';
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import type { ModuleContext } from '../../kernel/module-system/index.js';
 import type * as cart from '../../spec/cart.js';
@@ -435,6 +435,31 @@ export class CheckoutService implements CheckoutPublicApi {
     const s = await this.core.load(owner, id);
     this.assertNotExpired(s);
     return this.reval.revalidate(owner, id, by, (x) => this.views.checkout(x));
+  }
+
+  /**
+   * Development only (G30a, POST /api/dev/checkout/sessions/{id}/changes, DEV_TOKENS on): makes the next check of an
+   * open checkout find a change, so the review-changes screen can be tested by hand. Default: the line's quoted price
+   * is set 10% below the offer's (the price "went up"); unitPrice sets it to that amount; stock sets the quantity one
+   * above what is available (a stock shortage). The checkout is then checked again and the change set returned.
+   */
+  async devForceChanges(id: string, input: { lineId?: string; unitPrice?: number; stock?: boolean }, by: By): Promise<RevalidationResult> {
+    const s = isUuid(id) ? await this.repo.getSession(id) : undefined;
+    if (!s) throw this.core.notFound();
+    if (s.status !== 'open') throw new AppError('ILLEGAL_TRANSITION', 'Only an open checkout can be given changes', { machine: 'Checkout session', from: s.status, event: 'changes_found' });
+    if (input.unitPrice !== undefined && !(Number.isInteger(input.unitPrice) && input.unitPrice >= 1)) throw invalid([{ path: 'unitPrice', message: 'A price in cents, at least 1' }]);
+    const d = await this.quoter.draftOf(s);
+    const line = d.lines.filter(included).find((l) => !input.lineId || l.id === input.lineId);
+    if (!line) throw invalid([{ path: 'lineId', message: 'No such line in this checkout' }]);
+    if (input.stock) {
+      const available = (await this.ctx.use('inventory').getAvailability([line.stock_item_id]))[line.stock_item_id]?.available ?? line.quantity;
+      line.quantity = Math.max(available, 0) + 1;
+    } else {
+      line.unit_price = input.unitPrice ?? Math.max(1, Math.round(line.unit_price * 0.9));
+    }
+    await this.quoter.requote(d, { allowed: ['open'] });
+    await this.core.log(id, 'Development change', input.stock ? `Quantity set to ${line.quantity}` : `Quoted price set to ${line.unit_price}`);
+    return this.reval.revalidate(this.core.ownerOfRow(s), id, by, (x) => this.views.checkout(x));
   }
 
   async getChangeSet(owner: Owner | null, id: string, changeSetId: string): Promise<ChangeSet> {

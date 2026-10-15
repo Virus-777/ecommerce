@@ -225,6 +225,11 @@ export interface PaymentProvider {
    * cancelled card share off the allocations and releases the remainder at the final capture.
    */
   partialVoid?(o: { providerRef: string; amount: common.Money; idempotencyKey: string }): Promise<{ authorizedAmount: number }>;
+  /**
+   * Development processor only (G60): settles a payment it is holding without an answer (token tok_pending) as
+   * authorized or declined; the next status check reads the outcome. False when it holds no such payment.
+   */
+  devSettle?(o: { providerRef?: string | null; idempotencyKey: string }, outcome: 'authorized' | 'declined'): Promise<boolean>;
   refund(o: { providerRef: string; amount: common.Money; idempotencyKey: string; destination?: RefundDestination | null; refundId: string }): Promise<ProviderRefund>;
   retrieveRefund(o: { idempotencyKey: string }): Promise<ProviderRefund>;
 

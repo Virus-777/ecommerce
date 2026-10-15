@@ -17,6 +17,10 @@
  *   tok_timeout                 the authorization times out but went through: retrieve says authorized
  *   tok_timeout_declined        times out, retrieve says declined (05)
  *   tok_timeout_lost            times out and the processor has no record (retrieve: not_found)
+ *   tok_pending                 times out and stays unanswered (every retrieve times out too), so the payment stays
+ *                               "being checked" until devSettle (POST /api/dev/payments/intents/{id}/settle) answers
+ *                               authorized or declined; left alone, it is flagged for Finance after uncertainMaxHours
+ *                               like any unanswered check
  *   tok_unavailable             the processor cannot be reached; nothing is processed
  *   tok_closed                  approves, but refunds to this card fail: card closed by the issuer (not retryable)
  *   tok_refund_lost             a refund destination: the first refund sent to it times out and the processor has no
@@ -81,6 +85,8 @@ interface DevPayment {
   status: ProviderPayment['status'];
   decline?: { code: string; category: DeclineCategory } | null;
   captured: number;
+  /** tok_pending: no answer until devSettle */
+  held?: boolean;
 }
 
 interface DevRefund {
@@ -94,7 +100,7 @@ const nextYear = () => new Date().getUTCFullYear() + 3;
 function cardOf(token: string): CardDetails | null {
   const t = token.trim();
   if (!t.startsWith('tok_')) return null;
-  if (DECLINES[t] || ['tok_3ds', 'tok_timeout', 'tok_timeout_declined', 'tok_timeout_lost', 'tok_unavailable', 'tok_closed', 'tok_refund_lost'].includes(t)) {
+  if (DECLINES[t] || ['tok_3ds', 'tok_timeout', 'tok_timeout_declined', 'tok_timeout_lost', 'tok_pending', 'tok_unavailable', 'tok_closed', 'tok_refund_lost'].includes(t)) {
     return { kind: 'card', brand: 'visa', last4: t === 'tok_closed' ? '0341' : t === 'tok_refund_lost' ? '7777' : '0002', expMonth: 12, expYear: nextYear() };
   }
   const [, first, second, third] = t.split('_');
@@ -194,7 +200,8 @@ export function createDevCardProcessor(): PaymentProvider {
         p.status = 'requires_action';
         pending3ds.set(p.ref, o.idempotencyKey);
       }
-      const uncertain = token === 'tok_timeout' || token === 'tok_timeout_declined' || token === 'tok_timeout_lost' || cents === 3 || cents === 6 || cents === 7;
+      if (token === 'tok_pending' && !decline) p.held = true;
+      const uncertain = token === 'tok_timeout' || token === 'tok_timeout_declined' || token === 'tok_timeout_lost' || token === 'tok_pending' || cents === 3 || cents === 6 || cents === 7;
       if (token === 'tok_timeout_declined' || cents === 6) {
         p.status = 'declined';
         p.decline = DECLINES.tok_declined;
@@ -226,7 +233,17 @@ export function createDevCardProcessor(): PaymentProvider {
 
     async retrievePayment(o) {
       const p = (o.providerRef ? byRef.get(o.providerRef) : undefined) ?? payments.get(o.idempotencyKey);
+      if (p?.held) throw timeout('retrieve'); // tok_pending: still no answer
       return p ? view(p) : { status: 'not_found' };
+    },
+
+    async devSettle(o, outcome) {
+      const p = (o.providerRef ? byRef.get(o.providerRef) : undefined) ?? payments.get(o.idempotencyKey);
+      if (!p?.held) return false;
+      p.held = false;
+      p.status = outcome;
+      p.decline = outcome === 'declined' ? DECLINES.tok_declined : null;
+      return true;
     },
 
     async capture(o) {

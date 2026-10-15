@@ -394,6 +394,19 @@ export class Intents {
   }
 
   /**
+   * Development only (G60, POST /api/dev/payments/intents/{id}/settle, DEV_TOKENS on): answers a payment the
+   * development processor is holding (tok_pending) and checks it at once, as the status-check job would.
+   */
+  async devSettle(intentId: string, outcome: 'authorized' | 'declined', by: By): Promise<PaymentStatusView> {
+    const i = await this.get(intentId);
+    if (i.status !== 'pending_check') throw illegal('Only a payment being checked can be settled', { machine: 'Payment intent', from: i.status, event: 'settle' });
+    const settled = await this.core.provider.devSettle?.({ providerRef: i.provider_ref, idempotencyKey: `${i.id}:authorize` }, outcome);
+    if (!settled) throw new AppError('VALIDATION_FAILED', 'Only a development payment held with tok_pending can be settled', { issues: [{ path: 'id', message: 'Not a held development payment' }] });
+    await this.sync(intentId, by);
+    return this.views.statusView((await this.repo.get('intents', intentId))!, this.core.lookup());
+  }
+
+  /**
    * Payments of the customer that failed after their order was placed (an uncertain payment finally declined:
    * orders cancelled the order), newest first, at most 5. Failures at checkout, before an order exists, are
    * shown on the spot and left out.

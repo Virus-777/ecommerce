@@ -15,6 +15,7 @@ import type { RateLimitResult } from '../auth/rate-limit.js';
 import type { AppError } from '../errors/index.js';
 import type { ModuleEvents } from '../events/index.js';
 import type { ModuleResolvers } from '../graphql/index.js';
+import type { DevRoute } from '../http/dev-routes.js';
 import type { FileRoute } from '../http/files.js';
 import type { RouteSet } from '../http/index.js';
 import type { WebhookVerifier } from '../http/register.js';
@@ -110,6 +111,11 @@ export interface ModuleContext<N extends ModuleName> {
      * for their app's origins (kernel/http/security.ts); refresh-kind endpoints have it already.
      */
     sessionCookie(...operationIds: string[]): void;
+    /**
+     * Development-only routes under /api/dev/<module> (kernel/http/dev-routes.ts): registered only while DEV_TOKENS
+     * is on, outside the spec and hidden from OpenAPI. Test tooling, never a feature.
+     */
+    devRoutes(...routes: DevRoute[]): void;
   };
   readonly graphql: {
     resolvers(resolvers: ModuleResolvers): void;

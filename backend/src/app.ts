@@ -16,6 +16,7 @@ import { loadConfig, type Config } from './kernel/config/index.js';
 import { registerErrorCodes } from './kernel/errors/index.js';
 import { EventBus } from './kernel/events/index.js';
 import { registerGraphQL, unusablePersistedQueries } from './kernel/graphql/index.js';
+import { registerDevRoutes } from './kernel/http/dev-routes.js';
 import { registerFileRoute } from './kernel/http/files.js';
 import { mongoIdempotencyStore } from './kernel/http/idempotency.js';
 import { createOpenApiObjectTransform, createOpenApiTransform } from './kernel/http/openapi.js';
@@ -195,6 +196,8 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
 
   registerEndpoints(app, boot.endpoints, { config, auth, idempotency: mongoIdempotencyStore(mongo, clock), sessionCookie: boot.sessionCookie });
   if (fileRoute) registerFileRoute(app, fileRoute);
+  // test tooling under /api/dev: only with development tokens (never in production), hidden from OpenAPI
+  if (config.devTokens) registerDevRoutes(app, boot.devRoutes);
   const graphql = await registerGraphQL(app, {
     config,
     baseTypeDefs,

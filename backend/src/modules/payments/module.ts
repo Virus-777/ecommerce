@@ -1,3 +1,4 @@
+import { AppError } from '../../kernel/errors/index.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
 import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/payments.js';
@@ -27,6 +28,18 @@ export default defineModule({
     ctx.http.routes(storeRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
     ctx.graphql.resolvers(resolvers(service));
+
+    // Development only (registered while DEV_TOKENS is on, hidden from OpenAPI): test tooling, never a feature
+    ctx.http.devRoutes({
+      method: 'POST',
+      path: '/intents/:id/settle',
+      summary: 'Answer a payment the development processor holds (card token tok_pending): outcome authorized or declined',
+      handler: async ({ params, body, actor, requestId, principal }) => {
+        const outcome = body.outcome === 'declined' ? 'declined' : body.outcome === 'authorized' ? 'authorized' : null;
+        if (!outcome) throw new AppError('VALIDATION_FAILED', 'outcome is authorized or declined', { issues: [{ path: 'outcome', message: 'authorized or declined' }] });
+        return service.intents.devSettle(params.id!, outcome, { actor, requestId, principal });
+      },
+    });
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.placed", (e) => service.onOrderPlacedFromOrders(e.payload));
