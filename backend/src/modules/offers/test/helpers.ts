@@ -55,7 +55,7 @@ export interface Harness {
   api: OffersPublicApi;
   products: Map<string, catalog.ProductAdmin>;
   sellers: Map<string, SellerState>;
-  shipping: Map<string, { price: number; days: number; owner?: string | null }>;
+  shipping: Map<string, { price: number; days: number; owner?: string | null; freeOver?: number | null }>;
   access: { decision: access.AuthorityCheck['decision']; requests: access.RequestApprovalInput[]; cancelled: string[] };
   audits: audit.RecordInput[];
   events: { name: string; payload: any }[];
@@ -80,7 +80,7 @@ export async function harness(o: { serviceTerms?: Map<string, fulfillment.Servic
     clock,
     products: new Map<string, catalog.ProductAdmin>(),
     sellers: new Map<string, SellerState>(),
-    shipping: new Map<string, { price: number; days: number; owner?: string | null }>(),
+    shipping: new Map<string, { price: number; days: number; owner?: string | null; freeOver?: number | null }>(),
     access: { decision: 'allowed' as access.AuthorityCheck['decision'], requests: [] as access.RequestApprovalInput[], cancelled: [] as string[] },
     audits: [] as audit.RecordInput[],
     events: [] as { name: string; payload: any }[],
@@ -152,11 +152,16 @@ export async function harness(o: { serviceTerms?: Map<string, fulfillment.Servic
           }) as sellers.PerformanceSummary,
       },
       shipping: {
-        quote: async (profileId, postalCode, _parcel, dispatch) => {
+        quote: async (profileId, postalCode, _parcel, dispatch, orderValue) => {
           const p = h.shipping.get(profileId);
           if (!p) throw new AppError('NOT_FOUND', 'Unknown shipping profile');
           if (postalCode.startsWith('99')) return { shipsToLocation: false, reason: 'Does not ship to Alaska', options: [], default: null };
           const now = clock.now();
+          const freeOver = p.freeOver ? { amount: p.freeOver, currency: 'USD' } : null;
+          if (freeOver && orderValue && orderValue.amount >= freeOver.amount) {
+            const free: shipping.DeliveryOption = { id: `${profileId}:std`, methodCode: 'standard', methodName: 'Standard', carrierService: 'UPS Ground', price: { amount: 0, currency: 'USD' }, free: true, fundedBy: 'seller', freeReason: `Free over $${freeOver.amount / 100}`, arrival: { from: addDays(now, dispatch.businessDays + p.days - 1), to: addDays(now, dispatch.businessDays + p.days) }, arrivalLabel: `Arrives ${addDays(now, dispatch.businessDays + p.days)}`, dispatchBy: iso(now), dispatchLabel: `Ships from ${dispatch.shipsFrom}`, cutoffAt: null, notices: [], isDefault: true };
+            return { shipsToLocation: true, reason: null, options: [free], default: free, freeOver };
+          }
           const option: shipping.DeliveryOption = {
             id: `${profileId}:std`,
             methodCode: 'standard',
@@ -174,7 +179,7 @@ export async function harness(o: { serviceTerms?: Map<string, fulfillment.Servic
             notices: [],
             isDefault: true,
           };
-          return { shipsToLocation: true, reason: null, options: [option], default: option };
+          return { shipsToLocation: true, reason: null, options: [option], default: option, freeOver };
         },
         getSellerShippingSummaries: async () => ({}),
         getProfileOwners: async (ids) => Object.fromEntries(ids.map((id) => { const p = h.shipping.get(id); return [id, p ? { ownerType: p.owner ? ('seller' as const) : ('official' as const), sellerId: p.owner ?? null, status: 'active' } : null]; })),
@@ -415,9 +420,9 @@ export function addProduct(h: Harness, over: { reviewState?: catalog.ProductAdmi
 }
 
 /** A shipping profile owned by a seller (id) or the Official Store (null) */
-export function profile(h: Harness, price = 599, days = 3, owner: string | null = null): string {
+export function profile(h: Harness, price = 599, days = 3, owner: string | null = null, freeOver: number | null = null): string {
   const id = newId();
-  h.shipping.set(id, { price, days, owner });
+  h.shipping.set(id, { price, days, owner, freeOver });
   return id;
 }
 

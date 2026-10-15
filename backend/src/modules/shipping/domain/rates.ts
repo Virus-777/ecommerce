@@ -98,6 +98,27 @@ export function freeOutcome(o: {
   return { free: false, fundedBy: 'customer', reason: null };
 }
 
+/**
+ * The lowest order value at which freeOutcome makes this method free (the method's freeOver, the profile threshold
+ * on its free-shipping method, an active free-shipping rule's minimum). Null when there is none, or when the method
+ * is free whatever the order value.
+ */
+export function freeThreshold(o: Omit<Parameters<typeof freeOutcome>[0], 'subtotal'> & { currency: string }): common.Money | null {
+  if (o.pm.rateType === 'free') return null;
+  const scope = o.ownerType === 'official' ? 'official_store' : 'seller_offers';
+  const amounts: number[] = [];
+  if (o.pm.freeOver) amounts.push(o.pm.freeOver.amount);
+  if (o.threshold && (o.thresholdMethodCode ?? 'standard') === o.methodCode) amounts.push(o.threshold.amount);
+  for (const r of o.rules) {
+    if (r.status !== 'active' || r.scope !== scope || r.method_code !== o.methodCode) continue;
+    if (r.starts_on && o.today < r.starts_on) continue;
+    if (r.ends_on && o.today > r.ends_on) continue;
+    if (r.min_order_value == null) return null;
+    amounts.push(r.min_order_value);
+  }
+  return amounts.length ? money(Math.min(...amounts), o.currency) : null;
+}
+
 /** A rule's status on a day: its window decides scheduled, active and ended */
 export function ruleStatus(r: Pick<FreeRuleLike, 'status' | 'starts_on' | 'ends_on'>, today: string): 'scheduled' | 'active' | 'ended' | 'inactive' {
   if (r.status === 'inactive') return 'inactive';

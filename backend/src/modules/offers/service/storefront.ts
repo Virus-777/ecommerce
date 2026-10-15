@@ -69,12 +69,16 @@ export class StorefrontPart extends Part {
       this.core.fulfilment(rows),
     ]);
     const promoBy = new Map((promos ?? []).map((p) => [p.offerId, p]));
-    const deliveries = await Promise.all(rows.map((r) => this.deliveryOf(fulfilment.get(r.id)!, deliverTo)));
-    rows.forEach((r, i) => {
+    const prices = rows.map((r) => {
       const regular = money(r.price_amount, r.currency);
       const promo = promoBy.get(r.id);
       const campaign = promo && promo.price.currency === r.currency && promo.price.amount < regular.amount ? promo.price : null;
-      const unit = campaign ?? regular;
+      return { regular, promo, campaign, unit: campaign ?? regular };
+    });
+    // the order value (price × quantity) decides free-shipping thresholds
+    const deliveries = await Promise.all(rows.map((r, i) => this.deliveryOf(fulfilment.get(r.id)!, deliverTo, money(prices[i]!.unit.amount * qty, r.currency))));
+    rows.forEach((r, i) => {
+      const { regular, promo, campaign, unit } = prices[i]!;
       const delivery = deliveries[i]!;
       const ship = delivery.shippingCost?.amount ?? 0;
       const a = avail?.[r.id];
@@ -109,21 +113,22 @@ export class StorefrontPart extends Part {
    * SKU's parcel for marketly_service offers, labelled 'Ships from Marketly'. An offer the service does not let sell
    * gets no quote (it is never quoted as seller-shipped).
    */
-  deliveryOf(f: Fulfilment, deliverTo: DeliverTo): Promise<DeliveryEstimate> {
+  deliveryOf(f: Fulfilment, deliverTo: DeliverTo, orderValue: common.Money): Promise<DeliveryEstimate> {
     const d = f.shipping.dispatch;
     const label = f.shipping.fulfilledBy === 'marketly_service' ? FULFILLED_BY_MARKETLY_LABEL : null;
-    return this.deliveryFor({ profileId: f.shipping.profileId, businessDays: d.businessDays, sameDayCutoff: d.sameDayCutoff ?? null, shipsFrom: d.shipsFrom, label: d.label, parcel: f.parcel, fulfilledByLabel: label, quote: f.sellable }, deliverTo);
+    return this.deliveryFor({ profileId: f.shipping.profileId, businessDays: d.businessDays, sameDayCutoff: d.sameDayCutoff ?? null, shipsFrom: d.shipsFrom, label: d.label, parcel: f.parcel, fulfilledByLabel: label, quote: f.sellable }, deliverTo, orderValue);
   }
 
-  /** Delivery estimate from shipping.quote; without shipping only the dispatch label is known */
+  /** Delivery estimate from shipping.quote for an order value (price × quantity); without shipping only the dispatch label is known */
   async deliveryFor(
     d: { profileId: string; businessDays: number; sameDayCutoff?: string | null; shipsFrom: string; label: string; parcel?: { weightGrams: number; lengthCm?: number | null; widthCm?: number | null; heightCm?: number | null } | null; fulfilledByLabel?: string | null; quote?: boolean },
     deliverTo: DeliverTo,
+    orderValue: common.Money,
   ): Promise<DeliveryEstimate> {
     const shipping = this.ctx.tryUse('shipping');
     const plain: DeliveryEstimate = { shipsToLocation: true, arrivesFrom: null, arrivesTo: null, label: d.label, shippingCost: null, free: false, freeOver: null, carrier: null, service: null, shipsFrom: d.shipsFrom, fulfilledByLabel: d.fulfilledByLabel ?? null, dispatchLabel: d.label, orderWithinMinutes: null, serviceNotice: null };
     if (!shipping || d.quote === false) return plain;
-    const q = await this.core.soft('shipping.quote', () => shipping.quote(d.profileId, deliverTo.postalCode, d.parcel ?? DEFAULT_PARCEL, { businessDays: d.businessDays, sameDayCutoff: d.sameDayCutoff ?? null, shipsFrom: d.shipsFrom }));
+    const q = await this.core.soft('shipping.quote', () => shipping.quote(d.profileId, deliverTo.postalCode, d.parcel ?? DEFAULT_PARCEL, { businessDays: d.businessDays, sameDayCutoff: d.sameDayCutoff ?? null, shipsFrom: d.shipsFrom }, orderValue));
     if (!q) return plain;
     if (!q.shipsToLocation) return { ...plain, shipsToLocation: false, label: q.reason ?? 'Does not ship to this location' };
     const o = q.default ?? q.options[0];
@@ -136,7 +141,7 @@ export class StorefrontPart extends Part {
       label: o.free ? `Free delivery ${o.arrivalLabel.replace(/^Arrives /, '')}` : o.arrivalLabel,
       shippingCost: o.price,
       free: o.free,
-      freeOver: null,
+      freeOver: q.freeOver ?? null,
       carrier: o.carrierService ?? null,
       service: o.methodName,
       shipsFrom: d.shipsFrom,

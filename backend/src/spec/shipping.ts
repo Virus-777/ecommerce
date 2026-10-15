@@ -922,6 +922,8 @@ export interface DeliveryQuote {
   reason?: string | null;
   options: DeliveryOption[];
   default?: DeliveryOption | null;
+  /** Lowest order value that makes the default option's method free (method free-over, profile threshold or an active free-shipping rule); null when there is none or it is always free */
+  freeOver?: common.Money | null;
 }
 
 export const DeliveryQuote: z.ZodType<DeliveryQuote> = z.object({
@@ -932,6 +934,9 @@ export const DeliveryQuote: z.ZodType<DeliveryQuote> = z.object({
   },
   get default() {
     return DeliveryOption.nullish();
+  },
+  get freeOver() {
+    return common.Money.nullish();
   },
 }).register(common.apiTypes, { id: "shipping.DeliveryQuote" });
 
@@ -2252,8 +2257,8 @@ export const ShippingCoverageChangedEvent: z.ZodType<ShippingCoverageChangedEven
 
 /** What other modules may call in-process: `ctx.use('shipping')` (or `ctx.tryUse` for an optional dependency). */
 export interface ShippingPublicApi {
-  /** Delivery options for one offer at a location: ships-to check, price per method, arrival range, dispatch label, cutoff countdown and service notices Used by: offers. */
-  quote(profileId: string, postalCode: string, parcel: Parcel, dispatch: DispatchInput): Promise<DeliveryQuote>;
+  /** Delivery options for one offer at a location: ships-to check, price per method, arrival range, dispatch label, cutoff countdown and service notices. orderValue (item price × quantity) is checked against free-shipping thresholds and order-value rates (the option then carries free and freeReason); without it no threshold is reached. freeOver: the default method's threshold Used by: offers. */
+  quote(profileId: string, postalCode: string, parcel: Parcel, dispatch: DispatchInput, orderValue?: common.Money): Promise<DeliveryQuote>;
   /** Options for a package of several items from one seller and ship-from location: methods common to every item's profile, combined weight, free-shipping threshold on the package subtotal, arrival per option Used by: cart, checkout. */
   quoteOptions(input: PackageQuoteInput): Promise<PackageQuote>;
   /** Per profile: ships to this address or why not (excluded area, PO box, outside seller coverage) Used by: checkout. */

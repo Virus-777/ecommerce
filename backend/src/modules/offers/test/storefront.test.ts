@@ -50,6 +50,20 @@ describe('comparing offers', () => {
     expect(await h.api.getFeaturedOffer(m.v, '97205')).toMatchObject({ offerId: m.ob.id, featured: true });
   });
 
+  it('quotes shipping on the order value: a free-shipping threshold counts in estimates and the featured ranking (G15a/G17a)', async () => {
+    const p = addProduct(h);
+    const v = p.variants[0]!;
+    const x = addSeller(h, { name: 'Flat Rate Audio' });
+    const y = addSeller(h, { name: 'Free Over Audio' });
+    const ox = await sellerOffer(h, x, p.id, v, { price: { amount: 18400, currency: 'USD' }, shippingProfileId: profile(h, 599, 3, x) }); // total 18999
+    const oy = await sellerOffer(h, y, p.id, v, { price: { amount: 18900, currency: 'USD' }, shippingProfileId: profile(h, 599, 3, y, 3500) }); // free over $35: total 18900
+    const body = (await asVisitor(h, `/products/${p.id}/offers?postalCode=97205`)).json();
+    const byId = Object.fromEntries(body.offers.map((o: { offerId: string }) => [o.offerId, o]));
+    expect(byId[oy.id]).toMatchObject({ total: { amount: 18900 }, delivery: { free: true, shippingCost: { amount: 0 }, freeOver: { amount: 3500 } } });
+    expect(byId[ox.id]).toMatchObject({ total: { amount: 18999 }, delivery: { free: false, freeOver: null } });
+    expect(body.featuredOfferId).toBe(oy.id);
+  });
+
   it('changes the featured offer when the winner goes out of stock and tells search', async () => {
     const m = await market();
     expect((await h.api.getFeaturedOffer(m.v, '97205'))?.offerId).toBe(m.ob.id);

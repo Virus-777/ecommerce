@@ -591,6 +591,7 @@ How things get delivered: carriers and services, destinations and excluded areas
 | reason | `string?` Customer-facing reason when not shippable |
 | options | `DeliveryOption[]` |
 | default | `DeliveryOption?` |
+| freeOver | `Money?` Lowest order value that makes the default option's method free (method free-over, profile threshold or an active free-shipping rule); null when there is none or it is always free |
 
 ### PackageQuoteItem
 
@@ -1560,7 +1561,7 @@ Indexes: `unique (carrier_code, external_id)`
 
 | Function | Signature | Used by |
 |---|---|---|
-| quote | `(profileId: uuid, postalCode: string, parcel: Parcel, dispatch: DispatchInput) => DeliveryQuote`<br>Delivery options for one offer at a location: ships-to check, price per method, arrival range, dispatch label, cutoff countdown and service notices | offers |
+| quote | `(profileId: uuid, postalCode: string, parcel: Parcel, dispatch: DispatchInput, orderValue?: Money) => DeliveryQuote`<br>Delivery options for one offer at a location: ships-to check, price per method, arrival range, dispatch label, cutoff countdown and service notices. orderValue (item price × quantity) is checked against free-shipping thresholds and order-value rates (the option then carries free and freeReason); without it no threshold is reached. freeOver: the default method's threshold | offers |
 | quoteOptions | `(input: PackageQuoteInput) => PackageQuote`<br>Options for a package of several items from one seller and ship-from location: methods common to every item's profile, combined weight, free-shipping threshold on the package subtotal, arrival per option | cart, checkout |
 | checkCoverage | `(profileIds: uuid[], destination: Address) => CoverageCheck[]`<br>Per profile: ships to this address or why not (excluded area, PO box, outside seller coverage) | checkout |
 | hasCoverage | `(sellerId: uuid) => bool`<br>Seller has an active profile with coverage and a dispatch schedule (setup checklist) | sellers |

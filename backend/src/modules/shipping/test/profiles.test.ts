@@ -152,6 +152,12 @@ describe('estimates and quotes', () => {
       ['expedited', 1499],
     ]);
     expect(q.default).toMatchObject({ methodCode: 'standard', isDefault: true, fundedBy: 'customer', carrierService: 'UPS Ground or USPS Ground Advantage or FedEx Ground', arrivalLabel: expect.stringMatching(/^Arrives /), dispatchLabel: expect.stringContaining('from Reno, NV') });
+    // G15a: the order value reaches the profile's free-shipping threshold ($49 on Standard)
+    expect(q.freeOver).toEqual(USD(4900));
+    const reached = await h.service.quote(s.profileId, '97205', { weightGrams: 2500 }, { businessDays: 1, shipsFrom: 'Reno, NV' }, USD(4900));
+    expect(reached.default).toMatchObject({ methodCode: 'standard', free: true, price: USD(0), fundedBy: 'seller', freeReason: 'Free over $49' });
+    const below = await h.service.quote(s.profileId, '97205', { weightGrams: 2500 }, { businessDays: 1, shipsFrom: 'Reno, NV' }, USD(4899));
+    expect(below.default).toMatchObject({ methodCode: 'standard', free: false, price: USD(1299), freeReason: null });
     const ak = await h.service.quote(s.profileId, '99501', { weightGrams: 1000 }, { businessDays: 1, shipsFrom: 'Reno, NV' });
     expect(ak).toMatchObject({ shipsToLocation: false, reason: 'This seller ships to the contiguous US and DC only.', options: [] });
     const heavy = await h.service.quote(s.profileId, '97205', { weightGrams: 50_000 }, { businessDays: 1, shipsFrom: 'Reno, NV' });

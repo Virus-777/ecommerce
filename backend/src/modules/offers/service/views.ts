@@ -255,6 +255,7 @@ export class ViewsPart extends Part {
     const delivery = await this.parts.storefront.deliveryFor(
       { profileId: input.shippingProfileId, businessDays: input.dispatchBusinessDays, sameDayCutoff: origin.sameDayCutoff, shipsFrom: origin.shipsFrom, label: dispatchLabel(input.dispatchBusinessDays) },
       this.parts.storefront.deliverTo(undefined),
+      input.price,
     );
     const context = await this.priceContext(input.variantId);
     let compareAtCheck: OfferPreview['compareAtCheck'] = null;

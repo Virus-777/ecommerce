@@ -68,8 +68,8 @@ export class ShippingService implements ShippingPublicApi {
 
   /* ---------------------------------------------------------------- public API (in-process) */
 
-  quote(profileId: string, postalCode: string, parcel: Parcel, dispatch: DispatchInput): Promise<DeliveryQuote> {
-    return this.estimates.quote(profileId, postalCode, parcel, dispatch);
+  quote(profileId: string, postalCode: string, parcel: Parcel, dispatch: DispatchInput, orderValue?: common.Money | null): Promise<DeliveryQuote> {
+    return this.estimates.quote(profileId, postalCode, parcel, dispatch, orderValue);
   }
 
   quoteOptions(input: PackageQuoteInput): Promise<PackageQuote> {
@@ -154,7 +154,7 @@ export class ShippingService implements ShippingPublicApi {
       const profileId = shipping?.profileId ?? offer.shippingProfileId;
       const dispatch = shipping?.dispatch ?? offer.dispatch;
       try {
-        const q = await this.estimates.quote(profileId, zip, { weightGrams: 1000 }, { businessDays: dispatch.businessDays, sameDayCutoff: dispatch.sameDayCutoff ?? null, shipsFrom: dispatch.shipsFrom }, w);
+        const q = await this.estimates.quote(profileId, zip, { weightGrams: 1000 }, { businessDays: dispatch.businessDays, sameDayCutoff: dispatch.sameDayCutoff ?? null, shipsFrom: dispatch.shipsFrom }, offer.price, w);
         out.push({ offerId, shipsToLocation: q.shipsToLocation, reason: q.reason ?? null, option: q.default ?? null, otherOptions: Math.max(0, q.options.length - 1) });
       } catch {
         out.push({ offerId, shipsToLocation: false, reason: 'Delivery options are not available for this offer', option: null, otherOptions: 0 });

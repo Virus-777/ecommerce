@@ -10,7 +10,7 @@ import type * as common from '../../../spec/common.js';
 import type { CoverageCheck, CustomerNotice, DeliveryOption, DeliveryQuote, DispatchInput, PackageQuote, PackageQuoteInput, Parcel, ProfileMethod } from '../../../spec/shipping.js';
 import { addDays, arrivalRange, arrivesLabel, isTime, MON_FRI, planDispatch, shipsLabel, type DayRules } from '../domain/calendar.js';
 import { addressKindOf, CONTIGUOUS_48_DC, destinationOf, TERRITORIES, zoneMatches, type AddressKind, type Destination } from '../domain/geo.js';
-import { fitsWeight, freeOutcome, methodPrice, ruleStatus } from '../domain/rates.js';
+import { fitsWeight, freeOutcome, freeThreshold, methodPrice, ruleStatus } from '../domain/rates.js';
 import type { CarrierRec, ClosureRec, MethodRec, NoticeRec, ProfileRec, RuleRec, ServiceRec, SettingsRec, TargetsRec, ZoneRec } from '../ports.js';
 import { byMarketly, DEFAULT_CUTOFF, fulfilledByOf, notFound, SYSTEM, type Cfg, type Core, type FulfilledBy } from './core.js';
 
@@ -322,7 +322,12 @@ export class Estimates {
 
   /* ---------------------------------------------------------------- public API */
 
-  async quote(profileId: string, postalCode: string, parcel: Parcel | null, dispatch: DispatchInput, w?: World): Promise<DeliveryQuote> {
+  /**
+   * Delivery options for one offer. orderValue (the item price × quantity) is the subtotal free-shipping thresholds
+   * and order-value rates are checked against; without it no threshold is reached. freeOver: the threshold of the
+   * default option's method.
+   */
+  async quote(profileId: string, postalCode: string, parcel: Parcel | null, dispatch: DispatchInput, orderValue?: common.Money | null, w?: World): Promise<DeliveryQuote> {
     const world = w ?? (await this.world());
     const profile = await this.profileAt(profileId, world.at);
     if (!profile) throw notFound('Shipping profile');
@@ -331,20 +336,34 @@ export class Estimates {
     const dest = destinationOf({ postalCode });
     const weight = parcel?.weightGrams && parcel.weightGrams > 0 ? parcel.weightGrams : DEFAULT_WEIGHT_GRAMS;
     const cov = this.coverage(world, dest, settings, profile.methods, weight);
-    if (!cov.shippable) return { shipsToLocation: false, reason: cov.message, options: [], default: null };
+    if (!cov.shippable) return { shipsToLocation: false, reason: cov.message, options: [], default: null, freeOver: null };
     const options = await this.packageOptions(world, {
       owner,
       profiles: [profile],
       dest,
       zone: cov.zone,
       weightGrams: weight,
-      subtotal: null,
+      subtotal: orderValue ?? null,
       dispatch: [{ businessDays: dispatch.businessDays, sameDayCutoff: dispatch.sameDayCutoff ?? null, shipsFrom: dispatch.shipsFrom }],
       settings,
       closures: await this.closuresFor(owner),
     });
-    if (!options.length) return { shipsToLocation: false, reason: 'No delivery method is available for this item at this location.', options: [], default: null };
-    return { shipsToLocation: true, reason: null, options, default: options.find((x) => x.isDefault) ?? null };
+    if (!options.length) return { shipsToLocation: false, reason: 'No delivery method is available for this item at this location.', options: [], default: null, freeOver: null };
+    const def = options.find((x) => x.isDefault) ?? null;
+    const pm = def ? profile.methods.find((m) => m.methodCode === def.methodCode && m.enabled) : undefined;
+    const freeOver = pm
+      ? freeThreshold({
+          ownerType: owner.ownerType,
+          methodCode: pm.methodCode,
+          pm,
+          threshold: profile.free_threshold != null ? money(profile.free_threshold, profile.currency) : null,
+          thresholdMethodCode: profile.free_method_code,
+          rules: world.rules,
+          today: world.today,
+          currency: profile.currency,
+        })
+      : null;
+    return { shipsToLocation: true, reason: null, options, default: def, freeOver };
   }
 
   async quoteOptions(input: PackageQuoteInput): Promise<PackageQuote> {

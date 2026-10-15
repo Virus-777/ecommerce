@@ -31,7 +31,7 @@
   "dependsOn": ["orders"],
   "optionalDeps": ["offers", "sellers", "media", "support", "access", "settings", "audit", "finance", "fulfillment-service", "identity", "notifications", "returns", "reports"],
   "publicApi": [
-    { "name": "quote", "signature": "(profileId: uuid, postalCode: string, parcel: Parcel, dispatch: DispatchInput) => DeliveryQuote", "desc": "Delivery options for one offer at a location: ships-to check, price per method, arrival range, dispatch label, cutoff countdown and service notices", "usedBy": ["offers"] },
+    { "name": "quote", "signature": "(profileId: uuid, postalCode: string, parcel: Parcel, dispatch: DispatchInput, orderValue?: Money) => DeliveryQuote", "desc": "Delivery options for one offer at a location: ships-to check, price per method, arrival range, dispatch label, cutoff countdown and service notices. orderValue (item price × quantity) is checked against free-shipping thresholds and order-value rates (the option then carries free and freeReason); without it no threshold is reached. freeOver: the default method's threshold", "usedBy": ["offers"] },
     { "name": "quoteOptions", "signature": "(input: PackageQuoteInput) => PackageQuote", "desc": "Options for a package of several items from one seller and ship-from location: methods common to every item's profile, combined weight, free-shipping threshold on the package subtotal, arrival per option", "usedBy": ["cart", "checkout"] },
     { "name": "checkCoverage", "signature": "(profileIds: uuid[], destination: Address) => CoverageCheck[]", "desc": "Per profile: ships to this address or why not (excluded area, PO box, outside seller coverage)", "usedBy": ["checkout"] },
     { "name": "hasCoverage", "signature": "(sellerId: uuid) => bool", "desc": "Seller has an active profile with coverage and a dispatch schedule (setup checklist)", "usedBy": ["sellers"] },
@@ -173,7 +173,7 @@
       "notices": "string[]",
       "isDefault": "bool"
     },
-    "DeliveryQuote": { "shipsToLocation": "bool", "reason": { "type": "string?", "desc": "Customer-facing reason when not shippable" }, "options": "DeliveryOption[]", "default": "DeliveryOption?" },
+    "DeliveryQuote": { "shipsToLocation": "bool", "reason": { "type": "string?", "desc": "Customer-facing reason when not shippable" }, "options": "DeliveryOption[]", "default": "DeliveryOption?", "freeOver": { "type": "Money?", "desc": "Lowest order value that makes the default option's method free (method free-over, profile threshold or an active free-shipping rule); null when there is none or it is always free" } },
     "PackageQuoteItem": { "lineId": "string", "profileId": "uuid", "parcel": "Parcel", "quantity": "int", "value": "Money", "dispatch": "DispatchInput" },
     "PackageQuoteInput": { "ownerType": "enum(official|seller)", "sellerId": "uuid?", "fulfilledBy": { "type": "enum(official_warehouse|seller|marketly_service)?", "desc": "marketly_service (a seller package Marketly ships): Official dispatch settings, closures and cutoffs, the profile-owner check as for official (items carry the service profile, an Official profile), its free-shipping threshold, and origin the service location (fulfillment-service.getServiceLocation). Omitted = official_warehouse for official, seller for seller" }, "shipsFrom": "string", "items": "PackageQuoteItem[]", "destination": "QuoteDestination", "at": "datetime?" },
     "QuoteDestination": { "postalCode": "string", "country": "string", "region": "string?", "address": "Address?" },
