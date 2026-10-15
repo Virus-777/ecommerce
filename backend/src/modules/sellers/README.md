@@ -372,7 +372,7 @@ Seller admission and the seller account: the Sell with us programme and multi-st
 | owners | `json[]` { name, ownershipPct, isPrimary, idDocumentIds } |
 | registrationDocumentIds | `uuid[]?` |
 | taxIdType | `enum(ein|ssn)` |
-| taxId | `string` Sent once; stored encrypted, only the last 4 digits are ever returned |
+| taxId | `string?` Sent once; stored encrypted, only the last 4 digits are ever returned. Leave it out on later saves to keep the stored one (submitting needs one) |
 | w9Method | `enum(online|uploaded)` |
 | w9DocumentId | `uuid?` |
 

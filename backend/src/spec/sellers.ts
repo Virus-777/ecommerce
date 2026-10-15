@@ -458,8 +458,8 @@ export interface ApplicationVerificationInput {
   owners: unknown[];
   registrationDocumentIds?: string[] | null;
   taxIdType: "ein" | "ssn";
-  /** Sent once; stored encrypted, only the last 4 digits are ever returned */
-  taxId: string;
+  /** Sent once; stored encrypted, only the last 4 digits are ever returned. Leave it out on later saves to keep the stored one (submitting needs one) */
+  taxId?: string | null;
   w9Method: "online" | "uploaded";
   w9DocumentId?: string | null;
 }
@@ -468,7 +468,7 @@ export const ApplicationVerificationInput: z.ZodType<ApplicationVerificationInpu
   owners: z.array(z.unknown()).describe("{ name, ownershipPct, isPrimary, idDocumentIds }"),
   registrationDocumentIds: z.array(z.uuid()).nullish(),
   taxIdType: z.enum(["ein", "ssn"]),
-  taxId: z.string().describe("Sent once; stored encrypted, only the last 4 digits are ever returned"),
+  taxId: z.string().describe("Sent once; stored encrypted, only the last 4 digits are ever returned. Leave it out on later saves to keep the stored one (submitting needs one)").nullish(),
   w9Method: z.enum(["online", "uploaded"]),
   w9DocumentId: z.uuid().nullish(),
 }).register(common.apiTypes, { id: "sellers.ApplicationVerificationInput" });

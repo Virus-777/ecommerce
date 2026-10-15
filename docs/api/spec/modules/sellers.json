@@ -149,7 +149,7 @@
     "ApplicationVerificationInput": {
       "owners": { "type": "json[]", "desc": "{ name, ownershipPct, isPrimary, idDocumentIds }" },
       "registrationDocumentIds": "uuid[]?",
-      "taxIdType": "enum(ein|ssn)", "taxId": { "type": "string", "desc": "Sent once; stored encrypted, only the last 4 digits are ever returned" },
+      "taxIdType": "enum(ein|ssn)", "taxId": { "type": "string?", "desc": "Sent once; stored encrypted, only the last 4 digits are ever returned. Leave it out on later saves to keep the stored one (submitting needs one)" },
       "w9Method": "enum(online|uploaded)", "w9DocumentId": "uuid?"
     },
     "PayoutDetailsInput": {

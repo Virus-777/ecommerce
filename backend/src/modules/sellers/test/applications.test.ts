@@ -62,6 +62,18 @@ describe('application', () => {
     expect(JSON.stringify(ok.body)).not.toContain('000123457731');
   });
 
+  it('keeps the stored tax id when a later save of the verification step leaves it out', async () => {
+    const accountId = newId();
+    const { code } = await invitation(kit);
+    const start = await kit.call('POST', `${STORE}/applications`, customer(accountId), accountInput('Tax Test', code));
+    const verification = { owners: [{ name: 'Ana Lopez', ownershipPct: 100, isPrimary: true, idDocumentIds: [] }], taxIdType: 'ein', w9Method: 'online' };
+    const first = await kit.call('PATCH', `${STORE}/applications/${start.body.id}`, customer(accountId), { step: 'verification', verification: { ...verification, taxId: '12-3456789' } });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const again = await kit.call('PATCH', `${STORE}/applications/${start.body.id}`, customer(accountId), { step: 'verification', verification: { ...verification, owners: [{ ...verification.owners[0], name: 'Ana M. Lopez' }] } });
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body.verification).toMatchObject({ taxIdType: 'ein', taxIdLast4: '6789', owners: [{ name: 'Ana M. Lopez' }] });
+  });
+
   it('blocks submit until every step is complete (APPLICATION_INCOMPLETE)', async () => {
     const accountId = newId();
     const { code } = await invitation(kit);
