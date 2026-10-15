@@ -142,7 +142,7 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 | `MEDIA_STORAGE` / `MEDIA_STORAGE_DIR` | `local` (`memory` in tests) / `.data/media` | `memory` refused |
 | `WEBHOOK_SECRETS` | `dev-webhook-secret` for every provider while `DEV_TOKENS` is on | one secret per provider |
 | `REVOCATION_POLL_MS` | `3000` (at least 500) | |
-| `DEV_TOKENS` / `DEV_SIGNING_KEY_FILE` | on outside production / `.data/dev-signing-key.json` | refused. With it on, startup also refuses a non-loopback `HOST` and a non-local `MONGODB_URI` |
+| `DEV_TOKENS` / `DEV_SIGNING_KEY_FILE` | on outside production / `.data/dev-signing-key.json` | refused. With it on, startup also refuses a non-loopback `HOST` and a non-local `MONGODB_URI`. Only with it on, the development routes under `/api/dev/<module>/…` are served (`src/kernel/http/dev-routes.ts`: outside the spec, hidden from OpenAPI, any valid token, every app's origin), e.g. `GET /api/dev/notifications/outbox?to=&channel=email\|sms\|push&since=&limit=1-200` lists what the development email/SMS/push providers sent, newest first, each with `data` (the template variables: codes, reset and invitation links) and `links` (every URL in it); `DELETE /api/dev/notifications/outbox` clears it |
 | `RATE_LIMITS` | `true` | `false` refused |
 | `RATE_LIMIT_STORE` | `mongo` with `MONGODB_URI`, else `memory` | `mongo` |
 | `TRUST_PROXY` | none: a hop count, `true`, or addresses/CIDRs | only when a proxy in front terminates HTTPS (not on the one-server deployment, which serves HTTPS itself) |

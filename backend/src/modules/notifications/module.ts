@@ -5,6 +5,7 @@ import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { webhooksRoutes } from './http/webhooks.js';
+import { devRoutes } from './http/dev.js';
 import { NotificationsRepository } from './repository.js';
 import { NotificationsService } from './service.js';
 import { hmacWebhookVerifier } from '../../kernel/http/webhooks.js';
@@ -30,6 +31,8 @@ export default defineModule({
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
+    // GET/DELETE /api/dev/outbox: the kernel serves them only while DEV_TOKENS is on (the dev providers above also run in production)
+    ctx.http.devRoutes(...devRoutes);
     ctx.graphql.resolvers(resolvers(service));
     // topic catalogue and default templates (idempotent; retried lazily on first use if the tables are not ready)
     await service.seed().catch((err) => ctx.log.warn({ err }, 'notifications: seeding topics and templates failed; retrying on first use'));

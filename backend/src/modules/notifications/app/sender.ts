@@ -11,7 +11,7 @@ import { topicDef, type Audience, type DeliveryChannel, type TopicDef } from '..
 import { backoffMs, effectiveGroups, hashAddress, maskAddress, memberEmails, memberReceives, quietHoursEnd, defaultMemberChannel, addMonths } from '../domain/rules.js';
 import { deliveryMachine } from '../domain/state-machines.js';
 import { redact, render } from '../domain/templates.js';
-import type { DeliveryRow, NoticeRow, ProviderResult, ProviderSyncEvent, RecipientRow } from '../ports.js';
+import type { DeliveryRow, NoticeRow, ProviderResult, ProviderSyncEvent, RecipientRow, TemplateData } from '../ports.js';
 import { actorText, Core, SYSTEM } from './core.js';
 
 import type { RecipientKind, RecipientReason, Target } from '../domain/routing.js';
@@ -79,6 +79,8 @@ export interface Pending {
   title: string;
   headers: Record<string, string>;
   data: Record<string, string>;
+  /** The variables it was rendered from (kept only by the development providers) */
+  templateData?: TemplateData;
 }
 
 const firstName = (name: string | null | undefined) => (name ?? '').trim().split(/\s+/)[0] ?? '';
@@ -254,6 +256,7 @@ export class Sender {
       title: m.title ?? t.label,
       headers,
       data: { noticeId: row.notice_id ?? '', topic: t.key, kind: input.link.kind, id: input.link.id, screen: input.link.screen, ...(input.link.ref ? { ref: input.link.ref } : {}) },
+      templateData: full,
     };
   }
 
@@ -544,9 +547,10 @@ export class Sender {
   async #provider(d: DeliveryRow, m: Pending): Promise<ProviderResult> {
     const tags = { deliveryId: d.id, topicKey: d.topic_key };
     const p = this.core.providers;
-    if (d.channel === 'email') return p.email.send({ to: m.to, from: m.from, replyTo: m.replyTo, subject: m.subject, text: m.text, html: m.html, headers: m.headers, tags });
-    if (d.channel === 'sms') return p.sms.send({ to: m.to, text: m.text, tags });
-    return p.push.send({ token: m.to, title: m.title, body: m.text, data: m.data, tags });
+    const templateData = m.templateData;
+    if (d.channel === 'email') return p.email.send({ to: m.to, from: m.from, replyTo: m.replyTo, subject: m.subject, text: m.text, html: m.html, headers: m.headers, tags, templateData });
+    if (d.channel === 'sms') return p.sms.send({ to: m.to, text: m.text, tags, templateData });
+    return p.push.send({ token: m.to, title: m.title, body: m.text, data: m.data, tags, templateData });
   }
 
   /** Whether a delivery's message can still be sent (kept in memory, or rebuilt from its notice) */
@@ -581,7 +585,7 @@ export class Sender {
       ? { subject: row.subject ?? notice.title, title: notice.title, text: `${notice.body}\n\n${core.linkUrl(t.audience, link)}`, html: render(t, 'email', { ...content, title: notice.title, body: notice.body }, ctx).html }
       : { subject: row.subject ?? t.label, title: t.label, ...(() => { const r = render(t, row.channel as DeliveryChannel, content, ctx); return { text: r.text, html: r.html }; })() };
     const senders = (await core.setting('senders')) as Record<string, string>;
-    return { to, from: senders[t.family] ?? senders.account ?? 'Marketly <no-reply@marketly.example>', replyTo: null, subject: m.subject, text: m.text, html: m.html ?? m.text, title: m.title, headers: {}, data: { noticeId: row.notice_id ?? '', topic: t.key } };
+    return { to, from: senders[t.family] ?? senders.account ?? 'Marketly <no-reply@marketly.example>', replyTo: null, subject: m.subject, text: m.text, html: m.html ?? m.text, title: m.title, headers: {}, data: { noticeId: row.notice_id ?? '', topic: t.key }, templateData: ctx };
   }
 
   /* ---------------------------------------------------------------- provider events */

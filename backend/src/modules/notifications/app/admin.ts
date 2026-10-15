@@ -307,6 +307,7 @@ export class Admin {
       title: m.title ?? topic.label,
       headers: { 'X-Marketly-Test': `${t.channel} v${v.version}` },
       data: {},
+      templateData: ctx,
     });
     void by;
     return deliveryOf(sent ?? row);

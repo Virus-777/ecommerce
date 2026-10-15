@@ -73,6 +73,12 @@ export type ProviderResult =
   | { ok: true; providerMessageId: string; events?: ProviderSyncEvent[] }
   | { ok: false; temporary: boolean; error: string; invalidToken?: boolean };
 
+/**
+ * The template variables a message was rendered from (codes, links, names). Only the development
+ * providers keep them (the dev outbox, GET /api/dev/outbox); a real provider must never send them.
+ */
+export type TemplateData = Record<string, unknown>;
+
 export interface OutboundEmail {
   to: string;
   from: string;
@@ -83,12 +89,14 @@ export interface OutboundEmail {
   headers: Record<string, string>;
   /** Delivery id and topic, sent as provider tags */
   tags: { deliveryId: string; topicKey: string };
+  templateData?: TemplateData;
 }
 
 export interface OutboundSms {
   to: string;
   text: string;
   tags: { deliveryId: string; topicKey: string };
+  templateData?: TemplateData;
 }
 
 export interface OutboundPush {
@@ -98,6 +106,7 @@ export interface OutboundPush {
   /** Only the NoticeLink and notice id: never personal details beyond the order reference */
   data: Record<string, string>;
   tags: { deliveryId: string; topicKey: string };
+  templateData?: TemplateData;
 }
 
 export interface EmailProvider {

@@ -55,6 +55,8 @@ export function registerDevRoutes(app: FastifyInstance, routes: readonly ModuleD
         return out;
       },
     });
+    // any of the three web apps may call them from the browser (no credentials: the bearer token is enough)
+    app.corsRoutes.add(devRouteUrl(r.module, r.path), { anyApp: true });
     app.log.debug(`development route ${r.method} ${devRouteUrl(r.module, r.path)}: ${r.summary}`);
   }
 }
