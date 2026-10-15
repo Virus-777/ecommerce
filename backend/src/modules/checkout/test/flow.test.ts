@@ -41,6 +41,10 @@ describe('start, steps and totals', () => {
       ]),
     );
     expect(v.totals).toMatchObject({ itemCount: 3, items: USD(23900), total: USD(23900), taxNote: 'Tax is calculated once you enter a delivery address.' });
+    // G19: lines link to the product page (/p/{slug}/{id})
+    expect(v.packages[0].lines[0]).toMatchObject({ productSlug: 'aurora-wireless-headphones', productId: expect.any(String) });
+    // G15b: before an address no option is chosen, so the package's shipping is pending (not free)
+    expect(v.totals.shippingByPackage).toEqual([expect.objectContaining({ amount: USD(0), free: false, pending: true })]);
     expect(v.blockers).toEqual(expect.arrayContaining(['Choose a delivery address', 'Choose a payment method']));
     expect(v.steps.find((s: any) => s.key === 'account')).toMatchObject({ status: 'done' });
     expect(v.payment.options.savedMethods[0].id).toBe(SAVED_CARD_ID);
@@ -63,6 +67,7 @@ describe('start, steps and totals', () => {
     expect(v.packages[0].selectedOptionId).toBe(v.packages[0].options[0].id);
     // free standard shipping over $50; WA 6.5% on the items
     expect(v.totals).toMatchObject({ shippingTotal: USD(0), taxTotal: USD(1554), total: USD(23900 + 1554) });
+    expect(v.totals.shippingByPackage).toEqual([expect.objectContaining({ amount: USD(0), free: true, pending: false })]);
     expect(v.totals.tax[0]).toMatchObject({ jurisdiction: 'WA', rate: 0.065 });
     expect(v.quoteVersion).toBeGreaterThan(1);
   });

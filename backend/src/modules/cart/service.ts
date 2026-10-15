@@ -745,6 +745,7 @@ export class CartService implements CartPublicApi {
         id: r.id,
         offerId: r.offer_id,
         productId: r.product_id,
+        productSlug: product?.slug ?? null,
         variantId: r.variant_id,
         seller: sellerLabelOf({ owner_type: offer?.ownerType ?? 'seller', seller_id: offer?.sellerId ?? null }, offer, f?.quote ?? null),
         title: product?.title ?? 'Item',

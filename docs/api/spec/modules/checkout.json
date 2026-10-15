@@ -45,6 +45,7 @@
       "cartItemId": "uuid?",
       "offerId": "uuid",
       "productId": "uuid",
+      "productSlug": { "type": "string?", "desc": "For the product link /p/{productSlug}/{productId}; null when it was not known when the line was quoted" },
       "variantId": "uuid",
       "stockItemId": "uuid",
       "title": "string",
@@ -94,7 +95,7 @@
     "PaymentStep": { "selected": "PaymentSelectionView?", "options": "payments.PaymentOptions", "chargeNote": "string" },
     "TaxLine": { "jurisdiction": "string", "label": { "type": "string", "desc": "'Tax (Oregon has no sales tax)'" }, "rate": "number", "amount": "Money" },
     "DiscountLine": { "code": "string?", "label": "string", "amount": "Money", "fundedBy": "enum(platform|seller|shared)" },
-    "PackageShipping": { "packageKey": "string", "sellerName": "string", "amount": "Money", "free": "bool" },
+    "PackageShipping": { "packageKey": "string", "sellerName": "string", "amount": "Money", "free": "bool", "pending": { "type": "bool", "desc": "No delivery option is chosen yet (before an address): amount stays 0 and free is false; screens say 'Calculated at the next step'" } },
     "QuoteTotals": {
       "itemCount": "int",
       "items": "Money",

@@ -131,6 +131,7 @@ Turns a cart (or a Buy now offer) into an accepted order: identify the customer 
 | cartItemId | `uuid?` |
 | offerId | `uuid` |
 | productId | `uuid` |
+| productSlug | `string?` For the product link /p/{productSlug}/{productId}; null when it was not known when the line was quoted |
 | variantId | `uuid` |
 | stockItemId | `uuid` |
 | title | `string` |
@@ -262,6 +263,7 @@ Turns a cart (or a Buy now offer) into an accepted order: identify the customer 
 | sellerName | `string` |
 | amount | `Money` |
 | free | `bool` |
+| pending | `bool` No delivery option is chosen yet (before an address): amount stays 0 and free is false; screens say 'Calculated at the next step' |
 
 ### QuoteTotals
 
@@ -908,6 +910,8 @@ type CheckoutLine @areas(in: [STORE]) {
   cartItemId: UUID
   offerId: UUID!
   productId: UUID!
+  "For the product link /p/{productSlug}/{productId}; null when it was not known when the line was quoted"
+  productSlug: String
   variantId: UUID!
   title: String!
   variantLabel: String!
@@ -1038,6 +1042,8 @@ type CheckoutPackageShipping @areas(in: [STORE]) {
   sellerName: String!
   amount: Money!
   free: Boolean!
+  "No delivery option is chosen yet (before an address): amount stays 0 and free is false; screens say 'Calculated at the next step'"
+  pending: Boolean!
 }
 
 type CheckoutTaxLine @areas(in: [STORE]) {

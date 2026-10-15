@@ -191,6 +191,7 @@ fragment CheckoutLineFields on CheckoutLine {
   id
   offerId
   productId
+  productSlug
   variantId
   title
   variantLabel
@@ -224,6 +225,7 @@ fragment CheckoutTotalsFields on CheckoutTotals {
     packageKey
     sellerName
     free
+    pending
     amount { ...MoneyFields }
   }
   shippingTotal { ...MoneyFields }

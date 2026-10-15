@@ -418,6 +418,7 @@ export class CartChecker {
         id: e.item.id,
         offerId: e.item.offer_id,
         productId: e.item.product_id,
+        productSlug: product?.slug ?? null,
         variantId: e.item.variant_id,
         seller: e.seller,
         title: product?.title ?? 'Item',

@@ -132,6 +132,8 @@ export interface CartItem {
   id: string;
   offerId: string;
   productId: string;
+  /** For the product link /p/{productSlug}/{productId}; null when the catalog did not answer */
+  productSlug?: string | null;
   variantId: string;
   seller: SellerLabel;
   title: string;
@@ -169,6 +171,7 @@ export const CartItem: z.ZodType<CartItem> = z.object({
   id: z.uuid(),
   offerId: z.uuid(),
   productId: z.uuid(),
+  productSlug: z.string().describe("For the product link /p/{productSlug}/{productId}; null when the catalog did not answer").nullish(),
   variantId: z.uuid(),
   get seller() {
     return SellerLabel;
@@ -565,6 +568,8 @@ export interface SavedItem {
   id: string;
   offerId: string;
   productId: string;
+  /** For the product link /p/{productSlug}/{productId}; null when the catalog did not answer */
+  productSlug?: string | null;
   variantId: string;
   seller: SellerLabel;
   title: string;
@@ -580,6 +585,7 @@ export const SavedItem: z.ZodType<SavedItem> = z.object({
   id: z.uuid(),
   offerId: z.uuid(),
   productId: z.uuid(),
+  productSlug: z.string().describe("For the product link /p/{productSlug}/{productId}; null when the catalog did not answer").nullish(),
   variantId: z.uuid(),
   get seller() {
     return SellerLabel;

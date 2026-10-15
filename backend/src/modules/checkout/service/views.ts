@@ -84,6 +84,7 @@ export class Views {
       cartItemId: l.cart_item_id,
       offerId: l.offer_id,
       productId: l.product_id,
+      productSlug: i.productSlug ?? null,
       variantId: l.variant_id,
       stockItemId: l.stock_item_id,
       title: i.title,

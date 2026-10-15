@@ -134,6 +134,8 @@ export interface CheckoutLine {
   cartItemId?: string | null;
   offerId: string;
   productId: string;
+  /** For the product link /p/{productSlug}/{productId}; null when it was not known when the line was quoted */
+  productSlug?: string | null;
   variantId: string;
   stockItemId: string;
   title: string;
@@ -153,6 +155,7 @@ export const CheckoutLine: z.ZodType<CheckoutLine> = z.object({
   cartItemId: z.uuid().nullish(),
   offerId: z.uuid(),
   productId: z.uuid(),
+  productSlug: z.string().describe("For the product link /p/{productSlug}/{productId}; null when it was not known when the line was quoted").nullish(),
   variantId: z.uuid(),
   stockItemId: z.uuid(),
   title: z.string(),
@@ -407,6 +410,8 @@ export interface PackageShipping {
   sellerName: string;
   amount: common.Money;
   free: boolean;
+  /** No delivery option is chosen yet (before an address): amount stays 0 and free is false; screens say 'Calculated at the next step' */
+  pending: boolean;
 }
 
 export const PackageShipping: z.ZodType<PackageShipping> = z.object({
@@ -416,6 +421,7 @@ export const PackageShipping: z.ZodType<PackageShipping> = z.object({
     return common.Money;
   },
   free: z.boolean(),
+  pending: z.boolean().describe("No delivery option is chosen yet (before an address): amount stays 0 and free is false; screens say 'Calculated at the next step'"),
 }).register(common.apiTypes, { id: "checkout.PackageShipping" });
 
 export interface QuoteTotals {

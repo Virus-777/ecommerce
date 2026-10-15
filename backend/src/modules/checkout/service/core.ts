@@ -150,7 +150,8 @@ export class Core {
       coupons: q.coupons ?? [],
       discounts: q.discounts ?? [],
       tax: q.tax ?? null,
-      totals: q.totals ?? emptyTotals(row.currency),
+      // sessions quoted before shippingByPackage[].pending existed (2026-10) read as not pending
+      totals: q.totals ? { ...q.totals, shippingByPackage: q.totals.shippingByPackage.map((s) => ({ ...s, pending: s.pending ?? false })) } : emptyTotals(row.currency),
       excluded: q.excluded ?? [],
       evaluation: q.evaluation ?? null,
       addressBookNote: q.addressBookNote ?? null,

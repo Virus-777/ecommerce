@@ -132,6 +132,7 @@ export class Quoter {
         const shipping = shippingOf(offer);
         const info: LineInfo = {
           title: cmp?.product.title ?? 'Item',
+          productSlug: cmp?.product.slug ?? null,
           variantLabel: Object.values(variant?.options ?? {}).join(' · '),
           condition: view?.conditionLabel ?? CONDITION_LABEL[offer.condition] ?? offer.condition,
           image: variant?.images?.[0] ?? cmp?.product.image ?? null,
@@ -403,7 +404,7 @@ export class Quoter {
       const t = pl.reduce((s, l) => s + l.tax, 0);
       perPackage.push({ items: m(items, cur), discounts: m(discounts, cur), shipping: m(ship, cur), tax: m(t, cur), total: m(items - discounts + ship + t, cur) });
       const opt = d.packages.get(k)?.selected_option as shipping.DeliveryOption | null | undefined;
-      shippingByPackage.push({ packageKey: k, sellerName: quote.lineInfo[pl[0]!.id]?.seller.name ?? '', amount: m(ship, cur), free: Boolean(opt) && ship === 0 });
+      shippingByPackage.push({ packageKey: k, sellerName: quote.lineInfo[pl[0]!.id]?.seller.name ?? '', amount: m(ship, cur), free: Boolean(opt) && ship === 0, pending: !opt });
     }
     const sumOf = (f: (p: PackageTotals) => common.Money) => perPackage.reduce((s, p) => s + f(p).amount, 0);
     const beforeCredit = sumOf((p) => p.total);

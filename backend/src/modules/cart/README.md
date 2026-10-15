@@ -124,6 +124,7 @@ One cart across the Official Store and marketplace sellers for customers and gue
 | id | `uuid` |
 | offerId | `uuid` |
 | productId | `uuid` |
+| productSlug | `string?` For the product link /p/{productSlug}/{productId}; null when the catalog did not answer |
 | variantId | `uuid` |
 | seller | `SellerLabel` |
 | title | `string` |
@@ -322,6 +323,7 @@ One cart across the Official Store and marketplace sellers for customers and gue
 | id | `uuid` |
 | offerId | `uuid` |
 | productId | `uuid` |
+| productSlug | `string?` For the product link /p/{productSlug}/{productId}; null when the catalog did not answer |
 | variantId | `uuid` |
 | seller | `SellerLabel` |
 | title | `string` |
@@ -672,6 +674,8 @@ type CartLine @areas(in: [STORE]) {
   id: UUID!
   offerId: UUID!
   productId: UUID!
+  "For the product link /p/{productSlug}/{productId}; null when the catalog did not answer"
+  productSlug: String
   variantId: UUID!
   title: String!
   "e.g. 'Queen · Sage'"
@@ -820,6 +824,8 @@ type CartSavedItem @areas(in: [STORE]) {
   id: UUID!
   offerId: UUID!
   productId: UUID!
+  "For the product link /p/{productSlug}/{productId}; null when the catalog did not answer"
+  productSlug: String
   variantId: UUID!
   seller: CartSellerLabel!
   title: String!

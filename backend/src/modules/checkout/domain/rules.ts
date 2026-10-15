@@ -60,6 +60,8 @@ export interface StoredChangeSet {
 /** Display and pricing facts of one line, kept with the quote (session_lines has no title or image columns) */
 export interface LineInfo {
   title: string;
+  /** Product slug for links (absent on quotes stored before it was kept) */
+  productSlug?: string | null;
   variantLabel: string;
   condition: string;
   image: common.MediaRef | null;

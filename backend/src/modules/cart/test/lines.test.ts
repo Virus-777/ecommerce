@@ -31,6 +31,8 @@ describe('cart lines', () => {
     expect(add.body).toMatchObject({ outcome: 'added', message: 'Added to your cart.' });
     const line = lineOf(add.body.cart, offer.id);
     expect(line).toMatchObject({
+      productId,
+      productSlug: 'linen-duvet-cover',
       quantity: 1,
       maxQuantity: 3,
       purchaseLimit: 3,
