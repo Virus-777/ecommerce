@@ -95,6 +95,7 @@
       "offerId": "uuid?",
       "sellerName": "string",
       "sellerId": "uuid?",
+      "sellerSlug": { "type": "string?", "desc": "Storefront slug of the card's seller for /shop/{slug} (sellers' public API); null for the Official Store or when sellers cannot answer" },
       "official": "bool",
       "condition": "string",
       "wasPrice": "Money?",
@@ -104,7 +105,8 @@
       "freeDelivery": "bool",
       "availability": "enum(in_stock|low_stock|out_of_stock)",
       "offerCount": "int",
-      "badges": { "type": "string[]", "desc": "e.g. 'Official Store', 'Deal', 'New listing'" }
+      "badges": { "type": "string[]", "desc": "e.g. 'Official Store', 'Deal', 'New listing'" },
+      "isNewListing": { "type": "bool?", "desc": "First listed within newArrivalsWindowDays (the New listing badge)" }
     },
     "SponsoredMark": {
       "label": { "type": "string", "desc": "Always visible: 'Sponsored'" },
@@ -137,7 +139,9 @@
       "label": "string",
       "count": { "type": "int", "desc": "Results if this value is added to the current filters" },
       "selected": "bool",
-      "note": { "type": "string?", "desc": "e.g. 'Shows company offers at the prices listed' for Official Store" }
+      "note": { "type": "string?", "desc": "e.g. 'Shows company offers at the prices listed' for Official Store" },
+      "priceMin": { "type": "int?", "desc": "Price presets only (facet price): send as priceMin (minor units); null = no lower bound" },
+      "priceMax": { "type": "int?", "desc": "Price presets only: send as priceMax (minor units); null = no upper bound" }
     },
     "PriceRange": { "min": "Money?", "max": "Money?", "selectedMin": "Money?", "selectedMax": "Money?" },
     "Facet": {
@@ -470,7 +474,8 @@
     { "key": "newArrivalsWindowDays", "type": "duration", "default": 30, "desc": "'New arrivals' = first listed within this window", "unit": "days", "min": 1 },
     { "key": "bestSellingMinOrders", "type": "int", "default": 500, "desc": "Platform orders in 30 days before best-selling sort is offered", "min": 0 },
     { "key": "transitBusinessDays", "type": "duration", "default": 3, "desc": "Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate", "unit": "business days", "min": 0, "max": 15 },
-    { "key": "excludeOutOfStockByDefault", "type": "bool", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" }
+    { "key": "excludeOutOfStockByDefault", "type": "bool", "default": true, "desc": "Out-of-stock products appear only with 'Include out of stock'" },
+    { "key": "pricePresets", "type": "json", "default": [2500, 5000, 10000, 20000], "desc": "Boundaries of the price facet presets in minor units, ascending: Under $25, $25 to $50, … $200 and above. Each preset shows its result count" }
   ],
   "integrations": [
     { "name": "MongoDB text matching (development and tests)", "purpose": "Stemmed word and prefix matching over the read model, ranking, misspelling correction and suggestions without a search cluster" },

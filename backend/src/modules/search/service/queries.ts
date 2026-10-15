@@ -305,7 +305,8 @@ export class SearchQueries extends SearchIndexer {
 
   /** Product cards (and their matches) for engine hits; positions start after `offset` */
   protected async cards(hits: EngineHit[], opts: { offset?: number; attributes?: { key: string; values: string[] }[] } = {}): Promise<{ card: ProductCard; match: SearchMatch }[]> {
-    const names = await this.sellerNames(hits.map((h) => (h.offer && h.offer.offerId !== h.doc.featured_offer_id ? h.offer.sellerId : null)));
+    // names of the sellers of non-featured offers, slugs of every marketplace seller on a card (G18)
+    const sellers = await this.sellerLabels(hits.map((h) => (h.offer && !h.offer.official ? h.offer.sellerId : null)));
     const now = this.now();
     const newDays = await this.setting('newArrivalsWindowDays');
     const today = this.marketDate(now);
@@ -316,7 +317,7 @@ export class SearchQueries extends SearchIndexer {
       const o = h.offer;
       const featured = Boolean(o && o.offerId === d.featured_offer_id);
       const priceIsFrom = Boolean(o && !featured && o.matching > 1);
-      const sellerName = !o || featured ? (d.featured_seller_name ?? (o?.official ? OFFICIAL_STORE_NAME : 'Marketplace seller')) : o.official ? OFFICIAL_STORE_NAME : (names.get(o.sellerId ?? '') ?? 'Marketplace seller');
+      const sellerName = !o || featured ? (d.featured_seller_name ?? (o?.official ? OFFICIAL_STORE_NAME : 'Marketplace seller')) : o.official ? OFFICIAL_STORE_NAME : (sellers.get(o.sellerId ?? '')?.name ?? 'Marketplace seller');
       const variants = (Array.isArray(d.variant_options) ? d.variant_options : []) as { id: string; options: Record<string, string> }[];
       // the variant the filters picked (e.g. color), else the card offer's variant
       let variant = opts.attributes?.length
@@ -343,7 +344,8 @@ export class SearchQueries extends SearchIndexer {
       const badges: string[] = [];
       if (official) badges.push(OFFICIAL_BADGE);
       if (featured && d.on_sale) badges.push('Deal');
-      if (d.first_listed_at && now.getTime() - new Date(d.first_listed_at).getTime() <= newDays * 86_400_000) badges.push('New listing');
+      const isNewListing = Boolean(d.first_listed_at && now.getTime() - new Date(d.first_listed_at).getTime() <= newDays * 86_400_000);
+      if (isNewListing) badges.push('New listing');
       if (d.best_seller_rank !== null && d.best_seller_rank <= 3) badges.push('Best seller');
       const card: ProductCard = {
         productId: d.product_id,
@@ -360,6 +362,7 @@ export class SearchQueries extends SearchIndexer {
         offerId: o?.offerId ?? d.featured_offer_id,
         sellerName,
         sellerId: o ? o.sellerId : null,
+        sellerSlug: o && !o.official && o.sellerId ? (sellers.get(o.sellerId)?.slug ?? null) : null,
         official,
         condition: o?.condition ?? d.conditions[0] ?? 'new',
         wasPrice: was ? money(was, d.currency) : null,
@@ -370,6 +373,7 @@ export class SearchQueries extends SearchIndexer {
         availability: !inStock ? 'out_of_stock' : featured && d.low_stock ? 'low_stock' : 'in_stock',
         offerCount: d.offer_count,
         badges,
+        isNewListing,
       };
       const match: SearchMatch = { position: (opts.offset ?? 0) + i + 1, variantId, variantCue, offerId: card.offerId ?? null, priceIsFrom, badges };
       return { card, match };
@@ -444,6 +448,33 @@ export class SearchQueries extends SearchIndexer {
     return f;
   }
 
+  /**
+   * Price presets (setting pricePresets: boundaries in minor units), each with the number of results it would give
+   * with the other filters kept (G22b). Presets without results are left out unless selected.
+   */
+  protected async pricePresets(p: Prepared, currency: string): Promise<FacetValue[]> {
+    const raw = await this.setting('pricePresets');
+    const bounds = (Array.isArray(raw) ? (raw as unknown[]) : []).filter((n): n is number => Number.isInteger(n) && (n as number) > 0).sort((a, b) => a - b);
+    if (!bounds.length) return [];
+    const f = p.engineQuery.filters;
+    const amount = (minor: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency, minimumFractionDigits: minor % 100 ? 2 : 0 }).format(minor / 100);
+    const ranges = [
+      { min: null, max: bounds[0]! - 1, label: `Under ${amount(bounds[0]!)}` },
+      ...bounds.slice(1).map((b, i) => ({ min: bounds[i]!, max: b - 1, label: `${amount(bounds[i]!)} to ${amount(b)}` })),
+      { min: bounds.at(-1)!, max: null, label: `${amount(bounds.at(-1)!)} and above` },
+    ];
+    const { priceMin: _min, priceMax: _max, ...others } = f;
+    const values = await Promise.all(
+      ranges.map(async (r): Promise<FacetValue> => {
+        const filters = { ...others, ...(r.min !== null ? { priceMin: r.min } : {}), ...(r.max !== null ? { priceMax: r.max } : {}) };
+        const { total } = await this.engine.summary({ ...p.engineQuery, filters });
+        const selected = (f.priceMin ?? null) === r.min && (f.priceMax ?? null) === r.max;
+        return { value: `${r.min ?? ''}-${r.max ?? ''}`, label: r.label, count: total, selected, priceMin: r.min, priceMax: r.max };
+      }),
+    );
+    return values.filter((v) => v.count > 0 || v.selected);
+  }
+
   protected async facetsOf(p: Prepared, counts: FacetCounts, sellers: Map<string, { name: string; slug: string | null }>): Promise<Facet[]> {
     const f = p.engineQuery.filters;
     const currency = this.ctx.config.market.currency;
@@ -467,7 +498,7 @@ export class SearchQueries extends SearchIndexer {
       group: 'universal',
       kind: 'price',
       multiSelect: false,
-      values: [],
+      values: await this.pricePresets(p, currency),
       range: {
         min: counts.price.min !== null ? money(counts.price.min, currency) : null,
         max: counts.price.max !== null ? money(counts.price.max, currency) : null,

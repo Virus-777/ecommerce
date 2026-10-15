@@ -141,6 +141,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 | offerId | `uuid?` |
 | sellerName | `string` |
 | sellerId | `uuid?` |
+| sellerSlug | `string?` Storefront slug of the card's seller for /shop/{slug} (sellers' public API); null for the Official Store or when sellers cannot answer |
 | official | `bool` |
 | condition | `string` |
 | wasPrice | `Money?` |
@@ -151,6 +152,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 | availability | `enum(in_stock|low_stock|out_of_stock)` |
 | offerCount | `int` |
 | badges | `string[]` e.g. 'Official Store', 'Deal', 'New listing' |
+| isNewListing | `bool?` First listed within newArrivalsWindowDays (the New listing badge) |
 
 ### SponsoredMark
 
@@ -199,6 +201,8 @@ Finding products: a product index built from catalog, offers, inventory and revi
 | count | `int` Results if this value is added to the current filters |
 | selected | `bool` |
 | note | `string?` e.g. 'Shows company offers at the prices listed' for Official Store |
+| priceMin | `int?` Price presets only (facet price): send as priceMin (minor units); null = no lower bound |
+| priceMax | `int?` Price presets only: send as priceMax (minor units); null = no upper bound |
 
 ### PriceRange
 
@@ -821,6 +825,7 @@ Indexes: `pk (product_id, day)`, `(day)`
 | bestSellingMinOrders | `500` | int, 0–… | Platform orders in 30 days before best-selling sort is offered |
 | transitBusinessDays | `3` | duration, business days, 0–15 | Carrier transit business days assumed for every destination in the market (decision S-D4): search results' arrives-by filter and delivery cues use dispatch days + this. The purchase box and checkout show shipping's real estimate |
 | excludeOutOfStockByDefault | `true` | bool | Out-of-stock products appear only with 'Include out of stock' |
+| pricePresets | `[2500,5000,10000,20000]` | json | Boundaries of the price facet presets in minor units, ascending: Under $25, $25 to $50, … $200 and above. Each preset shows its result count |
 
 ## Integrations
 - **MongoDB text matching (development and tests)**: Stemmed word and prefix matching over the read model, ranking, misspelling correction and suggestions without a search cluster

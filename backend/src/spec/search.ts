@@ -149,6 +149,8 @@ export interface ProductCard {
   offerId?: string | null;
   sellerName: string;
   sellerId?: string | null;
+  /** Storefront slug of the card's seller for /shop/{slug} (sellers' public API); null for the Official Store or when sellers cannot answer */
+  sellerSlug?: string | null;
   official: boolean;
   condition: string;
   wasPrice?: common.Money | null;
@@ -161,6 +163,8 @@ export interface ProductCard {
   offerCount: number;
   /** e.g. 'Official Store', 'Deal', 'New listing' */
   badges: string[];
+  /** First listed within newArrivalsWindowDays (the New listing badge) */
+  isNewListing?: boolean | null;
 }
 
 export const ProductCard: z.ZodType<ProductCard> = z.object({
@@ -182,6 +186,7 @@ export const ProductCard: z.ZodType<ProductCard> = z.object({
   offerId: z.uuid().nullish(),
   sellerName: z.string(),
   sellerId: z.uuid().nullish(),
+  sellerSlug: z.string().describe("Storefront slug of the card's seller for /shop/{slug} (sellers' public API); null for the Official Store or when sellers cannot answer").nullish(),
   official: z.boolean(),
   condition: z.string(),
   get wasPrice() {
@@ -194,6 +199,7 @@ export const ProductCard: z.ZodType<ProductCard> = z.object({
   availability: z.enum(["in_stock", "low_stock", "out_of_stock"]),
   offerCount: z.number().int(),
   badges: z.array(z.string()).describe("e.g. 'Official Store', 'Deal', 'New listing'"),
+  isNewListing: z.boolean().describe("First listed within newArrivalsWindowDays (the New listing badge)").nullish(),
 }).register(common.apiTypes, { id: "search.ProductCard" });
 
 export interface SponsoredMark {
@@ -277,6 +283,10 @@ export interface FacetValue {
   selected: boolean;
   /** e.g. 'Shows company offers at the prices listed' for Official Store */
   note?: string | null;
+  /** Price presets only (facet price): send as priceMin (minor units); null = no lower bound */
+  priceMin?: number | null;
+  /** Price presets only: send as priceMax (minor units); null = no upper bound */
+  priceMax?: number | null;
 }
 
 export const FacetValue: z.ZodType<FacetValue> = z.object({
@@ -285,6 +295,8 @@ export const FacetValue: z.ZodType<FacetValue> = z.object({
   count: z.number().int().describe("Results if this value is added to the current filters"),
   selected: z.boolean(),
   note: z.string().describe("e.g. 'Shows company offers at the prices listed' for Official Store").nullish(),
+  priceMin: z.number().int().describe("Price presets only (facet price): send as priceMin (minor units); null = no lower bound").nullish(),
+  priceMax: z.number().int().describe("Price presets only: send as priceMax (minor units); null = no upper bound").nullish(),
 }).register(common.apiTypes, { id: "search.FacetValue" });
 
 export interface PriceRange {
@@ -1768,6 +1780,16 @@ export const spec = defineModuleSpec({
       "default": true,
       "desc": "Out-of-stock products appear only with 'Include out of stock'",
       "type": "bool"
+    },
+    "pricePresets": {
+      "default": [
+        2500,
+        5000,
+        10000,
+        20000
+      ],
+      "desc": "Boundaries of the price facet presets in minor units, ascending: Under $25, $25 to $50, … $200 and above. Each preset shows its result count",
+      "type": "json"
     }
   },
   errorCodes: {
