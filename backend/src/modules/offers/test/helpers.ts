@@ -103,6 +103,10 @@ export async function harness(o: { serviceTerms?: Map<string, fulfillment.Servic
       inventory: fakeInventory(() => booted!, h),
       // fulfillment-service is not booted: with o.serviceTerms its stub answers offers' optional lookup
       ...(o.serviceTerms ? { 'fulfillment-service': fakeFulfillmentService(o.serviceTerms) } : {}),
+      // reviews is not booted: its stub answers the Official Store's feedback for offer views
+      reviews: {
+        getSellerFeedbackSummary: async (sellerId) => ({ sellerId, official: true, periodMonths: 12, count: 4812, positivePct: 98, label: '98% positive · 4,812 ratings' }),
+      },
       catalog: {
         getProduct: async (id) => h.products.get(id)?.product ?? null,
         getProductAdmin: async (id) => h.products.get(id) ?? null,

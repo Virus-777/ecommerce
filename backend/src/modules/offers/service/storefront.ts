@@ -6,6 +6,7 @@
 import { isUuid } from '../../../kernel/lib/ids.js';
 import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
+import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type {
   Availability,
   DeliverTo,
@@ -158,10 +159,12 @@ export class StorefrontPart extends Part {
     const byId = new Map(cards.map((c) => [c.id, c]));
     const names = ids.length && cards.length < ids.length ? await this.core.sellerNames(rows) : new Map<string, string>();
     const elig = new Map((await this.repo.getEligibility(rows.map((r) => r.id))).map((e) => [e.offer_id, e]));
+    // the Official Store's ratings come from reviews (sellers has no storefront card for it)
+    const official = rows.some((r) => r.owner_type === 'official') ? await this.core.optional('reviews', 'Official Store feedback', (rv) => rv.getSellerFeedbackSummary(OFFICIAL_STORE_ID)) : undefined;
     const out = new Map<string, SellerCue>();
     for (const r of rows) {
       if (r.owner_type === 'official') {
-        out.set(r.id, { sellerId: null, name: OFFICIAL_NAME, official: true, verified: true, storeSlug: null, positivePct: null, ratingCount: null, onTimeDispatchPct: null, location: r.ships_from || null });
+        out.set(r.id, { sellerId: null, name: OFFICIAL_NAME, official: true, verified: true, storeSlug: null, positivePct: official?.positivePct ?? null, ratingCount: official?.count ?? null, onTimeDispatchPct: null, location: r.ships_from || null });
         continue;
       }
       const c = byId.get(r.seller_id!);

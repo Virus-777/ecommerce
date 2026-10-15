@@ -37,6 +37,8 @@ describe('Official Store offers', () => {
     const { id, body } = await official();
     expect(body.offer).toMatchObject({ ownerType: 'official', sellerId: null, sellerName: OFFICIAL_STORE_NAME, status: 'draft', returnTerms: { kind: 'extended', windowDays: 60, freeReturnShipping: true }, warranty: { handledBy: 'manufacturer' } });
     expect(body.seller).toMatchObject({ official: true, name: OFFICIAL_STORE_NAME });
+    // G25g: the Official Store's ratings come from reviews
+    expect(body.seller).toMatchObject({ positivePct: 98, ratingCount: 4812 });
     // ships from the inventory default location (decision O3); the title is denormalised from catalog
     expect(body.offer.dispatch.shipsFrom).toBe('Reno, NV');
     expect(body.offer.title).toBe('Halden Aurora ANC Headphones – Black');
