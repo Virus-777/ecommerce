@@ -536,6 +536,7 @@ export class Views {
     const ownerName = ownerRef ? (ownerRef as { name?: string }).name : null;
     return {
       detail,
+      statusLabel: sellerStatusLabel(this.facts(agg)),
       customer: { displayName: r.terms_snapshot.meta.customerName, city: r.terms_snapshot.meta.city, ordersWithSeller: Math.max(1, orders?.total ?? 1) },
       payment: { itemPaid: this.m(itemPaid, currency), shippingPaid: this.m(shippingPaid, currency), discountShare: this.m(discount, currency), maxRefundable: this.m(cap, currency), refundedSoFar: this.m(refunded, currency), methodLabel },
       policyApplied: r.terms_snapshot.terms,

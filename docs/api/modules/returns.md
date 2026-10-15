@@ -791,6 +791,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | Field | Type |
 |---|---|
 | detail | `ReturnDetail` |
+| statusLabel | `string` Seller and staff wording, as the seller and admin lists show it, e.g. Return requested, Waiting on customer (detail.statusLabel is the customer's wording) |
 | customer | `{"displayName":"string","city":"string?","ordersWithSeller":"int"}` |
 | payment | `{"itemPaid":"Money","shippingPaid":"Money","discountShare":"Money","maxRefundable":"Money","refundedSoFar":"Money","methodLabel":"string"}` |
 | policyApplied | `EffectiveTerms` |
@@ -1539,7 +1540,7 @@ type Return {
   sellerId: UUID
   sellerName: String!
   status: ReturnStatus!
-  "Customer wording, e.g. Approved: send it back"
+  "Store: customer wording, e.g. Approved: send it back. Seller and Admin Center: seller and staff wording, as their lists show it, e.g. Return requested"
   statusLabel: String!
   "Item track: Requested, Approved, Sent back, Received, Inspected, Refunded (or Replaced)"
   track: [ReturnTrackStep!]!

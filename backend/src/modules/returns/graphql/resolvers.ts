@@ -82,7 +82,8 @@ export function gqlReturn(d: ReturnDetail, c?: ReturnCase | null) {
     sellerId: d.seller.id ?? null,
     sellerName: d.seller.name,
     status: upper(d.status),
-    statusLabel: d.statusLabel,
+    // seller and admin areas (with the case): the seller and staff wording their lists use, not the customer's
+    statusLabel: c ? c.statusLabel : d.statusLabel,
     track: steps(d.track),
     items: d.items.map((i) => ({ ...i, sku: i.sku ?? null, imageUrl: i.imageUrl ?? null, options: options(i.options), unitPrice: money(i.unitPrice) })),
     itemCount: d.items.reduce((n, i) => n + i.quantity, 0),

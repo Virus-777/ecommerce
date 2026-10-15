@@ -1439,6 +1439,8 @@ export const ReturnFlag: z.ZodType<ReturnFlag> = z.object({
 
 export interface ReturnCase {
   detail: ReturnDetail;
+  /** Seller and staff wording, as the seller and admin lists show it, e.g. Return requested, Waiting on customer (detail.statusLabel is the customer's wording) */
+  statusLabel: string;
   customer: {
     displayName: string;
     city?: string | null;
@@ -1486,6 +1488,7 @@ export const ReturnCase: z.ZodType<ReturnCase> = z.object({
   get detail() {
     return ReturnDetail;
   },
+  statusLabel: z.string().describe("Seller and staff wording, as the seller and admin lists show it, e.g. Return requested, Waiting on customer (detail.statusLabel is the customer's wording)"),
   customer: z.object({
     displayName: z.string(),
     city: z.string().nullish(),

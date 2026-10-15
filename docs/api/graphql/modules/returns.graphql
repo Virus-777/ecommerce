@@ -21,7 +21,7 @@ type Return {
   sellerId: UUID
   sellerName: String!
   status: ReturnStatus!
-  "Customer wording, e.g. Approved: send it back"
+  "Store: customer wording, e.g. Approved: send it back. Seller and Admin Center: seller and staff wording, as their lists show it, e.g. Return requested"
   statusLabel: String!
   "Item track: Requested, Approved, Sent back, Received, Inspected, Refunded (or Replaced)"
   track: [ReturnTrackStep!]!

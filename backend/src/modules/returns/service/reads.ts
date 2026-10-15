@@ -468,6 +468,8 @@ export class Reads {
     const zero = money(0, agg.items[0]?.currency ?? this.core.currency);
     return {
       detail: detail!,
+      // the store shows the customer's wording everywhere
+      statusLabel: detail!.statusLabel,
       customer: { displayName: agg.ret.terms_snapshot.meta.customerName, city: null, ordersWithSeller: 0 },
       payment: { itemPaid: zero, shippingPaid: zero, discountShare: zero, maxRefundable: zero, refundedSoFar: zero, methodLabel: '' },
       policyApplied: agg.ret.terms_snapshot.terms,

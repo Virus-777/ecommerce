@@ -494,6 +494,7 @@
     "ReturnFlag": { "kind": "enum(refund_without_return_proposed|refund_without_return_approved|seller_missed_deadline|platform_took_over|refund_failed|customer_escalated|dispute_open|refund_after_payout)", "label": "string" },
     "ReturnCase": {
       "detail": "ReturnDetail",
+      "statusLabel": { "type": "string", "desc": "Seller and staff wording, as the seller and admin lists show it, e.g. Return requested, Waiting on customer (detail.statusLabel is the customer's wording)" },
       "customer": { "displayName": "string", "city": "string?", "ordersWithSeller": "int" },
       "payment": { "itemPaid": "Money", "shippingPaid": "Money", "discountShare": "Money", "maxRefundable": "Money", "refundedSoFar": "Money", "methodLabel": "string" },
       "policyApplied": "EffectiveTerms",

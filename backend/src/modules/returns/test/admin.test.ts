@@ -293,9 +293,11 @@ describe('queues and views', () => {
     expect(store.data.return).toMatchObject({ id: m.ret.id, status: 'REQUESTED', items: [{ title: 'Vase', options: [{ name: 'Color', value: 'Teal' }] }], terms: { windowDays: 30 } });
     const other = await h.gql('store', tokens.customer(newId()), 'query($ref: String!) { return(ref: $ref) { id } }', { ref: m.ret.ref });
     expect(other.data.return).toBeNull();
-    const seller = await h.gql('seller', m.seller, 'query($ref: String!) { sellerReturn(ref: $ref) { id status allowedActions deadlines { respondBy { state } } payment { itemPaid { amount } } } }', { ref: m.ret.ref });
+    expect(store.data.return.statusLabel).toBe('Requested'); // customer wording
+    const seller = await h.gql('seller', m.seller, 'query($ref: String!) { sellerReturn(ref: $ref) { id status statusLabel allowedActions deadlines { respondBy { state } } payment { itemPaid { amount } } } }', { ref: m.ret.ref });
     expect(seller.errors, JSON.stringify(seller.errors)).toBeUndefined();
-    expect(seller.data.sellerReturn).toMatchObject({ id: m.ret.id, allowedActions: expect.arrayContaining(['approve']), payment: { itemPaid: { amount: 4000 } } });
+    // the seller wording, as the seller list shows it
+    expect(seller.data.sellerReturn).toMatchObject({ id: m.ret.id, statusLabel: 'Return requested', allowedActions: expect.arrayContaining(['approve']), payment: { itemPaid: { amount: 4000 } } });
     const admin = await h.gql('admin', staff(), 'query($ref: String!) { returnAdmin(ref: $ref) { id flags { kind } owner { id } } refundRequests(status: UNDER_REVIEW) { total items { id status } } }', { ref: m.ret.ref });
     expect(admin.errors, JSON.stringify(admin.errors)).toBeUndefined();
     expect(admin.data.returnAdmin.id).toBe(m.ret.id);
