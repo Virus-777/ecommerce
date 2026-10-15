@@ -10,13 +10,19 @@ import { accountOf } from './store.js';
 export const adminRoutes = (service: NotificationsService) =>
   routes(endpoints, 'admin', {
     /** GET /inbox: My staff notices (routed by role, including roles I cover as backup) */
-    listStaffInbox: async ({ principal, query, page }) => service.listInboxFor({ principal }, { group: query.area, unreadOnly: query.unreadOnly, view: query.view }, page),
+    listStaffInbox: async ({ principal, query, page }) => service.listInboxFor({ principal }, { group: query.area, unreadOnly: query.unreadOnly, view: query.view, archived: query.archived }, page),
     /** GET /inbox/summary: Counts and today's routing for my roles */
     getStaffInboxSummary: async ({ principal }) => service.inbox.staffSummary({ principal }),
     /** POST /inbox/{id}/read: Mark one notice as read (for me) */
     markStaffRead: async ({ principal, params }) => service.inbox.markRead({ principal }, params.id),
     /** POST /inbox/read-all: Mark all as read (for me) */
     markAllStaffRead: async ({ principal, body }) => service.inbox.markAll({ principal }, body.area),
+    /** POST /inbox/{id}/unread: Mark one notice as unread (for me) */
+    markStaffUnread: async ({ principal, params }) => service.inbox.markUnread({ principal }, params.id),
+    /** POST /inbox/{id}/archive: Archive one notice (for me) */
+    archiveStaffNotice: async ({ principal, params }) => service.inbox.archive({ principal }, params.id),
+    /** POST /inbox/archive-all: Archive all (or one area) for me */
+    archiveAllStaffNotices: async ({ principal, body }) => service.inbox.archiveAll({ principal }, { group: body.area, readOnly: body.readOnly }),
     /** GET /my-preferences: My email preferences for staff notices */
     getMyStaffPreferences: async ({ principal }) => service.prefs.staffPreferences(accountOf(principal)),
     /** PUT /my-preferences: Change my email preferences */

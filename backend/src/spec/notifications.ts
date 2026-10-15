@@ -132,6 +132,8 @@ export interface Notice {
   link: NoticeLink;
   createdAt: string;
   readAt?: string | null;
+  /** Archived by me (hidden from the inbox and its counts; listed with archived=true) */
+  archivedAt?: string | null;
   actionRequired: boolean;
   deadline?: common.Deadline | null;
   /** The work was done (shows 'Resolved Oct 7') */
@@ -157,6 +159,7 @@ export const Notice: z.ZodType<Notice> = z.object({
   },
   createdAt: z.iso.datetime({ offset: true }),
   readAt: z.iso.datetime({ offset: true }).nullish(),
+  archivedAt: z.iso.datetime({ offset: true }).describe("Archived by me (hidden from the inbox and its counts; listed with archived=true)").nullish(),
   actionRequired: z.boolean(),
   get deadline() {
     return common.Deadline.nullish();
@@ -1222,6 +1225,7 @@ export interface NotificationsDb {
     reason: string;
     covering_for: string | null;
     read_at: Date | null;
+    archived_at: Date | null;
     created_at: Date;
   };
   scheduled_notifications: {
@@ -1274,6 +1278,13 @@ export interface NotificationsDb {
     channel: string;
     updated_by: string;
     updated_at: Date;
+  };
+  /** Seller members invited and not joined yet (from sellers.member.invited, removed on joined or removed): their preferences open once they accept */
+  invited_members: {
+    seller_id: string;
+    member_id: string;
+    email: string;
+    invited_at: Date;
   };
   staff_preferences: {
     account_id: string;
@@ -1343,6 +1354,7 @@ export const endpoints = defineEndpoints({
       z.object({
         group: z.enum(["orders", "returns_refunds", "cases", "account", "promotions"]).optional(),
         unreadOnly: z.stringbool().optional(),
+        archived: z.stringbool().describe("true: only archived notices; default: the inbox without them").optional(),
       }),
     paging: true,
     response: () => Notice,
@@ -1374,6 +1386,43 @@ export const endpoints = defineEndpoints({
         id: z.uuid(),
       }),
     response: () => Notice,
+    status: 200,
+    screens: ["account/notifications"],
+    phase: 1,
+  },
+  archiveNotice: {
+    area: "store",
+    method: "POST",
+    path: "/inbox/{id}/archive",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Archive one notice (for me)",
+    desc: "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => Notice,
+    status: 200,
+    errors: ["NOTICE_ACTION_OPEN"],
+    screens: ["account/notifications"],
+    phase: 1,
+  },
+  archiveAllNotices: {
+    area: "store",
+    method: "POST",
+    path: "/inbox/archive-all",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Archive all (or one group) for me",
+    desc: "Open action notices stay in the inbox.",
+    body: () => z.object({
+      group: z.string().nullish(),
+      readOnly: z.boolean().describe("Only notices I have read").nullish(),
+    }),
+    response: () => z.object({
+      updated: z.number().int(),
+    }),
     status: 200,
     screens: ["account/notifications"],
     phase: 1,
@@ -1464,6 +1513,7 @@ export const endpoints = defineEndpoints({
         group: z.enum(["orders", "returns_cases", "products", "account_finance"]).optional(),
         unreadOnly: z.stringbool().optional(),
         actionRequired: z.stringbool().optional(),
+        archived: z.stringbool().describe("true: only archived notices; default: the inbox without them").optional(),
       }),
     paging: true,
     response: () => Notice,
@@ -1495,6 +1545,43 @@ export const endpoints = defineEndpoints({
         id: z.uuid(),
       }),
     response: () => Notice,
+    status: 200,
+    screens: ["seller/notifications"],
+    phase: 1,
+  },
+  archiveSellerNotice: {
+    area: "seller",
+    method: "POST",
+    path: "/inbox/{id}/archive",
+    auth: "seller",
+    scope: "own-seller",
+    summary: "Archive one notice (for me)",
+    desc: "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => Notice,
+    status: 200,
+    errors: ["NOTICE_ACTION_OPEN"],
+    screens: ["seller/notifications"],
+    phase: 1,
+  },
+  archiveAllSellerNotices: {
+    area: "seller",
+    method: "POST",
+    path: "/inbox/archive-all",
+    auth: "seller",
+    scope: "own-seller",
+    summary: "Archive all (or one group) for me",
+    desc: "Open action notices stay in the inbox.",
+    body: () => z.object({
+      group: z.string().nullish(),
+      readOnly: z.boolean().describe("Only notices I have read").nullish(),
+    }),
+    response: () => z.object({
+      updated: z.number().int(),
+    }),
     status: 200,
     screens: ["seller/notifications"],
     phase: 1,
@@ -1536,7 +1623,7 @@ export const endpoints = defineEndpoints({
     permissionWhen: [{"if":{"params.memberId":"!self-member"},"permission":"notifications.preferences.manage"}],
     scope: "own-member",
     summary: "Set one member's topics and channel",
-    desc: "The owner (notifications.preferences.manage) sets anyone's; members may change their own channel and non-essential groups. Essential groups stay on for the owner; owner-only groups cannot be given to staff.",
+    desc: "The owner (notifications.preferences.manage) sets anyone's; members may change their own channel and non-essential groups. Essential groups stay on for the owner; owner-only groups cannot be given to staff. An invited member's preferences open once they accept the invitation (409 MEMBER_NOT_JOINED until then).",
     params: () =>
       z.object({
         memberId: z.uuid(),
@@ -1544,7 +1631,7 @@ export const endpoints = defineEndpoints({
     body: () => MemberPreferenceInput,
     response: () => MemberPreference,
     status: 200,
-    errors: ["FORBIDDEN","GROUP_LOCKED"],
+    errors: ["FORBIDDEN","GROUP_LOCKED","MEMBER_NOT_JOINED"],
     audited: true,
     screens: ["seller/staff"],
     phase: 1,
@@ -1588,6 +1675,7 @@ export const endpoints = defineEndpoints({
         view: z.enum(["all", "needs_my_action", "mentions"]).optional(),
         area: z.string().optional(),
         unreadOnly: z.stringbool().optional(),
+        archived: z.stringbool().describe("true: only archived notices; default: the inbox without them").optional(),
       }),
     paging: true,
     response: () => Notice,
@@ -1614,6 +1702,59 @@ export const endpoints = defineEndpoints({
     auth: "staff",
     scope: "staff",
     summary: "Mark one notice as read (for me)",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => Notice,
+    status: 200,
+    screens: ["admin/inbox"],
+    phase: 1,
+  },
+  archiveStaffNotice: {
+    area: "admin",
+    method: "POST",
+    path: "/inbox/{id}/archive",
+    auth: "staff",
+    scope: "staff",
+    summary: "Archive one notice (for me)",
+    desc: "Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    response: () => Notice,
+    status: 200,
+    errors: ["NOTICE_ACTION_OPEN"],
+    screens: ["admin/inbox"],
+    phase: 1,
+  },
+  archiveAllStaffNotices: {
+    area: "admin",
+    method: "POST",
+    path: "/inbox/archive-all",
+    auth: "staff",
+    scope: "staff",
+    summary: "Archive all (or one area) for me",
+    desc: "Open action notices stay in the inbox.",
+    body: () => z.object({
+      area: z.string().nullish(),
+      readOnly: z.boolean().describe("Only notices I have read").nullish(),
+    }),
+    response: () => z.object({
+      updated: z.number().int(),
+    }),
+    status: 200,
+    screens: ["admin/inbox"],
+    phase: 1,
+  },
+  markStaffUnread: {
+    area: "admin",
+    method: "POST",
+    path: "/inbox/{id}/unread",
+    auth: "staff",
+    scope: "staff",
+    summary: "Mark one notice as unread (for me)",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1700,7 +1841,7 @@ export const endpoints = defineEndpoints({
       get channels() {
         return z.array(ChannelSetting);
       },
-      reason: z.string(),
+      reason: z.string().describe("Recorded in the audit log; default 'Notification channels changed in the Admin Center'").nullish(),
     }),
     response: () => Topic,
     status: 200,
@@ -2464,6 +2605,9 @@ export const spec = defineModuleSpec({
       "offers.offer.missing_items_reviewed": "Resolve the seller's or staff's missing-items review notice of the offer (offer-missing-items:<offerId>); sends nothing",
       "inventory.stock.low_digest": "Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock",
       "sellers.application.information_reminder": "Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request",
+      "sellers.member.invited": "Remember the invited member (invited_members): their notification preferences answer 409 MEMBER_NOT_JOINED until they accept; sends nothing",
+      "sellers.member.joined": "Forget the invitation (invited_members): the member's preferences open; sends nothing",
+      "sellers.member.removed": "Forget a revoked invitation (invited_members); sends nothing",
       "workqueues.day_end.completed": "Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices"
     },
   },
@@ -2620,6 +2764,14 @@ export const spec = defineModuleSpec({
     "TOPIC_NOT_PROMOTIONAL": {
       "status": 400,
       "meaning": "Broadcasts can only use promotional topics."
+    },
+    "MEMBER_NOT_JOINED": {
+      "status": 409,
+      "meaning": "The member has been invited and has not accepted yet; notification preferences open once they join."
+    },
+    "NOTICE_ACTION_OPEN": {
+      "status": 409,
+      "meaning": "The notice still needs action; it can be archived once the work is done."
     }
   },
   collections: {
@@ -3154,16 +3306,19 @@ export const spec = defineModuleSpec({
         "reason",
         "covering_for",
         "read_at",
+        "archived_at",
         "created_at"
       ],
       "nullable": [
         "covering_for",
-        "read_at"
+        "read_at",
+        "archived_at"
       ],
       "decimal": [],
       "binary": [],
       "dates": [
         "read_at",
+        "archived_at",
         "created_at"
       ],
       "identity": null,
@@ -3202,6 +3357,12 @@ export const spec = defineModuleSpec({
               ]
             },
             "read_at": {
+              "bsonType": [
+                "date",
+                "null"
+              ]
+            },
+            "archived_at": {
               "bsonType": [
                 "date",
                 "null"
@@ -3725,6 +3886,72 @@ export const spec = defineModuleSpec({
           "key": {
             "account_id": 1
           }
+        }
+      ],
+      "unenforced": []
+    },
+    "invited_members": {
+      "idField": null,
+      "key": [
+        "seller_id",
+        "member_id"
+      ],
+      "columns": [
+        "seller_id",
+        "member_id",
+        "email",
+        "invited_at"
+      ],
+      "nullable": [],
+      "decimal": [],
+      "binary": [],
+      "dates": [
+        "invited_at"
+      ],
+      "identity": null,
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": [
+            "_id",
+            "seller_id",
+            "member_id",
+            "email",
+            "invited_at"
+          ],
+          "properties": {
+            "_id": {},
+            "_lock": {
+              "bsonType": [
+                "int",
+                "long",
+                "double"
+              ]
+            },
+            "seller_id": {
+              "bsonType": "string"
+            },
+            "member_id": {
+              "bsonType": "string"
+            },
+            "email": {
+              "bsonType": "string"
+            },
+            "invited_at": {
+              "bsonType": "date"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "indexes": [
+        {
+          "name": "invited_members_seller_id_member_id_436737",
+          "key": {
+            "seller_id": 1,
+            "member_id": 1
+          },
+          "unique": true
         }
       ],
       "unenforced": []

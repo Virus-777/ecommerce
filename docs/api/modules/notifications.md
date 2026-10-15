@@ -33,6 +33,8 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | GET | `/api/store/notifications/inbox` | Customer notifications | customer | Page<Notice> |
 | GET | `/api/store/notifications/inbox/summary` | Unread badge and counts per group | customer | `InboxSummary` |
 | POST | `/api/store/notifications/inbox/{id}/read` | Mark one notice as read | customer | `Notice` |
+| POST | `/api/store/notifications/inbox/{id}/archive` | Archive one notice (for me) | customer | `Notice` |
+| POST | `/api/store/notifications/inbox/archive-all` | Archive all (or one group) for me | customer | `{ group: string?, readOnly: bool? }` → `{ updated: int }` |
 | POST | `/api/store/notifications/inbox/read-all` | Mark all (or one group) as read | customer | `{ group: string? }` → `{ updated: int }` |
 | GET | `/api/store/notifications/preferences` | What we send and where to change it | customer | `CustomerNotificationPreferences` |
 | PUT | `/api/store/notifications/preferences/push` | Turn order-update push notices on or off _(phase 3)_ | customer | `{ orderUpdates: bool }` → `PushPreference` |
@@ -46,6 +48,8 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | GET | `/api/seller/notifications/inbox` | Seller workspace notifications | seller | Page<Notice> |
 | GET | `/api/seller/notifications/inbox/summary` | Unread, needs action (sorted by deadline) | seller | `InboxSummary` |
 | POST | `/api/seller/notifications/inbox/{id}/read` | Mark one notice as read (for me) | seller | `Notice` |
+| POST | `/api/seller/notifications/inbox/{id}/archive` | Archive one notice (for me) | seller | `Notice` |
+| POST | `/api/seller/notifications/inbox/archive-all` | Archive all (or one group) for me | seller | `{ group: string?, readOnly: bool? }` → `{ updated: int }` |
 | POST | `/api/seller/notifications/inbox/read-all` | Mark all as read (for me) | seller | `{ group: string? }` → `{ updated: int }` |
 | GET | `/api/seller/notifications/preferences` | Who hears about what (all members) | seller | `SellerPreferences` |
 | PUT | `/api/seller/notifications/preferences/members/{memberId}` | Set one member's topics and channel _(audited, also notifications.preferences.manage when not own)_ | seller | `MemberPreferenceInput` → `MemberPreference` |
@@ -59,11 +63,14 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | GET | `/api/admin/notifications/inbox` | My staff notices (routed by role, including roles I cover as backup) | staff | Page<Notice> |
 | GET | `/api/admin/notifications/inbox/summary` | Counts and today's routing for my roles | staff | `StaffInboxSummary` |
 | POST | `/api/admin/notifications/inbox/{id}/read` | Mark one notice as read (for me) | staff | `Notice` |
+| POST | `/api/admin/notifications/inbox/{id}/archive` | Archive one notice (for me) | staff | `Notice` |
+| POST | `/api/admin/notifications/inbox/archive-all` | Archive all (or one area) for me | staff | `{ area: string?, readOnly: bool? }` → `{ updated: int }` |
+| POST | `/api/admin/notifications/inbox/{id}/unread` | Mark one notice as unread (for me) | staff | `Notice` |
 | POST | `/api/admin/notifications/inbox/read-all` | Mark all as read (for me) | staff | `{ area: string? }` → `{ updated: int }` |
 | GET | `/api/admin/notifications/my-preferences` | My email preferences for staff notices | staff | `StaffPreferences` |
 | PUT | `/api/admin/notifications/my-preferences` | Change my email preferences | staff | `{ emailByArea: map<bool>, emailForMentions: bool, dailyDigest: bool }` → `StaffPreferences` |
 | GET | `/api/admin/notifications/topics` | Audience × event × channel matrix with delivery stats | staff<br>`notifications.templates.view` | `TopicMatrix` |
-| PUT | `/api/admin/notifications/topics/{key}/channels` | Turn channels on or off for a topic _(audited)_ | staff<br>`notifications.routing.manage` | `{ channels: ChannelSetting[], reason: text }` → `Topic` |
+| PUT | `/api/admin/notifications/topics/{key}/channels` | Turn channels on or off for a topic _(audited)_ | staff<br>`notifications.routing.manage` | `{ channels: ChannelSetting[], reason: text? }` → `Topic` |
 | GET | `/api/admin/notifications/templates` | Templates | staff<br>`notifications.templates.view` | Page<Template> |
 | GET | `/api/admin/notifications/templates/{id}` | Template editor: topic, variables, live and draft versions, history | staff<br>`notifications.templates.view` | `TemplateDetail` |
 | POST | `/api/admin/notifications/templates/{id}/versions` | Start a draft (from the live version, or restore an older one) | staff<br>`notifications.templates.edit` | `{ fromVersionId: uuid? }` → `TemplateVersion` |
@@ -162,6 +169,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | link | `NoticeLink` |
 | createdAt | `datetime` |
 | readAt | `datetime?` |
+| archivedAt | `datetime?` Archived by me (hidden from the inbox and its counts; listed with archived=true) |
 | actionRequired | `bool` |
 | deadline | `Deadline?` |
 | resolvedAt | `datetime?` The work was done (shows 'Resolved Oct 7') |
@@ -742,6 +750,7 @@ Indexes: `(address_kind, address_id, created_at desc)`, `(dedupe_key)`, `(expire
 | reason | text |
 | covering_for | text? |
 | read_at | timestamptz? |
+| archived_at | timestamptz? |
 | created_at | timestamptz |
 
 Indexes: `pk (notice_id, account_id)`, `(account_id, read_at, created_at desc)`
@@ -815,6 +824,17 @@ Indexes: `(delivery_id, at)`
 | updated_at | timestamptz |
 
 Indexes: `pk (seller_id, member_id)`, `(account_id)`
+
+**invited_members**: Seller members invited and not joined yet (from sellers.member.invited, removed on joined or removed): their preferences open once they accept
+
+| Column | Type |
+|---|---|
+| seller_id | uuid |
+| member_id | uuid |
+| email | text |
+| invited_at | timestamptz |
+
+Indexes: `pk (seller_id, member_id)`
 
 **staff_preferences**
 
@@ -1006,6 +1026,9 @@ Indexes: `(status, scheduled_at)`
 | `offers.offer.missing_items_reviewed` | offers | Resolve the seller's or staff's missing-items review notice of the offer (offer-missing-items:<offerId>); sends nothing |
 | `inventory.stock.low_digest` | inventory | Daily digest of items at or below their reorder point: Official Store items to staff (topic staff.inventory.low_stock_digest, Inventory Manager role); each seller's own items to that seller (topic seller.stock.low_digest, members with the stock permission). Replaces one notice per item for non-urgent low stock |
 | `sellers.application.information_reminder` | sellers | Applicant (topic seller.application.information_reminder, owner only): reminder that requested information is still missing, with the deadline; same action notice as the original request |
+| `sellers.member.invited` | sellers | Remember the invited member (invited_members): their notification preferences answer 409 MEMBER_NOT_JOINED until they accept; sends nothing |
+| `sellers.member.joined` | sellers | Forget the invitation (invited_members): the member's preferences open; sends nothing |
+| `sellers.member.removed` | sellers | Forget a revoked invitation (invited_members); sends nothing |
 | `workqueues.day_end.completed` | workqueues | Staff (topic staff.day_end.completed, to the payload's roleKeys): the day-end summary (who completed it, open and overdue counts, items with notes); resolves the staff.day_end.summary action notices |
 
 ## In-process API (for other modules)
@@ -1049,6 +1072,8 @@ Indexes: `(status, scheduled_at)`
 | `ADDRESS_SUPPRESSED` | 409 | The address is suppressed; remove the suppression first. |
 | `NOT_RETRYABLE` | 409 | Sensitive content (codes, links) expired; the person must request a new one. |
 | `TOPIC_NOT_PROMOTIONAL` | 400 | Broadcasts can only use promotional topics. |
+| `MEMBER_NOT_JOINED` | 409 | The member has been invited and has not accepted yet; notification preferences open once they join. |
+| `NOTICE_ACTION_OPEN` | 409 | The notice still needs action; it can be archived once the work is done. |
 
 ## Background jobs
 

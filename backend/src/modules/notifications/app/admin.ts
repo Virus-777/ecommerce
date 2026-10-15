@@ -92,7 +92,7 @@ export class Admin {
     };
   }
 
-  async updateTopicChannels(key: string, body: { channels: ChannelSetting[]; reason: string }, by: By): Promise<Topic> {
+  async updateTopicChannels(key: string, body: { channels: ChannelSetting[]; reason?: string | null }, by: By): Promise<Topic> {
     const t = topicDef(key);
     if (!t) throw notFound('Topic');
     const phase = this.core.launchPhase;
@@ -121,7 +121,8 @@ export class Admin {
         target: { type: 'notification_topic', id: key, label: t.label } as never,
         before: channelSettings(t, before, phase),
         after: view.channels,
-        reason: body.reason,
+        // G68: the design collects no reason; the audit log still gets one
+        reason: body.reason?.trim() || 'Notification channels changed in the Admin Center',
       },
       by,
     );

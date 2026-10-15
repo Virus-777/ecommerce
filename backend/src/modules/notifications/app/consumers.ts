@@ -247,6 +247,7 @@ export class Consumers {
               reason: id === p.leadAccountId ? 'lead' : p.viaBackup ? 'backup' : 'member',
               covering_for: p.viaBackup && id !== p.leadAccountId ? leadName : null,
               read_at: null,
+              archived_at: null,
               created_at: now,
             })),
           ),
@@ -266,7 +267,7 @@ export class Consumers {
           roleKeys = (await api.rolesOf(p.accountId)).map((r) => r.key);
         }
         const notices = await repo.recentRoleNotices(roleKeys, new Date(now.getTime() - 30 * 86_400_000));
-        await repo.insertRecipients(notices.map((n) => ({ notice_id: n.id, account_id: p.accountId, reason: 'lead', covering_for: null, read_at: null, created_at: now })));
+        await repo.insertRecipients(notices.map((n) => ({ notice_id: n.id, account_id: p.accountId, reason: 'lead', covering_for: null, read_at: null, archived_at: null, created_at: now })));
         return;
       }
       case 'dropOffReminder': {

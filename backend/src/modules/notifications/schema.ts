@@ -111,6 +111,7 @@ const notice_recipients = new Schema(
     reason: { type: String, required: true },
     covering_for: { type: String, default: null },
     read_at: { type: Date, default: null },
+    archived_at: { type: Date, default: null },
     created_at: { type: Date, required: true },
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
@@ -207,6 +208,20 @@ const member_preferences = new Schema(
 member_preferences.index({"seller_id":1,"member_id":1}, {"name":"member_preferences_seller_id_member_id_436737","unique":true});
 member_preferences.index({"account_id":1}, {"name":"member_preferences_account_id_05e878"});
 
+/** Seller members invited and not joined yet (from sellers.member.invited, removed on joined or removed): their preferences open once they accept */
+const invited_members = new Schema(
+  {
+    seller_id: { type: String, required: true },
+    member_id: { type: String, required: true },
+    email: { type: String, required: true },
+    invited_at: { type: Date, required: true },
+    /** lock-by-write counter (kernel/mongo/table.ts) */
+    _lock: Number,
+  },
+  collectionOptions("notifications.invited_members", { generatedId: true }),
+);
+invited_members.index({"seller_id":1,"member_id":1}, {"name":"invited_members_seller_id_member_id_436737","unique":true});
+
 const staff_preferences = new Schema(
   {
     _id: { type: String, required: true }, // account_id
@@ -298,6 +313,7 @@ export const schemas = {
   deliveries: deliveries,
   delivery_events: delivery_events,
   member_preferences: member_preferences,
+  invited_members: invited_members,
   staff_preferences: staff_preferences,
   push_devices: push_devices,
   suppressions: suppressions,

@@ -149,7 +149,7 @@ export class Sender {
             created_at: now,
             expires_at: addMonths(now, retention),
           });
-          for (const r of a.notice.recipients) recipients.push({ notice_id: noticeId, account_id: r.accountId, reason: r.reason, covering_for: r.coveringFor, read_at: null, created_at: now });
+          for (const r of a.notice.recipients) recipients.push({ notice_id: noticeId, account_id: r.accountId, reason: r.reason, covering_for: r.coveringFor, read_at: null, archived_at: null, created_at: now });
         }
       }
       for (const p of a.deliveries) {

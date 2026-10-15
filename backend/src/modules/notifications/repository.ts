@@ -2,7 +2,7 @@ import { orThrow } from '../../kernel/lib/or-throw.js';
 import type { PageRequest } from '../../kernel/lib/pagination.js';
 import type { Filter, ModuleStore } from '../../kernel/mongo/index.js';
 import type { Page } from '../../spec/common.js';
-import type { BroadcastRow, DeliveryEventRow, DeliveryFilter, DeliveryRow, InboxFilter, InboxOwner, InboxRow, MemberPrefRow, NoticeRow, PushDeviceRow, RecipientRow, ScheduledRow, StaffPrefRow, SubjectKey, SuppressionFilter, SuppressionRow, TemplateRow, TopicRow, VersionRow } from './ports.js';
+import type { BroadcastRow, DeliveryEventRow, DeliveryFilter, DeliveryRow, InboxFilter, InboxOwner, InboxRow, InvitedMemberRow, MemberPrefRow, NoticeRow, PushDeviceRow, RecipientRow, ScheduledRow, StaffPrefRow, SubjectKey, SuppressionFilter, SuppressionRow, TemplateRow, TopicRow, VersionRow } from './ports.js';
 
 /** One of `values`, or nothing when the list is empty (an empty IN matches no row) */
 const oneOf = (values: readonly unknown[]) => ({ $in: [...values] });
@@ -36,6 +36,7 @@ export class NotificationsRepository {
       pushDevices: this.store.table<PushDeviceRow>('push_devices'),
       suppressions: this.store.table<SuppressionRow>('suppressions'),
       broadcasts: this.store.table<BroadcastRow>('broadcasts'),
+      invited: this.store.table<InvitedMemberRow>('invited_members'),
     };
   }
 
@@ -171,6 +172,8 @@ export class NotificationsRepository {
         },
       },
       { $set: { r: { $first: '$r' } } },
+      // archived notices leave the inbox and its counts
+      { $match: { 'r.archived_at': null } },
       {
         $group: {
           _id: '$group_key',
@@ -185,8 +188,37 @@ export class NotificationsRepository {
   }
 
   async getInboxNotice(owner: InboxOwner, noticeId: string): Promise<InboxRow | undefined> {
-    const notice = await this.#t.notices.findOne({ $and: [await this.#inboxFilter(owner, {}), { id: noticeId }] });
+    // archived or not: the notice can still be opened, read and archived
+    const notice = await this.#t.notices.findOne({ $and: [await this.#inboxBase(owner), { id: noticeId }] });
     return notice ? (await this.#withReadState(owner.accountId, [notice]))[0] : undefined;
+  }
+
+  /** My recipient row's read state back to unread */
+  async markUnread(owner: InboxOwner, noticeId: string): Promise<number> {
+    return this.#t.recipients.updateMany({ account_id: owner.accountId, notice_id: noticeId, read_at: { $ne: null } }, { read_at: null });
+  }
+
+  /**
+   * Archives notices for the owner (never open action notices): sets archived_at on the owner's recipient rows;
+   * customers and sellers get a row (unread) the first time they archive a notice addressed to their workspace.
+   */
+  async archive(owner: InboxOwner, ids: string[] | 'all', at: Date, f: { group?: string; readOnly?: boolean } = {}): Promise<number> {
+    if (ids !== 'all' && !ids.length) return 0;
+    const and: Filter[] = [await this.#inboxBase(owner), { $nor: [OPEN_ACTION] }];
+    if (ids !== 'all') and.push({ id: oneOf(ids) });
+    if (f.group) and.push({ group_key: f.group });
+    if (f.readOnly) and.push({ id: oneOf(await this.#t.recipients.distinct<string>('notice_id', { account_id: owner.accountId, read_at: { $ne: null } })) });
+    const noticeIds = await this.#t.notices.distinct<string>('id', { $and: and });
+    if (!noticeIds.length) return 0;
+    const updated = await this.#t.recipients.updateMany({ account_id: owner.accountId, archived_at: null, notice_id: oneOf(noticeIds) }, { archived_at: at });
+    if (owner.kind === 'staff') return updated;
+    const have = new Set(await this.#t.recipients.distinct<string>('notice_id', { account_id: owner.accountId, notice_id: oneOf(noticeIds) }));
+    const reason = owner.kind === 'seller' ? 'member' : 'direct';
+    const inserted = await this.#t.recipients.insertManyIfAbsent(
+      noticeIds.filter((id) => !have.has(id)).map((id) => ({ notice_id: id, account_id: owner.accountId, reason, covering_for: null, read_at: null, archived_at: at, created_at: at })),
+      ['notice_id', 'account_id'],
+    );
+    return updated + inserted;
   }
 
   async markRead(owner: InboxOwner, ids: string[] | 'all', at: Date, f: { group?: string } = {}): Promise<number> {
@@ -445,6 +477,20 @@ export class NotificationsRepository {
     return (await this.#t.memberPrefs.insertIfAbsent(row, ['seller_id', 'member_id'])) ?? orThrow(await this.memberPreference(row.seller_id, row.member_id), 'member preference');
   }
 
+  /* invited seller members (sellers.member.invited until joined or removed) */
+
+  async rememberInvited(row: InvitedMemberRow): Promise<void> {
+    await this.#t.invited.upsert(row, { key: ['seller_id', 'member_id'], update: { email: row.email, invited_at: row.invited_at } });
+  }
+
+  async forgetInvited(sellerId: string, memberId: string): Promise<void> {
+    await this.#t.invited.deleteMany({ seller_id: sellerId, member_id: memberId });
+  }
+
+  invitedMember(sellerId: string, memberId: string): Promise<InvitedMemberRow | undefined> {
+    return this.#t.invited.findOne({ seller_id: sellerId, member_id: memberId });
+  }
+
   upsertMemberPreference(row: MemberPrefRow): Promise<MemberPrefRow> {
     return this.#t.memberPrefs.upsert(row, {
       key: ['seller_id', 'member_id'],
@@ -569,6 +615,8 @@ export class NotificationsRepository {
       else and.push({ id: { $nin: await this.#t.recipients.distinct<string>('notice_id', { account_id: owner.accountId, read_at: { $ne: null } }) } });
     }
     if (f.mentionsOnly) and.push({ id: oneOf(await this.#t.recipients.distinct<string>('notice_id', { account_id: owner.accountId, reason: 'mention' })) });
+    const archivedIds = await this.#t.recipients.distinct<string>('notice_id', { account_id: owner.accountId, archived_at: { $ne: null } });
+    and.push(f.archived ? { id: oneOf(archivedIds) } : { id: { $nin: archivedIds } });
     return and.length === 1 ? and[0]! : { $and: and };
   }
 
@@ -579,7 +627,7 @@ export class NotificationsRepository {
     const byNotice = new Map(rows.map((r) => [r.notice_id, r]));
     return notices.map((n) => {
       const r = byNotice.get(n.id);
-      return { ...n, read_at: r?.read_at ?? null, reason: r?.reason ?? null, covering_for: r?.covering_for ?? null };
+      return { ...n, read_at: r?.read_at ?? null, archived_at: r?.archived_at ?? null, reason: r?.reason ?? null, covering_for: r?.covering_for ?? null };
     });
   }
 }

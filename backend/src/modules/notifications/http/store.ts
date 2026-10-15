@@ -17,7 +17,7 @@ export const accountOf = (p: Principal): string => {
 export const storeRoutes = (service: NotificationsService) =>
   routes(endpoints, 'store', {
     /** GET /inbox: Customer notifications */
-    listInbox: async ({ principal, query, page }) => service.listInboxFor({ principal }, { group: query.group, unreadOnly: query.unreadOnly }, page),
+    listInbox: async ({ principal, query, page }) => service.listInboxFor({ principal }, { group: query.group, unreadOnly: query.unreadOnly, archived: query.archived }, page),
     /** GET /inbox/summary: Unread badge and counts per group */
     getInboxSummary: async ({ principal }) => {
       const s = await service.inbox.summary({ principal });
@@ -27,6 +27,10 @@ export const storeRoutes = (service: NotificationsService) =>
     markRead: async ({ principal, params }) => service.inbox.markRead({ principal }, params.id),
     /** POST /inbox/read-all: Mark all (or one group) as read */
     markAllRead: async ({ principal, body }) => service.inbox.markAll({ principal }, body.group),
+    /** POST /inbox/{id}/archive: Archive one notice (for me) */
+    archiveNotice: async ({ principal, params }) => service.inbox.archive({ principal }, params.id),
+    /** POST /inbox/archive-all: Archive all (or one group) for me */
+    archiveAllNotices: async ({ principal, body }) => service.inbox.archiveAll({ principal }, { group: body.group, readOnly: body.readOnly }),
     /** GET /preferences: What we send and where to change it */
     getCustomerPreferences: async ({ principal }) => service.prefs.customerPreferences(accountOf(principal)),
     /** PUT /preferences/push: Turn order-update push notices on or off */

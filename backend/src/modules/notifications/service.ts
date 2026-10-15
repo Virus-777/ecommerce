@@ -659,6 +659,21 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('workqueues.day_end.prepared', event, eventId);
   }
 
+  /** sellers.member.invited: remember the invited member (preferences answer 409 MEMBER_NOT_JOINED until they accept) */
+  async onMemberInvitedFromSellers(event: EventPayload<'sellers.member.invited'>): Promise<void> {
+    await this.prefs.rememberInvited(event.sellerId, event.memberId, event.email);
+  }
+
+  /** sellers.member.joined: the invitation was accepted; the member's preferences open */
+  async onMemberJoinedFromSellers(event: EventPayload<'sellers.member.joined'>): Promise<void> {
+    await this.prefs.forgetInvited(event.sellerId, event.memberId);
+  }
+
+  /** sellers.member.removed: a revoked invitation is forgotten */
+  async onMemberRemovedFromSellers(event: EventPayload<'sellers.member.removed'>): Promise<void> {
+    await this.prefs.forgetInvited(event.sellerId, event.memberId);
+  }
+
   /** workqueues.day_end.completed: Staff (topic staff.day_end.completed, to roleKeys): the day-end summary; resolves the staff.day_end.summary action notices */
   async onDayEndCompletedFromWorkqueues(event: EventPayload<'workqueues.day_end.completed'>, eventId?: string): Promise<void> {
     await this.consumers.handle('workqueues.day_end.completed', event, eventId);

@@ -21,7 +21,7 @@ export const sellerRoutes = (service: NotificationsService) =>
   routes(endpoints, 'seller', {
     /** GET /inbox: Seller workspace notifications */
     listSellerInbox: async ({ principal, sellerAccess, query, page }) =>
-      service.listInboxFor({ principal, sellerAccess }, { group: query.group, unreadOnly: query.unreadOnly, actionRequired: query.actionRequired }, page),
+      service.listInboxFor({ principal, sellerAccess }, { group: query.group, unreadOnly: query.unreadOnly, actionRequired: query.actionRequired, archived: query.archived }, page),
     /** GET /inbox/summary: Unread, needs action (sorted by deadline) */
     getSellerInboxSummary: async ({ principal, sellerAccess }) => {
       const s = await service.inbox.summary({ principal, sellerAccess });
@@ -31,6 +31,10 @@ export const sellerRoutes = (service: NotificationsService) =>
     markSellerRead: async ({ principal, sellerAccess, params }) => service.inbox.markRead({ principal, sellerAccess }, params.id),
     /** POST /inbox/read-all: Mark all as read (for me) */
     markAllSellerRead: async ({ principal, sellerAccess, body }) => service.inbox.markAll({ principal, sellerAccess }, body.group),
+    /** POST /inbox/{id}/archive: Archive one notice (for me) */
+    archiveSellerNotice: async ({ principal, sellerAccess, params }) => service.inbox.archive({ principal, sellerAccess }, params.id),
+    /** POST /inbox/archive-all: Archive all (or one group) for me */
+    archiveAllSellerNotices: async ({ principal, sellerAccess, body }) => service.inbox.archiveAll({ principal, sellerAccess }, { group: body.group, readOnly: body.readOnly }),
     /** GET /preferences: Who hears about what (all members) */
     getSellerPreferences: async (i) => service.prefs.sellerPreferences(await callerOf(i)),
     /** PUT /preferences/members/{memberId}: Set one member's topics and channel */

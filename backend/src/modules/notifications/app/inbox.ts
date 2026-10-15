@@ -18,6 +18,8 @@ export interface InboxQuery {
   actionRequired?: boolean;
   category?: Category;
   view?: 'all' | 'needs_my_action' | 'mentions';
+  /** true: only the notices I archived; otherwise the inbox without them */
+  archived?: boolean;
 }
 
 /** Who is reading: the principal, and for seller members their access within the seller */
@@ -67,6 +69,7 @@ export class Inbox {
     if (q.category) f.topicKeys = TOPICS.filter((t) => t.category === q.category).map((t) => t.key);
     if (q.view === 'needs_my_action') f.openActionOnly = true;
     if (q.view === 'mentions') f.mentionsOnly = true;
+    if (q.archived) f.archived = true;
     return f;
   }
 
@@ -155,6 +158,35 @@ export class Inbox {
     return { updated: await this.core.repo.markRead(owner, 'all', this.core.now(), group ? { group } : {}) };
   }
 
+  /** Staff (G73): back to unread for me */
+  async markUnread(r: Reader, noticeId: string): Promise<Notice> {
+    const owner = await this.owner(r);
+    const row = owner && (await this.core.repo.getInboxNotice(owner, noticeId));
+    if (!owner || !row) throw new AppError('NOT_FOUND', 'Notice not found');
+    if (row.read_at) await this.core.repo.markUnread(owner, noticeId);
+    return (await this.toNotices([{ ...row, read_at: null }], owner))[0]!;
+  }
+
+  /** G62: hides one notice from my inbox (an open action notice stays until its work is done) */
+  async archive(r: Reader, noticeId: string): Promise<Notice> {
+    const owner = await this.owner(r);
+    const row = owner && (await this.core.repo.getInboxNotice(owner, noticeId));
+    if (!owner || !row) throw new AppError('NOT_FOUND', 'Notice not found');
+    if (row.action_required && !row.resolved_at && !row.expired_at) {
+      throw new AppError('NOTICE_ACTION_OPEN', 'This notice still needs action; archive it once the work is done.', { noticeId });
+    }
+    if (!row.archived_at) await this.core.repo.archive(owner, [noticeId], this.core.now());
+    const after = (await this.core.repo.getInboxNotice(owner, noticeId)) ?? row;
+    return (await this.toNotices([after], owner))[0]!;
+  }
+
+  /** G62: archives every notice of my inbox (or one group / staff area; optionally only those I read), except open action notices */
+  async archiveAll(r: Reader, o: { group?: string | null; readOnly?: boolean | null } = {}): Promise<{ updated: number }> {
+    const owner = await this.owner(r);
+    if (!owner) return { updated: 0 };
+    return { updated: await this.core.repo.archive(owner, 'all', this.core.now(), { ...(o.group ? { group: o.group } : {}), ...(o.readOnly ? { readOnly: true } : {}) }) };
+  }
+
   /** API shape of inbox rows (staff notices carry who they were routed to) */
   async toNotices(rows: InboxRow[], owner: InboxOwner): Promise<Notice[]> {
     const now = this.core.now();
@@ -188,6 +220,7 @@ export class Inbox {
         link: linkOf(n.link),
         createdAt: n.created_at.toISOString(),
         readAt: n.read_at?.toISOString() ?? null,
+        archivedAt: n.archived_at?.toISOString() ?? null,
         actionRequired: n.action_required,
         deadline: deadlineOf(n.deadline_at, now),
         resolvedAt: n.resolved_at?.toISOString() ?? null,

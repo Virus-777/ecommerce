@@ -19,7 +19,8 @@ export type SuppressionRow = NotificationsDb['suppressions'];
 export type BroadcastRow = NotificationsDb['broadcasts'];
 
 /** A notice as one person sees it (with their read state) */
-export type InboxRow = NoticeRow & { read_at: Date | null; reason: string | null; covering_for: string | null };
+export type InboxRow = NoticeRow & { read_at: Date | null; archived_at: Date | null; reason: string | null; covering_for: string | null };
+export type InvitedMemberRow = NotificationsDb['invited_members'];
 
 /** Which notices a person's inbox holds */
 export type InboxOwner =
@@ -36,6 +37,8 @@ export interface InboxFilter {
   openActionOnly?: boolean;
   /** Staff: notices where my recipient reason is mention */
   mentionsOnly?: boolean;
+  /** true: only the notices I archived; otherwise the inbox without them */
+  archived?: boolean;
 }
 
 export interface DeliveryFilter {

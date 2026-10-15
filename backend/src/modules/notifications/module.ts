@@ -131,7 +131,10 @@ export default defineModule({
     ctx.events.on("purchasing.purchase_order.sent", (e) => service.onPurchaseOrderSentFromPurchasing(e.payload, e.id));
     ctx.events.on("wallet.credit.expiring", (e) => service.onCreditExpiringFromWallet(e.payload, e.id));
     ctx.events.on("workqueues.day_end.prepared", (e) => service.onDayEndPreparedFromWorkqueues(e.payload, e.id));
-    ctx.events.on("workqueues.day_end.completed", (e) => service.onDayEndCompletedFromWorkqueues(e.payload, e.id));
+    ctx.events.on("sellers.member.invited", (e) => service.onMemberInvitedFromSellers(e.payload));
+    ctx.events.on("sellers.member.joined", (e) => service.onMemberJoinedFromSellers(e.payload));
+    ctx.events.on("sellers.member.removed", (e) => service.onMemberRemovedFromSellers(e.payload));
+    ctx.events.on("workqueues.day_end.completed",(e) => service.onDayEndCompletedFromWorkqueues(e.payload, e.id));
     ctx.events.on("trust.evidence.requested", (e) => service.onEvidenceRequestedFromTrust(e.payload, e.id));
     ctx.events.on("trust.appeal.decided", (e) => service.onAppealDecidedFromTrust(e.payload, e.id));
     ctx.events.on("payments.refund.destination_requested", (e) => service.onRefundDestinationRequestedFromPayments(e.payload, e.id));

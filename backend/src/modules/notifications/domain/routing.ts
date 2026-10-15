@@ -1308,6 +1308,10 @@ export const ROUTES: Routes = {
       },
     ],
   },
+  // invited seller members are kept by app/preferences.ts (G49a); these events send nothing
+  'sellers.member.invited': {},
+  'sellers.member.joined': {},
+  'sellers.member.removed': {},
   'workqueues.day_end.completed': {
     // the review is done: the "day-end review is open" action notices are resolved
     resolve: (p) => [`day-end:${p.reviewId}`],

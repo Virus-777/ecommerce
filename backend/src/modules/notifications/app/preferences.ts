@@ -140,12 +140,25 @@ export class Preferences {
     };
   }
 
+  /** G49a: invited members (sellers.member.invited) until they join or the invitation is revoked */
+  async rememberInvited(sellerId: string, memberId: string, email: string): Promise<void> {
+    await this.core.repo.rememberInvited({ seller_id: sellerId, member_id: memberId, email, invited_at: this.core.now() });
+  }
+
+  async forgetInvited(sellerId: string, memberId: string): Promise<void> {
+    await this.core.repo.forgetInvited(sellerId, memberId);
+  }
+
   async updateMember(caller: SellerCaller, memberId: string, input: MemberPreferenceInput, by: By): Promise<MemberPreference> {
     const repo = this.core.repo;
     let row = await repo.memberPreference(caller.sellerId, memberId);
     const self = memberId === caller.memberId || row?.account_id === caller.accountId;
     if (!row && self) row = await this.inbox.rememberMember(caller.sellerId, caller.memberId, caller.accountId, caller.access.isOwner);
     row ??= (await this.core.sellerMembers(caller.sellerId)).find((r) => r.member_id === memberId); // a member who never opened Seller Center
+    if (!row && (await repo.invitedMember(caller.sellerId, memberId))) {
+      // G49a: an invitation not accepted yet has no account to send to
+      throw new AppError('MEMBER_NOT_JOINED', 'This person has not accepted the invitation yet; their notification settings open once they join.', { memberId });
+    }
     if (!row) throw new AppError('NOT_FOUND', 'Member not found');
     if (!self && !caller.canManage) throw new AppError('FORBIDDEN', "Only the owner can change other members' notifications", { permission: 'notifications.preferences.manage' });
     const access = row.account_id === caller.accountId ? caller.access : await this.core.memberAccess(caller.sellerId, row.account_id);
