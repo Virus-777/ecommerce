@@ -23,7 +23,7 @@ import type {
   StatusReason,
   WarrantyTerms,
 } from '../../spec/offers.js';
-import { compareAtExplanation, dispatchLabel, reason, returnSummary, warrantyTerms } from './domain/rules.js';
+import { changePct as changePctOf, compareAtExplanation, dispatchLabel, reason, returnSummary, warrantyTerms } from './domain/rules.js';
 import type { BulkJobRec, BulkRowRec, EligibilityRec, OfferRec, PriceHistoryRec, RuleRec, StatusLogRec } from './ports.js';
 
 /** The Official Store's display name wherever a seller name is shown */
@@ -264,7 +264,9 @@ export function bulkJob(j: BulkJobRec): BulkUpdateJob {
   };
 }
 
-export function bulkRow(r: BulkRowRec, currency: string, productLabel: string | null): BulkUpdateRow {
+/** largeChange: the row would need confirmLargeChanges at apply (worked out by the caller, BulkPart.rows) */
+export function bulkRow(r: BulkRowRec, currency: string, productLabel: string | null, largeChange = false): BulkUpdateRow {
+  const changePct = r.price_from !== null && r.price_to !== null ? changePctOf(r.price_from, r.price_to) : null;
   return {
     row: r.row_no,
     sellerSku: r.seller_sku,
@@ -276,6 +278,8 @@ export function bulkRow(r: BulkRowRec, currency: string, productLabel: string | 
     quantityTo: r.qty_to,
     result: r.result as BulkUpdateRow['result'],
     error: r.error_code ? ({ code: r.error_code as BulkRowError['code'], message: r.error_message ?? '' } satisfies BulkRowError) : null,
+    changePct,
+    largeChange,
   };
 }
 

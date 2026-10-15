@@ -210,28 +210,41 @@ export const reason = (code: IneligibilityCode, message?: string): Ineligibility
 
 /* ------------------------------------------------------------------ featured-offer rule */
 
+/** Tie-breakers a rule version may list, applied in its order when adjusted totals are exactly equal */
+export const TIE_BREAKERS = ['official_store', 'on_time_dispatch', 'earliest_publication'] as const;
+/** Versions that list no tie-breakers keep the order the first rule used */
+const FIRST_RULE_TIE_BREAKERS = ['on_time_dispatch', 'earliest_publication'];
+
+/**
+ * The rule a new install starts with (owner decision G17b, 2026-10-16): the lowest delivered total wins, and on an
+ * exact tie the Official Store's offer is featured. Installs that already had rule versions get the same rule as a
+ * new version from the offers migration (migrations.ts); their earlier decisions keep the version they were made under.
+ */
 export const DEFAULT_RULE = {
   version: 1,
   text:
     'We feature one offer for each product variant and delivery location. Only eligible offers can be featured: the offer is active, the seller is in good standing with no open restriction, ' +
     'dispatches on time at or above the published standard and is not under delivery review, and the product can be bought. The offer must be in stock and ship to your location. ' +
-    'Among eligible New offers we compare the total price (item + shipping − automatic discounts), adding a small amount for each business day an offer arrives later than the fastest one. ' +
-    'The lowest adjusted total is featured; ties go to the better on-time dispatch record, then the earlier listing. Advertising never affects the featured offer.',
+    'Among eligible New offers the lowest delivered total wins: item price + shipping − automatic discounts. When two totals are exactly the same, the Official Store\'s offer is featured; ' +
+    'between other sellers the better on-time dispatch record, then the earlier listing. Advertising never affects the featured offer.',
   steps: [
     'Eligible: offer active, seller in good standing, on-time dispatch at or above the standard, not under delivery review, product purchasable',
     'Available: in stock and ships to your delivery location',
-    'Delivery: each business day slower than the fastest eligible offer adds 1% of the item price to the ranking total',
-    'Total price: item + shipping − automatic discounts; the lowest adjusted total is featured',
+    'Total price: item + shipping − automatic discounts; the lowest total is featured',
+    'Exact tie: the Official Store first, then the better on-time dispatch record, then the earlier listing',
   ],
   parameters: {
     minOnTimeDispatchPct: 90,
     performanceWindowDays: 90,
-    deliveryDayAdjustmentPct: 1,
+    deliveryDayAdjustmentPct: 0,
     competingConditions: ['new'],
-    tieBreakers: ['on_time_dispatch', 'earliest_publication'],
+    tieBreakers: ['official_store', 'on_time_dispatch', 'earliest_publication'],
   } satisfies FeaturedRuleParameters,
   reason: 'Initial featured-offer rule',
 };
+
+/** Reason recorded on the version the migration adds to installs that had rule versions before G17b */
+export const OFFICIAL_TIE_REASON = 'Lowest delivered total wins; the Official Store wins exact ties (owner decision G17b)';
 
 export const RULE_NOTES = [
   'Used and refurbished offers compete only within their condition filter.',
@@ -277,6 +290,8 @@ export interface RankInput {
   dispatchDays: number;
   onTimePct: number | null;
   publishedAt: Date | null;
+  /** The Official Store's offer (official_store tie-breaker) */
+  official?: boolean;
 }
 
 export interface Ranked extends RankInput {
@@ -284,8 +299,19 @@ export interface Ranked extends RankInput {
   rank: number | null;
 }
 
-/** Ranks eligible candidates by adjusted total; ineligible ones keep rank null */
-export function rankCandidates(cands: readonly RankInput[], params: Pick<FeaturedRuleParameters, 'deliveryDayAdjustmentPct'>): Ranked[] {
+type TieBreak = (a: RankInput, b: RankInput) => number;
+const TIE_BREAK: Record<string, TieBreak> = {
+  official_store: (a, b) => Number(b.official ?? false) - Number(a.official ?? false),
+  on_time_dispatch: (a, b) => (b.onTimePct ?? 0) - (a.onTimePct ?? 0),
+  earliest_publication: (a, b) => (a.publishedAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.publishedAt?.getTime() ?? Number.MAX_SAFE_INTEGER),
+};
+
+/**
+ * Ranks eligible candidates by adjusted total, then by the rule's tie-breakers in order (the first rule's order when it
+ * lists none), then by offer id; ineligible ones keep rank null.
+ */
+export function rankCandidates(cands: readonly RankInput[], params: Pick<FeaturedRuleParameters, 'deliveryDayAdjustmentPct'> & { tieBreakers?: readonly string[] | null }): Ranked[] {
+  const order = (params.tieBreakers?.length ? params.tieBreakers : FIRST_RULE_TIE_BREAKERS).map((k) => TIE_BREAK[k]).filter((f): f is TieBreak => Boolean(f));
   const eligible = cands.filter((c) => c.eligible);
   const dates = eligible.map((c) => c.arrivesTo).filter((d): d is string => Boolean(d));
   const fastestDate = dates.length ? dates.reduce((a, b) => (a < b ? a : b)) : null;
@@ -295,15 +321,15 @@ export function rankCandidates(cands: readonly RankInput[], params: Pick<Feature
     const adjust = Math.round((c.itemPrice * params.deliveryDayAdjustmentPct * slower) / 100);
     return { ...c, adjustedTotal: c.total + adjust, rank: null };
   });
-  const ranked = out
-    .filter((c) => c.eligible)
-    .sort(
-      (a, b) =>
-        a.adjustedTotal - b.adjustedTotal ||
-        (b.onTimePct ?? 0) - (a.onTimePct ?? 0) ||
-        (a.publishedAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.publishedAt?.getTime() ?? Number.MAX_SAFE_INTEGER) ||
-        a.offerId.localeCompare(b.offerId),
-    );
+  const compare = (a: Ranked, b: Ranked) => {
+    if (a.adjustedTotal !== b.adjustedTotal) return a.adjustedTotal - b.adjustedTotal;
+    for (const tie of order) {
+      const d = tie(a, b);
+      if (d !== 0) return d;
+    }
+    return a.offerId.localeCompare(b.offerId);
+  };
+  const ranked = out.filter((c) => c.eligible).sort(compare);
   ranked.forEach((c, i) => (c.rank = i + 1));
   return out.sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER) || a.adjustedTotal - b.adjustedTotal);
 }

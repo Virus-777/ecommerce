@@ -43,7 +43,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
 | GET | `/api/seller/offers/offers` | This seller's offers with review state, publication and stock as separate columns | seller | Page<SellerOfferRow> |
-| GET | `/api/seller/offers/offers/counts` | Counts for the list tabs and the page heading | seller | `{ all: int, active: int, draft: int, paused: int, outOfStock: int, ineligible: int, removed: int, productSubmitted: int, productChangesRequested: int, productRejected: int, hiddenOrSuspended: int, productCount: int }` |
+| GET | `/api/seller/offers/offers/counts` | Counts for the list tabs and the page heading | seller | `{ all: int, active: int, draft: int, paused: int, outOfStock: int, ineligible: int, removed: int, productSubmitted: int, productChangesRequested: int, productRejected: int, hiddenOrSuspended: int, productCount: int, productDraft: int, productPublication: object }` |
 | GET | `/api/seller/offers/offers/{id}` | One own offer with product, stock, price history, status log and featured eligibility | seller | `SellerOfferDetail` |
 | POST | `/api/seller/offers/offers/preview` | Check an offer before saving: delivery a customer would see, price context, was-price check, return baseline | seller | `OfferInput` → `OfferPreview` |
 | POST | `/api/seller/offers/offers` | Create an offer on a catalog product (draft or published) | seller<br>`offers.offers.manage` | `OfferInput` → `SellerOfferDetail` |
@@ -75,18 +75,18 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | POST | `/api/admin/offers/offers/{id}/hold` | Hold an offer during an investigation (Ineligible, staff_hold) with a reason and review date _(audited)_ | staff<br>`offers.offers.remove` | `HoldOfferRequest` → `OfferAdminDetail` |
 | POST | `/api/admin/offers/offers/{id}/release-hold` | Release a staff hold _(audited)_ | staff<br>`offers.offers.remove` | `{ reason: text }` → `OfferAdminDetail` |
 | POST | `/api/admin/offers/offers/{id}/reinstate` | Reinstate a removed offer as Paused (e.g. after a successful appeal) _(audited)_ | staff<br>`offers.offers.remove` | `{ reason: text }` → `OfferAdminDetail` |
-| GET | `/api/admin/offers/official/offers` | Official Store offers with price, cost, margin and sellable stock | staff<br>`offers.official.manage` | Page<OfficialOfferRow> |
+| GET | `/api/admin/offers/official/offers` | Official Store offers with price, cost, margin and sellable stock | staff<br>`offers.official.view` | Page<OfficialOfferRow> |
 | POST | `/api/admin/offers/official/offers` | Create an Official Store offer linked to a company stock item _(audited)_ | staff<br>`offers.official.manage` | `OfficialOfferInput` → `OfferAdminDetail` |
 | PATCH | `/api/admin/offers/official/offers/{id}` | Edit Official Store offer terms (not price; use price changes) _(audited)_ | staff<br>`offers.official.manage` | `OfferUpdate` → `OfferAdminDetail` |
 | POST | `/api/admin/offers/official/offers/{id}/publish` | Publish an Official Store offer _(audited)_ | staff<br>`offers.official.manage` | `OfferAdminDetail` |
 | POST | `/api/admin/offers/official/offers/{id}/pause` | Hide an Official Store offer _(audited)_ | staff<br>`offers.official.manage` | `{ reason: text }` → `OfferAdminDetail` |
 | POST | `/api/admin/offers/official/offers/{id}/resume` | Show a hidden Official Store offer again _(audited)_ | staff<br>`offers.official.manage` | `OfferAdminDetail` |
 | POST | `/api/admin/offers/official/offers/{id}/price-changes` | Change an Official Store price (now or scheduled) with a reason _(audited)_ | staff<br>`offers.official.price` | `PriceChangeRequest` → `PriceChange` |
-| GET | `/api/admin/offers/price-changes` | Pending, scheduled and recent price changes | staff<br>`offers.official.price` | Page<PriceChange> |
+| GET | `/api/admin/offers/price-changes` | Pending, scheduled and recent price changes | staff<br>`offers.official.view` | Page<PriceChange> |
 | POST | `/api/admin/offers/price-changes/{id}/cancel` | Cancel a scheduled or pending price change _(audited)_ | staff<br>`offers.official.price` | `{ reason: text }` → `PriceChange` |
 | POST | `/api/admin/offers/official/bulk-updates` | Upload an Official Store price file for preview _(audited, phase 2)_ | staff<br>`offers.official.price` | `{ fileId: uuid, reason: text }` → `BulkUpdateJob` |
-| GET | `/api/admin/offers/official/bulk-updates/{id}` | Official Store bulk job state and totals _(phase 2)_ | staff<br>`offers.official.price` | `BulkUpdateJob` |
-| GET | `/api/admin/offers/official/bulk-updates/{id}/rows` | Official Store bulk preview rows _(phase 2)_ | staff<br>`offers.official.price` | Page<BulkUpdateRow> |
+| GET | `/api/admin/offers/official/bulk-updates/{id}` | Official Store bulk job state and totals _(phase 2)_ | staff<br>`offers.official.view` | `BulkUpdateJob` |
+| GET | `/api/admin/offers/official/bulk-updates/{id}/rows` | Official Store bulk preview rows _(phase 2)_ | staff<br>`offers.official.view` | Page<BulkUpdateRow> |
 | POST | `/api/admin/offers/official/bulk-updates/{id}/apply` | Apply valid rows; rows above the price-change limit become approval requests _(audited, phase 2)_ | staff<br>`offers.official.price` | `BulkUpdateJob` |
 | GET | `/api/admin/offers/featured-rule` | Current, scheduled and past versions of the featured-offer rule | staff<br>`offers.offers.view` | `{ current: FeaturedRule, scheduled: FeaturedRule?, history: FeaturedRule[] }` |
 | POST | `/api/admin/offers/featured-rule/versions` | Publish a new version of the featured-offer rule with an effective date _(audited)_ | staff<br>`offers.featured-rule.manage` | `FeaturedRuleInput` → `FeaturedRule` |
@@ -324,6 +324,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | dispatchLabel | `string` |
 | orderWithinMinutes | `int?` Countdown to the cutoff that keeps this date |
 | serviceNotice | `string?` Holiday or known interruption (from shipping) |
+| locationLabel | `string?` The delivery location this estimate is for (DeliverTo.label), e.g. 'Portland 97205' |
 
 ### Availability
 
@@ -428,6 +429,18 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | variants | `VariantAvailability[]` |
 | quantityOptions | `int[]` |
 | unavailable | `UnavailableInfo?` |
+| officialStore | `OfficialStoreCue?` Present when the Official Store has an offer for this variant that can't be bought at this location while another seller's offer is selected (the 'Official Store out of stock, other sellers have it' state); null otherwise |
+
+### OfficialStoreCue
+
+| Field | Type |
+|---|---|
+| offerId | `uuid` |
+| state | `enum(out_of_stock|not_shippable|unavailable)` out_of_stock: no stock now; not_shippable: does not ship to the delivery location; unavailable: paused or not eligible |
+| title | `string` e.g. 'Out of stock at the Official Store' |
+| message | `text` e.g. 'Expected back around 2026-10-28 (estimate). Other sellers have it now.' |
+| expectedRestockDate | `date?` From inventory incoming stock; an estimate |
+| price | `Money` The Official Store's price for the variant |
 
 ### OtherOffersCue
 
@@ -491,6 +504,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | statusReason | `StatusReason?` |
 | featured | `bool` |
 | featuredEligible | `bool` |
+| stockItemId | `uuid` The inventory stock item the offer sells from (for stock pages and bulk stock updates) |
 
 ### StockCue
 
@@ -650,6 +664,8 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | quantityTo | `int?` |
 | result | `enum(ready|error|unchanged|applied|skipped|pending_approval)` |
 | error | `BulkRowError?` |
+| changePct | `number?` Signed price change in percent when the row changes the price |
+| largeChange | `bool` Seller files: the row changes a published offer's price by more than largeSellerPriceChangePct, so apply needs confirmLargeChanges. Draft offers are exempt; always false on Official Store files (those go through price-change approval) |
 
 ### BulkRowError
 
@@ -735,7 +751,7 @@ How one seller (or the Official Store) sells one variant in one condition: price
 | performanceWindowDays | `int` |
 | deliveryDayAdjustmentPct | `number` Added to the total, as % of item price, per business day slower than the fastest eligible offer |
 | competingConditions | `string[]` Conditions that compete by default, e.g. ['new']; others compete only within their condition filter |
-| tieBreakers | `string[]` |
+| tieBreakers | `string[]` Applied in order when adjusted totals are exactly equal: official_store (the Official Store's offer first), on_time_dispatch (better record first), earliest_publication. Offer id decides last. Version 2 (owner decision G17b): ['official_store', 'on_time_dispatch', 'earliest_publication'] |
 
 ### FeaturedRuleInput
 
@@ -1148,6 +1164,7 @@ Indexes: `pk (job_id, row_no)`, `(job_id, result)`
 | `offers.bulk.update` | seller | Upload and apply bulk price and quantity files |
 | `offers.offers.view` | staff | View all offers, featured decisions and the featured rule |
 | `offers.offers.remove` | staff | Remove, hold, release and reinstate offers (reason required) |
+| `offers.official.view` | staff | View Official Store offers, price changes and price files (read only) |
 | `offers.official.manage` | staff | Create and edit Official Store offers |
 | `offers.official.price` | staff | Change Official Store prices within the approval limit set in access |
 | `offers.featured-rule.manage` | staff | Publish featured-offer rule versions and force recomputation |
@@ -1208,7 +1225,7 @@ Checked through the access module (limits per role, second reviewer).
 
 ## Notes
 - Product vs offer (plan ch. 5, 8): offers never edit shared content; corrections go through catalog suggestCorrection from the offer form.
-- Featured-offer rule (published, versioned, default v1): (1) Eligible: offer Active, seller in good standing with no open restriction, on-time dispatch ≥ minOnTimeDispatchPct over performanceWindowDays, not under delivery review, product purchasable. (2) Available: available > 0 and ships to the delivery location. (3) Delivery: each business day slower than the fastest eligible offer adds deliveryDayAdjustmentPct of the item price to the ranking total. (4) Total price: item + shipping − automatic discounts. Lowest adjusted total wins; ties by higher on-time dispatch, then earlier publication. Only competingConditions (New) compete by default; used/refurbished compete within their condition filter. Advertising never affects it.
+- Featured-offer rule (published, versioned, default v1): (1) Eligible: offer Active, seller in good standing with no open restriction, on-time dispatch ≥ minOnTimeDispatchPct over performanceWindowDays, not under delivery review, product purchasable. (2) Available: available > 0 and ships to the delivery location. (3) Delivery: each business day slower than the fastest eligible offer adds deliveryDayAdjustmentPct of the item price to the ranking total. (4) Total price: item + shipping − automatic discounts. Lowest adjusted total wins; exact ties go through the version's tieBreakers in order (official_store, on_time_dispatch, earliest_publication; a version listing none uses on-time dispatch, then earlier publication). Owner decision G17b (2026-10-16): the lowest delivered total wins and the Official Store wins an exact tie: new installs start with that rule (deliveryDayAdjustmentPct 0, tieBreakers official_store first); installs that had rule versions get it as a new version from the 2026-10-16 data migration, and decisions made earlier keep their version. Only competingConditions (New) compete by default; used/refurbished compete within their condition filter. Advertising never affects it.
 - A customer's explicit offer choice is passed as offerId; the purchase box and cart keep that seller. revalidate reports changes but never substitutes another seller (scenario 2).
 - Comparable totals need a delivery location: postalCode query → customer default address → market default (settings). Shipping estimates come from shipping.quote(profileId, postalCode, variant dimensions); when shipping is off, delivery shows the dispatch label only.
 - Was-price authenticity: compareAt is shown only when verified (price history or list price on file) and carries its explanation; the nightly job drops stale ones.

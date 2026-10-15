@@ -601,6 +601,10 @@
       "serviceNotice": {
         "type": "string?",
         "desc": "Holiday or known interruption (from shipping)"
+      },
+      "locationLabel": {
+        "type": "string?",
+        "desc": "The delivery location this estimate is for (DeliverTo.label), e.g. 'Portland 97205'"
       }
     },
     "Availability": {
@@ -729,7 +733,34 @@
       "otherOffers": "OtherOffersCue",
       "variants": "VariantAvailability[]",
       "quantityOptions": "int[]",
-      "unavailable": "UnavailableInfo?"
+      "unavailable": "UnavailableInfo?",
+      "officialStore": {
+        "type": "OfficialStoreCue?",
+        "desc": "Present when the Official Store has an offer for this variant that can't be bought at this location while another seller's offer is selected (the 'Official Store out of stock, other sellers have it' state); null otherwise"
+      }
+    },
+    "OfficialStoreCue": {
+      "offerId": "uuid",
+      "state": {
+        "type": "enum(out_of_stock|not_shippable|unavailable)",
+        "desc": "out_of_stock: no stock now; not_shippable: does not ship to the delivery location; unavailable: paused or not eligible"
+      },
+      "title": {
+        "type": "string",
+        "desc": "e.g. 'Out of stock at the Official Store'"
+      },
+      "message": {
+        "type": "text",
+        "desc": "e.g. 'Expected back around 2026-10-28 (estimate). Other sellers have it now.'"
+      },
+      "expectedRestockDate": {
+        "type": "date?",
+        "desc": "From inventory incoming stock; an estimate"
+      },
+      "price": {
+        "type": "Money",
+        "desc": "The Official Store's price for the variant"
+      }
     },
     "OtherOffersCue": {
       "count": "int",
@@ -795,7 +826,11 @@
       "status": "enum(draft|active|paused|out_of_stock|ineligible|removed)",
       "statusReason": "StatusReason?",
       "featured": "bool",
-      "featuredEligible": "bool"
+      "featuredEligible": "bool",
+      "stockItemId": {
+        "type": "uuid",
+        "desc": "The inventory stock item the offer sells from (for stock pages and bulk stock updates)"
+      }
     },
     "StockCue": {
       "available": "int",
@@ -948,7 +983,15 @@
       "quantityFrom": "int?",
       "quantityTo": "int?",
       "result": "enum(ready|error|unchanged|applied|skipped|pending_approval)",
-      "error": "BulkRowError?"
+      "error": "BulkRowError?",
+      "changePct": {
+        "type": "number?",
+        "desc": "Signed price change in percent when the row changes the price"
+      },
+      "largeChange": {
+        "type": "bool",
+        "desc": "Seller files: the row changes a published offer's price by more than largeSellerPriceChangePct, so apply needs confirmLargeChanges. Draft offers are exempt; always false on Official Store files (those go through price-change approval)"
+      }
     },
     "BulkRowError": {
       "code": {
@@ -1037,7 +1080,10 @@
         "type": "string[]",
         "desc": "Conditions that compete by default, e.g. ['new']; others compete only within their condition filter"
       },
-      "tieBreakers": "string[]"
+      "tieBreakers": {
+        "type": "string[]",
+        "desc": "Applied in order when adjusted totals are exactly equal: official_store (the Official Store's offer first), on_time_dispatch (better record first), earliest_publication. Offer id decides last. Version 2 (owner decision G17b): ['official_store', 'on_time_dispatch', 'earliest_publication']"
+      }
     },
     "FeaturedRuleInput": {
       "text": "text",
@@ -1663,6 +1709,10 @@
         "missingContent": {
           "type": "enum(images|identifiers)?",
           "desc": "Product content gaps: images = fewer than the category's required images; identifiers = no GTIN/UPC or brand + model number. Low stock is stockState=low_stock"
+        },
+        "productPublication": {
+          "type": "enum(active|hidden|suspended)?",
+          "desc": "The product's publication in the catalog (SellerOfferRow.productPublication)"
         }
       },
       "response": "SellerOfferRow",
@@ -1702,13 +1752,22 @@
         "productCount": {
           "type": "int",
           "desc": "Distinct products the seller's non-removed offers are on"
+        },
+        "productDraft": {
+          "type": "int",
+          "desc": "Offers on a product draft the seller has not submitted yet (list with productReviewState=draft)"
+        },
+        "productPublication": {
+          "active": "int",
+          "hidden": "int",
+          "suspended": "int"
         }
       },
       "screens": [
         "seller/products",
         "seller/dashboard"
       ],
-      "desc": "Offer status counts plus tab totals that combine the product review state (from catalog) with publication. Tabs: All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended; the heading reads '{all} offers across {productCount} products'."
+      "desc": "Offer status counts plus tab totals that combine the product review state (from catalog) with publication. Tabs: All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended; the heading reads '{all} offers across {productCount} products'. productDraft counts offers on unsubmitted product drafts; productPublication counts non-removed offers by the product's publication (active, hidden, suspended), matching the list's productPublication filter."
     },
     {
       "id": "getOwnOffer",
@@ -2328,7 +2387,7 @@
       "path": "/official/offers",
       "summary": "Official Store offers with price, cost, margin and sellable stock",
       "auth": "staff",
-      "permission": "offers.official.manage",
+      "permission": "offers.official.view",
       "paging": true,
       "query": {
         "q": {
@@ -2510,7 +2569,7 @@
       "path": "/price-changes",
       "summary": "Pending, scheduled and recent price changes",
       "auth": "staff",
-      "permission": "offers.official.price",
+      "permission": "offers.official.view",
       "paging": true,
       "query": {
         "state": "enum(requested|pending_approval|scheduled|applied|reverted|rejected|cancelled)?",
@@ -2576,7 +2635,7 @@
       "path": "/official/bulk-updates/{id}",
       "summary": "Official Store bulk job state and totals",
       "auth": "staff",
-      "permission": "offers.official.price",
+      "permission": "offers.official.view",
       "params": {
         "id": "uuid"
       },
@@ -2593,7 +2652,7 @@
       "path": "/official/bulk-updates/{id}/rows",
       "summary": "Official Store bulk preview rows",
       "auth": "staff",
-      "permission": "offers.official.price",
+      "permission": "offers.official.view",
       "params": {
         "id": "uuid"
       },
@@ -2972,6 +3031,11 @@
       "desc": "Remove, hold, release and reinstate offers (reason required)"
     },
     {
+      "key": "offers.official.view",
+      "audience": "staff",
+      "desc": "View Official Store offers, price changes and price files (read only)"
+    },
+    {
       "key": "offers.official.manage",
       "audience": "staff",
       "desc": "Create and edit Official Store offers"
@@ -3136,7 +3200,7 @@
   },
   "notes": [
     "Product vs offer (plan ch. 5, 8): offers never edit shared content; corrections go through catalog suggestCorrection from the offer form.",
-    "Featured-offer rule (published, versioned, default v1): (1) Eligible: offer Active, seller in good standing with no open restriction, on-time dispatch ≥ minOnTimeDispatchPct over performanceWindowDays, not under delivery review, product purchasable. (2) Available: available > 0 and ships to the delivery location. (3) Delivery: each business day slower than the fastest eligible offer adds deliveryDayAdjustmentPct of the item price to the ranking total. (4) Total price: item + shipping − automatic discounts. Lowest adjusted total wins; ties by higher on-time dispatch, then earlier publication. Only competingConditions (New) compete by default; used/refurbished compete within their condition filter. Advertising never affects it.",
+    "Featured-offer rule (published, versioned, default v1): (1) Eligible: offer Active, seller in good standing with no open restriction, on-time dispatch ≥ minOnTimeDispatchPct over performanceWindowDays, not under delivery review, product purchasable. (2) Available: available > 0 and ships to the delivery location. (3) Delivery: each business day slower than the fastest eligible offer adds deliveryDayAdjustmentPct of the item price to the ranking total. (4) Total price: item + shipping − automatic discounts. Lowest adjusted total wins; exact ties go through the version's tieBreakers in order (official_store, on_time_dispatch, earliest_publication; a version listing none uses on-time dispatch, then earlier publication). Owner decision G17b (2026-10-16): the lowest delivered total wins and the Official Store wins an exact tie: new installs start with that rule (deliveryDayAdjustmentPct 0, tieBreakers official_store first); installs that had rule versions get it as a new version from the 2026-10-16 data migration, and decisions made earlier keep their version. Only competingConditions (New) compete by default; used/refurbished compete within their condition filter. Advertising never affects it.",
     "A customer's explicit offer choice is passed as offerId; the purchase box and cart keep that seller. revalidate reports changes but never substitutes another seller (scenario 2).",
     "Comparable totals need a delivery location: postalCode query → customer default address → market default (settings). Shipping estimates come from shipping.quote(profileId, postalCode, variant dimensions); when shipping is off, delivery shows the dispatch label only.",
     "Was-price authenticity: compareAt is shown only when verified (price history or list price on file) and carries its explanation; the nightly job drops stale ones.",

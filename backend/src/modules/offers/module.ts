@@ -4,6 +4,7 @@ import { resolvers } from './graphql/resolvers.js';
 import { storeRoutes } from './http/store.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
+import { mongoMigrations } from './migrations.js';
 import { mediaBulkFileReader } from './providers/files.js';
 import { OffersRepository } from './repository.js';
 import { OffersService } from './service.js';
@@ -19,6 +20,7 @@ export default defineModule({
   spec,
   version: '2.0.0',
   schemas,
+  mongoMigrations,
   register(ctx) {
     const service = new OffersService({ repo: new OffersRepository(ctx.mongo), ctx, files: mediaBulkFileReader(ctx) });
     ctx.provide(service);

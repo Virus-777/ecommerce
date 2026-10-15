@@ -487,6 +487,8 @@ export interface DeliveryEstimate {
   orderWithinMinutes?: number | null;
   /** Holiday or known interruption (from shipping) */
   serviceNotice?: string | null;
+  /** The delivery location this estimate is for (DeliverTo.label), e.g. 'Portland 97205' */
+  locationLabel?: string | null;
 }
 
 export const DeliveryEstimate: z.ZodType<DeliveryEstimate> = z.object({
@@ -508,6 +510,7 @@ export const DeliveryEstimate: z.ZodType<DeliveryEstimate> = z.object({
   dispatchLabel: z.string(),
   orderWithinMinutes: z.number().int().describe("Countdown to the cutoff that keeps this date").nullish(),
   serviceNotice: z.string().describe("Holiday or known interruption (from shipping)").nullish(),
+  locationLabel: z.string().describe("The delivery location this estimate is for (DeliverTo.label), e.g. 'Portland 97205'").nullish(),
 }).register(common.apiTypes, { id: "offers.DeliveryEstimate" });
 
 export interface Availability {
@@ -721,6 +724,8 @@ export interface PurchaseBox {
   variants: VariantAvailability[];
   quantityOptions: number[];
   unavailable?: UnavailableInfo | null;
+  /** Present when the Official Store has an offer for this variant that can't be bought at this location while another seller's offer is selected (the 'Official Store out of stock, other sellers have it' state); null otherwise */
+  officialStore?: OfficialStoreCue | null;
 }
 
 export const PurchaseBox: z.ZodType<PurchaseBox> = z.object({
@@ -748,7 +753,35 @@ export const PurchaseBox: z.ZodType<PurchaseBox> = z.object({
   get unavailable() {
     return UnavailableInfo.nullish();
   },
+  get officialStore() {
+    return OfficialStoreCue.nullish();
+  },
 }).register(common.apiTypes, { id: "offers.PurchaseBox" });
+
+export interface OfficialStoreCue {
+  offerId: string;
+  /** out_of_stock: no stock now; not_shippable: does not ship to the delivery location; unavailable: paused or not eligible */
+  state: "out_of_stock" | "not_shippable" | "unavailable";
+  /** e.g. 'Out of stock at the Official Store' */
+  title: string;
+  /** e.g. 'Expected back around 2026-10-28 (estimate). Other sellers have it now.' */
+  message: string;
+  /** From inventory incoming stock; an estimate */
+  expectedRestockDate?: string | null;
+  /** The Official Store's price for the variant */
+  price: common.Money;
+}
+
+export const OfficialStoreCue: z.ZodType<OfficialStoreCue> = z.object({
+  offerId: z.uuid(),
+  state: z.enum(["out_of_stock", "not_shippable", "unavailable"]).describe("out_of_stock: no stock now; not_shippable: does not ship to the delivery location; unavailable: paused or not eligible"),
+  title: z.string().describe("e.g. 'Out of stock at the Official Store'"),
+  message: z.string().describe("e.g. 'Expected back around 2026-10-28 (estimate). Other sellers have it now.'"),
+  expectedRestockDate: z.iso.date().describe("From inventory incoming stock; an estimate").nullish(),
+  get price() {
+    return common.Money;
+  },
+}).register(common.apiTypes, { id: "offers.OfficialStoreCue" });
 
 export interface OtherOffersCue {
   count: number;
@@ -862,6 +895,8 @@ export interface OfferSummary {
   statusReason?: StatusReason | null;
   featured: boolean;
   featuredEligible: boolean;
+  /** The inventory stock item the offer sells from (for stock pages and bulk stock updates) */
+  stockItemId: string;
 }
 
 export const OfferSummary: z.ZodType<OfferSummary> = z.object({
@@ -888,6 +923,7 @@ export const OfferSummary: z.ZodType<OfferSummary> = z.object({
   },
   featured: z.boolean(),
   featuredEligible: z.boolean(),
+  stockItemId: z.uuid().describe("The inventory stock item the offer sells from (for stock pages and bulk stock updates)"),
 }).register(common.apiTypes, { id: "offers.OfferSummary" });
 
 export interface StockCue {
@@ -1215,6 +1251,10 @@ export interface BulkUpdateRow {
   quantityTo?: number | null;
   result: "ready" | "error" | "unchanged" | "applied" | "skipped" | "pending_approval";
   error?: BulkRowError | null;
+  /** Signed price change in percent when the row changes the price */
+  changePct?: number | null;
+  /** Seller files: the row changes a published offer's price by more than largeSellerPriceChangePct, so apply needs confirmLargeChanges. Draft offers are exempt; always false on Official Store files (those go through price-change approval) */
+  largeChange: boolean;
 }
 
 export const BulkUpdateRow: z.ZodType<BulkUpdateRow> = z.object({
@@ -1234,6 +1274,8 @@ export const BulkUpdateRow: z.ZodType<BulkUpdateRow> = z.object({
   get error() {
     return BulkRowError.nullish();
   },
+  changePct: z.number().describe("Signed price change in percent when the row changes the price").nullish(),
+  largeChange: z.boolean().describe("Seller files: the row changes a published offer's price by more than largeSellerPriceChangePct, so apply needs confirmLargeChanges. Draft offers are exempt; always false on Official Store files (those go through price-change approval)"),
 }).register(common.apiTypes, { id: "offers.BulkUpdateRow" });
 
 export interface BulkRowError {
@@ -1401,6 +1443,7 @@ export interface FeaturedRuleParameters {
   deliveryDayAdjustmentPct: number;
   /** Conditions that compete by default, e.g. ['new']; others compete only within their condition filter */
   competingConditions: string[];
+  /** Applied in order when adjusted totals are exactly equal: official_store (the Official Store's offer first), on_time_dispatch (better record first), earliest_publication. Offer id decides last. Version 2 (owner decision G17b): ['official_store', 'on_time_dispatch', 'earliest_publication'] */
   tieBreakers: string[];
 }
 
@@ -1409,7 +1452,7 @@ export const FeaturedRuleParameters: z.ZodType<FeaturedRuleParameters> = z.objec
   performanceWindowDays: z.number().int(),
   deliveryDayAdjustmentPct: z.number().describe("Added to the total, as % of item price, per business day slower than the fastest eligible offer"),
   competingConditions: z.array(z.string()).describe("Conditions that compete by default, e.g. ['new']; others compete only within their condition filter"),
-  tieBreakers: z.array(z.string()),
+  tieBreakers: z.array(z.string()).describe("Applied in order when adjusted totals are exactly equal: official_store (the Official Store's offer first), on_time_dispatch (better record first), earliest_publication. Offer id decides last. Version 2 (owner decision G17b): ['official_store', 'on_time_dispatch', 'earliest_publication']"),
 }).register(common.apiTypes, { id: "offers.FeaturedRuleParameters" });
 
 export interface FeaturedRuleInput {
@@ -2146,6 +2189,7 @@ export const endpoints = defineEndpoints({
         featured: z.stringbool().optional(),
         hiddenOrSuspended: z.stringbool().describe("Paused or ineligible offers, including those on hidden or suspended products").optional(),
         missingContent: z.enum(["images", "identifiers"]).describe("Product content gaps: images = fewer than the category's required images; identifiers = no GTIN/UPC or brand + model number. Low stock is stockState=low_stock").optional(),
+        productPublication: z.enum(["active", "hidden", "suspended"]).describe("The product's publication in the catalog (SellerOfferRow.productPublication)").optional(),
       }),
     paging: true,
     response: () => SellerOfferRow,
@@ -2160,7 +2204,7 @@ export const endpoints = defineEndpoints({
     auth: "seller",
     scope: "own-seller",
     summary: "Counts for the list tabs and the page heading",
-    desc: "Offer status counts plus tab totals that combine the product review state (from catalog) with publication. Tabs: All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended; the heading reads '{all} offers across {productCount} products'.",
+    desc: "Offer status counts plus tab totals that combine the product review state (from catalog) with publication. Tabs: All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended; the heading reads '{all} offers across {productCount} products'. productDraft counts offers on unsubmitted product drafts; productPublication counts non-removed offers by the product's publication (active, hidden, suspended), matching the list's productPublication filter.",
     response: () => z.object({
       all: z.number().int(),
       active: z.number().int(),
@@ -2174,6 +2218,12 @@ export const endpoints = defineEndpoints({
       productRejected: z.number().int().describe("Offers on a product submission the catalog team rejected (Rejected tab)"),
       hiddenOrSuspended: z.number().int().describe("Paused by the seller, or ineligible because of a staff hold, restriction or a hidden/suspended product (Hidden or suspended tab = list with hiddenOrSuspended=true)"),
       productCount: z.number().int().describe("Distinct products the seller's non-removed offers are on"),
+      productDraft: z.number().int().describe("Offers on a product draft the seller has not submitted yet (list with productReviewState=draft)"),
+      productPublication: z.object({
+        active: z.number().int(),
+        hidden: z.number().int(),
+        suspended: z.number().int(),
+      }),
     }),
     status: 200,
     screens: ["seller/products","seller/dashboard"],
@@ -2700,7 +2750,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/official/offers",
     auth: "staff",
-    permission: "offers.official.manage",
+    permission: "offers.official.view",
     scope: "staff",
     summary: "Official Store offers with price, cost, margin and sellable stock",
     query: () =>
@@ -2845,7 +2895,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/price-changes",
     auth: "staff",
-    permission: "offers.official.price",
+    permission: "offers.official.view",
     scope: "staff",
     summary: "Pending, scheduled and recent price changes",
     query: () =>
@@ -2907,7 +2957,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/official/bulk-updates/{id}",
     auth: "staff",
-    permission: "offers.official.price",
+    permission: "offers.official.view",
     scope: "staff",
     summary: "Official Store bulk job state and totals",
     params: () =>
@@ -2924,7 +2974,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/official/bulk-updates/{id}/rows",
     auth: "staff",
-    permission: "offers.official.price",
+    permission: "offers.official.view",
     scope: "staff",
     summary: "Official Store bulk preview rows",
     params: () =>
@@ -3087,6 +3137,11 @@ export const spec = defineModuleSpec({
       "key": "offers.offers.remove",
       "audience": "staff",
       "desc": "Remove, hold, release and reinstate offers (reason required)"
+    },
+    {
+      "key": "offers.official.view",
+      "audience": "staff",
+      "desc": "View Official Store offers, price changes and price files (read only)"
     },
     {
       "key": "offers.official.manage",

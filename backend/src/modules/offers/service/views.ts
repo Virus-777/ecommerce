@@ -43,6 +43,7 @@ export interface SellerListQuery {
   featured?: boolean;
   hiddenOrSuspended?: boolean;
   missingContent?: 'images' | 'identifiers';
+  productPublication?: 'active' | 'hidden' | 'suspended';
 }
 
 const EMPTY_STOCK: StockCue = { available: 0, reserved: 0, incoming: 0, lowStockThreshold: null, state: 'out_of_stock' };
@@ -82,6 +83,7 @@ export class ViewsPart extends Part {
         statusReason: (r.status_reason as OfferSummary['statusReason']) ?? null,
         featured: featured.has(r.id) && r.status === 'active',
         featuredEligible: e.get(r.id)?.eligible ?? r.status === 'active',
+        stockItemId: r.stock_item_id,
       });
     }
     return out;
@@ -152,7 +154,7 @@ export class ViewsPart extends Part {
   }
 
   private needsScan(q: SellerListQuery) {
-    return Boolean(q.q?.trim() || q.categoryId || q.stockState || q.productReviewState || q.featured !== undefined || q.hiddenOrSuspended !== undefined);
+    return Boolean(q.q?.trim() || q.categoryId || q.stockState || q.productReviewState || q.productPublication || q.featured !== undefined || q.hiddenOrSuspended !== undefined);
   }
 
   async listOwn(sellerId: string, q: SellerListQuery, page: PageRequest): Promise<common.Page<SellerOfferRow>> {
@@ -184,6 +186,7 @@ export class ViewsPart extends Part {
       if (q.categoryId && p?.product.categoryId !== q.categoryId) return false;
       if (q.stockState && row.stock.state !== q.stockState) return false;
       if (q.productReviewState && row.productReviewState !== q.productReviewState) return false;
+      if (q.productPublication && row.productPublication !== q.productPublication) return false;
       if (q.featured !== undefined && row.offer.featured !== q.featured) return false;
       if (q.hiddenOrSuspended !== undefined) {
         const hidden = r.status === 'paused' || r.status === 'ineligible' || row.productPublication !== 'active';
@@ -200,6 +203,8 @@ export class ViewsPart extends Part {
     const products = await this.sellerProducts(sellerId, rows.map((r) => r.product_id), new Map());
     const n = (s: string) => byStatus[s] ?? 0;
     const review = (state: string) => rows.filter((r) => products.get(r.product_id)?.reviewState === state).length;
+    // the same defaults as the list rows: a product catalog can't answer for counts as approved and active
+    const publication = (state: string) => rows.filter((r) => (products.get(r.product_id)?.publication ?? 'active') === state).length;
     return {
       all: Object.values(byStatus).reduce((a, b) => a + b, 0) - n('removed'),
       active: n('active'),
@@ -213,6 +218,8 @@ export class ViewsPart extends Part {
       productRejected: review('rejected'),
       hiddenOrSuspended: rows.filter((r) => r.status === 'paused' || r.status === 'ineligible' || (products.get(r.product_id)?.publication ?? 'active') !== 'active').length,
       productCount: new Set(rows.map((r) => r.product_id)).size,
+      productDraft: review('draft'),
+      productPublication: { active: publication('active'), hidden: publication('hidden'), suspended: publication('suspended') },
     };
   }
 
@@ -440,7 +447,7 @@ export class ViewsPart extends Part {
     if (typeof raw !== 'object' || Array.isArray(raw)) throw invalidField('filters', 'Filters are the list filters (q, status, condition, …)');
     const f = raw as Record<string, unknown>;
     const out: SellerListQuery = {};
-    for (const k of ['q', 'status', 'condition', 'categoryId', 'stockState', 'productReviewState', 'missingContent'] as const) {
+    for (const k of ['q', 'status', 'condition', 'categoryId', 'stockState', 'productReviewState', 'missingContent', 'productPublication'] as const) {
       if (f[k] === undefined || f[k] === null) continue;
       if (typeof f[k] !== 'string') throw invalidField(`filters.${k}`, 'Must be text');
       (out as Record<string, unknown>)[k] = f[k];

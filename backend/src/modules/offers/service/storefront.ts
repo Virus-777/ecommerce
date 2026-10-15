@@ -127,7 +127,7 @@ export class StorefrontPart extends Part {
     orderValue: common.Money,
   ): Promise<DeliveryEstimate> {
     const shipping = this.ctx.tryUse('shipping');
-    const plain: DeliveryEstimate = { shipsToLocation: true, arrivesFrom: null, arrivesTo: null, label: d.label, shippingCost: null, free: false, freeOver: null, carrier: null, service: null, shipsFrom: d.shipsFrom, fulfilledByLabel: d.fulfilledByLabel ?? null, dispatchLabel: d.label, orderWithinMinutes: null, serviceNotice: null };
+    const plain: DeliveryEstimate = { shipsToLocation: true, arrivesFrom: null, arrivesTo: null, label: d.label, shippingCost: null, free: false, freeOver: null, carrier: null, service: null, shipsFrom: d.shipsFrom, fulfilledByLabel: d.fulfilledByLabel ?? null, dispatchLabel: d.label, orderWithinMinutes: null, serviceNotice: null, locationLabel: deliverTo.label };
     if (!shipping || d.quote === false) return plain;
     const q = await this.core.soft('shipping.quote', () => shipping.quote(d.profileId, deliverTo.postalCode, d.parcel ?? DEFAULT_PARCEL, { businessDays: d.businessDays, sameDayCutoff: d.sameDayCutoff ?? null, shipsFrom: d.shipsFrom }, orderValue));
     if (!q) return plain;
@@ -150,6 +150,7 @@ export class StorefrontPart extends Part {
       dispatchLabel: o.dispatchLabel || d.label,
       orderWithinMinutes: minutes,
       serviceNotice: o.notices[0] ?? null,
+      locationLabel: deliverTo.label,
     };
   }
 
@@ -382,7 +383,29 @@ export class StorefrontPart extends Part {
       variants,
       quantityOptions: Array.from({ length: max }, (_, i) => i + 1),
       unavailable,
+      officialStore: this.officialStoreCue(views, selected, facts, deliverTo),
     };
+  }
+
+  /**
+   * G59: when another seller's offer is selected and the Official Store's offer for the variant can't be bought here,
+   * say so ("Out of stock at the Official Store", with the restock estimate). Null when the Official Store has no
+   * listed offer, is the one selected, or can be bought.
+   */
+  private officialStoreCue(views: readonly OfferView[], selected: OfferView | null, facts: Map<string, Facts>, deliverTo: DeliverTo): PurchaseBox['officialStore'] {
+    const official = views.find((v) => v.seller.official);
+    if (!official || !selected || selected.seller.official) return null;
+    const buyable = official.status === 'active' && official.availability.maxPerOrder > 0 && official.delivery.shipsToLocation;
+    if (buyable) return null;
+    const restock = facts.get(official.offerId)?.availability.expectedRestockDate ?? null;
+    const others = 'Other sellers have it now.';
+    if (!official.delivery.shipsToLocation) {
+      return { offerId: official.offerId, state: 'not_shippable', title: `The Official Store does not ship to ${deliverTo.label}`, message: others, expectedRestockDate: null, price: official.price };
+    }
+    if (official.status === 'out_of_stock' || official.availability.state === 'out_of_stock' || official.availability.maxPerOrder === 0) {
+      return { offerId: official.offerId, state: 'out_of_stock', title: 'Out of stock at the Official Store', message: restock ? `Expected back around ${restock} (estimate). ${others}` : others, expectedRestockDate: restock, price: official.price };
+    }
+    return { offerId: official.offerId, state: 'unavailable', title: 'Not available from the Official Store right now', message: others, expectedRestockDate: null, price: official.price };
   }
 
   /** Variant chooser cues from the active offers of each variant */

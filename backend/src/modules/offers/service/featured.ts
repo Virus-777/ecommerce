@@ -4,7 +4,7 @@
  */
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { DeliverTo, FeaturedCandidate, FeaturedDecision, FeaturedRule, FeaturedRuleInput, FeaturedRuleParameters } from '../../../spec/offers.js';
-import { CONDITIONS, conditionGroup, DEFAULT_RULE, rankCandidates, reason, RULE_NOTES, zoneKey, type ConditionGroup } from '../domain/rules.js';
+import { CONDITIONS, conditionGroup, DEFAULT_RULE, rankCandidates, reason, RULE_NOTES, TIE_BREAKERS, zoneKey, type ConditionGroup } from '../domain/rules.js';
 import { actorText, featuredRule, iso, isoReq, money, SERVICE_INELIGIBLE, serviceHeld } from '../mappers.js';
 import type { OfferRec, RuleRec } from '../ports.js';
 import { invalid, invalidField, Part, SYSTEM, type By, type ProductCache } from './core.js';
@@ -74,6 +74,7 @@ export class FeaturedPart extends Part {
       if (!Number.isInteger(p.performanceWindowDays) || p.performanceWindowDays < 1 || p.performanceWindowDays > 365) issues.push({ path: 'parameters.performanceWindowDays', message: '1 to 365 days' });
       if (typeof p.deliveryDayAdjustmentPct !== 'number' || p.deliveryDayAdjustmentPct < 0 || p.deliveryDayAdjustmentPct > 100) issues.push({ path: 'parameters.deliveryDayAdjustmentPct', message: '0 to 100' });
       if (!p.competingConditions?.length || p.competingConditions.some((c) => !CONDITIONS.includes(c as never))) issues.push({ path: 'parameters.competingConditions', message: `Conditions are ${CONDITIONS.join(', ')}` });
+      if ((p.tieBreakers ?? []).some((t) => !TIE_BREAKERS.includes(t as never))) issues.push({ path: 'parameters.tieBreakers', message: `Tie-breakers are ${TIE_BREAKERS.join(', ')}` });
     }
     const effectiveFrom = new Date(input.effectiveFrom);
     if (Number.isNaN(effectiveFrom.getTime())) issues.push({ path: 'effectiveFrom', message: 'Not a date-time' });
@@ -175,6 +176,7 @@ export class FeaturedPart extends Part {
           dispatchDays: f.fulfilment.shipping.dispatch.businessDays,
           onTimePct: onTime,
           publishedAt: r.published_at,
+          official: r.owner_type === 'official',
         },
       };
     });

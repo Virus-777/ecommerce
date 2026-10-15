@@ -11,7 +11,7 @@ import type { BulkRowError, BulkUpdateJob, BulkUpdateTotals, FileLink } from '..
 import { changePct, formatMoney, parseCsv, parsePrice, toCsv } from '../domain/rules.js';
 import { bulkUpdateJobMachine } from '../domain/state-machines.js';
 import { actorFromText, actorText, bulkJob, bulkReasonOf, bulkRow, EMPTY_TOTALS, isoReq, money, totalsOf } from '../mappers.js';
-import type { BulkJobRec, BulkRowRec } from '../ports.js';
+import type { BulkJobRec, BulkRowRec, OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
 
 type Owner = { ownerType: 'seller'; sellerId: string } | { ownerType: 'official'; sellerId: null };
@@ -185,7 +185,8 @@ export class BulkPart extends Part {
     const offers = new Map((await this.repo.getMany('offers', ready.map((r) => r.offer_id).filter((x): x is string => Boolean(x)))).map((r) => [r.id, r]));
     if (owner.ownerType === 'seller' && !o.confirmLargeChanges) {
       const threshold = await this.parts.pricing.largeThreshold();
-      const large = ready.filter((r) => r.price_to !== null && r.price_from !== null && offers.get(r.offer_id!)?.published_at && Math.abs(changePct(r.price_from, r.price_to)) > threshold);
+      const largeNos = await this.largeRows(owner, ready, [...offers.values()]);
+      const large = ready.filter((r) => largeNos.has(r.row_no));
       if (large.length) {
         throw this.core.error('LARGE_PRICE_CHANGE_UNCONFIRMED', `${large.length} row${large.length === 1 ? '' : 's'} change the price by more than ${threshold}%. Confirm large changes to apply them.`, {
           offers: large.map((r) => ({ offerId: r.offer_id, row: r.row_no, from: money(r.price_from!, this.core.currency), to: money(r.price_to!, this.core.currency), changePct: changePct(r.price_from!, r.price_to!) })),
@@ -287,7 +288,32 @@ export class BulkPart extends Part {
     const p = await this.repo.bulkRows(job.id, result, page);
     const offers = await this.repo.getMany('offers', p.items.map((r) => r.offer_id).filter((x): x is string => Boolean(x)));
     const summaries = await this.parts.views.summaries(offers);
-    return { ...p, items: p.items.map((r) => { const s = r.offer_id ? summaries.get(r.offer_id) : undefined; return bulkRow(r, this.core.currency, s ? `${s.productTitle} · ${s.variantLabel}` : null); }) };
+    const large = await this.largeRows(owner, p.items, offers);
+    return {
+      ...p,
+      items: p.items.map((r) => {
+        const s = r.offer_id ? summaries.get(r.offer_id) : undefined;
+        return bulkRow(r, this.core.currency, s ? `${s.productTitle} · ${s.variantLabel}` : null, large.has(r.row_no));
+      }),
+    };
+  }
+
+  /**
+   * Seller rows still to apply that change a published offer's price by more than largeSellerPriceChangePct: apply
+   * refuses them without confirmLargeChanges (decision G38: the preview flags them; drafts are exempt). Official
+   * Store files have none (their prices go through price-change approval).
+   */
+  private async largeRows(owner: Owner, rows: readonly BulkRowRec[], offers: readonly OfferRec[]): Promise<Set<number>> {
+    const out = new Set<number>();
+    if (owner.ownerType !== 'seller') return out;
+    const threshold = await this.parts.pricing.largeThreshold();
+    const byId = new Map(offers.map((o) => [o.id, o]));
+    for (const r of rows) {
+      if (r.result !== 'ready' || r.price_from === null || r.price_to === null) continue;
+      if (!byId.get(r.offer_id ?? '')?.published_at) continue;
+      if (Math.abs(changePct(r.price_from, r.price_to)) > threshold) out.add(r.row_no);
+    }
+    return out;
   }
 
   async correctionReport(owner: Owner, id: string, by: By): Promise<FileLink> {
