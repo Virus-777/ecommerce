@@ -431,6 +431,15 @@ query AdminOrder($ref: String!, $historyPaging: PageInput) {
       at
     }
 
+    history {
+      at
+      label
+      detail
+      actor {
+        ...Who
+      }
+    }
+
     auditTrail(paging: $historyPaging) {
       total
       nextCursor
@@ -461,6 +470,7 @@ fragment Who on Actor {
 fragment SellerLabel on OrderSellerLabel {
   id
   name
+  slug
   official
   verified
   logo {
