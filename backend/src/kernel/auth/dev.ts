@@ -14,6 +14,11 @@ export interface DevOptions {
   permissions?: string[];
   sellerId?: string;
   accountId?: string;
+  /**
+   * Sellers: the member id. Default none: the middleware uses the account's real member id when it is a
+   * member of the seller (else the account id), so per-member rows never go under a made-up id.
+   */
+  memberId?: string;
   /** Visitors: which app (default store) */
   audience?: Audience;
 }
@@ -28,7 +33,7 @@ export function devClaims(kind: DevKind, o: DevOptions = {}): DevClaims {
       return { aud: 'store', kind, sub: o.accountId ?? newId(), sid, authAt: now, dev: {} };
     case 'seller': {
       const sub = o.accountId ?? newId();
-      return { aud: 'seller', kind, sub, sid, authAt: now, sellerId: o.sellerId ?? newId(), memberId: sub, dev: { isOwner: !o.permissions, permissions: o.permissions ?? [] } };
+      return { aud: 'seller', kind, sub, sid, authAt: now, sellerId: o.sellerId ?? newId(), ...(o.memberId ? { memberId: o.memberId } : {}), dev: { isOwner: !o.permissions, permissions: o.permissions ?? [] } };
     }
     case 'staff':
       return { aud: 'admin', kind, sub: o.accountId ?? newId(), sid, authAt: now, dev: { permissions: o.permissions ?? ['*'] } };

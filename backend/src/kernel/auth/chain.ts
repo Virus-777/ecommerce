@@ -287,6 +287,7 @@ export class AuthChain {
       const access = await this.memberAccess(auth.claims, p);
       if (!access) throw new AppError('NO_SELLER_ACCESS', 'You are no longer a member of this seller account');
       if (p.sellerMemberId && access.memberId !== p.sellerMemberId) throw new AppError('NO_SELLER_ACCESS', 'This session belongs to a previous membership; sign in again');
+      p.sellerMemberId ??= access.memberId; // dev tokens name no member id: the one resolved above
       auth.sellerAccess = access;
     }
     if (d.permission && !(await this.can(auth, d.permission))) {
@@ -297,9 +298,14 @@ export class AuthChain {
   }
 
   async memberAccess(claims: AccessClaims | undefined, p: Principal): Promise<SellerMemberAccess | null> {
+    const member = () => this.members.get(`${p.sellerId}:${p.accountId}`, () => this.k.authorities.getMemberAccess(p.sellerId!, p.accountId!));
     const dev = devSellerAccess(claims);
-    if (dev) return dev;
-    return this.members.get(`${p.sellerId}:${p.accountId}`, () => this.k.authorities.getMemberAccess(p.sellerId!, p.accountId!));
+    if (!dev) return member();
+    if (claims?.memberId) return dev;
+    // A dev token stands in for the role, not the membership: when the account really is a member of the
+    // seller, use that member id, so what is kept per member (notification preferences) lands on the real member.
+    // Otherwise the account id stands in (development and tests only).
+    return { ...dev, memberId: (await member())?.memberId ?? dev.memberId };
   }
 
   /** Whether the caller holds a permission: staff through access, sellers through member access (owner-only keys need the owner). */

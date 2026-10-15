@@ -108,6 +108,8 @@ let chain: AuthChain;
 /** The middleware's counters (rate limits are on in this app) */
 const limits = memoryRateLimitStore({ now: () => new Date() });
 const usedReauth = new Set<string>();
+/** A real seller membership (sellers.getMemberAccess answers it) */
+const MEMBER = { sellerId: newId(), accountId: newId(), memberId: newId() };
 
 beforeAll(async () => {
   const config = loadConfig({ NODE_ENV: 'test' }, { launchPhase: 2, devSigning: { file: '', jwk: TEST_JWK }, cors: { store: [STORE_ORIGIN], seller: [SELLER_ORIGIN], admin: [] } });
@@ -129,6 +131,9 @@ beforeAll(async () => {
       verifyReauthToken: async (p, t, purpose) => (t.startsWith('reauth-') ? purpose === 'payout-account' && !usedReauth.has(t) : a.verifyReauthToken(p, t, purpose)),
       consumeReauthToken: async (t) => (t.startsWith('reauth-') ? !usedReauth.has(t) && Boolean(usedReauth.add(t)) : a.consumeReauthToken(t)),
       releaseReauthToken: async (t) => void (t.startsWith('reauth-') ? usedReauth.delete(t) : await a.releaseReauthToken(t)),
+      // sellers knows one membership
+      getMemberAccess: async (sellerId, accountId) =>
+        sellerId === MEMBER.sellerId && accountId === MEMBER.accountId ? { memberId: MEMBER.memberId, role: 'member', permissions: [], isOwner: false } : a.getMemberAccess(sellerId, accountId),
       verifyRefreshToken: async (t) => (t === REFRESH ? { sessionId: 'session-1', audience: 'store', kind: 'customer' } : t.startsWith('refresh-session-') ? { sessionId: t, audience: 'store', kind: 'customer' } : null),
     }),
     webhookVerifiers: new Map([['acks', hmacWebhookVerifier(config, 'acks')]]),
@@ -245,6 +250,18 @@ describe('caller checks', () => {
     const sellerId = newId();
     const res = await app.inject({ url: '/api/seller/demo/mine', headers: auth(callers.seller({ sellerId })) });
     expect(res.json()).toEqual({ sellerId });
+  });
+
+  it('dev seller tokens use the real member id of a member, never the account id (G49c)', async () => {
+    const claims = devClaims('seller', { sellerId: MEMBER.sellerId, accountId: MEMBER.accountId, permissions: ['demo.items.view'] });
+    expect(claims.memberId).toBeUndefined();
+    const p = principalOf(claims as never);
+    expect(await chain.memberAccess(claims as never, p)).toEqual({ memberId: MEMBER.memberId, role: 'member', permissions: ['demo.items.view'], isOwner: false });
+    // not a member of that seller: the account id stands in; an explicit member id is kept
+    const other = devClaims('seller', { sellerId: MEMBER.sellerId });
+    expect((await chain.memberAccess(other as never, principalOf(other as never)))?.memberId).toBe(other.sub);
+    const named = devClaims('seller', { sellerId: MEMBER.sellerId, accountId: MEMBER.accountId, memberId: 'member-x' });
+    expect((await chain.memberAccess(named as never, principalOf(named as never)))?.memberId).toBe('member-x');
   });
 
   it('needs a seller account chosen', async () => {
