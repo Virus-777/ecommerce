@@ -111,7 +111,7 @@ export async function buildApp(opts: BuildOptions = {}): Promise<FastifyInstance
 
   // independent startup work runs in parallel: the database connection and the module imports
   const [mongo, defs] = await Promise.all([
-    opts.mongo ?? connectMongo({ uri: config.mongo.uri, dataDir: config.mongo.dataDir }),
+    opts.mongo ?? connectMongo({ uri: config.mongo.uri, dataDir: config.mongo.dataDir, port: config.mongo.port }),
     loadDefinitions(opts.modules ?? config.modules ?? enabledModules, moduleLoaders),
   ]);
 

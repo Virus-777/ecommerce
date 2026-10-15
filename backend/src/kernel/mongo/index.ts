@@ -9,6 +9,7 @@
  *   - fn only reads and writes the database: no events (publish after the commit), no provider calls;
  *   - operations inside one transaction run one after another (no Promise.all on the same session).
  */
+import { createServer } from 'node:net';
 import mongoose, { type Connection, type Model, type Schema } from 'mongoose';
 import type { CollectionDef } from '../spec/define.js';
 import { useInstalledMongod } from './binary.js';
@@ -80,7 +81,12 @@ export interface MongoOptions {
   dbName?: string;
   /** Embedded replica set only: keep the data in this folder between restarts */
   dataDir?: string;
+  /** Embedded replica set with dataDir: its port (default 27018) */
+  port?: number;
 }
+
+/** The embedded replica set's name when it keeps its data in a folder */
+export const EMBEDDED_REPLICA_SET = 'rs0';
 
 /** Connects to MONGODB_URI, or (development, tests) starts an embedded single-node replica set. */
 export async function connectMongo(o: MongoOptions): Promise<MongoStore> {
@@ -90,16 +96,39 @@ export async function connectMongo(o: MongoOptions): Promise<MongoStore> {
   }
   useInstalledMongod();
   const { MongoMemoryReplSet } = await import('mongodb-memory-server');
+  // With a data folder, the replica set config stored in it names the set and this host:port: both stay fixed,
+  // or the next start cannot find itself in that config and fails.
+  const port = o.port ?? 27018;
+  if (o.dataDir && !(await portFree(port))) throw portTaken(port);
   const set = await MongoMemoryReplSet.create({
-    replSet: { count: 1, storageEngine: 'wiredTiger' },
-    ...(o.dataDir ? { instanceOpts: [{ dbPath: o.dataDir, storageEngine: 'wiredTiger' as const }] } : {}),
+    replSet: { count: 1, storageEngine: 'wiredTiger', ...(o.dataDir ? { name: EMBEDDED_REPLICA_SET } : {}) },
+    ...(o.dataDir ? { instanceOpts: [{ dbPath: o.dataDir, storageEngine: 'wiredTiger' as const, port }] } : {}),
   });
+  // mongodb-memory-server takes another port when the one asked for is busy: refuse instead of failing later
+  if (o.dataDir && set.servers[0]?.instanceInfo?.port !== port) {
+    await set.stop({ doCleanup: false });
+    throw portTaken(port);
+  }
   const connection = await mongoose.createConnection(set.getUri(), { appName: 'marketly', dbName: o.dbName ?? 'marketly' }).asPromise();
   return mongoStore(connection, async () => {
     await connection.close();
     await set.stop({ doCleanup: !o.dataDir });
   });
 }
+
+/** Whether nothing listens on 127.0.0.1:port */
+const portFree = (port: number) =>
+  new Promise<boolean>((resolve) => {
+    const probe = createServer();
+    probe.once('error', () => resolve(false));
+    probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)));
+  });
+
+const portTaken = (port: number) =>
+  new Error(
+    `MONGO_PORT ${port} is in use. The embedded MongoDB keeps its data folder (MONGO_DATA_DIR) on this port: stop what uses it ` +
+      '(often a mongod left running by an earlier dev server) or set MONGO_PORT to a free port.',
+  );
 
 const dbNameOf = (uri: string) => {
   try {

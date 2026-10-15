@@ -32,6 +32,8 @@ const schema = z.object({
   MONGODB_URI: z.string().optional(),
   /** Embedded MongoDB only: keep its data in this folder between restarts */
   MONGO_DATA_DIR: z.string().optional(),
+  /** Embedded MongoDB with MONGO_DATA_DIR: its fixed port (the replica set stored in the folder names it) */
+  MONGO_PORT: z.coerce.number().int().min(1).max(65535).default(27018),
   /** Apply the MongoDB schema and pending data migrations when the server starts (production runs `npm run migrate` instead) */
   MIGRATE_ON_START: flag,
   /** Plan ch. 20: endpoints of a later phase answer NOT_IMPLEMENTED. Phases 1–2 are designed for launch. */
@@ -108,7 +110,7 @@ export interface Config {
   adminAppDir: string | undefined;
   logLevel: string;
   /** MongoDB: the server (undefined = embedded replica set) and, for the embedded one, its data folder */
-  mongo: { uri: string | undefined; dataDir: string | undefined };
+  mongo: { uri: string | undefined; dataDir: string | undefined; port: number };
   migrateOnStart: boolean;
   launchPhase: number;
   market: { timeZone: string; currency: string; defaultLocation: { postalCode: string; label: string } };
@@ -177,7 +179,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     httpRedirectPort: e.HTTP_REDIRECT_PORT,
     adminAppDir: e.ADMIN_APP_DIR || undefined,
     logLevel: e.NODE_ENV === 'test' ? 'silent' : e.LOG_LEVEL,
-    mongo: { uri: e.MONGODB_URI || undefined, dataDir: e.MONGO_DATA_DIR || undefined },
+    mongo: { uri: e.MONGODB_URI || undefined, dataDir: e.MONGO_DATA_DIR || undefined, port: e.MONGO_PORT },
     migrateOnStart: e.MIGRATE_ON_START ?? !prod,
     launchPhase: e.LAUNCH_PHASE,
     market: {
