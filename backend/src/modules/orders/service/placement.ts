@@ -9,7 +9,7 @@ import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import type { AcceptedItem, OrderCreateInput, OrderDetail, PlacedGroup, SellerLabel } from '../../../spec/orders.js';
 import { orderItemMachine, orderLifecycleMachine } from '../domain/state-machines.js';
-import { CONDITION_LABEL, discountSum, MARKETLY_SERVICE, plural } from '../domain/rules.js';
+import { CONDITION_LABEL, dateTime, discountSum, MARKETLY_SERVICE, plural } from '../domain/rules.js';
 import type { GroupRec, ItemRec, OrderRec, StoredProduct } from '../ports.js';
 import { Batch, invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import type { Views } from './views.js';
@@ -269,7 +269,7 @@ export class Placement {
           group_id: g.id,
           visibility: 'seller' as const,
           label: accepted ? 'New order' : 'New order, payment being checked',
-          detail: g.fulfilled_by === MARKETLY_SERVICE ? 'Fulfilled by Marketly: our warehouse picks, packs and ships it.' : `Dispatch by ${g.dispatch_by.toISOString()}`,
+          detail: g.fulfilled_by === MARKETLY_SERVICE ? 'Fulfilled by Marketly: our warehouse picks, packs and ships it.' : `Dispatch by ${dateTime(g.dispatch_by, this.core.tz)}`,
         })),
       ]);
       return true;

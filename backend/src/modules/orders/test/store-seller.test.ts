@@ -196,6 +196,23 @@ describe('cancellations', () => {
     expect((await cancel()).status).toBe(201);
   });
 
+  it('seller timelines hold seller entries only, with dates in the market time zone (G54a, G54b)', async () => {
+    const m = await mixed();
+    const me = tokens.customer(m.customerId);
+    const itemB = m.groupB.items[0]!;
+    await h.call('POST', `/api/store/orders/orders/${m.order.id}/cancellations`, me, { items: [{ itemId: itemB.id, quantity: 1 }], reasonCode: 'changed_mind' }, idem());
+    const seller = tokens.seller(m.sellerB);
+    const detail = (await h.call('GET', `/api/seller/orders/orders/${m.groupB.id}`, seller)).body;
+    const labels = detail.timeline.map((t: any) => t.label);
+    expect(labels).toEqual(expect.arrayContaining(['New order', 'Buyer asked to cancel']));
+    expect(labels).not.toContain('Cancellation requested'); // the customer's entry
+    const readable = /^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M$/;
+    const dispatchBy = detail.timeline.find((t: any) => t.label === 'New order').detail.replace(/^Dispatch by /, '');
+    expect(dispatchBy).toMatch(readable);
+    const respondBy = /Respond by (.+?) or it is accepted/.exec(detail.timeline.find((t: any) => t.label === 'Buyer asked to cancel').detail)![1]!;
+    expect(respondBy).toMatch(readable);
+  });
+
   it('auto-accepts requests past respondBy when nothing shipped', async () => {
     const m = await mixed();
     const me = tokens.customer(m.customerId);

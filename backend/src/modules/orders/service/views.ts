@@ -804,7 +804,7 @@ export class Views {
       shipments: agg.shipments.filter((s) => s.group_id === g.id).map((s) => this.shipment(s)),
       cancellationRequests: agg.cancellations.filter((c) => c.group_id === g.id).map((c) => this.cancellation(agg, c)),
       timeline: this.timeline(
-        timeline.filter((t) => t.group_id === g.id && t.visibility !== 'staff'),
+        timeline.filter((t) => t.group_id === g.id && t.visibility === 'seller'),
         'seller',
       ),
       allowedActions: this.sellerActions(agg, g),
@@ -828,7 +828,7 @@ export class Views {
     };
     const totals = own.reduce((t, g) => ({ items: t.items + g.items_total, discounts: t.discounts + g.discount_total, shipping: t.shipping + g.shipping_total, tax: t.tax + g.tax_total, total: t.total + g.total }), { items: 0, discounts: 0, shipping: 0, tax: 0, total: 0 });
     scoped.order = { ...scoped.order, items_total: totals.items, discount_total: totals.discounts, shipping_total: totals.shipping, tax_total: totals.tax, total: totals.total, captured_total: 0, refunded_total: 0, contact_email: '', contact_phone: null, customer_id: null, contact_name: buyerName(agg.order.contact_name), coupon_codes: [] };
-    const detail = this.detail(scoped, timeline.filter((t) => t.group_id && ownIds.has(t.group_id) && t.visibility !== 'staff'), 'seller', cfg);
+    const detail = this.detail(scoped, timeline.filter((t) => t.group_id && ownIds.has(t.group_id) && t.visibility === 'seller'), 'seller', cfg);
     detail.contact = { kind: agg.order.customer_id ? 'customer' : 'guest', customerId: null, name: buyerName(agg.order.contact_name), email: 'hidden@marketly.invalid', phone: null };
     // decision D10: a seller whose groups Marketly all ships sees the city and region only
     if (own.every(isMarketlyService)) detail.deliveryAddress = this.cityAndRegion(agg.order.delivery_address);

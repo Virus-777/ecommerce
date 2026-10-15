@@ -311,6 +311,8 @@ export const shortDate = (d: Date | string, timeZone: string) =>
   new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(d));
 export const monthDay = (d: Date | string, timeZone: string) => new Intl.DateTimeFormat('en-US', { timeZone, month: 'short', day: 'numeric' }).format(new Date(d));
 export const clockTime = (d: Date | string, timeZone: string) => new Intl.DateTimeFormat('en-US', { timeZone, hour: 'numeric', minute: '2-digit' }).format(new Date(d));
+/** 'Fri, Oct 16, 5:00 PM' in the market time zone (timeline texts with a deadline) */
+export const dateTime = (d: Date | string, timeZone: string) => `${shortDate(d, timeZone)}, ${clockTime(d, timeZone)}`;
 /** A date-only value (YYYY-MM-DD) shown as 'Mon, Oct 12' */
 export const dayLabel = (ymd: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${ymd}T12:00:00Z`));
 

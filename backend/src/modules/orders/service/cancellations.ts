@@ -10,7 +10,7 @@ import { money } from '../../../kernel/lib/money.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { CancellableItem, CancellationLineInput, CancellationOptions, CancellationRequest, RefundPreview } from '../../../spec/orders.js';
 import { cancellationRequestMachine } from '../domain/state-machines.js';
-import { CANCELLABLE, fmt, is, marketlyFulfils, refundLines, respondBy, shortDate, SHIPPED_OR_LATER, sumMoney, type ItemState } from '../domain/rules.js';
+import { CANCELLABLE, dateTime, fmt, is, marketlyFulfils, refundLines, respondBy, shortDate, SHIPPED_OR_LATER, sumMoney, type ItemState } from '../domain/rules.js';
 import type { CancellationRec, GroupRec, ItemRec, StoredCancellationLine } from '../ports.js';
 import type { OrdersRepository } from '../repository.js';
 import { Batch, invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
@@ -258,7 +258,7 @@ export class Cancellations {
         },
         byMarketly
           ? { group_id: group.id, visibility: 'seller', label: 'Buyer asked to cancel', detail: `${titles}. Marketly's Order Manager decides, as the warehouse has started on this package.`, actor: batch.by.actor }
-          : { group_id: group.id, visibility: 'seller', label: 'Buyer asked to cancel', detail: `${titles}. Respond by ${o.pending.toISOString()} or it is accepted automatically if nothing has shipped.`, actor: batch.by.actor },
+          : { group_id: group.id, visibility: 'seller', label: 'Buyer asked to cancel', detail: `${titles}. Respond by ${dateTime(o.pending, this.core.tz)} or it is accepted automatically if nothing has shipped.`, actor: batch.by.actor },
       ]);
       batch.push('orders.cancellation.requested', {
         cancellationId: id,

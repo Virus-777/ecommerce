@@ -6,7 +6,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import type * as common from '../../../spec/common.js';
 import type { BulkResult, FulfillmentTask } from '../../../spec/orders.js';
-import { CANCELLABLE, DAY, is, isMarketlyService, marketlyFulfils, shortDate, UNSHIPPED, WAREHOUSE_STAGE_ENTRY, WAREHOUSE_STAGE_LABEL } from '../domain/rules.js';
+import { CANCELLABLE, DAY, dateTime, is, isMarketlyService, marketlyFulfils, shortDate, UNSHIPPED, WAREHOUSE_STAGE_ENTRY, WAREHOUSE_STAGE_LABEL } from '../domain/rules.js';
 import type { DispatchChange, GroupRec, ItemRec, ShipmentRec } from '../ports.js';
 import { invalid, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
 import type { Views } from './views.js';
@@ -117,7 +117,7 @@ export class Fulfillment {
           detail: `${g.seller_name} now expects to ship it by ${shortDate(expected, this.core.tz)}. You can wait, cancel the items that have not shipped, or contact support.`,
           actor: by.actor,
         },
-        { group_id: groupId, visibility: 'seller', label: 'Delay reported', detail: `New dispatch estimate ${expected.toISOString()}`, reason: body.note ?? body.reason, actor: by.actor },
+        { group_id: groupId, visibility: 'seller', label: 'Delay reported', detail: `New dispatch estimate ${dateTime(expected, this.core.tz)}`, reason: body.note ?? body.reason, actor: by.actor },
       ]);
       batch.push('orders.item.delayed', { orderId: agg.order.id, ...this.core.recipient(agg.order), groupId, itemIds: items.map((i) => i.id), source: 'seller', expectedDispatchBy: expected.toISOString(), reason: body.reason });
     });
@@ -137,8 +137,8 @@ export class Fulfillment {
       const change: DispatchChange = { kind: actor.kind === 'staff' ? 'extension' : 'recalculated', from: previous.toISOString(), to: due.toISOString(), reason, by: actor, at: this.core.now().toISOString() };
       await tx.update('seller_groups', groupId, { dispatch_by: due, dispatch_by_history: [...group.dispatch_by_history, change] });
       const entries: Parameters<Core['timeline']>[2] = [
-        { group_id: groupId, visibility: 'seller', label: 'Dispatch deadline changed', detail: `New deadline ${due.toISOString()}`, reason, actor },
-        { group_id: groupId, visibility: 'staff', label: 'Dispatch deadline changed', detail: `${previous.toISOString()} → ${due.toISOString()}`, reason, actor },
+        { group_id: groupId, visibility: 'seller', label: 'Dispatch deadline changed', detail: `New deadline ${dateTime(due, this.core.tz)}`, reason, actor },
+        { group_id: groupId, visibility: 'staff', label: 'Dispatch deadline changed', detail: `${dateTime(previous, this.core.tz)} → ${dateTime(due, this.core.tz)}`, reason, actor },
       ];
       if (o.notifyCustomer) entries.push({ group_id: groupId, visibility: 'customer', label: 'New dispatch date', detail: `Package ${group.position} should now ship by ${shortDate(due, this.core.tz)}. Contact support if this no longer works for you.`, actor });
       await this.core.timeline(tx, agg.order.id, entries);
