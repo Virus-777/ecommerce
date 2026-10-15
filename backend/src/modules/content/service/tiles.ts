@@ -98,11 +98,13 @@ export class ContentTiles extends ContentBase {
     const promotionsApi = this.ctx.tryUse('promotions');
     if (!promotionsApi) return [];
     const blocks = await this.soft('promotions.liveDeals', () => promotionsApi.liveDeals({ limit, campaignId }), [] as promotions.FlashSaleBlock[]);
-    return blocks
+    const items = blocks
       .filter((b) => b.campaignId === campaignId)
       .flatMap((b) => b.items ?? [])
-      .slice(0, limit)
-      .map((item): ResolvedProduct => {
+      .slice(0, limit);
+    // flash items carry no product slug: catalog has it
+    const slugs = await this.productSlugs(items.map((i) => i.productId));
+    return items.map((item): ResolvedProduct => {
         const left = Math.max(0, item.dealStock - item.claimed);
         const official = item.sellerId === OFFICIAL_STORE_ID;
         return {
@@ -113,6 +115,7 @@ export class ContentTiles extends ContentBase {
           hiddenReason: left > 0 ? null : 'out_of_stock',
           tile: {
             productId: item.productId,
+            slug: slugs.get(item.productId) ?? null,
             offerId: item.offerId,
             title: item.title,
             image: item.image ?? null,
@@ -131,6 +134,15 @@ export class ContentTiles extends ContentBase {
           },
         };
       });
+  }
+
+  /** Product slugs by id (catalog, optional) */
+  private async productSlugs(productIds: string[]): Promise<Map<string, string>> {
+    const catalogApi = this.ctx.tryUse('catalog');
+    const ids = unique(productIds);
+    if (!catalogApi || !ids.length) return new Map();
+    const records = await this.soft('catalog.getProducts', () => catalogApi.getProducts(ids), [] as catalog.ProductRecord[]);
+    return new Map(records.map((r) => [r.product.id, r.product.slug]));
   }
 
   private async resolveRule(rule: SourceRule, opts: { limit: number; categoryId?: string | null }): Promise<ResolvedProduct[]> {
@@ -169,6 +181,7 @@ export class ContentTiles extends ContentBase {
       hiddenReason: out ? 'out_of_stock' : null,
       tile: {
         productId: card.productId,
+        slug: card.slug ?? null,
         offerId: card.offerId ?? null,
         title: card.title,
         image: card.image ?? null,
@@ -230,7 +243,7 @@ export class ContentTiles extends ContentBase {
       sellerId: null,
       available: false,
       hiddenReason: 'product_hidden',
-      tile: { productId, offerId: null, title: 'Product no longer available', image: null, price: null, wasPrice: null, fromPrice: false, sellerName: null, officialStore: false, availability: null, checkedAt: this.now().toISOString(), badge: null, rank: null },
+      tile: { productId, slug: null, offerId: null, title: 'Product no longer available', image: null, price: null, wasPrice: null, fromPrice: false, sellerName: null, officialStore: false, availability: null, checkedAt: this.now().toISOString(), badge: null, rank: null },
     };
   }
 
@@ -255,6 +268,7 @@ export class ContentTiles extends ContentBase {
           hiddenReason: offer === null ? 'offer_paused' : null,
           tile: {
             productId: id,
+            slug: product.slug,
             offerId: offer?.id ?? null,
             title: product.title,
             image: product.images[0] ?? null,
@@ -308,7 +322,7 @@ export class ContentTiles extends ContentBase {
     return ids
       .map((id) => index.get(id))
       .filter((c): c is catalog.Category => Boolean(c && c.visible))
-      .map((c) => ({ categoryId: c.id, name: c.name, image: c.image ?? null }));
+      .map((c) => ({ categoryId: c.id, slug: c.slug, name: c.name, image: c.image ?? null }));
   }
 
   /** Featured seller cards in order; suspended or closed sellers are left out */
@@ -322,7 +336,7 @@ export class ContentTiles extends ContentBase {
       .filter((id) => byId.has(id) && !['suspended', 'closed'].includes(status.get(id) ?? 'approved'))
       .map((id) => {
         const c = byId.get(id)!;
-        return { sellerId: c.id, name: c.storeName, logo: c.logo ?? null, verified: c.verified, positivePct: c.positivePct ?? null, location: c.location ?? null, dispatchLabel: c.dispatchLabel ?? null };
+        return { sellerId: c.id, sellerSlug: c.slug, name: c.storeName, logo: c.logo ?? null, verified: c.verified, positivePct: c.positivePct ?? null, location: c.location ?? null, dispatchLabel: c.dispatchLabel ?? null };
       });
   }
 
@@ -335,6 +349,9 @@ export class ContentTiles extends ContentBase {
     const pages = (await this.repo.listPages({ kind: 'collection', collectionKind: 'brand', statuses: ['published'] })).filter((p) => p.brand_id && ids.includes(p.brand_id));
     const now = this.now();
     const live = pages.filter((p) => (!p.publish_at || p.publish_at <= now) && (!p.unpublish_at || p.unpublish_at > now));
+    const catalogApi = this.ctx.tryUse('catalog');
+    const brands = catalogApi ? await this.soft('catalog.getBrands', () => catalogApi.getBrands(ids), [] as catalog.Brand[]) : [];
+    const brandSlugs = new Map(brands.map((b) => [b.id, b.slug]));
     const tiles: BrandTile[] = [];
     for (const id of ids) {
       const page = live.find((p) => p.brand_id === id);
@@ -343,7 +360,7 @@ export class ContentTiles extends ContentBase {
       const snap = v?.snapshot as unknown as PageDraftInput | undefined;
       const count = (await this.collectionItems(page.id)).length;
       const refs = await this.refsMap([snap?.coverImage?.id]);
-      tiles.push({ brandId: id, name: page.title, logo: (snap?.coverImage?.id && refs.get(snap.coverImage.id)) || null, productCount: count });
+      tiles.push({ brandId: id, slug: brandSlugs.get(id) ?? null, pageSlug: page.slug, name: page.title, logo: (snap?.coverImage?.id && refs.get(snap.coverImage.id)) || null, productCount: count });
     }
     return tiles;
   }

@@ -64,7 +64,7 @@ describe('navigation', () => {
     expect(nav.header).toEqual(body.header);
     expect(nav.footer).toEqual(body.footer);
     expect(nav.serviceStrip).toBeNull();
-    expect(nav.contact.map((c: any) => c.kind)).toEqual(['chat', 'message']);
+    expect(nav.contact.map((c: any) => c.kind)).toEqual(['message']); // no live chat (G7); no phone without settings
     h.clock.advance(DAY + 1000);
     expect((await h.store('GET', '/navigation', undefined, auth(callers.visitor()))).json().serviceStrip).toMatchObject({ text: body.serviceStrip.text, link: body.serviceStrip.link });
     expect(h.audits.find((a) => a.action === 'content.navigation.update')).toMatchObject({ reason: 'Autumn update' });

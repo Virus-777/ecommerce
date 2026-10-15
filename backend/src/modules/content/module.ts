@@ -2,6 +2,7 @@ import { defineModule } from '../../kernel/module-system/index.js';
 import { spec } from '../../spec/content.js';
 import { resolvers } from './graphql/resolvers.js';
 import { storeRoutes } from './http/store.js';
+import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
 import { ContentRepository } from './repository.js';
 import { ContentService } from './service.js';
@@ -20,7 +21,7 @@ export default defineModule({
   register(ctx) {
     const service = new ContentService({ repo: new ContentRepository(ctx.mongo), ctx });
     ctx.provide(service);
-    ctx.http.routes(storeRoutes(service), adminRoutes(service));
+    ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
 
     // Events this module reacts to (spec events.consumes)

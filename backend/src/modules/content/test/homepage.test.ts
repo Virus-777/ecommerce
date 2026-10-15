@@ -226,8 +226,11 @@ describe('store homepage resolution', () => {
     expect((await h.admin('POST', '/homepage/publish', { summary: 'More sections' })).statusCode).toBe(200);
     const page = await home();
     const by = (id: string) => page.sections.find((s: any) => s.id === id);
-    expect(by(cats.id).categories).toEqual([{ categoryId: cat.id, name: cat.name, image: null }]);
+    expect(by(cats.id).categories).toEqual([{ categoryId: cat.id, slug: cat.slug, name: cat.name, image: null }]);
     expect(by(sellers.id).sellers.map((s: any) => s.name)).toEqual(['Casa Verde Home']);
+    // links: storefront slug on seller tiles (G18), product slug on product tiles (G19)
+    expect(by(sellers.id).sellers[0].sellerSlug).toBe(`store-${sellerOk.slice(0, 4)}`);
+    expect(by(popular.id).products.map((p: any) => p.slug)).toEqual([h.ruleCards[0]!.slug, h.ruleCards[1]!.slug]);
     expect(by(popular.id).products.map((p: any) => [p.title, p.rank])).toEqual([
       ['Best 1', 1],
       ['Best 2', 2],

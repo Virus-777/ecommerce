@@ -38,8 +38,7 @@ export interface Harness {
   settingsValues: Record<string, unknown>;
   /** promotions.liveDeals answer (null: one live sale with no items) and the calls it got */
   deals: unknown[] | null;
-  dealCalls: { limit: number; campaignId?: string }[];
-  eventsNamed(name: string): any[];
+  dealCalls: { limit: number; campaignId?: string }[];  eventsNamed(name: string): any[];
   /** Staff token for an account id (all permissions unless given) */
   staff(id?: string, permissions?: string[]): Record<string, string>;
   staffId: string;
@@ -94,14 +93,23 @@ export async function harness(): Promise<Harness> {
         isCampaignActive: async (id: string) => ({ active: h.campaigns.get(id)?.active ?? false }),
         liveDeals: async (opts: { limit: number; campaignId?: string }) => {
           h.dealCalls.push(opts);
-          return (h.deals ?? [{ campaignId: newId(), name: 'Flash Friday', state: 'live', secondsLeft: 3600, items: [] }]) as never;
+          const now = Date.now();
+          const period = { startsAt: new Date(now - 3_600_000).toISOString(), endsAt: new Date(now + 3_600_000).toISOString(), timeZone: 'America/Los_Angeles', display: 'Today' };
+          return (h.deals ?? [{ campaignId: newId(), name: 'Flash Friday', period, state: 'live', secondsLeft: 3600, items: [] }]) as never;
         },
       },
       sellers: {
         getStorefrontCard: async (ids: string[]) => ids.filter((id) => h.sellers.has(id)).map((id) => ({ id, slug: `store-${id.slice(0, 4)}`, storeName: h.sellers.get(id)!.name, logo: null, verified: true, location: 'Portland, OR', positivePct: 98, ratingCount: 120, dispatchLabel: 'Ships in 1 business day' })),
         getSellers: async (ids: string[]) => ids.filter((id) => h.sellers.has(id)).map((id) => ({ id, ref: 'SL-1', slug: 's', storeName: h.sellers.get(id)!.name, status: h.sellers.get(id)!.status, verified: true, canSellNew: true, activeRestrictionIds: [], launchReady: true }) as never),
+        // approved sellers for About pages: every seller in h.sellers with status approved or restricted
+        searchSellers: async (f: { statuses?: string[] }) => {
+          const n = [...h.sellers.values()].filter((s) => !f.statuses || f.statuses.includes(s.status)).length;
+          return { items: [], nextCursor: null, page: 1, totalPages: 1, total: n } as never;
+        },
       },
-      access: {
+      reviews: {
+        getSellerFeedbackSummary: async (sellerId: string) => ({ sellerId, official: true, periodMonths: 12, count: 40, positivePct: 97, neutralPct: 2, negativePct: 1, asDescribedPct: 99, avgDispatch: 4.8, avgCommunication: 4.7, label: '97% positive · 40 ratings', average: 4.8, onTimeDispatchPct: null }),
+      },      access: {
         check: async (_p, action) => ({ decision: h.decision, action, reason: h.decision === 'allowed' ? 'Business Owner authority' : 'Needs the Business Owner', requiresSecondReviewer: true, approvalsNeeded: h.decision === 'allowed' ? 0 : 1, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: false }),
         requestApproval: async (input) => {
           h.approvals.push(input);

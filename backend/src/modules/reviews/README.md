@@ -1059,7 +1059,7 @@ Indexes: `(state, due_at)`, `(customer_id)`
 | Function | Signature | Used by |
 |---|---|---|
 | getRatingSummaries | `(productIds: uuid[]) => RatingSummary[]`<br>Ratings for product cards and search results | search, catalog, promotions, graphql |
-| getSellerFeedbackSummary | `(sellerId: uuid) => SellerFeedbackSummary`<br>Seller quality for offer comparison, featured-offer eligibility and storefronts | offers, sellers, graphql |
+| getSellerFeedbackSummary | `(sellerId: uuid) => SellerFeedbackSummary`<br>Seller quality for offer comparison, featured-offer eligibility and storefronts (also the Official Store profile in content) | offers, sellers, content, graphql |
 | moveProductContent | `(fromProductId: uuid, toProductId: uuid) => { reviews: int, questions: int }`<br>Called during a duplicate merge | catalog |
 | removeContentForEnforcement | `(contentIds: uuid[], enforcementId: uuid, reason: string) => int`<br>Remove proven fake reviews named in an enforcement (same path as consuming trust.enforcement.recorded; publishes reviews.moderation.decided with trustEnforcementId) | trust |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's product reviews, seller feedback, questions, answers and reports they made (with status and moderation outcomes) for the personal data export. Export hook called by customers.build-data-exports | customers |

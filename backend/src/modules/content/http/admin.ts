@@ -47,7 +47,7 @@ export const adminRoutes = (service: ContentService) =>
     createHelpCategory: async (i) => service.createHelpCategory(i.body, by(i)),
     updateHelpCategory: async (i) => service.updateHelpCategory(i.params.id, i.body, by(i)),
     createHelpArticle: async (i) => service.createHelpArticle(i.body, by(i)),
-    getHelpArticleAdmin: async (i) => service.getHelpArticleAdmin(i.params.id),
+    getHelpArticleAdmin: async (i) => service.getHelpArticleAdmin(i.params.id, by(i)),
     updateHelpArticle: async (i) => service.updateHelpArticle(i.params.id, i.body, by(i)),
     transitionHelpArticle: async (i) => service.transitionHelpArticle(i.params.id, i.body, by(i)),
     listArticleVersions: async (i) => service.listArticleVersions(i.params.id, i.page),

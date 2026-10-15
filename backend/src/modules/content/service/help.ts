@@ -8,7 +8,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { ContactChannel, HelpArticle, HelpArticleAdmin, HelpArticleInput, HelpArticleSummary, HelpCategory, HelpHome, LinkRef, Version } from '../../../spec/content.js';
-import { isValidSlug, plainText, readMinutes, sanitizeHtml, sanitizeJson, slugify } from '../domain/rules.js';
+import { contactChannelsFrom, contentTables, isValidSlug, plainText, readMinutes, sanitizeHtml, slugify } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { ArticleRow, CategoryRow, VersionRow } from '../ports.js';
 import type { ContentRepository } from '../repository.js';
@@ -34,11 +34,21 @@ export interface ArticleSnap {
   _review?: DraftReview | null;
 }
 
+/**
+ * The contact channels support is asked to offer (contract requested from support: contactChannels(audience) =>
+ * support.ContactChannel[]). Until it exists content falls back to its own phone and message channels.
+ */
+interface SupportChannels {
+  contactChannels: (audience: 'customer' | 'seller') => Promise<{ kind: string; label: string; expectedResponse: string; available: boolean; hours: string }[] | null>;
+}
+
 type Status = HelpArticleAdmin['status'];
 type Audience = 'customer' | 'seller' | 'both';
 
 export const SELLER_FIRST_NOTE = 'For items from marketplace sellers, the seller answers first. If the seller does not reply within 2 business days, Marketly steps in.';
 const HELPFUL_WINDOW_DAYS = 30;
+/** Articles Seller Center shows */
+const SELLER_AUDIENCES = ['seller', 'both'];
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
@@ -169,13 +179,13 @@ export class ContentHelp extends ContentHomepage {
       category,
       breadcrumb: [
         { label: 'Help Center', url: '/help', kind: 'help' },
-        { label: category.name, url: `/help/topics/${category.slug}`, kind: 'help' },
+        { label: category.name, url: `/help?topic=${encodeURIComponent(category.slug)}`, kind: 'help' },
       ],
       effectiveAt: snap.effectiveAt,
       updatedAt: (version?.published_at ?? version?.created_at ?? r.updated_at).toISOString(),
       readMinutes: readMinutes(body),
       body,
-      tables: (sanitizeJson(snap.tables ?? []) as unknown[]) ?? [],
+      tables: contentTables(snap.tables ?? []),
       related: await this.summaries(ordered),
       actions: this.actionsFor(snap),
       policyLinks: await this.policyLinks(snap.policyKeys),
@@ -201,12 +211,20 @@ export class ContentHelp extends ContentHomepage {
     return { pct: total ? Math.round((helpful / total) * 1000) / 10 : null, total };
   }
 
-  protected async articleAdmin(a: ArticleRow): Promise<HelpArticleAdmin> {
+  /** viewer: the calling staff member, for canApprove (the author of a draft cannot approve it) */
+  protected async articleAdmin(a: ArticleRow, viewer?: By): Promise<HelpArticleAdmin> {
     const { live, draft } = await this.articleVersions(a);
     const v = draft ?? live;
     const snap = this.articleSnapOf(v)!;
-    const [owner, stats] = await Promise.all([this.owner(a.owner_staff_id), this.helpfulStats([a.id])]);
+    const authorIsStaff = draft?.author_kind === 'staff' && Boolean(draft.author_id);
+    const [owner, stats, author] = await Promise.all([this.owner(a.owner_staff_id), this.helpfulStats([a.id]), authorIsStaff ? this.owner(draft!.author_id) : null]);
+    const draftAuthor: common.Actor | null = draft ? { kind: draft.author_kind as common.Actor['kind'], id: draft.author_id ?? null, name: author?.name ?? null } : null;
+    // waiting for review: the article itself (first publication) or a new draft of a live article
+    const awaitingReview = a.status === 'in_review' || this.articleSnapOf(draft)?._review?.state === 'in_review';
+    const isAuthor = Boolean(draft?.author_id && viewer?.actor.id && draft.author_id === viewer.actor.id);
     return {
+      draftAuthor,
+      canApprove: awaitingReview && !isAuthor,
       article: await this.articleView(a, snap, v),
       status: a.status as Status,
       owner,
@@ -219,8 +237,8 @@ export class ContentHelp extends ContentHomepage {
     };
   }
 
-  async getHelpArticleAdmin(id: string): Promise<HelpArticleAdmin> {
-    return this.articleAdmin(await this.articleOrThrow(id));
+  async getHelpArticleAdmin(id: string, viewer?: By): Promise<HelpArticleAdmin> {
+    return this.articleAdmin(await this.articleOrThrow(id), viewer);
   }
 
   async listArticleVersions(id: string, page: PageRequest): Promise<common.Page<Version>> {
@@ -250,7 +268,7 @@ export class ContentHelp extends ContentHomepage {
       categoryId: cat.id,
       summary: input.summary?.trim() || null,
       body,
-      tables: input.tables ? (sanitizeJson(input.tables) as unknown[]) : null,
+      tables: input.tables ? contentTables(input.tables) : null,
       relatedIds,
       policyKeys: unique((input.policyKeys ?? []).map((k) => k.trim()).filter(Boolean)),
       audience,
@@ -312,7 +330,7 @@ export class ContentHelp extends ContentHomepage {
       throw this.slugConflictArticle(err, snap.slug);
     }
     await this.audit({ action: 'content.help.article.create', actionLabel: 'Created help article', target: { type: 'help_article', id, label: snap.title }, after: snap }, by);
-    return this.articleAdmin(row);
+    return this.articleAdmin(row, by);
   }
 
   async updateHelpArticle(id: string, input: HelpArticleInput, by: By): Promise<HelpArticleAdmin> {
@@ -337,7 +355,7 @@ export class ContentHelp extends ContentHomepage {
       throw this.slugConflictArticle(err, snap.slug);
     }
     await this.audit({ action: 'content.help.article.update', actionLabel: 'Edited help article draft', target: { type: 'help_article', id, label: snap.title }, before: draftSnap ?? this.articleSnapOf(live), after: snap, reason: input.changeNote ?? null }, by);
-    return this.articleAdmin(row);
+    return this.articleAdmin(row, by);
   }
 
   private async setArticleDraftReview(a: ArticleRow, review: DraftReview | null) {
@@ -402,11 +420,11 @@ export class ContentHelp extends ContentHomepage {
           if (review && status === 'unpublished' && draft && draftReview?.state !== 'approved') throw illegal('The draft needs review before it goes live');
         }
         await this.articleLive(id, by, 'publish');
-        return this.articleAdmin(await this.articleOrThrow(id));
+        return this.articleAdmin(await this.articleOrThrow(id), by);
       }
       case 'unpublish':
         await this.articleDown(id, body.reason ?? null, by);
-        return this.articleAdmin(await this.articleOrThrow(id));
+        return this.articleAdmin(await this.articleOrThrow(id), by);
       case 'remove': {
         if (!body.kind) throw invalid('kind', 'Say whether this is a correction or a removal');
         const reason = requireText(body.reason, 'reason', 'A reason is required');
@@ -421,7 +439,7 @@ export class ContentHelp extends ContentHomepage {
     }
     await this.logAction('article', id, event, by, body.reason ?? (body.publishAt ? `${body.publishAt}${body.unpublishAt ? ` – ${body.unpublishAt}` : ''}` : null));
     await this.audit({ action: `content.help.article.${body.action}`, actionLabel: `Help article: ${body.action}`, target: { type: 'help_article', id, label }, reason: body.reason ?? null, before: { status }, after: { status: (await this.repo.getArticle(id))!.status } }, by);
-    return this.articleAdmin(await this.articleOrThrow(id));
+    return this.articleAdmin(await this.articleOrThrow(id), by);
   }
 
   /** Publishes the draft (or the live version again); used by publish and the schedule job */
@@ -504,7 +522,7 @@ export class ContentHelp extends ContentHomepage {
     });
     await this.logAction('article', id, 'restore', by, reason);
     await this.audit({ action: 'content.help.article.restore-version', actionLabel: `Restored help article version ${number} as a new draft`, target: { type: 'help_article', id, label: row.title }, reason }, by);
-    return this.articleAdmin(row);
+    return this.articleAdmin(row, by);
   }
 
   /* ---------------------------------------------------------------- store */
@@ -526,11 +544,26 @@ export class ContentHelp extends ContentHomepage {
     return article;
   }
 
+  /** Seller Center (GET /api/seller/content/help/articles/{slug}): articles for sellers only (audience seller or both) */
+  async viewSellerHelpArticle(slug: string): Promise<HelpArticle> {
+    const a = await this.repo.articleBySlug(slug);
+    if (!a || !SELLER_AUDIENCES.includes(a.audience)) throw notFound('Article');
+    return this.viewHelpArticle(slug);
+  }
+
+  /** Seller Center feedback on an article for sellers */
+  async rateSellerHelpArticle(id: string, body: { helpful: boolean; comment?: string | null }, who: { principal: Principal; requestId: string }): Promise<void> {
+    const a = await this.repo.getArticle(id);
+    if (!a || !SELLER_AUDIENCES.includes(a.audience)) throw notFound('Article');
+    return this.rateHelpArticle(id, body, who);
+  }
+
   async rateHelpArticle(id: string, body: { helpful: boolean; comment?: string | null }, who: { principal: Principal; requestId: string }): Promise<void> {
     const a = await this.repo.getArticle(id);
     if (!a || a.status !== 'published') throw notFound('Article');
     const p = who.principal;
-    const visitorKey = p.kind === 'customer' && p.accountId ? `customer:${p.accountId}` : p.guestSessionId ? `guest:${p.guestSessionId}` : p.sessionId ? `session:${p.sessionId}` : `request:${who.requestId}`;
+    const visitorKey =
+      (p.kind === 'customer' || p.kind === 'seller') && p.accountId ? `${p.kind}:${p.accountId}` : p.guestSessionId ? `guest:${p.guestSessionId}` : p.sessionId ? `session:${p.sessionId}` : `request:${who.requestId}`;
     const comment = body.comment ? plainText(body.comment).slice(0, 2000) || null : null;
     await this.repo.upsertFeedback({ id: newId(), article_id: id, helpful: body.helpful, comment, visitor_key: visitorKey, customer_id: p.kind === 'customer' ? (p.accountId ?? null) : null, at: this.now() });
   }
@@ -546,18 +579,22 @@ export class ContentHelp extends ContentHomepage {
     return { ...res, items: await this.summaries(res.items) };
   }
 
+  /**
+   * Contact channels. Support owns them (decision G31c): when support offers contactChannels they are shown as
+   * support gives them; otherwise phone (settings) and a message. Live chat is never offered (decision G7).
+   */
   protected async contactChannels(audience: 'customer' | 'seller'): Promise<ContactChannel[]> {
     const settingsApi = this.ctx.tryUse('settings');
     const info = await this.soft('settings.storeInfo', settingsApi && (() => settingsApi.storeInfo()), null);
-    const hours = info?.support.hoursLabel ?? 'Mon–Sat, 8 AM–8 PM PT';
-    const chatHours = info?.support.chatHoursLabel ?? hours;
-    const phone = info?.support.phone ?? '';
-    const channels: ContactChannel[] = [
-      { kind: 'chat', label: 'Chat with us', hours: chatHours, detail: audience === 'seller' ? 'Seller support answers in Seller Center' : 'Typical reply in a few minutes', action: { label: 'Start chat', url: audience === 'seller' ? '/seller/help/contact?channel=chat' : '/help/contact?channel=chat', kind: 'help' } },
-      { kind: 'message', label: 'Send a message', hours: 'Any time', detail: 'We reply within one business day', action: { label: 'Write to us', url: audience === 'seller' ? '/seller/help/contact' : '/help/contact', kind: 'help' } },
-    ];
-    if (phone) channels.splice(1, 0, { kind: 'phone', label: 'Call us', hours, detail: phone, action: { label: phone, url: `tel:${phone.replace(/[^\d+]/g, '')}`, kind: 'external' } });
-    return channels;
+    // until support's spec declares contactChannels the call throws (undeclared public API) and soft answers null
+    const supportApi = this.ctx.tryUse('support') as unknown as SupportChannels | undefined;
+    const offered = await this.soft('support.contactChannels', supportApi && (() => supportApi.contactChannels(audience)), null);
+    return contactChannelsFrom(offered, {
+      hours: info?.support.hoursLabel ?? 'Mon–Sat, 8 AM–8 PM PT',
+      phone: info?.support.phone ?? '',
+      email: info?.support.email ?? null,
+      contactUrl: audience === 'seller' ? '/seller/help/contact' : '/help/contact',
+    });
   }
 
   async getHelpCenter(audience: 'customer' | 'seller' = 'customer'): Promise<HelpHome> {

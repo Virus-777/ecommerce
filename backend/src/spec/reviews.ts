@@ -1378,7 +1378,7 @@ export const ReviewsInviteDueEvent: z.ZodType<ReviewsInviteDueEvent> = z.object(
 export interface ReviewsPublicApi {
   /** Ratings for product cards and search results Used by: search, catalog, promotions, graphql. */
   getRatingSummaries(productIds: string[]): Promise<RatingSummary[]>;
-  /** Seller quality for offer comparison, featured-offer eligibility and storefronts Used by: offers, sellers, graphql. */
+  /** Seller quality for offer comparison, featured-offer eligibility and storefronts (also the Official Store profile in content) Used by: offers, sellers, content, graphql. */
   getSellerFeedbackSummary(sellerId: string): Promise<SellerFeedbackSummary>;
   /** Called during a duplicate merge Used by: catalog. */
   moveProductContent(fromProductId: string, toProductId: string): Promise<{ reviews: number, questions: number }>;

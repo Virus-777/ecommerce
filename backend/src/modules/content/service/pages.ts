@@ -6,7 +6,7 @@ import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
-import type { BannerBlock, Check, CollectionCard, LinkedPromotion, PageAdmin, PageBlock, PageDraftInput, PageSummary, ProductSource, ProductTile, RemovalInfo, StorePage, Version } from '../../../spec/content.js';
+import type { AboutFacts, BannerBlock, Check, CollectionCard, LinkedPromotion, PageAdmin, PageBlock, PageDraftInput, PageSummary, ProductSource, ProductTile, RemovalInfo, StorePage, Version } from '../../../spec/content.js';
 import { isValidSlug, isValidTimeZone, sanitizeHtml, slugify } from '../domain/rules.js';
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { PageRow, VersionRow } from '../ports.js';
@@ -272,7 +272,20 @@ export class ContentPages extends ContentTiles {
       notes: snap.kind === 'collection' ? COLLECTION_NOTES : snap.linkedPromotionId ? ['Prices and stock are live'] : [],
       updatedAt,
       version: version?.number ?? 0,
+      about: snap.kind === 'about' ? await this.aboutFacts() : null,
     };
+  }
+
+  /** Facts for About pages: company facts (settings) and the number of approved sellers (sellers) */
+  protected async aboutFacts(): Promise<AboutFacts> {
+    const settingsApi = this.ctx.tryUse('settings');
+    const sellersApi = this.ctx.tryUse('sellers');
+    const [info, approved] = await Promise.all([
+      this.soft('settings.storeInfo', settingsApi && (() => settingsApi.storeInfo()), null),
+      // approved sellers selling now (a restricted seller is still approved); page mode answers the total
+      this.soft('sellers.searchSellers', sellersApi && (() => sellersApi.searchSellers({ statuses: ['approved', 'restricted'] }, { page: 1, limit: 1 })), null),
+    ]);
+    return { company: info?.market.company ?? null, approvedSellerCount: approved?.total ?? null };
   }
 
   protected pageIsLive(p: PageRow, at = this.now()) {

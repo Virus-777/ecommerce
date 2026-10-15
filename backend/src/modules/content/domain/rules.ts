@@ -123,6 +123,22 @@ export function sanitizeJson(value: unknown, depth = 0): unknown {
   return value;
 }
 
+/**
+ * Tables of an article or policy as ContentTable[]: cells become plain text; entries that are not
+ * { columns: string[], rows: string[][] } (stored before the type existed) are left out.
+ */
+export function contentTables(value: unknown): { caption: string | null; columns: string[]; rows: string[][]; note: string | null }[] {
+  if (!Array.isArray(value)) return [];
+  const cell = (c: unknown) => (typeof c === 'string' ? plainText(c) : typeof c === 'number' || typeof c === 'boolean' ? String(c) : '');
+  const text = (t: unknown) => (typeof t === 'string' && plainText(t) ? plainText(t) : null);
+  return value.flatMap((t) => {
+    if (!t || typeof t !== 'object') return [];
+    const { caption, columns, rows, note } = t as Record<string, unknown>;
+    if (!Array.isArray(columns) || !Array.isArray(rows) || !rows.every(Array.isArray)) return [];
+    return [{ caption: text(caption), columns: columns.map(cell), rows: (rows as unknown[][]).map((r) => r.map(cell)), note: text(note) }];
+  });
+}
+
 /** Text without tags (search index, reading time, diffs) */
 export function plainText(html: string | null | undefined): string {
   return decodeEntities(String(html ?? '').replace(/<[^>]*>/g, ' '))
@@ -302,3 +318,40 @@ export const DEFAULT_AD_POSITIONS: { key: string; name: string }[] = [
 ];
 
 export const HOMEPAGE_ID = '0c0a7e7e-0000-4000-8000-000000000001';
+
+/* ------------------------------------------------------------------ contact channels */
+
+/** A contact channel as support describes it (support.ContactChannel) */
+export interface SupportChannel {
+  kind: string;
+  label: string;
+  expectedResponse: string;
+  available: boolean;
+  hours: string;
+}
+
+/** content.ContactChannel (kept local so the rules stay free of generated imports) */
+export interface HelpContactChannel {
+  kind: 'phone' | 'message' | 'email';
+  label: string;
+  hours: string;
+  detail: string;
+  action: { label: string; url: string; kind: 'help' | 'external' };
+}
+
+/**
+ * The Help Center's contact channels: support's channels as support gives them (owner decision G31c), else phone
+ * and a message. Live chat is never shown (decision G7), nor a kind content does not know.
+ */
+export function contactChannelsFrom(offered: readonly SupportChannel[] | null, o: { hours: string; phone: string; email: string | null; contactUrl: string }): HelpContactChannel[] {
+  const write = { label: 'Write to us', url: o.contactUrl, kind: 'help' as const };
+  const call = (label: string, hours: string): HelpContactChannel[] =>
+    o.phone ? [{ kind: 'phone', label, hours, detail: o.phone, action: { label: o.phone, url: `tel:${o.phone.replace(/[^\d+]/g, '')}`, kind: 'external' } }] : [];
+  if (!offered) return [...call('Call us', o.hours), { kind: 'message', label: 'Send a message', hours: 'Any time', detail: 'We reply within one business day', action: write }];
+  return offered.flatMap((c): HelpContactChannel[] => {
+    if (c.kind === 'phone') return call(c.label, c.hours);
+    if (c.kind === 'email') return [{ kind: 'email', label: c.label, hours: c.hours, detail: c.expectedResponse, action: o.email ? { label: o.email, url: `mailto:${o.email}`, kind: 'external' } : write }];
+    if (c.kind === 'messages') return [{ kind: 'message', label: c.label, hours: c.hours, detail: c.expectedResponse, action: write }];
+    return [];
+  });
+}

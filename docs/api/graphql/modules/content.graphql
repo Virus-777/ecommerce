@@ -322,10 +322,11 @@ type HelpArticle @areas(in: [STORE]) {
   version: Int!
 }
 
+"Contact channels come from support; live chat is not offered"
 enum HelpContactKind @areas(in: [STORE]) {
-  CHAT
   PHONE
   MESSAGE
+  EMAIL
 }
 
 type HelpContactChannel @areas(in: [STORE]) {

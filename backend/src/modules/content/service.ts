@@ -2,7 +2,8 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
 import type * as catalog from '../../spec/catalog.js';
 import { format as formatMoney } from '../../kernel/lib/money.js';
-import type { Check, ContentPublicApi, FooterGroup, HelpCategory, LinkRef, PageDraftInput, SellerAnnouncement, ServiceStrip, SiteNavigation } from '../../spec/content.js';
+import { OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME } from '../../spec/common.js';
+import type { Check, ContentPublicApi, FooterGroup, HelpCategory, LinkRef, OfficialStoreProfile, PageDraftInput, SellerAnnouncement, ServiceStrip, SiteNavigation } from '../../spec/content.js';
 import type * as sellers from '../../spec/sellers.js';
 import { inWindow } from './domain/rules.js';
 import type { NavigationRow, PageRow, VersionRow } from './ports.js';
@@ -43,6 +44,36 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
     const show = s && (opts.strip === 'any' || inWindow(this.now(), s.active_from, s.active_until));
     const serviceStrip: ServiceStrip | null = show ? { text: s.text ?? '', link: s.url ? link(s) : null, activeFrom: iso(s.active_from), activeUntil: iso(s.active_until) } : null;
     return { header, footer, serviceStrip };
+  }
+
+  /* ---------------------------------------------------------------- Official Store */
+
+  /**
+   * GET /official-store: the Official Store is not a seller record, so its profile comes from content settings,
+   * the current policies of the chosen kinds and its feedback summary in reviews.
+   */
+  async getOfficialStore(): Promise<OfficialStoreProfile> {
+    const [logoUrl, bannerUrl, introduction, kinds] = await Promise.all([
+      this.ctx.settings.get('officialStoreLogoUrl'),
+      this.ctx.settings.get('officialStoreBannerUrl'),
+      this.ctx.settings.get('officialStoreIntroduction'),
+      this.ctx.settings.get('officialStorePolicyKinds'),
+    ]);
+    const wanted: string[] = Array.isArray(kinds) ? (kinds as unknown[]).filter((k): k is string => typeof k === 'string') : [];
+    const policies = (await this.listPublicPolicies()).filter((p) => p.current && wanted.includes(p.kind));
+    policies.sort((a, b) => wanted.indexOf(a.kind) - wanted.indexOf(b.kind));
+    const reviewsApi = this.ctx.tryUse('reviews');
+    const feedback = await this.soft('reviews.getSellerFeedbackSummary', reviewsApi && (() => reviewsApi.getSellerFeedbackSummary(OFFICIAL_STORE_ID)), null);
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    return {
+      id: OFFICIAL_STORE_ID,
+      name: OFFICIAL_STORE_NAME,
+      logoUrl: text(logoUrl),
+      bannerUrl: text(bannerUrl),
+      introduction: text(introduction),
+      policies: policies.map((p) => ({ label: p.title, url: `/policies/${p.key}`, kind: 'policy' })),
+      feedback,
+    };
   }
 
   /** Header and footer links, the service strip inside its window, contact details and the company line */

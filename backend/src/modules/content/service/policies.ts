@@ -9,7 +9,7 @@ import { newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { ContentListItem, HelpSummary, LinkRef, PolicyApproval, PolicyDiff, PolicySummary, PolicyVersion, PolicyVersionInput, PolicyVersionRef, StorePolicy } from '../../../spec/content.js';
-import { diffHtml, isValidVersionLabel, nextMinorVersion, sanitizeHtml, sanitizeJson } from '../domain/rules.js';
+import { contentTables, diffHtml, isValidVersionLabel, nextMinorVersion, sanitizeHtml } from '../domain/rules.js';
 import { policyVersionMachine } from '../domain/state-machines.js';
 import type { PolicyApprovalRow, PolicyRow, PolicyVersionRow } from '../ports.js';
 import { actorFromKey, actorKey, invalid, iso, notFound, requireText, SYSTEM, type By } from './base.js';
@@ -114,7 +114,7 @@ export class ContentPolicies extends ContentHelp {
       version: v.version,
       state: v.state as State,
       body: v.body,
-      tables: (v.tables as unknown[] | null) ?? null,
+      tables: v.tables ? contentTables(v.tables) : null,
       effectiveAt: iso(v.effective_at),
       changeSummary: v.change_summary,
       impact: v.impact as PolicyVersion['impact'],
@@ -190,7 +190,7 @@ export class ContentPolicies extends ContentHelp {
       version: v.version,
       effectiveAt: (v.effective_at ?? v.created_at).toISOString(),
       body: sanitizeHtml(v.body),
-      tables: v.tables ? (sanitizeJson(v.tables) as unknown[]) : null,
+      tables: v.tables ? contentTables(v.tables) : null,
       previousVersion: prev && PUBLISHED.includes(prev.state) ? this.refOf(p.key, prev) : null,
       upcoming: upcoming ? this.refOf(p.key, upcoming) : null,
       upcomingSummary: upcoming?.change_summary ?? null,
@@ -284,7 +284,7 @@ export class ContentPolicies extends ContentHelp {
       return tx.updatePolicyVersion(id, {
         title: input.title?.trim() || locked.title,
         body,
-        tables: (input.tables ? sanitizeJson(input.tables) : input.tables === null ? null : locked.tables) as never,
+        tables: (input.tables ? contentTables(input.tables) : input.tables === null ? null : locked.tables) as never,
         effective_at: input.effectiveAt ? new Date(input.effectiveAt) : input.effectiveAt === null ? null : locked.effective_at,
         change_summary: input.changeSummary !== undefined ? input.changeSummary?.trim() || null : locked.change_summary,
         impact: input.impact ?? locked.impact,

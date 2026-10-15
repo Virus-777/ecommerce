@@ -120,7 +120,7 @@ describe('help articles', () => {
     expect(home.topics.map((t: any) => t.name)).toEqual(['Returns & refunds']);
     expect(home.topics[0].topArticles[0].id).toBe(id);
     expect(home.sellerFirstNote).toMatch(/seller answers first/);
-    expect(home.contact.map((c: any) => c.kind)).toEqual(['chat', 'message']);
+    expect(home.contact.map((c: any) => c.kind)).toEqual(['message']); // no live chat (G7); no phone without settings
     const seller = (await h.store('GET', '/help?audience=seller')).json();
     expect(seller.topics.map((t: any) => t.name)).toEqual(['Payouts']);
     expect(seller.featured).toBeNull();

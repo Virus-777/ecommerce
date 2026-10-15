@@ -3,7 +3,7 @@
 Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.
 
 - **Group:** Growth · **Launch phase:** 1 · **Plan chapters:** 19, 15, 4, 3, 17
-- **Depends on:** [media](media.md), [access](access.md) · **Optional:** [catalog](catalog.md), [offers](offers.md), [inventory](inventory.md), [promotions](promotions.md), [advertising](advertising.md), [sellers](sellers.md), [search](search.md), [reports](reports.md), [notifications](notifications.md), [audit](audit.md), [settings](settings.md), [shipping](shipping.md), [wishlist](wishlist.md), [support](support.md), [returns](returns.md)
+- **Depends on:** [media](media.md), [access](access.md) · **Optional:** [catalog](catalog.md), [offers](offers.md), [inventory](inventory.md), [promotions](promotions.md), [advertising](advertising.md), [sellers](sellers.md), [search](search.md), [reports](reports.md), [notifications](notifications.md), [audit](audit.md), [settings](settings.md), [shipping](shipping.md), [wishlist](wishlist.md), [support](support.md), [returns](returns.md), [reviews](reviews.md)
 
 ## Owns
 - Homepage sections: order, owner, schedule (show from / remove at with time zone), status, preview on desktop and phone, published layout versions
@@ -37,19 +37,29 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | GET | `/api/store/content/help/articles` | Search or browse help articles | visitor | Page<HelpArticleSummary> |
 | GET | `/api/store/content/help/articles/{slug}` | A help article with effective and updated dates and related articles | visitor | `HelpArticle` |
 | POST | `/api/store/content/help/articles/{id}/feedback` | Was this helpful? | shopper | `{ helpful: bool, comment: text? }` → 204 No content |
+| GET | `/api/store/content/official-store` | Official Store profile: name, logo, banner, introduction, policy links and feedback summary | visitor | `OfficialStoreProfile` |
 | GET | `/api/store/content/policies` | Policies with effective date and version | visitor | `PolicySummary[]` |
 | GET | `/api/store/content/policies/{key}` | Current policy (or the version in effect at a date) | visitor | `StorePolicy` |
 | GET | `/api/store/content/policies/{key}/versions` | Previous versions of a policy | visitor | `PolicyVersionRef[]` |
 | GET | `/api/store/content/policy-versions/{id}` | One past or current policy version (linked from order details) | visitor | `StorePolicy` |
 
+## Seller API
+
+| Method | Path | Purpose | Auth | Body → Response |
+|---|---|---|---|---|
+| GET | `/api/seller/content/help` | Seller Help Center: seller topics, popular articles and searches, featured guide and contact channels _(before seller is chosen)_ | seller | `HelpHome` |
+| GET | `/api/seller/content/help/articles` | Search or browse seller help articles _(before seller is chosen)_ | seller | Page<HelpArticleSummary> |
+| GET | `/api/seller/content/help/articles/{slug}` | A seller help article _(before seller is chosen)_ | seller | `HelpArticle` |
+| POST | `/api/seller/content/help/articles/{id}/feedback` | Was this helpful? (seller) _(before seller is chosen)_ | seller | `{ helpful: bool, comment: text? }` → 204 No content |
+
 ## Admin API
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| GET | `/api/admin/content/homepage` | Homepage sections with owner, schedule, status and locked ad positions | staff<br>`content.homepage.manage` | `HomepageAdmin` |
+| GET | `/api/admin/content/homepage` | Homepage sections with owner, schedule, status and locked ad positions | staff<br>`content.view` | `HomepageAdmin` |
 | POST | `/api/admin/content/homepage/sections` | Add a section to the draft layout _(audited)_ | staff<br>`content.homepage.manage` | `SectionInput` → `HomeSectionAdmin` |
 | PATCH | `/api/admin/content/homepage/sections/{id}` | Edit a section (heading, product source, schedule, position, owner) _(audited)_ | staff<br>`content.homepage.manage` | `SectionInput` → `HomeSectionAdmin` |
-| GET | `/api/admin/content/homepage/sections/{id}/products` | Products in a section, resolved with title, seller and stock | staff<br>`content.homepage.manage` | Page<SectionProductRow> |
+| GET | `/api/admin/content/homepage/sections/{id}/products` | Products in a section, resolved with title, seller and stock | staff<br>`content.view` | Page<SectionProductRow> |
 | POST | `/api/admin/content/homepage/sections/{id}/schedule` | Schedule a section (show from / remove at) _(audited)_ | staff<br>`content.homepage.manage` | `{ showFrom: datetime, removeAt: datetime?, timeZone: string }` → `HomeSectionAdmin` |
 | POST | `/api/admin/content/homepage/sections/{id}/remove` | Remove a section (correction or removal, reason required) _(audited)_ | staff<br>`content.homepage.manage` | `{ kind: enum(correction|removal), reason: text, immediately: bool }` → `HomeSectionAdmin` |
 | PUT | `/api/admin/content/homepage/order` | Reorder sections in the draft (ad positions move with the layout but stay locked) | staff<br>`content.homepage.manage` | `{ sectionIds: uuid[] }` → `HomepageAdmin` |
@@ -58,11 +68,11 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | POST | `/api/admin/content/homepage/review` | Approve the draft layout or request changes _(audited)_ | staff<br>`content.homepage.publish` | `{ approve: bool, note: text? }` → `HomepageAdmin` |
 | POST | `/api/admin/content/homepage/publish` | Publish the draft layout as a new version _(audited)_ | staff<br>`content.homepage.publish` | `{ summary: string }` → `HomepageAdmin` |
 | POST | `/api/admin/content/homepage/discard-draft` | Discard the unpublished layout draft | staff<br>`content.homepage.manage` | `HomepageAdmin` |
-| GET | `/api/admin/content/homepage/versions` | Homepage version history | staff<br>`content.homepage.manage` | Page<Version> |
+| GET | `/api/admin/content/homepage/versions` | Homepage version history | staff<br>`content.view` | Page<Version> |
 | POST | `/api/admin/content/homepage/versions/{number}/restore` | Restore an earlier layout (creates a new version; nothing is overwritten) _(audited)_ | staff<br>`content.homepage.publish` | `{ reason: text, publish: bool }` → `HomepageAdmin` |
-| GET | `/api/admin/content/pages` | Campaign pages and collections with publish and removal times | staff<br>`content.pages.manage` | Page<PageSummary> |
+| GET | `/api/admin/content/pages` | Campaign pages and collections with publish and removal times | staff<br>`content.view` | Page<PageSummary> |
 | POST | `/api/admin/content/pages` | Create a page or collection draft _(audited)_ | staff<br>`content.pages.manage` | `PageDraftInput` → `PageAdmin` |
-| GET | `/api/admin/content/pages/{id}` | Page with draft and live versions, checks and linked promotion | staff<br>`content.pages.manage` | `PageAdmin` |
+| GET | `/api/admin/content/pages/{id}` | Page with draft and live versions, checks and linked promotion | staff<br>`content.view` | `PageAdmin` |
 | PATCH | `/api/admin/content/pages/{id}` | Edit the page draft (creates or updates the draft version) _(audited)_ | staff<br>`content.pages.manage` | `PageDraftInput` → `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/preview` | Preview the draft as customers will see it | staff<br>`content.pages.manage` | `PreviewRequest` → `StorePage` |
 | POST | `/api/admin/content/pages/{id}/submit` | Send for review _(audited)_ | staff<br>`content.pages.manage` | `PageAdmin` |
@@ -72,26 +82,26 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | POST | `/api/admin/content/pages/{id}/publish` | Publish the draft now _(audited)_ | staff<br>`content.pages.publish` | `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/unpublish` | Take a page down (it can be republished) _(audited)_ | staff<br>`content.pages.publish` | `{ reason: text? }` → `PageAdmin` |
 | POST | `/api/admin/content/pages/{id}/remove` | Correction or removal action (reason required, takes effect now) _(audited)_ | staff<br>`content.pages.remove` | `{ kind: enum(correction|removal), reason: text, correctionNote: text? }` → `PageAdmin` |
-| GET | `/api/admin/content/pages/{id}/versions` | Version history of a page | staff<br>`content.pages.manage` | Page<Version> |
+| GET | `/api/admin/content/pages/{id}/versions` | Version history of a page | staff<br>`content.view` | Page<Version> |
 | POST | `/api/admin/content/pages/{id}/versions/{number}/restore` | Restore an earlier version as a new draft version _(audited)_ | staff<br>`content.pages.manage` | `{ reason: text }` → `PageAdmin` |
-| GET | `/api/admin/content/help/summary` | Published articles, policies, articles needing review and helpful rating | staff<br>`content.help.manage` | `HelpSummary` |
-| GET | `/api/admin/content/help/items` | Policies and help articles in one list | staff<br>`content.help.manage` | Page<ContentListItem> |
-| GET | `/api/admin/content/help/categories` | Help categories including hidden | staff<br>`content.help.manage` | `HelpCategory[]` |
+| GET | `/api/admin/content/help/summary` | Published articles, policies, articles needing review and helpful rating | staff<br>`content.view` | `HelpSummary` |
+| GET | `/api/admin/content/help/items` | Policies and help articles in one list | staff<br>`content.view` | Page<ContentListItem> |
+| GET | `/api/admin/content/help/categories` | Help categories including hidden | staff<br>`content.view` | `HelpCategory[]` |
 | POST | `/api/admin/content/help/categories` | Create a help category _(audited)_ | staff<br>`content.help.manage` | `{ name: string, slug: string?, icon: string?, description: string?, audience: enum(customer|seller|both), visible: bool? }` → `HelpCategory` |
 | PATCH | `/api/admin/content/help/categories/{id}` | Rename, hide or reorder a category _(audited)_ | staff<br>`content.help.manage` | `{ name: string?, icon: string?, description: string?, position: int?, visible: bool? }` → `HelpCategory` |
 | POST | `/api/admin/content/help/articles` | Create a help article draft _(audited)_ | staff<br>`content.help.manage` | `HelpArticleInput` → `HelpArticleAdmin` |
-| GET | `/api/admin/content/help/articles/{id}` | Article with status, versions and feedback | staff<br>`content.help.manage` | `HelpArticleAdmin` |
+| GET | `/api/admin/content/help/articles/{id}` | Article with status, versions and feedback | staff<br>`content.view` | `HelpArticleAdmin` |
 | PATCH | `/api/admin/content/help/articles/{id}` | Edit the article draft _(audited)_ | staff<br>`content.help.manage` | `HelpArticleInput` → `HelpArticleAdmin` |
 | POST | `/api/admin/content/help/articles/{id}/transition` | Submit, approve, request changes, schedule, publish, unpublish or remove an article _(audited)_ | staff<br>`content.help.manage` | `{ action: enum(submit|approve|requestChanges|schedule|cancelSchedule|publish|unpublish|remove|restore), reason: text?, kind: enum(correction|removal)?, publishAt: datetime?, unpublishAt: datetime? }` → `HelpArticleAdmin` |
-| GET | `/api/admin/content/help/articles/{id}/versions` | Article version history | staff<br>`content.help.manage` | Page<Version> |
+| GET | `/api/admin/content/help/articles/{id}/versions` | Article version history | staff<br>`content.view` | Page<Version> |
 | POST | `/api/admin/content/help/articles/{id}/versions/{number}/restore` | Restore an earlier article version as a new draft _(audited)_ | staff<br>`content.help.manage` | `{ reason: text }` → `HelpArticleAdmin` |
-| GET | `/api/admin/content/policies` | Policies with current, scheduled and draft versions | staff<br>`content.policies.edit` | `PolicySummary[]` |
+| GET | `/api/admin/content/policies` | Policies with current, scheduled and draft versions | staff<br>`content.view` | `PolicySummary[]` |
 | POST | `/api/admin/content/policies` | Create a new policy with its business owner _(audited)_ | staff<br>`content.policies.manage` | `{ key: string, kind: enum(returns|shipping|privacy|purchase_terms|seller_rules|advertising|cookies|other)?, title: string, ownerStaffId: uuid, editorStaffId: uuid?, audience: enum(customer|seller|both) }` → `PolicySummary` |
-| GET | `/api/admin/content/policies/{id}/versions` | All versions of a policy with effective date, summary and approver | staff<br>`content.policies.edit` | `PolicyVersion[]` |
+| GET | `/api/admin/content/policies/{id}/versions` | All versions of a policy with effective date, summary and approver | staff<br>`content.view` | `PolicyVersion[]` |
 | POST | `/api/admin/content/policies/{id}/versions` | Start a new version draft (copies the current text) _(audited)_ | staff<br>`content.policies.edit` | `{ version: string? }` → `PolicyVersion` |
-| GET | `/api/admin/content/policy-versions/{id}` | A policy version with approvals | staff<br>`content.policies.edit` | `PolicyVersion` |
+| GET | `/api/admin/content/policy-versions/{id}` | A policy version with approvals | staff<br>`content.view` | `PolicyVersion` |
 | PATCH | `/api/admin/content/policy-versions/{id}` | Edit a draft version (text, effective date, change summary, impact, notices) _(audited)_ | staff<br>`content.policies.edit` | `PolicyVersionInput` → `PolicyVersion` |
-| GET | `/api/admin/content/policy-versions/{id}/diff` | Changes from the previous version | staff<br>`content.policies.edit` | `PolicyDiff` |
+| GET | `/api/admin/content/policy-versions/{id}/diff` | Changes from the previous version | staff<br>`content.view` | `PolicyDiff` |
 | POST | `/api/admin/content/policy-versions/{id}/submit` | Send for approval (policy owner, then Business Owner) _(audited)_ | staff<br>`content.policies.edit` | `PolicyVersion` |
 | POST | `/api/admin/content/policy-versions/{id}/approve` | Policy owner approval or changes requested _(audited)_ | staff<br>`content.policies.approve` | `{ approve: bool, note: text? }` → `PolicyVersion` |
 | POST | `/api/admin/content/policy-versions/{id}/schedule` | Publish an approved version with its effective date _(audited)_ | staff<br>`content.policies.edit` | `{ effectiveAt: datetime }` → `PolicyVersion` |
@@ -128,6 +138,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | Field | Type |
 |---|---|
 | productId | `uuid` |
+| slug | `string?` Product slug for the product link /p/{slug}/{productId} |
 | offerId | `uuid?` |
 | title | `string` |
 | image | `MediaRef?` |
@@ -149,6 +160,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | Field | Type |
 |---|---|
 | sellerId | `uuid` |
+| sellerSlug | `string?` Storefront slug for /shop/{slug} (sellers.getStorefrontCard) |
 | name | `string` |
 | logo | `MediaRef?` |
 | verified | `bool` |
@@ -161,6 +173,8 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | Field | Type |
 |---|---|
 | brandId | `uuid` |
+| slug | `string?` Brand slug (catalog.getBrands) for the brand page |
+| pageSlug | `string?` Slug of the brand's published collection page the tile comes from (/pages/{pageSlug}) |
 | name | `string` |
 | logo | `MediaRef?` |
 | productCount | `int` |
@@ -170,6 +184,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | Field | Type |
 |---|---|
 | categoryId | `uuid` |
+| slug | `string?` Category slug for the category page |
 | name | `string` |
 | image | `MediaRef?` |
 
@@ -301,7 +316,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | categories | `CategoryTile[]` |
 | sellers | `SellerTile[]` |
 | brands | `BrandTile[]` |
-| deals | `json?` promotions.FlashSaleBlock[] when promotions is enabled (countdown, claimed meters, limits) |
+| deals | `promotions.FlashSaleBlock[]?` Flash sales from promotions (countdown, claimed meters, limits); null when promotions is off or for other kinds |
 | promiseItems | `PromiseItem[]` PROMISE_STRIP only: the promises in order; empty for other kinds |
 | adPlacementKey | `string?` For ad_position sections: the slot to request from advertising (POST /api/store/advertising/decisions) |
 | endsAt | `datetime?` |
@@ -467,6 +482,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | notes | `string[]` e.g. Only in-stock offers are included; no seller paid to be included; prices and stock are live |
 | updatedAt | `datetime` |
 | version | `int` |
+| about | `AboutFacts?` About pages only (kind about): company facts and the approved-seller count; null for other pages |
 
 ### CollectionCard
 
@@ -541,12 +557,12 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | slug | `string` |
 | title | `string` |
 | category | `HelpCategory` |
-| breadcrumb | `LinkRef[]` |
+| breadcrumb | `LinkRef[]` Help Center (/help), then the topic (/help?topic={category slug}) |
 | effectiveAt | `datetime?` |
 | updatedAt | `datetime` |
 | readMinutes | `int` |
 | body | `text` Structured rich text (headings, lists, tables, links), sanitized |
-| tables | `json[]?` e.g. who pays return shipping |
+| tables | `ContentTable[]?` e.g. who pays return shipping |
 | related | `HelpArticleSummary[]` |
 | actions | `LinkRef[]` e.g. Go to my orders, Contact us |
 | policyLinks | `LinkRef[]` |
@@ -561,7 +577,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | categoryId | `uuid` |
 | summary | `string?` |
 | body | `text` |
-| tables | `json[]?` |
+| tables | `ContentTable[]?` |
 | relatedIds | `uuid[]?` |
 | policyKeys | `string[]?` |
 | audience | `enum(customer|seller|both)?` |
@@ -585,6 +601,45 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | helpfulPct | `number?` |
 | feedbackCount | `int` |
 | schedule | `Schedule` |
+| draftAuthor | `Actor?` Who wrote the current draft version (null without a draft); the author cannot approve it (SAME_REVIEWER) |
+| canApprove | `bool` The draft waits for review and the caller is not its author, so the Approve button can show |
+
+### ContentTable
+
+| Field | Type |
+|---|---|
+| caption | `string?` e.g. Who pays return shipping |
+| columns | `string[]` Column headings |
+| rows | `string[][]` Cells as plain text, one list per row in column order |
+| note | `string?` |
+
+### HelpSummaryTabs
+
+| Field | Type |
+|---|---|
+| all | `int` |
+| articles | `int` |
+| policies | `int` |
+| needsReview | `int` |
+
+### OfficialStoreProfile
+
+| Field | Type |
+|---|---|
+| id | `uuid` OFFICIAL_STORE_ID |
+| name | `string` OFFICIAL_STORE_NAME |
+| logoUrl | `string?` Setting content.officialStoreLogoUrl (an absolute URL or a path on the store site) |
+| bannerUrl | `string?` Setting content.officialStoreBannerUrl |
+| introduction | `text?` Setting content.officialStoreIntroduction |
+| policies | `LinkRef[]` Current policies of the kinds in content.officialStorePolicyKinds (returns, shipping, purchase terms by default), linking to /policies/{key} |
+| feedback | `reviews.SellerFeedbackSummary?` Official Store feedback summary (reviews); null when reviews is off |
+
+### AboutFacts
+
+| Field | Type |
+|---|---|
+| company | `settings.CompanyFacts?` Emails, postal address, founding year and headquarters (settings market.*); null when settings is off |
+| approvedSellerCount | `int?` Marketplace sellers approved to sell now (sellers.searchSellers, statuses approved and restricted); null when sellers is off |
 
 ### ContentListItem
 
@@ -612,13 +667,13 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | articlesNeedingReview | `int` |
 | helpfulPct | `number` |
 | helpfulWindowDays | `int` |
-| tabs | `json` |
+| tabs | `HelpSummaryTabs` |
 
 ### ContactChannel
 
 | Field | Type |
 |---|---|
-| kind | `enum(chat|phone|message)` |
+| kind | `enum(phone|message|email)` From support (support.contactChannels) when it offers them; live chat is not offered |
 | label | `string` |
 | hours | `string` |
 | detail | `string` |
@@ -669,7 +724,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | version | `string` e.g. 3.1 |
 | state | `enum(draft|in_review|approved|scheduled|current|superseded|withdrawn)` |
 | body | `text` |
-| tables | `json[]?` |
+| tables | `ContentTable[]?` |
 | effectiveAt | `datetime?` |
 | changeSummary | `text?` |
 | impact | `enum(new_orders_only|extend_open_orders)` Extending to open orders is allowed only for changes that favor the customer |
@@ -697,7 +752,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 |---|---|
 | title | `string?` |
 | body | `text` |
-| tables | `json[]?` |
+| tables | `ContentTable[]?` |
 | effectiveAt | `datetime?` |
 | changeSummary | `text?` |
 | impact | `enum(new_orders_only|extend_open_orders)?` |
@@ -722,7 +777,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | version | `string` |
 | effectiveAt | `datetime` |
 | body | `text` |
-| tables | `json[]?` |
+| tables | `ContentTable[]?` |
 | previousVersion | `PolicyVersionRef?` |
 | upcoming | `PolicyVersionRef?` A scheduled version with its effective date and change summary |
 | upcomingSummary | `text?` |
@@ -737,7 +792,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | header | `LinkRef[]` |
 | footer | `FooterGroup[]` |
 | contact | `ContactChannel[]` |
-| companyLine | `string` settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly' |
+| companyLine | `string` settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · Portland, OR); when settings is off: '© <year> Marketly' |
 | legalName | `string` settings.storeInfo market.legalName; 'Marketly' when settings is off |
 | checks | `Check[]?` Admin only (PUT /navigation answer; null on store reads): warnings when the service strip text disagrees with the facts in force, e.g. a free-shipping amount other than shipping.getOfficialFreeShipping or a return window other than returns.defaultWindowDays. Warnings never block saving (decision: warn only) |
 | serviceStrip | `ServiceStrip?` Service message above the store header; null when none is active |
@@ -1076,6 +1131,7 @@ Indexes: `unique (policy_id, version)`, `(policy_id, state, effective_at)`
 | `content.policies.edit` | staff | Draft policy versions, submit and schedule approved versions |
 | `content.policies.approve` | staff | Policy owner approval |
 | `content.policies.manage` | staff | Create policies and assign their owners |
+| `content.view` | staff | View the homepage layout, pages, help content and policies in the Admin Center (read only) |
 
 ## Approval actions
 
@@ -1115,6 +1171,10 @@ Checked through the access module (limits per role, second reviewer).
 | reviewRequired | `{"page":false,"section":false,"article":true}` | json, approval: second reviewer | Whether the review step is required before publishing |
 | availabilityCheckMinutes | `60` | duration, minutes, 5–… | How often curated collections re-check stock |
 | maxSectionProducts | `24` | int, 1–… | Products per homepage section |
+| officialStoreLogoUrl | `"/brand/official-store-logo.svg"` | string | Official Store profile logo: an absolute URL or a path on the store site (example) |
+| officialStoreBannerUrl | `null` | string | Official Store profile banner: an absolute URL or a path on the store site; none by default |
+| officialStoreIntroduction | `"Products sold and shipped by Marketly: checked before they ship, with delivery dates you can rely on and help from Marketly support when you need it."` | string | Short introduction on the Official Store page (example) |
+| officialStorePolicyKinds | `["returns","shipping","purchase_terms"]` | json | Policy kinds linked from the Official Store page (current versions only) |
 
 ## Notes
 - Homepage sections each have their own schedule; the published layout version is the ordered list of section snapshots. Reordering or editing creates a draft layout; customers see it after Publish. Scheduled sections appear automatically at showFrom without a new manual publish (the job records a new version so history stays complete).
@@ -1457,10 +1517,11 @@ type HelpArticle @areas(in: [STORE]) {
   version: Int!
 }
 
+"Contact channels come from support; live chat is not offered"
 enum HelpContactKind @areas(in: [STORE]) {
-  CHAT
   PHONE
   MESSAGE
+  EMAIL
 }
 
 type HelpContactChannel @areas(in: [STORE]) {

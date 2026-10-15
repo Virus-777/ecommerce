@@ -31,6 +31,8 @@ export const storeRoutes = (service: ContentService) =>
     getHelpArticle: async ({ params }) => service.viewHelpArticle(params.slug),
     /** POST /help/articles/{id}/feedback: Was this helpful? */
     rateHelpArticle: async ({ params, body, principal, requestId }) => service.rateHelpArticle(params.id, body, { principal, requestId }),
+    /** GET /official-store: Official Store profile: name, logo, banner, introduction, policy links and feedback summary */
+    getOfficialStore: async () => service.getOfficialStore(),
     /** GET /policies: Policies with effective date and version */
     listPublicPolicies: async () => service.listPublicPolicies(),
     /** GET /policies/{key}: Current policy (or the version in effect at a date) */

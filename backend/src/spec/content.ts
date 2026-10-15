@@ -4,6 +4,9 @@ import { z } from 'zod';
 import type { Json } from '../kernel/lib/json.js';
 import { defineEndpoints, defineModuleSpec } from '../kernel/spec/define.js';
 import * as common from './common.js';
+import * as promotions from './promotions.js';
+import * as reviews from './reviews.js';
+import * as settings from './settings.js';
 
 /** Content: Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action. */
 
@@ -49,6 +52,8 @@ export const OwnerRef: z.ZodType<OwnerRef> = z.object({
 
 export interface ProductTile {
   productId: string;
+  /** Product slug for the product link /p/{slug}/{productId} */
+  slug?: string | null;
   offerId?: string | null;
   title: string;
   image?: common.MediaRef | null;
@@ -69,6 +74,7 @@ export interface ProductTile {
 
 export const ProductTile: z.ZodType<ProductTile> = z.object({
   productId: z.uuid(),
+  slug: z.string().describe("Product slug for the product link /p/{slug}/{productId}").nullish(),
   offerId: z.uuid().nullish(),
   title: z.string(),
   get image() {
@@ -94,6 +100,8 @@ export const ProductTile: z.ZodType<ProductTile> = z.object({
 
 export interface SellerTile {
   sellerId: string;
+  /** Storefront slug for /shop/{slug} (sellers.getStorefrontCard) */
+  sellerSlug?: string | null;
   name: string;
   logo?: common.MediaRef | null;
   verified: boolean;
@@ -104,6 +112,7 @@ export interface SellerTile {
 
 export const SellerTile: z.ZodType<SellerTile> = z.object({
   sellerId: z.uuid(),
+  sellerSlug: z.string().describe("Storefront slug for /shop/{slug} (sellers.getStorefrontCard)").nullish(),
   name: z.string(),
   get logo() {
     return common.MediaRef.nullish();
@@ -116,6 +125,10 @@ export const SellerTile: z.ZodType<SellerTile> = z.object({
 
 export interface BrandTile {
   brandId: string;
+  /** Brand slug (catalog.getBrands) for the brand page */
+  slug?: string | null;
+  /** Slug of the brand's published collection page the tile comes from (/pages/{pageSlug}) */
+  pageSlug?: string | null;
   name: string;
   logo?: common.MediaRef | null;
   productCount: number;
@@ -123,6 +136,8 @@ export interface BrandTile {
 
 export const BrandTile: z.ZodType<BrandTile> = z.object({
   brandId: z.uuid(),
+  slug: z.string().describe("Brand slug (catalog.getBrands) for the brand page").nullish(),
+  pageSlug: z.string().describe("Slug of the brand's published collection page the tile comes from (/pages/{pageSlug})").nullish(),
   name: z.string(),
   get logo() {
     return common.MediaRef.nullish();
@@ -132,12 +147,15 @@ export const BrandTile: z.ZodType<BrandTile> = z.object({
 
 export interface CategoryTile {
   categoryId: string;
+  /** Category slug for the category page */
+  slug?: string | null;
   name: string;
   image?: common.MediaRef | null;
 }
 
 export const CategoryTile: z.ZodType<CategoryTile> = z.object({
   categoryId: z.uuid(),
+  slug: z.string().describe("Category slug for the category page").nullish(),
   name: z.string(),
   get image() {
     return common.MediaRef.nullish();
@@ -388,8 +406,8 @@ export interface HomeSection {
   categories: CategoryTile[];
   sellers: SellerTile[];
   brands: BrandTile[];
-  /** promotions.FlashSaleBlock[] when promotions is enabled (countdown, claimed meters, limits) */
-  deals?: unknown | null;
+  /** Flash sales from promotions (countdown, claimed meters, limits); null when promotions is off or for other kinds */
+  deals?: promotions.FlashSaleBlock[] | null;
   /** PROMISE_STRIP only: the promises in order; empty for other kinds */
   promiseItems: PromiseItem[];
   /** For ad_position sections: the slot to request from advertising (POST /api/store/advertising/decisions) */
@@ -420,7 +438,9 @@ export const HomeSection: z.ZodType<HomeSection> = z.object({
   get brands() {
     return z.array(BrandTile);
   },
-  deals: z.unknown().describe("promotions.FlashSaleBlock[] when promotions is enabled (countdown, claimed meters, limits)").nullish(),
+  get deals() {
+    return z.array(promotions.FlashSaleBlock).nullish();
+  },
   get promiseItems() {
     return z.array(PromiseItem);
   },
@@ -731,6 +751,8 @@ export interface StorePage {
   notes: string[];
   updatedAt: string;
   version: number;
+  /** About pages only (kind about): company facts and the approved-seller count; null for other pages */
+  about?: AboutFacts | null;
 }
 
 export const StorePage: z.ZodType<StorePage> = z.object({
@@ -757,6 +779,9 @@ export const StorePage: z.ZodType<StorePage> = z.object({
   notes: z.array(z.string()).describe("e.g. Only in-stock offers are included; no seller paid to be included; prices and stock are live"),
   updatedAt: z.iso.datetime({ offset: true }),
   version: z.number().int(),
+  get about() {
+    return AboutFacts.nullish();
+  },
 }).register(common.apiTypes, { id: "content.StorePage" });
 
 export interface CollectionCard {
@@ -885,6 +910,7 @@ export interface HelpArticle {
   slug: string;
   title: string;
   category: HelpCategory;
+  /** Help Center (/help), then the topic (/help?topic={category slug}) */
   breadcrumb: LinkRef[];
   effectiveAt?: string | null;
   updatedAt: string;
@@ -892,7 +918,7 @@ export interface HelpArticle {
   /** Structured rich text (headings, lists, tables, links), sanitized */
   body: string;
   /** e.g. who pays return shipping */
-  tables?: unknown[] | null;
+  tables?: ContentTable[] | null;
   related: HelpArticleSummary[];
   /** e.g. Go to my orders, Contact us */
   actions: LinkRef[];
@@ -914,7 +940,9 @@ export const HelpArticle: z.ZodType<HelpArticle> = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
   readMinutes: z.number().int(),
   body: z.string().describe("Structured rich text (headings, lists, tables, links), sanitized"),
-  tables: z.array(z.unknown()).describe("e.g. who pays return shipping").nullish(),
+  get tables() {
+    return z.array(ContentTable).nullish();
+  },
   get related() {
     return z.array(HelpArticleSummary);
   },
@@ -933,7 +961,7 @@ export interface HelpArticleInput {
   categoryId: string;
   summary?: string | null;
   body: string;
-  tables?: unknown[] | null;
+  tables?: ContentTable[] | null;
   relatedIds?: string[] | null;
   policyKeys?: string[] | null;
   audience?: "customer" | "seller" | "both" | null;
@@ -954,7 +982,9 @@ export const HelpArticleInput: z.ZodType<HelpArticleInput> = z.object({
   categoryId: z.uuid(),
   summary: z.string().nullish(),
   body: z.string(),
-  tables: z.array(z.unknown()).nullish(),
+  get tables() {
+    return z.array(ContentTable).nullish();
+  },
   relatedIds: z.array(z.uuid()).nullish(),
   policyKeys: z.array(z.string()).nullish(),
   audience: z.enum(["customer", "seller", "both"]).nullish(),
@@ -976,6 +1006,10 @@ export interface HelpArticleAdmin {
   helpfulPct?: number | null;
   feedbackCount: number;
   schedule: Schedule;
+  /** Who wrote the current draft version (null without a draft); the author cannot approve it (SAME_REVIEWER) */
+  draftAuthor?: common.Actor | null;
+  /** The draft waits for review and the caller is not its author, so the Approve button can show */
+  canApprove: boolean;
 }
 
 export const HelpArticleAdmin: z.ZodType<HelpArticleAdmin> = z.object({
@@ -994,7 +1028,87 @@ export const HelpArticleAdmin: z.ZodType<HelpArticleAdmin> = z.object({
   get schedule() {
     return Schedule;
   },
+  get draftAuthor() {
+    return common.Actor.nullish();
+  },
+  canApprove: z.boolean().describe("The draft waits for review and the caller is not its author, so the Approve button can show"),
 }).register(common.apiTypes, { id: "content.HelpArticleAdmin" });
+
+export interface ContentTable {
+  /** e.g. Who pays return shipping */
+  caption?: string | null;
+  /** Column headings */
+  columns: string[];
+  /** Cells as plain text, one list per row in column order */
+  rows: string[][];
+  note?: string | null;
+}
+
+export const ContentTable: z.ZodType<ContentTable> = z.object({
+  caption: z.string().describe("e.g. Who pays return shipping").nullish(),
+  columns: z.array(z.string()).describe("Column headings"),
+  rows: z.array(z.array(z.string())).describe("Cells as plain text, one list per row in column order"),
+  note: z.string().nullish(),
+}).register(common.apiTypes, { id: "content.ContentTable" });
+
+export interface HelpSummaryTabs {
+  all: number;
+  articles: number;
+  policies: number;
+  needsReview: number;
+}
+
+export const HelpSummaryTabs: z.ZodType<HelpSummaryTabs> = z.object({
+  all: z.number().int(),
+  articles: z.number().int(),
+  policies: z.number().int(),
+  needsReview: z.number().int(),
+}).register(common.apiTypes, { id: "content.HelpSummaryTabs" });
+
+export interface OfficialStoreProfile {
+  /** OFFICIAL_STORE_ID */
+  id: string;
+  /** OFFICIAL_STORE_NAME */
+  name: string;
+  /** Setting content.officialStoreLogoUrl (an absolute URL or a path on the store site) */
+  logoUrl?: string | null;
+  /** Setting content.officialStoreBannerUrl */
+  bannerUrl?: string | null;
+  /** Setting content.officialStoreIntroduction */
+  introduction?: string | null;
+  /** Current policies of the kinds in content.officialStorePolicyKinds (returns, shipping, purchase terms by default), linking to /policies/{key} */
+  policies: LinkRef[];
+  /** Official Store feedback summary (reviews); null when reviews is off */
+  feedback?: reviews.SellerFeedbackSummary | null;
+}
+
+export const OfficialStoreProfile: z.ZodType<OfficialStoreProfile> = z.object({
+  id: z.uuid().describe("OFFICIAL_STORE_ID"),
+  name: z.string().describe("OFFICIAL_STORE_NAME"),
+  logoUrl: z.string().describe("Setting content.officialStoreLogoUrl (an absolute URL or a path on the store site)").nullish(),
+  bannerUrl: z.string().describe("Setting content.officialStoreBannerUrl").nullish(),
+  introduction: z.string().describe("Setting content.officialStoreIntroduction").nullish(),
+  get policies() {
+    return z.array(LinkRef);
+  },
+  get feedback() {
+    return reviews.SellerFeedbackSummary.nullish();
+  },
+}).register(common.apiTypes, { id: "content.OfficialStoreProfile" });
+
+export interface AboutFacts {
+  /** Emails, postal address, founding year and headquarters (settings market.*); null when settings is off */
+  company?: settings.CompanyFacts | null;
+  /** Marketplace sellers approved to sell now (sellers.searchSellers, statuses approved and restricted); null when sellers is off */
+  approvedSellerCount?: number | null;
+}
+
+export const AboutFacts: z.ZodType<AboutFacts> = z.object({
+  get company() {
+    return settings.CompanyFacts.nullish();
+  },
+  approvedSellerCount: z.number().int().describe("Marketplace sellers approved to sell now (sellers.searchSellers, statuses approved and restricted); null when sellers is off").nullish(),
+}).register(common.apiTypes, { id: "content.AboutFacts" });
 
 export interface ContentListItem {
   id: string;
@@ -1031,7 +1145,7 @@ export interface HelpSummary {
   articlesNeedingReview: number;
   helpfulPct: number;
   helpfulWindowDays: number;
-  tabs?: unknown;
+  tabs: HelpSummaryTabs;
 }
 
 export const HelpSummary: z.ZodType<HelpSummary> = z.object({
@@ -1043,11 +1157,14 @@ export const HelpSummary: z.ZodType<HelpSummary> = z.object({
   articlesNeedingReview: z.number().int(),
   helpfulPct: z.number(),
   helpfulWindowDays: z.number().int(),
-  tabs: z.unknown(),
+  get tabs() {
+    return HelpSummaryTabs;
+  },
 }).register(common.apiTypes, { id: "content.HelpSummary" });
 
 export interface ContactChannel {
-  kind: "chat" | "phone" | "message";
+  /** From support (support.contactChannels) when it offers them; live chat is not offered */
+  kind: "phone" | "message" | "email";
   label: string;
   hours: string;
   detail: string;
@@ -1055,7 +1172,7 @@ export interface ContactChannel {
 }
 
 export const ContactChannel: z.ZodType<ContactChannel> = z.object({
-  kind: z.enum(["chat", "phone", "message"]),
+  kind: z.enum(["phone", "message", "email"]).describe("From support (support.contactChannels) when it offers them; live chat is not offered"),
   label: z.string(),
   hours: z.string(),
   detail: z.string(),
@@ -1154,7 +1271,7 @@ export interface PolicyVersion {
   version: string;
   state: "draft" | "in_review" | "approved" | "scheduled" | "current" | "superseded" | "withdrawn";
   body: string;
-  tables?: unknown[] | null;
+  tables?: ContentTable[] | null;
   effectiveAt?: string | null;
   changeSummary?: string | null;
   /** Extending to open orders is allowed only for changes that favor the customer */
@@ -1176,7 +1293,9 @@ export const PolicyVersion: z.ZodType<PolicyVersion> = z.object({
   version: z.string().describe("e.g. 3.1"),
   state: z.enum(["draft", "in_review", "approved", "scheduled", "current", "superseded", "withdrawn"]),
   body: z.string(),
-  tables: z.array(z.unknown()).nullish(),
+  get tables() {
+    return z.array(ContentTable).nullish();
+  },
   effectiveAt: z.iso.datetime({ offset: true }).nullish(),
   changeSummary: z.string().nullish(),
   impact: z.enum(["new_orders_only", "extend_open_orders"]).describe("Extending to open orders is allowed only for changes that favor the customer"),
@@ -1216,7 +1335,7 @@ export const PolicyApproval: z.ZodType<PolicyApproval> = z.object({
 export interface PolicyVersionInput {
   title?: string | null;
   body: string;
-  tables?: unknown[] | null;
+  tables?: ContentTable[] | null;
   effectiveAt?: string | null;
   changeSummary?: string | null;
   impact?: "new_orders_only" | "extend_open_orders" | null;
@@ -1227,7 +1346,9 @@ export interface PolicyVersionInput {
 export const PolicyVersionInput: z.ZodType<PolicyVersionInput> = z.object({
   title: z.string().nullish(),
   body: z.string(),
-  tables: z.array(z.unknown()).nullish(),
+  get tables() {
+    return z.array(ContentTable).nullish();
+  },
   effectiveAt: z.iso.datetime({ offset: true }).nullish(),
   changeSummary: z.string().nullish(),
   impact: z.enum(["new_orders_only", "extend_open_orders"]).nullish(),
@@ -1256,7 +1377,7 @@ export interface StorePolicy {
   version: string;
   effectiveAt: string;
   body: string;
-  tables?: unknown[] | null;
+  tables?: ContentTable[] | null;
   previousVersion?: PolicyVersionRef | null;
   /** A scheduled version with its effective date and change summary */
   upcoming?: PolicyVersionRef | null;
@@ -1273,7 +1394,9 @@ export const StorePolicy: z.ZodType<StorePolicy> = z.object({
   version: z.string(),
   effectiveAt: z.iso.datetime({ offset: true }),
   body: z.string(),
-  tables: z.array(z.unknown()).nullish(),
+  get tables() {
+    return z.array(ContentTable).nullish();
+  },
   get previousVersion() {
     return PolicyVersionRef.nullish();
   },
@@ -1292,7 +1415,7 @@ export interface SiteNavigation {
   header: LinkRef[];
   footer: FooterGroup[];
   contact: ContactChannel[];
-  /** settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly' */
+  /** settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · Portland, OR); when settings is off: '© <year> Marketly' */
   companyLine: string;
   /** settings.storeInfo market.legalName; 'Marketly' when settings is off */
   legalName: string;
@@ -1312,7 +1435,7 @@ export const SiteNavigation: z.ZodType<SiteNavigation> = z.object({
   get contact() {
     return z.array(ContactChannel);
   },
-  companyLine: z.string().describe("settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly'"),
+  companyLine: z.string().describe("settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · Portland, OR); when settings is off: '© <year> Marketly'"),
   legalName: z.string().describe("settings.storeInfo market.legalName; 'Marketly' when settings is off"),
   get checks() {
     return z.array(Check).nullish();
@@ -1867,6 +1990,94 @@ export const endpoints = defineEndpoints({
     screens: ["help/article"],
     phase: 1,
   },
+  getOfficialStore: {
+    area: "store",
+    method: "GET",
+    path: "/official-store",
+    auth: "visitor",
+    scope: "public",
+    summary: "Official Store profile: name, logo, banner, introduction, policy links and feedback summary",
+    desc: "The Official Store is not a seller record: its profile comes from content settings (officialStoreLogoUrl, officialStoreBannerUrl, officialStoreIntroduction, officialStorePolicyKinds), current policies and the reviews feedback summary for OFFICIAL_STORE_ID.",
+    response: () => OfficialStoreProfile,
+    status: 200,
+    screens: ["store/official"],
+    phase: 1,
+  },
+  getSellerHelpHome: {
+    area: "seller",
+    method: "GET",
+    path: "/help",
+    auth: "seller",
+    sellerContext: "optional",
+    scope: "own-seller",
+    summary: "Seller Help Center: seller topics, popular articles and searches, featured guide and contact channels",
+    desc: "Same as the store's GET /help?audience=seller, with the seller session.",
+    response: () => HelpHome,
+    status: 200,
+    screens: ["seller/help"],
+    phase: 1,
+  },
+  searchSellerHelp: {
+    area: "seller",
+    method: "GET",
+    path: "/help/articles",
+    auth: "seller",
+    sellerContext: "optional",
+    scope: "own-seller",
+    summary: "Search or browse seller help articles",
+    desc: "Articles for sellers (audience seller or both).",
+    query: () =>
+      z.object({
+        q: z.string().optional(),
+        category: z.string().describe("Category slug").optional(),
+      }),
+    paging: true,
+    response: () => HelpArticleSummary,
+    status: 200,
+    screens: ["seller/help"],
+    phase: 1,
+  },
+  getSellerHelpArticle: {
+    area: "seller",
+    method: "GET",
+    path: "/help/articles/{slug}",
+    auth: "seller",
+    sellerContext: "optional",
+    scope: "own-seller",
+    summary: "A seller help article",
+    desc: "Published articles for sellers (audience seller or both); customer-only articles answer NOT_FOUND.",
+    params: () =>
+      z.object({
+        slug: z.string(),
+      }),
+    response: () => HelpArticle,
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["seller/help"],
+    phase: 1,
+  },
+  rateSellerHelpArticle: {
+    area: "seller",
+    method: "POST",
+    path: "/help/articles/{id}/feedback",
+    auth: "seller",
+    sellerContext: "optional",
+    scope: "own-seller",
+    summary: "Was this helpful? (seller)",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      helpful: z.boolean(),
+      comment: z.string().nullish(),
+    }),
+    response: null,
+    status: 204,
+    errors: ["NOT_FOUND"],
+    screens: ["seller/help"],
+    phase: 1,
+  },
   listPublicPolicies: {
     area: "store",
     method: "GET",
@@ -1939,7 +2150,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/homepage",
     auth: "staff",
-    permission: "content.homepage.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Homepage sections with owner, schedule, status and locked ad positions",
     response: () => HomepageAdmin,
@@ -1988,7 +2199,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/homepage/sections/{id}/products",
     auth: "staff",
-    permission: "content.homepage.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Products in a section, resolved with title, seller and stock",
     desc: "Resolves the section product source (manual list, collection or rule) through catalog, offers and inventory. Unavailable products are listed only with includeHidden=true and carry hiddenReason.",
@@ -2163,7 +2374,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/homepage/versions",
     auth: "staff",
-    permission: "content.homepage.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Homepage version history",
     paging: true,
@@ -2201,7 +2412,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/pages",
     auth: "staff",
-    permission: "content.pages.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Campaign pages and collections with publish and removal times",
     query: () =>
@@ -2237,7 +2448,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/pages/{id}",
     auth: "staff",
-    permission: "content.pages.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Page with draft and live versions, checks and linked promotion",
     params: () =>
@@ -2449,7 +2660,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/pages/{id}/versions",
     auth: "staff",
-    permission: "content.pages.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Version history of a page",
     params: () =>
@@ -2490,7 +2701,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/help/summary",
     auth: "staff",
-    permission: "content.help.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Published articles, policies, articles needing review and helpful rating",
     response: () => HelpSummary,
@@ -2503,7 +2714,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/help/items",
     auth: "staff",
-    permission: "content.help.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Policies and help articles in one list",
     query: () =>
@@ -2525,7 +2736,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/help/categories",
     auth: "staff",
-    permission: "content.help.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Help categories including hidden",
     response: () => z.array(HelpCategory),
@@ -2601,7 +2812,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/help/articles/{id}",
     auth: "staff",
-    permission: "content.help.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Article with status, versions and feedback",
     params: () =>
@@ -2666,7 +2877,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/help/articles/{id}/versions",
     auth: "staff",
-    permission: "content.help.manage",
+    permission: "content.view",
     scope: "staff",
     summary: "Article version history",
     params: () =>
@@ -2707,7 +2918,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/policies",
     auth: "staff",
-    permission: "content.policies.edit",
+    permission: "content.view",
     scope: "staff",
     summary: "Policies with current, scheduled and draft versions",
     response: () => z.array(PolicySummary),
@@ -2743,7 +2954,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/policies/{id}/versions",
     auth: "staff",
-    permission: "content.policies.edit",
+    permission: "content.view",
     scope: "staff",
     summary: "All versions of a policy with effective date, summary and approver",
     params: () =>
@@ -2782,7 +2993,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/policy-versions/{id}",
     auth: "staff",
-    permission: "content.policies.edit",
+    permission: "content.view",
     scope: "staff",
     summary: "A policy version with approvals",
     params: () =>
@@ -2820,7 +3031,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/policy-versions/{id}/diff",
     auth: "staff",
-    permission: "content.policies.edit",
+    permission: "content.view",
     scope: "staff",
     summary: "Changes from the previous version",
     params: () =>
@@ -2963,7 +3174,7 @@ export const spec = defineModuleSpec({
   chapters: [19,15,4,3,17],
   summary: "Store content managed by the Content Manager: ordered and scheduled homepage sections, campaign pages and curated collections, Help Center articles and categories, policies with versions and effective dates, the About page and footer links. Every item has an owner, a preview, a publication status and schedule, a version history with restore, and a correction or removal action.",
   dependsOn: ["media","access"],
-  optionalDeps: ["catalog","offers","inventory","promotions","advertising","sellers","search","reports","notifications","audit","settings","shipping","wishlist","support","returns"],
+  optionalDeps: ["catalog","offers","inventory","promotions","advertising","sellers","search","reports","notifications","audit","settings","shipping","wishlist","support","returns","reviews"],
   publicApi: ["currentPolicyVersions","getPolicyVersion","helpArticlesFor","pageLink","getHomePage","previewHomePage","getStorePage","previewPage","collectionProducts","getHelpCenter","getHelpArticle","countHelpArticlesForPolicy","sellerAnnouncements","contentForCampaign"],
   permissions: [
     {
@@ -3010,6 +3221,11 @@ export const spec = defineModuleSpec({
       "key": "content.policies.manage",
       "audience": "staff",
       "desc": "Create policies and assign their owners"
+    },
+    {
+      "key": "content.view",
+      "audience": "staff",
+      "desc": "View the homepage layout, pages, help content and policies in the Admin Center (read only)"
     }
   ],
   approvalActions: [
@@ -3266,6 +3482,30 @@ export const spec = defineModuleSpec({
       "desc": "Products per homepage section",
       "type": "int",
       "min": 1
+    },
+    "officialStoreLogoUrl": {
+      "default": "/brand/official-store-logo.svg",
+      "desc": "Official Store profile logo: an absolute URL or a path on the store site (example)",
+      "type": "string"
+    },
+    "officialStoreBannerUrl": {
+      "default": null,
+      "desc": "Official Store profile banner: an absolute URL or a path on the store site; none by default",
+      "type": "string"
+    },
+    "officialStoreIntroduction": {
+      "default": "Products sold and shipped by Marketly: checked before they ship, with delivery dates you can rely on and help from Marketly support when you need it.",
+      "desc": "Short introduction on the Official Store page (example)",
+      "type": "string"
+    },
+    "officialStorePolicyKinds": {
+      "default": [
+        "returns",
+        "shipping",
+        "purchase_terms"
+      ],
+      "desc": "Policy kinds linked from the Official Store page (current versions only)",
+      "type": "json"
     }
   },
   errorCodes: {
