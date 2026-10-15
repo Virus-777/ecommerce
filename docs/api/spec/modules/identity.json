@@ -150,8 +150,8 @@
     },
     {
       "name": "issueOrderLink",
-      "signature": "(orderId: uuid, email: string) => { url: url, expiresAt: datetime }",
-      "desc": "Signed link for confirmation and 'email me my order links' emails; redeemed at POST /api/public/identity/order-links/{token}/redeem",
+      "signature": "(orderId: uuid, email: string, orderRef?: string) => { url: url, expiresAt: datetime }",
+      "desc": "Signed link for confirmation and 'email me my order links' emails; redeemed at POST /api/public/identity/order-links/redeem. Pass orderRef so the redemption can return it (the screen shows the ref).",
       "usedBy": [
         "checkout",
         "customers",
@@ -698,8 +698,15 @@
       "expiresAt": "datetime"
     },
     "OrderLinkRedemption": {
-      "guestSession": "GuestSession",
+      "guestSession": {
+        "type": "GuestSession?",
+        "desc": "The guest session that may now open the order; null for a signed-in customer (no guest access is created: the order opens in their account when it is theirs)"
+      },
       "orderId": "uuid",
+      "orderRef": {
+        "type": "string?",
+        "desc": "The order's reference, as screens show it; null for links issued before it was recorded or by an issuer that did not pass it"
+      },
       "emailMasked": "string"
     }
   },
@@ -968,6 +975,7 @@
         "id": "uuid pk",
         "token_hash": "text unique",
         "order_id": "uuid",
+        "order_ref": "text? (the order's reference, given by the issuer, returned on redemption)",
         "email_normalized": "text",
         "expires_at": "timestamptz",
         "last_redeemed_at": "timestamptz?",
@@ -1536,7 +1544,7 @@
       "method": "POST",
       "path": "/order-links/redeem",
       "summary": "Open an order from an emailed link",
-      "desc": "Grants the (new or given) guest session access to that order. Signed-in customers whose verified email matches see it in their account instead.",
+      "desc": "Visitors: grants the (new or given) guest session access to that order. A signed-in customer gets the order id and ref without any guest access (guestSession null): the order opens in their account when it is theirs. Returns orderRef when the link recorded it.",
       "auth": "visitor",
       "body": {
         "token": "string"
@@ -2696,7 +2704,7 @@
   "errorCodes": {
     "INVALID_CREDENTIALS": {
       "status": 401,
-      "meaning": "Email and password don't match. details.attemptsLeft before a temporary lock."
+      "meaning": "Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes."
     },
     "ACCOUNT_LOCKED": {
       "status": 423,

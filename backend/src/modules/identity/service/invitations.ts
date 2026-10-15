@@ -158,7 +158,7 @@ export class Invitations {
         if (!passwordOk) {
           const f = await this.authentication.countFailure(repo, a!, s, now, { client: caller.client, audience: 'seller', reason: 'password' });
           after = f.after;
-          return { error: new AppError('INVALID_CREDENTIALS', "That password doesn't match this account", { attemptsLeft: f.attemptsLeft }) };
+          return { error: new AppError('INVALID_CREDENTIALS', "That password doesn't match this account", { attemptsLeft: f.attemptsLeft, lockoutMinutes: s.lockoutMinutes }) };
         }
         a = await this.authentication.liftExpiredLock(repo, a!, now);
         if (lockInForce(a, now)) return { error: this.authentication.lockedError(a) };

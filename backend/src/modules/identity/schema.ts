@@ -287,6 +287,7 @@ const order_links = new Schema(
     _id: { type: String, required: true }, // id
     token_hash: { type: String, required: true },
     order_id: { type: String, required: true },
+    order_ref: { type: String, default: null }, // the order's reference, given by the issuer, returned on redemption
     email_normalized: { type: String, required: true },
     expires_at: { type: Date, required: true },
     last_redeemed_at: { type: Date, default: null },

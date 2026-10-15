@@ -232,7 +232,7 @@ describe('sign-in', () => {
     for (let i = 4; i >= 1; i--) {
       const r = await signIn(kit, { email: c.email, password: 'Wrong-Pass-1' });
       expect(r.status).toBe(401);
-      expect(r.body.error).toMatchObject({ code: 'INVALID_CREDENTIALS', details: { attemptsLeft: i } });
+      expect(r.body.error).toMatchObject({ code: 'INVALID_CREDENTIALS', details: { attemptsLeft: i, lockoutMinutes: 15 } });
     }
     const locked = await signIn(kit, { email: c.email, password: 'Wrong-Pass-1' });
     expect(locked.status).toBe(423);
@@ -245,7 +245,7 @@ describe('sign-in', () => {
     const ghost = uniqueEmail('ghost');
     for (let i = 4; i >= 1; i--) {
       const r = await signIn(kit, { email: ghost, password: 'Wrong-Pass-1' });
-      expect(r.body.error).toMatchObject({ code: 'INVALID_CREDENTIALS', details: { attemptsLeft: i } });
+      expect(r.body.error).toMatchObject({ code: 'INVALID_CREDENTIALS', details: { attemptsLeft: i, lockoutMinutes: 15 } });
     }
     expect((await signIn(kit, { email: ghost, password: 'Wrong-Pass-1' })).body.error.code).toBe('ACCOUNT_LOCKED');
 

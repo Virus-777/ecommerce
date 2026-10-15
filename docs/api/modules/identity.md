@@ -499,8 +499,9 @@ Who someone is and how they prove it: accounts for customers, seller members and
 
 | Field | Type |
 |---|---|
-| guestSession | `GuestSession` |
+| guestSession | `GuestSession?` The guest session that may now open the order; null for a signed-in customer (no guest access is created: the order opens in their account when it is theirs) |
 | orderId | `uuid` |
+| orderRef | `string?` The order's reference, as screens show it; null for links issued before it was recorded or by an issuer that did not pass it |
 | emailMasked | `string` |
 
 ## Status flows
@@ -803,6 +804,7 @@ Indexes: `pk (guest_session_id, order_id)`, `(email_normalized)`
 | id | uuid pk |
 | token_hash | text unique |
 | order_id | uuid |
+| order_ref | text? (the order's reference, given by the issuer, returned on redemption) |
 | email_normalized | text |
 | expires_at | timestamptz |
 | last_redeemed_at | timestamptz? |
@@ -897,7 +899,7 @@ Indexes: `(expires_at)`
 | revokeSessions | `(accountId: uuid, reason: string, audience?: 'store' | 'seller' | 'admin') => int`<br>Sign an account out everywhere (or in one area). Returns the number of sessions revoked. | access, sellers, trust |
 | grantGuestOrderAccess | `(guestSessionId: uuid, orderId: uuid, email: string, via: 'checkout' | 'lookup' | 'link') => GuestSession`<br>Let a guest session open one order (after guest checkout, a successful lookup in customers, or an emailed link) | checkout, customers |
 | hasGuestOrderAccess | `(guestSessionId: uuid, orderId: uuid) => bool`<br>Gate guest access to order detail, tracking, returns and help | orders, shipping, returns, support, customers, media |
-| issueOrderLink | `(orderId: uuid, email: string) => { url: url, expiresAt: datetime }`<br>Signed link for confirmation and 'email me my order links' emails; redeemed at POST /api/public/identity/order-links/{token}/redeem | checkout, customers, notifications |
+| issueOrderLink | `(orderId: uuid, email: string, orderRef?: string) => { url: url, expiresAt: datetime }`<br>Signed link for confirmation and 'email me my order links' emails; redeemed at POST /api/public/identity/order-links/redeem. Pass orderRef so the redemption can return it (the screen shows the ref). | checkout, customers, notifications |
 | closeAccount | `(accountId: uuid, reason: string) => void`<br>Close the member credential after customers completes a closure. Revokes all sessions; keeps Seller Center access if the account still belongs to a seller. | customers |
 | sendPasswordReset | `(accountId: uuid, input: { reason: string, by: Actor, revokeSessions: bool }) => void`<br>Staff-initiated reset from another module's screen (customers account actions) | customers |
 | startPhoneVerification | `(accountId: uuid, phone: string) => VerificationChallenge`<br>Text a 6-digit code to a new mobile number (needs SMS, phase 2; until then the number stays unverified). Confirmed at POST /api/public/identity/verifications/{id}/confirm; publishes identity.user.verified with channel phone. | customers |
@@ -921,7 +923,7 @@ Indexes: `(expires_at)`
 
 | Code | Status | Meaning |
 |---|---|---|
-| `INVALID_CREDENTIALS` | 401 | Email and password don't match. details.attemptsLeft before a temporary lock. |
+| `INVALID_CREDENTIALS` | 401 | Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes. |
 | `ACCOUNT_LOCKED` | 423 | Sign-in is paused. details.lockedUntil (null = until staff unlock) and details.cause. |
 | `ACCOUNT_DISABLED` | 403 | The account is disabled or closed. |
 | `EMAIL_NOT_VERIFIED` | 403 | Confirm the email first. details.challenge is a fresh VerificationChallenge. |

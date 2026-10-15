@@ -44,23 +44,40 @@ export class Guests {
   }
 
   /** Public API: emailed order link (token in the fragment; redeemed in the body) */
-  async issueOrderLink(orderId: string, email: string): Promise<{ url: string; expiresAt: string }> {
+  async issueOrderLink(orderId: string, email: string, orderRef?: string): Promise<{ url: string; expiresAt: string }> {
     const s = await this.core.cfg();
     const now = this.core.now();
     const token = randomToken();
     const expiresAt = new Date(now.getTime() + s.orderLinkTtlDays * DAY);
-    await this.core.repo.insertOrderLink({ id: newId(), token_hash: tokenHash(token), order_id: orderId, email_normalized: normalizeEmail(email), expires_at: expiresAt, last_redeemed_at: null, redeem_count: 0 });
+    await this.core.repo.insertOrderLink({
+      id: newId(),
+      token_hash: tokenHash(token),
+      order_id: orderId,
+      order_ref: orderRef?.trim() || null,
+      email_normalized: normalizeEmail(email),
+      expires_at: expiresAt,
+      last_redeemed_at: null,
+      redeem_count: 0,
+    });
     return { url: `${this.core.appUrl('store')}/orders/open#token=${token}`, expiresAt: map.iso(expiresAt) };
   }
 
-  /** POST /order-links/redeem: grants the caller's visitor session (or a new guest session) the order */
+  /**
+   * POST /order-links/redeem: grants the caller's visitor session (or a new guest session) the order. A signed-in
+   * customer gets the order without any guest access: a guest session would be one their app cannot use.
+   */
   async redeemOrderLink(token: string, caller: Caller): Promise<OrderLinkRedemption> {
     const s = await this.core.cfg();
     const now = this.core.now();
     return this.core.repo.transaction(async (repo) => {
       const link = typeof token === 'string' && token.length >= 20 ? await repo.findOrderLinkByHash(tokenHash(token), { forUpdate: true }) : undefined;
       if (!link || link.expires_at <= now) throw new AppError('ORDER_LINK_INVALID', 'This order link has expired; use Guest order lookup');
+      const found = { orderId: link.order_id, orderRef: link.order_ref ?? null, emailMasked: maskEmail(link.email_normalized) };
       const p = caller.principal;
+      if (p?.kind === 'customer') {
+        await repo.updateOrderLink(link.id, { last_redeemed_at: now, redeem_count: link.redeem_count + 1 });
+        return { guestSession: null, ...found };
+      }
       let g = p?.kind === 'visitor' && p.audience === 'store' && isUuid(p.sessionId) ? this.liveGuest(await repo.getGuestSession(p.sessionId, { forUpdate: true }), now) : undefined;
       if (!g) {
         g = {
@@ -80,7 +97,7 @@ export class Guests {
       }
       await repo.upsertGrant({ guest_session_id: g.id, order_id: link.order_id, email_normalized: link.email_normalized, via: 'link', granted_at: now, expires_at: new Date(now.getTime() + s.guestOrderAccessDays * DAY) });
       await repo.updateOrderLink(link.id, { last_redeemed_at: now, redeem_count: link.redeem_count + 1 });
-      return { guestSession: await this.guestSession(g, repo), orderId: link.order_id, emailMasked: maskEmail(link.email_normalized) };
+      return { guestSession: await this.guestSession(g, repo), ...found };
     });
   }
 }

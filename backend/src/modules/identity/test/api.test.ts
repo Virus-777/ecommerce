@@ -225,6 +225,28 @@ describe('guest sessions and order links', () => {
     kit.clock.set(new Date());
   });
 
+  it('returns the order ref, and a signed-in customer gets the order without a guest session (G29a, G29b)', async () => {
+    const orderId = newId();
+    const link = await identity.issueOrderLink(orderId, 'guest@example.com', 'MK-1001-ABCD');
+    const token = new URL(link.url).hash.replace('#token=', '');
+    const v = await visitor(kit);
+    const asVisitor = await kit.call('POST', `${PUBLIC}/order-links/redeem`, { token: v.accessToken, body: { token } });
+    expect(asVisitor.body).toMatchObject({ orderId, orderRef: 'MK-1001-ABCD', guestSession: { id: v.sessionId } });
+
+    const c = await customer(kit);
+    const guestsBefore = await identityTable(kit.app, 'guest_sessions').count({});
+    const asCustomer = await kit.call('POST', `${PUBLIC}/order-links/redeem`, { token: c.tokens.accessToken, body: { token } });
+    expect(asCustomer.status, JSON.stringify(asCustomer.body)).toBe(200);
+    expect(asCustomer.body).toEqual({ guestSession: null, orderId, orderRef: 'MK-1001-ABCD', emailMasked: 'g••••@example.com' });
+    expect(await identityTable(kit.app, 'guest_sessions').count({})).toBe(guestsBefore);
+    expect(await identityTable(kit.app, 'guest_order_grants').count({ order_id: orderId })).toBe(1); // only the visitor's
+
+    // links issued without a ref still redeem
+    const old = await identity.issueOrderLink(newId(), 'guest@example.com');
+    const r = await kit.call('POST', `${PUBLIC}/order-links/redeem`, { token: (await visitor(kit)).accessToken, body: { token: new URL(old.url).hash.replace('#token=', '') } });
+    expect(r.body.orderRef).toBeNull();
+  });
+
   it('a claimed visitor session loses its grants', async () => {
     const v = await visitor(kit);
     const orderId = newId();

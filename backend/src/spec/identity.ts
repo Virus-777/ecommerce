@@ -769,16 +769,20 @@ export const ReauthToken: z.ZodType<ReauthToken> = z.object({
 }).register(common.apiTypes, { id: "identity.ReauthToken" });
 
 export interface OrderLinkRedemption {
-  guestSession: GuestSession;
+  /** The guest session that may now open the order; null for a signed-in customer (no guest access is created: the order opens in their account when it is theirs) */
+  guestSession?: GuestSession | null;
   orderId: string;
+  /** The order's reference, as screens show it; null for links issued before it was recorded or by an issuer that did not pass it */
+  orderRef?: string | null;
   emailMasked: string;
 }
 
 export const OrderLinkRedemption: z.ZodType<OrderLinkRedemption> = z.object({
   get guestSession() {
-    return GuestSession;
+    return GuestSession.nullish();
   },
   orderId: z.uuid(),
+  orderRef: z.string().describe("The order's reference, as screens show it; null for links issued before it was recorded or by an issuer that did not pass it").nullish(),
   emailMasked: z.string(),
 }).register(common.apiTypes, { id: "identity.OrderLinkRedemption" });
 
@@ -1107,8 +1111,8 @@ export interface IdentityPublicApi {
   grantGuestOrderAccess(guestSessionId: string, orderId: string, email: string, via: 'checkout' | 'lookup' | 'link'): Promise<GuestSession>;
   /** Gate guest access to order detail, tracking, returns and help Used by: orders, shipping, returns, support, customers, media. */
   hasGuestOrderAccess(guestSessionId: string, orderId: string): Promise<boolean>;
-  /** Signed link for confirmation and 'email me my order links' emails; redeemed at POST /api/public/identity/order-links/{token}/redeem Used by: checkout, customers, notifications. */
-  issueOrderLink(orderId: string, email: string): Promise<{ url: string, expiresAt: string }>;
+  /** Signed link for confirmation and 'email me my order links' emails; redeemed at POST /api/public/identity/order-links/redeem. Pass orderRef so the redemption can return it (the screen shows the ref). Used by: checkout, customers, notifications. */
+  issueOrderLink(orderId: string, email: string, orderRef?: string): Promise<{ url: string, expiresAt: string }>;
   /** Close the member credential after customers completes a closure. Revokes all sessions; keeps Seller Center access if the account still belongs to a seller. Used by: customers. */
   closeAccount(accountId: string, reason: string): Promise<void>;
   /** Staff-initiated reset from another module's screen (customers account actions) Used by: customers. */
@@ -1315,6 +1319,8 @@ export interface IdentityDb {
     id: string;
     token_hash: string;
     order_id: string;
+    /** the order's reference, given by the issuer, returned on redemption */
+    order_ref: string | null;
     email_normalized: string;
     expires_at: Date;
     last_redeemed_at: Date | null;
@@ -1603,7 +1609,7 @@ export const endpoints = defineEndpoints({
     auth: "visitor",
     scope: "public",
     summary: "Open an order from an emailed link",
-    desc: "Grants the (new or given) guest session access to that order. Signed-in customers whose verified email matches see it in their account instead.",
+    desc: "Visitors: grants the (new or given) guest session access to that order. A signed-in customer gets the order id and ref without any guest access (guestSession null): the order opens in their account when it is theirs. Returns orderRef when the link recorded it.",
     body: () => z.object({
       token: z.string(),
     }),
@@ -2711,7 +2717,7 @@ export const spec = defineModuleSpec({
   errorCodes: {
     "INVALID_CREDENTIALS": {
       "status": 401,
-      "meaning": "Email and password don't match. details.attemptsLeft before a temporary lock."
+      "meaning": "Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes."
     },
     "ACCOUNT_LOCKED": {
       "status": 423,
@@ -4461,12 +4467,14 @@ export const spec = defineModuleSpec({
         "id",
         "token_hash",
         "order_id",
+        "order_ref",
         "email_normalized",
         "expires_at",
         "last_redeemed_at",
         "redeem_count"
       ],
       "nullable": [
+        "order_ref",
         "last_redeemed_at"
       ],
       "decimal": [],
@@ -4503,6 +4511,12 @@ export const spec = defineModuleSpec({
             },
             "order_id": {
               "bsonType": "string"
+            },
+            "order_ref": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
             },
             "email_normalized": {
               "bsonType": "string"

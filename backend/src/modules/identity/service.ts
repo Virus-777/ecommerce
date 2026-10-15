@@ -99,8 +99,8 @@ export class IdentityService implements IdentityPublicApi {
   }
 
   /** Public API: emailed order link (token in the fragment; redeemed in the body) */
-  issueOrderLink(orderId: string, email: string): Promise<{ url: string; expiresAt: string }> {
-    return this.guests.issueOrderLink(orderId, email);
+  issueOrderLink(orderId: string, email: string, orderRef?: string): Promise<{ url: string; expiresAt: string }> {
+    return this.guests.issueOrderLink(orderId, email, orderRef);
   }
 
   /** Close the member credential after customers completes a closure (idempotent) */

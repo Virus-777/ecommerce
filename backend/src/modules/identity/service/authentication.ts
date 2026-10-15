@@ -43,7 +43,7 @@ export class Authentication {
       if (f.lock) lockedUntil = new Date(at.getTime() + windowMs);
     }
     if (lockedUntil && lockedUntil > now) throw new AppError('ACCOUNT_LOCKED', 'Sign-in is paused for this account', { lockedUntil: map.iso(lockedUntil), cause: 'failed_sign_ins' });
-    throw new AppError('INVALID_CREDENTIALS', "Email and password don't match", { attemptsLeft });
+    throw new AppError('INVALID_CREDENTIALS', "Email and password don't match", { attemptsLeft, lockoutMinutes: s.lockoutMinutes });
   }
 
   lockedError(a: AccountRow) {
@@ -115,7 +115,7 @@ export class Authentication {
       if (!ok) {
         const f = await this.countFailure(repo, a, s, now, { client: caller.client, audience: body.audience, reason: 'password' });
         after = f.after;
-        return { error: f.locked ? this.lockedError(f.account) : new AppError('INVALID_CREDENTIALS', "Email and password don't match", { attemptsLeft: f.attemptsLeft }) };
+        return { error: f.locked ? this.lockedError(f.account) : new AppError('INVALID_CREDENTIALS', "Email and password don't match", { attemptsLeft: f.attemptsLeft, lockoutMinutes: s.lockoutMinutes }) };
       }
       if (a.status === 'disabled' || (a.status === 'closed' && (body.audience !== 'seller' || !(await repo.activeSellerAccess(a.id)).length))) {
         await this.core.securityEvent(repo, a.id, 'sign_in_blocked', 'blocked', { client: caller.client, audience: body.audience, detail: { cause: 'disabled' } });
