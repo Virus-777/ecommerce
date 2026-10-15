@@ -127,7 +127,7 @@ describe('public API reads', () => {
     const p = product(h, { title: 'Candle', price: 1500, sellerId });
     const email = `guest-${newId().slice(0, 8)}@example.com`;
     const order = await h.service.createOrder(checkout([group(h, [line(p, 1)], { sellerId })], { email }));
-    expect(await h.service.findGuestOrder(order.ref.toLowerCase(), email.toUpperCase())).toEqual({ orderId: order.id });
+    expect(await h.service.findGuestOrder(order.ref.toLowerCase(), email.toUpperCase())).toEqual({ orderId: order.id, signInRequired: false });
     expect(await h.service.findGuestOrder(order.ref, 'other@example.com')).toBeNull();
     expect((await h.service.listGuestOrdersByEmail(email)).map((o) => o.ref)).toEqual([order.ref]);
 
@@ -137,6 +137,9 @@ describe('public API reads', () => {
     const res = await h.call('GET', `/api/store/orders/orders/${order.id}`, tokens.customer(accountId));
     expect(res.status).toBe(200);
     expect(res.body.contact.kind).toBe('customer');
+    // G29e: now a registered customer's order: the lookup asks to sign in, with the right email or a wrong one
+    expect(await h.service.findGuestOrder(order.ref, email)).toEqual({ signInRequired: true });
+    expect(await h.service.findGuestOrder(order.ref, 'other@example.com')).toEqual({ signInRequired: true });
   });
 
   it('counts purchases and answers paid amounts per item', async () => {

@@ -349,6 +349,8 @@ export class Cancellations {
       const status = cancellationRequestMachine.next(c.status as 'requested', event as 'accept');
       const group = agg.groups.find((g) => g.id === c.group_id)!;
       const items = c.items.map((l) => agg.items.find((i) => i.id === l.itemId)!).filter(Boolean);
+      // a label bought after the request: the seller (or staff) voids it, or declines because it ships
+      this.refuseOnLabel(agg, items);
       // refund recomputed now: the group may have changed since the request
       const refund = this.groupRefund(
         agg,
@@ -424,6 +426,18 @@ export class Cancellations {
   }
 
   /** Items under a request go back to the state held before it */
+  /**
+   * Items on a bought label the carrier does not have yet are cancelled only after the label is voided (G41): shipping
+   * voids a label only when its whole parcel goes, so whoever cancels (seller, staff, accepting a request) voids it first.
+   */
+  private refuseOnLabel(agg: Agg, items: readonly ItemRec[]) {
+    const onLabel = items.filter((i) => this.views.onUnusedLabel(agg, i.id));
+    if (!onLabel.length) return;
+    throw this.core.error('CANCELLATION_NOT_ALLOWED', 'Some items are on a shipping label. Void the label first, then cancel the items.', {
+      items: onLabel.map((i) => ({ itemId: i.id, reason: 'This item is on a shipping label the carrier does not have yet. Void the label first.', alternative: null })),
+    });
+  }
+
   private async restore(tx: OrdersRepository, batch: Batch, agg: Agg, c: CancellationRec, event: 'decline_cancellation') {
     for (const l of c.items) {
       const item = agg.items.find((i) => i.id === l.itemId);
@@ -443,13 +457,7 @@ export class Cancellations {
       const group = agg.groups.find((g) => g.id === groupId)!;
       this.core.refuseMarketly(group, 'cancel its items');
       const lines = this.resolve(agg, input.items, { groupId });
-      // shipping voids a label only when its whole parcel is cancelled: the seller voids it first
-      const onLabel = lines.filter((l) => this.views.onUnusedLabel(agg, l.item.id));
-      if (onLabel.length) {
-        throw this.core.error('CANCELLATION_NOT_ALLOWED', 'Some items are on a shipping label. Void the label first, then cancel the items.', {
-          items: onLabel.map((l) => ({ itemId: l.item.id, reason: 'This item is on a shipping label the carrier does not have yet. Void the label first.', alternative: null })),
-        });
-      }
+      this.refuseOnLabel(agg, lines.map((l) => l.item));
       return this.createDirect(tx, batch, agg, group, lines, { initiatedBy: 'seller', reasonCode: input.reasonCode, reason: input.note ?? null, idempotencyKey: key, pending: null, countsAgainstSeller: true });
     });
     return this.one(orderId, id);
@@ -470,6 +478,7 @@ export class Cancellations {
     const counts = ['seller_cannot_fulfill', 'overdue_dispatch'].includes(input.reasonCode);
     const ids = await this.core.write(orderId, by, async (tx, agg, batch) => {
       const lines = this.resolve(agg, input.items);
+      this.refuseOnLabel(agg, lines.map((l) => l.item));
       const out: string[] = [];
       for (const [groupId, ls] of this.byGroup(lines)) {
         const group = agg.groups.find((g) => g.id === groupId)!;

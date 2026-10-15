@@ -223,6 +223,7 @@ const shipment_refs = new Schema(
     shipped_at: { type: Date, default: null },
     delivered_at: { type: Date, default: null },
     item_ids: { type: Schema.Types.Mixed },
+    lines: { type: Schema.Types.Mixed, default: null }, // { orderItemId, quantity }[] from shipping.shipment.created: the units a bought label carries; null on rows projected before it was kept, rea
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },

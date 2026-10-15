@@ -208,6 +208,7 @@ export class Fulfillment {
       shipped_at: prev?.shipped_at ?? null,
       delivered_at: prev?.delivered_at ?? null,
       item_ids: prev?.item_ids ?? [],
+      lines: prev?.lines ?? null,
       ...patch,
     };
   }
@@ -234,8 +235,21 @@ export class Fulfillment {
           tracking_url: e.trackingUrl ?? null,
           status: prev && prev.status !== 'label_created' ? prev.status : e.status || 'label_created',
           item_ids: prev?.item_ids.length ? prev.item_ids : [...new Set(e.lines.map((l) => l.orderItemId))],
+          // the units the label carries (onLabelQuantity while it is not handed over)
+          lines: prev?.lines ?? (e.lines.map((l) => ({ orderItemId: l.orderItemId, quantity: l.quantity })) as never),
         }),
       );
+    });
+  }
+
+  /** shipping.exception.resolved: the delivery issue leaves the flag and the admin row's open exceptions */
+  async onExceptionResolved(e: EventPayload<'shipping.exception.resolved'>) {
+    if (!(await this.known(e.orderId, e.groupId))) return;
+    await this.core.write(e.orderId, { actor: SYSTEM }, async (tx, agg) => {
+      const fact = agg.factRows.find((f) => f.kind === 'delivery_issue' && f.source_id === e.exceptionId);
+      if (!fact || fact.status === 'resolved') return;
+      await this.core.updateFact(tx, agg, 'delivery_issue', e.exceptionId, { status: 'resolved' });
+      await this.core.timeline(tx, agg.order.id, [{ group_id: e.groupId, visibility: 'staff', label: 'Delivery exception resolved', detail: e.resolution || e.kind }]);
     });
   }
 

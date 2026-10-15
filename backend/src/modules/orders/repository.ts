@@ -145,17 +145,28 @@ export class OrdersRepository {
     if (f.tab === 'cancelled') match.display_status = 'cancelled';
     const pipeline: Doc[] = [{ $match: match }];
     if (f.tab === 'returns') pipeline.push(this.#lookupAny('order_items', '_id', 'order_id', { return_id: { $ne: null } }, '_ret'), { $match: { _ret: { $ne: [] } } }, { $unset: '_ret' });
-    if (f.q?.trim()) {
-      const term = contains(f.q);
-      pipeline.push(this.#lookupAny('order_items', '_id', 'order_id', { 'product_snapshot.title': term }, '_title'), { $match: { $or: [{ ref: term }, { _title: { $ne: [] } }] } }, { $unset: '_title' });
-    }
+    pipeline.push(...this.#customerSearch(f.q));
     return this.#orders.pageAggregate(pipeline, page, { key: 'placed_at', direction: 'desc' });
   }
 
-  async customerTabCounts(customerId: string, placedFrom: Date | null): Promise<{ all: number; inProgress: number; delivered: number; returns: number; cancelled: number }> {
+  /** The customer's order search: q matches the order reference, a product title or a seller (package) name */
+  #customerSearch(q: string | undefined): Doc[] {
+    if (!q?.trim()) return [];
+    const term = contains(q);
+    return [
+      this.#lookupAny('order_items', '_id', 'order_id', { 'product_snapshot.title': term }, '_title'),
+      this.#lookupAny('seller_groups', '_id', 'order_id', { seller_name: term }, '_seller'),
+      { $match: { $or: [{ ref: term }, { _title: { $ne: [] } }, { _seller: { $ne: [] } }] } },
+      { $unset: ['_title', '_seller'] },
+    ];
+  }
+
+  /** Orders per status tab; q narrows them like the order list search */
+  async customerTabCounts(customerId: string, placedFrom: Date | null, q?: string): Promise<{ all: number; inProgress: number; delivered: number; returns: number; cancelled: number }> {
     const match: Doc = { customer_id: customerId, ...(placedFrom ? { placed_at: { $gte: placedFrom } } : {}) };
     const [r] = await this.#orders.aggregate<{ all: number; inProgress: number; delivered: number; returns: number; cancelled: number }>([
       { $match: match },
+      ...this.#customerSearch(q),
       this.#lookupAny('order_items', '_id', 'order_id', { return_id: { $ne: null } }, '_ret'),
       {
         $group: {
@@ -198,6 +209,7 @@ export class OrdersRepository {
     }
     if (f.fulfilledBy) match.push({ fulfilled_by: f.fulfilledBy });
     if (f.overdueOnly) match.push({ status: { $in: OPEN }, dispatch_by: { $lt: now }, fulfilled_by: { $ne: MARKETLY } });
+    if (f.groupIds) match.push({ _id: { $in: f.groupIds } });
     const pipeline: Doc[] = [
       { $match: { $and: match } },
       { $lookup: { from: this.#orders.name, localField: 'order_id', foreignField: '_id', pipeline: [{ $project: { placed_at: 1, ref: 1, contact_name: 1 } }], as: '_o' } },
@@ -207,6 +219,7 @@ export class OrdersRepository {
     const after: Doc[] = [];
     if (f.placedFrom) after.push({ _placed_at: { $gte: f.placedFrom } });
     if (f.placedTo) after.push({ _placed_at: { $lt: f.placedTo } });
+    if (f.refs) after.push({ '_o.ref': { $in: f.refs } });
     if (f.q?.trim()) {
       const term = contains(f.q);
       pipeline.push(this.#lookupAny('order_items', '_id', 'group_id', { 'offer_snapshot.sellerSku': term }, '_sku'));

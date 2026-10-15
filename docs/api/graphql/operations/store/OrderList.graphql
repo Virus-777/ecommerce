@@ -1,7 +1,8 @@
 # screens: account/orders
 # replaces: GET orders/orders, GET orders/orders/counts
 # why: Order history cards show each package's seller and status next to the order, and the status tabs need counts for the same date range; both come in one round trip per search, tab or page change.
-query OrderList($filter: OrderListFilter, $paging: PageInput, $countsRange: OrderDateRange) {
+# countsQuery: pass the same text as filter.q so the tab counts follow the search.
+query OrderList($filter: OrderListFilter, $paging: PageInput, $countsRange: OrderDateRange, $countsQuery: String) {
   orders(filter: $filter, paging: $paging) {
     total
     page
@@ -34,7 +35,7 @@ query OrderList($filter: OrderListFilter, $paging: PageInput, $countsRange: Orde
   }
   me {
     id
-    orderCounts(range: $countsRange) { all inProgress delivered returns cancelled }
+    orderCounts(range: $countsRange, q: $countsQuery) { all inProgress delivered returns cancelled }
   }
 }
 

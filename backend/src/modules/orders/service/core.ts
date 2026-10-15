@@ -62,7 +62,7 @@ export function factsOf(rows: readonly FactRec[]): FlagData {
   if (chargebacks.length) f.chargebacks = chargebacks.map((r) => ({ disputeId: r.source_id, kind: r.subkind ?? '', groupId: r.group_id, at: r.at.toISOString() }));
   const cases = of('case');
   if (cases.length) f.cases = cases.map((r) => ({ caseId: r.source_id, ref: r.ref ?? '', itemIds: r.item_ids ?? [], status: r.status ?? 'open', nextUpdateBy: iso(r.due_at) }));
-  const issues = of('delivery_issue');
+  const issues = of('delivery_issue').filter((r) => r.status !== 'resolved'); // shipping.exception.resolved marks them
   if (issues.length) f.deliveryIssues = issues.map((r) => ({ exceptionId: r.source_id, kind: r.subkind ?? '', groupId: r.group_id ?? '', shipmentId: r.shipment_id, dueAt: iso(r.due_at) ?? r.at.toISOString(), customerAction: r.customer_action, at: r.at.toISOString() }));
   const restricted = of('seller_restricted');
   if (restricted.length) f.restrictedGroups = restricted.map((r) => r.group_id ?? r.source_id);
@@ -170,6 +170,23 @@ export class Core {
       if (!isAppError(err)) this.ctx.log.warn({ err, module, what }, 'orders: optional call failed');
       return undefined;
     }
+  }
+
+  /**
+   * Current product slugs for product links (/p/{slug}/{id}), read from catalog in batches of 200. Products catalog
+   * does not return (or a catalog failure) are left out: their links fall back to the id.
+   */
+  async productSlugs(productIds: Iterable<string>): Promise<Map<string, string>> {
+    const ids = [...new Set(productIds)];
+    const out = new Map<string, string>();
+    for (let i = 0; i < ids.length; i += 200) {
+      try {
+        for (const r of await this.ctx.use('catalog').getProducts(ids.slice(i, i + 200))) out.set(r.product.id, r.product.slug);
+      } catch (err) {
+        if (!isAppError(err)) this.ctx.log.warn({ err }, 'orders: product slugs unavailable');
+      }
+    }
+    return out;
   }
 
   /* ---------------------------------------------------------------- loading */

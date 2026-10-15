@@ -104,6 +104,10 @@ export interface SellerGroupFilter {
   sort?: 'dispatch_deadline' | 'newest' | 'oldest';
   /** Only self-shipped (seller) or only Fulfilled by Marketly (marketly_service) groups */
   fulfilledBy?: 'seller' | 'marketly_service';
+  /** Only these groups (selected rows of an export); still the seller's own only */
+  groupIds?: string[];
+  /** Only groups of these order references (selected rows of an export) */
+  refs?: string[];
 }
 
 export interface AdminOrderFilter {

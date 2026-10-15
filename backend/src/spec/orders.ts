@@ -162,6 +162,8 @@ export interface OrderItem {
   shipmentId?: string | null;
   deliveredAt?: string | null;
   returnWindowEndsAt?: string | null;
+  /** Units on a bought label the carrier does not have yet (not handed over): neither shippable nor cancellable until the label is voided or handed over. Always set in orders' own responses (0 when none) */
+  onLabelQuantity?: number | null;
   /** Set when a partial cancel, shipment or return split the line */
   splitFromItemId?: string | null;
   replacementOfItemId?: string | null;
@@ -216,6 +218,7 @@ export const OrderItem: z.ZodType<OrderItem> = z.object({
   shipmentId: z.uuid().nullish(),
   deliveredAt: z.iso.datetime({ offset: true }).nullish(),
   returnWindowEndsAt: z.iso.datetime({ offset: true }).nullish(),
+  onLabelQuantity: z.number().int().describe("Units on a bought label the carrier does not have yet (not handed over): neither shippable nor cancellable until the label is voided or handed over. Always set in orders' own responses (0 when none)").nullish(),
   splitFromItemId: z.uuid().describe("Set when a partial cancel, shipment or return split the line").nullish(),
   replacementOfItemId: z.uuid().nullish(),
   checkoutLineId: z.string().describe("Checkout session line the item came from (OrderItemInput.checkoutLineId); checkout maps its lines to order items by it, not by offer id. Split lines keep it; replacement lines have none").nullish(),
@@ -577,6 +580,8 @@ export interface OrderSummary {
   packageCount: number;
   packages: PackageLine[];
   thumbnails: common.MediaRef[];
+  /** Every item line of the order (product links and Buy again); thumbnails are the first four item images */
+  items: OrderSummaryItem[];
   note?: string | null;
   actions: ("view" | "track" | "return" | "cancel" | "review" | "buy_again")[];
 }
@@ -602,9 +607,40 @@ export const OrderSummary: z.ZodType<OrderSummary> = z.object({
   get thumbnails() {
     return z.array(common.MediaRef);
   },
+  get items() {
+    return z.array(OrderSummaryItem);
+  },
   note: z.string().nullish(),
   actions: z.array(z.enum(["view", "track", "return", "cancel", "review", "buy_again"])),
 }).register(common.apiTypes, { id: "orders.OrderSummary" });
+
+export interface OrderSummaryItem {
+  itemId: string;
+  productId: string;
+  /** For the product link /p/{productSlug}/{productId}; null when the catalog did not answer */
+  productSlug?: string | null;
+  variantId: string;
+  /** The offer bought (Buy again adds it to the cart) */
+  offerId: string;
+  title: string;
+  variantLabel: string;
+  image?: common.MediaRef | null;
+  quantity: number;
+}
+
+export const OrderSummaryItem: z.ZodType<OrderSummaryItem> = z.object({
+  itemId: z.uuid(),
+  productId: z.uuid(),
+  productSlug: z.string().describe("For the product link /p/{productSlug}/{productId}; null when the catalog did not answer").nullish(),
+  variantId: z.uuid(),
+  offerId: z.uuid().describe("The offer bought (Buy again adds it to the cart)"),
+  title: z.string(),
+  variantLabel: z.string(),
+  get image() {
+    return common.MediaRef.nullish();
+  },
+  quantity: z.number().int(),
+}).register(common.apiTypes, { id: "orders.OrderSummaryItem" });
 
 export interface OrderDisplayStatus {
   /** Derived from the items; see notes */
@@ -1112,6 +1148,8 @@ export interface SellerOrderItem {
   state: string;
   shippedQuantity: number;
   cancelledQuantity: number;
+  /** Units on a bought label not handed over yet: subtract them from what can still be shipped or cancelled */
+  onLabelQuantity: number;
 }
 
 export const SellerOrderItem: z.ZodType<SellerOrderItem> = z.object({
@@ -1133,6 +1171,7 @@ export const SellerOrderItem: z.ZodType<SellerOrderItem> = z.object({
   state: z.string(),
   shippedQuantity: z.number().int(),
   cancelledQuantity: z.number().int(),
+  onLabelQuantity: z.number().int().describe("Units on a bought label not handed over yet: subtract them from what can still be shipped or cancelled"),
 }).register(common.apiTypes, { id: "orders.SellerOrderItem" });
 
 export interface SellerOrderMoney {
@@ -1294,6 +1333,8 @@ export interface AdminOrderRow {
   /** Who handles the overdue group (warehouse, seller or a named manager) */
   owner?: string | null;
   flags: OrderFlag[];
+  /** Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest first: the Admin Center reminds the seller through shipping's exception actions with these ids */
+  openExceptionIds: string[];
 }
 
 export const AdminOrderRow: z.ZodType<AdminOrderRow> = z.object({
@@ -1318,6 +1359,7 @@ export const AdminOrderRow: z.ZodType<AdminOrderRow> = z.object({
   get flags() {
     return z.array(OrderFlag);
   },
+  openExceptionIds: z.array(z.uuid()).describe("Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest first: the Admin Center reminds the seller through shipping's exception actions with these ids"),
 }).register(common.apiTypes, { id: "orders.AdminOrderRow" });
 
 export interface GroupMoney {
@@ -2120,8 +2162,8 @@ export interface OrdersPublicApi {
   setDispatchDeadline(groupId: string, dueAt: string, reason: string, actor: common.Actor): Promise<void>;
   /** Per item: paid amount split into item, discount share, shipping share and tax share, for refund caps Used by: payments, returns, support. */
   getPaidAmounts(orderId: string): Promise<ItemPaidAmount[]>;
-  /** Match a guest order by reference and checkout email (case-insensitive); used by the guest lookup Used by: customers. */
-  findGuestOrder(orderRef: string, email: string): Promise<{ orderId: string } | null>;
+  /** Match a guest order by reference and checkout email (case-insensitive); used by the guest lookup. Only guest orders open this way (owner decision G29e): when the reference belongs to a registered customer's order the answer is { signInRequired: true } without an orderId, whatever email was given, so it never confirms the email Used by: customers. */
+  findGuestOrder(orderRef: string, email: string): Promise<{ orderId?: string, signInRequired: boolean } | null>;
   /** Guest orders for emailed order links Used by: customers. */
   listGuestOrdersByEmail(email: string): Promise<{ orderId: string, ref: string, placedAt: string }[]>;
   /** Account overview tile Used by: customers. */
@@ -2140,8 +2182,8 @@ export interface OrdersPublicApi {
   getOrderForViewer(viewer: { customerId?: string, guestSessionId?: string }, ref: string): Promise<OrderDetail | null>;
   /** Order history with search, date range and status tab (same filters as GET /orders); fields are resolved lazily so list cards stay cheap Used by: graphql. */
   listOrdersForCustomer(customerId: string, filter: { q?: string, range?: string, from?: string, to?: string, tab?: string }, page: common.PageInput): Promise<common.Page<OrderDetail>>;
-  /** Counts per status tab plus delayed packages (account overview tiles, order list tabs, customer 360) Used by: graphql. */
-  countOrdersByTab(customerId: string, range?: string): Promise<{ all: number, inProgress: number, delivered: number, returns: number, cancelled: number, delayedPackages: number }>;
+  /** Counts per status tab plus delayed packages (account overview tiles, order list tabs, customer 360); q narrows the tab counts like the order list search Used by: graphql. */
+  countOrdersByTab(customerId: string, range?: string, q?: string): Promise<{ all: number, inProgress: number, delivered: number, returns: number, cancelled: number, delayedPackages: number }>;
   /** One order as a seller sees it: only the seller's own groups (items, money, ship-to while needed, cancellations, timeline) and seller-safe order fields. Null (NOT_FOUND) when the order has no group of this seller. Used by: graphql. */
   getOrderForSeller(sellerId: string, ref: string): Promise<{ order: OrderDetail, groups: SellerOrderDetail[] } | null>;
   /** The seller's orders by stage with dispatch deadlines (same filters as seller GET /orders); own groups only Used by: graphql, search. */
@@ -2343,6 +2385,8 @@ export interface OrdersDb {
     shipped_at: Date | null;
     delivered_at: Date | null;
     item_ids: Json;
+    /** { orderItemId, quantity }[] from shipping.shipment.created: the units a bought label carries; null on rows projected before it was kept, read as the whole item */
+    lines: Json | null;
   };
   /** Customer-visible events and staff action history */
   timeline: {
@@ -2399,7 +2443,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Order history with search, date range and status tab",
-    desc: "q matches the order reference or a product title. Each order shows a status per package so a mixed order reads as partly delivered.",
+    desc: "q matches the order reference, a product title or a seller name. Each order shows a status per package so a mixed order reads as partly delivered.",
     query: () =>
       z.object({
         q: z.string().optional(),
@@ -2421,9 +2465,11 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Counts per status tab",
+    desc: "q narrows the counts like the order list search, so the tabs follow a search.",
     query: () =>
       z.object({
         range: z.enum(["last_30_days", "last_3_months", "last_6_months", "this_year", "all"]).optional(),
+        q: z.string().describe("Same search as GET /orders (order reference, product title or seller name)").optional(),
       }),
     response: () => z.object({
       all: z.number().int(),
@@ -2841,7 +2887,7 @@ export const endpoints = defineEndpoints({
     permission: "orders.fulfillment.export",
     scope: "own-seller",
     summary: "Export the seller's orders (own items only)",
-    desc: "Creates an authorized export job through reports.requestExport (dataset orders.seller.orders, sellerId from the session; only the seller's own groups). Poll GET /exports/{id} for the download link.",
+    desc: "Creates an authorized export job through reports.requestExport (dataset orders.seller.orders, sellerId from the session; only the seller's own groups). filters takes the order list filters (tab, tabs, q, placedFrom, placedTo, overdueOnly, fulfilledBy, sort) and, to export selected rows, groupIds (seller group ids) and/or refs (order references), at most 500 each; a list given with nothing usable exports no rows. Poll GET /exports/{id} for the download link.",
     body: () => z.object({
       filters: z.unknown(),
       format: z.enum(["csv"]),
@@ -3460,6 +3506,7 @@ export const spec = defineModuleSpec({
       "shipping.shipment.status_changed": "Update the shipment projection and the delivery progress",
       "shipping.shipment.delivered": "Items become Delivered; publish orders.item.delivered with the return window end",
       "shipping.shipment.exception": "Flag delivery issues on the group (failed delivery, lost or damaged, missing tracking)",
+      "shipping.exception.resolved": "Mark the delivery issue resolved: it leaves the delivery_issue flag and AdminOrderRow.openExceptionIds",
       "shipping.dispatch.overdue": "Unshipped items of the group become Delayed; publish orders.item.delayed (customer is told and offered support)",
       "shipping.tracking.corrected": "Update the projection and add a timeline entry",
       "warehouse.fulfillment.status_changed": "Official Store items become Preparing when picking starts (and close the window for instant cancellation)",
@@ -4769,7 +4816,8 @@ export const spec = defineModuleSpec({
         "estimated_arrival",
         "shipped_at",
         "delivered_at",
-        "item_ids"
+        "item_ids",
+        "lines"
       ],
       "nullable": [
         "carrier",
@@ -4778,7 +4826,8 @@ export const spec = defineModuleSpec({
         "tracking_url",
         "estimated_arrival",
         "shipped_at",
-        "delivered_at"
+        "delivered_at",
+        "lines"
       ],
       "decimal": [],
       "binary": [],
@@ -4858,7 +4907,8 @@ export const spec = defineModuleSpec({
                 "null"
               ]
             },
-            "item_ids": {}
+            "item_ids": {},
+            "lines": {}
           },
           "additionalProperties": false
         }

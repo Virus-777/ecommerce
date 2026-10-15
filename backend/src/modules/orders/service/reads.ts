@@ -19,7 +19,15 @@ export interface StoreViewer {
 }
 
 export type AdminListQuery = Omit<AdminOrderFilter, 'placedFrom' | 'placedTo'> & { placedFrom?: string; placedTo?: string; savedFilterId?: string };
-export type SellerListQuery = { tab?: string; tabs?: string | string[]; q?: string; placedFrom?: string; placedTo?: string; overdueOnly?: boolean; sort?: string; fulfilledBy?: string };
+export type SellerListQuery = { tab?: string; tabs?: string | string[]; q?: string; placedFrom?: string; placedTo?: string; overdueOnly?: boolean; sort?: string; fulfilledBy?: string; groupIds?: unknown; refs?: unknown };
+
+/** A list given in export filters (array or comma-separated text), at most 500 entries; undefined when not given */
+const listOf = (v: unknown, keep: (s: string) => string | null): string[] | undefined => {
+  if (v === undefined || v === null) return undefined;
+  const raw = Array.isArray(v) ? v : String(v).split(',');
+  // given but nothing usable: matches nothing (an export of the selected rows never widens to everything)
+  return [...new Set(raw.map((x) => keep(String(x).trim())).filter((x): x is string => !!x))].slice(0, 500);
+};
 
 const toPageRequest = (p: common.PageInput | undefined): PageRequest => {
   const limit = Math.min(Math.max(p?.limit ?? 24, 1), 100);
@@ -75,7 +83,8 @@ export class Reads {
     const { f } = this.customerFilter(customerId, filter);
     const rows = await this.core.repo.customerOrders(customerId, f, page);
     const aggs = await this.core.loadMany(rows.items.map((r) => r.id));
-    return { ...rows, items: rows.items.map((r) => this.views.summary(aggs.get(r.id)!)) };
+    const slugs = await this.core.productSlugs([...aggs.values()].flatMap((a) => a.items.map((i) => i.product_id)));
+    return { ...rows, items: rows.items.map((r) => this.views.summary(aggs.get(r.id)!, slugs)) };
   }
 
   async listOrdersForCustomer(customerId: string, filter: { q?: string; range?: string; from?: string; to?: string; tab?: string }, page: common.PageInput): Promise<common.Page<OrderDetail>> {
@@ -109,9 +118,10 @@ export class Reads {
     return [{ key: 'orders', title: 'Orders', module: 'orders', records }];
   }
 
-  async countByTab(customerId: string | null, range?: string) {
+  /** Tab counts; q narrows them like the order list search (ref, product title, seller name) */
+  async countByTab(customerId: string | null, range?: string, q?: string) {
     if (!customerId) return { all: 0, inProgress: 0, delivered: 0, returns: 0, cancelled: 0, delayedPackages: 0 };
-    const counts = await this.core.repo.customerTabCounts(customerId, rangeStart(range, this.core.now(), this.core.tz));
+    const counts = await this.core.repo.customerTabCounts(customerId, rangeStart(range, this.core.now(), this.core.tz), q);
     const delayedPackages = (await this.core.repo.delayedGroupsOfCustomer(customerId, this.core.now())).length;
     return { ...counts, delayedPackages };
   }
@@ -141,7 +151,8 @@ export class Reads {
   async recent(customerId: string, limit: number): Promise<OrderSummary[]> {
     const rows = await this.core.repo.customerOrders(customerId, {}, { mode: 'cursor', cursor: null, limit: Math.min(Math.max(limit, 1), 50) });
     const aggs = await this.core.loadMany(rows.items.map((r) => r.id));
-    return rows.items.map((r) => this.views.summary(aggs.get(r.id)!));
+    const slugs = await this.core.productSlugs([...aggs.values()].flatMap((a) => a.items.map((i) => i.product_id)));
+    return rows.items.map((r) => this.views.summary(aggs.get(r.id)!, slugs));
   }
 
   async getOrderForViewer(viewer: StoreViewer, ref: string): Promise<OrderDetail | null> {
@@ -202,6 +213,8 @@ export class Reads {
       overdueOnly: q.overdueOnly,
       sort: (['dispatch_deadline', 'newest', 'oldest'].includes(String(q.sort)) ? q.sort : 'dispatch_deadline') as SellerGroupFilter['sort'],
       fulfilledBy: q.fulfilledBy === 'seller' || q.fulfilledBy === 'marketly_service' ? q.fulfilledBy : undefined,
+      groupIds: listOf(q.groupIds, (s) => (isUuid(s) ? s : null)),
+      refs: listOf(q.refs, (s) => s.toUpperCase() || null),
     };
   }
 

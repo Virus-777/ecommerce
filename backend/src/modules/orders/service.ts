@@ -95,10 +95,16 @@ export class OrdersService implements OrdersPublicApi {
     return this.reads.paidAmounts(orderId);
   }
 
-  async findGuestOrder(orderRef: string, email: string): Promise<{ orderId: string } | null> {
+  /**
+   * The guest lookup (G29e): only guest orders open with ref + email. A registered customer's order answers
+   * signInRequired whatever email was given, so the answer never confirms the email.
+   */
+  async findGuestOrder(orderRef: string, email: string): Promise<{ orderId?: string; signInRequired: boolean } | null> {
     const o = (await this.core.repo.find('orders', { ref: orderRef.trim().toUpperCase() }))[0];
-    if (!o || o.contact_email.trim().toLowerCase() !== email.trim().toLowerCase()) return null;
-    return { orderId: o.id };
+    if (!o) return null;
+    if (o.customer_id) return { signInRequired: true };
+    if (o.contact_email.trim().toLowerCase() !== email.trim().toLowerCase()) return null;
+    return { orderId: o.id, signInRequired: false };
   }
 
   async listGuestOrdersByEmail(email: string): Promise<{ orderId: string; ref: string; placedAt: string }[]> {
@@ -141,8 +147,8 @@ export class OrdersService implements OrdersPublicApi {
     return this.reads.listOrdersForCustomer(customerId, filter, page);
   }
 
-  countOrdersByTab(customerId: string, range?: string) {
-    return this.reads.countByTab(customerId, range);
+  countOrdersByTab(customerId: string, range?: string, q?: string) {
+    return this.reads.countByTab(customerId, range, q);
   }
 
   getOrderForSeller(sellerId: string, ref: string): Promise<{ order: OrderDetail; groups: SellerOrderDetail[] } | null> {
@@ -289,6 +295,11 @@ export class OrdersService implements OrdersPublicApi {
 
   onDispatchOverdueFromShipping(event: EventPayload<'shipping.dispatch.overdue'>) {
     return this.fulfillment.onDispatchOverdue(event);
+  }
+
+  /** shipping.exception.resolved: Mark the delivery issue resolved (flag and AdminOrderRow.openExceptionIds) */
+  onExceptionResolvedFromShipping(event: EventPayload<'shipping.exception.resolved'>) {
+    return this.fulfillment.onExceptionResolved(event);
   }
 
   onTrackingCorrectedFromShipping(event: EventPayload<'shipping.tracking.corrected'>) {

@@ -39,6 +39,7 @@ export default defineModule({
     ctx.events.on("shipping.shipment.delivered", (e) => service.onShipmentDeliveredFromShipping(e.payload));
     ctx.events.on("shipping.shipment.exception", (e) => service.onShipmentExceptionFromShipping(e.payload));
     ctx.events.on("shipping.dispatch.overdue", (e) => service.onDispatchOverdueFromShipping(e.payload));
+    ctx.events.on("shipping.exception.resolved", (e) => service.onExceptionResolvedFromShipping(e.payload));
     ctx.events.on("shipping.tracking.corrected", (e) => service.onTrackingCorrectedFromShipping(e.payload));
     ctx.events.on("warehouse.fulfillment.status_changed", (e) => service.onFulfillmentStatusChangedFromWarehouse(e.payload));
     ctx.events.on("returns.return.requested", (e) => service.onReturnRequestedFromReturns(e.payload));

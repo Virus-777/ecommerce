@@ -233,6 +233,7 @@ export class Views {
       shipmentId: i.shipment_id,
       deliveredAt: iso(i.delivered_at),
       returnWindowEndsAt: iso(i.return_window_ends_at),
+      onLabelQuantity: this.onLabelQuantity(agg, i),
       splitFromItemId: i.split_from_item_id,
       replacementOfItemId: i.replacement_of_item_id,
       checkoutLineId: i.replacement_of_item_id ? null : i.checkout_line_id,
@@ -540,7 +541,8 @@ export class Views {
     };
   }
 
-  summary(agg: Agg): OrderSummary {
+  /** slugs: product id → current slug (core.productSlugs); missing ones give a null productSlug */
+  summary(agg: Agg, slugs: ReadonlyMap<string, string> = new Map()): OrderSummary {
     const status = this.status(agg);
     const delayed = agg.groups.filter((g) => g.status === 'delayed' || (this.groupOpen(agg, g) && this.core.now().getTime() > g.dispatch_by.getTime())).length;
     const actions: OrderSummary['actions'] = ['view'];
@@ -565,6 +567,17 @@ export class Views {
         .map((i) => this.image(i))
         .filter((x): x is common.MediaRef => Boolean(x))
         .slice(0, 4),
+      items: agg.items.map((i) => ({
+        itemId: i.id,
+        productId: i.product_id,
+        productSlug: slugs.get(i.product_id) ?? null,
+        variantId: i.variant_id,
+        offerId: i.offer_id,
+        title: this.title(i),
+        variantLabel: this.variantLabel(i),
+        image: this.image(i),
+        quantity: i.quantity,
+      })),
       note: delayed ? `${plural(delayed, 'package')} delayed` : status.flags.includes('cancellation_requested') ? 'Cancellation requested' : null,
       actions,
     };
@@ -710,6 +723,7 @@ export class Views {
       state: i.state,
       shippedQuantity: shipped ? i.quantity : 0,
       cancelledQuantity: i.state === 'cancelled' ? i.quantity : 0,
+      onLabelQuantity: this.onLabelQuantity(agg, i),
     };
   }
 
@@ -749,6 +763,27 @@ export class Views {
   /** The item is on a bought label the carrier has not scanned yet (shipment still label_created) */
   onUnusedLabel(agg: Agg, itemId: string): boolean {
     return agg.shipments.some((s) => s.status === 'label_created' && s.item_ids.includes(itemId));
+  }
+
+  /**
+   * Units of the item on bought labels the carrier does not have yet (G41a): the label's own quantities
+   * (shipment_refs.lines), or the whole item for shipments projected before those were kept. Shipped and
+   * cancelled items have none.
+   */
+  onLabelQuantity(agg: Agg, i: ItemRec): number {
+    if (i.state === 'cancelled' || is(SHIPPED_OR_LATER, i.state)) return 0;
+    let units = 0;
+    for (const s of agg.shipments) {
+      if (s.status !== 'label_created' || !s.item_ids.includes(i.id)) continue;
+      const lines = Array.isArray(s.lines) ? (s.lines as { orderItemId: string; quantity: number }[]) : null;
+      units += lines ? lines.filter((l) => l.orderItemId === i.id).reduce((n, l) => n + l.quantity, 0) : i.quantity;
+    }
+    return Math.min(units, i.quantity);
+  }
+
+  /** Open shipping delivery exceptions of the order, oldest first (G73: the Admin Center reminds the seller with them) */
+  openExceptionIds(agg: Agg): string[] {
+    return (agg.facts.deliveryIssues ?? []).map((d) => d.exceptionId);
   }
 
   sellerActions(agg: Agg, g: GroupRec): SellerOrderDetail['allowedActions'] {
@@ -941,7 +976,8 @@ export class Views {
 
   adminActions(agg: Agg): AdminOrderDetail['allowedActions'] {
     const out: AdminOrderDetail['allowedActions'] = [];
-    if (this.canCancelSomething(agg)) out.push('cancel_items');
+    // items on a bought label the carrier does not have yet are cancelled only after the label is voided
+    if (agg.order.lifecycle === 'open' && agg.items.some((i) => is(CANCELLABLE, i.state) && !this.onUnusedLabel(agg, i.id))) out.push('cancel_items');
     if (agg.items.some((i) => is(DELIVERED_LIKE, i.state) || i.state === 'shipped')) out.push('issue_refund');
     if (agg.groups.some((g) => g.owner_type === 'seller')) out.push('contact_seller');
     out.push('open_case', 'add_note');
@@ -1017,6 +1053,7 @@ export class Views {
       lateBy: overdue ? `Overdue ${human(now - overdue.dispatch_by.getTime())}` : null,
       owner: overdue ? (overdue.owner_type === 'official' ? 'Official Store warehouse' : isMarketlyService(overdue) ? `Marketly warehouse (Fulfilled by Marketly for ${overdue.seller_name})` : overdue.seller_name) : null,
       flags: this.flags(agg),
+      openExceptionIds: this.openExceptionIds(agg),
     };
   }
 

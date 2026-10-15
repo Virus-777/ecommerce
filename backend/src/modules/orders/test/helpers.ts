@@ -101,6 +101,12 @@ export async function harness(o: { fulfillmentService?: boolean } = {}): Promise
           const p = [...h.products.values()].find((x) => x.productId === productId);
           return p ? ({ id: productId, categoryId: h.productCategories.get(productId) ?? p.categoryId ?? null } as unknown as catalog.Product) : null;
         },
+        // product links: the slug is the title in lower case with dashes
+        getProducts: async (ids) =>
+          ids.flatMap((id) => {
+            const p = [...h.products.values()].find((x) => x.productId === id);
+            return p ? [{ product: { id, slug: p.title.toLowerCase().replace(/\W+/g, '-') } } as unknown as catalog.ProductRecord] : [];
+          }),
         listCategories: async () =>
           [
             { id: CATEGORY.root, parentId: null, name: 'Home', slug: 'home', position: 1, visible: true, comingSoon: false, productCount: 0, children: [{ id: CATEGORY.child, parentId: CATEGORY.root, name: 'Kitchen', slug: 'kitchen', position: 1, visible: true, comingSoon: false, productCount: 0, children: [] }] },

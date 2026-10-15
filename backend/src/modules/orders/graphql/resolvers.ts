@@ -82,6 +82,7 @@ function item(i: OrderItem, extra?: { shippedQuantity: number; cancelledQuantity
     actions: i.actions.map(upper),
     shippedQuantity: extra?.shippedQuantity ?? (is(SHIPPED_OR_LATER, i.state) ? i.quantity : 0),
     cancelledQuantity: extra?.cancelledQuantity ?? (i.state === 'cancelled' ? i.quantity : 0),
+    onLabelQuantity: i.onLabelQuantity ?? 0,
   };
 }
 
@@ -131,7 +132,7 @@ function group(g: SellerGroup, s: SellerOrderDetail | undefined, cancellations: 
   };
 }
 
-function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrderDetail[]; admin?: AdminOrderDetail; cancellations: CancellationRequest[]; buyerName?: string }) {
+function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrderDetail[]; admin?: AdminOrderDetail; cancellations: CancellationRequest[]; buyerName?: string; openExceptionIds?: string[] }) {
   const seller = (id: string) => x.seller?.find((s) => s.id === id);
   const t = o.totals;
   const pr = o.progress;
@@ -182,6 +183,7 @@ function order(o: OrderDetail, x: { summary?: OrderSummary; seller?: SellerOrder
     channel: upper(o.channel),
     customer: a ? { ...a.customer, customerId: a.customer.customerId ?? null, phone: a.customer.phone ?? null } : null,
     flags: (a?.flags ?? []).map((f) => ({ ...f, kind: upper(f.kind), tone: upper(f.tone) })),
+    openExceptionIds: x.openExceptionIds ?? [],
     alerts: (a?.alerts ?? []).map((al) => ({ ...al, tone: upper(al.tone), caseRef: al.caseRef ?? null })),
     afterSales: (a?.afterSales ?? []).map((s) => ({ ...s, amount: money(s.amount), owner: s.owner ?? null })),
     moneyBySeller: (a?.moneyBySeller ?? []).map((m) => ({
@@ -278,7 +280,7 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
       const row = views.sellerRow(agg, g, cfg);
       return { ...d, deadlineLabel: row.deadlineLabel, itemsSummary: row.itemsSummary, nextAction: row.nextAction };
     });
-    return order(a.order, { summary: views.summary(agg), admin: a, seller: groups, cancellations: cancellationsOf(agg) });
+    return order(a.order, { summary: views.summary(agg), admin: a, seller: groups, cancellations: cancellationsOf(agg), openExceptionIds: views.openExceptionIds(agg) });
   }
 
   const byRef = async (ref: string) => {
@@ -373,13 +375,17 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
       },
     },
     Customer: {
-      orderCounts: async (root: { id: string }, args: { range?: string | null }) => service.countOrdersByTab(root.id, lower(args?.range ?? undefined)),
+      orderCounts: async (root: { id: string }, args: { range?: string | null; q?: string | null }) => service.countOrdersByTab(root.id, lower(args?.range ?? undefined), args?.q?.trim() || undefined),
       delayedItems: async (root: { id: string }) =>
         (await service.listDelayedItemsForCustomer(root.id)).map((d) => ({ ...d, newDispatchBy: d.newDispatchBy ?? null, newArrivalFrom: d.newArrival?.from ?? null, newArrivalTo: d.newArrival?.to ?? null, options: d.options.map(upper), caseRef: d.caseRef ?? null })),
     },
     Seller: {
       orderCounts: async (root: { id: string }, _args: unknown, ctx: GraphQLContext) =>
         (await load(ctx, 'sellerCounts', root.id, async (ids) => new Map(Object.entries(await service.countOrdersForSellers(ids))))) ?? null,
+    },
+    OrderItem: {
+      // current slug for the product link, one catalog read per request for all items
+      productSlug: async (root: { productId: string }, _args: unknown, ctx: GraphQLContext) => (await load(ctx, 'productSlugs', root.productId, (ids) => core.productSlugs(ids))) ?? null,
     },
     Case: { order: orderField },
     Return: { order: orderField },

@@ -22,7 +22,7 @@ export const storeRoutes = (service: OrdersService) =>
     listMyOrders: async ({ query, page, scope }) => service.reads.listMyOrders(customerIdOf(scope), query, page),
     /** GET /orders/counts: Counts per status tab */
     getMyOrderCounts: async ({ query, scope }) => {
-      const c = await service.reads.countByTab(customerIdOf(scope), query.range);
+      const c = await service.reads.countByTab(customerIdOf(scope), query.range, query.q);
       return { all: c.all, inProgress: c.inProgress, delivered: c.delivered, returns: c.returns, cancelled: c.cancelled };
     },
     /** GET /orders/{id}: Order detail by seller group, with item states and separate payment, delivery and returns progress */

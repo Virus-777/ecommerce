@@ -173,6 +173,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | shipmentId | `uuid?` |
 | deliveredAt | `datetime?` |
 | returnWindowEndsAt | `datetime?` |
+| onLabelQuantity | `int?` Units on a bought label the carrier does not have yet (not handed over): neither shippable nor cancellable until the label is voided or handed over. Always set in orders' own responses (0 when none) |
 | splitFromItemId | `uuid?` Set when a partial cancel, shipment or return split the line |
 | replacementOfItemId | `uuid?` |
 | checkoutLineId | `string?` Checkout session line the item came from (OrderItemInput.checkoutLineId); checkout maps its lines to order items by it, not by offer id. Split lines keep it; replacement lines have none |
@@ -359,8 +360,23 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | packageCount | `int` |
 | packages | `PackageLine[]` |
 | thumbnails | `MediaRef[]` |
+| items | `OrderSummaryItem[]` Every item line of the order (product links and Buy again); thumbnails are the first four item images |
 | note | `string?` |
 | actions | `enum(view|track|return|cancel|review|buy_again)[]` |
+
+### OrderSummaryItem
+
+| Field | Type |
+|---|---|
+| itemId | `uuid` |
+| productId | `uuid` |
+| productSlug | `string?` For the product link /p/{productSlug}/{productId}; null when the catalog did not answer |
+| variantId | `uuid` |
+| offerId | `uuid` The offer bought (Buy again adds it to the cart) |
+| title | `string` |
+| variantLabel | `string` |
+| image | `MediaRef?` |
+| quantity | `int` |
 
 ### OrderDisplayStatus
 
@@ -605,6 +621,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | state | `string` |
 | shippedQuantity | `int` |
 | cancelledQuantity | `int` |
+| onLabelQuantity | `int` Units on a bought label not handed over yet: subtract them from what can still be shipped or cancelled |
 
 ### SellerOrderMoney
 
@@ -688,6 +705,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | lateBy | `string?` 'Overdue 16 d' |
 | owner | `string?` Who handles the overdue group (warehouse, seller or a named manager) |
 | flags | `OrderFlag[]` |
+| openExceptionIds | `uuid[]` Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest first: the Admin Center reminds the seller through shipping's exception actions with these ids |
 
 ### GroupMoney
 
@@ -1138,6 +1156,7 @@ Indexes: `(group_id, status)`, `(status, respond_by)`, `unique (order_id, idempo
 | shipped_at | timestamptz? |
 | delivered_at | timestamptz? |
 | item_ids | jsonb |
+| lines | jsonb? ({ orderItemId, quantity }[] from shipping.shipment.created: the units a bought label carries; null on rows projected before it was kept, read as the whole item) |
 
 Indexes: `(order_id)`, `(tracking_number)`
 
@@ -1226,6 +1245,7 @@ Indexes: `(order_id, at desc)`
 | `shipping.shipment.status_changed` | shipping | Update the shipment projection and the delivery progress |
 | `shipping.shipment.delivered` | shipping | Items become Delivered; publish orders.item.delivered with the return window end |
 | `shipping.shipment.exception` | shipping | Flag delivery issues on the group (failed delivery, lost or damaged, missing tracking) |
+| `shipping.exception.resolved` | shipping | Mark the delivery issue resolved: it leaves the delivery_issue flag and AdminOrderRow.openExceptionIds |
 | `shipping.dispatch.overdue` | shipping | Unshipped items of the group become Delayed; publish orders.item.delayed (customer is told and offered support) |
 | `shipping.tracking.corrected` | shipping | Update the projection and add a timeline entry |
 | `warehouse.fulfillment.status_changed` | warehouse | Official Store items become Preparing when picking starts (and close the window for instant cancellation) |
@@ -1253,7 +1273,7 @@ Indexes: `(order_id, at desc)`
 | canShipItems | `(groupId: uuid, lines: { orderItemId: uuid, quantity: int }[]) => { ok: bool, problems: string[] }`<br>Items belong to the group, are not cancelled or already shipped, and quantities fit | shipping, warehouse |
 | setDispatchDeadline | `(groupId: uuid, dueAt: datetime, reason: string, actor: Actor) => void`<br>Recalculated deadline (e.g. a payment accepted late) or a staff extension; publishes orders.dispatch_deadline.changed | shipping |
 | getPaidAmounts | `(orderId: uuid) => ItemPaidAmount[]`<br>Per item: paid amount split into item, discount share, shipping share and tax share, for refund caps | payments, returns, support |
-| findGuestOrder | `(orderRef: string, email: string) => { orderId: uuid } | null`<br>Match a guest order by reference and checkout email (case-insensitive); used by the guest lookup | customers |
+| findGuestOrder | `(orderRef: string, email: string) => { orderId?: uuid, signInRequired: bool } | null`<br>Match a guest order by reference and checkout email (case-insensitive); used by the guest lookup. Only guest orders open this way (owner decision G29e): when the reference belongs to a registered customer's order the answer is { signInRequired: true } without an orderId, whatever email was given, so it never confirms the email | customers |
 | listGuestOrdersByEmail | `(email: string) => { orderId: uuid, ref: string, placedAt: datetime }[]`<br>Guest orders for emailed order links | customers |
 | countInProgress | `(customerId: uuid) => { inProgress: int, delayedPackages: int }`<br>Account overview tile | customers |
 | listRecentForCustomer | `(customerId: uuid, limit: int) => OrderSummary[]`<br>Account overview recent orders | customers |
@@ -1263,7 +1283,7 @@ Indexes: `(order_id, at desc)`
 | isVerifiedPurchase | `(customerId: uuid, productId: uuid) => { orderItemId: uuid, deliveredAt: datetime } | null`<br>Delivered purchase of the product for Verified Purchase labels | reviews |
 | getOrderForViewer | `(viewer: { customerId?: uuid, guestSessionId?: uuid }, ref: string) => OrderDetail | null`<br>Store order detail by reference. Returns the order only when it belongs to the signed-in customer or the guest session has access (identity.hasGuestOrderAccess); otherwise null (NOT_FOUND). | graphql |
 | listOrdersForCustomer | `(customerId: uuid, filter: { q?: string, range?: string, from?: date, to?: date, tab?: string }, page: PageInput) => Page<OrderDetail>`<br>Order history with search, date range and status tab (same filters as GET /orders); fields are resolved lazily so list cards stay cheap | graphql |
-| countOrdersByTab | `(customerId: uuid, range?: string) => { all: int, inProgress: int, delivered: int, returns: int, cancelled: int, delayedPackages: int }`<br>Counts per status tab plus delayed packages (account overview tiles, order list tabs, customer 360) | graphql |
+| countOrdersByTab | `(customerId: uuid, range?: string, q?: string) => { all: int, inProgress: int, delivered: int, returns: int, cancelled: int, delayedPackages: int }`<br>Counts per status tab plus delayed packages (account overview tiles, order list tabs, customer 360); q narrows the tab counts like the order list search | graphql |
 | getOrderForSeller | `(sellerId: uuid, ref: string) => { order: OrderDetail, groups: SellerOrderDetail[] } | null`<br>One order as a seller sees it: only the seller's own groups (items, money, ship-to while needed, cancellations, timeline) and seller-safe order fields. Null (NOT_FOUND) when the order has no group of this seller. | graphql |
 | listOrdersForSeller | `(sellerId: uuid, filter: { tab?: string, tabs?: string[], q?: string, placedFrom?: date, placedTo?: date, overdueOnly?: bool, sort?: string, fulfilledBy?: string }, page: PageInput) => Page<{ order: OrderDetail, groups: SellerOrderDetail[] }>`<br>The seller's orders by stage with dispatch deadlines (same filters as seller GET /orders); own groups only | graphql, search |
 | countSellerOrders | `(sellerId: uuid) => SellerOrderCounts`<br>Seller tab counts plus overdue and due today | graphql |
@@ -1421,6 +1441,8 @@ type Order {
   "Customer panel. Email and phone are masked unless the staff member has orders.customers.view-contact."
   customer: OrderAdminCustomer! @areas(in: [ADMIN])
   flags: [OrderFlag!]! @areas(in: [ADMIN])
+  "Open shipping delivery exceptions on the order, oldest first (remind the seller through shipping's exception actions)"
+  openExceptionIds: [UUID!]! @areas(in: [ADMIN])
   "Banners, e.g. 'Package 3 is 16 days past its dispatch deadline'"
   alerts: [OrderAlert!]! @areas(in: [ADMIN])
   "Cancellations, returns and refunds per item with owner"
@@ -1493,6 +1515,8 @@ type OrderGroup {
 type OrderItem {
   id: UUID!
   productId: UUID!
+  "Current product slug for the product link /p/{productSlug}/{productId}; null when the catalog did not answer"
+  productSlug: String
   variantId: UUID!
   offerId: UUID!
   title: String!
@@ -1536,6 +1560,8 @@ type OrderItem {
   # ---- Seller Center and Admin Center
   shippedQuantity: Int! @areas(in: [SELLER, ADMIN])
   cancelledQuantity: Int! @areas(in: [SELLER, ADMIN])
+  "Units on a bought label the carrier does not have yet (not handed over): neither shippable nor cancellable until the label is voided or handed over"
+  onLabelQuantity: Int! @areas(in: [SELLER, ADMIN])
 }
 
 type OrderPage implements Paged {
@@ -1889,7 +1915,7 @@ type OrderInternalNote @areas(in: [ADMIN]) {
 # ------------------------------------------------------------------ inputs
 
 input OrderListFilter @areas(in: [STORE]) {
-  "Order reference or product title"
+  "Order reference, product title or seller name"
   q: String
   range: OrderDateRange
   from: Date
@@ -2248,8 +2274,8 @@ extend type Query {
 }
 
 extend type Customer {
-  "Status-tab counts and delayed packages (AccountOverview tiles, OrderList tabs, customer 360)"
-  orderCounts(range: OrderDateRange): OrderCounts! @areas(in: [STORE, ADMIN]) @source(module: "orders", fn: "countOrdersByTab") @cost(weight: 3)
+  "Status-tab counts and delayed packages (AccountOverview tiles, OrderList tabs, customer 360); q narrows the tab counts like the order list search"
+  orderCounts(range: OrderDateRange, q: String): OrderCounts! @areas(in: [STORE, ADMIN]) @source(module: "orders", fn: "countOrdersByTab") @cost(weight: 3)
 
   "Delay alerts with the new estimate and options (AccountOverview)"
   delayedItems: [OrderDelayedItem!]! @areas(in: [STORE]) @source(module: "orders", fn: "listDelayedItemsForCustomer")
