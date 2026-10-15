@@ -118,6 +118,23 @@ describe('summary', () => {
     });
   });
 
+  it('byActor counts each person once (kind + id), under their latest name; namesakes stay apart', async () => {
+    const api = auditApi(app);
+    const pat = { kind: 'staff' as const, id: newId(), name: 'Pat Doe' };
+    const namesake = { kind: 'staff' as const, id: newId(), name: 'Sam Lee' };
+    const sam = { kind: 'staff' as const, id: newId(), name: 'Sam Lee' };
+    const one = (actor: typeof pat, at: string) => api.record(entry({ actor, action: 'content.page.published', actionLabel: 'Published a page', module: 'content', category: 'content', target: { type: 'page', id: 'x' }, at }));
+    await one(pat, '2026-11-02T10:00:00Z');
+    await one({ ...pat, name: 'Pat Morgan' }, '2026-11-03T10:00:00Z'); // renamed
+    await one(sam, '2026-11-02T11:00:00Z');
+    await one(sam, '2026-11-02T12:00:00Z');
+    await one(sam, '2026-11-02T13:00:00Z');
+    await one(namesake, '2026-11-04T10:00:00Z');
+    const res = await admin('/summary?from=2026-11-01&to=2026-11-05');
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().byActor).toEqual({ 'Sam Lee': 3, 'Pat Morgan': 2, [`Sam Lee (${namesake.id})`]: 1 });
+  });
+
   it('refuses a range that ends before it starts', async () => {
     const res = await admin('/summary?from=2026-10-07&to=2026-10-01');
     expect(res.statusCode).toBe(400);

@@ -372,13 +372,21 @@ export class AuditRepository {
     const referenced = await this.#t.entries.distinct<string>('approval_request_id', { ...range, approval_request_id: { $ne: null } });
     const decided = referenced.length ? await this.#t.approvals.distinct<string>('approval_request_id', { approval_request_id: { $in: referenced }, state: { $nin: OPEN_APPROVAL } }) : [];
     const pendingSecondReview = await this.#t.entries.count({ ...range, approval_request_id: { $nin: [null, ...decided] } });
-    const byActor = await this.#t.entries.aggregate<{ name: string; n: number }>([
+    // one row per person (actor kind + id), named by their latest entry (a renamed person counts once)
+    const actors = await this.#t.entries.aggregate<{ id: string | null; name: string | null; n: number }>([
       { $match: { ...range, actor_kind: 'staff' } },
-      { $group: { _id: { $ifNull: ['$actor_name', '$actor_id', 'Unknown staff'] }, n: { $sum: 1 } } },
-      { $sort: { n: -1, _id: 1 } },
+      { $sort: { at: -1 } },
+      { $group: { _id: { kind: '$actor_kind', id: '$actor_id' }, name: { $first: '$actor_name' }, n: { $sum: 1 } } },
+      { $sort: { n: -1, '_id.id': 1 } },
       { $limit: 10 },
-      { $project: { _id: 0, name: '$_id', n: 1 } },
+      { $project: { _id: 0, id: '$_id.id', name: 1, n: 1 } },
     ]);
+    // the summary is keyed by name: two people with the same name stay apart
+    const byActor: { name: string; n: number }[] = [];
+    for (const a of actors) {
+      const name = a.name ?? a.id ?? 'Unknown staff';
+      byActor.push({ name: byActor.some((b) => b.name === name) ? `${name} (${a.id ?? 'unknown'})` : name, n: a.n });
+    }
     return {
       total,
       pendingSecondReview,
