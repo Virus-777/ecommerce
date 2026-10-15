@@ -74,6 +74,33 @@ export const Attribute: z.ZodType<Attribute> = z.object({
   variantDefining: z.boolean().describe("Creates variants (colour, size)"),
 }).register(common.apiTypes, { id: "catalog.Attribute" });
 
+export interface AttributeInput {
+  /** An attribute of this category to keep (its id stays, so product values keep pointing at it); omitted for a new attribute */
+  id?: string | null;
+  /** e.g. Screen size */
+  name: string;
+  kind: "text" | "number" | "enum" | "bool";
+  unit?: string | null;
+  /** The values to choose from (kind enum) */
+  options?: string[] | null;
+  required: boolean;
+  /** Shown as a category filter in the store */
+  filterable: boolean;
+  /** Creates variants (colour, size) */
+  variantDefining: boolean;
+}
+
+export const AttributeInput: z.ZodType<AttributeInput> = z.object({
+  id: z.uuid().describe("An attribute of this category to keep (its id stays, so product values keep pointing at it); omitted for a new attribute").nullish(),
+  name: z.string().describe("e.g. Screen size"),
+  kind: z.enum(["text", "number", "enum", "bool"]),
+  unit: z.string().nullish(),
+  options: z.array(z.string()).describe("The values to choose from (kind enum)").nullish(),
+  required: z.boolean(),
+  filterable: z.boolean().describe("Shown as a category filter in the store"),
+  variantDefining: z.boolean().describe("Creates variants (colour, size)"),
+}).register(common.apiTypes, { id: "catalog.AttributeInput" });
+
 export interface Brand {
   id: string;
   name: string;
@@ -2316,7 +2343,7 @@ export const endpoints = defineEndpoints({
       }),
     body: () => z.object({
       get attributes() {
-        return z.array(Attribute);
+        return z.array(AttributeInput);
       },
       get imageRules() {
         return z.array(ImageRule);

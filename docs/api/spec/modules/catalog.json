@@ -262,6 +262,31 @@
         "desc": "Creates variants (colour, size)"
       }
     },
+    "AttributeInput": {
+      "id": {
+        "type": "uuid?",
+        "desc": "An attribute of this category to keep (its id stays, so product values keep pointing at it); omitted for a new attribute"
+      },
+      "name": {
+        "type": "string",
+        "desc": "e.g. Screen size"
+      },
+      "kind": "enum(text|number|enum|bool)",
+      "unit": "string?",
+      "options": {
+        "type": "string[]?",
+        "desc": "The values to choose from (kind enum)"
+      },
+      "required": "bool",
+      "filterable": {
+        "type": "bool",
+        "desc": "Shown as a category filter in the store"
+      },
+      "variantDefining": {
+        "type": "bool",
+        "desc": "Creates variants (colour, size)"
+      }
+    },
     "Brand": {
       "id": "uuid",
       "name": "string",
@@ -2139,7 +2164,7 @@
         "id": "uuid"
       },
       "body": {
-        "attributes": "Attribute[]",
+        "attributes": "AttributeInput[]",
         "imageRules": "ImageRule[]"
       },
       "response": "Attribute[]",

@@ -78,7 +78,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | POST | `/api/admin/catalog/categories` | Create a category _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ name: string, parentId: uuid?, position: int?, visible: bool?, comingSoon: bool?, imageId: uuid? }` → `Category` |
 | PATCH | `/api/admin/catalog/categories/{id}` | Rename, move, hide or mark coming soon _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ name: string?, parentId: uuid?, position: int?, visible: bool?, comingSoon: bool?, imageId: uuid? }` → `Category` |
 | GET | `/api/admin/catalog/categories/{id}/attributes` | Category attributes with fill rates, inheritance and image standards | staff | `{ attributes: AttributeAdmin[], imageRules: ImageRule[] }` |
-| PUT | `/api/admin/catalog/categories/{id}/attributes` | Replace a category's attributes and image standards _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ attributes: Attribute[], imageRules: ImageRule[] }` → `Attribute[]` |
+| PUT | `/api/admin/catalog/categories/{id}/attributes` | Replace a category's attributes and image standards _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ attributes: AttributeInput[], imageRules: ImageRule[] }` → `Attribute[]` |
 | GET | `/api/admin/catalog/brands` | All brands with counts, seller authorization and status | staff | Page<BrandAdmin> |
 | POST | `/api/admin/catalog/brands` | Create a brand _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ name: string, logoId: uuid?, description: text?, bannerId: uuid?, sellingPolicy: enum(open|authorized_list|official_only)?, authorizedSellerIds: uuid[]? }` → `BrandAdmin` |
 | PATCH | `/api/admin/catalog/brands/{id}` | Edit a brand, including who can sell _(audited)_ | staff<br>`catalog.taxonomy.manage` | `{ name: string?, logoId: uuid?, description: text?, bannerId: uuid?, sellingPolicy: enum(open|authorized_list|official_only)?, authorizedSellerIds: uuid[]?, reason: text? }` → `BrandAdmin` |
@@ -112,6 +112,19 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | kind | `enum(text|number|enum|bool)` |
 | unit | `string?` |
 | options | `string[]` |
+| required | `bool` |
+| filterable | `bool` Shown as a category filter in the store |
+| variantDefining | `bool` Creates variants (colour, size) |
+
+### AttributeInput
+
+| Field | Type |
+|---|---|
+| id | `uuid?` An attribute of this category to keep (its id stays, so product values keep pointing at it); omitted for a new attribute |
+| name | `string` e.g. Screen size |
+| kind | `enum(text|number|enum|bool)` |
+| unit | `string?` |
+| options | `string[]?` The values to choose from (kind enum) |
 | required | `bool` |
 | filterable | `bool` Shown as a category filter in the store |
 | variantDefining | `bool` Creates variants (colour, size) |

@@ -114,6 +114,26 @@ describe('attributes and image standards', () => {
     expect(admin.attributes[1]).toMatchObject({ attribute: { name: 'RAM' }, inheritedFrom: null });
     expect((await a.admin('GET', `/categories/${newId()}/attributes`)).statusCode).toBe(404);
   });
+
+  it('takes new attributes without an id or category id and keeps the id of an existing one (G67d)', async () => {
+    const cat = await category(t, 'Monitors');
+    const first = await a.admin('PUT', `/categories/${cat.id}/attributes`, { attributes: [{ name: 'Panel', kind: 'text', required: false, filterable: false, variantDefining: false }], imageRules: [] });
+    expect(first.statusCode, first.body).toBe(200);
+    const panel = first.json()[0];
+    expect(panel).toMatchObject({ id: expect.any(String), categoryId: cat.id, name: 'Panel', options: [] });
+    const second = await a.admin('PUT', `/categories/${cat.id}/attributes`, {
+      attributes: [
+        { id: panel.id, name: 'Panel type', kind: 'text', required: true, filterable: false, variantDefining: false },
+        { name: 'Size', kind: 'number', unit: 'in', required: true, filterable: true, variantDefining: true },
+      ],
+      imageRules: [],
+    });
+    expect(second.statusCode, second.body).toBe(200);
+    expect(second.json().map((x: { id: string; name: string }) => [x.id === panel.id, x.name])).toEqual([
+      [true, 'Panel type'],
+      [false, 'Size'],
+    ]);
+  });
 });
 
 describe('brands', () => {
