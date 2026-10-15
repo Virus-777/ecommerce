@@ -241,6 +241,7 @@ export class Views {
       trackingNumber: l.tracking_number,
       labelUrl: link?.url ?? fallback,
       qrCodeUrl: l.qr_code ? `${this.core.ctx.config.publicUrls.store.replace(/\/$/, '')}/returns/drop-off/${encodeURIComponent(l.qr_code)}` : null,
+      dropOffCode: l.qr_code ?? null,
       dropOffBy: iso(l.drop_off_by),
       format: l.format as Label['format'],
       status: l.status as Label['status'],

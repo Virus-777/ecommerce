@@ -736,7 +736,10 @@ export interface ReturnShipment {
   trackingNumber?: string | null;
   trackingUrl?: string | null;
   labelUrl?: string | null;
+  /** Drop-off link the QR encodes (prepaid_qr) */
   qrCodeUrl?: string | null;
+  /** prepaid_qr: the code the carrier scans at drop-off; apps draw the QR from it (decision G26a) */
+  dropOffCode?: string | null;
   dropOffBy?: string | null;
   dropOffPoints: DropOffPoint[];
   instructions: string[];
@@ -758,7 +761,8 @@ export const ReturnShipment: z.ZodType<ReturnShipment> = z.object({
   trackingNumber: z.string().nullish(),
   trackingUrl: z.url().nullish(),
   labelUrl: z.url().nullish(),
-  qrCodeUrl: z.url().nullish(),
+  qrCodeUrl: z.url().describe("Drop-off link the QR encodes (prepaid_qr)").nullish(),
+  dropOffCode: z.string().describe("prepaid_qr: the code the carrier scans at drop-off; apps draw the QR from it (decision G26a)").nullish(),
   dropOffBy: z.iso.datetime({ offset: true }).nullish(),
   get dropOffPoints() {
     return z.array(DropOffPoint);
@@ -910,6 +914,8 @@ export interface ReturnDetail {
   decision?: ReturnDecision | null;
   shipment?: ReturnShipment | null;
   refund?: RefundView | null;
+  /** Before the refund is decided: what the customer can expect back (isEstimate true; return shipping the customer pays and the coupon share already taken off; inspection can still change it). Null once refund is set, or when the remedy is not a refund or store credit, or the return is closed (G26b) */
+  refundEstimate?: RefundBreakdown | null;
   replacement?: Replacement | null;
   /** Terms accepted at purchase */
   terms: EffectiveTerms;
@@ -960,6 +966,9 @@ export const ReturnDetail: z.ZodType<ReturnDetail> = z.object({
   },
   get refund() {
     return RefundView.nullish();
+  },
+  get refundEstimate() {
+    return RefundBreakdown.nullish();
   },
   get replacement() {
     return Replacement.nullish();
@@ -1136,17 +1145,21 @@ export const InspectionChecklist: z.ZodType<InspectionChecklist> = z.object({
 }).register(common.apiTypes, { id: "returns.InspectionChecklist" });
 
 export interface InspectionDraft {
-  /** Partial InspectionInput as last saved */
-  inspection?: unknown;
-  /** Partial RemedyInput (seller inspect-and-refund form) */
-  remedy?: unknown | null;
+  /** Partial InspectionInput as last saved (G75: typed; unknown keys and values that do not fit a field are left out) */
+  inspection: InspectionDraftValues;
+  /** Partial RemedyInput (seller inspect-and-refund form), typed the same way */
+  remedy?: RemedyDraftValues | null;
   savedBy: common.Actor;
   savedAt: string;
 }
 
 export const InspectionDraft: z.ZodType<InspectionDraft> = z.object({
-  inspection: z.unknown().describe("Partial InspectionInput as last saved"),
-  remedy: z.unknown().describe("Partial RemedyInput (seller inspect-and-refund form)").nullish(),
+  get inspection() {
+    return InspectionDraftValues;
+  },
+  get remedy() {
+    return RemedyDraftValues.nullish();
+  },
   get savedBy() {
     return common.Actor;
   },
@@ -1179,6 +1192,89 @@ export const ReturnEvidence: z.ZodType<ReturnEvidence> = z.object({
   addedAt: z.iso.datetime({ offset: true }),
   caseId: z.uuid().describe("Set once copied into the support case on escalation").nullish(),
 }).register(common.apiTypes, { id: "returns.ReturnEvidence" });
+
+export interface RemedyPreviewInput {
+  kind: "full_refund" | "partial_refund" | "store_credit";
+  /** Partial refunds: what is taken off and why */
+  deductions?: RefundDeduction[] | null;
+  /** Partial refunds: the amount instead of deductions */
+  amount?: common.Money | null;
+}
+
+export const RemedyPreviewInput: z.ZodType<RemedyPreviewInput> = z.object({
+  kind: z.enum(["full_refund", "partial_refund", "store_credit"]),
+  get deductions() {
+    return z.array(RefundDeduction).nullish();
+  },
+  get amount() {
+    return common.Money.nullish();
+  },
+}).register(common.apiTypes, { id: "returns.RemedyPreviewInput" });
+
+export interface RemedyPreview {
+  /** The refund the customer would get (isEstimate true) */
+  breakdown: RefundBreakdown;
+  /** Effect on the seller's earnings; null when finance cannot answer */
+  earningsImpact?: EarningsImpact | null;
+}
+
+export const RemedyPreview: z.ZodType<RemedyPreview> = z.object({
+  get breakdown() {
+    return RefundBreakdown;
+  },
+  get earningsImpact() {
+    return EarningsImpact.nullish();
+  },
+}).register(common.apiTypes, { id: "returns.RemedyPreview" });
+
+export interface InspectionDraftValues {
+  conditionOutcome?: "as_described" | "damaged_by_customer" | "missing_parts" | "not_matching_request" | "wrong_item_returned" | "empty_package" | null;
+  grade?: "new_sealed" | "like_new" | "good" | "damaged" | null;
+  checks?: InspectionCheck[] | null;
+  missingParts?: string[] | null;
+  notes?: string | null;
+  mediaIds?: string[] | null;
+  /** The photos of mediaIds, resolved (empty when none, or when media is off) */
+  media: common.MediaRef[];
+  proposedStockOutcome?: "restock" | "different_condition" | "damaged_stock" | "repair" | "return_to_supplier" | "write_off" | null;
+  regradeCondition?: string | null;
+}
+
+export const InspectionDraftValues: z.ZodType<InspectionDraftValues> = z.object({
+  conditionOutcome: z.enum(["as_described", "damaged_by_customer", "missing_parts", "not_matching_request", "wrong_item_returned", "empty_package"]).nullish(),
+  grade: z.enum(["new_sealed", "like_new", "good", "damaged"]).nullish(),
+  get checks() {
+    return z.array(InspectionCheck).nullish();
+  },
+  missingParts: z.array(z.string()).nullish(),
+  notes: z.string().nullish(),
+  mediaIds: z.array(z.uuid()).nullish(),
+  get media() {
+    return z.array(common.MediaRef);
+  },
+  proposedStockOutcome: z.enum(["restock", "different_condition", "damaged_stock", "repair", "return_to_supplier", "write_off"]).nullish(),
+  regradeCondition: z.string().nullish(),
+}).register(common.apiTypes, { id: "returns.InspectionDraftValues" });
+
+export interface RemedyDraftValues {
+  kind?: "full_refund" | "partial_refund" | "replacement" | "exchange" | "store_credit" | null;
+  deductions?: RefundDeduction[] | null;
+  amount?: common.Money | null;
+  explanation?: string | null;
+  exchangeVariantId?: string | null;
+}
+
+export const RemedyDraftValues: z.ZodType<RemedyDraftValues> = z.object({
+  kind: z.enum(["full_refund", "partial_refund", "replacement", "exchange", "store_credit"]).nullish(),
+  get deductions() {
+    return z.array(RefundDeduction).nullish();
+  },
+  get amount() {
+    return common.Money.nullish();
+  },
+  explanation: z.string().nullish(),
+  exchangeVariantId: z.uuid().nullish(),
+}).register(common.apiTypes, { id: "returns.RemedyDraftValues" });
 
 export interface InspectionInput {
   conditionOutcome: "as_described" | "damaged_by_customer" | "missing_parts" | "not_matching_request" | "wrong_item_returned" | "empty_package";
@@ -1291,7 +1387,10 @@ export interface EarningsImpact {
   sellerEarningsChange: common.Money;
   /** Preview before booking; the posted fee_refund entries after */
   feeReturned: common.Money;
+  /** Return label the seller pays. Before the seller approves (no label yet): the price the label would cost, from shipping.estimateLabelCost (labelChargeEstimated true; G55c) */
   labelCharge?: common.Money | null;
+  /** labelCharge is an estimate (the label is not bought yet) */
+  labelChargeEstimated: boolean;
   totalBalanceChange: common.Money;
   /** True when the sale was already paid out; the amount is deducted from the next payout */
   afterPayout: boolean;
@@ -1311,6 +1410,7 @@ export const EarningsImpact: z.ZodType<EarningsImpact> = z.object({
   get labelCharge() {
     return common.Money.nullish();
   },
+  labelChargeEstimated: z.boolean().describe("labelCharge is an estimate (the label is not bought yet)"),
   get totalBalanceChange() {
     return common.Money;
   },
@@ -1667,6 +1767,8 @@ export interface AdminReturnRow {
   };
   item: ReturnItemView;
   reason: string;
+  /** The customer's reason as the code the list's reason filter takes, e.g. damaged (reason is its label, e.g. Arrived damaged) */
+  reasonCode: string;
   amount: common.Money;
   owner?: common.Actor | null;
   deadline?: common.Deadline | null;
@@ -1691,6 +1793,7 @@ export const AdminReturnRow: z.ZodType<AdminReturnRow> = z.object({
     return ReturnItemView;
   },
   reason: z.string(),
+  reasonCode: z.string().describe("The customer's reason as the code the list's reason filter takes, e.g. damaged (reason is its label, e.g. Arrived damaged)"),
   get amount() {
     return common.Money;
   },
@@ -2586,6 +2689,8 @@ export interface ReturnsDb {
     tracking_number: string | null;
     label_url: string | null;
     qr_code_url: string | null;
+    /** shipping Label.dropOffCode; null on rows from before G26a: read from qr_code_url */
+    drop_off_code: string | null;
     drop_off_by: Date | null;
     from_address: Json | null;
     to_address: Json;
@@ -2877,7 +2982,7 @@ export const endpoints = defineEndpoints({
     summary: "Return detail: status track, drop-off, return shipment, refund or replacement progress",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     response: () => ReturnDetail,
     status: 200,
@@ -2895,7 +3000,7 @@ export const endpoints = defineEndpoints({
     desc: "Restarts the respond-by clock.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       reply: z.string(),
@@ -2916,7 +3021,7 @@ export const endpoints = defineEndpoints({
     summary: "Cancel a return before the item is sent back",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       reason: z.string().nullish(),
@@ -2937,7 +3042,7 @@ export const endpoints = defineEndpoints({
     summary: "Drop-off QR code, printable label, instructions and nearby drop-off points",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     query: () =>
       z.object({
@@ -2958,7 +3063,7 @@ export const endpoints = defineEndpoints({
     summary: "Email the drop-off code to the customer",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     response: null,
     status: 204,
@@ -2974,7 +3079,7 @@ export const endpoints = defineEndpoints({
     summary: "Add carrier and tracking for a customer-arranged return",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       carrier: z.string(),
@@ -2997,7 +3102,7 @@ export const endpoints = defineEndpoints({
     desc: "Allowed when the seller missed a deadline, rejected the return, or the refund is late. Opens or links a support case.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       reason: z.enum(["seller_no_response", "customer_disagrees", "refund_late", "other"]),
@@ -3090,7 +3195,7 @@ export const endpoints = defineEndpoints({
     summary: "Return case: request, photos, policy applied, payment, deadlines, shipment, inspection and earnings impact",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     response: () => ReturnCase,
     status: 200,
@@ -3109,7 +3214,7 @@ export const endpoints = defineEndpoints({
     desc: "Customer-pays is refused for defective, damaged or wrong items. A prepaid label paid by the seller is charged to seller earnings (finance). The drop-off deadline (now + the policy's dropOffDays) is passed to shipping as LabelRequest.dropOffBy; the label's carrierServiceId is kept for drop-off points.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       labelMethod: z.enum(["prepaid_qr", "prepaid_label", "customer_arranged"]),
@@ -3133,7 +3238,7 @@ export const endpoints = defineEndpoints({
     summary: "Ask the customer a question (pauses the respond-by clock)",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       question: z.string(),
@@ -3156,7 +3261,7 @@ export const endpoints = defineEndpoints({
     desc: "Only when the request breaks the published terms. The customer can ask Marketly to review.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       reasonCode: z.enum(["outside_window", "item_not_eligible", "damaged_by_customer", "other"]),
@@ -3179,7 +3284,7 @@ export const endpoints = defineEndpoints({
     summary: "Refund without asking for the item back (recorded reason)",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => ExceptionInput,
     response: () => ReturnCase,
@@ -3200,7 +3305,7 @@ export const endpoints = defineEndpoints({
     summary: "Mark the return as received at the seller's return address",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       receivedAt: z.iso.datetime({ offset: true }).nullish(),
@@ -3223,7 +3328,7 @@ export const endpoints = defineEndpoints({
     summary: "Record the condition on arrival and the stock outcome",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => InspectionInput,
     response: () => ReturnCase,
@@ -3244,7 +3349,7 @@ export const endpoints = defineEndpoints({
     desc: "Partial values are kept as entered (no validation beyond types) and shown again on ReturnCase.inspectionDraft. Recording the inspection or remedy clears the draft. The customer sees nothing.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       inspection: z.unknown().describe("Partial InspectionInput"),
@@ -3267,7 +3372,7 @@ export const endpoints = defineEndpoints({
     desc: "Upload files through media first. Evidence stays with the return ('on record') and is copied into the support case when the return is escalated (support reads returns.listEvidence). Not shown to the customer.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       kind: z.enum(["photo", "video", "document", "tracking", "invoice", "other"]),
@@ -3278,6 +3383,26 @@ export const endpoints = defineEndpoints({
     status: 201,
     errors: ["VALIDATION_FAILED","NOT_FOUND"],
     audited: true,
+    screens: ["seller/return"],
+    phase: 1,
+  },
+  previewSellerRemedy: {
+    area: "seller",
+    method: "POST",
+    path: "/requests/{id}/remedy/preview",
+    auth: "seller",
+    permission: "returns.refunds.issue",
+    scope: "own-seller",
+    summary: "Preview a full or partial refund before issuing it: the customer's refund and the effect on the seller's earnings",
+    desc: "Nothing is saved. The breakdown uses the same rules as POST /remedy (deductions, amount capped at the remaining refundable amount); the earnings effect is finance's preview (finance.previewRefundImpact) with the return label the seller pays (G55d).",
+    params: () =>
+      z.object({
+        id: z.string().describe("Return id or its RT- reference"),
+      }),
+    body: () => RemedyPreviewInput,
+    response: () => RemedyPreview,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION","VALIDATION_FAILED","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","REMEDY_NOT_AVAILABLE"],
     screens: ["seller/return"],
     phase: 1,
   },
@@ -3292,7 +3417,7 @@ export const endpoints = defineEndpoints({
     desc: "Partial refunds need deductions with reasons. Capped at the remaining refundable amount. The refund is approved by the seller and handed to payments; the customer sees Processing, then Sent. Replacements and exchanges allocate stock through inventory.allocateForOrder (exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED).",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => RemedyInput,
     response: () => ReturnCase,
@@ -3406,7 +3531,7 @@ export const endpoints = defineEndpoints({
     summary: "Full return case with exception record, refund request and action history",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     response: () => ReturnCase,
     status: 200,
@@ -3423,7 +3548,7 @@ export const endpoints = defineEndpoints({
     summary: "Approve an Official Store return, or decide a seller return as the platform",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       labelMethod: z.enum(["prepaid_qr", "prepaid_label", "customer_arranged"]),
@@ -3448,7 +3573,7 @@ export const endpoints = defineEndpoints({
     summary: "Ask the customer for more information or photos",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       question: z.string(),
@@ -3471,7 +3596,7 @@ export const endpoints = defineEndpoints({
     summary: "Reject with an explanation",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       reasonCode: z.enum(["outside_window", "item_not_eligible", "damaged_by_customer", "other"]),
@@ -3496,7 +3621,7 @@ export const endpoints = defineEndpoints({
     desc: "Used when a seller misses a deadline or the customer challenges the outcome. The seller keeps read access and is told why.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       reason: z.enum(["seller_no_response", "seller_missed_inspection", "customer_disagrees", "refund_late", "other"]),
@@ -3520,7 +3645,7 @@ export const endpoints = defineEndpoints({
     summary: "Overturn a seller's rejection",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       withoutReturn: z.boolean(),
@@ -3545,7 +3670,7 @@ export const endpoints = defineEndpoints({
     summary: "Set the owner of a return",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       ownerId: z.uuid(),
@@ -3568,7 +3693,7 @@ export const endpoints = defineEndpoints({
     desc: "Records the reason and details (visible to Finance and in the action history), sets the stock outcome to written off, and sends the refund request to Finance approval.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => ExceptionInput,
     response: () => ReturnCase,
@@ -3591,7 +3716,7 @@ export const endpoints = defineEndpoints({
     desc: "For returns Marketly handles on a seller's behalf (e.g. the seller is suspended) when the seller confirms receipt outside Seller Center. Parcels arriving at the Marketly warehouse are scanned in by warehouse (receiveReturnParcel), which calls recordWarehouseReceipt; they are not recorded here.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       receivedAt: z.iso.datetime({ offset: true }).nullish(),
@@ -3611,7 +3736,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inspections",
     auth: "staff",
-    permission: "returns.inspections.record",
+    permission: "returns.inspections.view",
     scope: "staff",
     summary: "Official Store and Fulfilled by Marketly returns received, arriving and decided",
     query: () =>
@@ -3629,7 +3754,7 @@ export const endpoints = defineEndpoints({
     method: "GET",
     path: "/inspections/stats",
     auth: "staff",
-    permission: "returns.inspections.record",
+    permission: "returns.inspections.view",
     scope: "staff",
     summary: "Inspection queue KPIs",
     response: () => InspectionQueueStats,
@@ -3648,7 +3773,7 @@ export const endpoints = defineEndpoints({
     desc: "Inspector defaults to the caller; another inspector needs returns.requests.manage. The return stays in status received; the queue and case show Inspecting with the inspector and start time. Calling it again by the same inspector is a no-op (Continue).",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       inspectorId: z.uuid().nullish(),
@@ -3670,7 +3795,7 @@ export const endpoints = defineEndpoints({
     summary: "Save an unsent inspection (checks ticked so far, notes, photos)",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => z.object({
       inspection: z.unknown().describe("Partial InspectionInput"),
@@ -3692,7 +3817,7 @@ export const endpoints = defineEndpoints({
     desc: "The inspector proposes; the Returns Manager decides the remedy. The stock outcome is sent to inventory to record.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => InspectionInput,
     response: () => ReturnCase,
@@ -3714,7 +3839,7 @@ export const endpoints = defineEndpoints({
     desc: "Refunds go to Finance as an under-review refund request; replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.",
     params: () =>
       z.object({
-        id: z.uuid(),
+        id: z.string().describe("Return id or its RT- reference"),
       }),
     body: () => RemedyInput,
     response: () => ReturnCase,
@@ -4018,6 +4143,11 @@ export const spec = defineModuleSpec({
       "key": "returns.inspections.record",
       "audience": "staff",
       "desc": "Record receipt and inspection of returns (Warehouse)"
+    },
+    {
+      "key": "returns.inspections.view",
+      "audience": "staff",
+      "desc": "View the return inspection queue and its KPIs (read only; recording needs returns.inspections.record)"
     },
     {
       "key": "returns.exceptions.propose",
@@ -5418,6 +5548,7 @@ export const spec = defineModuleSpec({
         "tracking_number",
         "label_url",
         "qr_code_url",
+        "drop_off_code",
         "drop_off_by",
         "from_address",
         "to_address",
@@ -5435,6 +5566,7 @@ export const spec = defineModuleSpec({
         "tracking_number",
         "label_url",
         "qr_code_url",
+        "drop_off_code",
         "drop_off_by",
         "from_address",
         "cost",
@@ -5508,6 +5640,12 @@ export const spec = defineModuleSpec({
               ]
             },
             "qr_code_url": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
+            "drop_off_code": {
               "bsonType": [
                 "string",
                 "null"

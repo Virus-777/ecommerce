@@ -11,6 +11,7 @@ import type {
   EarningsImpact,
   Inspection,
   InspectionChecklist,
+  InspectionDraft,
   InspectionQueueRow,
   RefundBreakdown,
   RefundRequest,
@@ -32,6 +33,9 @@ import {
   addDays,
   customerStatusLabel,
   deadline,
+  draftInspection,
+  draftRemedy,
+  dropOffCodeOf,
   is,
   iso,
   LIVE_REFUND,
@@ -49,7 +53,7 @@ import {
   type RefundStatus,
   type ReturnStatus,
 } from '../domain/rules.js';
-import type { EventRec, ItemRec, RefundRec, ReplacementRec, ReturnRec, ShipmentRec } from '../ports.js';
+import type { DraftRec, EventRec, ItemRec, RefundRec, ReplacementRec, ReturnRec, ShipmentRec } from '../ports.js';
 import { Amounts } from './amounts.js';
 import type { Agg, Core } from './core.js';
 
@@ -75,7 +79,7 @@ export class Views {
   /* ---------------------------------------------------------------- media */
 
   mediaIdsOf(agg: Agg): string[] {
-    return [...agg.ret.media_ids, ...(agg.ret.info_request?.replyMediaIds ?? []), ...agg.inspections.flatMap((i) => i.media_ids), ...agg.evidence.flatMap((e) => e.media_ids)];
+    return [...agg.ret.media_ids, ...(agg.ret.info_request?.replyMediaIds ?? []), ...agg.inspections.flatMap((i) => i.media_ids), ...agg.evidence.flatMap((e) => e.media_ids), ...(agg.draft ? (draftInspection(agg.draft.inspection).mediaIds ?? []) : [])];
   }
 
   async refs(ids: string[]): Promise<Refs> {
@@ -85,6 +89,12 @@ export class Views {
     const list = await this.core.soft('media', 'media refs', (m) => m.refs(unique, 'small'));
     for (const r of list ?? []) out.set(r.id, r);
     return out;
+  }
+
+  /** An inspection draft, typed (G75): known fields only, photos resolved */
+  draftView(d: DraftRec, refs: Refs): InspectionDraft {
+    const inspection = draftInspection(d.inspection);
+    return { inspection: { ...inspection, media: this.pick(inspection.mediaIds ?? [], refs) }, remedy: draftRemedy(d.remedy), savedBy: d.saved_by, savedAt: d.saved_at.toISOString() };
   }
 
   private pick(ids: string[], refs: Refs): common.MediaRef[] {
@@ -262,6 +272,7 @@ export class Views {
       trackingUrl: null,
       labelUrl: s.label_url,
       qrCodeUrl: s.qr_code_url,
+      dropOffCode: s.drop_off_code ?? dropOffCodeOf(s.qr_code_url),
       dropOffBy: iso(s.drop_off_by),
       dropOffPoints,
       instructions: this.instructions(s),
@@ -344,10 +355,26 @@ export class Views {
 
   async details(aggs: Agg[], area: Area): Promise<ReturnDetail[]> {
     const refs = await this.refs(aggs.flatMap((a) => [...a.ret.media_ids, ...(a.ret.info_request?.replyMediaIds ?? [])]));
-    return aggs.map((a) => this.detail(a, area, refs));
+    const estimates = await Promise.all(aggs.map((a) => this.refundEstimate(a)));
+    return aggs.map((a, n) => this.detail(a, area, refs, estimates[n] ?? null));
   }
 
-  detail(agg: Agg, area: Area, refs: Refs): ReturnDetail {
+  /**
+   * G26b: before the refund is decided, what the customer can expect back (an estimate: the return shipping the
+   * customer pays is taken off; inspection can still change it). Null once a refund request exists, for remedies that
+   * are not money, for closed returns, or when the amounts cannot be read.
+   */
+  async refundEstimate(agg: Agg): Promise<RefundBreakdown | null> {
+    const r = agg.ret;
+    if (this.core.refundOf(agg) || !['refund', 'store_credit'].includes(r.remedy) || is(['rejected', 'cancelled', 'completed'], r.status)) return null;
+    const shipment = this.core.shipmentOf(agg);
+    const withReturnShipping = r.shipping_paid_by === 'customer' && shipment?.method !== 'customer_arranged';
+    const b = await this.core.quiet('refund estimate', () => this.amounts.forReturn(r, agg.items, { strict: false, withReturnShipping }));
+    if (!b) return null;
+    return this.amounts.breakdown(b, agg.items[0]?.currency ?? this.core.currency, [], await this.amounts.methodLabel(r), true);
+  }
+
+  detail(agg: Agg, area: Area, refs: Refs, refundEstimate: RefundBreakdown | null = null): ReturnDetail {
     const r = agg.ret;
     const shipment = this.core.shipmentOf(agg);
     const rr = this.core.refundOf(agg);
@@ -374,6 +401,7 @@ export class Views {
       decision: r.decision,
       shipment: shipment ? this.shipment(shipment, agg) : null,
       refund: rr ? this.refundView(rr, agg) : null,
+      refundEstimate: rr ? null : refundEstimate,
       replacement: rep ? this.replacement(rep, agg) : null,
       terms: r.terms_snapshot.terms,
       escalation: r.escalation,
@@ -469,12 +497,16 @@ export class Views {
     return { id: e.id, kind: e.kind as ReturnEvidence['kind'], media: this.pick(e.media_ids, refs), note: e.note, party: e.party as ReturnEvidence['party'], addedBy: e.added_by, addedAt: e.added_at.toISOString(), caseId: e.case_id };
   }
 
-  async earningsImpact(agg: Agg, rr: RefundRec | null): Promise<EarningsImpact | null> {
+  /** o.refund: a refund being considered (the seller's remedy preview) instead of the decided or full amount */
+  async earningsImpact(agg: Agg, rr: RefundRec | null, o: { refund?: common.Money } = {}): Promise<EarningsImpact | null> {
     const r = agg.ret;
     if (r.owner_type !== 'seller') return null;
-    const refund = rr ? this.m(rr.total, rr.currency) : this.amountOf(agg);
+    const refund = o.refund ?? (rr ? this.m(rr.total, rr.currency) : this.amountOf(agg));
     const shipment = this.core.shipmentOf(agg);
-    const labelCharge = shipment?.paid_by === 'seller' && shipment.cost ? this.m(shipment.cost) : null;
+    let labelCharge = shipment?.paid_by === 'seller' && shipment.cost ? this.m(shipment.cost) : null;
+    // G55c: before the seller approves, the price of the label it would pay for
+    const estimated = !shipment && r.shipping_paid_by === 'seller' && is(['requested', 'info_requested'], r.status);
+    if (estimated) labelCharge = await this.labelEstimate(agg);
     const items = agg.items.map((i) => i.order_item_id);
     // once the refund is booked, what finance posted; a new preview would no longer find the fee it already returned
     const booked = rr?.payment_refund_id ? await this.core.soft('finance', 'booked refund impact', (f) => f.bookedRefundImpact(rr.payment_refund_id!, items)) : null;
@@ -485,10 +517,31 @@ export class Views {
       sellerEarningsChange: preview.sellerEarningsChange,
       feeReturned: preview.feeReturned,
       labelCharge,
+      labelChargeEstimated: estimated && !!labelCharge,
       totalBalanceChange: this.m(preview.sellerEarningsChange.amount + preview.feeReturned.amount - (labelCharge?.amount ?? 0), refund.currency),
       afterPayout: preview.afterPayout,
       note: preview.note,
     };
+  }
+
+  /** The return label price before it is bought: the request decisions.issue would send to shipping.createLabel */
+  private async labelEstimate(agg: Agg): Promise<common.Money | null> {
+    const r = agg.ret;
+    const meta = r.terms_snapshot.meta;
+    const cost = await this.core.quiet('return label estimate', () =>
+      this.core.ctx.use('shipping').estimateLabelCost({
+        groupId: meta.groupId,
+        kind: 'return',
+        items: agg.items.map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity })),
+        parcel: { weightGrams: 1000 },
+        carrierServiceId: meta.carrierServiceId ?? null,
+        keepPromise: false,
+        from: meta.deliveryAddress,
+        to: meta.destination.address,
+        returnId: r.id,
+      }),
+    );
+    return cost ?? null;
   }
 
   /** Category of each returned order item at purchase: copied at request time, else read from orders (older returns) */
@@ -535,7 +588,7 @@ export class Views {
       cap += rem ? Math.min(rem.remaining, paidShare) : paidShare;
       refunded += rem ? rem.refunded : 0;
     }
-    const detail = this.detail(agg, area, refs);
+    const detail = this.detail(agg, area, refs, await this.refundEstimate(agg));
     const ownerName = ownerRef ? (ownerRef as { name?: string }).name : null;
     return {
       detail,
@@ -559,7 +612,7 @@ export class Views {
         .map((e) => this.event(e))
         .reverse(),
       inspectionChecklist: this.checklist(agg, (checks ?? {}) as Record<string, unknown>, categories),
-      inspectionDraft: agg.draft ? { inspection: agg.draft.inspection, remedy: agg.draft.remedy, savedBy: agg.draft.saved_by, savedAt: agg.draft.saved_at.toISOString() } : null,
+      inspectionDraft: agg.draft ? this.draftView(agg.draft, refs) : null,
       inspector: r.inspector,
       evidence: agg.evidence.map((e) => this.evidenceView(e, refs)),
       allowedActions: this.allowedActions(agg, area),
@@ -687,6 +740,7 @@ export class Views {
       seller: { ownerType: r.owner_type, id: r.seller_id, name: r.owner_type === 'official' ? OFFICIAL_STORE_NAME : r.terms_snapshot.meta.sellerName },
       item: this.item(agg.items[0]!, r),
       reason: reasonLabel(r.reason),
+      reasonCode: r.reason,
       amount: this.amountOf(agg),
       owner: r.owner_staff_id ? { kind: 'staff', id: r.owner_staff_id } : null,
       deadline: this.nextDeadline(agg),

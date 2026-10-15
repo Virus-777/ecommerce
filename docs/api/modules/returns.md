@@ -63,6 +63,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | POST | `/api/seller/returns/requests/{id}/inspection` | Record the condition on arrival and the stock outcome | seller<br>`returns.refunds.issue` | `InspectionInput` → `ReturnCase` |
 | PUT | `/api/seller/returns/requests/{id}/inspection-draft` | Save an unsent inspection and refund decision | seller<br>`returns.refunds.issue` | `{ inspection: json, remedy: json? }` → `InspectionDraft` |
 | POST | `/api/seller/returns/requests/{id}/evidence` | Attach evidence to a return before any case exists _(audited)_ | seller<br>`returns.requests.respond` | `{ kind: enum(photo|video|document|tracking|invoice|other), mediaIds: uuid[], note: text? }` → `ReturnEvidence` |
+| POST | `/api/seller/returns/requests/{id}/remedy/preview` | Preview a full or partial refund before issuing it: the customer's refund and the effect on the seller's earnings | seller<br>`returns.refunds.issue` | `RemedyPreviewInput` → `RemedyPreview` |
 | POST | `/api/seller/returns/requests/{id}/remedy` | Confirm the refund (full or partial) or ship a replacement or exchange _(idempotent)_ | seller<br>`returns.refunds.issue` | `RemedyInput` → `ReturnCase` |
 | POST | `/api/seller/returns/replacements/{id}/cancel` | Cancel a replacement or exchange not shipped yet (e.g. no stock) with a reason _(audited)_ | seller<br>`returns.refunds.issue` | `{ reason: text }` → `Replacement` |
 | GET | `/api/seller/returns/terms` | Own return terms, return address and the platform baseline | seller | `SellerReturnTerms` |
@@ -83,8 +84,8 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | POST | `/api/admin/returns/requests/{id}/assign` | Set the owner of a return _(audited)_ | staff<br>`returns.requests.manage` | `{ ownerId: uuid, note: text? }` → `ReturnCase` |
 | POST | `/api/admin/returns/requests/{id}/approve-without-return` | Propose refund-without-return (controlled exception) _(idempotent, audited)_ | staff<br>`returns.exceptions.propose` | `ExceptionInput` → `ReturnCase` |
 | POST | `/api/admin/returns/requests/{id}/receive` | Record receipt at a seller's address for a platform-handled return _(audited)_ | staff<br>`returns.inspections.record` | `{ receivedAt: datetime?, trackingNumber: string?, note: text? }` → `ReturnCase` |
-| GET | `/api/admin/returns/inspections` | Official Store and Fulfilled by Marketly returns received, arriving and decided | staff<br>`returns.inspections.record` | Page<InspectionQueueRow> |
-| GET | `/api/admin/returns/inspections/stats` | Inspection queue KPIs | staff<br>`returns.inspections.record` | `InspectionQueueStats` |
+| GET | `/api/admin/returns/inspections` | Official Store and Fulfilled by Marketly returns received, arriving and decided | staff<br>`returns.inspections.view` | Page<InspectionQueueRow> |
+| GET | `/api/admin/returns/inspections/stats` | Inspection queue KPIs | staff<br>`returns.inspections.view` | `InspectionQueueStats` |
 | POST | `/api/admin/returns/requests/{id}/start-inspection` | Start (or continue) inspecting a received return: sets the inspector and status Inspecting _(audited)_ | staff<br>`returns.inspections.record` | `{ inspectorId: uuid? }` → `InspectionQueueRow` |
 | PUT | `/api/admin/returns/requests/{id}/inspection-draft` | Save an unsent inspection (checks ticked so far, notes, photos) | staff<br>`returns.inspections.record` | `{ inspection: json }` → `InspectionDraft` |
 | POST | `/api/admin/returns/requests/{id}/inspection` | Record inspection: photos, condition grade, checks, missing parts and proposed stock outcome _(audited)_ | staff<br>`returns.inspections.record` | `InspectionInput` → `ReturnCase` |
@@ -472,7 +473,8 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | trackingNumber | `string?` |
 | trackingUrl | `url?` |
 | labelUrl | `url?` |
-| qrCodeUrl | `url?` |
+| qrCodeUrl | `url?` Drop-off link the QR encodes (prepaid_qr) |
+| dropOffCode | `string?` prepaid_qr: the code the carrier scans at drop-off; apps draw the QR from it (decision G26a) |
 | dropOffBy | `datetime?` |
 | dropOffPoints | `DropOffPoint[]` |
 | instructions | `string[]` |
@@ -558,6 +560,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | decision | `ReturnDecision?` |
 | shipment | `ReturnShipment?` |
 | refund | `RefundView?` |
+| refundEstimate | `RefundBreakdown?` Before the refund is decided: what the customer can expect back (isEstimate true; return shipping the customer pays and the coupon share already taken off; inspection can still change it). Null once refund is set, or when the remedy is not a refund or store credit, or the return is closed (G26b) |
 | replacement | `Replacement?` |
 | terms | `EffectiveTerms` Terms accepted at purchase |
 | escalation | `Escalation?` |
@@ -648,8 +651,8 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 
 | Field | Type |
 |---|---|
-| inspection | `json` Partial InspectionInput as last saved |
-| remedy | `json?` Partial RemedyInput (seller inspect-and-refund form) |
+| inspection | `InspectionDraftValues` Partial InspectionInput as last saved (G75: typed; unknown keys and values that do not fit a field are left out) |
+| remedy | `RemedyDraftValues?` Partial RemedyInput (seller inspect-and-refund form), typed the same way |
 | savedBy | `Actor` |
 | savedAt | `datetime` |
 
@@ -665,6 +668,45 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | addedBy | `Actor` |
 | addedAt | `datetime` |
 | caseId | `uuid?` Set once copied into the support case on escalation |
+
+### RemedyPreviewInput
+
+| Field | Type |
+|---|---|
+| kind | `enum(full_refund|partial_refund|store_credit)` |
+| deductions | `RefundDeduction[]?` Partial refunds: what is taken off and why |
+| amount | `Money?` Partial refunds: the amount instead of deductions |
+
+### RemedyPreview
+
+| Field | Type |
+|---|---|
+| breakdown | `RefundBreakdown` The refund the customer would get (isEstimate true) |
+| earningsImpact | `EarningsImpact?` Effect on the seller's earnings; null when finance cannot answer |
+
+### InspectionDraftValues
+
+| Field | Type |
+|---|---|
+| conditionOutcome | `enum(as_described|damaged_by_customer|missing_parts|not_matching_request|wrong_item_returned|empty_package)?` |
+| grade | `enum(new_sealed|like_new|good|damaged)?` |
+| checks | `InspectionCheck[]?` |
+| missingParts | `string[]?` |
+| notes | `text?` |
+| mediaIds | `uuid[]?` |
+| media | `MediaRef[]` The photos of mediaIds, resolved (empty when none, or when media is off) |
+| proposedStockOutcome | `enum(restock|different_condition|damaged_stock|repair|return_to_supplier|write_off)?` |
+| regradeCondition | `string?` |
+
+### RemedyDraftValues
+
+| Field | Type |
+|---|---|
+| kind | `enum(full_refund|partial_refund|replacement|exchange|store_credit)?` |
+| deductions | `RefundDeduction[]?` |
+| amount | `Money?` |
+| explanation | `text?` |
+| exchangeVariantId | `uuid?` |
 
 ### InspectionInput
 
@@ -726,7 +768,8 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | refundToCustomer | `Money` |
 | sellerEarningsChange | `Money` Before the refund is booked a preview (finance.previewRefundImpact); once payments sent it and finance booked it, the posted refund entries (finance.bookedRefundImpact) |
 | feeReturned | `Money` Preview before booking; the posted fee_refund entries after |
-| labelCharge | `Money?` |
+| labelCharge | `Money?` Return label the seller pays. Before the seller approves (no label yet): the price the label would cost, from shipping.estimateLabelCost (labelChargeEstimated true; G55c) |
+| labelChargeEstimated | `bool` labelCharge is an estimate (the label is not bought yet) |
 | totalBalanceChange | `Money` |
 | afterPayout | `bool` True when the sale was already paid out; the amount is deducted from the next payout |
 | note | `string` |
@@ -860,6 +903,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | seller | `{"ownerType":"enum(official|seller)","id":{"type":"uuid?","desc":"Null for the Official Store"},"name":"string"}` |
 | item | `ReturnItemView` |
 | reason | `string` |
+| reasonCode | `string` The customer's reason as the code the list's reason filter takes, e.g. damaged (reason is its label, e.g. Arrived damaged) |
 | amount | `Money` |
 | owner | `Actor?` |
 | deadline | `Deadline?` |
@@ -1162,6 +1206,7 @@ Indexes: `(order_item_id)`
 | tracking_number | text? |
 | label_url | text? |
 | qr_code_url | text? |
+| drop_off_code | text? (shipping Label.dropOffCode; null on rows from before G26a: read from qr_code_url) |
 | drop_off_by | timestamptz? |
 | from_address | jsonb? |
 | to_address | jsonb |
@@ -1422,6 +1467,7 @@ Indexes: `(return_id, at)`
 | `returns.requests.view` | staff | View returns, refund requests and policies |
 | `returns.requests.manage` | staff | Approve, reject, request information, take over, overturn and decide remedies (Returns Manager) |
 | `returns.inspections.record` | staff | Record receipt and inspection of returns (Warehouse) |
+| `returns.inspections.view` | staff | View the return inspection queue and its KPIs (read only; recording needs returns.inspections.record) |
 | `returns.exceptions.propose` | staff | Propose refund-without-return with a recorded reason |
 | `returns.refunds.approve` | staff | Approve or decline refund requests within the approval limit (Finance) |
 | `returns.policies.manage` | staff | Propose baseline and category exception changes |
@@ -1563,6 +1609,8 @@ type Return {
   shipment: ReturnShipment
   "Refund progress (Requested, Under review, Approved, Processing, Sent), kept apart from the return status"
   refund: ReturnRefund
+  "Before the refund is decided: what the customer can expect back (isEstimate true); null once refund is set"
+  refundEstimate: ReturnRefundBreakdown
   "Replacement or exchange, with its own shipment"
   replacement: ReturnReplacement
   "Return terms accepted at purchase (frozen on the order item)"
@@ -1637,10 +1685,12 @@ enum ReturnChecklistKind @areas(in: [SELLER, ADMIN]) {
 }
 
 type ReturnInspectionDraft @areas(in: [SELLER, ADMIN]) {
-  "Partial inspection input as last saved"
+  "Partial inspection input as last saved (known fields only, as REST InspectionDraftValues; media resolves mediaIds)"
   inspection: JSON!
-  "Partial remedy input (seller form)"
+  "Partial remedy input (seller form), as REST RemedyDraftValues"
   remedy: JSON
+  "The draft's photos (inspection.mediaIds), resolved"
+  photos: [MediaRef!]!
   savedBy: Actor!
   savedAt: DateTime!
 }
@@ -1778,7 +1828,10 @@ type ReturnShipment {
   trackingNumber: String
   trackingUrl: URL
   labelUrl: URL
+  "Drop-off link the QR encodes (prepaid QR)"
   qrCodeUrl: URL
+  "Prepaid QR: the code the carrier scans at drop-off; apps draw the QR from it"
+  dropOffCode: String
   dropOffBy: DateTime
   dropOffPoints: [ReturnDropOffPoint!]!
   instructions: [String!]!
@@ -2039,7 +2092,9 @@ type ReturnEarningsImpact @areas(in: [SELLER, ADMIN]) {
   refundToCustomer: Money!
   sellerEarningsChange: Money!
   feeReturned: Money!
+  "Return label the seller pays; before approval the label's estimated price (labelChargeEstimated)"
   labelCharge: Money
+  labelChargeEstimated: Boolean!
   totalBalanceChange: Money!
   "The sale was already paid out; the amount comes off the next payout"
   afterPayout: Boolean!

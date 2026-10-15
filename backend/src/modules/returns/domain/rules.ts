@@ -451,6 +451,61 @@ export function termsSummary(windowDays: number, changeOfMindAllowed: boolean, f
 
 export const isEmail = (s: string | null | undefined): s is string => !!s && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
 
+/** The drop-off code of a prepaid QR link (…/returns/drop-off/<code>), for return parcels saved before dropOffCode (G26a) */
+export function dropOffCodeOf(qrCodeUrl: string | null | undefined): string | null {
+  const m = qrCodeUrl ? /\/returns\/drop-off\/([^/?#]+)/.exec(qrCodeUrl) : null;
+  return m ? decodeURIComponent(m[1]!) : null;
+}
+
+/* ---------------------------------------------------------------- inspection drafts (G75: typed on read) */
+
+const CONDITION_OUTCOMES = ['as_described', 'damaged_by_customer', 'missing_parts', 'not_matching_request', 'wrong_item_returned', 'empty_package'] as const;
+const GRADES = ['new_sealed', 'like_new', 'good', 'damaged'] as const;
+const STOCK_OUTCOMES = ['restock', 'different_condition', 'damaged_stock', 'repair', 'return_to_supplier', 'write_off'] as const;
+const REMEDY_KINDS = ['full_refund', 'partial_refund', 'replacement', 'exchange', 'store_credit'] as const;
+
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
+const text = (v: unknown) => (typeof v === 'string' ? v : undefined);
+const oneOf = <T extends string>(list: readonly T[], v: unknown): T | undefined => (typeof v === 'string' && (list as readonly string[]).includes(v) ? (v as T) : undefined);
+const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : undefined);
+const moneyOf = (v: unknown): common.Money | undefined => {
+  const m = obj(v);
+  return typeof m.amount === 'number' && Number.isFinite(m.amount) && typeof m.currency === 'string' ? { amount: m.amount, currency: m.currency } : undefined;
+};
+/** Keeps the fields that are set */
+const defined = <T extends Record<string, unknown>>(o: T): T => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as T;
+
+/** The saved inspection draft as typed values: known fields of the right type only (drafts are stored as entered) */
+export function draftInspection(raw: unknown) {
+  const d = obj(raw);
+  const checks = Array.isArray(d.checks)
+    ? d.checks.map(obj).filter((c) => typeof c.label === 'string' && typeof c.passed === 'boolean').map((c) => ({ ...(typeof c.key === 'string' ? { key: c.key } : {}), label: c.label as string, passed: c.passed as boolean }))
+    : undefined;
+  return defined({
+    conditionOutcome: oneOf(CONDITION_OUTCOMES, d.conditionOutcome),
+    grade: oneOf(GRADES, d.grade),
+    checks,
+    missingParts: strings(d.missingParts),
+    notes: text(d.notes),
+    mediaIds: strings(d.mediaIds),
+    proposedStockOutcome: oneOf(STOCK_OUTCOMES, d.proposedStockOutcome),
+    regradeCondition: text(d.regradeCondition),
+  });
+}
+
+/** The saved remedy draft (seller form) as typed values; null when none was saved */
+export function draftRemedy(raw: unknown) {
+  if (raw === null || raw === undefined) return null;
+  const d = obj(raw);
+  const deductions = Array.isArray(d.deductions)
+    ? d.deductions.map(obj).flatMap((x) => {
+        const amount = moneyOf(x.amount);
+        return typeof x.label === 'string' && typeof x.reason === 'string' && amount ? [{ label: x.label, amount, reason: x.reason }] : [];
+      })
+    : undefined;
+  return defined({ kind: oneOf(REMEDY_KINDS, d.kind), deductions, amount: moneyOf(d.amount), explanation: text(d.explanation), exchangeVariantId: text(d.exchangeVariantId) });
+}
+
 /** Actors are stored as JSON text in *_by text columns */
 export const actorText = (a: common.Actor) => JSON.stringify({ kind: a.kind, id: a.id ?? null, ...(a.name ? { name: a.name } : {}) });
 export function actorFrom(text: string | null | undefined): common.Actor | null {

@@ -277,9 +277,15 @@ describe('labels', () => {
     const to = { name: 'Casa Verde Returns', line1: '9 Dock Rd', city: 'Reno', region: 'NV', postalCode: '89502', country: 'US' };
     // the drop-off deadline is the one returns decided (approval + policy dropOffDays), never one shipping invents
     const dropOffBy = new Date(h.clock.now().getTime() + 10 * 86_400_000).toISOString();
+    // G55c: the price createLabel will charge, known before buying and without keeping a quote
+    const quotesBefore = await h.service.core.repo.count('label_quotes', {});
+    const estimate = await h.service.estimateLabelCost({ groupId: o.groupId, kind: 'return', items: [{ orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 1200 }, keepPromise: false, to, returnId });
+    expect(estimate).toMatchObject({ amount: expect.any(Number), currency: 'USD' });
+    expect(await h.service.core.repo.count('label_quotes', {})).toBe(quotesBefore);
     const r = await h.service.createLabel({ groupId: o.groupId, kind: 'return', items: [{ orderItemId: o.lamp.id, quantity: 1 }], parcel: { weightGrams: 1200 }, keepPromise: false, to, returnId, labelMethod: 'prepaid_qr', billedTo: 'customer', dropOffBy }, `ret-${returnId}`);
     expect(r.shipment).toMatchObject({ kind: 'return', returnId, status: 'label_created' });
     expect(r.label.qrCodeUrl).toMatch(/^http/);
+    expect(r.label.cost).toEqual(estimate);
     expect(r.label).toMatchObject({ dropOffBy, format: 'pdf', carrierServiceId: expect.any(String) });
     const row = (await h.service.core.repo.get('labels', r.label.id))!;
     expect(row).toMatchObject({ billed_to: 'customer', drop_off_by: new Date(dropOffBy), carrier_service_id: r.label.carrierServiceId });

@@ -9,9 +9,9 @@ import { money } from '../../../kernel/lib/money.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import type * as common from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
-import type { InspectionDraft, InspectionInput, InspectionQueueRow, RemedyInput, Replacement, ReturnEvidence } from '../../../spec/returns.js';
+import type { InspectionDraft, InspectionInput, InspectionQueueRow, RemedyInput, RemedyPreview, RemedyPreviewInput, Replacement, ReturnEvidence } from '../../../spec/returns.js';
 import { replacementMachine, returnMachine, returnShipmentMachine } from '../domain/state-machines.js';
-import { actorText, human, is, LIVE_REFUND, type ReturnStatus } from '../domain/rules.js';
+import { actorText, draftInspection, human, is, LIVE_REFUND, type ReturnStatus } from '../domain/rules.js';
 import type { ReplacementRec, ReturnRec } from '../ports.js';
 import type { ReturnsRepository } from '../repository.js';
 import { Batch, illegal, invalid, invalidField, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
@@ -90,7 +90,7 @@ export class Handling {
     const allowed: ReturnStatus[] = withRemedy ? ['received', 'awaiting_remedy'] : ['received'];
     if (!is(allowed, agg.ret.status)) throw illegal('There is nothing to inspect yet', { from: agg.ret.status });
     const row = await this.core.repo.upsertDraft({ return_id: id, inspection: body.inspection ?? {}, remedy: withRemedy ? (body.remedy ?? null) : (agg.draft?.remedy ?? null), saved_by: by.actor, saved_at: this.core.now() });
-    return { inspection: row.inspection, remedy: row.remedy, savedBy: row.saved_by, savedAt: row.saved_at.toISOString() };
+    return this.views.draftView(row, await this.views.refs(draftInspection(row.inspection).mediaIds ?? []));
   }
 
   async recordInspection(id: string, input: InspectionInput, by: By, agg: Agg, party: 'seller' | 'staff'): Promise<void> {
@@ -160,6 +160,16 @@ export class Handling {
    * seller: the seller approves its own refund (requested → approved → processing); staff (Official Store or
    * platform-handled): the refund request goes to Finance as under_review. Replacements reserve stock.
    */
+  /** POST seller /requests/{id}/remedy/preview (G55d): the refund and its effect on the seller's earnings; nothing is saved */
+  async previewRemedy(input: RemedyPreviewInput, agg: Agg): Promise<RemedyPreview> {
+    const r = agg.ret;
+    this.core.sellerMayAct(r);
+    if (!is(['received', 'awaiting_remedy'], r.status)) throw illegal('A refund can be previewed once the return is received', { from: r.status, allowed: [] });
+    const plan = await this.refunds.plan(agg, { kind: input.kind, deductions: input.deductions ?? null, amount: input.amount ?? null });
+    const breakdown = this.views.amounts.breakdown(plan.b, plan.currency, plan.deductions, plan.destinationLabel, true);
+    return { breakdown, earningsImpact: await this.views.earningsImpact(agg, null, { refund: breakdown.total }) };
+  }
+
   async remedy(id: string, input: RemedyInput, by: By, agg: Agg, mode: 'seller' | 'admin'): Promise<void> {
     const r = agg.ret;
     if (mode === 'seller') this.core.sellerMayAct(r);

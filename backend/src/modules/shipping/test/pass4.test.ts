@@ -26,6 +26,8 @@ describe('columns', () => {
     expect(row).toMatchObject({ kind: 'return', return_id: returnId, qr_code: expect.stringMatching(/^QR-/) });
     expect(row.storage_key ?? '').not.toMatch(/^\{/);
     expect(r.label.qrCodeUrl).toContain(encodeURIComponent(row.qr_code!));
+    // G26a: the code itself, for apps that draw the QR
+    expect(r.label.dropOffCode).toBe(row.qr_code);
     expect(r.label.carrierName).not.toBe('Carrier');
   });
 

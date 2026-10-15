@@ -556,7 +556,7 @@ export class Shipments {
   }
 
   /** Quotes per label-capable service: cost, arrival and whether it keeps the promised range */
-  private async quotesFor(g: GroupCtx, parcel: Parcel, o: { kind: string; to?: Partial<common.Address> | null; from?: Partial<common.Address> | null }): Promise<LabelQuote[]> {
+  private async quotesFor(g: GroupCtx, parcel: Parcel, o: { kind: string; to?: Partial<common.Address> | null; from?: Partial<common.Address> | null; store?: boolean }): Promise<LabelQuote[]> {
     const options = await this.labelServices();
     if (!options.length) throw this.core.error('LABELS_NOT_SUPPORTED', 'No carrier service can sell a label for this package. Enter tracking manually.');
     const now = this.core.now();
@@ -574,11 +574,32 @@ export class Shipments {
       }
       const estimatedArrival = this.estimateAfter(now, { min: service.transit_min, max: service.transit_max }, null)!;
       const keepsPromise = o.kind === 'return' || !promise ? true : estimatedArrival.to <= promise.to;
-      const row = await this.repo.insert('label_quotes', { id: newId(), group_id: g.task.groupId, carrier_service_id: service.id, cost: cost.amount, parcel, estimated_arrival: estimatedArrival, keeps_promise: keepsPromise, expires_at: new Date(now.getTime() + QUOTE_TTL_MS) });
-      out.push({ id: row.id, carrierServiceId: service.id, carrierName: carrier.name, serviceName: service.name, cost, estimatedArrival, keepsPromise, expiresAt: row.expires_at.toISOString() });
+      // an estimate (store: false) is not a quote that can be bought: nothing is kept
+      const expiresAt = new Date(now.getTime() + QUOTE_TTL_MS);
+      const id = o.store === false ? newId() : (await this.repo.insert('label_quotes', { id: newId(), group_id: g.task.groupId, carrier_service_id: service.id, cost: cost.amount, parcel, estimated_arrival: estimatedArrival, keeps_promise: keepsPromise, expires_at: expiresAt })).id;
+      out.push({ id, carrierServiceId: service.id, carrierName: carrier.name, serviceName: service.name, cost, estimatedArrival, keepsPromise, expiresAt: expiresAt.toISOString() });
     }
     if (!out.length) throw this.core.error('LABELS_NOT_SUPPORTED', 'No carrier can carry this package. Enter tracking manually.');
     return out.sort((a, b) => Number(b.keepsPromise) - Number(a.keepsPromise) || a.cost.amount - b.cost.amount);
+  }
+
+  /**
+   * What createLabel would charge for this request, without buying or keeping a quote (G55c: the return label price
+   * a seller sees before approving). The given carrier service, else the one createLabel would pick; null when no
+   * carrier can sell the label.
+   */
+  async estimateLabelCost(input: LabelRequest): Promise<common.Money | null> {
+    const g = await this.groupContext(input.groupId);
+    const from = input.from ?? (input.kind === 'return' ? null : await this.originOf(g));
+    let quotes: LabelQuote[];
+    try {
+      quotes = await this.quotesFor(g, input.parcel, { kind: input.kind, to: input.to ?? null, from, store: false });
+    } catch (err) {
+      if (isAppError(err) && err.code === 'LABELS_NOT_SUPPORTED') return null;
+      throw err;
+    }
+    const chosen = input.carrierServiceId ? quotes.find((q) => q.carrierServiceId === input.carrierServiceId) : (input.keepPromise ? quotes.filter((q) => q.keepsPromise) : quotes)[0];
+    return chosen?.cost ?? null;
   }
 
   /** Where an outbound package of the group starts: the service location for Fulfilled by Marketly groups, else not known here */

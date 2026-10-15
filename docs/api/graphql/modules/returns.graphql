@@ -44,6 +44,8 @@ type Return {
   shipment: ReturnShipment
   "Refund progress (Requested, Under review, Approved, Processing, Sent), kept apart from the return status"
   refund: ReturnRefund
+  "Before the refund is decided: what the customer can expect back (isEstimate true); null once refund is set"
+  refundEstimate: ReturnRefundBreakdown
   "Replacement or exchange, with its own shipment"
   replacement: ReturnReplacement
   "Return terms accepted at purchase (frozen on the order item)"
@@ -118,10 +120,12 @@ enum ReturnChecklistKind @areas(in: [SELLER, ADMIN]) {
 }
 
 type ReturnInspectionDraft @areas(in: [SELLER, ADMIN]) {
-  "Partial inspection input as last saved"
+  "Partial inspection input as last saved (known fields only, as REST InspectionDraftValues; media resolves mediaIds)"
   inspection: JSON!
-  "Partial remedy input (seller form)"
+  "Partial remedy input (seller form), as REST RemedyDraftValues"
   remedy: JSON
+  "The draft's photos (inspection.mediaIds), resolved"
+  photos: [MediaRef!]!
   savedBy: Actor!
   savedAt: DateTime!
 }
@@ -259,7 +263,10 @@ type ReturnShipment {
   trackingNumber: String
   trackingUrl: URL
   labelUrl: URL
+  "Drop-off link the QR encodes (prepaid QR)"
   qrCodeUrl: URL
+  "Prepaid QR: the code the carrier scans at drop-off; apps draw the QR from it"
+  dropOffCode: String
   dropOffBy: DateTime
   dropOffPoints: [ReturnDropOffPoint!]!
   instructions: [String!]!
@@ -520,7 +527,9 @@ type ReturnEarningsImpact @areas(in: [SELLER, ADMIN]) {
   refundToCustomer: Money!
   sellerEarningsChange: Money!
   feeReturned: Money!
+  "Return label the seller pays; before approval the label's estimated price (labelChargeEstimated)"
   labelCharge: Money
+  labelChargeEstimated: Boolean!
   totalBalanceChange: Money!
   "The sale was already paid out; the amount comes off the next payout"
   afterPayout: Boolean!

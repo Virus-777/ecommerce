@@ -748,7 +748,8 @@ How things get delivered: carriers and services, destinations and excluded areas
 | cost | `Money` |
 | trackingNumber | `string` |
 | labelUrl | `url` |
-| qrCodeUrl | `url?` Return labels with labelMethod prepaid_qr: code scanned at drop-off |
+| qrCodeUrl | `url?` Return labels with labelMethod prepaid_qr: drop-off link (the URL the QR encodes) |
+| dropOffCode | `string?` Return labels with labelMethod prepaid_qr: the code the carrier scans at drop-off; apps draw the QR from it (decision G26a) |
 | dropOffBy | `datetime?` |
 | format | `enum(pdf|zpl)` |
 | status | `enum(purchased|used|voided)` |
@@ -1587,6 +1588,7 @@ Indexes: `unique (carrier_code, external_id)`
 | hasCoverage | `(sellerId: uuid) => bool`<br>Seller has an active profile with coverage and a dispatch schedule (setup checklist) | sellers |
 | dispatchDeadline | `(ownerType: 'official'|'seller', sellerId: uuid | null, from: datetime, dispatch: DispatchInput) => datetime`<br>Dispatch deadline from acceptance time, handling days, same-day cutoff, business days and closures. No module calls it at launch: checkout takes each option's dispatchBy from quoteOptions. |  |
 | activeNotices | `(postalCode?: string, carrierCodes?: string[], surface?: string) => CustomerNotice[]`<br>Live service notices for a location. offers, checkout and content show notices through the GraphQL field; none calls it in-process at launch. | graphql |
+| estimateLabelCost | `(input: LabelRequest) => Money | null`<br>What createLabel would charge for this request (the given carrier service, else the one createLabel would pick), without buying a label or keeping a quote; null when no carrier can sell it. Returns shows sellers the return label price before they approve (G55c). | returns |
 | quoteLabelOptions | `(input: LabelRequest) => LabelQuote[]`<br>Carrier services that can carry this parcel to the destination, with cost, estimated arrival and keepsPromise against the customer's promised range (same rule createLabel enforces with keepPromise) | warehouse |
 | createLabel | `(input: LabelRequest, idempotencyKey: string) => LabelResult`<br>Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; LabelRequest.dropOffBy from the return is stored and returned on the label); format pdf (default) or zpl; its tracking events carry kind = return and returnId. Same key returns the same label. fulfillment-service (phase 4) will call it when its label flow is wired. | warehouse, returns |
 | voidLabel | `(labelId: uuid, reason: string) => Label`<br>Void an unused label (before the first carrier scan) | warehouse, returns |

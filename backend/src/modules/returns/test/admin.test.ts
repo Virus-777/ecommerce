@@ -61,6 +61,12 @@ describe('Official Store returns', () => {
     expect(h.named('returns.return.received').filter((e) => e.returnId === m.ret.id)).toHaveLength(1);
     const stats = await h.call('GET', '/api/admin/returns/inspections/stats', staff());
     expect(stats.body.waiting).toBeGreaterThanOrEqual(1);
+    // G77: the inspection reads need only the view key; recording still needs returns.inspections.record
+    const viewer = tokens.staff(['returns.inspections.view']);
+    expect((await h.call('GET', '/api/admin/returns/inspections/stats', viewer)).status).toBe(200);
+    expect((await h.call('GET', '/api/admin/returns/inspections?tab=arriving', viewer)).status).toBe(200);
+    expect((await h.call('POST', `/api/admin/returns/requests/${m.ret.id}/start-inspection`, viewer, {})).status).toBe(403);
+    expect((await h.call('GET', '/api/admin/returns/inspections/stats', tokens.staff(['returns.requests.view']))).status).toBe(403);
 
     const me = newId();
     const inspector = tokens.staff(['returns.inspections.record'], { sub: me });
@@ -291,6 +297,11 @@ describe('queues and views', () => {
     const list = await h.call('GET', `/api/admin/returns/requests?tab=needs_decision&sellerId=${m.sellerId}`, staff());
     expect(list.body.items.map((r: any) => r.id)).toEqual([m.ret.id]);
     expect(list.body.items[0]).toMatchObject({ seller: { ownerType: 'seller', id: m.sellerId }, status: 'Return requested' });
+    // G75: rows carry the reason code the reason filter takes
+    const code = list.body.items[0].reasonCode;
+    expect(code).toMatch(/^[a-z_]+$/);
+    expect((await h.call('GET', `/api/admin/returns/requests?reason=${code}&sellerId=${m.sellerId}`, staff())).body.items.map((r: any) => r.id)).toContain(m.ret.id);
+    expect((await h.call('GET', `/api/admin/returns/requests/${m.ret.ref}`, staff())).body.detail.id).toBe(m.ret.id);
     const byOrder = await h.call('GET', `/api/admin/returns/requests?orderId=${m.order.id}`, staff());
     expect(byOrder.body.items).toHaveLength(1);
 

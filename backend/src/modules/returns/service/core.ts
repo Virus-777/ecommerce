@@ -265,9 +265,16 @@ export class Core {
    * orders identity granted them, sellers only their own returns, staff any.
    */
   async visible(returnId: string, v: Visibility): Promise<Agg> {
-    const agg = isUuid(returnId) ? await this.load(returnId) : undefined;
+    // REST takes the return id or its RT- reference (G69b)
+    const agg = isUuid(returnId) ? await this.load(returnId) : /^RT-/i.test(String(returnId).trim()) ? await this.loadByRef(returnId) : undefined;
     if (!agg || !(await this.canSee(agg.ret, v))) throw notFound();
     return agg;
+  }
+
+  /** A return by its RT- reference */
+  async loadByRef(ref: string): Promise<Agg | undefined> {
+    const row = (await this.repo.find('returns', { ref: String(ref).trim().toUpperCase() }))[0];
+    return row ? this.load(row.id) : undefined;
   }
 
   async canSee(ret: ReturnRec, v: Visibility): Promise<boolean> {

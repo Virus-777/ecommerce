@@ -57,13 +57,13 @@ export const storeRoutes = (service: ReturnsService) => {
     replyToInfoRequest: async ({ params, body, scope, principal, actor, requestId }) => {
       const { who, agg } = await mine(params.id, scope, principal);
       await service.requests.reply(agg, body, who, { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.ret.id);
     },
     /** POST /requests/{id}/withdraw: Cancel a return before the item is sent back */
     withdrawReturn: async ({ params, body, scope, principal, actor, requestId }) => {
       const { agg } = await mine(params.id, scope, principal);
       await service.requests.withdraw(agg, body.reason, { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.ret.id);
     },
     /** GET /requests/{id}/label: Drop-off QR code, printable label, instructions and nearby drop-off points */
     getReturnLabel: async ({ params, query, scope, principal }) => {
@@ -79,13 +79,13 @@ export const storeRoutes = (service: ReturnsService) => {
     addCustomerTracking: async ({ params, body, scope, principal, actor, requestId }) => {
       const { agg } = await mine(params.id, scope, principal);
       await service.requests.addTracking(agg, body, { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.ret.id);
     },
     /** POST /requests/{id}/escalate: Ask Marketly to step in */
     escalateReturn: async ({ params, body, scope, principal, actor, requestId }) => {
       const { who, agg } = await mine(params.id, scope, principal);
       await service.requests.escalate(agg, body, who, { actor, requestId, principal });
-      return detail(params.id);
+      return detail(agg.ret.id);
     },
   });
 };

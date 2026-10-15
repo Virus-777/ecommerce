@@ -53,7 +53,7 @@ export class Decisions {
     if (method === 'customer_arranged') {
       return {
         labelId: null,
-        row: { ...base, id: newId(), status: 'label_issued', carrier: null, service: null, tracking_number: null, label_url: null, qr_code_url: null, drop_off_by: dropOffBy, cost: null, paid_by: 'customer', shipping_shipment_id: null, label_id: null, carrier_service_id: null },
+        row: { ...base, id: newId(), status: 'label_issued', carrier: null, service: null, tracking_number: null, label_url: null, qr_code_url: null, drop_off_code: null, drop_off_by: dropOffBy, cost: null, paid_by: 'customer', shipping_shipment_id: null, label_id: null, carrier_service_id: null },
       };
     }
     const billedTo = r.owner_type === 'official' ? 'company' : (r.shipping_paid_by as 'seller' | 'customer' | 'platform');
@@ -88,6 +88,7 @@ export class Decisions {
         tracking_number: l.trackingNumber,
         label_url: l.labelUrl,
         qr_code_url: l.qrCodeUrl ?? null,
+        drop_off_code: l.dropOffCode ?? null,
         drop_off_by: l.dropOffBy ? new Date(l.dropOffBy) : dropOffBy,
         cost: l.cost.amount,
         paid_by: r.shipping_paid_by,

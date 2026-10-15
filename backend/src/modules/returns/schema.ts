@@ -162,6 +162,7 @@ const return_shipments = new Schema(
     tracking_number: { type: String, default: null },
     label_url: { type: String, default: null },
     qr_code_url: { type: String, default: null },
+    drop_off_code: { type: String, default: null }, // shipping Label.dropOffCode; null on rows from before G26a: read from qr_code_url
     drop_off_by: { type: Date, default: null },
     from_address: { type: Schema.Types.Mixed, default: null },
     to_address: { type: Schema.Types.Mixed },

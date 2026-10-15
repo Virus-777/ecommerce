@@ -23,44 +23,44 @@ export const adminRoutes = (service: ReturnsService) => {
     /** POST /requests/{id}/approve: Approve an Official Store return, or decide a seller return as the platform */
     adminApproveReturn: async (i) => {
       const agg = await any(i.params.id);
-      await service.decisions.approve(i.params.id, { labelMethod: i.body.labelMethod, carrierServiceId: i.body.carrierServiceId, note: i.body.reason }, by(i), 'admin', agg);
-      return caseOf(i.params.id);
+      await service.decisions.approve(agg.ret.id, { labelMethod: i.body.labelMethod, carrierServiceId: i.body.carrierServiceId, note: i.body.reason }, by(i), 'admin', agg);
+      return caseOf(agg.ret.id);
     },
     /** POST /requests/{id}/request-info: Ask the customer for more information or photos */
     adminRequestInfo: async (i) => {
       const agg = await any(i.params.id);
-      await service.decisions.requestInfo(i.params.id, i.body.question, by(i), 'admin', agg);
-      return caseOf(i.params.id);
+      await service.decisions.requestInfo(agg.ret.id, i.body.question, by(i), 'admin', agg);
+      return caseOf(agg.ret.id);
     },
     /** POST /requests/{id}/reject: Reject with an explanation */
     adminRejectReturn: async (i) => {
       const agg = await any(i.params.id);
-      await service.decisions.reject(i.params.id, i.body, by(i), 'admin', agg);
-      return caseOf(i.params.id);
+      await service.decisions.reject(agg.ret.id, i.body, by(i), 'admin', agg);
+      return caseOf(agg.ret.id);
     },
     /** POST /requests/{id}/take-over: Platform intervention: Marketly takes over a seller return */
     takeOverReturn: async (i) => {
       const agg = await any(i.params.id);
-      await service.decisions.takeOver(i.params.id, i.body, by(i), agg);
-      return caseOf(i.params.id);
+      await service.decisions.takeOver(agg.ret.id, i.body, by(i), agg);
+      return caseOf(agg.ret.id);
     },
     /** POST /requests/{id}/overturn: Overturn a seller's rejection */
     overturnRejection: async (i) => {
       const agg = await any(i.params.id);
-      await service.decisions.overturn(i.params.id, i.body, by(i), agg);
-      return caseOf(i.params.id);
+      await service.decisions.overturn(agg.ret.id, i.body, by(i), agg);
+      return caseOf(agg.ret.id);
     },
     /** POST /requests/{id}/assign: Set the owner of a return */
     assignReturn: async (i) => {
       const agg = await any(i.params.id);
-      await service.decisions.assign(i.params.id, i.body, by(i), agg);
-      return caseOf(i.params.id);
+      await service.decisions.assign(agg.ret.id, i.body, by(i), agg);
+      return caseOf(agg.ret.id);
     },
     /** POST /requests/{id}/approve-without-return: Propose refund-without-return (controlled exception) */
     adminApproveWithoutReturn: async (i) => {
       const agg = await any(i.params.id);
-      await service.decisions.approveWithoutReturn(i.params.id, i.body, by(i), 'admin', agg);
-      return caseOf(i.params.id);
+      await service.decisions.approveWithoutReturn(agg.ret.id, i.body, by(i), 'admin', agg);
+      return caseOf(agg.ret.id);
     },
     /** POST /requests/{id}/receive: Record receipt at a seller's address for a platform-handled return */
     receiveReturn: async (i) => {
@@ -68,29 +68,35 @@ export const adminRoutes = (service: ReturnsService) => {
       if (agg.ret.owner_type !== 'seller' || !agg.ret.platform_handling) {
         throw illegal('Only returns Marketly handles for a seller are received here; the warehouse scans Official Store parcels', { from: agg.ret.status });
       }
-      await service.handling.receive(i.params.id, { receivedAt: i.body.receivedAt, note: i.body.note, trackingNumber: i.body.trackingNumber }, by(i), agg);
+      await service.handling.receive(agg.ret.id, { receivedAt: i.body.receivedAt, note: i.body.note, trackingNumber: i.body.trackingNumber }, by(i), agg);
       await service.core.audit({ action: 'returns.return.receive', actionLabel: `Recorded receipt of return ${agg.ret.ref}`, target: { type: 'return', id: agg.ret.id, ref: agg.ret.ref, label: `Return ${agg.ret.ref}` }, after: i.body, reason: i.body.note ?? null }, by(i));
-      return caseOf(i.params.id);
+      return caseOf(agg.ret.id);
     },
     /** GET /inspections: Official Store returns received, arriving and decided */
     inspectionQueue: async ({ query, page }) => service.reads.inspectionQueue(query.tab, page),
     /** GET /inspections/stats: Inspection queue KPIs */
     inspectionStats: async () => service.reads.inspectionStats(),
     /** POST /requests/{id}/start-inspection: Start (or continue) inspecting a received return: sets the inspector and status Inspecting */
-    startInspection: async (i) => service.handling.startInspection(i.params.id, i.body.inspectorId, by(i), await any(i.params.id)),
+    startInspection: async (i) => {
+      const agg = await any(i.params.id);
+      return service.handling.startInspection(agg.ret.id, i.body.inspectorId, by(i), agg);
+    },
     /** PUT /requests/{id}/inspection-draft: Save an unsent inspection (checks ticked so far, notes, photos) */
-    saveInspectionDraft: async (i) => service.handling.saveDraft(i.params.id, { inspection: i.body.inspection }, by(i), await any(i.params.id), false),
+    saveInspectionDraft: async (i) => {
+      const agg = await any(i.params.id);
+      return service.handling.saveDraft(agg.ret.id, { inspection: i.body.inspection }, by(i), agg, false);
+    },
     /** POST /requests/{id}/inspection: Record inspection: photos, condition grade, checks, missing parts and proposed stock outcome */
     recordInspection: async (i) => {
       const agg = await any(i.params.id);
-      await service.handling.recordInspection(i.params.id, i.body, by(i), agg, 'staff');
-      return caseOf(i.params.id);
+      await service.handling.recordInspection(agg.ret.id, i.body, by(i), agg, 'staff');
+      return caseOf(agg.ret.id);
     },
     /** POST /requests/{id}/remedy: Decide the remedy for an Official Store or platform-handled return */
     proposeRemedy: async (i) => {
       const agg = await any(i.params.id);
-      await service.handling.remedy(i.params.id, i.body, by(i), agg, 'admin');
-      return caseOf(i.params.id);
+      await service.handling.remedy(agg.ret.id, i.body, by(i), agg, 'admin');
+      return caseOf(agg.ret.id);
     },
     /** POST /refunds: Issue a refund from the order page (exception refund request) */
     createExceptionRefund: async (i) => service.refunds.createException(i.body, by(i), i.idempotencyKey),

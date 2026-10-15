@@ -47,7 +47,7 @@ export const terms = (t: EffectiveTerms) => ({
 });
 
 const impact = (e: ReturnCase['earningsImpact']) =>
-  e ? { refundToCustomer: money(e.refundToCustomer), sellerEarningsChange: money(e.sellerEarningsChange), feeReturned: money(e.feeReturned), labelCharge: money(e.labelCharge), totalBalanceChange: money(e.totalBalanceChange), afterPayout: e.afterPayout, note: e.note } : null;
+  e ? { refundToCustomer: money(e.refundToCustomer), sellerEarningsChange: money(e.sellerEarningsChange), feeReturned: money(e.feeReturned), labelCharge: money(e.labelCharge), labelChargeEstimated: e.labelChargeEstimated, totalBalanceChange: money(e.totalBalanceChange), afterPayout: e.afterPayout, note: e.note } : null;
 
 export const refundRequest = (r: RefundRequest) => ({
   ...r,
@@ -107,6 +107,7 @@ export function gqlReturn(d: ReturnDetail, c?: ReturnCase | null) {
         }
       : null,
     refund: d.refund ? { ...d.refund, status: upper(d.refund.status), track: steps(d.refund.track), breakdown: breakdown(d.refund.breakdown) } : null,
+    refundEstimate: d.refundEstimate ? breakdown(d.refundEstimate) : null,
     replacement: d.replacement ? { ...d.replacement, kind: upper(d.replacement.kind), status: upper(d.replacement.status), options: options(d.replacement.options) } : null,
     terms: terms(d.terms),
     escalation: d.escalation ? { ...d.escalation, by: actor(d.escalation.by), reason: upper(d.escalation.reason), note: d.escalation.note ?? null, caseId: d.escalation.caseId ?? null, caseRef: d.escalation.caseRef ?? null } : null,
@@ -142,7 +143,7 @@ export function gqlReturn(d: ReturnDetail, c?: ReturnCase | null) {
     owner: actor(c?.owner),
     exception: c?.exception ? { ...c.exception, proposedBy: actor(c.exception.proposedBy), approvedBy: actor(c.exception.approvedBy) } : null,
     inspectionChecklist: c?.inspectionChecklist ? { ...c.inspectionChecklist, serialShipped: c.inspectionChecklist.serialShipped ?? null, items: c.inspectionChecklist.items.map((i) => ({ ...i, kind: upper(i.kind), expected: i.expected ?? null })) } : null,
-    inspectionDraft: c?.inspectionDraft ? { ...c.inspectionDraft, savedBy: actor(c.inspectionDraft.savedBy) } : null,
+    inspectionDraft: c?.inspectionDraft ? { ...c.inspectionDraft, remedy: c.inspectionDraft.remedy ?? null, photos: c.inspectionDraft.inspection.media, savedBy: actor(c.inspectionDraft.savedBy) } : null,
     inspector: actor(c?.inspector),
     evidence: (c?.evidence ?? []).map((e) => ({ ...e, kind: upper(e.kind), addedBy: actor(e.addedBy), caseId: e.caseId ?? null })),
   };

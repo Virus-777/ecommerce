@@ -143,6 +143,16 @@ describe('seller decisions and the return parcel', () => {
     expect(own.body).toMatchObject({ detail: { id: m.ret.id, statusLabel: 'Requested' }, shippingPaidBy: 'seller', allowedActions: expect.arrayContaining(['approve', 'reject', 'request-info']) });
     expect(own.body.payment).toMatchObject({ itemPaid: { amount: 12600 }, discountShare: { amount: 1000 }, maxRefundable: { amount: 12000 }, methodLabel: 'Visa •••• 4417' });
     expect(own.body.deadlines.respondBy.state).toBe('on_time');
+    // G26b: the expected refund before the decision; G55c: the label price the seller would pay, before approving
+    expect(own.body.detail.refund).toBeNull();
+    expect(own.body.detail.refundEstimate).toMatchObject({ total: { amount: 12000 }, isEstimate: true });
+    expect(own.body.earningsImpact).toMatchObject({ labelCharge: { amount: 650 }, labelChargeEstimated: true });
+    const store = await h.call('GET', `/api/store/returns/requests/${m.ret.id}`, m.token);
+    expect(store.body.refundEstimate).toMatchObject({ total: { amount: 12000 }, isEstimate: true });
+    // G69b: the RT- reference opens the return like its id, in every area
+    expect((await h.call('GET', `/api/seller/returns/requests/${m.ret.ref}`, m.seller)).body.detail.id).toBe(m.ret.id);
+    expect((await h.call('GET', `/api/store/returns/requests/${m.ret.ref}`, m.token)).body.id).toBe(m.ret.id);
+    expect((await h.call('GET', `/api/seller/returns/requests/${m.ret.ref}`, tokens.seller(m.sellerB))).status).toBe(404);
   });
 
   it('asks the customer, pauses the clock, and refuses customer-paid shipping for a damaged item', async () => {
@@ -182,7 +192,8 @@ describe('seller decisions and the return parcel', () => {
 
     const label = await h.call('GET', `/api/store/returns/requests/${m.ret.id}/label?near=97201`, m.token);
     expect(label.status).toBe(200);
-    expect(label.body).toMatchObject({ method: 'prepaid_qr', qrCodeUrl: 'https://labels.example/return-qr.png' });
+    // G26a: the link and the code itself (apps draw the QR)
+    expect(label.body).toMatchObject({ method: 'prepaid_qr', qrCodeUrl: 'https://labels.example/return-qr.png', dropOffCode: 'RQ-7H2K9' });
     expect(label.body.instructions.length).toBeGreaterThan(0);
     expect((await h.call('POST', `/api/store/returns/requests/${m.ret.id}/label/email`, m.token)).status).toBe(204);
     expect(h.calls.notices.at(-1)).toMatchObject({ topic: 'customer.return.label_ready', recipients: [{ kind: 'customer', accountId: m.customerId }] });
@@ -206,14 +217,24 @@ describe('seller decisions and the return parcel', () => {
     });
     expect((await h.orders.getOrder(m.order.id))!.groups[0]!.items[0]!.state).toBe('returned');
 
-    const draft = await h.call('PUT', `/api/seller/returns/requests/${m.ret.id}/inspection-draft`, m.seller, { inspection: { grade: 'good' }, remedy: { kind: 'full_refund' } });
-    expect(draft.status).toBe(200);
+    const draft = await h.call('PUT', `/api/seller/returns/requests/${m.ret.id}/inspection-draft`, m.seller, { inspection: { grade: 'good', notes: 'Box dented', checks: [{ label: 'Powers on', passed: true }, { label: 7 }], mediaIds: [], junk: 1 }, remedy: { kind: 'full_refund', amount: 'lots' } });
+    expect(draft.status, JSON.stringify(draft.body)).toBe(200);
+    // G75: the draft is typed: known fields of the right type, photos resolved
+    expect(draft.body.inspection).toEqual({ grade: 'good', notes: 'Box dented', checks: [{ label: 'Powers on', passed: true }], mediaIds: [], media: [] });
+    expect(draft.body.remedy).toEqual({ kind: 'full_refund' });
     expect((await h.call('GET', `/api/seller/returns/requests/${m.ret.id}`, m.seller)).body.inspectionDraft).toMatchObject({ inspection: { grade: 'good' } });
     const inspected = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/inspection`, m.seller, { conditionOutcome: 'as_described', grade: 'good', proposedStockOutcome: 'restock', checks: [{ label: 'Powers on', passed: true }] });
     expect(inspected.status, JSON.stringify(inspected.body)).toBe(200);
     expect(inspected.body).toMatchObject({ detail: { status: 'awaiting_remedy', statusLabel: 'Inspected' }, inspection: { conditionOutcome: 'as_described', grade: 'good' }, inspectionDraft: null });
     expect(h.named('returns.return.inspected').filter((e) => e.returnId === m.ret.id)).toEqual([expect.objectContaining({ orderItemId: m.items[0]![0]!, variantId: m.pa.variantId, stockItemId: m.pa.stockItemId, quantity: 2, proposedStockOutcome: 'restock', customerId: m.customerId, contactEmail: 'sam@example.com' })]);
 
+    // G55d: the seller previews a partial refund and its effect on earnings; nothing is saved
+    const preview = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/remedy/preview`, m.seller, { kind: 'partial_refund', deductions: [{ label: 'Scratch', amount: { amount: 1000, currency: 'USD' }, reason: 'Scratched lid' }] });
+    expect(preview.status, JSON.stringify(preview.body)).toBe(200);
+    expect(preview.body.breakdown).toMatchObject({ total: { amount: 11000 }, isEstimate: true });
+    expect(preview.body.earningsImpact).toMatchObject({ refundToCustomer: { amount: 11000 }, sellerEarningsChange: { amount: -11000 }, feeReturned: { amount: 1100 }, labelChargeEstimated: false });
+    expect((await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/remedy/preview`, m.seller, { kind: 'partial_refund' })).status).toBe(400);
+    expect((await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/remedy/preview`, tokens.seller(m.sellerB), { kind: 'full_refund' })).status).toBe(404);
     const partial = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/remedy`, m.seller, { kind: 'partial_refund' }, idem());
     expect(partial.status).toBe(400);
     const tooMuch = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/remedy`, m.seller, { kind: 'partial_refund', amount: { amount: 99999, currency: 'USD' }, deductions: [{ label: 'Scratch', amount: { amount: 100, currency: 'USD' }, reason: 'Scratched lid' }] }, idem());

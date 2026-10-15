@@ -1209,8 +1209,10 @@ export interface Label {
   cost: common.Money;
   trackingNumber: string;
   labelUrl: string;
-  /** Return labels with labelMethod prepaid_qr: code scanned at drop-off */
+  /** Return labels with labelMethod prepaid_qr: drop-off link (the URL the QR encodes) */
   qrCodeUrl?: string | null;
+  /** Return labels with labelMethod prepaid_qr: the code the carrier scans at drop-off; apps draw the QR from it (decision G26a) */
+  dropOffCode?: string | null;
   dropOffBy?: string | null;
   format: "pdf" | "zpl";
   status: "purchased" | "used" | "voided";
@@ -1231,7 +1233,8 @@ export const Label: z.ZodType<Label> = z.object({
   },
   trackingNumber: z.string(),
   labelUrl: z.url(),
-  qrCodeUrl: z.url().describe("Return labels with labelMethod prepaid_qr: code scanned at drop-off").nullish(),
+  qrCodeUrl: z.url().describe("Return labels with labelMethod prepaid_qr: drop-off link (the URL the QR encodes)").nullish(),
+  dropOffCode: z.string().describe("Return labels with labelMethod prepaid_qr: the code the carrier scans at drop-off; apps draw the QR from it (decision G26a)").nullish(),
   dropOffBy: z.iso.datetime({ offset: true }).nullish(),
   format: z.enum(["pdf", "zpl"]),
   status: z.enum(["purchased", "used", "voided"]),
@@ -2309,6 +2312,8 @@ export interface ShippingPublicApi {
   dispatchDeadline(ownerType: 'official'|'seller', sellerId: string | null, from: string, dispatch: DispatchInput): Promise<string>;
   /** Live service notices for a location. offers, checkout and content show notices through the GraphQL field; none calls it in-process at launch. Used by: graphql. */
   activeNotices(postalCode?: string, carrierCodes?: string[], surface?: string): Promise<CustomerNotice[]>;
+  /** What createLabel would charge for this request (the given carrier service, else the one createLabel would pick), without buying a label or keeping a quote; null when no carrier can sell it. Returns shows sellers the return label price before they approve (G55c). Used by: returns. */
+  estimateLabelCost(input: LabelRequest): Promise<common.Money | null>;
   /** Carrier services that can carry this parcel to the destination, with cost, estimated arrival and keepsPromise against the customer's promised range (same rule createLabel enforces with keepPromise) Used by: warehouse. */
   quoteLabelOptions(input: LabelRequest): Promise<LabelQuote[]>;
   /** Buy a carrier label and create the shipment (label_created). kind = return creates the return parcel for returns (labelMethod prepaid_qr adds a QR drop-off code; LabelRequest.dropOffBy from the return is stored and returned on the label); format pdf (default) or zpl; its tracking events carry kind = return and returnId. Same key returns the same label. fulfillment-service (phase 4) will call it when its label flow is wired. Used by: warehouse, returns. */
@@ -4072,7 +4077,7 @@ export const spec = defineModuleSpec({
   summary: "How things get delivered: carriers and services, destinations and excluded areas, shipping profiles with rates (Official Store and sellers), free-shipping rules, dispatch targets and cutoffs, the holiday and service-interruption calendar, delivery estimates for a location, shipments with contents and tracking, labels where supported, partial shipments, and delivery exceptions with their required responses and carrier claims.",
   dependsOn: ["orders"],
   optionalDeps: ["offers","sellers","media","support","access","settings","audit","finance","fulfillment-service","identity","notifications","returns","reports"],
-  publicApi: ["quote","quoteOptions","checkCoverage","hasCoverage","dispatchDeadline","activeNotices","quoteLabelOptions","createLabel","voidLabel","handOver","getShipmentsForOrder","dispatchMetrics","registerReturnTracking","findDropOffPoints","listShipmentsForGroups","getShipment","estimateOffers","openExceptionIdsForOrders","listExceptionsForOrder","listExceptions","countOpenExceptions","getSellerShippingSummaries","shipmentsForReplacements","getProfileOwners","getOfficialFreeShipping","getOfficialDefaultProfile","getSellerShippingSetup","exportRows"],
+  publicApi: ["quote","quoteOptions","checkCoverage","hasCoverage","dispatchDeadline","activeNotices","estimateLabelCost","quoteLabelOptions","createLabel","voidLabel","handOver","getShipmentsForOrder","dispatchMetrics","registerReturnTracking","findDropOffPoints","listShipmentsForGroups","getShipment","estimateOffers","openExceptionIdsForOrders","listExceptionsForOrder","listExceptions","countOpenExceptions","getSellerShippingSummaries","shipmentsForReplacements","getProfileOwners","getOfficialFreeShipping","getOfficialDefaultProfile","getSellerShippingSetup","exportRows"],
   permissions: [
     {
       "key": "shipping.settings.view",

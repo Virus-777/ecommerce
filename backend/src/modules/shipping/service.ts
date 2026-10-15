@@ -93,6 +93,10 @@ export class ShippingService implements ShippingPublicApi {
     return this.estimates.activeNotices(postalCode, carrierCodes, surface);
   }
 
+  estimateLabelCost(input: LabelRequest): Promise<common.Money | null> {
+    return this.shipments.estimateLabelCost(input);
+  }
+
   quoteLabelOptions(input: LabelRequest): Promise<LabelQuote[]> {
     return this.shipments.quoteLabelOptions(input);
   }

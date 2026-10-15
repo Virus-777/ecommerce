@@ -179,6 +179,7 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
             trackingNumber: `1ZRET${key.length}${Math.floor(Math.random() * 1e6)}`,
             labelUrl: 'https://labels.example/return.pdf',
             qrCodeUrl: input.labelMethod === 'prepaid_qr' ? 'https://labels.example/return-qr.png' : null,
+            dropOffCode: input.labelMethod === 'prepaid_qr' ? 'RQ-7H2K9' : null,
             dropOffBy: new Date(clock.now().getTime() + 7 * 86_400_000).toISOString(),
             format: 'pdf',
             carrierServiceId: h.carrierServiceId,
@@ -196,6 +197,7 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
           h.calls.tracking.push(input);
           return { id: newId(), carrierName: 'USPS' } as shipping.Shipment;
         },
+        estimateLabelCost: async () => USD(650),
         findDropOffPoints: async () => [{ name: 'UPS Store 1234', address: { name: 'UPS Store', line1: '10 Market St', city: 'Portland', region: 'OR', postalCode: '97201', country: 'US' }, hours: '9–6', distanceMiles: 0.4, acceptsQr: true }],
       },
       payments: {
