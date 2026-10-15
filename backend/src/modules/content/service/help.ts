@@ -34,14 +34,6 @@ export interface ArticleSnap {
   _review?: DraftReview | null;
 }
 
-/**
- * The contact channels support is asked to offer (contract requested from support: contactChannels(audience) =>
- * support.ContactChannel[]). Until it exists content falls back to its own phone and message channels.
- */
-interface SupportChannels {
-  contactChannels: (audience: 'customer' | 'seller') => Promise<{ kind: string; label: string; expectedResponse: string; available: boolean; hours: string }[] | null>;
-}
-
 type Status = HelpArticleAdmin['status'];
 type Audience = 'customer' | 'seller' | 'both';
 
@@ -580,21 +572,13 @@ export class ContentHelp extends ContentHomepage {
   }
 
   /**
-   * Contact channels. Support owns them (decision G31c): when support offers contactChannels they are shown as
-   * support gives them; otherwise phone (settings) and a message. Live chat is never offered (decision G7).
+   * Contact channels: support owns them (decision G31c), content shows support.contactChannels in its order; none
+   * while support is off. Live chat is never offered (decision G7).
    */
   protected async contactChannels(audience: 'customer' | 'seller'): Promise<ContactChannel[]> {
-    const settingsApi = this.ctx.tryUse('settings');
-    const info = await this.soft('settings.storeInfo', settingsApi && (() => settingsApi.storeInfo()), null);
-    // until support's spec declares contactChannels the call throws (undeclared public API) and soft answers null
-    const supportApi = this.ctx.tryUse('support') as unknown as SupportChannels | undefined;
-    const offered = await this.soft('support.contactChannels', supportApi && (() => supportApi.contactChannels(audience)), null);
-    return contactChannelsFrom(offered, {
-      hours: info?.support.hoursLabel ?? 'Mon–Sat, 8 AM–8 PM PT',
-      phone: info?.support.phone ?? '',
-      email: info?.support.email ?? null,
-      contactUrl: audience === 'seller' ? '/seller/help/contact' : '/help/contact',
-    });
+    const supportApi = this.ctx.tryUse('support');
+    const offered = await this.soft('support.contactChannels', supportApi && (() => supportApi.contactChannels(audience)), []);
+    return contactChannelsFrom(offered, audience === 'seller' ? '/seller/help/contact' : '/help/contact');
   }
 
   async getHelpCenter(audience: 'customer' | 'seller' = 'customer'): Promise<HelpHome> {

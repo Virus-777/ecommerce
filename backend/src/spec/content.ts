@@ -1163,7 +1163,7 @@ export const HelpSummary: z.ZodType<HelpSummary> = z.object({
 }).register(common.apiTypes, { id: "content.HelpSummary" });
 
 export interface ContactChannel {
-  /** From support (support.contactChannels) when it offers them; live chat is not offered */
+  /** Support owns the channels: support.contactChannels in support's order (none while support is off); live chat is not offered */
   kind: "phone" | "message" | "email";
   label: string;
   hours: string;
@@ -1172,7 +1172,7 @@ export interface ContactChannel {
 }
 
 export const ContactChannel: z.ZodType<ContactChannel> = z.object({
-  kind: z.enum(["phone", "message", "email"]).describe("From support (support.contactChannels) when it offers them; live chat is not offered"),
+  kind: z.enum(["phone", "message", "email"]).describe("Support owns the channels: support.contactChannels in support's order (none while support is off); live chat is not offered"),
   label: z.string(),
   hours: z.string(),
   detail: z.string(),

@@ -107,6 +107,13 @@ export async function harness(): Promise<Harness> {
           return { items: [], nextCursor: null, page: 1, totalPages: 1, total: n } as never;
         },
       },
+      // support owns the contact channels (G31c): a message channel and the phone
+      support: {
+        contactChannels: async (audience: 'customer' | 'seller') => [
+          { kind: 'messages', label: 'Send a message', expectedResponse: 'Within 1 business day', available: true, hours: 'Any time', detail: 'We reply within one business day', action: { label: 'Write to us', url: audience === 'seller' ? '/seller/help/contact' : '/help/contact', kind: 'help' } },
+          { kind: 'phone', label: 'Call us', expectedResponse: 'About 5 minutes', available: true, hours: 'Mon–Sat, 8 AM–8 PM PT', detail: '1-800-555-0136', action: { label: '1-800-555-0136', url: 'tel:18005550136', kind: 'external' } },
+        ],
+      },
       reviews: {
         getSellerFeedbackSummary: async (sellerId: string) => ({ sellerId, official: true, periodMonths: 12, count: 40, positivePct: 97, neutralPct: 2, negativePct: 1, asDescribedPct: 99, avgDispatch: 4.8, avgCommunication: 4.7, label: '97% positive · 40 ratings', average: 4.8, onTimeDispatchPct: null }),
       },      access: {

@@ -136,20 +136,21 @@ describe('Help Center', () => {
   });
 
   it('shows support’s contact channels without chat (G7, G31c)', async () => {
-    // support does not offer contactChannels yet: content's own channels, no chat
-    expect((await h.store('GET', '/help')).json().contact.map((c: any) => c.kind)).toEqual(['message']);
-    const offered = [
-      { kind: 'messages', label: 'Message the seller', expectedResponse: 'Within 2 business days', available: true, hours: 'Any time' },
-      { kind: 'email', label: 'Email Marketly support', expectedResponse: 'Within 1 business day', available: true, hours: 'Any time' },
-      { kind: 'chat', label: 'Chat with Marketly', expectedResponse: 'About 2 minutes', available: true, hours: 'Mon–Sat' },
-      { kind: 'phone', label: 'Call Marketly', expectedResponse: 'About 5 minutes', available: true, hours: 'Mon–Sat, 8 AM–8 PM PT' },
-    ];
-    const channels = contactChannelsFrom(offered, { hours: 'x', phone: '1-800-555-0136', email: 'help@marketly.example', contactUrl: '/help/contact' });
-    expect(channels.map((c) => [c.kind, c.label, c.detail, c.action.url])).toEqual([
-      ['message', 'Message the seller', 'Within 2 business days', '/help/contact'],
-      ['email', 'Email Marketly support', 'Within 1 business day', 'mailto:help@marketly.example'],
-      ['phone', 'Call Marketly', '1-800-555-0136', 'tel:18005550136'],
+    // the seller help home reads support's seller channels
+    const seller = (await h.call('GET', '/api/seller/content/help', undefined, auth(callers.seller()))).json();
+    expect(seller.contact.map((c: any) => [c.kind, c.detail, c.action])).toEqual([
+      ['message', 'We reply within one business day', { label: 'Write to us', url: '/seller/help/contact', kind: 'help' }],
+      ['phone', '1-800-555-0136', { label: '1-800-555-0136', url: 'tel:18005550136', kind: 'external' }],
     ]);
+    // kinds content does not know (such as an old chat entry) are left out; no detail or action falls back
+    const channels = contactChannelsFrom(
+      [
+        { kind: 'chat', label: 'Chat', expectedResponse: 'About 2 minutes', hours: 'Mon–Sat' },
+        { kind: 'email', label: 'Email Marketly support', expectedResponse: 'Within 1 business day', hours: 'Any time' },
+      ],
+      '/help/contact',
+    );
+    expect(channels).toEqual([{ kind: 'email', label: 'Email Marketly support', hours: 'Any time', detail: 'Within 1 business day', action: { label: 'Write to us', url: '/help/contact', kind: 'help' } }]);
   });
 });
 

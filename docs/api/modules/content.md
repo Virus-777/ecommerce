@@ -673,7 +673,7 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 
 | Field | Type |
 |---|---|
-| kind | `enum(phone|message|email)` From support (support.contactChannels) when it offers them; live chat is not offered |
+| kind | `enum(phone|message|email)` Support owns the channels: support.contactChannels in support's order (none while support is off); live chat is not offered |
 | label | `string` |
 | hours | `string` |
 | detail | `string` |
