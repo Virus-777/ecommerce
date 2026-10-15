@@ -126,7 +126,7 @@ export interface Notice {
   group: string;
   title: string;
   body: string;
-  /** Icon name from the design system, e.g. truck */
+  /** Lucide icon name as lucide-react 1.x names it, e.g. truck, triangle-alert, circle-x (never the old aliases alert-triangle, x-circle) */
   icon?: string | null;
   tone: "info" | "success" | "warning" | "danger" | "brand" | "deal" | "neutral";
   link: NoticeLink;
@@ -150,7 +150,7 @@ export const Notice: z.ZodType<Notice> = z.object({
   group: z.string().describe("Inbox filter: customer orders|returns_refunds|cases|account|promotions; seller orders|returns_cases|products|account_finance; staff = work area"),
   title: z.string(),
   body: z.string(),
-  icon: z.string().describe("Icon name from the design system, e.g. truck").nullish(),
+  icon: z.string().describe("Lucide icon name as lucide-react 1.x names it, e.g. truck, triangle-alert, circle-x (never the old aliases alert-triangle, x-circle)").nullish(),
   tone: z.enum(["info", "success", "warning", "danger", "brand", "deal", "neutral"]),
   get link() {
     return NoticeLink;
@@ -370,10 +370,11 @@ export const TopicMatrix: z.ZodType<TopicMatrix> = z.object({
 export interface TemplateContent {
   /** Email; keep under 60 characters */
   subject?: string | null;
+  /** Email preview line with {{variables}}; shortened to 90 characters after rendering (never inside a variable) */
   preheader?: string | null;
   /** In-app and push title */
   title?: string | null;
-  /** Plain text with {{variables}}; email HTML is rendered from the layout */
+  /** Plain text with {{variables}}; email HTML is rendered from the layout; push bodies are shortened to 140 characters after rendering */
   body: string;
   button?: TemplateButton | null;
   /** Marketly Orders <orders@marketly.example> */
@@ -384,9 +385,9 @@ export interface TemplateContent {
 
 export const TemplateContent: z.ZodType<TemplateContent> = z.object({
   subject: z.string().describe("Email; keep under 60 characters").nullish(),
-  preheader: z.string().nullish(),
+  preheader: z.string().describe("Email preview line with {{variables}}; shortened to 90 characters after rendering (never inside a variable)").nullish(),
   title: z.string().describe("In-app and push title").nullish(),
-  body: z.string().describe("Plain text with {{variables}}; email HTML is rendered from the layout"),
+  body: z.string().describe("Plain text with {{variables}}; email HTML is rendered from the layout; push bodies are shortened to 140 characters after rendering"),
   get button() {
     return TemplateButton.nullish();
   },

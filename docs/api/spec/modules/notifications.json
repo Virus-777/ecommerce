@@ -82,7 +82,7 @@
       "group": { "type": "string", "desc": "Inbox filter: customer orders|returns_refunds|cases|account|promotions; seller orders|returns_cases|products|account_finance; staff = work area" },
       "title": "string",
       "body": "text",
-      "icon": { "type": "string?", "desc": "Icon name from the design system, e.g. truck" },
+      "icon": { "type": "string?", "desc": "Lucide icon name as lucide-react 1.x names it, e.g. truck, triangle-alert, circle-x (never the old aliases alert-triangle, x-circle)" },
       "tone": "enum(info|success|warning|danger|brand|deal|neutral)",
       "link": "NoticeLink",
       "createdAt": "datetime",
@@ -155,9 +155,9 @@
     },
     "TemplateContent": {
       "subject": { "type": "string?", "desc": "Email; keep under 60 characters" },
-      "preheader": "string?",
+      "preheader": { "type": "string?", "desc": "Email preview line with {{variables}}; shortened to 90 characters after rendering (never inside a variable)" },
       "title": { "type": "string?", "desc": "In-app and push title" },
-      "body": { "type": "text", "desc": "Plain text with {{variables}}; email HTML is rendered from the layout" },
+      "body": { "type": "text", "desc": "Plain text with {{variables}}; email HTML is rendered from the layout; push bodies are shortened to 140 characters after rendering" },
       "button": "TemplateButton?",
       "sender": { "type": "string?", "desc": "Marketly Orders <orders@marketly.example>" },
       "allowPromotionalContent": { "type": "bool", "desc": "Always false for essential topics" }

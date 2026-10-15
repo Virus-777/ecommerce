@@ -284,6 +284,7 @@ export interface TopicDef {
   /** Codes and links: rendered and sent without storing the secret, not retryable */
   sensitive: boolean;
   family: SenderFamily;
+  /** Lucide icon name as lucide-react 1.x names it (triangle-alert, circle-x; never the old aliases alert-triangle, x-circle) */
   icon: string;
   tone: Tone;
   template: DefaultTemplate;
@@ -407,18 +408,18 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: "Your payment didn't go through", body: 'The payment for order {{order.ref}} was declined. Try again or choose another payment method.', subject: "Your payment for {{order.ref}} didn't go through", button: 'Try again' } }),
   cu('payment.pending_check', { group: 'orders', label: 'Payment being checked', opens: 'Order status', triggers: ['payments.payment.pending_check'], icon: 'clock', tone: 'warning',
     t: { title: "We're checking your payment", body: "We're confirming the result of your payment of {{payment.amount}} for {{order.ref}}. We'll update you as soon as we know.", subject: "We're checking your payment for {{order.ref}}", button: 'View order status' } }),
-  cu('order.item_cancelled', { group: 'orders', label: 'Cancellation', opens: 'Order details', triggers: ['orders.item.cancelled'], icon: 'x-circle', tone: 'warning',
+  cu('order.item_cancelled', { group: 'orders', label: 'Cancellation', opens: 'Order details', triggers: ['orders.item.cancelled'], icon: 'circle-x', tone: 'warning',
     t: { title: 'Item cancelled in {{order.ref}}', body: '{{item.count}} item(s) in order {{order.ref}} were cancelled. We will refund {{refund.amount}} to your original payment method.', subject: 'An item in {{order.ref}} was cancelled', button: 'View order' } }),
   cu('order.delayed', { group: 'orders', label: 'Delay', opens: 'Order details', triggers: ['orders.item.delayed'], icon: 'clock', tone: 'warning',
     t: { title: 'Your package from {{order.ref}} is delayed', body: 'New dispatch estimate: {{delay.dispatchBy}}. {{delay.reason}}. You can wait, cancel the item or contact support.', subject: 'Delay on your order {{order.ref}}', button: 'See your options' } }),
-  cu('order.cancellation_decided', { group: 'orders', label: 'Cancellation request result', opens: 'Order details', triggers: ['orders.cancellation.decided'], icon: 'x-circle',
+  cu('order.cancellation_decided', { group: 'orders', label: 'Cancellation request result', opens: 'Order details', triggers: ['orders.cancellation.decided'], icon: 'circle-x',
     t: { title: 'Cancellation request {{cancellation.outcome}}', body: 'Your cancellation request for order {{order.ref}} was {{cancellation.outcome}}.', subject: 'Your cancellation request for {{order.ref}}', button: 'View order' } }),
   cu('shipment.dispatched', { group: 'orders', label: 'Dispatched, with tracking', opens: 'Tracking', triggers: ['shipping.shipment.dispatched'], icon: 'truck', tone: 'info',
     description: 'Package dispatched with its contents, carrier and tracking (never says in transit before a carrier scan)',
     t: { title: 'Package dispatched: {{order.ref}}', body: '{{package.items}} from order {{order.ref}} has been dispatched. Estimated arrival: {{delivery.estimate}}.', subject: 'Your package from {{order.ref}} has been dispatched', button: 'Track package' } }),
   cu('shipment.delivered', { group: 'orders', label: 'Delivered', opens: 'Order details', triggers: ['shipping.shipment.delivered'], icon: 'package-check', tone: 'success',
     t: { title: 'Package delivered: {{order.ref}}', body: '{{package.items}} from order {{order.ref}} was delivered. Something wrong? You can report a problem from the order.', subject: 'Your package from {{order.ref}} was delivered', button: 'View order' } }),
-  cu('shipment.exception', { group: 'orders', label: 'Delivery problem', opens: 'Tracking', triggers: ['shipping.shipment.exception'], icon: 'alert-triangle', tone: 'warning', action: true, supports: ['in_app', 'email', 'sms', 'push'],
+  cu('shipment.exception', { group: 'orders', label: 'Delivery problem', opens: 'Tracking', triggers: ['shipping.shipment.exception'], icon: 'triangle-alert', tone: 'warning', action: true, supports: ['in_app', 'email', 'sms', 'push'],
     t: { title: 'Problem with your delivery for {{order.ref}}', body: 'There is a delivery problem ({{exception.kind}}). Next step: {{exception.action}} by {{due.date}}.', subject: 'Action needed: delivery problem with {{order.ref}}', button: 'See next steps' } }),
   cu('order.guest_link', { group: 'orders', label: 'Guest order links', opens: 'Order details', supports: EMAIL_ONLY, icon: 'link',
     description: 'Emailed order links for guests (minted by customers)',
@@ -429,7 +430,7 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'How was your purchase?', body: 'Tell other shoppers what you think of your recent purchase.', subject: 'How was your purchase?', button: 'Write a review' } }),
 
   /* ---------------------------------------------------------------- customer: returns and refunds */
-  cu('return.info_requested', { group: 'returns_refunds', label: 'Return: information needed', opens: 'Return', triggers: ['returns.return.info_requested'], icon: 'help-circle', tone: 'warning', action: true,
+  cu('return.info_requested', { group: 'returns_refunds', label: 'Return: information needed', opens: 'Return', triggers: ['returns.return.info_requested'], icon: 'circle-question-mark', tone: 'warning', action: true,
     t: { title: 'We need more information for your return', body: 'Please reply by {{due.date}} so we can continue with your return {{return.ref}}.', subject: 'Action needed for your return {{return.ref}}', button: 'Reply' } }),
   cu('return.approved', { group: 'returns_refunds', label: 'Return approved', opens: 'Return', triggers: ['returns.return.approved'], icon: 'rotate-ccw', tone: 'success',
     t: { title: 'Return {{return.ref}} approved', body: 'Your return was approved. {{return.outcome}}', subject: 'Your return {{return.ref}} was approved', button: 'View return' } }),
@@ -448,7 +449,7 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Refund of {{refund.amount}} approved', body: "We approved a refund of {{refund.amount}} for order {{order.ref}}. It's being processed; we'll tell you when it's sent.", subject: 'Your refund of {{refund.amount}} was approved', button: 'Track refund' } }),
   cu('refund.sent', { group: 'returns_refunds', label: 'Refund sent', opens: 'Refund progress', triggers: ['payments.refund.sent'], icon: 'wallet', tone: 'success',
     t: { title: 'Refund of {{refund.amount}} sent', body: 'We sent {{refund.amount}} to {{refund.destination}}. Banks usually show it within 3–5 business days.', subject: 'Your refund of {{refund.amount}} was sent', button: 'Track refund' } }),
-  cu('refund.failed', { group: 'returns_refunds', label: 'Refund problem', opens: 'Refund progress', triggers: ['payments.refund.failed'], icon: 'alert-triangle', tone: 'danger',
+  cu('refund.failed', { group: 'returns_refunds', label: 'Refund problem', opens: 'Refund progress', triggers: ['payments.refund.failed'], icon: 'triangle-alert', tone: 'danger',
     t: { title: 'Problem with your refund', body: "We couldn't send your refund of {{refund.amount}} ({{refund.reason}}). Our team is on it; we'll contact you about the next steps.", subject: 'There is a problem with your refund', button: 'View refund' } }),
   cu('refund.destination_needed', { group: 'returns_refunds', label: 'Refund: choose where to receive it', opens: 'Refund progress', triggers: ['payments.refund.destination_requested'], icon: 'wallet', tone: 'warning', action: true,
     description: 'The refund could not go back to the original payment method; the customer chooses another destination',
@@ -463,7 +464,7 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'New reply on {{case.ref}}', body: 'There is a new reply on your case {{case.ref}}. Reply in your account or answer this email.', subject: 'New reply on your case {{case.ref}}', button: 'View reply' } }),
   cu('case.decided', { group: 'cases', label: 'Case decision', opens: 'Case', triggers: ['support.case.decided'], icon: 'scale',
     t: { title: 'Decision on case {{case.ref}}', body: 'Our decision: {{case.outcome}}. You can appeal until {{appeal.deadline}}.', subject: 'Decision on your case {{case.ref}}', button: 'View decision' } }),
-  cu('case.resolved', { group: 'cases', label: 'Case resolved', opens: 'Case', triggers: ['support.case.resolved'], icon: 'check-circle', tone: 'success',
+  cu('case.resolved', { group: 'cases', label: 'Case resolved', opens: 'Case', triggers: ['support.case.resolved'], icon: 'circle-check-big', tone: 'success',
     t: { title: 'Case {{case.ref}} resolved', body: 'Your case {{case.ref}} is resolved. Reply within 7 days if you still need help.', subject: 'Your case {{case.ref}} is resolved', button: 'View case' } }),
 
   /* ---------------------------------------------------------------- customer: account and security */
@@ -509,7 +510,7 @@ export const TOPICS: readonly TopicDef[] = [
     description: 'The outcome of a report a customer, guest or rights owner made (never the reported party\'s details); sellers get seller.trust_report.resolved',
     t: { title: 'Your report {{report.ref}} was reviewed', body: 'We finished reviewing your report {{report.ref}}. {{report.outcome}}', subject: 'Update on your report {{report.ref}}', button: 'View details' } }),
 
-  cu('trust.evidence_requested', { group: 'cases', label: 'Trust and Risk needs information', opens: 'Evidence request', triggers: ['trust.evidence.requested'], icon: 'file-question', tone: 'warning', action: true,
+  cu('trust.evidence_requested', { group: 'cases', label: 'Trust and Risk needs information', opens: 'Evidence request', triggers: ['trust.evidence.requested'], icon: 'file-question-mark', tone: 'warning', action: true,
     description: 'Trust and Risk needs proof or an explanation from the customer, with what to send and by when',
     t: { title: 'We need information from you ({{report.ref}})', body: 'Our Trust and Risk team needs your help: {{evidence.question}} Please answer by {{due.date}}.', subject: 'Action needed: we need information from you', button: 'Send what we asked for' } }),
   cu('trust.appeal_decided', { group: 'cases', label: 'Appeal result', opens: 'Appeal', triggers: ['trust.appeal.decided'], icon: 'scale',
@@ -525,13 +526,13 @@ export const TOPICS: readonly TopicDef[] = [
   /* ---------------------------------------------------------------- seller: orders */
   se('order.new', { group: 'orders', label: 'New order', opens: 'Seller order', triggers: ['orders.order.accepted'], pref: 'new_orders', permission: 'orders.fulfillment.view', icon: 'shopping-bag', tone: 'brand',
     t: { title: 'New order {{order.ref}}', body: 'You have a new order {{order.ref}} ({{order.total}}). Dispatch by {{due.date}}.', subject: 'New order {{order.ref}}', button: 'Open order' } }),
-  se('order.item_cancelled', { group: 'orders', label: 'Item cancelled', opens: 'Seller order', triggers: ['orders.item.cancelled'], pref: 'new_orders', permission: 'orders.fulfillment.view', icon: 'x-circle', tone: 'warning',
+  se('order.item_cancelled', { group: 'orders', label: 'Item cancelled', opens: 'Seller order', triggers: ['orders.item.cancelled'], pref: 'new_orders', permission: 'orders.fulfillment.view', icon: 'circle-x', tone: 'warning',
     t: { title: 'Item cancelled in {{order.ref}}', body: '{{item.count}} item(s) in order {{order.ref}} were cancelled. {{cancel.note}}', subject: 'Item cancelled in {{order.ref}}', button: 'Open order' } }),
   se('dispatch.reminder', { group: 'orders', label: 'Dispatch deadline, 4 h before', opens: 'Seller order', triggers: ['scheduled'], pref: 'dispatch_overdue', permission: 'orders.fulfillment.view', icon: 'clock', tone: 'warning', action: true,
     t: { title: 'Dispatch {{order.ref}} by {{due.date}}', body: 'Order {{order.ref}} must be dispatched by {{due.date}} to stay on time.', subject: 'Reminder: dispatch {{order.ref}} by {{due.date}}', button: 'Open dispatch queue' } }),
-  se('dispatch.overdue', { group: 'orders', label: 'Dispatch overdue', opens: 'Seller order', triggers: ['shipping.dispatch.overdue'], pref: 'dispatch_overdue', permission: 'orders.fulfillment.view', icon: 'alert-triangle', tone: 'danger', action: true,
+  se('dispatch.overdue', { group: 'orders', label: 'Dispatch overdue', opens: 'Seller order', triggers: ['shipping.dispatch.overdue'], pref: 'dispatch_overdue', permission: 'orders.fulfillment.view', icon: 'triangle-alert', tone: 'danger', action: true,
     t: { title: 'Dispatch overdue: {{order.ref}}', body: 'Order {{order.ref}} was due for dispatch on {{due.date}}. Dispatch it now or tell the customer about the delay.', subject: 'Overdue: dispatch {{order.ref}} now', button: 'Open order' } }),
-  se('order.cancellation_requested', { group: 'orders', label: 'Cancellation request', opens: 'Seller order', triggers: ['orders.cancellation.requested'], pref: 'new_orders', permission: 'orders.fulfillment.view', icon: 'x-circle', tone: 'warning', action: true,
+  se('order.cancellation_requested', { group: 'orders', label: 'Cancellation request', opens: 'Seller order', triggers: ['orders.cancellation.requested'], pref: 'new_orders', permission: 'orders.fulfillment.view', icon: 'circle-x', tone: 'warning', action: true,
     description: 'A customer asks to cancel items of a group the seller ships; action required until the respond-by time',
     t: { title: 'Cancellation requested on {{order.ref}}', body: 'The customer asked to cancel {{item.count}} item(s) in order {{order.ref}}. Accept, or decline if it has already shipped, by {{due.date}}.', subject: 'Cancellation request on {{order.ref}}', button: 'Respond' } }),
   se('order.dispute_opened', { group: 'returns_cases', label: 'Payment dispute opened', opens: 'Seller order', triggers: ['payments.chargeback.opened'], pref: 'returns_cases', permission: 'orders.fulfillment.view', icon: 'scale', tone: 'danger', action: true,
@@ -554,11 +555,11 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Decision on case {{case.ref}}', body: 'Decision: {{case.outcome}}. You can appeal until {{appeal.deadline}}.', subject: 'Decision on case {{case.ref}}', button: 'View decision' } }),
 
   /* ---------------------------------------------------------------- seller: products */
-  se('product.changes_requested', { group: 'products', label: 'Requested corrections', opens: 'Product', triggers: ['catalog.product.changes_requested'], pref: 'products', permission: 'catalog.products.submit', icon: 'edit', tone: 'warning', action: true,
+  se('product.changes_requested', { group: 'products', label: 'Requested corrections', opens: 'Product', triggers: ['catalog.product.changes_requested'], pref: 'products', permission: 'catalog.products.submit', icon: 'square-pen', tone: 'warning', action: true,
     t: { title: 'Corrections requested', body: 'Please correct your product and resubmit: {{product.reason}}.', subject: 'Corrections requested for your product', button: 'Fix product' } }),
-  se('product.approved', { group: 'products', label: 'Product approved', opens: 'Product', triggers: ['catalog.product.approved'], pref: 'products', permission: 'catalog.products.submit', icon: 'check-circle', tone: 'success',
+  se('product.approved', { group: 'products', label: 'Product approved', opens: 'Product', triggers: ['catalog.product.approved'], pref: 'products', permission: 'catalog.products.submit', icon: 'circle-check-big', tone: 'success',
     t: { title: 'Product approved', body: 'Your product was approved. You can now publish offers for it.', subject: 'Your product was approved', button: 'View product' } }),
-  se('product.rejected', { group: 'products', label: 'Product rejected', opens: 'Product', triggers: ['catalog.product.rejected'], pref: 'products', permission: 'catalog.products.submit', icon: 'x-circle', tone: 'danger',
+  se('product.rejected', { group: 'products', label: 'Product rejected', opens: 'Product', triggers: ['catalog.product.rejected'], pref: 'products', permission: 'catalog.products.submit', icon: 'circle-x', tone: 'danger',
     t: { title: 'Product rejected', body: 'Your product was rejected: {{product.reason}}.', subject: 'Your product was rejected', button: 'View product' } }),
   se('stock.low', { group: 'products', label: 'Low stock', opens: 'Stock', triggers: ['inventory.stock.low'], pref: 'products', permission: 'inventory.stock.adjust', icon: 'package', tone: 'warning',
     t: { title: 'Low stock: {{stock.label}}', body: 'Only {{stock.available}} left of {{stock.label}}.', subject: 'Low stock: {{stock.label}}', button: 'Update stock' } }),
@@ -587,7 +588,7 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Information required for your application', body: 'We need more information to review your application. Please answer by {{due.date}}.', subject: 'Action needed: your Marketly seller application', button: 'Answer now' } }),
   se('application.information_reminder', { group: 'account_finance', label: 'Application: information still missing', opens: 'Application status', triggers: ['sellers.application.information_reminder'], ownerOnly: true, pref: 'account', icon: 'file-text', tone: 'warning', action: true,
     t: { title: 'Reminder: information still missing', body: '{{application.openItems}} requested item(s) are still missing from your application. Please answer by {{due.date}}.', subject: 'Reminder: your Marketly seller application needs information', button: 'Answer now' } }),
-  se('trust.evidence_requested', { group: 'account_finance', label: 'Trust and Risk needs proof', opens: 'Evidence request', triggers: ['trust.evidence.requested'], ownerOnly: true, pref: 'account', icon: 'file-question', tone: 'warning', action: true,
+  se('trust.evidence_requested', { group: 'account_finance', label: 'Trust and Risk needs proof', opens: 'Evidence request', triggers: ['trust.evidence.requested'], ownerOnly: true, pref: 'account', icon: 'file-question-mark', tone: 'warning', action: true,
     t: { title: 'Proof requested ({{report.ref}})', body: 'Our Trust and Risk team needs proof from you: {{evidence.question}} Please send it by {{due.date}}.', subject: 'Action needed: Marketly Trust and Risk needs proof', button: 'Send proof' } }),
   se('trust.appeal_decided', { group: 'account_finance', label: 'Trust appeal result', opens: 'Account health', triggers: ['trust.appeal.decided'], ownerOnly: true, pref: 'account', icon: 'scale',
     t: { title: 'Your appeal {{appeal.ref}} was decided', body: 'The action on your account was {{appeal.outcome}}. {{appeal.explanation}} {{appeal.changes}}', subject: 'The result of your appeal {{appeal.ref}}', button: 'View appeal' } }),
@@ -599,7 +600,7 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Your account is suspended', body: 'Reason: {{restriction.reason}}. Open orders: see Seller Center. You can appeal until {{appeal.deadline}}.', subject: 'Your Marketly seller account is suspended', button: 'View account health' } }),
   se('account.reinstated', { group: 'account_finance', label: 'Account reinstated', opens: 'Account health', triggers: ['sellers.seller.reinstated'], ownerOnly: true, pref: 'account', icon: 'shield-check', tone: 'success',
     t: { title: 'Your account was reinstated', body: 'Your seller account was reinstated.', subject: 'Your Marketly seller account was reinstated', button: 'View account health' } }),
-  se('account.warning', { group: 'account_finance', label: 'Warning', opens: 'Account health', triggers: ['sellers.warning.issued'], ownerOnly: true, pref: 'account', icon: 'alert-triangle', tone: 'warning',
+  se('account.warning', { group: 'account_finance', label: 'Warning', opens: 'Account health', triggers: ['sellers.warning.issued'], ownerOnly: true, pref: 'account', icon: 'triangle-alert', tone: 'warning',
     t: { title: 'Warning: {{warning.title}}', body: 'We issued a warning on your account: {{warning.title}}.', subject: 'Warning on your seller account', button: 'View account health' } }),
   se('appeal.decided', { group: 'account_finance', label: 'Appeal result', opens: 'Account health', triggers: ['sellers.appeal.decided'], ownerOnly: true, pref: 'account', icon: 'scale',
     t: { title: 'Appeal {{appeal.outcome}}', body: 'Your appeal was {{appeal.outcome}}.', subject: 'The result of your appeal', button: 'View appeal' } }),
@@ -620,11 +621,11 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Payout {{payout.ref}} paid', body: 'Your bank confirmed payout {{payout.ref}} of {{payout.amount}}.', subject: 'Payout {{payout.ref}} paid', button: 'View payout' } }),
   se('payout.failed', { group: 'account_finance', label: 'Payout failed', opens: 'Payout record', triggers: ['finance.payout.failed'], ownerOnly: true, pref: 'payouts_holds', permission: 'finance.balances.view', icon: 'wallet', tone: 'danger', action: true,
     t: { title: 'Payout {{payout.ref}} failed', body: 'Payout {{payout.ref}} of {{payout.amount}} failed: {{payout.reason}}. Fix your payout settings to receive it.', subject: 'Payout {{payout.ref}} failed', button: 'Fix payout settings' } }),
-  se('hold.placed', { group: 'account_finance', label: 'Hold placed', opens: 'Hold', triggers: ['finance.hold.placed'], ownerOnly: true, pref: 'payouts_holds', permission: 'finance.balances.view', icon: 'pause-circle', tone: 'warning',
+  se('hold.placed', { group: 'account_finance', label: 'Hold placed', opens: 'Hold', triggers: ['finance.hold.placed'], ownerOnly: true, pref: 'payouts_holds', permission: 'finance.balances.view', icon: 'circle-pause', tone: 'warning',
     t: { title: 'Hold of {{hold.amount}} placed', body: 'We placed a hold of {{hold.amount}}: {{hold.reason}}. Review date: {{hold.reviewDate}}.', subject: 'A hold was placed on your balance', button: 'View hold' } }),
-  se('hold.released', { group: 'account_finance', label: 'Hold released', opens: 'Hold', triggers: ['finance.hold.released'], ownerOnly: true, pref: 'payouts_holds', permission: 'finance.balances.view', icon: 'play-circle', tone: 'success',
+  se('hold.released', { group: 'account_finance', label: 'Hold released', opens: 'Hold', triggers: ['finance.hold.released'], ownerOnly: true, pref: 'payouts_holds', permission: 'finance.balances.view', icon: 'circle-play', tone: 'success',
     t: { title: 'Hold of {{hold.amount}} released', body: 'The hold of {{hold.amount}} was released.', subject: 'A hold on your balance was released', button: 'View balance' } }),
-  se('balance.negative', { group: 'account_finance', label: 'Amount owed', opens: 'Balance', triggers: ['finance.balance.negative'], ownerOnly: true, pref: 'payouts_holds', permission: 'finance.balances.view', icon: 'minus-circle', tone: 'danger',
+  se('balance.negative', { group: 'account_finance', label: 'Amount owed', opens: 'Balance', triggers: ['finance.balance.negative'], ownerOnly: true, pref: 'payouts_holds', permission: 'finance.balances.view', icon: 'circle-minus', tone: 'danger',
     t: { title: 'Your balance is negative', body: 'Your available balance is {{balance.amount}}. It will be recovered from your next sales.', subject: 'Your Marketly balance is negative', button: 'View balance' } }),
   se('statement.issued', { group: 'account_finance', label: 'Statement available', opens: 'Statement', triggers: ['finance.statement.issued'], ownerOnly: true, pref: 'payouts_holds', permission: 'finance.balances.view', icon: 'file-text',
     t: { title: 'Statement for {{statement.period}}', body: 'Your statement for {{statement.period}} is available.', subject: 'Your statement for {{statement.period}}', button: 'View statement' } }),
@@ -667,7 +668,7 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Low stock at Marketly: {{stock.label}}', body: "Only {{available}} left of {{stock.label}} at Marketly's warehouse. Send more in an inbound shipment to keep selling.", subject: 'Low stock at Marketly: {{stock.label}}', button: 'Plan an inbound shipment' } }),
   fbm('stock_aged', { group: 'products', label: 'Fulfilled by Marketly: long-term storage soon', opens: 'Stock', icon: 'clock', tone: 'warning',
     t: { title: '{{units}} units reach long-term storage {{effective}}', body: "{{units}} units at Marketly's warehouse reach long-term storage on {{effective}} and will then incur long-term storage fees. Sell them or request their removal.", subject: 'Units reach long-term storage {{effective}}', button: 'View stock' } }),
-  fbm('disposal_scheduled', { group: 'products', label: 'Fulfilled by Marketly: disposal scheduled', opens: 'Removal order', icon: 'trash-2', tone: 'warning',
+  fbm('disposal_scheduled', { group: 'products', label: 'Fulfilled by Marketly: disposal scheduled', opens: 'Removal order', icon: 'trash', tone: 'warning',
     t: { title: '{{units}} units will be disposed of', body: "{{units}} unsellable units left at Marketly's warehouse for over {{days}} days will be disposed of ({{removal.ref}}). Ask for them back to keep them.", subject: 'Units at Marketly will be disposed of', button: 'View removal' } }),
   fbm('fee_schedule_changed', { group: 'account_finance', label: 'Fulfilled by Marketly: new fees', opens: 'Fees', icon: 'calendar',
     t: { title: 'New Fulfilled by Marketly fees from {{effective}}', body: 'Fee schedule {{version}} for Fulfilled by Marketly takes effect on {{effective}}.', subject: 'New Fulfilled by Marketly fees from {{effective}}', button: 'View fees' } }),
@@ -678,9 +679,9 @@ export const TOPICS: readonly TopicDef[] = [
   st('shipping.dispatch_overdue', { group: 'Shipping', label: 'Overdue shipping', opens: 'Dispatch queue', triggers: ['shipping.dispatch.overdue'], roles: ['shipping_manager', 'warehouse_manager'], action: true,
     description: 'A package missed its dispatch deadline: Shipping Manager; Fulfilled by Marketly packages (the Marketly warehouse is late) go to the Warehouse Manager', urgent: true, icon: 'truck', tone: 'danger',
     t: { title: 'Overdue dispatch {{order.ref}}', body: '{{seller.name}} missed the dispatch deadline for {{order.ref}} ({{due.date}}).', subject: 'Overdue dispatch: {{order.ref}}', button: 'Open dispatch queue' } }),
-  st('shipping.exception', { group: 'Shipping', label: 'Delivery exception', opens: 'Dispatch queue', triggers: ['shipping.shipment.exception'], roles: ['shipping_manager'], action: true, icon: 'alert-triangle', tone: 'warning',
+  st('shipping.exception', { group: 'Shipping', label: 'Delivery exception', opens: 'Dispatch queue', triggers: ['shipping.shipment.exception'], roles: ['shipping_manager'], action: true, icon: 'triangle-alert', tone: 'warning',
     t: { title: 'Delivery exception on {{order.ref}}', body: 'Exception: {{exception.kind}}. Due {{due.date}}.', subject: 'Delivery exception on {{order.ref}}', button: 'Open exception' } }),
-  st('orders.cancellation_requested', { group: 'Operations', label: 'Cancellation request to decide', opens: 'Order', triggers: ['orders.cancellation.requested'], roles: ['order_manager'], action: true, icon: 'x-circle', tone: 'warning',
+  st('orders.cancellation_requested', { group: 'Operations', label: 'Cancellation request to decide', opens: 'Order', triggers: ['orders.cancellation.requested'], roles: ['order_manager'], action: true, icon: 'circle-x', tone: 'warning',
     description: 'A customer asks to cancel Official Store or Fulfilled by Marketly items already being picked; the Order Manager decides (sellers decide only the groups they ship)',
     t: { title: 'Cancellation request on {{order.ref}}', body: 'The customer asked to cancel {{item.count}} item(s) in {{order.ref}} ({{shipper.name}}), already being picked. Decide by {{due.date}}.', subject: 'Cancellation request on {{order.ref}}', button: 'Decide cancellation' } }),
   st('inventory.stock_shortage', { group: 'Inventory', label: 'Stock shortage', opens: 'Stock', triggers: ['inventory.stock.low'], roles: ['inventory_manager'], action: true, icon: 'package', tone: 'warning',
@@ -700,7 +701,7 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Second approval needed', body: '{{approval.by}} approved; one more approval is needed for {{approval.summary}}.', subject: 'Second approval needed', button: 'Review request' } }),
   st('approval.returned', { group: 'Approvals', label: 'Request returned', opens: 'Approval', triggers: ['access.approval.returned'], action: true, icon: 'corner-up-left', tone: 'warning',
     t: { title: 'Your request was returned', body: '{{approval.by}} sent your request back: {{approval.comment}}', subject: 'Your approval request was returned', button: 'Update request' } }),
-  st('approval.decided', { group: 'Approvals', label: 'Approval decided', opens: 'Approval', triggers: ['access.approval.decided'], icon: 'check-circle',
+  st('approval.decided', { group: 'Approvals', label: 'Approval decided', opens: 'Approval', triggers: ['access.approval.decided'], icon: 'circle-check-big',
     t: { title: 'Request {{approval.outcome}}', body: 'Your request was {{approval.outcome}}.', subject: 'Your approval request was {{approval.outcome}}', button: 'View request' } }),
   st('approval.reminder', { group: 'Approvals', label: 'Approval reminder', opens: 'Approval', triggers: ['access.approval.reminder_sent'], action: true, icon: 'bell', tone: 'warning',
     t: { title: 'Reminder: approval waiting', body: 'A request is still waiting for your decision. {{approval.comment}}', subject: 'Reminder: an approval is waiting for you', button: 'Review request' } }),
@@ -718,9 +719,9 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Dispute {{chargeback.ref}} opened', body: 'A {{chargeback.amount}} dispute was opened on {{order.ref}}.', subject: 'Dispute opened on {{order.ref}}', button: 'Open dispute' } }),
   st('finance.payout_failed', { group: 'Finance', label: 'Failed payout', opens: 'Payout record', triggers: ['finance.payout.failed'], roles: ['finance_manager'], action: true, urgent: true, icon: 'wallet', tone: 'danger',
     t: { title: 'Payout {{payout.ref}} failed', body: 'Payout {{payout.ref}} of {{payout.amount}} failed: {{payout.reason}}.', subject: 'Failed payout {{payout.ref}}', button: 'Open payout' } }),
-  st('finance.balance_negative', { group: 'Finance', label: 'Negative seller balance', opens: 'Seller balance', triggers: ['finance.balance.negative'], roles: ['finance_manager'], icon: 'minus-circle', tone: 'warning',
+  st('finance.balance_negative', { group: 'Finance', label: 'Negative seller balance', opens: 'Seller balance', triggers: ['finance.balance.negative'], roles: ['finance_manager'], icon: 'circle-minus', tone: 'warning',
     t: { title: 'Negative balance: {{balance.amount}}', body: 'A seller balance is negative ({{balance.amount}}).', subject: 'Negative seller balance', button: 'Open balance' } }),
-  st('finance.reconciliation_mismatch', { group: 'Finance', label: 'Unusual financial activity', opens: 'Finance checks', triggers: ['finance.reconciliation.mismatch_found'], roles: ['finance_manager'], action: true, icon: 'alert-octagon', tone: 'danger',
+  st('finance.reconciliation_mismatch', { group: 'Finance', label: 'Unusual financial activity', opens: 'Finance checks', triggers: ['finance.reconciliation.mismatch_found'], roles: ['finance_manager'], action: true, icon: 'octagon-alert', tone: 'danger',
     t: { title: 'Reconciliation mismatch: {{mismatch.check}}', body: 'The {{mismatch.check}} check is off by {{mismatch.difference}}.', subject: 'Reconciliation mismatch', button: 'Open finance checks' } }),
   st('seller.application_submitted', { group: 'Sellers', label: 'New seller application', opens: 'Application', triggers: ['sellers.application.submitted'], roles: ['seller_manager'], action: true, icon: 'store',
     t: { title: 'New seller application', body: 'A new seller application is waiting for review.', subject: 'New seller application', button: 'Review application' } }),
@@ -732,9 +733,9 @@ export const TOPICS: readonly TopicDef[] = [
     t: { title: 'Sponsored campaign waiting for approval', body: 'A sponsored campaign is waiting for review.', subject: 'Sponsored campaign waiting for approval', button: 'Review campaign' } }),
   st('queue.item_overdue', { group: 'Operations', label: 'Overdue work item', opens: 'Work queue', triggers: ['workqueues.item.overdue'], action: true, urgent: true, icon: 'clock', tone: 'danger',
     t: { title: 'Overdue: {{queue.item}}', body: 'An item in {{queue.name}} is overdue (due {{due.date}}).', subject: 'Overdue work item {{queue.item}}', button: 'Open queue' } }),
-  st('queue.item_escalated', { group: 'Operations', label: 'Escalated work item', opens: 'Work queue', triggers: ['workqueues.item.escalated'], action: true, icon: 'arrow-up-circle', tone: 'warning',
+  st('queue.item_escalated', { group: 'Operations', label: 'Escalated work item', opens: 'Work queue', triggers: ['workqueues.item.escalated'], action: true, icon: 'circle-arrow-up', tone: 'warning',
     t: { title: 'Escalated to you: {{queue.name}}', body: 'A work item was escalated: {{escalation.reason}}.', subject: 'Work item escalated to you', button: 'Open queue' } }),
-  st('audit.integrity_failed', { group: 'Platform', label: 'Integrity alert', opens: 'Action history', triggers: ['audit.integrity.failed'], roles: ['platform_administrator', 'business_owner'], action: true, urgent: true, icon: 'alert-octagon', tone: 'danger',
+  st('audit.integrity_failed', { group: 'Platform', label: 'Integrity alert', opens: 'Action history', triggers: ['audit.integrity.failed'], roles: ['platform_administrator', 'business_owner'], action: true, urgent: true, icon: 'octagon-alert', tone: 'danger',
     t: { title: 'Action history integrity check failed', body: 'The action history chain is broken at entry {{integrity.seq}}. Investigate now.', subject: 'URGENT: action history integrity check failed', button: 'Open action history' } }),
   st('security.account_locked', { group: 'Platform', label: 'Staff account locked', opens: 'Staff member', triggers: ['identity.account.locked'], roles: ['platform_administrator'], icon: 'lock', tone: 'warning',
     t: { title: 'A staff account was locked', body: 'A staff account was locked ({{lock.until}}).', subject: 'A staff account was locked', button: 'Open staff member' } }),
@@ -831,7 +832,8 @@ export function defaultContent(t: TopicDef, channel: Channel, senders: Record<st
     case 'email':
       return {
         subject: subject ?? title,
-        preheader: body.length > 90 ? `${body.slice(0, 87)}…` : body,
+        // the whole body: render() shortens the preheader after the variables are filled in
+        preheader: body,
         title,
         body: promo ? `${body}\n\nUnsubscribe: {{unsubscribe.url}}` : body,
         button: t.audience === 'external' && !button ? null : { label: button ?? 'Open', url: '{{link.url}}' },
@@ -842,7 +844,8 @@ export function defaultContent(t: TopicDef, channel: Channel, senders: Record<st
       // codes and links are the message itself; other texts carry the title and the link
       return { title: null, body: `Marketly: ${t.sensitive ? body : `${title}.`} {{link.url}}${promo ? ' Reply STOP to opt out.' : ''}`, allowPromotionalContent: promo };
     case 'push':
-      return { title, body: body.length > 140 ? `${body.slice(0, 137)}…` : body, allowPromotionalContent: promo };
+      // the whole body: render() shortens push bodies after the variables are filled in
+      return { title, body, allowPromotionalContent: promo };
     case 'in_app':
       return { title, body, allowPromotionalContent: promo };
   }

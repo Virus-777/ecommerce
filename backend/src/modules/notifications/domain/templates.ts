@@ -28,6 +28,13 @@ export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&
 export const renderText = (template: string | null | undefined, ctx: unknown): string =>
   (template ?? '').replace(VAR, (_, name: string) => show(lookup(ctx, name))).replace(/[ \t]+([.,;:])/g, '$1').trim();
 
+/** Longest email preheader and push body; longer rendered texts end with "…" */
+export const PREHEADER_MAX = 90;
+export const PUSH_BODY_MAX = 140;
+
+/** Shortens a rendered text (variables already filled in, so a cut never splits a {{variable}}) */
+export const shorten = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+
 /** Same text with every variable removed, for sensitive subjects stored in the delivery log */
 export const redact = (template: string | null | undefined): string => (template ?? '').replace(VAR, '…').trim();
 
@@ -67,7 +74,7 @@ export function validateContent(topic: TopicDef, channel: Channel, content: Temp
   }
   if (content.subject && renderText(content.subject, {}).length > 60) issues.push({ severity: 'warning', field: 'subject', message: 'Keep the subject under 60 characters' });
   if (channel === 'sms' && content.body.length > 160) issues.push({ severity: 'warning', field: 'body', message: 'SMS longer than 160 characters is sent in several parts' });
-  if (channel === 'push' && content.body.length > 180) issues.push({ severity: 'warning', field: 'body', message: 'Push bodies are cut after about 180 characters' });
+  if (channel === 'push' && content.body.length > PUSH_BODY_MAX) issues.push({ severity: 'warning', field: 'body', message: `Push bodies are cut after ${PUSH_BODY_MAX} characters` });
   return { ok: !issues.some((i) => i.severity === 'blocking'), issues };
 }
 
@@ -97,10 +104,11 @@ export function render(topic: TopicDef, channel: Channel, content: TemplateConte
   const footer = renderText(footerFor(topic), ctx);
   const subject = content.subject ? renderText(content.subject, ctx) : null;
   const title = content.title ? renderText(content.title, ctx) : null;
-  const body = renderText(content.body, ctx);
+  // cut after rendering: cutting the template could split a {{variable}} ("Estimated arrival: {{de…")
+  const body = channel === 'push' ? shorten(renderText(content.body, ctx), PUSH_BODY_MAX) : renderText(content.body, ctx);
   const buttonLabel = content.button ? renderText(content.button.label, ctx) : null;
   const buttonUrl = content.button ? renderText(content.button.url, ctx) : null;
-  const preheader = content.preheader ? renderText(content.preheader, ctx) : null;
+  const preheader = content.preheader ? shorten(renderText(content.preheader, ctx), PREHEADER_MAX) : null;
   const text = [title && channel === 'email' ? title : null, body, buttonUrl ? `${buttonLabel ?? 'Open'}: ${buttonUrl}` : null, channel === 'email' ? footer : null].filter(Boolean).join('\n\n');
   const html = channel === 'email' ? emailHtml({ title, body, preheader, buttonLabel, buttonUrl, footer, device }) : null;
   return { subject, preheader, title, text, html, footer, buttonLabel, buttonUrl, sender: content.sender ?? null };

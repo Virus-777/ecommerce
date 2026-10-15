@@ -159,7 +159,7 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | group | `string` Inbox filter: customer orders|returns_refunds|cases|account|promotions; seller orders|returns_cases|products|account_finance; staff = work area |
 | title | `string` |
 | body | `text` |
-| icon | `string?` Icon name from the design system, e.g. truck |
+| icon | `string?` Lucide icon name as lucide-react 1.x names it, e.g. truck, triangle-alert, circle-x (never the old aliases alert-triangle, x-circle) |
 | tone | `enum(info|success|warning|danger|brand|deal|neutral)` |
 | link | `NoticeLink` |
 | createdAt | `datetime` |
@@ -271,9 +271,9 @@ Who is told what, on which channel: notification topics for customers, sellers a
 | Field | Type |
 |---|---|
 | subject | `string?` Email; keep under 60 characters |
-| preheader | `string?` |
+| preheader | `string?` Email preview line with {{variables}}; shortened to 90 characters after rendering (never inside a variable) |
 | title | `string?` In-app and push title |
-| body | `text` Plain text with {{variables}}; email HTML is rendered from the layout |
+| body | `text` Plain text with {{variables}}; email HTML is rendered from the layout; push bodies are shortened to 140 characters after rendering |
 | button | `TemplateButton?` |
 | sender | `string?` Marketly Orders <orders@marketly.example> |
 | allowPromotionalContent | `bool` Always false for essential topics |
