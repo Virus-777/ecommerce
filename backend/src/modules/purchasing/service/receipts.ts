@@ -43,7 +43,7 @@ export class Receipts {
         if (cur.status !== 'receiving') await tx.updateDelivery(deliveryId, { status: deliveryMachine.next(cur.status, 'startReceiving') });
         const id = newId();
         const r = await tx.insertReceipt(
-          { id, ref, purchaseOrderId: po.id, deliveryId, locationId: po.shipToLocationId, status: receiptMachine.initial, note: null, receivedBy: by.actor, startedAt: this.core.now(), submittedAt: null, confirmedBy: null, confirmedAt: null },
+          { id, ref, purchaseOrderId: po.id, deliveryId, locationId: po.shipToLocationId, status: receiptMachine.initial, note: null, receivedBy: by.actor, startedAt: this.core.now(), submittedAt: null, confirmedBy: null, confirmedAt: null, inboundId: null },
           lines.map((l) => ({ receiptId: id, purchaseOrderLineId: l.id, stockItemId: l.stockItemId, expected: openQty(l), received: 0, damaged: 0, binCode: bins.get(l.stockItemId) ?? null, photoIds: [], note: null })),
         );
         await tx.addEvent(this.core.event(po.id, `Receiving started · ${ref}`, null, by.actor));
@@ -153,7 +153,8 @@ export class Receipts {
     const shares = freightShares(money(po.freightAmount, po.currency), poLines);
     const shareOf = new Map(poLines.map((l, i) => [l.id, shares[i]!]));
     const submittedAt = this.core.now();
-    await this.core.inventory().submitInbound({
+    // the inbound id links the receipt to inventory's confirmation queue (G75)
+    const inbound = await this.core.inventory().submitInbound({
       receiptId: receipt.id,
       receiptRef: receipt.ref,
       purchaseOrderId: po.id,
@@ -193,7 +194,7 @@ export class Receipts {
       const curDelivery = (await tx.getDelivery(delivery.id, { forUpdate: true }))!;
       await tx.updateDelivery(delivery.id, { status: deliveryMachine.next(curDelivery.status, hasIssues ? 'completeWithIssues' : 'complete') });
       if (newPoStatus !== po.status) await tx.updatePurchaseOrder(po.id, { status: newPoStatus });
-      const updated = await tx.updateReceipt(id, { status, submittedAt, receivedBy: by.actor });
+      const updated = await tx.updateReceipt(id, { status, submittedAt, receivedBy: by.actor, inboundId: inbound?.id ?? null });
       const label = newPoStatus === 'received' ? `Received in full · ${totalReceived} of ${totalOrdered}` : `Partly received · ${totalReceived} of ${totalOrdered}`;
       const detail = [receipt.ref, shortUnits ? `${shortUnits} short` : null, damagedUnits ? `${damagedUnits} damaged` : null].filter(Boolean).join(' · ');
       await tx.addEvent(this.core.event(po.id, anyReceived ? label : 'Delivery counted · nothing received', detail, by.actor));
@@ -278,7 +279,8 @@ export class Receipts {
     await this.core.repo.transaction(async (tx) => {
       const cur = await tx.getReceipt(receipt.id, { forUpdate: true });
       if (!cur || !receiptMachine.can(cur.status, 'confirm')) return;
-      await tx.updateReceipt(cur.id, { status: receiptMachine.next(cur.status, 'confirm'), confirmedBy: event.confirmedBy, confirmedAt: at });
+      // receipts submitted before inboundId was kept get it here
+      await tx.updateReceipt(cur.id, { status: receiptMachine.next(cur.status, 'confirm'), confirmedBy: event.confirmedBy, confirmedAt: at, ...(cur.inboundId ? {} : { inboundId: event.inboundId ?? null }) });
       await tx.addEvent({ ...this.core.event(cur.purchaseOrderId, `Stock made available · ${cur.ref}`, `${units(sellable)} sellable`, event.confirmedBy), at });
     });
   }

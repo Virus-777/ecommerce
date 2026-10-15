@@ -120,6 +120,8 @@ export interface ReceiptRow {
   submittedAt: Date | null;
   confirmedBy: common.Actor | null;
   confirmedAt: Date | null;
+  /** inventory InboundReceipt.id, set on submit (G75) */
+  inboundId: string | null;
 }
 
 export interface ReceiptLineRow {

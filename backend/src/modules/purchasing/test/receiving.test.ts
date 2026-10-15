@@ -142,6 +142,10 @@ describe('receiving', () => {
     const submitted = await call('POST', `/receipts/${r.id}/submit`, { raiseClaims: true });
     expect(submitted.statusCode, submitted.body).toBe(200);
     expect(submitted.json()).toMatchObject({ status: 'awaiting_confirmation', submittedAt: expect.any(String), totals: { sellable: null } });
+    // G75: the receipt carries inventory's inbound receipt id
+    const inbound = (await stubs.inventory.submitInbound.mock.results.at(-1)!.value) as { id: string };
+    expect(submitted.json().inboundId).toBe(inbound.id);
+    expect((await call('GET', `/receipts/${r.id}`)).json().inboundId).toBe(inbound.id);
     // freight $150.00 split by line value (950,000 : 200,000) → 12,391 and 2,609 cents; per unit 124 and 52
     expect(stubs.inventory.submitInbound).toHaveBeenCalledWith(
       expect.objectContaining({

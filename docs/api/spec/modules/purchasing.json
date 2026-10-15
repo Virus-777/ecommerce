@@ -241,7 +241,8 @@
       "startedAt": "datetime",
       "submittedAt": "datetime?",
       "confirmedBy": { "type": "Actor?", "desc": "Inventory Manager who made the units sellable" },
-      "confirmedAt": "datetime?"
+      "confirmedAt": "datetime?",
+      "inboundId": { "type": "uuid?", "desc": "The inventory inbound receipt (InboundReceipt.id) made on submit, for links to the confirmation queue; null before submit" }
     },
     "ReceiptTotals": { "expected": "int", "received": "int", "damaged": "int", "shortage": "int", "sellable": "int?" },
     "ReceiptSummary": { "id": "uuid", "ref": "string", "status": "string", "received": "int", "damaged": "int", "shortage": "int", "receivedBy": "Actor", "submittedAt": "datetime?" },
@@ -276,7 +277,7 @@
     { "name": "purchase_order_lines", "columns": { "id": "uuid pk", "purchase_order_id": "uuid → purchase_orders", "stock_item_id": "uuid", "sku": "text", "label": "text", "qty_ordered": "int", "qty_received": "int", "qty_damaged": "int", "qty_closed": "int", "unit_cost_amount": "bigint", "expected_date": "date?" }, "indexes": ["(purchase_order_id)", "(stock_item_id)"] },
     { "name": "purchase_order_events", "desc": "PO timeline (created, sent, approval, backorder, received, closed)", "columns": { "id": "uuid pk", "purchase_order_id": "uuid → purchase_orders", "label": "text", "detail": "text?", "actor_kind": "text", "actor_id": "text?", "at": "timestamptz" }, "indexes": ["(purchase_order_id, at)"] },
     { "name": "deliveries", "desc": "Expected inbound deliveries per purchase order", "columns": { "id": "uuid pk", "purchase_order_id": "uuid → purchase_orders", "carrier": "text?", "tracking_ref": "text?", "window_from": "timestamptz", "window_to": "timestamptz", "units": "int", "status": "text", "delay_reason": "text?", "arrived_at": "timestamptz?", "dock": "text?" }, "indexes": ["(status, window_from)", "(purchase_order_id)"] },
-    { "name": "receipts", "columns": { "id": "uuid pk", "ref": "text unique", "purchase_order_id": "uuid → purchase_orders", "delivery_id": "uuid → deliveries", "location_id": "uuid", "status": "text", "note": "text?", "received_by": "text", "started_at": "timestamptz", "submitted_at": "timestamptz?", "confirmed_by": "text?", "confirmed_at": "timestamptz?" }, "indexes": ["(status, started_at)", "unique (delivery_id) where status = 'in_progress'"] },
+    { "name": "receipts", "columns": { "id": "uuid pk", "ref": "text unique", "purchase_order_id": "uuid → purchase_orders", "delivery_id": "uuid → deliveries", "location_id": "uuid", "status": "text", "note": "text?", "received_by": "text", "started_at": "timestamptz", "submitted_at": "timestamptz?", "confirmed_by": "text?", "confirmed_at": "timestamptz?", "inbound_id": "uuid? (inventory InboundReceipt.id, set on submit)" }, "indexes": ["(status, started_at)", "unique (delivery_id) where status = 'in_progress'"] },
     { "name": "receipt_lines", "columns": { "receipt_id": "uuid → receipts", "purchase_order_line_id": "uuid → purchase_order_lines", "stock_item_id": "uuid", "expected": "int", "received": "int", "damaged": "int", "bin_code": "text?", "photo_media_ids": "jsonb", "note": "text?" }, "indexes": ["pk (receipt_id, purchase_order_line_id)"] },
     { "name": "supplier_claims", "columns": { "id": "uuid pk", "ref": "text unique", "supplier_id": "uuid → suppliers", "purchase_order_id": "uuid → purchase_orders", "receipt_id": "uuid? → receipts", "kind": "text", "lines": "jsonb", "amount": "bigint", "currency": "char(3)", "status": "text", "settlement": "text?", "settled_amount": "bigint?", "supplier_reference": "text?", "owner_id": "text", "notes": "text?", "created_at": "timestamptz", "decided_at": "timestamptz?" }, "indexes": ["(status, created_at)", "(supplier_id)"] }
   ],

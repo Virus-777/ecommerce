@@ -691,6 +691,8 @@ export interface Receipt {
   /** Inventory Manager who made the units sellable */
   confirmedBy?: common.Actor | null;
   confirmedAt?: string | null;
+  /** The inventory inbound receipt (InboundReceipt.id) made on submit, for links to the confirmation queue; null before submit */
+  inboundId?: string | null;
 }
 
 export const Receipt: z.ZodType<Receipt> = z.object({
@@ -721,6 +723,7 @@ export const Receipt: z.ZodType<Receipt> = z.object({
     return common.Actor.nullish();
   },
   confirmedAt: z.iso.datetime({ offset: true }).nullish(),
+  inboundId: z.uuid().describe("The inventory inbound receipt (InboundReceipt.id) made on submit, for links to the confirmation queue; null before submit").nullish(),
 }).register(common.apiTypes, { id: "purchasing.Receipt" });
 
 export interface ReceiptTotals {
@@ -1122,6 +1125,8 @@ export interface PurchasingDb {
     submitted_at: Date | null;
     confirmed_by: string | null;
     confirmed_at: Date | null;
+    /** inventory InboundReceipt.id, set on submit */
+    inbound_id: string | null;
   };
   receipt_lines: {
     receipt_id: string;
@@ -2987,13 +2992,15 @@ export const spec = defineModuleSpec({
         "started_at",
         "submitted_at",
         "confirmed_by",
-        "confirmed_at"
+        "confirmed_at",
+        "inbound_id"
       ],
       "nullable": [
         "note",
         "submitted_at",
         "confirmed_by",
-        "confirmed_at"
+        "confirmed_at",
+        "inbound_id"
       ],
       "decimal": [],
       "binary": [],
@@ -3069,6 +3076,12 @@ export const spec = defineModuleSpec({
             "confirmed_at": {
               "bsonType": [
                 "date",
+                "null"
+              ]
+            },
+            "inbound_id": {
+              "bsonType": [
+                "string",
                 "null"
               ]
             }

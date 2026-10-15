@@ -381,6 +381,7 @@ export class PurchasingViews {
         submittedAt: iso(r.submittedAt),
         confirmedBy: r.confirmedBy,
         confirmedAt: iso(r.confirmedAt),
+        inboundId: r.inboundId,
       };
     });
   }

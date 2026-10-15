@@ -393,6 +393,7 @@ Buying stock for the Official Store: suppliers and their price lists, purchase o
 | submittedAt | `datetime?` |
 | confirmedBy | `Actor?` Inventory Manager who made the units sellable |
 | confirmedAt | `datetime?` |
+| inboundId | `uuid?` The inventory inbound receipt (InboundReceipt.id) made on submit, for links to the confirmation queue; null before submit |
 
 ### ReceiptTotals
 
@@ -666,6 +667,7 @@ Indexes: `(status, window_from)`, `(purchase_order_id)`
 | submitted_at | timestamptz? |
 | confirmed_by | text? |
 | confirmed_at | timestamptz? |
+| inbound_id | uuid? (inventory InboundReceipt.id, set on submit) |
 
 Indexes: `(status, started_at)`, `unique (delivery_id) where status = 'in_progress'`
 

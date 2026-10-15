@@ -172,6 +172,7 @@ const receipts = new Schema(
     submitted_at: { type: Date, default: null },
     confirmed_by: { type: String, default: null },
     confirmed_at: { type: Date, default: null },
+    inbound_id: { type: String, default: null }, // inventory InboundReceipt.id, set on submit
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },

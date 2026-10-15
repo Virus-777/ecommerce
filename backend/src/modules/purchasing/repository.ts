@@ -195,6 +195,7 @@ const toReceipt = (r: T<'receipts'>): ReceiptRow => ({
   submittedAt: asDateOrNull(r.submitted_at),
   confirmedBy: parseActor(r.confirmed_by),
   confirmedAt: asDateOrNull(r.confirmed_at),
+  inboundId: r.inbound_id ?? null,
 });
 
 const toReceiptLine = (r: T<'receipt_lines'>): ReceiptLineRow => ({
@@ -694,6 +695,7 @@ export class PurchasingRepository {
       submitted_at: row.submittedAt,
       confirmed_by: row.confirmedBy ? actorText(row.confirmedBy) : null,
       confirmed_at: row.confirmedAt,
+      inbound_id: row.inboundId ?? null,
     });
     await this.#t.receiptLines.insertMany(
       lines.map((l) => ({
@@ -720,6 +722,7 @@ export class PurchasingRepository {
     if (patch.submittedAt !== undefined) c.submitted_at = patch.submittedAt;
     if (patch.confirmedBy !== undefined) c.confirmed_by = patch.confirmedBy ? actorText(patch.confirmedBy) : null;
     if (patch.confirmedAt !== undefined) c.confirmed_at = patch.confirmedAt;
+    if (patch.inboundId !== undefined) c.inbound_id = patch.inboundId;
     if (!Object.keys(c).length) return (await this.getReceipt(id))!;
     return toReceipt(orThrow(await this.#t.receipts.update(id, c), `purchasing: receipt ${id}`));
   }
