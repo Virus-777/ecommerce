@@ -477,6 +477,8 @@ export const SecurityEvent: z.ZodType<SecurityEvent> = z.object({
 export interface SecurityOverview {
   account: AccountSummary;
   passwordChangedAt?: string | null;
+  /** False for accounts that sign in with Google or Apple only; password actions (change password, confirm with password) answer PASSWORD_NOT_SET */
+  hasPassword: boolean;
   email: EmailStatus;
   twoStep: TwoStepStatus;
   devices: Device[];
@@ -491,6 +493,7 @@ export const SecurityOverview: z.ZodType<SecurityOverview> = z.object({
     return AccountSummary;
   },
   passwordChangedAt: z.iso.datetime({ offset: true }).nullish(),
+  hasPassword: z.boolean().describe("False for accounts that sign in with Google or Apple only; password actions (change password, confirm with password) answer PASSWORD_NOT_SET"),
   get email() {
     return EmailStatus;
   },
@@ -1689,7 +1692,7 @@ export const endpoints = defineEndpoints({
     body: () => ChangePasswordRequest,
     response: null,
     status: 204,
-    errors: ["CURRENT_PASSWORD_WRONG","WEAK_PASSWORD","PASSWORD_REUSED","RATE_LIMITED"],
+    errors: ["CURRENT_PASSWORD_WRONG","PASSWORD_NOT_SET","WEAK_PASSWORD","PASSWORD_REUSED","RATE_LIMITED"],
     events: ["identity.password.changed"],
     screens: ["account/security"],
     phase: 1,
@@ -1725,7 +1728,7 @@ export const endpoints = defineEndpoints({
     body: () => ReauthRequest,
     response: () => ReauthToken,
     status: 200,
-    errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","RATE_LIMITED"],
+    errors: ["CURRENT_PASSWORD_WRONG","PASSWORD_NOT_SET","CODE_INVALID","RATE_LIMITED"],
     screens: ["account/profile","account/security"],
     phase: 1,
   },
@@ -1741,7 +1744,7 @@ export const endpoints = defineEndpoints({
     body: () => ReauthRequest,
     response: () => ReauthToken,
     status: 200,
-    errors: ["CURRENT_PASSWORD_WRONG","CODE_INVALID","RATE_LIMITED"],
+    errors: ["CURRENT_PASSWORD_WRONG","PASSWORD_NOT_SET","CODE_INVALID","RATE_LIMITED"],
     audited: true,
     screens: ["seller/finance","seller/store"],
     phase: 1,
@@ -1772,7 +1775,7 @@ export const endpoints = defineEndpoints({
     body: () => TwoStepSetupRequest,
     response: () => TwoStepSetup,
     status: 201,
-    errors: ["CURRENT_PASSWORD_WRONG","METHOD_NOT_AVAILABLE","TWO_STEP_NOT_FOR_STAFF"],
+    errors: ["CURRENT_PASSWORD_WRONG","PASSWORD_NOT_SET","METHOD_NOT_AVAILABLE","TWO_STEP_NOT_FOR_STAFF"],
     screens: ["account/security"],
     phase: 1,
   },
@@ -2749,6 +2752,10 @@ export const spec = defineModuleSpec({
     "CURRENT_PASSWORD_WRONG": {
       "status": 400,
       "meaning": "The current password is incorrect."
+    },
+    "PASSWORD_NOT_SET": {
+      "status": 409,
+      "meaning": "The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one."
     },
     "RESET_LINK_INVALID": {
       "status": 410,

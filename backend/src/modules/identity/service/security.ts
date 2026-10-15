@@ -174,6 +174,7 @@ export class Security {
     return {
       account: map.accountSummary(a, sec.methods.length > 0, now),
       passwordChangedAt: map.isoOrNull(a.password_changed_at),
+      hasPassword: Boolean(a.password_hash),
       email: { address: a.email, verifiedAt: map.isoOrNull(a.email_verified_at), pendingChangeTo: sec.pendingEmail ?? null },
       twoStep: map.twoStepStatus(sec.methods, sec.recovery),
       devices: sec.devices.map((d) => map.device(d, principal.sessionId)),
@@ -191,6 +192,8 @@ export class Security {
     const now = this.core.now();
     const peek = await this.core.repo.getAccount(accountId);
     if (!peek) return { ok: false, error: new AppError('NOT_FOUND', 'Account not found') };
+    // Google / Apple sign-in accounts have no password to check: a clear answer, never a counted failure
+    if (proof.password && !peek.password_hash) return { ok: false, error: new AppError('PASSWORD_NOT_SET', 'This account has no password; it signs in with Google or Apple') };
     const passwordOk = proof.password ? await verifyPassword(peek.password_hash, proof.password) : false;
     let after = () => {};
     const out = await this.core.repo.transaction(async (repo): Promise<{ ok: true } | { ok: false; error: AppError }> => {

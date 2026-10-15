@@ -352,6 +352,26 @@ describe('in-process API', () => {
     const unverified = await kit.call('POST', `${PUBLIC}/external-sign-ins`, { token: (await visitor(kit)).accessToken, body: { provider: 'google', idToken: `dev-unverified:${email}`, audience: 'store', device: web } });
     expect(unverified.body.error.code).toBe('INVALID_CREDENTIALS');
   });
+
+  it('says a provider account has no password, and a password step-up is a clear error, not a counted failure (G28)', async () => {
+    const email = uniqueEmail('nopass');
+    const res = await kit.call('POST', `${PUBLIC}/external-sign-ins`, { token: (await visitor(kit)).accessToken, body: { provider: 'google', idToken: `dev:${email}:Noa:Pass`, audience: 'store', device: web } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const token = res.body.tokens.accessToken as string;
+    const security = await kit.call('GET', `${STORE}/security`, { token });
+    expect(security.body.hasPassword).toBe(false);
+    for (let i = 0; i < 6; i++) {
+      const r = await kit.call('POST', `${STORE}/reauth`, { token, body: { purpose: 'email-change', password: 'Any-Guess-123' } });
+      expect(r.status).toBe(409);
+      expect(r.body.error.code).toBe('PASSWORD_NOT_SET');
+    }
+    const change = await kit.call('PUT', `${STORE}/password`, { token, body: { currentPassword: 'Any-Guess-123', newPassword: 'Brand-New-Pass-7', signOutOtherDevices: false } });
+    expect(change.body.error.code).toBe('PASSWORD_NOT_SET');
+    expect(await identityTable(kit.app, 'accounts').get(res.body.account.id)).toMatchObject({ failed_sign_ins: 0, locked_until: null });
+
+    const c = await customer(kit);
+    expect((await kit.call('GET', `${STORE}/security`, { token: c.tokens.accessToken })).body.hasPassword).toBe(true);
+  });
 });
 
 describe('jobs', () => {

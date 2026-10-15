@@ -357,6 +357,7 @@ Who someone is and how they prove it: accounts for customers, seller members and
 |---|---|
 | account | `AccountSummary` |
 | passwordChangedAt | `datetime?` |
+| hasPassword | `bool` False for accounts that sign in with Google or Apple only; password actions (change password, confirm with password) answer PASSWORD_NOT_SET |
 | email | `EmailStatus` |
 | twoStep | `TwoStepStatus` |
 | devices | `Device[]` |
@@ -933,6 +934,7 @@ Indexes: `(expires_at)`
 | `WEAK_PASSWORD` | 400 | The password breaks a rule. details.failed lists the rules (min_length, number, uppercase, personal_info, breached). |
 | `PASSWORD_REUSED` | 400 | The password was used recently on this account. |
 | `CURRENT_PASSWORD_WRONG` | 400 | The current password is incorrect. |
+| `PASSWORD_NOT_SET` | 409 | The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one. |
 | `RESET_LINK_INVALID` | 410 | The reset link was used, replaced or has expired. |
 | `REFRESH_TOKEN_INVALID` | 401 | Refresh token unknown, expired, revoked or reused; sign in again. |
 | `EMAIL_IN_USE` | 409 | Another account in this realm uses that email. |

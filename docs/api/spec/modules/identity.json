@@ -537,6 +537,10 @@
     "SecurityOverview": {
       "account": "AccountSummary",
       "passwordChangedAt": "datetime?",
+      "hasPassword": {
+        "type": "bool",
+        "desc": "False for accounts that sign in with Google or Apple only; password actions (change password, confirm with password) answer PASSWORD_NOT_SET"
+      },
       "email": {
         "type": "EmailStatus"
       },
@@ -1639,6 +1643,7 @@
       "response": null,
       "errors": [
         "CURRENT_PASSWORD_WRONG",
+        "PASSWORD_NOT_SET",
         "WEAK_PASSWORD",
         "PASSWORD_REUSED",
         "RATE_LIMITED"
@@ -1692,6 +1697,7 @@
       "response": "ReauthToken",
       "errors": [
         "CURRENT_PASSWORD_WRONG",
+        "PASSWORD_NOT_SET",
         "CODE_INVALID",
         "RATE_LIMITED"
       ],
@@ -1713,6 +1719,7 @@
       "response": "ReauthToken",
       "errors": [
         "CURRENT_PASSWORD_WRONG",
+        "PASSWORD_NOT_SET",
         "CODE_INVALID",
         "RATE_LIMITED"
       ],
@@ -1751,6 +1758,7 @@
       "status": 201,
       "errors": [
         "CURRENT_PASSWORD_WRONG",
+        "PASSWORD_NOT_SET",
         "METHOD_NOT_AVAILABLE",
         "TWO_STEP_NOT_FOR_STAFF"
       ],
@@ -2729,6 +2737,10 @@
     "CURRENT_PASSWORD_WRONG": {
       "status": 400,
       "meaning": "The current password is incorrect."
+    },
+    "PASSWORD_NOT_SET": {
+      "status": 409,
+      "meaning": "The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one."
     },
     "RESET_LINK_INVALID": {
       "status": 410,
