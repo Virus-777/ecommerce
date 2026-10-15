@@ -303,7 +303,8 @@ export class Core {
       };
     };
     const customer = (): Counterparty => {
-      const p = b.participants.find((x) => x.kind === 'customer');
+      // the buyer: a signed-in customer, or the guest of a guest order (shown by the name they checked out with)
+      const p = b.participants.find((x) => x.kind === 'customer' || x.kind === 'guest');
       return { kind: 'customer', id: c.customer_id ?? null, name: p?.name ?? 'Buyer' };
     };
     if (v.kind === 'customer') return c.kind === 'support' || c.kind === 'staff_seller' ? support : seller();

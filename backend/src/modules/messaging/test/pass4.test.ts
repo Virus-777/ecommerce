@@ -53,6 +53,16 @@ describe('participants', () => {
     expect(res.data.sellerConversation.participants).toEqual(expect.arrayContaining([{ kind: 'GUEST', id: `order:${o.order.id}` }]));
   });
 
+  it('the seller sees the guest buyer by name, not "Buyer"', async () => {
+    const o = await placeOrder(h, { guest: true });
+    const start = await h.call('POST', `${SELLER}/conversations`, tokens.seller(o.sellerA), { orderId: o.order.id, body: 'Your order ships tomorrow.' });
+    expect(start.status, JSON.stringify(start.body)).toBe(201);
+    const conv = await h.call('GET', `${SELLER}/conversations/${start.body.conversation.id}`, tokens.seller(o.sellerA));
+    expect(conv.body.counterparty).toMatchObject({ kind: 'customer', id: null });
+    expect(conv.body.counterparty.name).not.toBe('Buyer');
+    expect(conv.body.counterparty.name).toContain('Gia');
+  });
+
   it('a customer actor is the customer id: unread counts by customer id, not by account id', async () => {
     const o = await placeOrder(h);
     const start = await h.call('POST', `${SELLER}/conversations`, tokens.seller(o.sellerA), { orderId: o.order.id, body: 'A question about your order' });
