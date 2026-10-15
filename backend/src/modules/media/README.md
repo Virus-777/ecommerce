@@ -42,7 +42,7 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 
 | Method | Path | Purpose | Auth | Body → Response |
 |---|---|---|---|---|
-| POST | `/api/seller/media/uploads` | Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files) | seller<br>`media.assets.upload` | `UploadRequest` → `UploadTicket` |
+| POST | `/api/seller/media/uploads` | Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, return evidence, case evidence, bulk files) | seller<br>`media.assets.upload` | `UploadRequest` → `UploadTicket` |
 | POST | `/api/seller/media/uploads/{id}/complete` | Confirm the upload; processing starts | seller<br>`media.assets.upload` | `MediaAsset` |
 | PUT | `/api/seller/media/uploads/{id}/content` | Send the file bytes of an upload | seller<br>`media.assets.upload` | raw bytes → 204 No content |
 | GET | `/api/seller/media/assets` | Seller media library | seller | Page<MediaAsset> |

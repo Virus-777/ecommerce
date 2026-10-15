@@ -22,7 +22,11 @@ export const isGeneratedPurpose = (p: string): p is GeneratedPurpose => (GENERAT
 const STORE_PURPOSES: readonly Purpose[] = ['return_evidence', 'case_evidence', 'review_photo', 'message_attachment', 'verification_document'];
 /** Guests (store visitors with a guest session) may upload return and case evidence for their guest order */
 const GUEST_PURPOSES: readonly Purpose[] = ['return_evidence', 'case_evidence'];
-/** Seller Center: product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files */
+/**
+ * Seller Center: product images and video, store logo and banner, ad creatives, documents, inspection photos,
+ * return evidence (a return's evidence before any case: the return_evidence usage takes only this purpose),
+ * case evidence, bulk files
+ */
 const SELLER_PURPOSES: readonly Purpose[] = [
   'product_image',
   'product_video',
@@ -33,6 +37,7 @@ const SELLER_PURPOSES: readonly Purpose[] = [
   'ad_creative',
   'ad_video',
   'verification_document',
+  'return_evidence',
   'case_evidence',
   'inspection_photo',
   'message_attachment',

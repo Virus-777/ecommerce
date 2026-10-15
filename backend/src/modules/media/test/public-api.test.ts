@@ -39,6 +39,14 @@ describe('attach and detach', () => {
     expect(await t.media.getAsset(asset.id)).toMatchObject({ inUse: false, usageCount: 0, retainUntil: null });
   });
 
+  it('lets a seller attach evidence to a return before any case (return_evidence)', async () => {
+    const sellerId = newId();
+    const owner = { kind: 'seller' as const, id: sellerId };
+    const { asset } = await uploadFile(t, 'seller', callers.seller({ sellerId }), { purpose: 'return_evidence', body: png(800, 600, { seed: 'return-evidence' }) });
+    await t.media.attach(asset.id, { module: 'returns', kind: 'return_evidence', refId: newId(), refLabel: 'Return RT-261009-0001' }, owner);
+    expect(await t.media.getAsset(asset.id)).toMatchObject({ inUse: true, usageCount: 1 });
+  });
+
   it('evidence usages extend retainUntil', async () => {
     const accountId = newId();
     const owner = { kind: 'customer' as const, id: accountId };
