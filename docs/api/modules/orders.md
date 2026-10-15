@@ -354,6 +354,7 @@ The accepted purchase: one order per checkout, one seller group per seller packa
 | statusLabel | `string` |
 | total | `Money` |
 | itemCount | `int` |
+| itemStates | `map<int>` Units per item state, e.g. { shipped: 2, delivered: 1 }; adds up to itemCount |
 | sellerCount | `int` |
 | packageCount | `int` |
 | packages | `PackageLine[]` |

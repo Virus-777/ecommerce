@@ -278,11 +278,7 @@ export class Admin {
       orders: {
         count: c.order_count,
         totalSpend: { amount: Number(c.total_spend_minor), currency: c.currency },
-        recent: (recent ?? []).map((o) => {
-          const itemStates: Record<string, number> = {};
-          for (const p of o.packages ?? []) itemStates[p.status] = (itemStates[p.status] ?? 0) + 1;
-          return { orderId: o.id, ref: o.ref, placedAt: o.placedAt, total: o.total, statusLabel: o.statusLabel, packageCount: o.packageCount, thumbnails: o.thumbnails ?? [], itemStates };
-        }),
+        recent: (recent ?? []).map((o) => ({ orderId: o.id, ref: o.ref, placedAt: o.placedAt, total: o.total, statusLabel: o.statusLabel, packageCount: o.packageCount, thumbnails: o.thumbnails ?? [], itemStates: o.itemStates ?? {} })),
       },
       openCases: (cases?.items ?? []).map((k) => ({
         caseId: k.id,

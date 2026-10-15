@@ -369,6 +369,13 @@ export class Views {
   /** Purchase units (replacement lines are not purchases) */
   units = (agg: Agg) => agg.items.filter((i) => !i.replacement_of_item_id).reduce((s, i) => s + i.quantity, 0);
 
+  /** Units per item state, counted like units() (replacement items left out) */
+  itemStates(agg: Agg): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const i of agg.items) if (!i.replacement_of_item_id) out[i.state] = (out[i.state] ?? 0) + i.quantity;
+    return out;
+  }
+
   summaryLine(agg: Agg) {
     return `${plural(this.units(agg), 'item')} from ${plural(agg.groups.length, 'seller')} · ${fmt(agg.order.total, agg.order.currency)}`;
   }
@@ -550,6 +557,7 @@ export class Views {
       statusLabel: DISPLAY_LABEL[status.value],
       total: this.m(agg.order.total, agg),
       itemCount: this.units(agg),
+      itemStates: this.itemStates(agg),
       sellerCount: new Set(agg.groups.map((g) => g.seller_id ?? 'official')).size,
       packageCount: agg.groups.length,
       packages: agg.groups.map((g) => ({ label: `Package ${g.position} of ${agg.groups.length}`, sellerName: this.sellerLabel(g).name, status: GROUP_LABEL[g.status as GroupStatus] ?? g.status, note: this.estimateLabel(agg, g) })),

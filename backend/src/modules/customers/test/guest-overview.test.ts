@@ -25,11 +25,12 @@ beforeAll(async () => {
             statusLabel: 'Partly shipped',
             total: { amount: 51398, currency: 'USD' },
             itemCount: 4,
+            itemStates: { shipped: 3, accepted: 1 },
             sellerCount: 3,
             packageCount: 2,
             packages: [
-              { label: 'Package 1', sellerName: 'A', status: 'in_transit', note: '' },
-              { label: 'Package 2', sellerName: 'B', status: 'delayed', note: '' },
+              { label: 'Package 1', sellerName: 'A', status: 'Shipped', note: '' },
+              { label: 'Package 2', sellerName: 'B', status: 'Delayed', note: '' },
             ],
             thumbnails: [],
             actions: ['view'],
@@ -110,7 +111,7 @@ describe('account overview', () => {
       { key: 'store_credit', amount: null, available: false },
     ]);
     expect(o.alerts.map((a: any) => a.kind)).toEqual(['item_delayed', 'payment_being_checked']);
-    expect(o.recentOrders[0]).toMatchObject({ ref: ORDER.ref, packageCount: 2, itemStates: { in_transit: 1, delayed: 1 } });
+    expect(o.recentOrders[0]).toMatchObject({ ref: ORDER.ref, packageCount: 2, itemStates: { shipped: 3, accepted: 1 } });
     expect(o.menuCounts).toEqual({ 'account/orders': 2, 'account/messages': 4 });
     expect(o.unavailable.sort()).toEqual(['open_returns', 'store_credit']);
   });

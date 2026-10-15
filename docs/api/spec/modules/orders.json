@@ -195,6 +195,7 @@
       "statusLabel": "string",
       "total": "Money",
       "itemCount": "int",
+      "itemStates": { "type": "map<int>", "desc": "Units per item state, e.g. { shipped: 2, delivered: 1 }; adds up to itemCount" },
       "sellerCount": "int",
       "packageCount": "int",
       "packages": "PackageLine[]",

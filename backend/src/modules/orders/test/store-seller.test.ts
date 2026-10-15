@@ -50,6 +50,11 @@ describe('store: record scope and reads', () => {
     expect(detail.status).toBe(200);
     expect(detail.body.groups[0].items[0].offer.sellerSku).toBeNull();
     expect(detail.body.groups[0].items[0].actions).toContain('cancel');
+    // G14: units per item state (not package labels), adding up to itemCount
+    const units: Record<string, number> = {};
+    for (const g of detail.body.groups) for (const i of g.items) units[i.state] = (units[i.state] ?? 0) + i.quantity;
+    expect(list.body.items[0].itemStates).toEqual(units);
+    expect(Object.values(units).reduce((s, n) => s + n, 0)).toBe(4);
 
     const other = tokens.customer(newId());
     expect((await h.call('GET', `/api/store/orders/orders/${m.order.id}`, other)).status).toBe(404);

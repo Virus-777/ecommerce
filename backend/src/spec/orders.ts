@@ -571,6 +571,8 @@ export interface OrderSummary {
   statusLabel: string;
   total: common.Money;
   itemCount: number;
+  /** Units per item state, e.g. { shipped: 2, delivered: 1 }; adds up to itemCount */
+  itemStates: Record<string, number>;
   sellerCount: number;
   packageCount: number;
   packages: PackageLine[];
@@ -591,6 +593,7 @@ export const OrderSummary: z.ZodType<OrderSummary> = z.object({
     return common.Money;
   },
   itemCount: z.number().int(),
+  itemStates: z.record(z.string(), z.number().int()).describe("Units per item state, e.g. { shipped: 2, delivered: 1 }; adds up to itemCount"),
   sellerCount: z.number().int(),
   packageCount: z.number().int(),
   get packages() {

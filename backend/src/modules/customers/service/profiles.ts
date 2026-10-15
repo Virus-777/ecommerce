@@ -287,11 +287,7 @@ export class Profiles {
       customer: { firstName: c.first_name, displayName: displayName(c.first_name, c.last_name), email: c.email, memberSince: dateInZone(c.created_at, this.core.tz) },
       tiles,
       alerts,
-      recentOrders: (recent ?? []).slice(0, 3).map((o) => {
-        const itemStates: Record<string, number> = {};
-        for (const p of o.packages ?? []) itemStates[p.status] = (itemStates[p.status] ?? 0) + 1;
-        return { orderId: o.id, ref: o.ref, placedAt: o.placedAt, total: o.total, statusLabel: o.statusLabel, packageCount: o.packageCount, thumbnails: o.thumbnails ?? [], itemStates };
-      }),
+      recentOrders: (recent ?? []).slice(0, 3).map((o) => ({ orderId: o.id, ref: o.ref, placedAt: o.placedAt, total: o.total, statusLabel: o.statusLabel, packageCount: o.packageCount, thumbnails: o.thumbnails ?? [], itemStates: o.itemStates ?? {} })),
       openCases: (cases?.items ?? []).slice(0, 3).map((k) => ({
         caseId: k.id,
         ref: k.ref,
