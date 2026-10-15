@@ -38,7 +38,7 @@ export async function promotionFlow(sim: Sim): Promise<void> {
     terms: 'One use per customer. Marketly pays the discount, so sellers receive their full price.',
   });
   await api.call(mk, 'POST', `/api/admin/promotions/campaigns/${campaign.id}/submit`, { note: 'Fall campaign, platform funded' });
-  await api.call(mk, 'POST', `/api/admin/promotions/campaigns/${campaign.id}/confirm-funding`, { comment: 'Within the Q4 budget', costCenter: 'MKT-PDX' });
+  await api.call(w.staff.marketingReviewer!.session, 'POST', `/api/admin/promotions/campaigns/${campaign.id}/confirm-funding`, { comment: 'Within the Q4 budget', costCenter: 'MKT-PDX' });
   const scheduled = await api.call(mk, 'POST', `/api/admin/promotions/campaigns/${campaign.id}/schedule`);
   run.check('the campaign is live', scheduled.status === 'live', scheduled);
   w.couponCode = code;

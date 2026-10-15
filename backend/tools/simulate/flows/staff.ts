@@ -33,6 +33,8 @@ const TEAM: { key: keyof World['staff']; first: string; last: string; roles: str
   { key: 'orders', first: 'Omar', last: 'Haddad', roles: ['order_manager', 'shipping_manager', 'returns_manager'] },
   { key: 'support', first: 'Avery', last: 'Brooks', roles: ['support_agent'] },
   { key: 'marketing', first: 'Mia', last: 'Moreno', roles: ['marketing_manager'] },
+  // confirms the funding of campaigns Mia creates (nobody confirms their own campaign's funding)
+  { key: 'marketingReviewer', first: 'Max', last: 'Ortega', roles: ['marketing_manager'] },
   { key: 'operations', first: 'Ian', last: 'Iverson', roles: ['inventory_manager', 'warehouse_manager', 'purchasing_manager', 'official_store_manager'] },
   { key: 'trust', first: 'Tia', last: 'Tanaka', roles: ['trust_and_risk_manager'] },
   // a sensitive grant: the other Business Owner approves it before the invitation can be accepted

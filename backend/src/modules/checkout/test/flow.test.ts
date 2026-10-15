@@ -232,6 +232,8 @@ describe('coupons (promotions)', () => {
   it('applies a live coupon with its coverage, reserves it at Place order and commits it to the order', async () => {
     const marketing = await w.f.staffWithRoles(w.owner, 'mia@marketly.test', 'Mia Marketing', ['marketing_manager']);
     const staff = marketing.accessToken;
+    // a campaign's creator can't confirm its own funding: a second marketing manager does
+    const reviewer = (await w.f.staffWithRoles(w.owner, 'max@marketly.test', 'Max Marketing', ['marketing_manager'])).accessToken;
     const now = w.clock.now().getTime();
     const input = {
       name: 'Welcome five',
@@ -250,7 +252,7 @@ describe('coupons (promotions)', () => {
     const created = await w.call('POST', '/api/admin/promotions/campaigns', staff, input);
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     for (const step of ['submit', 'confirm-funding', 'schedule']) {
-      const r = await w.call('POST', `/api/admin/promotions/campaigns/${created.body.id}/${step}`, staff, {});
+      const r = await w.call('POST', `/api/admin/promotions/campaigns/${created.body.id}/${step}`, step === 'confirm-funding' ? reviewer : staff, {});
       expect(r.status, `${step}: ${JSON.stringify(r.body)}`).toBe(200);
     }
 

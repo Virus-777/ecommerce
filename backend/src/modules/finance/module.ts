@@ -4,7 +4,7 @@ import { spec } from '../../spec/finance.js';
 import { resolvers } from './graphql/resolvers.js';
 import { sellerRoutes } from './http/seller.js';
 import { adminRoutes } from './http/admin.js';
-import { devRoutes, type FinanceDevRoute } from './http/dev.js';
+import { devRoutes } from './http/dev.js';
 import { publicRoutes } from './http/public.js';
 import { webhooksRoutes } from './http/webhooks.js';
 import { FinanceRepository } from './repository.js';
@@ -29,9 +29,8 @@ export default defineModule({
     ctx.provide(service);
     ctx.http.routes(sellerRoutes(service), adminRoutes(service), publicRoutes(service), webhooksRoutes(service));
     ctx.http.webhookVerifier(hmacWebhookVerifier(ctx.config, ctx.name));
-    // GET /api/dev/finance/test-deposits (G11): the kernel serves development routes only while DEV_TOKENS is on.
-    // ctx.http.devRoutes comes with the development outbox (R1); until that kernel change is merged it is absent.
-    (ctx.http as { devRoutes?: (...routes: FinanceDevRoute[]) => void }).devRoutes?.(...devRoutes(service));
+    // GET /api/dev/finance/test-deposits (G11): the kernel serves development routes only while DEV_TOKENS is on
+    ctx.http.devRoutes(...devRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
     ctx.afterBoot(async () => {
       await service.core.ensureRules();

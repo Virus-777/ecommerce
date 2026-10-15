@@ -115,6 +115,8 @@ describe('terms_changed', () => {
 describe('an Official Store item under a coupon', () => {
   it('places the order with the discount (promotions gets OFFICIAL_STORE_ID, never an empty seller id)', async () => {
     const marketing = await w.f.staffWithRoles(w.owner, 'ola@marketly.test', 'Ola Marketing', ['marketing_manager']);
+    // a campaign's creator can't confirm its own funding: a second marketing manager does
+    const reviewer = await w.f.staffWithRoles(w.owner, 'oscar@marketly.test', 'Oscar Marketing', ['marketing_manager']);
     const now = w.clock.now().getTime();
     const created = await w.call('POST', '/api/admin/promotions/campaigns', marketing.accessToken, {
       name: 'Official three',
@@ -132,7 +134,7 @@ describe('an Official Store item under a coupon', () => {
     });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     for (const step of ['submit', 'confirm-funding', 'schedule']) {
-      const r = await w.call('POST', `/api/admin/promotions/campaigns/${created.body.id}/${step}`, marketing.accessToken, {});
+      const r = await w.call('POST', `/api/admin/promotions/campaigns/${created.body.id}/${step}`, (step === 'confirm-funding' ? reviewer : marketing).accessToken, {});
       expect(r.status, `${step}: ${JSON.stringify(r.body)}`).toBe(200);
     }
     const promo = w.api('promotions') as { evaluateCart(input: any): Promise<unknown> };
