@@ -995,7 +995,7 @@ Checked through the access module (limits per role, second reviewer).
 
 | Job | Schedule | Does |
 |---|---|---|
-| `catalog.refresh-counts` | every 10 min | Roll listing_stats up into category_stats (with subcategories) and brand_stats (overall and per top-level category) |
+| `catalog.refresh-counts` | every 10 min | Fill offer_index prices still missing (offers.getOffers: offers indexed before offers.offer.created carried the price), then roll listing_stats up into category_stats (with subcategories) and brand_stats (overall and per top-level category) |
 
 ## Settings
 

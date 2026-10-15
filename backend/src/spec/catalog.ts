@@ -2619,7 +2619,7 @@ export const spec = defineModuleSpec({
   jobs: {
     "catalog.refresh-counts": {
       "schedule": "every 10 min",
-      "does": "Roll listing_stats up into category_stats (with subcategories) and brand_stats (overall and per top-level category)"
+      "does": "Fill offer_index prices still missing (offers.getOffers: offers indexed before offers.offer.created carried the price), then roll listing_stats up into category_stats (with subcategories) and brand_stats (overall and per top-level category)"
     }
   },
   settings: {

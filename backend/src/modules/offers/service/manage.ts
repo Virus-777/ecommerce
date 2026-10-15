@@ -8,7 +8,7 @@ import type * as catalog from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type { CompareAtInput, HoldOfferRequest, OfferInput, OfferUpdate, OfficialOfferInput, RemoveOfferRequest, ReturnTerms, ReturnTermsInput, StatusReason, WarrantyInput } from '../../../spec/offers.js';
 import { activityLabel, conditionLabel, needsConditionNotes, returnTermsOf, warrantyTerms, type Condition } from '../domain/rules.js';
-import { offerTitle, strings, variantLabel } from '../mappers.js';
+import { money, offerTitle, strings, variantLabel } from '../mappers.js';
 import type { OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
 
@@ -445,7 +445,7 @@ export class ManagePart extends Part {
   private async afterCreate(row: OfferRec, by: By) {
     this.core.publish(
       'offers.offer.created',
-      { offerId: row.id, productId: row.product_id, variantId: row.variant_id, ownerType: row.owner_type, sellerId: row.seller_id, condition: row.condition, stockItemId: row.stock_item_id },
+      { offerId: row.id, productId: row.product_id, variantId: row.variant_id, ownerType: row.owner_type, sellerId: row.seller_id, condition: row.condition, stockItemId: row.stock_item_id, price: money(row.price_amount, row.currency) },
       by,
     );
     const rule = await this.parts.featured.currentRule();

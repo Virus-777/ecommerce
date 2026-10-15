@@ -1604,6 +1604,8 @@ export interface OffersOfferCreatedEvent {
   sellerId?: string | null;
   condition: string;
   stockItemId: string;
+  /** The offer price at creation (catalog keeps the product's best price from it). Offers always sets it; absent only on events recorded before it was added */
+  price?: common.Money | null;
 }
 
 export const OffersOfferCreatedEvent: z.ZodType<OffersOfferCreatedEvent> = z.object({
@@ -1614,6 +1616,9 @@ export const OffersOfferCreatedEvent: z.ZodType<OffersOfferCreatedEvent> = z.obj
   sellerId: z.uuid().nullish(),
   condition: z.string(),
   stockItemId: z.uuid(),
+  get price() {
+    return common.Money.nullish();
+  },
 });
 
 /** offers.offer.updated: Customer-visible terms change (termsVersion bumped) */
@@ -1857,7 +1862,7 @@ export interface OffersPublicApi {
   getPurchaseBoxOffer(items: { productId: string, offerId?: string, variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>>;
   /** Active offers for a list of ids in the given order, inactive ones left out (storefront featured collections) Used by: sellers, graphql. */
   listActiveOffersByIds(offerIds: string[], limit?: number): Promise<Offer[]>;
-  /** Batch read by id in any status (draft, removed and ineligible included), with sellerId (null for the Official Store: callers that need a seller id use OFFICIAL_STORE_ID) and title. Unknown ids map to null. Replaces per-line getOffer loops in cart revalidation, promotions evaluation and advertising checks. Used by: cart, promotions, advertising. */
+  /** Batch read by id in any status (draft, removed and ineligible included), with sellerId (null for the Official Store: callers that need a seller id use OFFICIAL_STORE_ID) and title. Unknown ids map to null. Replaces per-line getOffer loops in cart revalidation, promotions evaluation and advertising checks. catalog.refresh-counts fills offer_index prices it does not have yet. Used by: cart, promotions, advertising, catalog. */
   getOffers(offerIds: string[]): Promise<Record<string, Offer | null>>;
   /** Offers that still use a shipping profile: every status except removed (drafts and paused offers count, because they can be published again). One count query on (shipping_profile_id, status); shipping refuses to delete or deactivate a profile in use (PROFILE_IN_USE) without paging through listOffersAdmin. Used by: shipping. */
   countActiveOffersByProfile(shippingProfileId: string): Promise<number>;

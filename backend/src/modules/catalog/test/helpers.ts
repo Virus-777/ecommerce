@@ -36,6 +36,7 @@ export const stubs = () => ({
   offers: {
     listActiveOffersForProduct: vi.fn(async (_id: string) => [] as never[]),
     listOwnOffersForProduct: vi.fn(async (_s: string, ids: string[]) => Object.fromEntries(ids.map((id) => [id, []])) as never),
+    getOffers: vi.fn(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, null])) as never),
   },
   reports: {
     /** keeps every registration: boot-time calls happen before Vitest clears mock calls for each test */

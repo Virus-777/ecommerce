@@ -655,6 +655,8 @@ export class CatalogRepository {
         seller_id: row.seller_id,
         // a missing seller name keeps the one already indexed
         ...(row.seller_name != null ? { seller_name: row.seller_name } : {}),
+        // a missing price keeps the one already indexed
+        ...(row.price != null ? { price: row.price } : {}),
         condition: row.condition,
         updated_at: row.updated_at,
       },
@@ -673,6 +675,11 @@ export class CatalogRepository {
   async offersOf(productIds: string[]): Promise<OfferIndexRow[]> {
     if (!productIds.length) return [];
     return this.#t.offers.find({ product_id: oneOf(productIds) }, { sort: { updated_at: 1 } });
+  }
+
+  /** Indexed offers (not removed) without a price yet, oldest first */
+  offersWithoutPrice(limit: number): Promise<OfferIndexRow[]> {
+    return this.#t.offers.find({ price: null, status: { $ne: 'removed' } }, { sort: { updated_at: 1 }, limit });
   }
 
   async offersOfSeller(sellerId: string, productIds: string[]): Promise<OfferIndexRow[]> {

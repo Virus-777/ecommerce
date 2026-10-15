@@ -411,7 +411,8 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
       status: existing?.status ?? 'draft',
       eligible: existing?.eligible ?? false,
       in_stock: existing?.in_stock ?? false,
-      price: (existing?.price ?? null) as never,
+      // a price_changed handled first is newer than the creation price
+      price: (existing?.price ?? event.price ?? null) as never,
       updated_at: this.now(),
     });
     await this.refreshListing(event.productId);

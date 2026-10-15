@@ -756,8 +756,29 @@ export class CatalogAdmin extends CatalogReview {
     });
   }
 
+  /**
+   * Offers indexed without a price (indexed before offers.offer.created carried one, or from another offer event
+   * first): their price from offers. The next listing refresh turns it into the product's best price.
+   */
+  private async fillMissingPrices(): Promise<void> {
+    const offers = this.ctx.tryUse('offers');
+    if (!offers) return;
+    const rows = await this.repo.offersWithoutPrice(500);
+    if (!rows.length) return;
+    try {
+      const found = await offers.getOffers(rows.map((r) => r.offer_id));
+      for (const r of rows) {
+        const price = found[r.offer_id]?.price;
+        if (price) await this.repo.updateOffer(r.offer_id, { price: price as never });
+      }
+    } catch (err) {
+      this.ctx.log.warn({ err }, 'catalog: offer prices could not be filled');
+    }
+  }
+
   /** Job catalog.refresh-counts: listing_stats → category_stats (with subcategories) and brand_stats (overall and per top-level category) */
   async refreshCounts(): Promise<{ products: number; categories: number; brands: number }> {
+    await this.fillMissingPrices();
     const withOffers = await this.repo.productIdsWithOffers();
     for (const id of withOffers) await this.refreshListing(id);
     const tax = await this.taxonomy();

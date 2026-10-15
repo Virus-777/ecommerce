@@ -242,11 +242,12 @@
     {
       "name": "getOffers",
       "signature": "(offerIds: uuid[]) => map<Offer | null>",
-      "desc": "Batch read by id in any status (draft, removed and ineligible included), with sellerId (null for the Official Store: callers that need a seller id use OFFICIAL_STORE_ID) and title. Unknown ids map to null. Replaces per-line getOffer loops in cart revalidation, promotions evaluation and advertising checks.",
+      "desc": "Batch read by id in any status (draft, removed and ineligible included), with sellerId (null for the Official Store: callers that need a seller id use OFFICIAL_STORE_ID) and title. Unknown ids map to null. Replaces per-line getOffer loops in cart revalidation, promotions evaluation and advertising checks. catalog.refresh-counts fills offer_index prices it does not have yet.",
       "usedBy": [
         "cart",
         "promotions",
-        "advertising"
+        "advertising",
+        "catalog"
       ]
     },
     {
@@ -2723,7 +2724,8 @@
           "ownerType": "string",
           "sellerId": "uuid?",
           "condition": "string",
-          "stockItemId": "uuid"
+          "stockItemId": "uuid",
+          "price": { "type": "Money?", "desc": "The offer price at creation (catalog keeps the product's best price from it). Offers always sets it; absent only on events recorded before it was added" }
         }
       },
       {

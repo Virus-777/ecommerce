@@ -25,7 +25,7 @@ beforeEach(() => {
 const offerEvents = async (o: { productId: string; variantId: string; sellerId: string | null; status: string; price?: number; available?: number }) => {
   const offerId = newId();
   const base = { offerId, productId: o.productId, variantId: o.variantId, ownerType: o.sellerId ? 'seller' : 'official', sellerId: o.sellerId };
-  t.app.kernel.events.publish('offers', 'offers.offer.created', { ...base, condition: 'new', stockItemId: newId() });
+  t.app.kernel.events.publish('offers', 'offers.offer.created', { ...base, condition: 'new', stockItemId: newId(), price: { amount: (o.price ?? 10000) + 500, currency: 'USD' } });
   t.app.kernel.events.publish('offers', 'offers.offer.status_changed', { ...base, from: 'draft', to: o.status, stockItemId: newId() });
   if (o.price) t.app.kernel.events.publish('offers', 'offers.offer.price_changed', { ...base, from: { amount: o.price + 500, currency: 'USD' }, to: { amount: o.price, currency: 'USD' }, termsVersion: 2 });
   t.app.kernel.events.publish('inventory', 'inventory.stock.changed', { stockItemId: newId(), offerId, ownerType: base.ownerType, sellerId: o.sellerId, variantId: o.variantId, available: o.available ?? 4, reserved: 0, previousAvailable: 0, state: (o.available ?? 4) > 0 ? 'in_stock' : 'out_of_stock', cause: 'receipt', productId: o.productId, archived: false });
@@ -61,6 +61,30 @@ describe('listing read model and counts', () => {
     expect(brandAdmin).toMatchObject({ offerCount: 2, sellerCount: 2, pageLive: true });
     expect((await a.store(`/brands/${brandRow.slug}`)).json().productCount).toBe(1);
     expect((await a.admin('GET', '/products/stats')).json().offers).toBeGreaterThanOrEqual(3);
+  });
+
+  it('takes the price from offers.offer.created and fills prices still missing in the counts job (G37b)', async () => {
+    const sellerId = newId();
+    const { id } = await sellerProduct(t, sellerId, { brandId: brandRow.id, categoryId: cat.id, approve: true, model: 'KK-60' });
+    const v = await variantOf(id);
+    const stock = (offerId: string) => ({ stockItemId: newId(), offerId, ownerType: 'seller', sellerId, variantId: v, available: 3, reserved: 0, previousAvailable: 0, state: 'in_stock', cause: 'receipt', productId: id, archived: false });
+    const live = (offerId: string) => ({ offerId, productId: id, variantId: v, ownerType: 'seller', sellerId, from: 'draft', to: 'active', stockItemId: newId() });
+    // an offer created with its price and never repriced
+    const priced = newId();
+    t.app.kernel.events.publish('offers', 'offers.offer.created', { offerId: priced, productId: id, variantId: v, ownerType: 'seller', sellerId, condition: 'new', stockItemId: newId(), price: { amount: 15900, currency: 'USD' } });
+    t.app.kernel.events.publish('offers', 'offers.offer.status_changed', live(priced));
+    t.app.kernel.events.publish('inventory', 'inventory.stock.changed', stock(priced));
+    await t.app.kernel.events.drain();
+    expect((await a.admin('GET', `/products/${id}`)).json().bestPrice).toEqual({ amount: 15900, currency: 'USD' });
+
+    // an offer indexed before the event carried a price: the counts job asks offers
+    const older = newId();
+    t.app.kernel.events.publish('offers', 'offers.offer.status_changed', live(older));
+    t.app.kernel.events.publish('inventory', 'inventory.stock.changed', stock(older));
+    await t.app.kernel.events.drain();
+    t.stubs.offers.getOffers.mockImplementationOnce(async (ids: string[]) => Object.fromEntries(ids.map((x) => [x, x === older ? { price: { amount: 14900, currency: 'USD' } } : null])) as never);
+    await t.app.kernel.jobs.runNow('catalog.refresh-counts');
+    expect((await a.admin('GET', `/products/${id}`)).json().bestPrice).toEqual({ amount: 14900, currency: 'USD' });
   });
 });
 
