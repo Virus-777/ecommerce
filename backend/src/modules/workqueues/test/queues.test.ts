@@ -233,4 +233,18 @@ describe('GraphQL', () => {
     const hidden = await gql(outsider, 'query($id: UUID!) { workItem(id: $id) { id } }', { id });
     expect(hidden.json().data.workItem).toBeNull();
   });
+
+  it("uses the caller's permissions from the request like REST (dev-token view-all) (G64c)", async () => {
+    const viewAll = (query: string, variables?: unknown) =>
+      t.app.inject({ method: 'POST', url: '/graphql/admin', headers: as.staff(outsider, [...WORKER, 'workqueues.items.view-all']), payload: { query, variables } });
+    const rest = await call('GET', '/summary', outsider, [...WORKER, 'workqueues.items.view-all']);
+    expect(rest.statusCode).toBe(200);
+    const res = await viewAll('{ workSummary { needsAttention { queueKey } } workItems(filter: { kinds: [OVERDUE_DISPATCH] }, paging: { limit: 1 }) { items { id } } }');
+    const body = res.json();
+    expect(body.errors, JSON.stringify(body.errors)).toBeUndefined();
+    expect(body.data.workSummary.needsAttention.map((x: { queueKey: string }) => x.queueKey)).toEqual(rest.json().needsAttention.map((x: { queueKey: string }) => x.queueKey));
+    expect(body.data.workSummary.needsAttention.length).toBeGreaterThan(0);
+    const id = body.data.workItems.items[0].id;
+    expect((await viewAll('query($id: UUID!) { workItem(id: $id) { id } }', { id })).json().data.workItem).toEqual({ id });
+  });
 });

@@ -106,7 +106,8 @@ const savedFilter = (f: SavedFilter) => ({ ...f, owner: staff(f.owner), target: 
  *   Query.workItem → service.getItem
  */
 export const resolvers = (service: WorkqueuesService): ModuleResolvers => {
-  const viewerOf = (ctx: GraphQLContext): Promise<Viewer> => service.viewer(ctx.principal as never);
+  // the request's permission check, as the REST handlers pass it (dev-token permissions included)
+  const viewerOf = (ctx: GraphQLContext): Promise<Viewer> => service.viewer(ctx.principal as never, (p) => ctx.can(p));
 
   const queuesFor = async (v: Viewer, keys: Set<string> | null) => {
     const rows = (await service.core.repo.listQueues()).filter((q) => q.active && (keys ? keys.has(q.key) : service.core.queueVisible(v, q)));
@@ -155,9 +156,13 @@ export const resolvers = (service: WorkqueuesService): ModuleResolvers => {
           generatedAt: s.generatedAt,
         };
       },
-      workItems: async (_root: unknown, args: FilterArgs, ctx: GraphQLContext) => page(await service.listItems(filterOf(args.filter), args.paging ?? {}, ctx.principal as never), gqlItem),
+      workItems: async (_root: unknown, args: FilterArgs, ctx: GraphQLContext) =>
+        page(await service.items.list(await viewerOf(ctx), filterOf(args.filter), toPageRequest(args.paging ?? undefined)), gqlItem),
       workItem: async (_root: unknown, args: { id: string }, ctx: GraphQLContext) => {
-        const item = await service.getItem(args.id, ctx.principal as never);
+        const item = await service.items.get(await viewerOf(ctx), args.id).catch((err: { code?: string }) => {
+          if (err.code === 'NOT_FOUND') return null;
+          throw err;
+        });
         return item ? gqlItem(item) : null;
       },
     },
