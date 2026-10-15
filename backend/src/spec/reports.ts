@@ -407,16 +407,16 @@ export const ReportSchedule: z.ZodType<ReportSchedule> = z.object({
 
 export interface ExportDatasetKey {
   /** Every dataset a screen can export. See the exportDatasets setting for owner, permission, audience and screens. */
-  key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
+  key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.admin.overview" | "advertising.admin.campaigns" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
 }
 
 export const ExportDatasetKey: z.ZodType<ExportDatasetKey> = z.object({
-  key: z.enum(["reports.report_result", "catalog.admin.products", "offers.admin.offers", "offers.seller.offers", "inventory.admin.stock", "inventory.seller.stock", "purchasing.admin.receiving", "shipping.admin.exceptions", "returns.admin.requests", "returns.seller.requests", "returns.admin.inspections", "support.admin.cases", "finance.admin.ledger", "finance.admin.payout_run", "finance.admin.checks", "finance.seller.ledger", "promotions.admin.campaigns", "workqueues.admin.items", "orders.admin.orders", "orders.seller.orders", "customers.admin.accounts", "sellers.admin.accounts", "audit.admin.entries", "trust.admin.reports", "fulfillment-service.seller.fees", "fulfillment-service.seller.stock", "fulfillment-service.admin.stock_by_owner", "fulfillment-service.admin.fees"]).describe("Every dataset a screen can export. See the exportDatasets setting for owner, permission, audience and screens."),
+  key: z.enum(["reports.report_result", "catalog.admin.products", "offers.admin.offers", "offers.seller.offers", "inventory.admin.stock", "inventory.seller.stock", "purchasing.admin.receiving", "shipping.admin.exceptions", "returns.admin.requests", "returns.seller.requests", "returns.admin.inspections", "support.admin.cases", "finance.admin.ledger", "finance.admin.payout_run", "finance.admin.checks", "finance.admin.overview", "advertising.admin.campaigns", "finance.seller.ledger", "promotions.admin.campaigns", "workqueues.admin.items", "orders.admin.orders", "orders.seller.orders", "customers.admin.accounts", "sellers.admin.accounts", "audit.admin.entries", "trust.admin.reports", "fulfillment-service.seller.fees", "fulfillment-service.seller.stock", "fulfillment-service.admin.stock_by_owner", "fulfillment-service.admin.fees"]).describe("Every dataset a screen can export. See the exportDatasets setting for owner, permission, audience and screens."),
 }).register(common.apiTypes, { id: "reports.ExportDatasetKey" });
 
 export interface ExportDataset {
   /** An ExportDatasetKey value */
-  key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
+  key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.admin.overview" | "advertising.admin.campaigns" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
   /** Module that supplies the rows through its publicApi exportRows */
   owner: string;
   title: string;
@@ -433,7 +433,7 @@ export interface ExportDataset {
 }
 
 export const ExportDataset: z.ZodType<ExportDataset> = z.object({
-  key: z.enum(["reports.report_result", "catalog.admin.products", "offers.admin.offers", "offers.seller.offers", "inventory.admin.stock", "inventory.seller.stock", "purchasing.admin.receiving", "shipping.admin.exceptions", "returns.admin.requests", "returns.seller.requests", "returns.admin.inspections", "support.admin.cases", "finance.admin.ledger", "finance.admin.payout_run", "finance.admin.checks", "finance.seller.ledger", "promotions.admin.campaigns", "workqueues.admin.items", "orders.admin.orders", "orders.seller.orders", "customers.admin.accounts", "sellers.admin.accounts", "audit.admin.entries", "trust.admin.reports", "fulfillment-service.seller.fees", "fulfillment-service.seller.stock", "fulfillment-service.admin.stock_by_owner", "fulfillment-service.admin.fees"]).describe("An ExportDatasetKey value"),
+  key: z.enum(["reports.report_result", "catalog.admin.products", "offers.admin.offers", "offers.seller.offers", "inventory.admin.stock", "inventory.seller.stock", "purchasing.admin.receiving", "shipping.admin.exceptions", "returns.admin.requests", "returns.seller.requests", "returns.admin.inspections", "support.admin.cases", "finance.admin.ledger", "finance.admin.payout_run", "finance.admin.checks", "finance.admin.overview", "advertising.admin.campaigns", "finance.seller.ledger", "promotions.admin.campaigns", "workqueues.admin.items", "orders.admin.orders", "orders.seller.orders", "customers.admin.accounts", "sellers.admin.accounts", "audit.admin.entries", "trust.admin.reports", "fulfillment-service.seller.fees", "fulfillment-service.seller.stock", "fulfillment-service.admin.stock_by_owner", "fulfillment-service.admin.fees"]).describe("An ExportDatasetKey value"),
   owner: z.string().describe("Module that supplies the rows through its publicApi exportRows"),
   title: z.string(),
   permission: z.string().describe("Dataset permission, checked in addition to reports.exports.create (staff) or by itself (seller)"),
@@ -2067,6 +2067,26 @@ export const spec = defineModuleSpec({
           "audience": "staff",
           "screens": [
             "admin/payouts"
+          ],
+          "phase": 1
+        },
+        {
+          "key": "finance.admin.overview",
+          "owner": "finance",
+          "permission": "finance.ledger.view",
+          "audience": "staff",
+          "screens": [
+            "admin/finance"
+          ],
+          "phase": 1
+        },
+        {
+          "key": "advertising.admin.campaigns",
+          "owner": "advertising",
+          "permission": "advertising.campaigns.view",
+          "audience": "staff",
+          "screens": [
+            "admin/ads"
           ],
           "phase": 1
         },
