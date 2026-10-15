@@ -1215,8 +1215,12 @@ type ConversationSubject @areas(in: [STORE, SELLER]) {
   returnRef: String
   caseId: UUID
   caseRef: String
+  "PRODUCT: the product asked about before purchase"
+  productId: UUID
   "e.g. Linen duvet cover"
   title: String!
+  "Order conversations: the items concerned, e.g. Linen duvet cover + 2 more items"
+  itemSummary: String
   imageUrl: URL
   "e.g. Package 3 of 3"
   packageLabel: String
@@ -1231,6 +1235,8 @@ enum ConversationSubjectKind @areas(in: [STORE, SELLER]) {
   CASE
   SELLER_ACCOUNT
   APPLICATION
+  "A pre-sale message about one of the seller's products (no order)"
+  PRODUCT
 }
 
 type ConversationPage implements Paged @areas(in: [STORE, SELLER]) {
@@ -1256,6 +1262,8 @@ type Message @areas(in: [STORE, SELLER]) {
   redactions: [MessageRedaction!]!
   "Hidden by moderation; body is empty"
   hidden: Boolean!
+  "The caller already reported this message"
+  viewerReported: Boolean!
   at: DateTime!
 }
 
@@ -1893,6 +1901,8 @@ type OrderGroup {
 type OrderItem {
   id: UUID!
   productId: UUID!
+  "Current product slug for the product link /p/{productSlug}/{productId}; null when the catalog did not answer"
+  productSlug: String
   variantId: UUID!
   offerId: UUID!
   title: String!
@@ -1920,6 +1930,8 @@ type OrderItem {
   afterSales: OrderItemAfterSales!
   shippedQuantity: Int! @areas(in: [SELLER, ADMIN])
   cancelledQuantity: Int! @areas(in: [SELLER, ADMIN])
+  "Units on a bought label the carrier does not have yet (not handed over): neither shippable nor cancellable until the label is voided or handed over"
+  onLabelQuantity: Int! @areas(in: [SELLER, ADMIN])
 }
 
 type OrderPage implements Paged {
@@ -2709,6 +2721,8 @@ type Return {
   shipment: ReturnShipment
   "Refund progress (Requested, Under review, Approved, Processing, Sent), kept apart from the return status"
   refund: ReturnRefund
+  "Before the refund is decided: what the customer can expect back (isEstimate true); null once refund is set"
+  refundEstimate: ReturnRefundBreakdown
   "Replacement or exchange, with its own shipment"
   replacement: ReturnReplacement
   "Return terms accepted at purchase (frozen on the order item)"
@@ -2775,10 +2789,12 @@ enum ReturnChecklistKind @areas(in: [SELLER, ADMIN]) {
 }
 
 type ReturnInspectionDraft @areas(in: [SELLER, ADMIN]) {
-  "Partial inspection input as last saved"
+  "Partial inspection input as last saved (known fields only, as REST InspectionDraftValues; media resolves mediaIds)"
   inspection: JSON!
-  "Partial remedy input (seller form)"
+  "Partial remedy input (seller form), as REST RemedyDraftValues"
   remedy: JSON
+  "The draft's photos (inspection.mediaIds), resolved"
+  photos: [MediaRef!]!
   savedBy: Actor!
   savedAt: DateTime!
 }
@@ -2907,7 +2923,10 @@ type ReturnShipment {
   trackingNumber: String
   trackingUrl: URL
   labelUrl: URL
+  "Drop-off link the QR encodes (prepaid QR)"
   qrCodeUrl: URL
+  "Prepaid QR: the code the carrier scans at drop-off; apps draw the QR from it"
+  dropOffCode: String
   dropOffBy: DateTime
   dropOffPoints: [ReturnDropOffPoint!]!
   instructions: [String!]!
@@ -3166,7 +3185,9 @@ type ReturnEarningsImpact @areas(in: [SELLER, ADMIN]) {
   refundToCustomer: Money!
   sellerEarningsChange: Money!
   feeReturned: Money!
+  "Return label the seller pays; before approval the label's estimated price (labelChargeEstimated)"
   labelCharge: Money
+  labelChargeEstimated: Boolean!
   totalBalanceChange: Money!
   "The sale was already paid out; the amount comes off the next payout"
   afterPayout: Boolean!
@@ -4028,8 +4049,31 @@ type StoreInfoMarket {
   serviceRegionLabel: String!
   "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"
   legalName: String!
-  "One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"
+  "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"
   companyLine: String!
+  "Where prices and delivery dates are estimated before a visitor gives an address (Deliver to Portland, OR 97205)"
+  defaultDeliveryLocation: StoreInfoDeliveryLocation
+  "Contact emails, postal address, founding year and headquarters for the About and contact pages"
+  company: StoreInfoCompany
+}
+
+type StoreInfoDeliveryLocation {
+  "e.g. 97205"
+  postalCode: String!
+  "e.g. Portland, OR 97205"
+  label: String!
+}
+
+type StoreInfoCompany {
+  helpEmail: Email
+  "Selling on Marketly enquiries"
+  sellersEmail: Email
+  pressEmail: Email
+  "Mailing address on one line"
+  postalAddress: String
+  foundedYear: Int
+  "e.g. Portland, OR"
+  headquarters: String
 }
 
 type StoreInfoSupport {
@@ -4114,7 +4158,7 @@ type Shipment {
   groupId: UUID!
   "Set for return parcels"
   returnId: UUID
-  "'Package 2 of 3'"
+  "'Shipment 2 of 3': this shipment among the order's shipments (orders' 'Package x of y' is the seller group); 'Return parcel' for returns"
   packageLabel: String!
   sellerName: String!
   shipFrom: String!
@@ -4210,6 +4254,8 @@ type ShipmentLabel @areas(in: [SELLER, ADMIN]) {
   serviceName: String!
   cost: Money!
   trackingNumber: String!
+  "Download link of the label file (PDF or ZPL), signed for the caller as on REST Label.labelUrl"
+  labelUrl: URL
   status: ShipmentLabelStatus!
   purchasedBy: Actor!
   purchasedAt: DateTime!
@@ -4283,6 +4329,8 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   itemsSummary: String!
   "The order items the exception is about (empty when it covers the whole group)"
   orderItemIds: [UUID!]!
+  "orderItemIds with the units concerned, in the same order"
+  items: [DeliveryExceptionItem!]!
   "e.g. 'USPS number not recognized' or 'Label created, no scan 36 h'"
   situation: String!
   "The plan's required response for the kind"
@@ -4300,6 +4348,12 @@ type DeliveryException @areas(in: [SELLER, ADMIN]) {
   caseRef: String
   history: [TimelineEvent!]!
   openedAt: DateTime!
+}
+
+type DeliveryExceptionItem @areas(in: [SELLER, ADMIN]) {
+  orderItemId: UUID!
+  "Units of the order item the exception is about; null on exceptions opened before quantities were kept"
+  quantity: Int
 }
 
 type DeliverySellerResponse @areas(in: [SELLER, ADMIN]) {

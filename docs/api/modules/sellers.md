@@ -2124,10 +2124,10 @@ Indexes: `(email)`, `(state, expires_at)`
 | `sellers.storefront.updated` | Storefront content, collections or approved claims change | `{ sellerId: uuid, fields: string[] }` | - |
 | `sellers.change_request.submitted` | A store name, claim or business change waits for review | `{ changeRequestId: uuid, sellerId: uuid, kind: string }` | workqueues |
 | `sellers.change_request.decided` | Staff approve or reject a change request | `{ changeRequestId: uuid, sellerId: uuid, kind: string, approved: bool, brandRequest: json? }` | catalog, notifications, workqueues |
-| `sellers.member.invited` | The owner invites staff | `{ sellerId: uuid, memberId: uuid, email: email }` | - |
-| `sellers.member.joined` | An invited member accepts | `{ sellerId: uuid, memberId: uuid, accountId: uuid }` | - |
+| `sellers.member.invited` | The owner invites staff | `{ sellerId: uuid, memberId: uuid, email: email }` | notifications |
+| `sellers.member.joined` | An invited member accepts | `{ sellerId: uuid, memberId: uuid, accountId: uuid }` | notifications |
 | `sellers.member.permissions_changed` | A member's role or permissions change | `{ sellerId: uuid, memberId: uuid, permissions: string[] }` | - |
-| `sellers.member.removed` | A member is suspended or removed | `{ sellerId: uuid, memberId: uuid, accountId: uuid? }` | - |
+| `sellers.member.removed` | A member is suspended or removed | `{ sellerId: uuid, memberId: uuid, accountId: uuid? }` | notifications |
 | `sellers.member.reactivated` | The owner lifts a member's suspension | `{ sellerId: uuid, memberId: uuid, accountId: uuid?, permissions: string[] }` | - |
 | `sellers.launch_review.requested` | A seller asks for the launch readiness review | `{ sellerId: uuid }` | workqueues |
 | `sellers.launch_review.decided` | The launch review passes or needs changes (offers activates eligible offers on pass) | `{ sellerId: uuid, outcome: enum(passed|changes_needed), decidedAt: datetime }` | notifications, offers, workqueues |

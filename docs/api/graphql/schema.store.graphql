@@ -284,6 +284,8 @@ type CartLine @areas(in: [STORE]) {
   id: UUID!
   offerId: UUID!
   productId: UUID!
+  "For the product link /p/{productSlug}/{productId}; null when the catalog did not answer"
+  productSlug: String
   variantId: UUID!
   title: String!
   "e.g. 'Queen · Sage'"
@@ -432,6 +434,8 @@ type CartSavedItem @areas(in: [STORE]) {
   id: UUID!
   offerId: UUID!
   productId: UUID!
+  "For the product link /p/{productSlug}/{productId}; null when the catalog did not answer"
+  productSlug: String
   variantId: UUID!
   seller: CartSellerLabel!
   title: String!
@@ -721,6 +725,8 @@ type CheckoutLine @areas(in: [STORE]) {
   cartItemId: UUID
   offerId: UUID!
   productId: UUID!
+  "For the product link /p/{productSlug}/{productId}; null when it was not known when the line was quoted"
+  productSlug: String
   variantId: UUID!
   title: String!
   variantLabel: String!
@@ -851,6 +857,8 @@ type CheckoutPackageShipping @areas(in: [STORE]) {
   sellerName: String!
   amount: Money!
   free: Boolean!
+  "No delivery option is chosen yet (before an address): amount stays 0 and free is false; screens say 'Calculated at the next step'"
+  pending: Boolean!
 }
 
 type CheckoutTaxLine @areas(in: [STORE]) {
@@ -1387,10 +1395,11 @@ type HelpArticle @areas(in: [STORE]) {
   version: Int!
 }
 
+"Contact channels come from support; live chat is not offered"
 enum HelpContactKind @areas(in: [STORE]) {
-  CHAT
   PHONE
   MESSAGE
+  EMAIL
 }
 
 type HelpContactChannel @areas(in: [STORE]) {
@@ -1457,8 +1466,31 @@ type Customer {
   "Saved addresses, default first (at most maxAddresses, 20)"
   addresses: [CustomerAddress!]! @areas(in: [STORE, ADMIN])
   marketingPreferences: CustomerMarketingPreferences! @areas(in: [STORE, ADMIN])
-  "Data export and closure requests, newest first"
-  dataRequests: [CustomerDataRequest!]! @areas(in: [STORE, ADMIN])
+  "Data export and closure requests, newest first. Cancelled data exports are left out unless includeCancelled (kept for the audit trail)."
+  dataRequests(includeCancelled: Boolean = false): [CustomerDataRequest!]! @areas(in: [STORE, ADMIN])
+  "Account overview alerts (same as REST GET /overview alerts): delays, failed payments, payments being checked, returns and cases waiting on the customer. Sources that do not answer in time are left out."
+  overviewAlerts: [CustomerOverviewAlert!]! @areas(in: [STORE]) @cost(weight: 10)
+}
+
+"An alert on the Account tab home"
+type CustomerOverviewAlert @areas(in: [STORE]) {
+  kind: CustomerOverviewAlertKind!
+  title: String!
+  body: String!
+  orderId: UUID
+  orderRef: String
+  caseRef: String
+  returnRef: String
+  "What the app offers, e.g. wait, cancel_item, view_case, view_return, view_order"
+  actions: [String!]!
+}
+
+enum CustomerOverviewAlertKind @areas(in: [STORE]) {
+  ITEM_DELAYED
+  PAYMENT_BEING_CHECKED
+  RETURN_ACTION_NEEDED
+  CASE_WAITING_ON_YOU
+  PAYMENT_FAILED
 }
 
 enum CustomerAccountStatus {
@@ -1738,8 +1770,12 @@ type ConversationSubject @areas(in: [STORE, SELLER]) {
   returnRef: String
   caseId: UUID
   caseRef: String
+  "PRODUCT: the product asked about before purchase"
+  productId: UUID
   "e.g. Linen duvet cover"
   title: String!
+  "Order conversations: the items concerned, e.g. Linen duvet cover + 2 more items"
+  itemSummary: String
   imageUrl: URL
   "e.g. Package 3 of 3"
   packageLabel: String
@@ -1754,6 +1790,8 @@ enum ConversationSubjectKind @areas(in: [STORE, SELLER]) {
   CASE
   SELLER_ACCOUNT
   APPLICATION
+  "A pre-sale message about one of the seller's products (no order)"
+  PRODUCT
 }
 
 type ConversationPage implements Paged @areas(in: [STORE, SELLER]) {
@@ -1779,6 +1817,8 @@ type Message @areas(in: [STORE, SELLER]) {
   redactions: [MessageRedaction!]!
   "Hidden by moderation; body is empty"
   hidden: Boolean!
+  "The caller already reported this message"
+  viewerReported: Boolean!
   at: DateTime!
 }
 
@@ -2342,6 +2382,8 @@ type OrderGroup {
 type OrderItem {
   id: UUID!
   productId: UUID!
+  "Current product slug for the product link /p/{productSlug}/{productId}; null when the catalog did not answer"
+  productSlug: String
   variantId: UUID!
   offerId: UUID!
   title: String!
@@ -2655,7 +2697,7 @@ type OrderDelayedItem @areas(in: [STORE]) {
 }
 
 input OrderListFilter @areas(in: [STORE]) {
-  "Order reference or product title"
+  "Order reference, product title or seller name"
   q: String
   range: OrderDateRange
   from: Date
@@ -2883,8 +2925,8 @@ extend type Query {
 }
 
 extend type Customer {
-  "Status-tab counts and delayed packages (AccountOverview tiles, OrderList tabs, customer 360)"
-  orderCounts(range: OrderDateRange): OrderCounts! @areas(in: [STORE, ADMIN]) @source(module: "orders", fn: "countOrdersByTab") @cost(weight: 3)
+  "Status-tab counts and delayed packages (AccountOverview tiles, OrderList tabs, customer 360); q narrows the tab counts like the order list search"
+  orderCounts(range: OrderDateRange, q: String): OrderCounts! @areas(in: [STORE, ADMIN]) @source(module: "orders", fn: "countOrdersByTab") @cost(weight: 3)
   "Delay alerts with the new estimate and options (AccountOverview)"
   delayedItems: [OrderDelayedItem!]! @areas(in: [STORE]) @source(module: "orders", fn: "listDelayedItemsForCustomer")
 }
@@ -2982,6 +3024,8 @@ type PaymentStatus @areas(in: [STORE]) {
   methodLabel: String!
   amount: Money!
   orderRef: String
+  "When the order was placed; null while no order exists"
+  placedAt: DateTime
   lastCheckedAt: DateTime
   nextCheckInSeconds: Int
   decline: PaymentDecline
@@ -3626,6 +3670,8 @@ type Return {
   shipment: ReturnShipment
   "Refund progress (Requested, Under review, Approved, Processing, Sent), kept apart from the return status"
   refund: ReturnRefund
+  "Before the refund is decided: what the customer can expect back (isEstimate true); null once refund is set"
+  refundEstimate: ReturnRefundBreakdown
   "Replacement or exchange, with its own shipment"
   replacement: ReturnReplacement
   "Return terms accepted at purchase (frozen on the order item)"
@@ -3754,7 +3800,10 @@ type ReturnShipment {
   trackingNumber: String
   trackingUrl: URL
   labelUrl: URL
+  "Drop-off link the QR encodes (prepaid QR)"
   qrCodeUrl: URL
+  "Prepaid QR: the code the carrier scans at drop-off; apps draw the QR from it"
+  dropOffCode: String
   dropOffBy: DateTime
   dropOffPoints: [ReturnDropOffPoint!]!
   instructions: [String!]!
@@ -4748,8 +4797,31 @@ type StoreInfoMarket {
   serviceRegionLabel: String!
   "Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts)"
   legalName: String!
-  "One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA"
+  "One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR"
   companyLine: String!
+  "Where prices and delivery dates are estimated before a visitor gives an address (Deliver to Portland, OR 97205)"
+  defaultDeliveryLocation: StoreInfoDeliveryLocation
+  "Contact emails, postal address, founding year and headquarters for the About and contact pages"
+  company: StoreInfoCompany
+}
+
+type StoreInfoDeliveryLocation {
+  "e.g. 97205"
+  postalCode: String!
+  "e.g. Portland, OR 97205"
+  label: String!
+}
+
+type StoreInfoCompany {
+  helpEmail: Email
+  "Selling on Marketly enquiries"
+  sellersEmail: Email
+  pressEmail: Email
+  "Mailing address on one line"
+  postalAddress: String
+  foundedYear: Int
+  "e.g. Portland, OR"
+  headquarters: String
 }
 
 type StoreInfoSupport {
@@ -4817,7 +4889,7 @@ type Shipment {
   groupId: UUID!
   "Set for return parcels"
   returnId: UUID
-  "'Package 2 of 3'"
+  "'Shipment 2 of 3': this shipment among the order's shipments (orders' 'Package x of y' is the seller group); 'Return parcel' for returns"
   packageLabel: String!
   sellerName: String!
   shipFrom: String!
