@@ -135,7 +135,7 @@ export async function boot(): Promise<Kit> {
       },
       sellers: {
         getSeller: async (id: string) => (sellers.has(id) ? ({ id, ref: `SL-${id.slice(-5)}`, slug: 's', storeName: sellers.get(id)!.storeName, status: sellers.get(id)!.status ?? 'approved' } as any) : null),
-        getSellers: async (ids: string[]) => ids.filter((id) => sellers.has(id)).map((id) => ({ id, ref: `SL-${id.slice(-5)}`, storeName: sellers.get(id)!.storeName, status: sellers.get(id)!.status ?? 'approved' }) as any),
+        getSellers: async (ids: string[]) => ids.filter((id) => sellers.has(id)).map((id) => ({ id, ref: `SL-${id.slice(-5)}`, slug: `store-${id.slice(-5)}`, storeName: sellers.get(id)!.storeName, status: sellers.get(id)!.status ?? 'approved' }) as any),
       },
       customers: {
         getCustomer: async (id: string) => (customers.has(id) ? ({ id, userId: customers.get(id)!.userId ?? newId(), ref: `CU-${id.slice(-6)}`, displayName: customers.get(id)!.displayName, email: 'c@example.com', accountStatus: 'active', canOrder: true, canMessage: true } as any) : null),

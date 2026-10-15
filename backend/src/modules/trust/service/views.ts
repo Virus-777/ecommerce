@@ -4,7 +4,7 @@
  * that never name the reporter.
  */
 import type * as common from '../../../spec/common.js';
-import type { DetectionRule, Enforcement, EvidenceItem, EvidenceRequest, MyEnforcement, MyReport, Recommendation, ReportRow, StaffRef, TrustAppeal, TrustReport, TrustSubject } from '../../../spec/trust.js';
+import type { DetectionRule, Enforcement, EvidenceItem, EvidenceRequest, MyEnforcement, MyReport, Recommendation, ReportRow, StaffRef, TrustAppeal, TrustNextStep, TrustReport, TrustSubject } from '../../../spec/trust.js';
 import { ACTIONS, appealRoute, deadline, humanize, isAction, reporterStatus, riskLevel, SCREENS, WHAT, type SubjectType, type Thresholds } from '../domain/rules.js';
 import type { AppealRec, EnforcementRec, EvidenceRec, RecommendationRec, RequestRec, RuleRec, SubjectRec } from '../ports.js';
 import { actorOf, type Agg, type Core } from './core.js';
@@ -18,7 +18,12 @@ export interface ViewCtx {
   now: Date;
   /** Current status labels from the owning modules (getReport) */
   statusLabels?: Map<string, string>;
+  /** Seller subjects' reference and slug from sellers (G69d) */
+  sellers?: SellerRefs;
 }
+
+/** Seller id → reference (SL-…) and store slug */
+export type SellerRefs = Map<string, { ref: string; slug: string }>;
 
 export class Views {
   constructor(private readonly core: Core) {}
@@ -30,18 +35,30 @@ export class Views {
       ...aggs.flatMap((a) => [a.report.assignee_staff_id, ...a.recommendations.flatMap((r) => [r.owner_staff_id, r.decided_by, r.created_by, r.routed_by])]),
     ];
     const mediaIds = o.media === false ? [] : [...(o.extraMedia ?? []), ...aggs.flatMap((a) => [...a.evidence.flatMap((e) => e.media_ids), ...a.requests.flatMap((r) => r.answer_media_ids)])];
-    const [staff, media, thresholds] = await Promise.all([this.core.staffRefs(staffIds), this.core.mediaRefs(mediaIds), this.core.thresholds()]);
-    return { staff, media, thresholds, now: this.core.now() };
+    const sellerIds = aggs.flatMap((a) => [...a.subjects.filter((s) => s.subject_type === 'seller').map((s) => s.subject_id), ...a.requests.filter((r) => r.to_type === 'seller').map((r) => r.to_id)]);
+    const [staff, media, thresholds, sellers] = await Promise.all([this.core.staffRefs(staffIds), this.core.mediaRefs(mediaIds), this.core.thresholds(), this.sellerRefs(sellerIds)]);
+    return { staff, media, thresholds, now: this.core.now(), sellers };
   }
 
-  subject(s: SubjectRec, statusLabels?: Map<string, string>): TrustSubject {
+  /** G69d: seller subjects show the seller's reference and slug (sellers.getSellers; empty when sellers is off) */
+  async sellerRefs(ids: string[]): Promise<SellerRefs> {
+    const unique = [...new Set(ids)];
+    const out: SellerRefs = new Map();
+    if (!unique.length) return out;
+    for (const s of (await this.core.soft('sellers', 'getSellers', (m) => m.getSellers(unique))) ?? []) out.set(s.id, { ref: s.ref, slug: s.slug });
+    return out;
+  }
+
+  subject(s: SubjectRec, statusLabels?: Map<string, string>, sellers?: SellerRefs): TrustSubject {
+    const seller = s.subject_type === 'seller' ? sellers?.get(s.subject_id) : undefined;
     return {
       type: s.subject_type as SubjectType,
       id: s.subject_id,
-      ref: s.ref ?? null,
+      ref: s.ref ?? seller?.ref ?? null,
       label: s.label,
       statusLabel: statusLabels?.get(`${s.subject_type}:${s.subject_id}`) ?? null,
       screen: SCREENS[s.subject_type as SubjectType] ?? null,
+      slug: seller?.slug ?? null,
     };
   }
 
@@ -59,12 +76,12 @@ export class Views {
     };
   }
 
-  request(r: RequestRec, subjects: SubjectRec[], media: Map<string, common.MediaRef>, now: Date, reportRef: string | null = null): EvidenceRequest {
+  request(r: RequestRec, subjects: SubjectRec[], media: Map<string, common.MediaRef>, now: Date, reportRef: string | null = null, sellers?: SellerRefs): EvidenceRequest {
     const s = subjects.find((x) => x.subject_type === r.to_type && x.subject_id === r.to_id);
     return {
       id: r.id,
       reportId: r.report_id,
-      to: s ? this.subject(s) : { type: r.to_type as SubjectType, id: r.to_id, ref: null, label: humanize(r.to_type), statusLabel: null, screen: SCREENS[r.to_type as SubjectType] ?? null },
+      to: this.subject(s ?? { report_id: r.report_id, subject_type: r.to_type, subject_id: r.to_id, ref: null, label: humanize(r.to_type) }, undefined, sellers),
       question: r.question,
       dueAt: r.due_at.toISOString(),
       deadline: deadline(r.due_at, r.state === 'open' ? now : (r.answered_at ?? r.due_at), 5 * 86_400_000),
@@ -168,7 +185,7 @@ export class Views {
       reporter: summary ? null : { actor: { kind: r.reporter_kind, id: r.reporter_id ?? null }, name: r.reporter_name ?? null, organization: r.reporter_org ?? null, contactEmail: r.reporter_contact ?? null },
       reporterCount: r.reporter_count,
       detector: r.detector ?? null,
-      subjects: agg.subjects.map((s) => this.subject(s, c.statusLabels)),
+      subjects: agg.subjects.map((s) => this.subject(s, c.statusLabels, c.sellers)),
       status: r.status as TrustReport['status'],
       riskScore: r.risk_score,
       riskLevel: riskLevel(r.risk_score, c.thresholds),
@@ -177,7 +194,7 @@ export class Views {
       assignee: r.assignee_staff_id ? (c.staff.get(r.assignee_staff_id) ?? { staffId: r.assignee_staff_id, name: 'Staff member' }) : null,
       deadline: r.due_at && this.core.isActive(r.status) ? deadline(r.due_at, c.now, Math.max(3_600_000, r.due_at.getTime() - r.created_at.getTime())) : null,
       evidence: summary ? [] : agg.evidence.map((e) => this.evidence(e, c.media)),
-      evidenceRequests: summary ? [] : agg.requests.map((x) => this.request(x, agg.subjects, c.media, c.now, r.ref)),
+      evidenceRequests: summary ? [] : agg.requests.map((x) => this.request(x, agg.subjects, c.media, c.now, r.ref, c.sellers)),
       recommendations: agg.recommendations.map((x) => this.recommendation(x, c.staff)),
       enforcements: agg.enforcements.map((x) => this.enforcement(x, r.ref)),
       linkedCaseRefs: [...new Set(casesLinked)],
@@ -194,9 +211,35 @@ export class Views {
       resolution: r.resolution ?? null,
       reporterOutcome: r.reporter_outcome ?? null,
       assessment: r.assessment && !r.assessment.pending ? { level: r.assessment.level, flags: r.assessment.flags, recommendation: r.assessment.recommendation, recommendedHoldDays: r.assessment.recommendedHoldDays ?? null } : null,
+      nextStep: this.nextStep(agg, c.now),
       createdAt: r.created_at.toISOString(),
       updatedAt: r.updated_at.toISOString(),
     };
+  }
+
+  /**
+   * G74: what an active report needs next, from its state, in this order: a failed enforcement, a missing assessment,
+   * an investigator, a recommendation to send, one the owner team is deciding, proof not answered yet, evidence, a
+   * recommendation, and once everything is decided, the resolution. Null for closed reports.
+   */
+  nextStep(agg: Agg, now: Date): TrustNextStep | null {
+    const r = agg.report;
+    if (!this.core.isActive(r.status)) return null;
+    const step = (key: TrustNextStep['key'], label: string, detail: string | null = null): TrustNextStep => ({ key, label, detail });
+    const failed = agg.enforcements.find((e) => e.execution_state === 'failed');
+    if (failed) return step('check_enforcement', 'An enforcement failed: check it with the owner team', failed.failure ?? null);
+    if ((r.type === 'seller_application' || r.type === 'account_risk') && (!r.assessment || r.assessment.pending)) return step('record_assessment', 'Record the risk assessment');
+    if (!r.assignee_staff_id) return step('assign', 'Assign an investigator');
+    const pending = agg.recommendations.find((x) => x.state === 'pending');
+    if (pending) return step('route_recommendation', 'Send the recommendation to the owner team', pending.label);
+    const waiting = agg.recommendations.find((x) => x.state === 'sent_to_owner');
+    if (waiting) return step('await_owner', `Waiting for ${humanize(waiting.owner_team)} to decide`, waiting.label);
+    const proof = agg.requests.filter((x) => x.state === 'open' && x.due_at.getTime() > now.getTime()).sort((a, b) => a.due_at.getTime() - b.due_at.getTime())[0];
+    if (proof) return step('await_proof', `Waiting for proof from the ${proof.to_type}`, `Due ${proof.due_at.toISOString().slice(0, 10)}`);
+    if (!agg.recommendations.length && !agg.enforcements.length) {
+      return agg.evidence.length ? step('add_recommendation', 'Recommend an action to the owner team, or dismiss the report') : step('gather_evidence', 'Add evidence or ask for proof');
+    }
+    return step('resolve', 'Resolve the report with an outcome');
   }
 
   reporterLabel(agg: Agg): string {
@@ -240,7 +283,7 @@ export class Views {
       riskLevel: riskLevel(r.risk_score, c.thresholds),
       source: r.source,
       reporterLabel: this.reporterLabel(agg),
-      subjects: agg.subjects.map((s) => this.subject(s)),
+      subjects: agg.subjects.map((s) => this.subject(s, undefined, c.sellers)),
       assignee: r.assignee_staff_id ? (c.staff.get(r.assignee_staff_id) ?? { staffId: r.assignee_staff_id, name: 'Staff member' }) : null,
       recommendations: this.counts(agg.recommendations),
       deadline: r.due_at && this.core.isActive(r.status) ? deadline(r.due_at, c.now, Math.max(3_600_000, r.due_at.getTime() - r.created_at.getTime())) : null,

@@ -41,7 +41,20 @@
       "type": "enum(seller|product|offer|order|customer|review|question|answer|message|conversation|application|storefront_claim|payment)",
       "id": "uuid", "ref": "string?", "label": "string",
       "statusLabel": { "type": "string?", "desc": "Current status in the owning module, e.g. Restricted" },
-      "screen": { "type": "string?", "desc": "Admin screen to open, e.g. admin/seller" }
+      "screen": { "type": "string?", "desc": "Admin screen to open, e.g. admin/seller" },
+      "slug": { "type": "string?", "desc": "Seller subjects: the store's slug for /sellers/{slug} links; ref and slug are read from sellers (getSellers) when the report is shown" }
+    },
+    "TrustNextStep": {
+      "key": { "type": "enum(check_enforcement|record_assessment|assign|route_recommendation|await_owner|await_proof|gather_evidence|add_recommendation|resolve)", "desc": "What the report needs next, from its state: a failed enforcement, a missing assessment (seller_application, account_risk), no investigator, a recommendation not sent yet, one waiting for the owner team, proof asked for and not answered yet, no evidence, no recommendation, or everything decided (resolve it)" },
+      "label": { "type": "string", "desc": "e.g. Waiting for Catalog to decide" },
+      "detail": { "type": "string?", "desc": "e.g. Suspend the Gadget Grove offer for BRL-S2; Proof due Oct 14" }
+    },
+    "TrustReportBrief": { "id": "uuid", "ref": "string", "type": "string", "title": "string", "status": "string", "outcome": { "type": "string?", "desc": "resolution.outcome of a closed report" }, "createdAt": "datetime" },
+    "SubjectHistory": {
+      "subject": "TrustSubject",
+      "totalReports": { "type": "int", "desc": "Other reports naming this subject (merged ones left out)" },
+      "reports": { "type": "TrustReportBrief[]", "desc": "The 5 most recent of them" },
+      "enforcementsInForce": { "type": "int", "desc": "Enforcements against this subject not reversed (any report)" }
     },
     "RiskFactor": { "factor": "string", "weight": "int", "detail": "string" },
     "EvidenceItem": {
@@ -162,6 +175,8 @@
       "resolution": { "type": "json?", "desc": "{ outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred|dismissed, summary, decidedBy, decidedAt }: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment" },
       "reporterOutcome": { "type": "text?", "desc": "Text the reporter sees" },
       "assessment": { "type": "json?", "desc": "For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? }" },
+      "nextStep": { "type": "TrustNextStep?", "desc": "Recommended next step while the report is active (null once resolved, dismissed or merged)" },
+      "subjectHistory": { "type": "SubjectHistory[]?", "desc": "getReport only: other reports and enforcements about each subject of this report" },
       "createdAt": "datetime", "updatedAt": "datetime"
     },
     "ReportRow": {
@@ -297,6 +312,7 @@
     { "id": "escalateReport", "area": "admin", "method": "POST", "path": "/reports/{id}/escalate", "summary": "Escalate to the Trust and Risk Manager or Business Owner", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "reason": "text" }, "response": "TrustReport", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "events": ["trust.report.escalated"], "screens": ["admin/trust"] },
     { "id": "addEvidence", "area": "admin", "method": "POST", "path": "/reports/{id}/evidence", "summary": "Add evidence (check result, document, photo, note, linked record)", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": "EvidenceInput", "response": "EvidenceItem", "status": 201, "audited": true, "screens": ["admin/trust"] },
     { "id": "requestEvidence", "area": "admin", "method": "POST", "path": "/reports/{id}/evidence-requests", "summary": "Ask the seller or customer for proof with a deadline", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "to": "TrustSubject", "question": "text", "dueAt": "datetime" }, "response": "EvidenceRequest", "status": 201, "audited": true, "events": ["trust.evidence.requested"], "screens": ["admin/trust"] },
+    { "id": "cancelEvidenceRequest", "area": "admin", "method": "POST", "path": "/evidence-requests/{id}/cancel", "summary": "Cancel an open proof request", "desc": "Only while open; the seller's or customer's 'send proof' notice is closed and the report's timeline notes it. The reason is optional (default 'No longer needed').", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "reason": "text?" }, "response": "EvidenceRequest", "errors": ["ILLEGAL_TRANSITION"], "audited": true, "screens": ["admin/trust"] },
     { "id": "linkRecords", "area": "admin", "method": "POST", "path": "/reports/{id}/links", "summary": "Link more subjects or a support case", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "subjects": "TrustSubject[]?", "caseRefs": "string[]?" }, "response": "TrustReport", "screens": ["admin/trust"] },
     { "id": "overrideRiskScore", "area": "admin", "method": "POST", "path": "/reports/{id}/risk-score", "summary": "Override the risk score with a reason", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "score": "int", "reason": "text" }, "response": "TrustReport", "audited": true, "screens": ["admin/trust"] },
     { "id": "addReportNote", "area": "admin", "method": "POST", "path": "/reports/{id}/notes", "summary": "Internal note", "auth": "staff", "permission": "trust.reports.investigate", "params": { "id": "uuid" }, "body": { "body": "text" }, "response": "TrustReport", "screens": ["admin/trust"] },

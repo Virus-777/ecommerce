@@ -26,6 +26,8 @@ export const adminRoutes = (service: TrustService) =>
     addEvidence: async (i) => service.reports.addEvidence(i.params.id, i.body, byOf(i)),
     /** POST /reports/{id}/evidence-requests: Ask the seller or customer for proof with a deadline */
     requestEvidence: async (i) => service.reports.requestEvidence(i.params.id, i.body, byOf(i)),
+    /** POST /evidence-requests/{id}/cancel: Cancel an open proof request (G73) */
+    cancelEvidenceRequest: async (i) => service.reports.cancelRequest(i.params.id, i.body ?? {}, byOf(i)),
     /** POST /reports/{id}/links: Link more subjects or a support case */
     linkRecords: async (i) => service.reports.link(i.params.id, i.body, byOf(i)),
     /** POST /reports/{id}/risk-score: Override the risk score with a reason */

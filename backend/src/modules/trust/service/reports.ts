@@ -9,13 +9,13 @@ import { decodeCursor, encodeCursor, toPageRequest, type PageRequest } from '../
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
 import type * as reports from '../../../spec/reports.js';
-import type { EvidenceInput, EvidenceItem, EvidenceRequest, MyReport, ReportReporter, ReportRow, StoreReportInput, TrustOverview, TrustReport, TrustSubject } from '../../../spec/trust.js';
+import type { EvidenceInput, EvidenceItem, EvidenceRequest, MyReport, ReportReporter, ReportRow, StoreReportInput, SubjectHistory, TrustOverview, TrustReport, TrustSubject } from '../../../spec/trust.js';
 import { trustReportMachine, evidenceRequestMachine } from '../domain/state-machines.js';
 import { ACTIVE, FORM_TYPES, humanize, OUTCOMES, REPORT_TYPES, riskLevel, SUBJECT_TYPES, TYPE_LABELS, type ReportStatus, type SubjectType } from '../domain/rules.js';
 import type { Assessment, EvidenceRec, ReportFilter, ReportRec } from '../ports.js';
 import type { TrustRepository } from '../repository.js';
 import { Batch, illegal, invalid, invalidField, notFound, type Agg, type By, type Core } from './core.js';
-import type { Views } from './views.js';
+import type { SellerRefs, Views } from './views.js';
 
 export const DATASET = 'trust.admin.reports';
 
@@ -590,8 +590,33 @@ export class Reports {
 
   async full(agg: Agg, o: { labels?: boolean } = {}): Promise<TrustReport> {
     const c = await this.views.context([agg]);
-    if (o.labels) c.statusLabels = await this.statusLabels(agg);
-    return this.views.report(agg, c);
+    if (!o.labels) return this.views.report(agg, c);
+    c.statusLabels = await this.statusLabels(agg);
+    return { ...this.views.report(agg, c), subjectHistory: await this.subjectHistory(agg, c.sellers) };
+  }
+
+  /**
+   * G74: for each subject of the report (up to 10), the other reports naming it (newest 5, merged ones left out) and
+   * the enforcements against it that are not reversed.
+   */
+  async subjectHistory(agg: Agg, sellers?: SellerRefs): Promise<SubjectHistory[]> {
+    const repo = this.core.repo;
+    const out: SubjectHistory[] = [];
+    for (const s of agg.subjects.slice(0, 10)) {
+      const hits = await repo.find('report_subjects', { subject_type: s.subject_type, subject_id: s.subject_id });
+      const ids = [...new Set(hits.map((h) => h.report_id))].filter((id) => id !== agg.report.id && !agg.mergedIds.includes(id));
+      const others = ids.length ? await repo.find('reports', { id: ids, status: { op: '<>', value: 'merged' } }, { orderBy: [['created_at', 'desc']] }) : [];
+      const targets = await repo.find('enforcement_targets', { target_type: s.subject_type, target_id: s.subject_id });
+      const enforcementIds = [...new Set(targets.map((t) => t.enforcement_id))];
+      const inForce = enforcementIds.length ? await repo.count('enforcements', { id: enforcementIds, execution_state: { op: 'not in', value: ['reversed', 'failed'] } }) : 0;
+      out.push({
+        subject: this.views.subject(s, undefined, sellers),
+        totalReports: others.length,
+        reports: others.slice(0, 5).map((r) => ({ id: r.id, ref: r.ref, type: r.type, title: r.title, status: r.status, outcome: (r.resolution as { outcome?: string } | null)?.outcome ?? null, createdAt: r.created_at.toISOString() })),
+        enforcementsInForce: inForce,
+      });
+    }
+    return out;
   }
 
   async get(id: string): Promise<TrustReport> {
@@ -804,6 +829,25 @@ export class Reports {
     await this.core.soft('notifications', 'resolve evidence notice', (n) => n.resolve(`trust-evidence:${requestId}`, 'Proof sent'));
     const agg = (await this.core.load(req.report_id))!;
     return this.views.request(row, agg.subjects, await this.core.mediaRefs(row.answer_media_ids), this.core.now(), agg.report.ref);
+  }
+
+  /** G73: staff cancel an open proof request; the "send proof" notice closes and the report's timeline notes it */
+  async cancelRequest(requestId: string, body: { reason?: string | null }, by: By): Promise<EvidenceRequest> {
+    const req = isUuid(requestId) ? await this.core.repo.get('evidence_requests', requestId) : undefined;
+    if (!req) throw notFound('Evidence request');
+    const reason = text(body.reason) ? body.reason!.trim() : 'No longer needed';
+    const row = await this.core.write(req.report_id, by, async (tx) => {
+      const cur = (await tx.get('evidence_requests', requestId, { forUpdate: true }))!;
+      const state = evidenceRequestMachine.next(cur.state as 'open', 'cancel');
+      const row = await tx.update('evidence_requests', requestId, { state });
+      await this.core.timeline(tx, req.report_id, [{ kind: 'evidence_request_cancelled', label: `Proof request to the ${cur.to_type} cancelled`, text: reason, actor: by.actor, meta: { requestId } }]);
+      await tx.update('reports', req.report_id, { updated_at: this.core.now() });
+      return row;
+    });
+    await this.core.soft('notifications', 'resolve evidence notice', (n) => n.resolve(`trust-evidence:${requestId}`, 'Request cancelled'));
+    const agg = (await this.core.load(req.report_id))!;
+    await this.core.audit({ action: 'trust.evidence.cancel', actionLabel: 'Cancelled a proof request', target: this.target(agg.report), before: { state: req.state }, after: { state: row.state, question: row.question }, reason }, by);
+    return this.views.request(row, agg.subjects, await this.core.mediaRefs(row.answer_media_ids), this.core.now(), agg.report.ref, await this.views.sellerRefs(row.to_type === 'seller' ? [row.to_id] : []));
   }
 
   /** Requests addressed to a seller or customer (any id it may be stored under); the reporter is never named */

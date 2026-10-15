@@ -50,6 +50,8 @@ export interface TrustSubject {
   statusLabel?: string | null;
   /** Admin screen to open, e.g. admin/seller */
   screen?: string | null;
+  /** Seller subjects: the store's slug for /sellers/{slug} links; ref and slug are read from sellers (getSellers) when the report is shown */
+  slug?: string | null;
 }
 
 export const TrustSubject: z.ZodType<TrustSubject> = z.object({
@@ -59,7 +61,65 @@ export const TrustSubject: z.ZodType<TrustSubject> = z.object({
   label: z.string(),
   statusLabel: z.string().describe("Current status in the owning module, e.g. Restricted").nullish(),
   screen: z.string().describe("Admin screen to open, e.g. admin/seller").nullish(),
+  slug: z.string().describe("Seller subjects: the store's slug for /sellers/{slug} links; ref and slug are read from sellers (getSellers) when the report is shown").nullish(),
 }).register(common.apiTypes, { id: "trust.TrustSubject" });
+
+export interface TrustNextStep {
+  /** What the report needs next, from its state: a failed enforcement, a missing assessment (seller_application, account_risk), no investigator, a recommendation not sent yet, one waiting for the owner team, proof asked for and not answered yet, no evidence, no recommendation, or everything decided (resolve it) */
+  key: "check_enforcement" | "record_assessment" | "assign" | "route_recommendation" | "await_owner" | "await_proof" | "gather_evidence" | "add_recommendation" | "resolve";
+  /** e.g. Waiting for Catalog to decide */
+  label: string;
+  /** e.g. Suspend the Gadget Grove offer for BRL-S2; Proof due Oct 14 */
+  detail?: string | null;
+}
+
+export const TrustNextStep: z.ZodType<TrustNextStep> = z.object({
+  key: z.enum(["check_enforcement", "record_assessment", "assign", "route_recommendation", "await_owner", "await_proof", "gather_evidence", "add_recommendation", "resolve"]).describe("What the report needs next, from its state: a failed enforcement, a missing assessment (seller_application, account_risk), no investigator, a recommendation not sent yet, one waiting for the owner team, proof asked for and not answered yet, no evidence, no recommendation, or everything decided (resolve it)"),
+  label: z.string().describe("e.g. Waiting for Catalog to decide"),
+  detail: z.string().describe("e.g. Suspend the Gadget Grove offer for BRL-S2; Proof due Oct 14").nullish(),
+}).register(common.apiTypes, { id: "trust.TrustNextStep" });
+
+export interface TrustReportBrief {
+  id: string;
+  ref: string;
+  type: string;
+  title: string;
+  status: string;
+  /** resolution.outcome of a closed report */
+  outcome?: string | null;
+  createdAt: string;
+}
+
+export const TrustReportBrief: z.ZodType<TrustReportBrief> = z.object({
+  id: z.uuid(),
+  ref: z.string(),
+  type: z.string(),
+  title: z.string(),
+  status: z.string(),
+  outcome: z.string().describe("resolution.outcome of a closed report").nullish(),
+  createdAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "trust.TrustReportBrief" });
+
+export interface SubjectHistory {
+  subject: TrustSubject;
+  /** Other reports naming this subject (merged ones left out) */
+  totalReports: number;
+  /** The 5 most recent of them */
+  reports: TrustReportBrief[];
+  /** Enforcements against this subject not reversed (any report) */
+  enforcementsInForce: number;
+}
+
+export const SubjectHistory: z.ZodType<SubjectHistory> = z.object({
+  get subject() {
+    return TrustSubject;
+  },
+  totalReports: z.number().int().describe("Other reports naming this subject (merged ones left out)"),
+  get reports() {
+    return z.array(TrustReportBrief);
+  },
+  enforcementsInForce: z.number().int().describe("Enforcements against this subject not reversed (any report)"),
+}).register(common.apiTypes, { id: "trust.SubjectHistory" });
 
 export interface RiskFactor {
   factor: string;
@@ -500,6 +560,10 @@ export interface TrustReport {
   reporterOutcome?: string | null;
   /** For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? } */
   assessment?: unknown | null;
+  /** Recommended next step while the report is active (null once resolved, dismissed or merged) */
+  nextStep?: TrustNextStep | null;
+  /** getReport only: other reports and enforcements about each subject of this report */
+  subjectHistory?: SubjectHistory[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -551,6 +615,12 @@ export const TrustReport: z.ZodType<TrustReport> = z.object({
   resolution: z.unknown().describe("{ outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred|dismissed, summary, decidedBy, decidedAt }: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment").nullish(),
   reporterOutcome: z.string().describe("Text the reporter sees").nullish(),
   assessment: z.unknown().describe("For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? }").nullish(),
+  get nextStep() {
+    return TrustNextStep.nullish();
+  },
+  get subjectHistory() {
+    return z.array(SubjectHistory).nullish();
+  },
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "trust.TrustReport" });
@@ -1662,6 +1732,29 @@ export const endpoints = defineEndpoints({
     status: 201,
     audited: true,
     events: ["trust.evidence.requested"],
+    screens: ["admin/trust"],
+    phase: 1,
+  },
+  cancelEvidenceRequest: {
+    area: "admin",
+    method: "POST",
+    path: "/evidence-requests/{id}/cancel",
+    auth: "staff",
+    permission: "trust.reports.investigate",
+    scope: "staff",
+    summary: "Cancel an open proof request",
+    desc: "Only while open; the seller's or customer's 'send proof' notice is closed and the report's timeline notes it. The reason is optional (default 'No longer needed').",
+    params: () =>
+      z.object({
+        id: z.uuid(),
+      }),
+    body: () => z.object({
+      reason: z.string().nullish(),
+    }),
+    response: () => EvidenceRequest,
+    status: 200,
+    errors: ["ILLEGAL_TRANSITION"],
+    audited: true,
     screens: ["admin/trust"],
     phase: 1,
   },

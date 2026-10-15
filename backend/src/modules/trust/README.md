@@ -62,6 +62,7 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | POST | `/api/admin/trust/reports/{id}/escalate` | Escalate to the Trust and Risk Manager or Business Owner _(audited)_ | staff<br>`trust.reports.investigate` | `{ reason: text }` → `TrustReport` |
 | POST | `/api/admin/trust/reports/{id}/evidence` | Add evidence (check result, document, photo, note, linked record) _(audited)_ | staff<br>`trust.reports.investigate` | `EvidenceInput` → `EvidenceItem` |
 | POST | `/api/admin/trust/reports/{id}/evidence-requests` | Ask the seller or customer for proof with a deadline _(audited)_ | staff<br>`trust.reports.investigate` | `{ to: TrustSubject, question: text, dueAt: datetime }` → `EvidenceRequest` |
+| POST | `/api/admin/trust/evidence-requests/{id}/cancel` | Cancel an open proof request _(audited)_ | staff<br>`trust.reports.investigate` | `{ reason: text? }` → `EvidenceRequest` |
 | POST | `/api/admin/trust/reports/{id}/links` | Link more subjects or a support case | staff<br>`trust.reports.investigate` | `{ subjects: TrustSubject[]?, caseRefs: string[]? }` → `TrustReport` |
 | POST | `/api/admin/trust/reports/{id}/risk-score` | Override the risk score with a reason _(audited)_ | staff<br>`trust.reports.investigate` | `{ score: int, reason: text }` → `TrustReport` |
 | POST | `/api/admin/trust/reports/{id}/notes` | Internal note | staff<br>`trust.reports.investigate` | `{ body: text }` → `TrustReport` |
@@ -120,6 +121,36 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | label | `string` |
 | statusLabel | `string?` Current status in the owning module, e.g. Restricted |
 | screen | `string?` Admin screen to open, e.g. admin/seller |
+| slug | `string?` Seller subjects: the store's slug for /sellers/{slug} links; ref and slug are read from sellers (getSellers) when the report is shown |
+
+### TrustNextStep
+
+| Field | Type |
+|---|---|
+| key | `enum(check_enforcement|record_assessment|assign|route_recommendation|await_owner|await_proof|gather_evidence|add_recommendation|resolve)` What the report needs next, from its state: a failed enforcement, a missing assessment (seller_application, account_risk), no investigator, a recommendation not sent yet, one waiting for the owner team, proof asked for and not answered yet, no evidence, no recommendation, or everything decided (resolve it) |
+| label | `string` e.g. Waiting for Catalog to decide |
+| detail | `string?` e.g. Suspend the Gadget Grove offer for BRL-S2; Proof due Oct 14 |
+
+### TrustReportBrief
+
+| Field | Type |
+|---|---|
+| id | `uuid` |
+| ref | `string` |
+| type | `string` |
+| title | `string` |
+| status | `string` |
+| outcome | `string?` resolution.outcome of a closed report |
+| createdAt | `datetime` |
+
+### SubjectHistory
+
+| Field | Type |
+|---|---|
+| subject | `TrustSubject` |
+| totalReports | `int` Other reports naming this subject (merged ones left out) |
+| reports | `TrustReportBrief[]` The 5 most recent of them |
+| enforcementsInForce | `int` Enforcements against this subject not reversed (any report) |
 
 ### RiskFactor
 
@@ -351,6 +382,8 @@ Trust and Risk's case file: reports of counterfeit goods, suspicious orders, fak
 | resolution | `json?` { outcome: action_taken|no_violation|insufficient_evidence|duplicate|referred|dismissed, summary, decidedBy, decidedAt }: duplicate when merged into another report, dismissed by dismissReport, referred by recordAssessment |
 | reporterOutcome | `text?` Text the reporter sees |
 | assessment | `json?` For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? } |
+| nextStep | `TrustNextStep?` Recommended next step while the report is active (null once resolved, dismissed or merged) |
+| subjectHistory | `SubjectHistory[]?` getReport only: other reports and enforcements about each subject of this report |
 | createdAt | `datetime` |
 | updatedAt | `datetime` |
 
