@@ -20,6 +20,8 @@ import {
   defaultEligibleRoleKeys,
   expandPermissions,
   permissionLabel,
+  VIEW_COMPANIONS,
+  viewCompanions,
 } from '../domain/seed.js';
 import type { ActionRow, LimitRow, RoleRow } from '../ports.js';
 import type { AccessRepository } from '../repository.js';
@@ -263,6 +265,17 @@ export class Core {
         if (bo.system && !bo.archived_at) {
           const newViews = expandPermissions(['*.view'], staffKeys.filter((k) => !known.has(k)));
           await tx.addRolePermissions(bo.id, newViews, 'system', now);
+        }
+      }
+      // G77: a companion view key registered for the first time goes to every role holding a key under its prefix
+      // (e.g. returns.inspections.view to the Returns Manager, who records inspections)
+      const fresh = staffKeys.filter((k) => !known.has(k));
+      if (known.size && fresh.some((k) => k in VIEW_COMPANIONS)) {
+        const roles = (await tx.listRoles()).filter((r) => !r.archived_at);
+        const held = await tx.rolePermissions(roles.map((r) => r.id));
+        for (const r of roles) {
+          const views = viewCompanions(held.filter((p) => p.role_id === r.id).map((p) => p.permission_key), fresh);
+          if (views.length) await tx.addRolePermissions(r.id, views, 'system', now);
         }
       }
     });

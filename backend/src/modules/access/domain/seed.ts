@@ -326,7 +326,26 @@ export const SYSTEM_ROLES: SeedRole[] = [
   },
 ];
 
-/** Expands a seed permission list against the registry's staff keys. */
+/**
+ * G77: read-only keys for admin pages that were gated by manage keys. A role holding any key under the prefix (e.g.
+ * returns.inspections.record) also holds the view key, so nobody loses a screen when the reads move to it.
+ */
+export const VIEW_COMPANIONS: Readonly<Record<string, string>> = {
+  'catalog.view': 'catalog.',
+  'content.view': 'content.',
+  'offers.official.view': 'offers.official.',
+  'sellers.applications.view': 'sellers.applications.',
+  'returns.inspections.view': 'returns.inspections.',
+};
+
+/** The companion view keys (among `available`) a role holding `held` should also hold */
+export function viewCompanions(held: readonly string[], available: readonly string[]): string[] {
+  return Object.entries(VIEW_COMPANIONS)
+    .filter(([view, prefix]) => available.includes(view) && !held.includes(view) && held.some((k) => k !== view && k.startsWith(prefix)))
+    .map(([view]) => view);
+}
+
+/** Expands a seed permission list against the registry's staff keys (with the G77 companion view keys). */
 export function expandPermissions(patterns: readonly string[], staffKeys: readonly string[]): string[] {
   const out = new Set<string>();
   const matches = (p: string, key: string) => {
@@ -336,6 +355,7 @@ export function expandPermissions(patterns: readonly string[], staffKeys: readon
   };
   for (const p of patterns.filter((x) => !x.startsWith('!'))) for (const k of staffKeys) if (matches(p, k)) out.add(k);
   for (const p of patterns.filter((x) => x.startsWith('!'))) for (const k of [...out]) if (matches(p.slice(1), k)) out.delete(k);
+  for (const view of viewCompanions([...out], staffKeys)) out.add(view);
   return [...out].sort();
 }
 

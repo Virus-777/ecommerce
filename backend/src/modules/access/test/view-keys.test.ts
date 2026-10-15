@@ -53,6 +53,37 @@ describe('Business Owner view keys (G77)', () => {
     expect(keys).not.toContain(removed);
   });
 
+  it('roles holding a manage or record key of those pages get the matching view key in the seed', () => {
+    const seed = (key: string) => SYSTEM_ROLES.find((r) => r.key === key)!.permissions;
+    const registry = [...G77_KEYS, 'returns.inspections.record', 'returns.requests.view', 'catalog.products.review', 'catalog.products.manage-official', 'offers.official.manage', 'offers.official.price', 'sellers.applications.review', 'content.pages.manage', 'content.homepage.manage', 'support.cases.view'];
+    expect(expandPermissions(seed('returns_manager'), registry)).toContain('returns.inspections.view');
+    expect(expandPermissions(seed('catalog_manager'), registry)).toContain('catalog.view');
+    expect(expandPermissions(seed('seller_manager'), registry)).toContain('sellers.applications.view');
+    const official = SYSTEM_ROLES.find((r) => r.permissions.includes('offers.official.manage'))!;
+    expect(expandPermissions(official.permissions, registry)).toEqual(expect.arrayContaining(['offers.official.view', 'catalog.view']));
+    const content = SYSTEM_ROLES.find((r) => r.permissions.some((p) => p.startsWith('content.')))!;
+    expect(expandPermissions(content.permissions, registry)).toContain('content.view');
+    // no key under the prefix: no view key
+    expect(expandPermissions(seed('support_agent'), registry)).not.toEqual(expect.arrayContaining(['catalog.view']));
+    expect(expandPermissions(seed('support_agent'), registry).filter((k) => G77_KEYS.includes(k))).toEqual([]);
+  });
+
+  it.runIf(staffViewKeys().includes('returns.inspections.view'))('an existing install: the Returns Manager gets returns.inspections.view when it is registered, and from the migration', async () => {
+    const roleId = await f.roleId('returns_manager');
+    const keys = async () => (await f.table('role_permissions').find({ role_id: roleId })).map((r) => r.permission_key as string);
+    expect(await keys()).toContain('returns.inspections.view'); // new install (seed)
+    await f.table('permissions').deleteMany({ key: 'returns.inspections.view' });
+    await f.table('role_permissions').deleteMany({ permission_key: 'returns.inspections.view' });
+    await f.svc.core.doSync();
+    expect(await keys()).toContain('returns.inspections.view');
+    expect(await ownerKeys()).toContain('returns.inspections.view');
+    // the migration restores it once more
+    await f.table('role_permissions').deleteMany({ role_id: roleId, permission_key: 'returns.inspections.view' });
+    await businessOwnerViewKeys.up(f.app.kernel.mongo.db);
+    expect(await keys()).toContain('returns.inspections.view');
+    expect((await f.table('role_permissions').find({ role_id: await f.roleId('support_agent') })).map((r) => r.permission_key)).not.toContain('returns.inspections.view');
+  });
+
   it('the migration gives a role seeded before them every view key, the wave 2 keys included once declared', async () => {
     const roleId = await f.roleId('business_owner');
     const views = staffViewKeys();
