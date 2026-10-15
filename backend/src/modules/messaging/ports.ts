@@ -30,6 +30,8 @@ export interface ConversationKey {
   order_item_id: string | null;
   return_id: string | null;
   case_id?: string | null;
+  /** Pre-sale conversations (G4): the product asked about; undefined is not compared */
+  product_id?: string | null;
 }
 
 /** Who owns a list of conversations (inbox scope) */

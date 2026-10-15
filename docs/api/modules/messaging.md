@@ -3,10 +3,10 @@
 Private service conversations linked to an order, item, return or case: customer with seller (or the Official Store), which Marketly support can join from a case, with attachments, read state, seller reply targets and overdue flags, and staff moderation. No promotional messages.
 
 - **Group:** After-sales and money · **Launch phase:** 1 · **Plan chapters:** 7, 11, 17
-- **Depends on:** [orders](orders.md) · **Optional:** [media](media.md), [sellers](sellers.md), [support](support.md), [returns](returns.md), [notifications](notifications.md), [trust](trust.md), [audit](audit.md), [customers](customers.md), [shipping](shipping.md), [identity](identity.md), [workqueues](workqueues.md), [settings](settings.md)
+- **Depends on:** [orders](orders.md) · **Optional:** [media](media.md), [sellers](sellers.md), [support](support.md), [returns](returns.md), [notifications](notifications.md), [trust](trust.md), [audit](audit.md), [customers](customers.md), [shipping](shipping.md), [identity](identity.md), [workqueues](workqueues.md), [settings](settings.md), [offers](offers.md), [catalog](catalog.md)
 
 ## Owns
-- Conversations between a customer and a seller (or the Official Store) about an order, item or return
+- Conversations between a customer and a seller (or the Official Store) about an order, item or return, or about a product before purchase (decision G4)
 - Marketly support joining a customer-seller conversation from a case (participant and system note); the customer-Marketly case thread itself is the support case
 - Messages with attachments, system notes (e.g. support joined from a case) and read state per participant
 - Seller reply target (e.g. 24 hours), awaiting-reply and overdue flags, seller response statistics
@@ -14,7 +14,7 @@ Private service conversations linked to an order, item, return or case: customer
 - Seller reply templates (phase 2)
 
 **Not here:**
-- Product questions and answers (public): reviews
+- Public product questions and answers: reviews (a private pre-sale message to the seller about a product is here)
 - Customer-Marketly support conversations, formal case threads, evidence and decisions: support (support can join an order conversation and post into it)
 - Promotional messages: notifications; marketing consent: customers (promotions never appear here)
 - Email and push delivery of new-message notices: notifications (reads messaging.message.sent)
@@ -26,6 +26,7 @@ Private service conversations linked to an order, item, return or case: customer
 | GET | `/api/store/messaging/conversations` | Inbox: conversations with sellers and Marketly support | shopper | Page<ConversationSummary> |
 | GET | `/api/store/messaging/conversations/{id}` | Conversation header: counterparty, response time, linked order or item and its status | shopper | `Conversation` |
 | GET | `/api/store/messaging/conversations/{id}/messages` | Messages, newest first (cursor for older) | shopper | Page<Message> |
+| POST | `/api/store/messaging/product-conversations` | Message the seller about one of its products before buying | customer | `ProductConversationInput` → `{ conversation: Conversation, message: Message }` |
 | POST | `/api/store/messaging/conversations` | Message a seller, the Official Store or Marketly support about an order, item or return | shopper | `StartConversationInput` → `{ conversation: Conversation, message: Message }` |
 | POST | `/api/store/messaging/conversations/{id}/messages` | Send a message with optional photos or files | shopper | `MessageInput` → `Message` |
 | POST | `/api/store/messaging/conversations/{id}/read` | Mark messages read up to a message | shopper | `{ upToMessageId: uuid }` → 204 No content |
@@ -39,7 +40,7 @@ Private service conversations linked to an order, item, return or case: customer
 | GET | `/api/seller/messaging/conversations` | Order messages with reply deadlines; overdue first | seller<br>`messaging.conversations.reply` | Page<ConversationSummary> |
 | GET | `/api/seller/messaging/conversations/{id}` | Conversation with order status and dispatch warning | seller<br>`messaging.conversations.reply` | `Conversation` |
 | GET | `/api/seller/messaging/conversations/{id}/messages` | Messages, newest first | seller<br>`messaging.conversations.reply` | Page<Message> |
-| POST | `/api/seller/messaging/conversations` | Message the buyer of one of the seller's orders | seller<br>`messaging.conversations.reply` | `SellerStartInput` → `{ conversation: Conversation, message: Message }` |
+| POST | `/api/seller/messaging/conversations` | Message the buyer of one of the seller's orders, optionally about an item or a return | seller<br>`messaging.conversations.reply` | `SellerStartInput` → `{ conversation: Conversation, message: Message }` |
 | POST | `/api/seller/messaging/conversations/{id}/messages` | Reply to the buyer | seller<br>`messaging.conversations.reply` | `MessageInput` → `Message` |
 | POST | `/api/seller/messaging/conversations/{id}/read` | Mark read | seller<br>`messaging.conversations.reply` | `{ upToMessageId: uuid }` → 204 No content |
 | GET | `/api/seller/messaging/response-stats` | Reply target, average reply time this month, awaiting and overdue counts | seller | `ResponseStats` |
@@ -69,7 +70,7 @@ Private service conversations linked to an order, item, return or case: customer
 
 | Field | Type |
 |---|---|
-| kind | `enum(order|order_item|return|case|seller_account|application)` |
+| kind | `enum(order|order_item|return|case|seller_account|application|product)` product: a pre-sale message about one of the seller's products (no order) |
 | orderId | `uuid?` |
 | orderRef | `string?` |
 | orderItemId | `uuid?` |
@@ -77,7 +78,9 @@ Private service conversations linked to an order, item, return or case: customer
 | returnRef | `string?` |
 | caseId | `uuid?` |
 | caseRef | `string?` |
+| productId | `uuid?` kind product: the product asked about |
 | title | `string` e.g. Linen duvet cover |
+| itemSummary | `string?` Order conversations: the items concerned, e.g. Linen duvet cover, or Linen duvet cover + 2 more items (the seller's package, or the one item). Null on conversations started before it was kept, until the conversation is opened |
 | imageUrl | `url?` |
 | packageLabel | `string?` e.g. Package 3 of 3 |
 | statusLabel | `string?` Live item or return status, e.g. Delayed |
@@ -111,7 +114,7 @@ Private service conversations linked to an order, item, return or case: customer
 | Field | Type |
 |---|---|
 | id | `uuid` |
-| kind | `enum(order|support|staff_seller)` staff_seller: started by Marketly staff with a seller or seller applicant |
+| kind | `enum(order|support|staff_seller)` order: customer with a seller or the Official Store (about an order, item, return, or a product before purchase: subject.kind product); staff_seller: started by Marketly staff with a seller or seller applicant |
 | counterparty | `Counterparty` From the caller's point of view |
 | participants | `Participant[]` |
 | subject | `Subject` |
@@ -159,6 +162,7 @@ Private service conversations linked to an order, item, return or case: customer
 | hidden | `bool` |
 | hiddenReason | `string?` |
 | clientMessageId | `string?` |
+| viewerReported | `bool` The caller already reported this message (any report status; staff reads: false) |
 | at | `datetime` |
 
 ### MessageInput
@@ -204,6 +208,16 @@ Private service conversations linked to an order, item, return or case: customer
 |---|---|
 | orderId | `uuid` |
 | orderItemId | `uuid?` |
+| returnId | `uuid?` A return on the seller's items of the order: the conversation is about the return (Return.conversation shows it; G55b) |
+| body | `text` |
+| mediaIds | `uuid[]?` |
+| clientMessageId | `string?` |
+
+### ProductConversationInput
+
+| Field | Type |
+|---|---|
+| offerId | `uuid` The offer the customer asks about (its seller and product); the Official Store's offers reach the Official Store team |
 | body | `text` |
 | mediaIds | `uuid[]?` |
 | clientMessageId | `string?` |
@@ -332,6 +346,7 @@ Actioning hides the message or locks the conversation; serious cases are referre
 | return_id | uuid? |
 | case_id | uuid? |
 | application_id | uuid? |
+| product_id | uuid? (pre-sale conversations: the product asked about; part of the key) |
 | started_by_staff_id | uuid? |
 | subject | jsonb |
 | status | text |
@@ -344,7 +359,7 @@ Actioning hides the message or locks the conversation; serious cases are referre
 | last_message_at | timestamptz |
 | archive_after | timestamptz? |
 
-Indexes: `(customer_id, last_message_at desc)`, `(seller_id, reply_state, reply_due_at)`, `(order_id)`, `(case_id)`, `unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id) where kind <> 'support'`, `unique nulls not distinct (kind, customer_id, order_id, case_id) where kind = 'support'`
+Indexes: `(customer_id, last_message_at desc)`, `(seller_id, reply_state, reply_due_at)`, `(order_id)`, `(case_id)`, `unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id, product_id) where kind <> 'support'`, `unique nulls not distinct (kind, customer_id, order_id, case_id) where kind = 'support'`
 
 **participants**
 
@@ -525,6 +540,7 @@ Indexes: `(computed_at)`
 | maskContactDetails | `true` | bool, approval: second reviewer | Mask phone numbers, emails and outside links in messages |
 | maxAttachments | `5` | int, 0–20 | Files per message |
 | maxAttachmentMb | `10` | int, MB, 1–… | Size per file |
+| presaleConversationsPerDay | `10` | int, 1–100 | New pre-sale conversations (about a product, no order) a customer can start per day (G4) |
 | messageMaxLength | `4000` | int, characters, 1–… | Characters per message |
 | archiveAfterDays | `180` | duration, days, 30–… | Days after order completion |
 
@@ -533,7 +549,7 @@ Indexes: `(computed_at)`
 - Conversations are private to the customer, the seller and Marketly support. Sellers never see other sellers' conversations; staff reads are logged with a reason.
 - One conversation per customer + seller + subject (order, item or return); starting again appends to it, so history stays linked to the transaction.
 - Promotional messages are not allowed here; marketing goes through notifications with separate preferences (plan ch. 15, 19).
-- Product questions and answers are public and live in reviews; order-specific questions belong here.
+- Product questions and answers are public and live in reviews; order-specific questions belong here. A signed-in customer may also message a seller privately about one of its products before buying (decision G4: POST /product-conversations, rate limited, same content filter): an order-kind conversation with subject.kind product, keyed by customer, seller and product.
 - clientMessageId makes sends safe to retry from the Android app without duplicates.
 - Guests can message about orders reached through guest order access (auth shopper). The key is the order, not the session (decision D-M2): a conversation on a guest order has customer_id null and a guest participant (id order:<orderId>) created with the conversation, so any later session with identity.hasGuestOrderAccess to the order sees it with its read state; guest_session_id only records the session that started it.
 - Official Store conversations (decision D-M1): customers reach the Official Store with with = official_store; seller_id is OFFICIAL_STORE_ID, the reply state and reply target apply as for sellers, staff answer from admin (sendStaffMessage, filter official_awaiting), messaging keeps an official_store_reply work item per waiting conversation, and messaging.message.sent with officialStore=true drives the staff notification topic for Official Store messages.
@@ -654,8 +670,12 @@ type ConversationSubject @areas(in: [STORE, SELLER]) {
   returnRef: String
   caseId: UUID
   caseRef: String
+  "PRODUCT: the product asked about before purchase"
+  productId: UUID
   "e.g. Linen duvet cover"
   title: String!
+  "Order conversations: the items concerned, e.g. Linen duvet cover + 2 more items"
+  itemSummary: String
   imageUrl: URL
   "e.g. Package 3 of 3"
   packageLabel: String
@@ -670,6 +690,8 @@ enum ConversationSubjectKind @areas(in: [STORE, SELLER]) {
   CASE
   SELLER_ACCOUNT
   APPLICATION
+  "A pre-sale message about one of the seller's products (no order)"
+  PRODUCT
 }
 
 type ConversationPage implements Paged @areas(in: [STORE, SELLER]) {
@@ -695,6 +717,8 @@ type Message @areas(in: [STORE, SELLER]) {
   redactions: [MessageRedaction!]!
   "Hidden by moderation; body is empty"
   hidden: Boolean!
+  "The caller already reported this message"
+  viewerReported: Boolean!
   at: DateTime!
 }
 

@@ -107,8 +107,12 @@ type ConversationSubject @areas(in: [STORE, SELLER]) {
   returnRef: String
   caseId: UUID
   caseRef: String
+  "PRODUCT: the product asked about before purchase"
+  productId: UUID
   "e.g. Linen duvet cover"
   title: String!
+  "Order conversations: the items concerned, e.g. Linen duvet cover + 2 more items"
+  itemSummary: String
   imageUrl: URL
   "e.g. Package 3 of 3"
   packageLabel: String
@@ -123,6 +127,8 @@ enum ConversationSubjectKind @areas(in: [STORE, SELLER]) {
   CASE
   SELLER_ACCOUNT
   APPLICATION
+  "A pre-sale message about one of the seller's products (no order)"
+  PRODUCT
 }
 
 type ConversationPage implements Paged @areas(in: [STORE, SELLER]) {
@@ -148,6 +154,8 @@ type Message @areas(in: [STORE, SELLER]) {
   redactions: [MessageRedaction!]!
   "Hidden by moderation; body is empty"
   hidden: Boolean!
+  "The caller already reported this message"
+  viewerReported: Boolean!
   at: DateTime!
 }
 

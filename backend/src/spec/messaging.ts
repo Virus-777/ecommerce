@@ -10,7 +10,8 @@ import * as common from './common.js';
 /* ------------------------------------------------------------------ types */
 
 export interface Subject {
-  kind: "order" | "order_item" | "return" | "case" | "seller_account" | "application";
+  /** product: a pre-sale message about one of the seller's products (no order) */
+  kind: "order" | "order_item" | "return" | "case" | "seller_account" | "application" | "product";
   orderId?: string | null;
   orderRef?: string | null;
   orderItemId?: string | null;
@@ -18,8 +19,12 @@ export interface Subject {
   returnRef?: string | null;
   caseId?: string | null;
   caseRef?: string | null;
+  /** kind product: the product asked about */
+  productId?: string | null;
   /** e.g. Linen duvet cover */
   title: string;
+  /** Order conversations: the items concerned, e.g. Linen duvet cover, or Linen duvet cover + 2 more items (the seller's package, or the one item). Null on conversations started before it was kept, until the conversation is opened */
+  itemSummary?: string | null;
   imageUrl?: string | null;
   /** e.g. Package 3 of 3 */
   packageLabel?: string | null;
@@ -28,7 +33,7 @@ export interface Subject {
 }
 
 export const Subject: z.ZodType<Subject> = z.object({
-  kind: z.enum(["order", "order_item", "return", "case", "seller_account", "application"]),
+  kind: z.enum(["order", "order_item", "return", "case", "seller_account", "application", "product"]).describe("product: a pre-sale message about one of the seller's products (no order)"),
   orderId: z.uuid().nullish(),
   orderRef: z.string().nullish(),
   orderItemId: z.uuid().nullish(),
@@ -36,7 +41,9 @@ export const Subject: z.ZodType<Subject> = z.object({
   returnRef: z.string().nullish(),
   caseId: z.uuid().nullish(),
   caseRef: z.string().nullish(),
+  productId: z.uuid().describe("kind product: the product asked about").nullish(),
   title: z.string().describe("e.g. Linen duvet cover"),
+  itemSummary: z.string().describe("Order conversations: the items concerned, e.g. Linen duvet cover, or Linen duvet cover + 2 more items (the seller's package, or the one item). Null on conversations started before it was kept, until the conversation is opened").nullish(),
   imageUrl: z.url().nullish(),
   packageLabel: z.string().describe("e.g. Package 3 of 3").nullish(),
   statusLabel: z.string().describe("Live item or return status, e.g. Delayed").nullish(),
@@ -88,7 +95,7 @@ export const Participant: z.ZodType<Participant> = z.object({
 
 export interface Conversation {
   id: string;
-  /** staff_seller: started by Marketly staff with a seller or seller applicant */
+  /** order: customer with a seller or the Official Store (about an order, item, return, or a product before purchase: subject.kind product); staff_seller: started by Marketly staff with a seller or seller applicant */
   kind: "order" | "support" | "staff_seller";
   /** From the caller's point of view */
   counterparty: Counterparty;
@@ -111,7 +118,7 @@ export interface Conversation {
 
 export const Conversation: z.ZodType<Conversation> = z.object({
   id: z.uuid(),
-  kind: z.enum(["order", "support", "staff_seller"]).describe("staff_seller: started by Marketly staff with a seller or seller applicant"),
+  kind: z.enum(["order", "support", "staff_seller"]).describe("order: customer with a seller or the Official Store (about an order, item, return, or a product before purchase: subject.kind product); staff_seller: started by Marketly staff with a seller or seller applicant"),
   get counterparty() {
     return Counterparty;
   },
@@ -188,6 +195,8 @@ export interface Message {
   hidden: boolean;
   hiddenReason?: string | null;
   clientMessageId?: string | null;
+  /** The caller already reported this message (any report status; staff reads: false) */
+  viewerReported: boolean;
   at: string;
 }
 
@@ -208,6 +217,7 @@ export const Message: z.ZodType<Message> = z.object({
   hidden: z.boolean(),
   hiddenReason: z.string().nullish(),
   clientMessageId: z.string().nullish(),
+  viewerReported: z.boolean().describe("The caller already reported this message (any report status; staff reads: false)"),
   at: z.iso.datetime({ offset: true }),
 }).register(common.apiTypes, { id: "messaging.Message" });
 
@@ -282,6 +292,8 @@ export const StaffStartInput: z.ZodType<StaffStartInput> = z.object({
 export interface SellerStartInput {
   orderId: string;
   orderItemId?: string | null;
+  /** A return on the seller's items of the order: the conversation is about the return (Return.conversation shows it; G55b) */
+  returnId?: string | null;
   body: string;
   mediaIds?: string[] | null;
   clientMessageId?: string | null;
@@ -290,10 +302,26 @@ export interface SellerStartInput {
 export const SellerStartInput: z.ZodType<SellerStartInput> = z.object({
   orderId: z.uuid(),
   orderItemId: z.uuid().nullish(),
+  returnId: z.uuid().describe("A return on the seller's items of the order: the conversation is about the return (Return.conversation shows it; G55b)").nullish(),
   body: z.string(),
   mediaIds: z.array(z.uuid()).nullish(),
   clientMessageId: z.string().nullish(),
 }).register(common.apiTypes, { id: "messaging.SellerStartInput" });
+
+export interface ProductConversationInput {
+  /** The offer the customer asks about (its seller and product); the Official Store's offers reach the Official Store team */
+  offerId: string;
+  body: string;
+  mediaIds?: string[] | null;
+  clientMessageId?: string | null;
+}
+
+export const ProductConversationInput: z.ZodType<ProductConversationInput> = z.object({
+  offerId: z.uuid().describe("The offer the customer asks about (its seller and product); the Official Store's offers reach the Official Store team"),
+  body: z.string(),
+  mediaIds: z.array(z.uuid()).nullish(),
+  clientMessageId: z.string().nullish(),
+}).register(common.apiTypes, { id: "messaging.ProductConversationInput" });
 
 export interface ResponseStats {
   targetHours: number;
@@ -603,6 +631,8 @@ export interface MessagingDb {
     return_id: string | null;
     case_id: string | null;
     application_id: string | null;
+    /** pre-sale conversations: the product asked about; part of the key */
+    product_id: string | null;
     started_by_staff_id: string | null;
     subject: Json;
     status: string;
@@ -750,6 +780,29 @@ export const endpoints = defineEndpoints({
     response: () => Message,
     status: 200,
     screens: ["account/messages"],
+    phase: 1,
+  },
+  startProductConversation: {
+    area: "store",
+    method: "POST",
+    path: "/product-conversations",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "Message the seller about one of its products before buying",
+    desc: "Decision G4: signed-in customers only. One conversation per customer, seller and product (starting again appends to it). The same content filter as order messages masks contact details and outside links; sellers see it in their inbox with the reply target. A customer starts at most presaleConversationsPerDay new pre-sale conversations a day (RATE_LIMITED, details.retryAfterSeconds); replies inside a conversation are not limited. The offer must be one customers can see (active or out of stock), else NOT_FOUND. A messaging restriction gives MESSAGING_RESTRICTED.",
+    body: () => ProductConversationInput,
+    response: () => z.object({
+      get conversation() {
+        return Conversation;
+      },
+      get message() {
+        return Message;
+      },
+    }),
+    status: 201,
+    errors: ["NOT_FOUND","MESSAGING_RESTRICTED","RATE_LIMITED","CONVERSATION_LOCKED"],
+    events: ["messaging.conversation.started","messaging.message.sent"],
+    screens: ["store/product","account/messages"],
     phase: 1,
   },
   startCustomerConversation: {
@@ -914,7 +967,7 @@ export const endpoints = defineEndpoints({
     auth: "seller",
     permission: "messaging.conversations.reply",
     scope: "own-seller",
-    summary: "Message the buyer of one of the seller's orders",
+    summary: "Message the buyer of one of the seller's orders, optionally about an item or a return",
     body: () => SellerStartInput,
     response: () => z.object({
       get conversation() {
@@ -925,7 +978,7 @@ export const endpoints = defineEndpoints({
       },
     }),
     status: 201,
-    errors: ["ORDER_NOT_ELIGIBLE"],
+    errors: ["ORDER_NOT_ELIGIBLE","NOT_FOUND"],
     events: ["messaging.conversation.started","messaging.message.sent"],
     screens: ["seller/order"],
     phase: 1,
@@ -1283,7 +1336,7 @@ export const spec = defineModuleSpec({
   chapters: [7,11,17],
   summary: "Private service conversations linked to an order, item, return or case: customer with seller (or the Official Store), which Marketly support can join from a case, with attachments, read state, seller reply targets and overdue flags, and staff moderation. No promotional messages.",
   dependsOn: ["orders"],
-  optionalDeps: ["media","sellers","support","returns","notifications","trust","audit","customers","shipping","identity","workqueues","settings"],
+  optionalDeps: ["media","sellers","support","returns","notifications","trust","audit","customers","shipping","identity","workqueues","settings","offers","catalog"],
   publicApi: ["findOrStartForOrder","postSystemNote","addStaffParticipant","sellerResponseStats","unreadCount","listForOrder","getForSubject","unreadSummary","sellerInboxSummary","listInbox","getConversation","customerConversationSummaries","exportCustomerData"],
   permissions: [
     {
@@ -1444,6 +1497,13 @@ export const spec = defineModuleSpec({
       "min": 1,
       "unit": "MB"
     },
+    "presaleConversationsPerDay": {
+      "default": 10,
+      "desc": "New pre-sale conversations (about a product, no order) a customer can start per day (G4)",
+      "type": "int",
+      "min": 1,
+      "max": 100
+    },
     "messageMaxLength": {
       "default": 4000,
       "desc": "Characters per message",
@@ -1494,6 +1554,7 @@ export const spec = defineModuleSpec({
         "return_id",
         "case_id",
         "application_id",
+        "product_id",
         "started_by_staff_id",
         "subject",
         "status",
@@ -1515,6 +1576,7 @@ export const spec = defineModuleSpec({
         "return_id",
         "case_id",
         "application_id",
+        "product_id",
         "started_by_staff_id",
         "locked_reason",
         "locked_by_enforcement_id",
@@ -1611,6 +1673,12 @@ export const spec = defineModuleSpec({
                 "null"
               ]
             },
+            "product_id": {
+              "bsonType": [
+                "string",
+                "null"
+              ]
+            },
             "started_by_staff_id": {
               "bsonType": [
                 "string",
@@ -1693,7 +1761,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "conversations_kind_customer_id_seller_id_application_i_e4bdf4",
+          "name": "conversations_kind_customer_id_seller_id_application_i_313b7a",
           "key": {
             "kind": 1,
             "customer_id": 1,
@@ -1701,7 +1769,8 @@ export const spec = defineModuleSpec({
             "application_id": 1,
             "order_id": 1,
             "order_item_id": 1,
-            "return_id": 1
+            "return_id": 1,
+            "product_id": 1
           },
           "unique": true,
           "partial": {

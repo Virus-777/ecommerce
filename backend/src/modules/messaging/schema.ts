@@ -20,6 +20,7 @@ const conversations = new Schema(
     return_id: { type: String, default: null },
     case_id: { type: String, default: null },
     application_id: { type: String, default: null },
+    product_id: { type: String, default: null }, // pre-sale conversations: the product asked about; part of the key
     started_by_staff_id: { type: String, default: null },
     subject: { type: Schema.Types.Mixed },
     status: { type: String, required: true },
@@ -40,7 +41,7 @@ conversations.index({"customer_id":1,"last_message_at":-1}, {"name":"conversatio
 conversations.index({"seller_id":1,"reply_state":1,"reply_due_at":1}, {"name":"conversations_seller_id_reply_state_reply_due_at_880d57"});
 conversations.index({"order_id":1}, {"name":"conversations_order_id_4c5e85"});
 conversations.index({"case_id":1}, {"name":"conversations_case_id_ddb8b4"});
-conversations.index({"kind":1,"customer_id":1,"seller_id":1,"application_id":1,"order_id":1,"order_item_id":1,"return_id":1}, {"name":"conversations_kind_customer_id_seller_id_application_i_e4bdf4","unique":true,"partialFilterExpression":{"kind":{"$in":["order","staff_seller"]}}});
+conversations.index({"kind":1,"customer_id":1,"seller_id":1,"application_id":1,"order_id":1,"order_item_id":1,"return_id":1,"product_id":1}, {"name":"conversations_kind_customer_id_seller_id_application_i_313b7a","unique":true,"partialFilterExpression":{"kind":{"$in":["order","staff_seller"]}}});
 conversations.index({"kind":1,"customer_id":1,"order_id":1,"case_id":1}, {"name":"conversations_kind_customer_id_order_id_case_id_6fa7e5","unique":true,"partialFilterExpression":{"kind":"support"}});
 
 const participants = new Schema(

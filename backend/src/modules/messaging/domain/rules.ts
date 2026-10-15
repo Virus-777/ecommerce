@@ -176,6 +176,15 @@ export function replyRounds(lines: readonly { conversation_id: string; author_ki
   return rounds;
 }
 
+/** The items a conversation is about (G45b): Linen duvet cover, 2 × Linen duvet cover, or Linen duvet cover + 2 more items */
+export function itemSummary(items: readonly { title: string; quantity: number }[]): string | null {
+  const first = items[0];
+  if (!first) return null;
+  if (items.length === 1) return first.quantity > 1 ? `${first.quantity} × ${first.title}` : first.title;
+  const more = items.length - 1;
+  return `${first.title} + ${more} more item${more === 1 ? '' : 's'}`;
+}
+
 /** Customer-facing short name: Sam Rivera → Sam R. */
 export function buyerName(full: string | null | undefined): string {
   const parts = (full ?? '').trim().split(/\s+/).filter(Boolean);

@@ -43,6 +43,8 @@ export interface Harness {
   cases: { orderId: string; caseId: string; ref: string; status: string; orderItemIds: string[] }[];
   signals: any[];
   sellers: Map<string, { storeName: string; verified?: boolean }>;
+  /** offers.getOffer answers for pre-sale conversations (G4), by offer id */
+  liveOffers: Map<string, { id: string; ownerType: 'official' | 'seller'; sellerId: string | null; sellerName: string; productId: string; title: string; status: string }>;
   /** workqueues.raise inputs and resolveBySource keys */
   work: any[];
   resolved: string[];
@@ -71,6 +73,7 @@ export async function harness(o: { trust?: boolean } = {}): Promise<Harness> {
     cases: [] as Harness['cases'],
     signals: [] as any[],
     sellers: new Map<string, { storeName: string; verified?: boolean }>(),
+    liveOffers: new Map() as Harness['liveOffers'],
     work: [] as any[],
     resolved: [] as string[],
   };
@@ -85,9 +88,11 @@ export async function harness(o: { trust?: boolean } = {}): Promise<Harness> {
     apiStubs: {
       offers: {
         snapshotForOrder: async (offerId) => structuredClone(h.offers.get(offerId)!),
+        getOffer: async (offerId) => (h.liveOffers.get(offerId) ?? null) as never,
       },
       catalog: {
         snapshotForOrder: async (variantId) => ({ ...structuredClone(h.products.get(variantId)!), takenAt: clock.now().toISOString() }),
+        getProducts: async (ids) => ids.map((id) => ({ product: { id, title: 'Linen duvet cover (catalog)', images: [{ id: newId(), url: 'https://cdn.example/duvet.jpg' }] } }) as never),
       },
       customers: {
         getCustomerByUserId: async (userId) => ({ id: userId, userId, ref: 'CU-000001', displayName: 'Sam Rivera', email: 'sam@example.com', accountStatus: 'active', canOrder: true, canMessage: !h.restricted.has(userId) }) as never,

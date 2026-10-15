@@ -13,6 +13,7 @@ import type {
   Message,
   MessageReport,
   MessagingPublicApi,
+  ProductConversationInput,
   ReplyTemplate,
   ReplyTemplateInput,
   ResponseStats,
@@ -22,7 +23,7 @@ import type {
   Subject,
 } from '../../spec/messaging.js';
 import type * as orders from '../../spec/orders.js';
-import { buyerName, DAY, groupSellerId, HOUR, isOfficialConversation, marketplaceSellerId, MINUTE, OFFICIAL_STORE_NAME, promotionalPhrase, replyRounds, responseTimeLabel, SUPPORT_LABEL, SUPPORT_TEAM_ID } from './domain/rules.js';
+import { buyerName, DAY, groupSellerId, HOUR, isOfficialConversation, itemSummary, marketplaceSellerId, MINUTE, OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME, promotionalPhrase, replyRounds, responseTimeLabel, SUPPORT_LABEL, SUPPORT_TEAM_ID } from './domain/rules.js';
 import { conversationMachine, messageReportMachine, sellerReplyMachine } from './domain/state-machines.js';
 import type { ConversationKey, ConversationRec, MessageRec, ParticipantRec, ReplyStatsRec, ReportRec, TemplateRec } from './ports.js';
 import { Core, guestKey, invalid, meOf, notFound, SYSTEM, type Author, type By, type Cfg, type MessagingServiceDeps, type Prepared, type Viewer } from './service/core.js';
@@ -222,6 +223,8 @@ export class MessagingService implements MessagingPublicApi {
     if (!order || !group) throw notEligible();
     const item = body.orderItemId ? group.items.find((i) => i.id === body.orderItemId) : undefined;
     if (body.orderItemId && !item) throw notEligible('This item is not part of your order');
+    // G55b: a return on the seller's own items of the order (Return.conversation shows the conversation)
+    const ret = body.returnId ? await this.sellerReturn(group, body.returnId) : null;
     const cfg = await this.core.cfg();
     const participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[] = [
       { kind: 'seller', participant_id: v.sellerId, name: group.seller.name, label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 },
@@ -229,9 +232,68 @@ export class MessagingService implements MessagingPublicApi {
     participants.unshift(this.buyerParticipant(order));
     const author = this.core.authorOf(v, { kind: 'order', seller_id: v.sellerId } as ConversationRec, participants.map((p) => ({ ...p, conversation_id: '', joined_at: this.now() })));
     const prepared = await this.core.prepare(author, body, cfg);
-    const key: ConversationKey = { kind: 'order', customer_id: order.contact.customerId ?? null, seller_id: v.sellerId, application_id: null, order_id: order.id, order_item_id: item?.id ?? null, return_id: null };
-    const conv = await this.findOrCreate(key, { guest_session_id: null, subject: this.subjectFrom(order, group, item ?? null, null, null, null), case_id: null }, participants, by);
+    const key: ConversationKey = { kind: 'order', customer_id: order.contact.customerId ?? null, seller_id: v.sellerId, application_id: null, order_id: order.id, order_item_id: item?.id ?? null, return_id: ret?.id ?? null };
+    const conv = await this.findOrCreate(key, { guest_session_id: null, subject: this.subjectFrom(order, group, item ?? null, ret, null, null), case_id: null }, participants, by);
     return this.finishStart(v, conv.id, author, prepared, cfg, by);
+  }
+
+  /**
+   * POST store /product-conversations (decision G4): a signed-in customer messages the seller of an offer before
+   * buying. One conversation per customer, seller and product; new ones are rate limited per customer and day.
+   */
+  async startProductConversation(v: CustomerViewer, body: ProductConversationInput, by: By): Promise<{ conversation: Conversation; message: Message }> {
+    if (!v.customerId) throw new AppError('UNAUTHORIZED', 'Sign in to message a seller');
+    const offers = this.ctx.tryUse('offers');
+    const offer = offers ? await offers.getOffer(body.offerId) : null;
+    // only offers customers can see on the product page
+    if (!offer || !['active', 'out_of_stock'].includes(offer.status)) throw notFound('Offer');
+    const sellerId = offer.ownerType === 'official' ? OFFICIAL_STORE_ID : offer.sellerId;
+    if (!sellerId) throw notFound('Offer');
+    await this.core.assertMayWrite(v, { case_id: null });
+    const cfg = await this.core.cfg();
+    const customer = await this.core.soft('customers', 'customer name', (c) => c.getCustomer(v.customerId!));
+    const name = buyerName(customer?.displayName);
+    const author: Author = {
+      kind: 'customer',
+      id: v.customerId,
+      label: name,
+      mediaOwner: v.accountId ? { kind: 'customer', id: v.accountId } : { kind: 'guest', id: null },
+      participantName: name,
+      participantLabel: 'Buyer',
+    };
+    const prepared = await this.core.prepare(author, body, cfg);
+    const key: ConversationKey = { kind: 'order', customer_id: v.customerId, seller_id: sellerId, application_id: null, order_id: null, order_item_id: null, return_id: null, product_id: offer.productId };
+    // only a new conversation counts toward the daily limit; asking again appends to the existing one
+    if (!(await this.repo.findByKey(key))) await this.presaleLimit(v.customerId);
+    const product = (await this.core.soft('catalog', 'product', (c) => c.getProducts([offer.productId])))?.[0]?.product;
+    const subject: Subject = {
+      kind: 'product',
+      orderId: null,
+      orderRef: null,
+      orderItemId: null,
+      returnId: null,
+      returnRef: null,
+      caseId: null,
+      caseRef: null,
+      productId: offer.productId,
+      title: product?.title ?? offer.title,
+      imageUrl: product?.images[0]?.url ?? null,
+      packageLabel: null,
+      statusLabel: null,
+      itemSummary: null,
+    };
+    const participants: Omit<ParticipantRec, 'conversation_id' | 'joined_at'>[] = [{ kind: 'customer', participant_id: v.customerId, name, label: 'Buyer', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 }];
+    // the Official Store is answered by Marketly staff, who join when they reply: no seller participant
+    if (marketplaceSellerId(sellerId)) participants.push({ kind: 'seller', participant_id: sellerId, name: offer.sellerName ?? 'Seller', label: 'Seller', joined_from_case_id: null, last_read_message_id: null, unread_count: 0 });
+    const conv = await this.findOrCreate(key, { guest_session_id: null, subject, case_id: null }, participants, by);
+    return this.finishStart(v, conv.id, author, prepared, cfg, by);
+  }
+
+  /** RATE_LIMITED when the customer already started presaleConversationsPerDay pre-sale conversations in the last day */
+  private async presaleLimit(customerId: string) {
+    const limit = Number((await this.ctx.settings.get('presaleConversationsPerDay')) ?? 10);
+    const r = await this.ctx.rateLimit(`presale:${customerId}`, { limit, windowMs: DAY });
+    if (!r.allowed) throw new AppError('RATE_LIMITED', 'You have messaged many sellers today. Try again tomorrow, or reply in a conversation you already have.', { retryAfterSeconds: Math.max(1, Math.ceil(r.retryAfterMs / 1000)) });
   }
 
   /** POST /conversations/{id}/messages (store and seller) */
@@ -1290,6 +1352,7 @@ export class MessagingService implements MessagingPublicApi {
         return_id: key.return_id,
         case_id: key.case_id ?? extra.case_id,
         application_id: key.application_id,
+        product_id: key.product_id ?? null,
         started_by_staff_id: extra.started_by_staff_id ?? null,
         subject: extra.subject as never,
         status: conversationMachine.initial,
@@ -1342,6 +1405,8 @@ export class MessagingService implements MessagingPublicApi {
       imageUrl: (item ?? group?.items[0])?.image?.url ?? null,
       packageLabel: group?.packageLabel ?? null,
       statusLabel: ret?.status ?? kase?.status ?? item?.stateLabel ?? group?.statusLabel ?? order.statusLabel,
+      // G45b: the items the conversation is about (the item, the seller's package, or the whole order)
+      itemSummary: itemSummary(item ? [item] : (group?.items ?? order.groups.flatMap((g) => g.items))),
     };
   }
 
@@ -1354,6 +1419,14 @@ export class MessagingService implements MessagingPublicApi {
     const states = await returns.returnStateForItems(items);
     const r = states.find((s) => s.returnId === returnId);
     return r ? { id: returnId, ref: r.ref, status: r.status } : null;
+  }
+
+  /** A return on the seller's own items of the order (G55b), from returns; NOT_FOUND otherwise */
+  private async sellerReturn(group: orders.SellerGroup, returnId: string): Promise<{ id: string; ref: string | null; status: string | null }> {
+    const states = await this.core.soft('returns', 'seller return', (r) => r.returnStateForItems(group.items.map((i) => i.id)));
+    const r = states?.find((s) => s.returnId === returnId);
+    if (!r) throw notFound('Return');
+    return { id: returnId, ref: r.ref, status: r.status };
   }
 
   private async verifyReturn(order: orders.OrderDetail, returnId: string) {

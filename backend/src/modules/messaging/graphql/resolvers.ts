@@ -22,6 +22,7 @@ const message = (m: Message) => ({
   attachments: m.attachments,
   redactions: m.redactions.map(upper),
   hidden: m.hidden,
+  viewerReported: m.viewerReported,
   at: m.at,
 });
 

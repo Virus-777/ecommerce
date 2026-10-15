@@ -22,6 +22,8 @@ export const storeRoutes = (service: MessagingService) =>
     getCustomerConversation: async ({ params, scope, principal }) => service.getConversationFor(shopperOf(scope, principal), params.id),
     /** GET /conversations/{id}/messages: Messages, newest first (cursor for older) */
     listCustomerMessages: async ({ params, page, scope, principal }) => service.messagesFor(shopperOf(scope, principal), params.id, page),
+    /** POST /product-conversations: Message the seller about one of its products before buying (G4) */
+    startProductConversation: async ({ body, scope, principal, actor, requestId }) => service.startProductConversation(shopperOf(scope, principal), body, { actor, requestId }),
     /** POST /conversations: Message a seller or Marketly support about an order, item or return */
     startCustomerConversation: async ({ body, scope, principal, actor, requestId }) => service.startCustomerConversation(shopperOf(scope, principal), body, { actor, requestId }),
     /** POST /conversations/{id}/messages: Send a message with optional photos or files */

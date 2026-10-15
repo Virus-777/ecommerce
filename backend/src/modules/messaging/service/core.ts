@@ -17,6 +17,7 @@ import type * as sellers from '../../../spec/sellers.js';
 import {
   deadline,
   groupSellerId,
+  itemSummary,
   isOfficialConversation,
   marketplaceSellerId,
   HIDDEN_NOTE,
@@ -416,6 +417,8 @@ export class Core {
       const item = c.order_item_id ? order.groups.flatMap((g) => g.items).find((i) => i.id === c.order_item_id) : undefined;
       const group = item ? order.groups.find((g) => g.id === item.groupId) : order.groups.find((g) => (c.seller_id ? groupSellerId(g) === c.seller_id : g.seller.ownerType === 'official'));
       subject.statusLabel = item?.stateLabel ?? group?.statusLabel ?? order.statusLabel;
+      // conversations started before the item summary was kept (G45b)
+      subject.itemSummary ??= itemSummary(item ? [item] : (group?.items ?? order.groups.flatMap((g) => g.items)));
       if (v.kind === 'seller' && group && group.dispatchDeadline.state === 'overdue' && ['new', 'preparing', 'delayed', 'partly_shipped'].includes(group.status)) {
         dispatchWarning = `Dispatch deadline was ${shortDateTime(new Date(group.dispatchDeadline.dueAt), this.tz)}. It is now overdue.`;
       }
@@ -454,7 +457,7 @@ export class Core {
     return new Map((refs ?? []).map((r) => [r.id, r]));
   }
 
-  messageOf(v: Viewer | null, m: MessageRec, refs: Map<string, common.MediaRef>, staffView = false): Message {
+  messageOf(v: Viewer | null, m: MessageRec, refs: Map<string, common.MediaRef>, staffView = false, reported = false): Message {
     const me = v ? meOf(v) : null;
     // a guest sees the guest participant's messages of the order conversation as their own
     const guest = v?.kind === 'customer' && !v.customerId;
@@ -475,13 +478,23 @@ export class Core {
       hidden: m.hidden,
       hiddenReason: m.hidden ? (staffView ? m.hidden_reason : HIDDEN_NOTE) : null,
       clientMessageId: m.client_message_id,
+      viewerReported: reported,
       at: m.at.toISOString(),
     };
   }
 
   async messagesOf(v: Viewer | null, rows: readonly MessageRec[], staffView = false): Promise<Message[]> {
-    const refs = await this.mediaRefs(rows.flatMap((m) => (m.media_ids as string[] | null) ?? []));
-    return rows.map((m) => this.messageOf(v, m, refs, staffView));
+    const [refs, reported] = await Promise.all([this.mediaRefs(rows.flatMap((m) => (m.media_ids as string[] | null) ?? [])), staffView || !v || v.kind === 'staff' ? new Set<string>() : this.reportedBy(v, rows)]);
+    return rows.map((m) => this.messageOf(v, m, refs, staffView, reported.has(m.id)));
+  }
+
+  /** The messages the viewer already reported (G56a): reports under the viewer's participant key in each conversation */
+  private async reportedBy(v: Viewer, rows: readonly MessageRec[]): Promise<Set<string>> {
+    if (!rows.length) return new Set();
+    const [convs, reports] = await Promise.all([this.repo.getMany('conversations', [...new Set(rows.map((m) => m.conversation_id))]), this.repo.find('message_reports', { message_id: rows.map((m) => m.id) })]);
+    if (!reports.length) return new Set();
+    const me = new Map(convs.map((c) => [c.id, meOf(v, c)]));
+    return new Set(reports.filter((r) => me.get(r.conversation_id)?.kind === r.reporter_kind && me.get(r.conversation_id)?.id === r.reporter_id).map((r) => r.message_id));
   }
 
   /* ---------------------------------------------------------------- authors */
