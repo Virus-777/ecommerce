@@ -38,6 +38,6 @@ export const sellerRoutes = (service: PromotionsService) => {
     /** POST /invitations/{id}/decline: Decline an invitation */
     declineInvitation: async ({ sellerId, params, body, actor, requestId, principal }) => p.decline(sellerId, params.id, body.reason, { actor, requestId, principal }),
     /** POST /invitations/{id}/withdraw: Leave a campaign */
-    withdrawParticipation: async ({ sellerId, params, body, actor, requestId, principal }) => p.withdraw(sellerId, params.id, body.reason, { actor, requestId, principal }),
+    withdrawParticipation: async ({ sellerId, params, body, actor, requestId, principal }) => p.withdraw(sellerId, params.id, body.reason ?? null, { actor, requestId, principal }),
   });
 };

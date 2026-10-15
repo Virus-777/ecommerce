@@ -27,7 +27,7 @@ describe('platform campaigns', () => {
     expect(locked.status).toBe(409);
     expect(locked.body.error.code).toBe('CAMPAIGN_LOCKED');
 
-    const confirmed = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.staff, { comment: 'OK' });
+    const confirmed = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.finance, { comment: 'OK' });
     expect(confirmed.body).toMatchObject({ status: 'approved', fundingReview: { state: 'confirmed', comment: 'OK' } });
     expect(k.of('promotions.campaign.funding_confirmed').at(-1)).toMatchObject({ campaignId: id, platformMaximum: USD(1_000_000), sellersMaximum: USD(0) });
 
@@ -76,7 +76,7 @@ describe('platform campaigns', () => {
     const c = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { startsAt: new Date(k.clock.now().getTime() + 86_400_000).toISOString() }));
     const id = c.body.id;
     await k.call('POST', `${ADMIN}/campaigns/${id}/submit`, k.staff, {});
-    const approved = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.staff, {});
+    const approved = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.finance, {});
     const cosmetic = await k.call('PATCH', `${ADMIN}/campaigns/${id}`, k.staff, { name: 'Fall Home Week 2', version: approved.body.version });
     expect(cosmetic.body).toMatchObject({ status: 'approved', name: 'Fall Home Week 2' });
     const material = await k.call('PATCH', `${ADMIN}/campaigns/${id}`, k.staff, { discount: { kind: 'percent_coupon', percentOffBps: 2500 }, version: cosmetic.body.version });
@@ -99,12 +99,12 @@ describe('platform campaigns', () => {
       const c = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { limits: { budget: USD(5_000_000) } }));
       const id = c.body.id;
       await k.call('POST', `${ADMIN}/campaigns/${id}/submit`, k.staff, {});
-      const pending = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.staff, { comment: 'Big one' });
+      const pending = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.finance, { comment: 'Big one' });
       expect(pending.status).toBe(200);
       expect(pending.body).toMatchObject({ status: 'in_review', fundingReview: { approval: { required: true } } });
       const [requestId, req] = [...k.approvals.entries()].at(-1)!;
       expect(req).toMatchObject({ action: 'promotions.budgets.approve', amount: USD(5_000_000), target: { id } });
-      const again = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.staff, {});
+      const again = await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.finance, {});
       expect(again.body.error.code).toBe('APPROVAL_REQUIRED');
       await k.emit('access.approval.decided', { requestId, ref: 'AP-1', actionKey: 'promotions.budgets.approve', module: 'promotions', target: { type: 'promotion_campaign', id }, outcome: 'approved', decidedBy: { kind: 'staff', id: crypto.randomUUID() }, approverIds: [], requestedById: crypto.randomUUID() });
       expect((await k.call('GET', `${ADMIN}/campaigns/${id}`, k.staff)).body.status).toBe('approved');
@@ -112,7 +112,7 @@ describe('platform campaigns', () => {
       // a second campaign is rejected by the approver → changes requested
       const d = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock));
       await k.call('POST', `${ADMIN}/campaigns/${d.body.id}/submit`, k.staff, {});
-      await k.call('POST', `${ADMIN}/campaigns/${d.body.id}/confirm-funding`, k.staff, {});
+      await k.call('POST', `${ADMIN}/campaigns/${d.body.id}/confirm-funding`, k.finance, {});
       const [rid] = [...k.approvals.entries()].at(-1)!;
       await k.emit('access.approval.decided', { requestId: rid, ref: 'AP-2', actionKey: 'promotions.budgets.approve', module: 'promotions', target: { type: 'promotion_campaign', id: d.body.id }, outcome: 'rejected', reason: 'Too much', approverIds: [], requestedById: crypto.randomUUID() });
       expect((await k.call('GET', `${ADMIN}/campaigns/${d.body.id}`, k.staff)).body).toMatchObject({ status: 'changes_requested', fundingReview: { state: 'changes_requested', comment: 'Too much' } });

@@ -184,7 +184,7 @@ describe('concurrency: caps hold under parallel checkouts', () => {
     expect(put.body[0]).toMatchObject({ dealStock: 2, claimed: 0, percentOffBps: 4000, state: 'active' });
     const tooMuch = await k.call('PUT', `${ADMIN}/campaigns/${id}/flash-items`, k.staff, { items: [{ offerId: o.id, dealPrice: USD(12000), dealStock: 500, purchaseLimit: 1 }] });
     expect(tooMuch.body.error.code).toBe('INSUFFICIENT_STOCK');
-    for (const step of ['submit', 'confirm-funding', 'schedule']) expect((await k.call('POST', `${ADMIN}/campaigns/${id}/${step}`, k.staff, {})).status).toBe(200);
+    for (const step of ['submit', 'confirm-funding', 'schedule']) expect((await k.call('POST', `${ADMIN}/campaigns/${id}/${step}`, step === 'confirm-funding' ? k.finance : k.staff, {})).status).toBe(200);
 
     const evs = await Promise.all(Array.from({ length: 5 }, () => cart([line(o, 1)])));
     expect(evs.every((e) => e.lines[0]!.unitPrice.amount === 12000)).toBe(true);

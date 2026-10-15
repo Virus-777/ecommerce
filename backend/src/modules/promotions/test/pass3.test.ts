@@ -129,7 +129,7 @@ describe('storefront', () => {
     const created = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { name: 'One deal', discount: { kind: 'flash_sale' }, scope: { mode: 'offers', include: [{ kind: 'offer', id: o.id }], exclude: [] } }));
     const id = created.body.id;
     await k.call('PUT', `${ADMIN}/campaigns/${id}/flash-items`, k.staff, { items: [{ offerId: o.id, dealPrice: USD(6000), dealStock: 5, purchaseLimit: 1 }] });
-    for (const step of ['submit', 'confirm-funding', 'schedule']) expect((await k.call('POST', `${ADMIN}/campaigns/${id}/${step}`, k.staff, {})).status).toBe(200);
+    for (const step of ['submit', 'confirm-funding', 'schedule']) expect((await k.call('POST', `${ADMIN}/campaigns/${id}/${step}`, step === 'confirm-funding' ? k.finance : k.staff, {})).status).toBe(200);
     const deals = await k.svc.liveDeals({ limit: 4, campaignId: id });
     expect(deals.map((d) => d.campaignId)).toEqual([id]);
     expect(await k.svc.liveDeals({ limit: 4, campaignId: newId() })).toEqual([]);

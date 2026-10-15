@@ -49,6 +49,8 @@ export interface Kit {
   authority: Map<string, Decision>;
   blockedSellers: Map<string, string>;
   staff: string;
+  /** Another staff member: confirms funding (the creator or submitter can't, G65a) */
+  finance: string;
   of(name: string): any[];
   call(method: string, url: string, token: string, body?: unknown): Promise<{ status: number; body: any }>;
   emit(name: string, payload: unknown): Promise<void>;
@@ -175,6 +177,7 @@ export async function boot(): Promise<Kit> {
     authority,
     blockedSellers,
     staff,
+    finance: callers.staff(),
     of: (name) => events.filter((e) => e.name === name).map((e) => e.payload),
     async call(method, url, token, body) {
       const res = await app.inject({ method: method as any, url, headers: auth(token), ...(body !== undefined ? { payload: body as any } : {}) });
@@ -222,7 +225,7 @@ export async function liveCampaign(k: Kit, input: CampaignInput): Promise<any> {
   const id = created.body.id;
   const steps = [`${ADMIN}/campaigns/${id}/submit`, `${ADMIN}/campaigns/${id}/confirm-funding`, `${ADMIN}/campaigns/${id}/schedule`];
   for (const url of steps) {
-    const r = await k.call('POST', url, k.staff, {});
+    const r = await k.call('POST', url, url.endsWith('/confirm-funding') ? k.finance : k.staff, {});
     if (r.status !== 200) throw new Error(`${url}: ${JSON.stringify(r.body)}`);
   }
   return (await k.call('GET', `${ADMIN}/campaigns/${id}`, k.staff)).body;

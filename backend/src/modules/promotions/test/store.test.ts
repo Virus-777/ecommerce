@@ -48,7 +48,7 @@ describe('deals page and coupons', () => {
 
   it('refuses clipping coupons that ended, have not started or are not for this customer', async () => {
     const future = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { deals: { show: true, section: 'coupons' }, startsAt: new Date(Date.now() + 86_400_000).toISOString() }));
-    for (const s of ['submit', 'confirm-funding', 'schedule']) await k.call('POST', `${ADMIN}/campaigns/${future.body.id}/${s}`, k.staff, {});
+    for (const s of ['submit', 'confirm-funding', 'schedule']) await k.call('POST', `${ADMIN}/campaigns/${future.body.id}/${s}`, s === 'confirm-funding' ? k.finance : k.staff, {});
     const early = await k.call('POST', `${STORE}/coupons/${future.body.id}/clip`, customer);
     expect(early.status).toBe(422);
     expect(early.body.error).toMatchObject({ code: 'COUPON_NOT_ELIGIBLE', details: { reason: 'not_started' } });
@@ -70,7 +70,7 @@ describe('deals page and coupons', () => {
 
   it('sets and removes event reminders on upcoming events', async () => {
     const ev = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { name: 'Holiday Kickoff', deals: { show: true, section: 'events' }, startsAt: new Date(Date.now() + 3 * 86_400_000).toISOString() }));
-    for (const s of ['submit', 'confirm-funding', 'schedule']) await k.call('POST', `${ADMIN}/campaigns/${ev.body.id}/${s}`, k.staff, {});
+    for (const s of ['submit', 'confirm-funding', 'schedule']) await k.call('POST', `${ADMIN}/campaigns/${ev.body.id}/${s}`, s === 'confirm-funding' ? k.finance : k.staff, {});
     const set = await k.call('POST', `${STORE}/events/${ev.body.id}/reminder`, customer);
     expect(set.status).toBe(201);
     expect(set.body).toMatchObject({ campaignId: ev.body.id, reminderSet: true, name: 'Holiday Kickoff' });
@@ -159,7 +159,7 @@ describe('reactions to other modules', () => {
     const camp = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k.clock, { discount: { kind: 'markdown', percentOffBps: 1000 }, participation: { inviteSellers: true, rules: [] } }));
     const inv = await k.call('POST', `${ADMIN}/campaigns/${camp.body.id}/invitations`, k.staff, { sellerIds: [SELLER_A], respondBy: new Date(Date.now() + 86_400_000).toISOString() });
     await k.call('POST', `${SELLER}/invitations/${inv.body[0].id}/accept`, callers.seller({ sellerId: SELLER_A }), { offerIds: [o.id], consent: true, consentTextVersion: 'v' });
-    for (const s of ['submit', 'confirm-funding', 'schedule']) await k.call('POST', `${ADMIN}/campaigns/${camp.body.id}/${s}`, k.staff, {});
+    for (const s of ['submit', 'confirm-funding', 'schedule']) await k.call('POST', `${ADMIN}/campaigns/${camp.body.id}/${s}`, s === 'confirm-funding' ? k.finance : k.staff, {});
     await k.emit('offers.offer.price_changed', { offerId: o.id, productId: o.productId, variantId: o.variantId, sellerId: SELLER_A, ownerType: 'seller', from: USD(10000), to: USD(12000), compareAt: null, priceChangeId: newId(), termsVersion: 2 });
     const p = await k.call('GET', `${ADMIN}/campaigns/${camp.body.id}/participations`, k.staff);
     expect(p.body.items[0].reason).toBe('Price raised from $100.00 to $120.00 during the campaign');

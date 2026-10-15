@@ -49,8 +49,10 @@ export const adminRoutes = (service: PromotionsService) => {
     /** POST /campaigns/{id}/pause: Pause a scheduled or live campaign */
     pauseCampaign: async ({ params, body, actor, requestId, principal }) => {
       const by = { actor, requestId, principal };
-      await c.pause(params.id, body.reason, by);
-      return c.audited(params.id, 'promotions.campaign.pause', 'Paused campaign', by, body.reason);
+      // the reason is optional (G68): a default keeps the history and the audit entry readable
+      const reason = body.reason?.trim() || 'Paused by Marketing';
+      await c.pause(params.id, reason, by);
+      return c.audited(params.id, 'promotions.campaign.pause', 'Paused campaign', by, reason);
     },
     /** POST /campaigns/{id}/resume: Resume a paused campaign */
     resumeCampaign: async ({ params, body, actor, requestId, principal }) => {

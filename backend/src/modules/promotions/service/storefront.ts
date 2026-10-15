@@ -423,7 +423,7 @@ export class StorefrontPart extends Part {
     return list.map((c: OfferCard) => {
       const p = prices.get(c.offer.id);
       const end = endsAt(c.offer.id);
-      return { productId: c.offer.productId, offerId: c.offer.id, title: c.title, image: c.image, sellerName: c.sellerName, price: p?.price ?? c.offer.price, wasPrice: p?.wasPrice ?? (p && p.price.amount < p.regularPrice.amount ? p.regularPrice : null), endsAt: end ? end.toISOString() : null, stockLeft: c.stock };
+      return { productId: c.offer.productId, offerId: c.offer.id, title: c.title, image: c.image, sellerName: c.sellerName, sellerSlug: c.sellerSlug, price: p?.price ?? c.offer.price, wasPrice: p?.wasPrice ?? (p && p.price.amount < p.regularPrice.amount ? p.regularPrice : null), endsAt: end ? end.toISOString() : null, stockLeft: c.stock };
     });
   }
 

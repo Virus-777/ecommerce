@@ -64,7 +64,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | GET | `/api/seller/promotions/invitations/{id}` | Invitation with eligibility per offer, funding split and expected earnings per unit | seller | `Invitation` |
 | POST | `/api/seller/promotions/invitations/{id}/accept` | Consent to join with selected eligible offers _(audited)_ | seller<br>`promotions.campaigns.join` | `{ offerIds: uuid[], consent: bool, consentTextVersion: string }` → `Invitation` |
 | POST | `/api/seller/promotions/invitations/{id}/decline` | Decline an invitation | seller<br>`promotions.campaigns.join` | `{ reason: text? }` → `Invitation` |
-| POST | `/api/seller/promotions/invitations/{id}/withdraw` | Leave a campaign _(audited)_ | seller<br>`promotions.campaigns.join` | `{ reason: text }` → `Invitation` |
+| POST | `/api/seller/promotions/invitations/{id}/withdraw` | Leave a campaign _(audited)_ | seller<br>`promotions.campaigns.join` | `{ reason: text? }` → `Invitation` |
 
 ## Admin API
 
@@ -88,7 +88,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | POST | `/api/admin/promotions/campaigns/{id}/confirm-funding` | Finance confirms funding _(audited)_ | staff<br>`promotions.funding.confirm` | `{ comment: text?, costCenter: string? }` → `Campaign` |
 | POST | `/api/admin/promotions/campaigns/{id}/request-changes` | Finance sends the campaign back with a reason _(audited)_ | staff<br>`promotions.funding.confirm` | `{ reason: text }` → `Campaign` |
 | POST | `/api/admin/promotions/campaigns/{id}/schedule` | Schedule an approved campaign _(audited)_ | staff<br>`promotions.campaigns.publish` | `Campaign` |
-| POST | `/api/admin/promotions/campaigns/{id}/pause` | Pause a scheduled or live campaign _(audited)_ | staff<br>`promotions.campaigns.publish` | `{ reason: text }` → `Campaign` |
+| POST | `/api/admin/promotions/campaigns/{id}/pause` | Pause a scheduled or live campaign _(audited)_ | staff<br>`promotions.campaigns.publish` | `{ reason: text? }` → `Campaign` |
 | POST | `/api/admin/promotions/campaigns/{id}/resume` | Resume a paused campaign _(audited)_ | staff<br>`promotions.campaigns.publish` | `{ reason: text? }` → `Campaign` |
 | POST | `/api/admin/promotions/campaigns/{id}/end` | End a live or paused campaign early _(audited)_ | staff<br>`promotions.campaigns.publish` | `{ reason: text }` → `Campaign` |
 | POST | `/api/admin/promotions/campaigns/{id}/cancel` | Cancel a campaign that has not started _(audited)_ | staff<br>`promotions.campaigns.manage` | `{ reason: text }` → `Campaign` |
@@ -447,6 +447,8 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | campaign | `{"id":"uuid","name":"string","description":"string?","period":"SchedulePeriod","banner":"MediaRef?","featuredOn":{"type":"string[]","desc":"e.g. Home page, Deals page, Opening ad"},"discountLabel":"string","rules":"string[]","funding":{"discountBps":"int","sellerFundsBps":"int","platformFundsBps":"int","feeBasisNote":"string"}}` |
 | leavePolicy | `string` e.g. You can leave before Oct 12. After it starts, leaving needs Marketing approval. |
 | salesNote | `string?` Historical context; never a promise of sales |
+| consentText | `text` The text the seller agrees to by accepting (worded for the eligible offers; once accepted, the exact text recorded with the participation) |
+| consentTextVersion | `string` Version of the consent wording shown; send it back as consentTextVersion when accepting |
 
 ### SellerDiscountInput
 
@@ -520,6 +522,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | image | `MediaRef?` |
 | sellerId | `uuid` |
 | sellerName | `string` |
+| sellerSlug | `string?` Storefront slug for /shop/:slug; null for the Official Store |
 | dealPrice | `Money` |
 | regularPrice | `Money` |
 | percentOffBps | `int` |
@@ -717,6 +720,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | title | `string` |
 | image | `MediaRef?` |
 | sellerName | `string` |
+| sellerSlug | `string?` Storefront slug for /shop/:slug; null for the Official Store |
 | price | `Money` |
 | wasPrice | `Money?` |
 | endsAt | `datetime?` |
@@ -1361,6 +1365,7 @@ Checked through the access module (limits per role, second reviewer).
 | `OFFER_NOT_ELIGIBLE` | 422 | An offer does not meet the campaign rules. details.offers lists each reason. |
 | `INSUFFICIENT_STOCK` | 422 | Deal stock is above the offer's available stock. |
 | `CODE_TAKEN` | 409 | The coupon code is already used by another active or scheduled campaign. |
+| `SAME_REVIEWER` | 409 | The person who created a campaign or sent it to Finance can't confirm its funding. |
 
 ## Background jobs
 

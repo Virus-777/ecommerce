@@ -64,6 +64,8 @@ export interface OfferCard {
   image: common.MediaRef | null;
   categoryId: string | null;
   sellerName: string;
+  /** Storefront slug (/shop/:slug); null for the Official Store or when sellers can't answer */
+  sellerSlug: string | null;
   stock: number | null;
 }
 
@@ -214,11 +216,16 @@ export class Core {
   }
 
   async sellerNames(ids: readonly (string | null | undefined)[]): Promise<Map<string, string>> {
+    return new Map([...(await this.sellerCards(ids))].map(([id, s]) => [id, s.name]));
+  }
+
+  /** Store name and storefront slug per seller (sellers.getSellers); sellers it can't answer for are left out */
+  async sellerCards(ids: readonly (string | null | undefined)[]): Promise<Map<string, { name: string; slug: string | null }>> {
     const wanted = [...new Set(ids.filter((i): i is string => isUuid(i)))];
-    const out = new Map<string, string>();
+    const out = new Map<string, { name: string; slug: string | null }>();
     if (!wanted.length) return out;
     const list = await this.optional('sellers', (s) => s.getSellers(wanted));
-    for (const s of list ?? []) out.set(s.id, s.storeName);
+    for (const s of list ?? []) out.set(s.id, { name: s.storeName, slug: s.slug ?? null });
     return out;
   }
 
@@ -258,16 +265,19 @@ export class Core {
     const products = new Map<string, Awaited<ReturnType<Core['product']>>>();
     for (const pid of new Set(list.map((x) => x.productId))) products.set(pid, await this.product(pid));
     const stock = o.withStock === false ? new Map<string, number>() : await this.stockOf(list.map((x) => x.stockItemId));
-    const names = await this.sellerNames(list.map((x) => x.sellerId));
+    const sellers = await this.sellerCards(list.map((x) => x.sellerId));
     for (const offer of list) {
       const p = products.get(offer.productId) ?? null;
+      const seller = offer.ownerType === 'official' ? undefined : sellers.get(offer.sellerId ?? '');
       out.set(offer.id, {
         offer,
         attrs: await this.attrsOf(offer, p),
         title: p?.title ?? offer.sellerSku ?? 'Product',
         image: p?.image ?? null,
         categoryId: p?.categoryId ?? null,
-        sellerName: offer.ownerType === 'official' ? OFFICIAL_STORE_NAME : (names.get(offer.sellerId ?? '') ?? offer.sellerName ?? 'Seller'),
+        sellerName: offer.ownerType === 'official' ? OFFICIAL_STORE_NAME : (seller?.name ?? offer.sellerName ?? 'Seller'),
+        // the Official Store has no seller storefront
+        sellerSlug: seller?.slug ?? null,
         stock: stock.has(offer.stockItemId) ? stock.get(offer.stockItemId)! : null,
       });
     }

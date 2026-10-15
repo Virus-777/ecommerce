@@ -785,6 +785,10 @@ export interface Invitation {
   leavePolicy: string;
   /** Historical context; never a promise of sales */
   salesNote?: string | null;
+  /** The text the seller agrees to by accepting (worded for the eligible offers; once accepted, the exact text recorded with the participation) */
+  consentText: string;
+  /** Version of the consent wording shown; send it back as consentTextVersion when accepting */
+  consentTextVersion: string;
 }
 
 export const Invitation: z.ZodType<Invitation> = z.object({
@@ -813,6 +817,8 @@ export const Invitation: z.ZodType<Invitation> = z.object({
   }),
   leavePolicy: z.string().describe("e.g. You can leave before Oct 12. After it starts, leaving needs Marketing approval."),
   salesNote: z.string().describe("Historical context; never a promise of sales").nullish(),
+  consentText: z.string().describe("The text the seller agrees to by accepting (worded for the eligible offers; once accepted, the exact text recorded with the participation)"),
+  consentTextVersion: z.string().describe("Version of the consent wording shown; send it back as consentTextVersion when accepting"),
 }).register(common.apiTypes, { id: "promotions.Invitation" });
 
 export interface SellerDiscountInput {
@@ -976,6 +982,8 @@ export interface FlashItem {
   image?: common.MediaRef | null;
   sellerId: string;
   sellerName: string;
+  /** Storefront slug for /shop/:slug; null for the Official Store */
+  sellerSlug?: string | null;
   dealPrice: common.Money;
   regularPrice: common.Money;
   percentOffBps: number;
@@ -999,6 +1007,7 @@ export const FlashItem: z.ZodType<FlashItem> = z.object({
   },
   sellerId: z.uuid(),
   sellerName: z.string(),
+  sellerSlug: z.string().describe("Storefront slug for /shop/:slug; null for the Official Store").nullish(),
   get dealPrice() {
     return common.Money;
   },
@@ -1398,6 +1407,8 @@ export interface DealProduct {
   title: string;
   image?: common.MediaRef | null;
   sellerName: string;
+  /** Storefront slug for /shop/:slug; null for the Official Store */
+  sellerSlug?: string | null;
   price: common.Money;
   wasPrice?: common.Money | null;
   endsAt?: string | null;
@@ -1412,6 +1423,7 @@ export const DealProduct: z.ZodType<DealProduct> = z.object({
     return common.MediaRef.nullish();
   },
   sellerName: z.string(),
+  sellerSlug: z.string().describe("Storefront slug for /shop/:slug; null for the Official Store").nullish(),
   get price() {
     return common.Money;
   },
@@ -2793,13 +2805,13 @@ export const endpoints = defineEndpoints({
     permission: "promotions.campaigns.join",
     scope: "own-seller",
     summary: "Leave a campaign",
-    desc: "Before the start: immediate. After the start: becomes a withdrawal request decided by Marketing.",
+    desc: "Before the start: immediate. After the start: becomes a withdrawal request decided by Marketing. The reason is optional (G57b): without one the record says 'Left the campaign' before the start or 'Asked to leave the campaign' after it.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
-      reason: z.string(),
+      reason: z.string().nullish(),
     }),
     response: () => Invitation,
     status: 200,
@@ -3134,7 +3146,7 @@ export const endpoints = defineEndpoints({
     permission: "promotions.funding.confirm",
     scope: "staff",
     summary: "Finance confirms funding",
-    desc: "A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided.",
+    desc: "A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided. Separation of duties (G65a): the person who created the campaign or sent it to Finance can't confirm its funding (SAME_REVIEWER).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3145,7 +3157,7 @@ export const endpoints = defineEndpoints({
     }),
     response: () => Campaign,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED"],
+    errors: ["ILLEGAL_TRANSITION","APPROVAL_REQUIRED","SAME_REVIEWER"],
     audited: true,
     approval: "Approval action promotions.budgets.approve: budget above the Marketing approval limit needs a Finance member whose limit covers it; above that, a second reviewer",
     events: ["promotions.campaign.funding_confirmed"],
@@ -3203,13 +3215,13 @@ export const endpoints = defineEndpoints({
     permission: "promotions.campaigns.publish",
     scope: "staff",
     summary: "Pause a scheduled or live campaign",
-    desc: "Takes effect for new evaluations immediately; open reservations may still commit.",
+    desc: "Takes effect for new evaluations immediately; open reservations may still commit. The reason is optional (G68): without one the history and the audit entry say 'Paused by Marketing'.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
-      reason: z.string(),
+      reason: z.string().nullish(),
     }),
     response: () => Campaign,
     status: 200,
@@ -3883,6 +3895,10 @@ export const spec = defineModuleSpec({
     "CODE_TAKEN": {
       "status": 409,
       "meaning": "The coupon code is already used by another active or scheduled campaign."
+    },
+    "SAME_REVIEWER": {
+      "status": 409,
+      "meaning": "The person who created a campaign or sent it to Finance can't confirm its funding."
     }
   },
   collections: {

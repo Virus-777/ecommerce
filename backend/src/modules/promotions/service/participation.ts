@@ -79,7 +79,15 @@ export class ParticipationPart extends Part {
       },
       leavePolicy: started ? 'The campaign has started: leaving needs Marketing approval.' : `You can leave before ${dayLabel(c.startsAt, c.timeZone)}. After it starts, leaving needs Marketing approval.`,
       salesNote: null,
+      // G57a: the wording the seller agrees to (the recorded text once accepted), and its version to send back
+      consentText: rec.consent_text ?? this.consentFor(c, rec, part.offers.filter((o) => o.eligible).length),
+      consentTextVersion: CONSENT_TEXT_VERSION,
     };
+  }
+
+  /** The consent wording for a number of offers */
+  consentFor(c: CampaignModel, rec: ParticipationRec, offerCount: number, version = CONSENT_TEXT_VERSION): string {
+    return consentText({ campaignName: c.name, period: periodOf(c).display, discount: discountLabel(c.discount, c.currency), offerCount, sellerShareBps: rec.seller_share_bps, platformShareBps: rec.platform_share_bps, version });
   }
 
   async ownParticipation(sellerId: string, id: string): Promise<{ rec: ParticipationRec; c: CampaignModel }> {
@@ -228,7 +236,7 @@ export class ParticipationPart extends Part {
     if (problems.length) throw this.ctx.error('OFFER_NOT_ELIGIBLE', 'Only eligible offers can join', { offers: problems });
     const can = await this.core.optional('sellers', (s) => s.canSell(sellerId, { activity: 'promotions' }));
     if (can && !can.allowed) throw invalid([{ path: 'sellerId', message: can.reason ?? 'Your account cannot join promotions right now' }], 'Your account cannot join promotions right now');
-    const text = consentText({ campaignName: c.name, period: periodOf(c).display, discount: discountLabel(c.discount, c.currency), offerCount: offerIds.length, sellerShareBps: rec.seller_share_bps, platformShareBps: rec.platform_share_bps, version: body.consentTextVersion || CONSENT_TEXT_VERSION });
+    const text = this.consentFor(c, rec, offerIds.length, body.consentTextVersion || CONSENT_TEXT_VERSION);
     const after = await this.repo.transaction(async (tx) => {
       await tx.updateWhere('participation_offers', { participation_id: id }, { included: false });
       await tx.updateWhere('participation_offers', { participation_id: id, offer_id: offerIds }, { included: true });
@@ -249,9 +257,11 @@ export class ParticipationPart extends Part {
     return this.invitation(after, c);
   }
 
-  async withdraw(sellerId: string, id: string, reason: string, by: By): Promise<Invitation> {
+  /** The reason is optional (G57b): the record gets a default wording */
+  async withdraw(sellerId: string, id: string, given: string | null, by: By): Promise<Invitation> {
     const { rec, c } = await this.ownParticipation(sellerId, id);
     const started = c.startsAt.getTime() <= this.now().getTime() && ['scheduled', 'live', 'paused'].includes(c.status);
+    const reason = given?.trim() || (started ? 'Asked to leave the campaign' : 'Left the campaign');
     const after = await this.move(id, started ? 'requestWithdrawal' : 'withdraw', by, { reason });
     await this.core.audit({ action: started ? 'promotions.participation.request_withdrawal' : 'promotions.participation.withdraw', actionLabel: started ? `Asked to leave ${c.name}` : `Left ${c.name}`, category: 'other', target: { type: 'participation', id, label: c.name, sellerId }, relatedTargets: [{ type: 'campaign', id: c.id, ref: c.ref }], before: { state: rec.state }, after: { state: after.state }, reason, visibleToSeller: true }, by);
     return this.invitation(after, c);

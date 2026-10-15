@@ -127,7 +127,7 @@ describe('platform campaign participation', () => {
 
     // Finance confirmation sees the consent; once live the consented offer is priced and the other is not
     await k.call('POST', `${ADMIN}/campaigns/${id}/submit`, k.staff, {});
-    await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.staff, {});
+    await k.call('POST', `${ADMIN}/campaigns/${id}/confirm-funding`, k.finance, {});
     await k.call('POST', `${ADMIN}/campaigns/${id}/schedule`, k.staff, {});
     const prices = await k.svc.priceOffers([good.id, low.id], { at: new Date(Date.parse(startsAt) + 60_000).toISOString() });
     expect(prices.find((p) => p.offerId === good.id)).toMatchObject({ price: USD(8000), campaignId: id });
@@ -148,7 +148,7 @@ describe('platform campaign participation', () => {
     await k.call('POST', `${SELLER}/invitations/${pid}/accept`, sellerB, { offerIds: [o1.id, o2.id], consent: true, consentTextVersion: 'v1' });
     const removed = await k.call('POST', `${ADMIN}/participations/${pid}/remove`, k.staff, { offerIds: [o2.id], reason: 'Price raised' });
     expect(removed.body).toMatchObject({ state: 'accepted', offerCount: 1 });
-    for (const step of ['submit', 'confirm-funding', 'schedule']) expect((await k.call('POST', `${ADMIN}/campaigns/${id}/${step}`, k.staff, {})).status).toBe(200);
+    for (const step of ['submit', 'confirm-funding', 'schedule']) expect((await k.call('POST', `${ADMIN}/campaigns/${id}/${step}`, step === 'confirm-funding' ? k.finance : k.staff, {})).status).toBe(200);
     const req = await k.call('POST', `${SELLER}/invitations/${pid}/withdraw`, sellerB, { reason: 'Out of stock soon' });
     expect(req.body.participation.state).toBe('withdrawal_requested');
     const kept = await k.call('POST', `${ADMIN}/participations/${pid}/decide-withdrawal`, k.staff, { approve: false, reason: 'Campaign promise' });

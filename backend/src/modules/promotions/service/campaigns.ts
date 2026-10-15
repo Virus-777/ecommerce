@@ -597,6 +597,7 @@ export class CampaignsPart extends Part {
   async confirmFunding(id: string, body: { comment?: string | null; costCenter?: string | null }, by: By): Promise<Campaign> {
     const { row, model: c } = await this.core.campaign(id);
     this.core.step(promotionCampaignMachine, c.status, 'confirmFunding');
+    await this.refuseOwnCampaign(row, by);
     const review = (await this.latestReviews([id])).get(id);
     if (review?.approval_request_id && review.state === 'waiting') throw new AppError('APPROVAL_REQUIRED', 'The budget is waiting for approval', { approvalRequestId: review.approval_request_id });
     const platformMax = review?.platform_max ?? 0;
@@ -625,6 +626,16 @@ export class CampaignsPart extends Part {
     }
     await this.finishConfirmation(id, by, body.comment ?? null, body.costCenter ?? null);
     return this.audited(id, 'promotions.campaign.confirm_funding', 'Confirmed campaign funding', by, body.comment);
+  }
+
+  /** Separation of duties (G65a): whoever created the campaign or last sent it to Finance can't confirm its funding */
+  private async refuseOwnCampaign(row: CampaignRec, by: By): Promise<void> {
+    const me = by.actor.id;
+    if (!me) return;
+    const submitted = (await this.repo.find('campaign_log', { campaign_id: row.id, action: 'submitted' }, { orderBy: [['at', 'desc']], limit: 1 }))[0];
+    if (decodeActor(row.created_by)?.id === me || submitted?.actor_id === me) {
+      throw this.ctx.error('SAME_REVIEWER', 'You created or submitted this campaign: another Finance member confirms its funding');
+    }
   }
 
   /** in_review → approved with the review confirmed; publishes funding_confirmed */
@@ -811,6 +822,7 @@ export class CampaignsPart extends Part {
         image: card?.image ?? null,
         sellerId: card?.offer.sellerId ?? card?.offer.id ?? f.offer_id,
         sellerName: card?.sellerName ?? 'Seller',
+        sellerSlug: card?.sellerSlug ?? null,
         dealPrice: m(f.deal_price, cur),
         regularPrice: m(f.regular_price, cur),
         percentOffBps: f.regular_price > 0 ? Math.round(((f.regular_price - f.deal_price) * 10000) / f.regular_price) : 0,
