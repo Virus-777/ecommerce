@@ -242,11 +242,13 @@ export class MessagingService implements MessagingPublicApi {
    * buying. One conversation per customer, seller and product; new ones are rate limited per customer and day.
    */
   async startProductConversation(v: CustomerViewer, body: ProductConversationInput, by: By): Promise<{ conversation: Conversation; message: Message }> {
-    if (!v.customerId) throw new AppError('UNAUTHORIZED', 'Sign in to message a seller');
     const offers = this.ctx.tryUse('offers');
     const offer = offers ? await offers.getOffer(body.offerId) : null;
     // only offers customers can see on the product page
     if (!offer || !['active', 'out_of_stock'].includes(offer.status)) throw notFound('Offer');
+    // the endpoint takes customer tokens only (the middleware refuses others); an account without a customer record
+    // (never set up) has nobody to write as: not found, never an authentication error for a valid token
+    if (!v.customerId) throw notFound('Customer');
     const sellerId = offer.ownerType === 'official' ? OFFICIAL_STORE_ID : offer.sellerId;
     if (!sellerId) throw notFound('Offer');
     await this.core.assertMayWrite(v, { case_id: null });
