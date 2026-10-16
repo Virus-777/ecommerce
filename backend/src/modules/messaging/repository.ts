@@ -248,6 +248,16 @@ export class MessagingRepository {
     return rows.map(line);
   }
 
+  /** Text messages of every seller's customer conversations in a period (or one seller's), oldest first, with the seller of each */
+  async customerMessageLinesBySeller(from: Date, to: Date, sellerId?: string): Promise<(MessageLine & { seller_id: string })[]> {
+    const rows = await this.#messages.find({ kind: 'text', at: { $gte: from, $lt: to } }, { sort: { at: 1, id: 1 } });
+    const ids = [...new Set(rows.map((r) => r.conversation_id))];
+    if (!ids.length) return [];
+    const conversations = await this.#conversations.find({ id: { $in: ids }, kind: 'order', ...(sellerId ? { seller_id: sellerId } : { seller_id: { $ne: null } }) });
+    const sellerOf = new Map(conversations.map((c) => [c.id, c.seller_id as string]));
+    return rows.filter((r) => sellerOf.has(r.conversation_id)).map((r) => ({ ...line(r), seller_id: sellerOf.get(r.conversation_id)! }));
+  }
+
   /** Report counts per conversation (any status) */
   async reportCounts(conversationIds: readonly string[]): Promise<Map<string, number>> {
     if (!conversationIds.length) return new Map();

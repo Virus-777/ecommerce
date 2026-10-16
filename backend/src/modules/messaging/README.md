@@ -236,6 +236,18 @@ Private service conversations linked to an order, item, return or case: customer
 | overdue | `int` |
 | period | `DateRange` |
 
+### DailyReplyStats
+
+| Field | Type |
+|---|---|
+| date | `date` Market day the customer's message that waits for a reply was sent |
+| sellerId | `uuid` OFFICIAL_STORE_ID for Official Store conversations |
+| waiting | `int` Customer messages that started a wait for the seller's reply (a reply round) |
+| replied | `int` |
+| replyMinutesTotal | `int` Minutes from the customer's message to the seller's reply, summed over replied (wall-clock time) |
+| repliedWithinTarget | `int` Replies within the reply target (targetHours) |
+| targetHours | `int` |
+
 ### ReplyTemplate
 
 | Field | Type |
@@ -498,6 +510,7 @@ Indexes: `(computed_at)`
 | postSystemNote | `(conversationId: uuid, text: string) => Message`<br>A system note (Message.kind system), e.g. Marketly Support joined from case CS-261005-3381: unread for every participant, no reply-state change, no messaging.message.sent (nobody is notified) | support, returns |
 | addStaffParticipant | `(conversationId: uuid, staff: Actor, caseId: uuid) => Conversation`<br>Support joins an order conversation when a case is opened | support |
 | sellerResponseStats | `(sellerId: uuid, range: DateRange) => ResponseStats`<br>Response time for seller performance and reports | sellers, reports, graphql |
+| replyStatsByDay | `(range: DateRange, sellerId?: uuid) => DailyReplyStats[]`<br>Seller reply rounds in order and product conversations per market day and seller: customer messages waiting for a reply, replies, total reply minutes and replies within the target. Reports' Response time and case backlog. | reports |
 | unreadCount | `(participant: Actor) => int`<br>Badge counts for the account and Seller Center | notifications |
 | listForOrder | `(orderId: uuid, participant: Actor) => ConversationSummary[]`<br>Conversations about an order or its items that the participant takes part in (Order.conversations) | graphql |
 | getForSubject | `(subject: { kind: 'return' | 'case' | 'order_item', id: uuid }, participant: Actor) => Conversation | null`<br>The conversation linked to a return, case or item, batched (Return.conversation) | graphql |

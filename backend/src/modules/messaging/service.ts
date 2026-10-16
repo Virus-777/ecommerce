@@ -1,6 +1,6 @@
 import { AppError } from '../../kernel/errors/index.js';
 import type { EventPayload } from '../../kernel/events/index.js';
-import { zonedTimeToUtc } from '../../kernel/lib/clock.js';
+import { dateInZone, zonedTimeToUtc } from '../../kernel/lib/clock.js';
 import { isUuid, newId } from '../../kernel/lib/ids.js';
 import { toPageRequest, type PageRequest } from '../../kernel/lib/pagination.js';
 import { isDuplicateKey } from '../../kernel/mongo/index.js';
@@ -10,6 +10,7 @@ import type {
   Conversation,
   ConversationSummary,
   CustomerConversationSummary,
+  DailyReplyStats,
   Message,
   MessageReport,
   MessagingPublicApi,
@@ -835,6 +836,41 @@ export class MessagingService implements MessagingPublicApi {
     const [cfg, inbox] = await Promise.all([this.core.cfg(), this.repo.sellerInbox(sellerId)]);
     const r = await this.replyFigures(sellerId, range, cfg);
     return { targetHours: cfg.targetHours, averageReplyMinutes: r.averageReplyMinutes, medianReplyMinutes: r.medianReplyMinutes, repliedWithinTargetPct: r.repliedWithinTargetPct, awaitingReply: inbox.awaiting + inbox.overdue, overdue: inbox.overdue, period: range };
+  }
+
+  /**
+   * Reply rounds per market day and seller (reports' Response time and case backlog). A round starts with the
+   * customer's first unanswered message and ends at the seller's reply; replies after the range still count for
+   * rounds that started in it (looked up to 14 days on).
+   */
+  async replyStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyReplyStats[]> {
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    if (!day.test(range?.from ?? '') || !day.test(range?.to ?? '') || range.from > range.to) throw invalid([{ path: 'range', message: 'Dates are YYYY-MM-DD, from on or before to' }]);
+    const cfg = await this.core.cfg();
+    const tz = this.core.tz;
+    const from = zonedTimeToUtc(range.from, '00:00', tz);
+    const to = new Date(zonedTimeToUtc(range.to, '00:00', tz).getTime() + DAY);
+    const until = new Date(Math.min(this.now().getTime() + MINUTE, to.getTime() + ROUND_LOOKBACK_MS));
+    const lines = await this.repo.customerMessageLinesBySeller(new Date(from.getTime() - ROUND_LOOKBACK_MS), until, sellerId);
+    const sellerOf = new Map(lines.map((l) => [l.conversation_id, l.seller_id]));
+    const target = cfg.targetHours * HOUR;
+    const out = new Map<string, DailyReplyStats>();
+    for (const round of replyRounds(lines)) {
+      if (round.start < from || round.start >= to) continue;
+      const seller = sellerOf.get(round.conversationId)!;
+      const date = dateInZone(round.start, tz);
+      const key = `${date}|${seller}`;
+      const v = out.get(key) ?? { date, sellerId: seller, waiting: 0, replied: 0, replyMinutesTotal: 0, repliedWithinTarget: 0, targetHours: cfg.targetHours };
+      v.waiting += 1;
+      if (round.reply) {
+        const took = round.reply.getTime() - round.start.getTime();
+        v.replied += 1;
+        v.replyMinutesTotal += Math.round(took / MINUTE);
+        if (took <= target) v.repliedWithinTarget += 1;
+      }
+      out.set(key, v);
+    }
+    return [...out.values()].sort((a, b) => a.date.localeCompare(b.date) || a.sellerId.localeCompare(b.sellerId));
   }
 
   private async replyFigures(sellerId: string, range: common.DateRange, cfg: Cfg): Promise<{ averageReplyMinutes: number | null; medianReplyMinutes: number | null; repliedWithinTargetPct: number | null; replied: number; within: number; decided: number }> {

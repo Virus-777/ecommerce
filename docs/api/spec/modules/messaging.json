@@ -26,6 +26,7 @@
     { "name": "postSystemNote", "signature": "(conversationId: uuid, text: string) => Message", "desc": "A system note (Message.kind system), e.g. Marketly Support joined from case CS-261005-3381: unread for every participant, no reply-state change, no messaging.message.sent (nobody is notified)", "usedBy": ["support", "returns"] },
     { "name": "addStaffParticipant", "signature": "(conversationId: uuid, staff: Actor, caseId: uuid) => Conversation", "desc": "Support joins an order conversation when a case is opened", "usedBy": ["support"] },
     { "name": "sellerResponseStats", "signature": "(sellerId: uuid, range: DateRange) => ResponseStats", "desc": "Response time for seller performance and reports", "usedBy": ["sellers", "reports", "graphql"] },
+    { "name": "replyStatsByDay", "signature": "(range: DateRange, sellerId?: uuid) => DailyReplyStats[]", "desc": "Seller reply rounds in order and product conversations per market day and seller: customer messages waiting for a reply, replies, total reply minutes and replies within the target. Reports' Response time and case backlog.", "usedBy": ["reports"] },
     { "name": "unreadCount", "signature": "(participant: Actor) => int", "desc": "Badge counts for the account and Seller Center", "usedBy": ["notifications"] },
     { "name": "listForOrder", "signature": "(orderId: uuid, participant: Actor) => ConversationSummary[]", "desc": "Conversations about an order or its items that the participant takes part in (Order.conversations)", "usedBy": ["graphql"] },
     { "name": "getForSubject", "signature": "(subject: { kind: 'return' | 'case' | 'order_item', id: uuid }, participant: Actor) => Conversation | null", "desc": "The conversation linked to a return, case or item, batched (Return.conversation)", "usedBy": ["graphql"] },
@@ -156,6 +157,15 @@
       "awaitingReply": "int",
       "overdue": "int",
       "period": "DateRange"
+    },
+    "DailyReplyStats": {
+      "date": { "type": "date", "desc": "Market day the customer's message that waits for a reply was sent" },
+      "sellerId": { "type": "uuid", "desc": "OFFICIAL_STORE_ID for Official Store conversations" },
+      "waiting": { "type": "int", "desc": "Customer messages that started a wait for the seller's reply (a reply round)" },
+      "replied": "int",
+      "replyMinutesTotal": { "type": "int", "desc": "Minutes from the customer's message to the seller's reply, summed over replied (wall-clock time)" },
+      "repliedWithinTarget": { "type": "int", "desc": "Replies within the reply target (targetHours)" },
+      "targetHours": "int"
     },
     "ReplyTemplate": { "id": "uuid", "name": "string", "body": "text", "updatedAt": "datetime" },
     "ReplyTemplateInput": { "name": "string", "body": "text" },

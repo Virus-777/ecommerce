@@ -346,6 +346,31 @@ export const ResponseStats: z.ZodType<ResponseStats> = z.object({
   },
 }).register(common.apiTypes, { id: "messaging.ResponseStats" });
 
+export interface DailyReplyStats {
+  /** Market day the customer's message that waits for a reply was sent */
+  date: string;
+  /** OFFICIAL_STORE_ID for Official Store conversations */
+  sellerId: string;
+  /** Customer messages that started a wait for the seller's reply (a reply round) */
+  waiting: number;
+  replied: number;
+  /** Minutes from the customer's message to the seller's reply, summed over replied (wall-clock time) */
+  replyMinutesTotal: number;
+  /** Replies within the reply target (targetHours) */
+  repliedWithinTarget: number;
+  targetHours: number;
+}
+
+export const DailyReplyStats: z.ZodType<DailyReplyStats> = z.object({
+  date: z.iso.date().describe("Market day the customer's message that waits for a reply was sent"),
+  sellerId: z.uuid().describe("OFFICIAL_STORE_ID for Official Store conversations"),
+  waiting: z.number().int().describe("Customer messages that started a wait for the seller's reply (a reply round)"),
+  replied: z.number().int(),
+  replyMinutesTotal: z.number().int().describe("Minutes from the customer's message to the seller's reply, summed over replied (wall-clock time)"),
+  repliedWithinTarget: z.number().int().describe("Replies within the reply target (targetHours)"),
+  targetHours: z.number().int(),
+}).register(common.apiTypes, { id: "messaging.DailyReplyStats" });
+
 export interface ReplyTemplate {
   id: string;
   name: string;
@@ -596,6 +621,8 @@ export interface MessagingPublicApi {
   addStaffParticipant(conversationId: string, staff: common.Actor, caseId: string): Promise<Conversation>;
   /** Response time for seller performance and reports Used by: sellers, reports, graphql. */
   sellerResponseStats(sellerId: string, range: common.DateRange): Promise<ResponseStats>;
+  /** Seller reply rounds in order and product conversations per market day and seller: customer messages waiting for a reply, replies, total reply minutes and replies within the target. Reports' Response time and case backlog. Used by: reports. */
+  replyStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyReplyStats[]>;
   /** Badge counts for the account and Seller Center Used by: notifications. */
   unreadCount(participant: common.Actor): Promise<number>;
   /** Conversations about an order or its items that the participant takes part in (Order.conversations) Used by: graphql. */
@@ -1337,7 +1364,7 @@ export const spec = defineModuleSpec({
   summary: "Private service conversations linked to an order, item, return or case: customer with seller (or the Official Store), which Marketly support can join from a case, with attachments, read state, seller reply targets and overdue flags, and staff moderation. No promotional messages.",
   dependsOn: ["orders"],
   optionalDeps: ["media","sellers","support","returns","notifications","trust","audit","customers","shipping","identity","workqueues","settings","offers","catalog"],
-  publicApi: ["findOrStartForOrder","postSystemNote","addStaffParticipant","sellerResponseStats","unreadCount","listForOrder","getForSubject","unreadSummary","sellerInboxSummary","listInbox","getConversation","customerConversationSummaries","exportCustomerData"],
+  publicApi: ["findOrStartForOrder","postSystemNote","addStaffParticipant","sellerResponseStats","replyStatsByDay","unreadCount","listForOrder","getForSubject","unreadSummary","sellerInboxSummary","listInbox","getConversation","customerConversationSummaries","exportCustomerData"],
   permissions: [
     {
       "key": "messaging.conversations.read",
