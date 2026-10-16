@@ -34,15 +34,15 @@ export async function buildTestApp(opts: BuildOptions & { only?: string[] } = {}
 }
 
 /**
- * A clock that follows real time and can be moved ahead (deadlines, expiry jobs) while dev tokens,
- * signed at real time, stay valid. Pass it as `clock` to buildTestApp.
- */
-/**
  * The market's calendar date `days` from `at` (YYYY-MM-DD), which is what modules mean by "today". A UTC date
  * (`toISOString().slice(0, 10)`) is a day off for part of every day, so tests comparing with module dates use this.
  */
 export const marketDate = (at: Date, days = 0, timeZone = 'America/Los_Angeles') => dateInZone(new Date(at.getTime() + days * 86_400_000), timeZone);
 
+/**
+ * A clock that follows real time and can be moved ahead (deadlines, expiry jobs) while dev tokens,
+ * signed at real time, stay valid. Pass it as `clock` to buildTestApp.
+ */
 export function movingClock(): { now(): Date; advance(ms: number): void; set(at: Date | string): void } {
   let offset = 0;
   return {

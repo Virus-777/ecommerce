@@ -124,6 +124,16 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
     return r.body.reauthToken as string;
   };
   const identity = () => app.kernel.boot.apis.get('identity') as IdentityService;
+  /** Invites a staff member with roles by key (the inviter confirms with the password) */
+  const invite = async (inviter: Staff, email: string, name: string, roleKeys: string[]) => {
+    const roles = (await call('GET', '/api/admin/access/roles', { token: inviter.accessToken })).body as { id: string; key: string }[];
+    const roleIds = roleKeys.map((k) => roles.find((r) => r.key === k)!.id);
+    const invited = await call('POST', '/api/admin/access/staff-invitations', {
+      token: inviter.accessToken,
+      body: { email, name, roleIds, reason: 'New hire', reauthToken: await reauth(inviter, 'role-grant') },
+    });
+    expect(invited.status, JSON.stringify(invited.body)).toBe(201);
+  };
 
   const self: Flows = {
     app,
@@ -169,13 +179,7 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
       return { owner, deputy };
     },
     async staffWithSensitiveRoles(inviter, approver, email, name, roleKeys) {
-      const roles = (await call('GET', '/api/admin/access/roles', { token: inviter.accessToken })).body as { id: string; key: string }[];
-      const roleIds = roleKeys.map((k) => roles.find((r) => r.key === k)!.id);
-      const invited = await call('POST', '/api/admin/access/staff-invitations', {
-        token: inviter.accessToken,
-        body: { email, name, roleIds, reason: 'New hire', reauthToken: await reauth(inviter, 'role-grant') },
-      });
-      expect(invited.status, JSON.stringify(invited.body)).toBe(201);
+      await invite(inviter, email, name, roleKeys);
       const pending = (await call('GET', '/api/admin/access/approval-requests?view=to_decide', { token: approver.accessToken })).body.items as { id: string; status: string }[];
       expect(pending.length, 'a sensitive grant waits for the other Business Owner').toBeGreaterThan(0);
       for (const r of pending) {
@@ -186,13 +190,7 @@ export function flows(app: FastifyInstance, clock: { now(): Date; advance(ms: nu
       return self.acceptStaffInvitation(email);
     },
     async staffWithRoles(inviter, email, name, roleKeys) {
-      const roles = (await call('GET', '/api/admin/access/roles', { token: inviter.accessToken })).body as { id: string; key: string }[];
-      const roleIds = roleKeys.map((k) => roles.find((r) => r.key === k)!.id);
-      const invited = await call('POST', '/api/admin/access/staff-invitations', {
-        token: inviter.accessToken,
-        body: { email, name, roleIds, reason: 'New hire', reauthToken: await reauth(inviter, 'role-grant') },
-      });
-      expect(invited.status, JSON.stringify(invited.body)).toBe(201);
+      await invite(inviter, email, name, roleKeys);
       return self.acceptStaffInvitation(email);
     },
     async customer(email) {
