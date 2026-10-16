@@ -39,6 +39,18 @@ describe('authenticator set-up', () => {
     kit.clock.advance(30_000);
   });
 
+  it('getAccounts and getAccount report 2-step per account in a batch', async () => {
+    const on = await customer(kit);
+    const off = await customer(kit);
+    await enableTotp(kit, on.tokens.accessToken, on.password);
+    const batch = await identity.getAccounts([off.accountId, on.accountId, on.accountId]);
+    expect(batch.map((a) => [a.id, a.twoStepEnabled])).toEqual([
+      [off.accountId, false],
+      [on.accountId, true],
+    ]);
+    expect(await identity.getAccount(on.accountId)).toMatchObject({ twoStepEnabled: true });
+  });
+
   it('answers METHOD_NOT_AVAILABLE for text messages before phase 2', async () => {
     const k1 = await boot({ config: { launchPhase: 1 } });
     try {

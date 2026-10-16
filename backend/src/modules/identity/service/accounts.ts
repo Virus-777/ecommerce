@@ -47,12 +47,12 @@ export class Accounts {
     if (query.realm === 'staff' && !(await can('identity.staff-accounts.manage'))) throw new AppError('FORBIDDEN', 'Staff accounts need identity.staff-accounts.manage', { permission: 'identity.staff-accounts.manage' });
     const res = await this.core.repo.listAccounts(query, page);
     const ids = res.items.map((a) => a.id);
-    const [methods, sellers] = await Promise.all([this.core.repo.activeMethods(ids), this.core.repo.sellerCounts(ids)]);
+    const [twoStep, sellers] = await Promise.all([this.core.repo.withTwoStep(ids), this.core.repo.sellerCounts(ids)]);
     const now = this.core.now();
     return {
       ...res,
       items: res.items.map((a) => ({
-        account: map.accountSummary(a, methods.some((m) => m.account_id === a.id), now),
+        account: map.accountSummary(a, twoStep.has(a.id), now),
         lockedUntil: map.isoOrNull(lockInForce(a, now) ? a.locked_until : null),
         mustResetPassword: a.must_reset_password,
         sellerCount: sellers.get(a.id) ?? 0,

@@ -326,8 +326,7 @@ export class Core {
   }
 
   async summaryOf(a: AccountRow, repo: IdentityRepository = this.repo): Promise<AccountSummary> {
-    const methods = await repo.activeMethods([a.id]);
-    return map.accountSummary(a, methods.length > 0, this.now());
+    return map.accountSummary(a, (await repo.withTwoStep([a.id])).has(a.id), this.now());
   }
 
   /** The signed-in account behind a principal (404 when it isn't known here) */

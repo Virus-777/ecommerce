@@ -140,10 +140,16 @@ export class Security {
       this.core.repo.pendingEmailChanges(ids, now),
     ]);
     const out = new Map<string, { account: AccountRow; methods: TwoStepMethodRow[]; recovery: number; devices: DeviceWithSessions[]; sellers: SellerAccessRow[]; invitation?: InvitationRow; events: SecurityEventRow[]; pendingEmail?: string }>();
+    const methodsOf = new Map<string, TwoStepMethodRow[]>();
+    for (const m of methods) {
+      const own = methodsOf.get(m.account_id);
+      if (own) own.push(m);
+      else methodsOf.set(m.account_id, [m]);
+    }
     for (const a of accounts) {
       out.set(a.id, {
         account: a,
-        methods: methods.filter((m) => m.account_id === a.id),
+        methods: methodsOf.get(a.id) ?? [],
         recovery: recovery.get(a.id) ?? 0,
         devices: devices.get(a.id) ?? [],
         sellers: sellers.get(a.id) ?? [],

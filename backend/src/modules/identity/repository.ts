@@ -147,6 +147,11 @@ export class IdentityRepository {
     return ids.length ? this.#t.methods.find({ account_id: { $in: [...ids] }, removed_at: null, confirmed_at: { $ne: null } }, { sort: { confirmed_at: 1 } }) : Promise.resolve([]);
   }
 
+  /** The accounts among ids with 2-step on (a confirmed method): their ids only, not the method rows */
+  async withTwoStep(ids: readonly string[]): Promise<Set<string>> {
+    return new Set(ids.length ? await this.#t.methods.distinct<string>('account_id', { account_id: { $in: [...ids] }, removed_at: null, confirmed_at: { $ne: null } }) : []);
+  }
+
   async insertMethod(row: TwoStepMethodRow): Promise<void> {
     await this.#t.methods.insert({ ...row, secret_encrypted: bin(row.secret_encrypted), phone_e164_encrypted: bin(row.phone_e164_encrypted) });
   }

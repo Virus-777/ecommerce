@@ -171,9 +171,9 @@ export class IdentityService implements IdentityPublicApi {
 
   async getAccounts(accountIds: string[]): Promise<AccountSummary[]> {
     const ids = [...new Set(accountIds.filter(isUuid))];
-    const [rows, methods] = await Promise.all([this.core.repo.getAccounts(ids), this.core.repo.activeMethods(ids)]);
+    const [rows, twoStep] = await Promise.all([this.core.repo.getAccounts(ids), this.core.repo.withTwoStep(ids)]);
     const now = this.core.now();
-    const byId = new Map(rows.map((a) => [a.id, map.accountSummary(a, methods.some((m) => m.account_id === a.id), now)]));
+    const byId = new Map(rows.map((a) => [a.id, map.accountSummary(a, twoStep.has(a.id), now)]));
     return ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
   }
 
