@@ -212,7 +212,8 @@ describe('saved payment methods', () => {
     ]);
     const stored = await h.service.core.repo.get('saved_methods', first.body.id);
     expect(stored!.provider_method_id).toMatch(/^pm_/);
-    expect(JSON.stringify(stored)).not.toMatch(/\d{12,}/);
+    // no card number anywhere (the uuids are left out: a random one can end in 12 digits)
+    expect(JSON.stringify({ ...stored, id: undefined, customer_id: undefined })).not.toMatch(/\d{12,}/);
 
     let list = await h.call('GET', '/api/store/payments/methods', me);
     expect(list.body.map((m: any) => [m.id, m.isDefault])).toEqual([
