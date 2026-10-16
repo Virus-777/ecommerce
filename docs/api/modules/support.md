@@ -81,6 +81,23 @@ Help cases and disputes: customer help and order-problem cases opened from the o
 
 ## Types
 
+### DailyCaseStats
+
+| Field | Type |
+|---|---|
+| date | `date` Market day the cases were opened |
+| sellerId | `uuid?` Seller the cases are about; null for cases about no seller (Official Store orders, account questions) |
+| categoryKey | `string` |
+| categoryLabel | `string` |
+| group | `string` |
+| audience | `enum(customer|seller)` |
+| opened | `int` |
+| firstReplied | `int` Of the cases opened, those with a first reply (by Marketly support, or the seller when the seller handles the case) |
+| firstReplyMinutesTotal | `int` Minutes from opening to the first reply, summed over firstReplied (wall-clock time) |
+| firstReplyWithinTarget | `int` First replies on or before the case's first-response due time (targets count business hours) |
+| sellerReplied | `int` Customer cases about a seller where the seller replied |
+| sellerReplyMinutesTotal | `int` |
+
 ### CaseCategory
 
 | Field | Type |
@@ -948,6 +965,7 @@ Indexes: `(case_id, at)`
 | customerIdsWithOpenCases | `(filter: { ids?: uuid[] }) => uuid[]`<br>Customers-module ids with at least one case that is not resolved or closed. With ids only those ids are checked; without, every matching id is returned. The customer list filters hasOpenCases with it before paging, so pages are full and totals right. | customers |
 | casesForOrder | `(orderId: uuid) => { caseId: uuid, ref: string, status: string, orderItemIds: uuid[] }[]`<br>Open and recent cases per order item for the order page | orders, returns |
 | sellerCaseStats | `(sellerId: uuid, range: DateRange) => { open: int, unresolved: int, decidedAgainstSeller: int, medianReplyMinutes: int }`<br>Unresolved cases for seller performance | sellers, reports |
+| caseStatsByDay | `(range: DateRange, sellerId?: uuid) => DailyCaseStats[]`<br>Cases opened per market day, seller and category (the reason), with first-reply figures of those cases: how many got a first reply, the minutes it took in total and how many were within the first-response target; for customer cases also the seller's first reply. Reports' Complaint patterns and Response time and case backlog. | reports |
 | hasUnresolvedRemedy | `(caseId: uuid) => bool`<br>Whether a promised refund or replacement is still open | workqueues |
 | listOpenCasesForCustomer | `(customerId: uuid, limit: int) => { items: CaseSummary[], total: int }`<br>Open cases of a customer, most recently updated first, for the account overview. | customers, graphql |
 | getCaseForCustomer | `(customerId: uuid | null, guestSessionId: uuid | null, ref: string) => CaseView | null`<br>Case detail for the customer or guest order session (no internal notes) | graphql |

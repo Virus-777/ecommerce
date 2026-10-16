@@ -2,7 +2,7 @@ import type { EventPayload } from '../../kernel/events/index.js';
 import { isUuid } from '../../kernel/lib/ids.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { AdminCaseDetail, CaseSummary, CaseView, ContactChannel, SellerCaseRow, SupportPublicApi } from '../../spec/support.js';
+import type { AdminCaseDetail, CaseSummary, CaseView, ContactChannel, DailyCaseStats, SellerCaseRow, SupportPublicApi } from '../../spec/support.js';
 import { UNRESOLVED_REMEDY } from './domain/rules.js';
 import { Automation } from './service/automation.js';
 import { Cases } from './service/cases.js';
@@ -60,6 +60,11 @@ export class SupportService implements SupportPublicApi {
   /** Unresolved cases for seller performance */
   sellerCaseStats(sellerId: string, range: common.DateRange): Promise<{ open: number; unresolved: number; decidedAgainstSeller: number; medianReplyMinutes: number }> {
     return this.reads.sellerCaseStats(sellerId, range);
+  }
+
+  /** Cases opened per market day, seller and category with first-reply figures (reports) */
+  caseStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyCaseStats[]> {
+    return this.reads.caseStatsByDay(range, sellerId);
   }
 
   /** Whether a promised refund or replacement is still open */

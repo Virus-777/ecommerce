@@ -32,6 +32,7 @@
     { "name": "customerIdsWithOpenCases", "signature": "(filter: { ids?: uuid[] }) => uuid[]", "desc": "Customers-module ids with at least one case that is not resolved or closed. With ids only those ids are checked; without, every matching id is returned. The customer list filters hasOpenCases with it before paging, so pages are full and totals right.", "usedBy": ["customers"] },
     { "name": "casesForOrder", "signature": "(orderId: uuid) => { caseId: uuid, ref: string, status: string, orderItemIds: uuid[] }[]", "desc": "Open and recent cases per order item for the order page", "usedBy": ["orders", "returns"] },
     { "name": "sellerCaseStats", "signature": "(sellerId: uuid, range: DateRange) => { open: int, unresolved: int, decidedAgainstSeller: int, medianReplyMinutes: int }", "desc": "Unresolved cases for seller performance", "usedBy": ["sellers", "reports"] },
+    { "name": "caseStatsByDay", "signature": "(range: DateRange, sellerId?: uuid) => DailyCaseStats[]", "desc": "Cases opened per market day, seller and category (the reason), with first-reply figures of those cases: how many got a first reply, the minutes it took in total and how many were within the first-response target; for customer cases also the seller's first reply. Reports' Complaint patterns and Response time and case backlog.", "usedBy": ["reports"] },
     { "name": "hasUnresolvedRemedy", "signature": "(caseId: uuid) => bool", "desc": "Whether a promised refund or replacement is still open", "usedBy": ["workqueues"] },
     { "name": "listOpenCasesForCustomer", "signature": "(customerId: uuid, limit: int) => { items: CaseSummary[], total: int }", "desc": "Open cases of a customer, most recently updated first, for the account overview.", "usedBy": ["customers", "graphql"] },
     { "name": "getCaseForCustomer", "signature": "(customerId: uuid | null, guestSessionId: uuid | null, ref: string) => CaseView | null", "desc": "Case detail for the customer or guest order session (no internal notes)", "usedBy": ["graphql"] },
@@ -47,6 +48,20 @@
     { "name": "contactChannels", "signature": "(audience: 'customer' | 'seller') => ContactChannel[]", "desc": "The ways to reach Marketly, in display order, with hours, expected reply, a detail line and the link to open (the single source of the contact channels: content's Help Center and site navigation read them here; GET /contact-options lists the customer ones). Live chat is not offered (decision G7), so there is no chat channel. The phone number is settings support.phone (the same as ContactOptions.phone).", "usedBy": ["content"] }
   ],
   "types": {
+    "DailyCaseStats": {
+      "date": { "type": "date", "desc": "Market day the cases were opened" },
+      "sellerId": { "type": "uuid?", "desc": "Seller the cases are about; null for cases about no seller (Official Store orders, account questions)" },
+      "categoryKey": "string",
+      "categoryLabel": "string",
+      "group": "string",
+      "audience": "enum(customer|seller)",
+      "opened": "int",
+      "firstReplied": { "type": "int", "desc": "Of the cases opened, those with a first reply (by Marketly support, or the seller when the seller handles the case)" },
+      "firstReplyMinutesTotal": { "type": "int", "desc": "Minutes from opening to the first reply, summed over firstReplied (wall-clock time)" },
+      "firstReplyWithinTarget": { "type": "int", "desc": "First replies on or before the case's first-response due time (targets count business hours)" },
+      "sellerReplied": { "type": "int", "desc": "Customer cases about a seller where the seller replied" },
+      "sellerReplyMinutesTotal": "int"
+    },
     "CaseCategory": {
       "key": { "type": "string", "desc": "e.g. delivery_late, return_dispute, fees_payouts" },
       "label": { "type": "string", "desc": "e.g. Delivery, late item" },

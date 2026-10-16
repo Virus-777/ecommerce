@@ -10,6 +10,42 @@ import * as identity from './identity.js';
 
 /* ------------------------------------------------------------------ types */
 
+export interface DailyCaseStats {
+  /** Market day the cases were opened */
+  date: string;
+  /** Seller the cases are about; null for cases about no seller (Official Store orders, account questions) */
+  sellerId?: string | null;
+  categoryKey: string;
+  categoryLabel: string;
+  group: string;
+  audience: "customer" | "seller";
+  opened: number;
+  /** Of the cases opened, those with a first reply (by Marketly support, or the seller when the seller handles the case) */
+  firstReplied: number;
+  /** Minutes from opening to the first reply, summed over firstReplied (wall-clock time) */
+  firstReplyMinutesTotal: number;
+  /** First replies on or before the case's first-response due time (targets count business hours) */
+  firstReplyWithinTarget: number;
+  /** Customer cases about a seller where the seller replied */
+  sellerReplied: number;
+  sellerReplyMinutesTotal: number;
+}
+
+export const DailyCaseStats: z.ZodType<DailyCaseStats> = z.object({
+  date: z.iso.date().describe("Market day the cases were opened"),
+  sellerId: z.uuid().describe("Seller the cases are about; null for cases about no seller (Official Store orders, account questions)").nullish(),
+  categoryKey: z.string(),
+  categoryLabel: z.string(),
+  group: z.string(),
+  audience: z.enum(["customer", "seller"]),
+  opened: z.number().int(),
+  firstReplied: z.number().int().describe("Of the cases opened, those with a first reply (by Marketly support, or the seller when the seller handles the case)"),
+  firstReplyMinutesTotal: z.number().int().describe("Minutes from opening to the first reply, summed over firstReplied (wall-clock time)"),
+  firstReplyWithinTarget: z.number().int().describe("First replies on or before the case's first-response due time (targets count business hours)"),
+  sellerReplied: z.number().int().describe("Customer cases about a seller where the seller replied"),
+  sellerReplyMinutesTotal: z.number().int(),
+}).register(common.apiTypes, { id: "support.DailyCaseStats" });
+
 export interface CaseCategory {
   /** e.g. delivery_late, return_dispute, fees_payouts */
   key: string;
@@ -1330,6 +1366,8 @@ export interface SupportPublicApi {
   casesForOrder(orderId: string): Promise<{ caseId: string, ref: string, status: string, orderItemIds: string[] }[]>;
   /** Unresolved cases for seller performance Used by: sellers, reports. */
   sellerCaseStats(sellerId: string, range: common.DateRange): Promise<{ open: number, unresolved: number, decidedAgainstSeller: number, medianReplyMinutes: number }>;
+  /** Cases opened per market day, seller and category (the reason), with first-reply figures of those cases: how many got a first reply, the minutes it took in total and how many were within the first-response target; for customer cases also the seller's first reply. Reports' Complaint patterns and Response time and case backlog. Used by: reports. */
+  caseStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyCaseStats[]>;
   /** Whether a promised refund or replacement is still open Used by: workqueues. */
   hasUnresolvedRemedy(caseId: string): Promise<boolean>;
   /** Open cases of a customer, most recently updated first, for the account overview. Used by: customers, graphql. */
@@ -2363,7 +2401,7 @@ export const spec = defineModuleSpec({
   summary: "Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules.",
   dependsOn: ["orders","access"],
   optionalDeps: ["returns","payments","shipping","sellers","messaging","media","finance","trust","wallet","workqueues","notifications","settings","audit","content","customers","identity","promotions","reports","warehouse"],
-  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts","exportCustomerData","contactChannels"],
+  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","caseStatsByDay","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts","exportCustomerData","contactChannels"],
   permissions: [
     {
       "key": "support.cases.view",

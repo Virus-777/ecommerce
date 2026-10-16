@@ -8,7 +8,7 @@ import { isUuid } from '../../../kernel/lib/ids.js';
 import { toPageRequest, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
-import type { AdminCaseDetail, AdminCaseRow, CaseAssignee, CaseStats, CaseSummary, CaseView, ContactChannel, ContactOptions, ProblemContext, ProblemPackage, SellerCaseRow, SellerSupportOptions } from '../../../spec/support.js';
+import type { AdminCaseDetail, AdminCaseRow, CaseAssignee, CaseStats, CaseSummary, CaseView, ContactChannel, ContactOptions, DailyCaseStats, ProblemContext, ProblemPackage, SellerCaseRow, SellerSupportOptions } from '../../../spec/support.js';
 import { CLOSED_STATUSES, median, OFFICIAL_STORE_NAME, OPEN_STATUSES, TEAM_ROLES, type Area, type Team } from '../domain/rules.js';
 import type { CaseFilter, CaseRec, CaseSort } from '../ports.js';
 import type { Cases, Shopper } from './cases.js';
@@ -348,6 +348,60 @@ export class Reads {
     const against = decided.filter((c) => c.decision && ['customer_favored', 'shared'].includes(c.decision.outcome) && c.decision.decidedAt >= from.toISOString() && c.decision.decidedAt < to.toISOString());
     const replies = inRange.filter((r) => r.facts.sellerRepliedAt).map((r) => (new Date(r.facts.sellerRepliedAt!).getTime() - r.opened_at.getTime()) / 60_000);
     return { open, unresolved: inRange.filter((r) => !CLOSED.includes(r.status)).length, decidedAgainstSeller: against.length, medianReplyMinutes: median(replies) };
+  }
+
+  /** Cases opened per market day, seller and category, with first-reply figures (reports: Complaint patterns, Response time) */
+  async caseStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyCaseStats[]> {
+    const day = /^\d{4}-\d{2}-\d{2}$/;
+    if (!day.test(range?.from ?? '') || !day.test(range?.to ?? '') || range.from > range.to) {
+      throw new AppError('VALIDATION_FAILED', 'A date range: from on or before to', { issues: [{ path: 'range', message: 'Dates are YYYY-MM-DD, from on or before to' }] });
+    }
+    const tz = this.core.tz;
+    const from = zonedTimeToUtc(range.from, '00:00', tz);
+    const to = new Date(zonedTimeToUtc(range.to, '00:00', tz).getTime() + DAY);
+    const [rows, categories] = await Promise.all([
+      this.core.repo.find('cases', { opened_at: { op: '>=', value: from }, ...(sellerId ? { seller_id: sellerId } : {}) }),
+      this.core.categories(),
+    ]);
+    const minutes = (a: Date, b: Date) => Math.max(0, Math.round((b.getTime() - a.getTime()) / 60_000));
+    const out = new Map<string, DailyCaseStats>();
+    for (const r of rows) {
+      if (r.opened_at >= to) continue;
+      const date = dateInZone(r.opened_at, tz);
+      const key = `${date}|${r.seller_id ?? ''}|${r.category_key}`;
+      let v = out.get(key);
+      if (!v) {
+        const cat = categories.get(r.category_key);
+        const view = cat ? this.core.categoryView(cat) : null;
+        v = {
+          date,
+          sellerId: r.seller_id ?? null,
+          categoryKey: r.category_key,
+          categoryLabel: view?.label ?? r.category_key,
+          group: view?.group ?? 'other',
+          audience: view?.audience ?? (r.kind === 'seller_request' ? 'seller' : 'customer'),
+          opened: 0,
+          firstReplied: 0,
+          firstReplyMinutesTotal: 0,
+          firstReplyWithinTarget: 0,
+          sellerReplied: 0,
+          sellerReplyMinutesTotal: 0,
+        };
+        out.set(key, v);
+      }
+      v.opened += 1;
+      if (r.first_replied_at) {
+        v.firstReplied += 1;
+        v.firstReplyMinutesTotal += minutes(r.opened_at, r.first_replied_at);
+        if (!r.first_response_due_at || r.first_replied_at <= r.first_response_due_at) v.firstReplyWithinTarget += 1;
+      }
+      const sellerAt = r.facts.sellerRepliedAt ? new Date(r.facts.sellerRepliedAt) : null;
+      if (sellerAt && !Number.isNaN(sellerAt.getTime())) {
+        v.sellerReplied += 1;
+        v.sellerReplyMinutesTotal += minutes(r.opened_at, sellerAt);
+      }
+    }
+    return [...out.values()].sort((a, b) => a.date.localeCompare(b.date) || (a.sellerId ?? '').localeCompare(b.sellerId ?? '') || a.categoryKey.localeCompare(b.categoryKey));
   }
 
   async listOpenForCustomer(customerId: string, limit: number): Promise<{ items: CaseSummary[]; total: number }> {
