@@ -6677,6 +6677,26 @@ export const spec = defineModuleSpec({
             "store_name": "text",
             "legal_name": "text"
           }
+        },
+        {
+          "name": "sellers_created_at__id_501e84",
+          "key": {
+            "created_at": 1,
+            "_id": 1
+          }
+        },
+        {
+          "name": "sellers_store_name__id_b0efd6",
+          "key": {
+            "store_name": 1,
+            "_id": 1
+          }
+        },
+        {
+          "name": "sellers_approved_at_5826da",
+          "key": {
+            "approved_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -6861,6 +6881,12 @@ export const spec = defineModuleSpec({
           "name": "applications_tax_id_hash_f16802",
           "key": {
             "tax_id_hash": 1
+          }
+        },
+        {
+          "name": "applications_decision_target_at_f234ff",
+          "key": {
+            "decision_target_at": 1
           }
         }
       ],
@@ -7244,6 +7270,13 @@ export const spec = defineModuleSpec({
             "state": 1,
             "due_at": 1
           }
+        },
+        {
+          "name": "information_requests_application_id_state_b34cab",
+          "key": {
+            "application_id": 1,
+            "state": 1
+          }
         }
       ],
       "unenforced": []
@@ -7338,7 +7371,14 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "risk_reviews_application_id_ff174c",
+          "key": {
+            "application_id": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "agreement_acceptances": {
@@ -8048,6 +8088,13 @@ export const spec = defineModuleSpec({
           "partial": {
             "is_owner": true,
             "status": "active"
+          }
+        },
+        {
+          "name": "members_seller_id_status_b608db",
+          "key": {
+            "seller_id": 1,
+            "status": 1
           }
         }
       ],
@@ -9336,7 +9383,21 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "seller_notes_seller_id_created_at_62d0d8",
+          "key": {
+            "seller_id": 1,
+            "created_at": 1
+          }
+        },
+        {
+          "name": "seller_notes_application_id_ff174c",
+          "key": {
+            "application_id": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "account_events": {

@@ -1650,7 +1650,7 @@ Granted when identity, business registration, payout account and return address 
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(status, id)`, `(verification_state)`, `gin(to_tsvector(store_name || ' ' || legal_name))`
+Indexes: `(status, id)`, `(verification_state)`, `gin(to_tsvector(store_name || ' ' || legal_name))`, `(created_at, id)`, `(store_name, id)`, `(approved_at)`
 
 **applications**
 
@@ -1678,7 +1678,7 @@ Indexes: `(status, id)`, `(verification_state)`, `gin(to_tsvector(store_name || 
 | draft_saved_at | timestamptz |
 | created_at | timestamptz |
 
-Indexes: `(state, decision_target_at)`, `(applicant_account_id)`, `(reviewer_id, state)`, `(tax_id_hash)`
+Indexes: `(state, decision_target_at)`, `(applicant_account_id)`, `(reviewer_id, state)`, `(tax_id_hash)`, `(decision_target_at)`
 
 **application_documents**
 
@@ -1734,7 +1734,7 @@ Indexes: `(application_id)`, `(seller_id, kind)`, `unique(provider, provider_ref
 | state | text (open|answered|expired) |
 | draft_saved_at | timestamptz? (the applicant's last saved draft response) |
 
-Indexes: `(state, due_at)`
+Indexes: `(state, due_at)`, `(application_id, state)`
 
 **risk_reviews**
 
@@ -1749,6 +1749,8 @@ Indexes: `(state, due_at)`
 | recommendation | text? |
 | reviewed_by | text? |
 | reviewed_at | timestamptz? |
+
+Indexes: `(application_id)`
 
 **agreement_acceptances**: Which agreement version each seller accepted, by whom and when
 
@@ -1856,7 +1858,7 @@ Indexes: `(state, submitted_at)`, `(seller_id)`
 | last_active_at | timestamptz? |
 | removed_at | timestamptz? |
 
-Indexes: `unique(seller_id, email) where status in ('invited','active','suspended')`, `(account_id)`, `unique(seller_id) where is_owner and status = 'active'`
+Indexes: `unique(seller_id, email) where status in ('invited','active','suspended')`, `(account_id)`, `unique(seller_id) where is_owner and status = 'active'`, `(seller_id, status)`
 
 **performance_events**: Raw per-seller facts from other modules' events (append-only, used to recompute windows)
 
@@ -2051,6 +2053,8 @@ Indexes: `(state, decide_by)`, `(seller_id)`, `unique(subject, subject_id, level
 | author_id | text |
 | author_name | text |
 | created_at | timestamptz |
+
+Indexes: `(seller_id, created_at)`, `(application_id)`
 
 **account_events**: Seller-visible and staff timeline (approved, warnings, restrictions, appeals, holds reported by finance)
 

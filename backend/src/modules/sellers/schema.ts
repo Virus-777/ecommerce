@@ -54,6 +54,9 @@ sellers.index({"slug":1}, {"name":"sellers_slug_549e08","unique":true});
 sellers.index({"status":1,"_id":1}, {"name":"sellers_status__id_1ab776"});
 sellers.index({"verification_state":1}, {"name":"sellers_verification_state_73d30f"});
 sellers.index({"store_name":"text","legal_name":"text"}, {"name":"sellers_store_name_legal_name_7c7434"});
+sellers.index({"created_at":1,"_id":1}, {"name":"sellers_created_at__id_501e84"});
+sellers.index({"store_name":1,"_id":1}, {"name":"sellers_store_name__id_b0efd6"});
+sellers.index({"approved_at":1}, {"name":"sellers_approved_at_5826da"});
 
 const applications = new Schema(
   {
@@ -88,6 +91,7 @@ applications.index({"state":1,"decision_target_at":1}, {"name":"applications_sta
 applications.index({"applicant_account_id":1}, {"name":"applications_applicant_account_id_633383"});
 applications.index({"reviewer_id":1,"state":1}, {"name":"applications_reviewer_id_state_25e17d"});
 applications.index({"tax_id_hash":1}, {"name":"applications_tax_id_hash_f16802"});
+applications.index({"decision_target_at":1}, {"name":"applications_decision_target_at_f234ff"});
 
 const application_documents = new Schema(
   {
@@ -153,6 +157,7 @@ const information_requests = new Schema(
   collectionOptions("sellers.information_requests"),
 );
 information_requests.index({"state":1,"due_at":1}, {"name":"information_requests_state_due_at_c06642"});
+information_requests.index({"application_id":1,"state":1}, {"name":"information_requests_application_id_state_b34cab"});
 
 const risk_reviews = new Schema(
   {
@@ -170,6 +175,7 @@ const risk_reviews = new Schema(
   },
   collectionOptions("sellers.risk_reviews"),
 );
+risk_reviews.index({"application_id":1}, {"name":"risk_reviews_application_id_ff174c"});
 
 /** Which agreement version each seller accepted, by whom and when */
 const agreement_acceptances = new Schema(
@@ -297,6 +303,7 @@ const members = new Schema(
 members.index({"seller_id":1,"email":1}, {"name":"members_seller_id_email_621991","unique":true,"partialFilterExpression":{"status":{"$in":["invited","active","suspended"]}}});
 members.index({"account_id":1}, {"name":"members_account_id_05e878"});
 members.index({"seller_id":1}, {"name":"members_seller_id_77f6bb","unique":true,"partialFilterExpression":{"is_owner":true,"status":"active"}});
+members.index({"seller_id":1,"status":1}, {"name":"members_seller_id_status_b608db"});
 
 /** Raw per-seller facts from other modules' events (append-only, used to recompute windows) */
 const performance_events = new Schema(
@@ -528,6 +535,8 @@ const seller_notes = new Schema(
   },
   collectionOptions("sellers.seller_notes"),
 );
+seller_notes.index({"seller_id":1,"created_at":1}, {"name":"seller_notes_seller_id_created_at_62d0d8"});
+seller_notes.index({"application_id":1}, {"name":"seller_notes_application_id_ff174c"});
 
 /** Seller-visible and staff timeline (approved, warnings, restrictions, appeals, holds reported by finance) */
 const account_events = new Schema(
