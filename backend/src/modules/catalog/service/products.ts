@@ -25,7 +25,7 @@ import { productReviewMachine, publicationMachine } from '../domain/state-machin
 import { imageRulesOfRow, stringMap, strings } from '../mappers.js';
 import type { BrandRow, CheckRow, ProductRow, SubmissionRow, VariantRow } from '../ports.js';
 import { GtinTakenError, type CatalogRepository } from '../repository.js';
-import { invalid, notFound, type By, type ReviewClock } from './base.js';
+import { invalid, notFound, type By, type ReviewClock, type Taxonomy } from './base.js';
 import { CatalogTaxonomy } from './taxonomy.js';
 
 export type Owner = { type: 'official'; sellerId: null } | { type: 'seller'; sellerId: string };
@@ -507,26 +507,34 @@ export class CatalogProducts extends CatalogTaxonomy {
   /* ================================================================ automated checks (advisory) */
 
   protected async runChecks(product: ProductRow, submission: SubmissionRow) {
+    // the category tree is read once for the checks that need it (a failed read fails only those checks)
+    const tax = this.taxonomy();
+    tax.catch(() => undefined);
     const variants = await this.repo.variantsOf([product.id]);
     const checks: [ProductCheck['kind'], () => Promise<CheckResult>][] = [
       ['duplicate', () => this.duplicateCheck(product, variants)],
-      ['image_standard', () => this.imageCheck(product)],
-      ['category_fit', () => this.categoryFitCheck(product, variants)],
+      ['image_standard', () => this.imageCheck(product, tax)],
+      ['category_fit', () => this.categoryFitCheck(product, variants, tax)],
       ['prohibited_claim', async () => this.claimCheck(product)],
       ['brand_authorization', () => this.brandCheck(product)],
       ['restricted_item', async () => this.restrictedCheck(product)],
       ['identifier', async () => this.identifierCheck(product, variants)],
     ];
     const ranAt = this.now();
+    // the checks only read: they run at once, and their rows keep the order above
+    const results = await Promise.all(
+      checks.map(async ([kind, run]): Promise<CheckResult> => {
+        try {
+          return await run();
+        } catch (err) {
+          this.ctx.log.warn({ err, kind, productId: product.id }, 'catalog: submission check could not run');
+          return { kind, result: 'warn', message: 'This check could not run; review manually', details: [], evidence: [] };
+        }
+      }),
+    );
     const rows: CheckRow[] = [];
-    for (const [kind, run] of checks) {
-      let r: CheckResult;
-      try {
-        r = await run();
-      } catch (err) {
-        this.ctx.log.warn({ err, kind, productId: product.id }, 'catalog: submission check could not run');
-        r = { kind, result: 'warn', message: 'This check could not run; review manually', details: [], evidence: [] };
-      }
+    for (const [i, [kind]] of checks.entries()) {
+      const r = results[i]!;
       rows.push({
         id: newId(),
         submission_id: submission.id,
@@ -574,8 +582,8 @@ export class CatalogProducts extends CatalogTaxonomy {
     };
   }
 
-  private async imageCheck(p: ProductRow): Promise<CheckResult> {
-    const tax = await this.taxonomy();
+  private async imageCheck(p: ProductRow, taxonomy: Promise<Taxonomy>): Promise<CheckResult> {
+    const tax = await taxonomy;
     const standards = await this.repo.imageStandardsOf(tax.path(p.category_id).map((c) => c.id));
     const standard = this.imageStandardFor(p.category_id, tax, standards);
     const ruleList = standard ? imageRulesOfRow(standard.rules) : [];
@@ -591,14 +599,17 @@ export class CatalogProducts extends CatalogTaxonomy {
       details.push(`${images.length} image${images.length === 1 ? '' : 's'}; this category needs at least ${minCount}`);
     }
     const source = tax.path(p.category_id).map((c) => c.name).join(' › ');
+    const passes = [
+      [blocking, 'fail'],
+      [warning, 'warn'],
+    ] as const;
+    // every image against both rule sets at once; the findings keep the image and rule order
+    // (the product image spec's ratio, media.productImage, applies to every category: category ratios are ignored)
+    const checked = await Promise.all(images.map((id) => Promise.all(passes.map(([rules]) => (rules ? this.media.checkImage(id, { ...rules.rules, aspectRatios: [] }) : null)))));
     for (const [i, id] of images.entries()) {
-      for (const [rules, severity] of [
-        [blocking, 'fail'],
-        [warning, 'warn'],
-      ] as const) {
+      for (const [j, [rules, severity]] of passes.entries()) {
         if (!rules) continue;
-        // the product image spec's ratio (media.productImage) applies to every category: category ratios are ignored
-        const r = await this.media.checkImage(id, { ...rules.rules, aspectRatios: [] });
+        const r = checked[i]![j]!;
         const issues = r.issues.filter((x) => (severity === 'fail' ? x.severity === 'blocking' : true));
         if (!issues.length) continue;
         if (severity === 'fail' || result === 'pass') result = severity === 'fail' ? 'fail' : result === 'fail' ? 'fail' : 'warn';
@@ -613,9 +624,9 @@ export class CatalogProducts extends CatalogTaxonomy {
     return { kind: 'image_standard', result, message, details, evidence };
   }
 
-  private async categoryFitCheck(p: ProductRow, variants: VariantRow[]): Promise<CheckResult> {
+  private async categoryFitCheck(p: ProductRow, variants: VariantRow[], taxonomy: Promise<Taxonomy>): Promise<CheckResult> {
     if (!p.category_id) return { kind: 'category_fit', result: 'warn', message: 'No category chosen', details: [], evidence: [] };
-    const tax = await this.taxonomy();
+    const tax = await taxonomy;
     const attrs = (await this.effectiveAttributes(p.category_id, tax)).map((a) => a.attribute);
     const specs = stringMap(p.specs);
     const opts = variants.map((v) => ({ options: stringMap(v.options) }));

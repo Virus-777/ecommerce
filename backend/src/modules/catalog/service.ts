@@ -244,10 +244,12 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     const ids = [...new Set(sellerIds)];
     const [counts, paused] = await Promise.all([this.repo.countBySellerAndState(ids), this.repo.pausedCounts(ids)]);
     const sellers = this.ctx.tryUse('sellers');
+    const cans = await Promise.all(ids.map((id) => (sellers ? sellers.canSell(id, { activity: 'product_submissions' }) : { allowed: true as const, reason: undefined })));
+    const count = new Map(counts.map((c) => [`${c.seller_id}|${c.review_state}`, c.n]));
     const out: Awaited<ReturnType<CatalogPublicApi['countProductsForSellers']>> = {};
-    for (const id of ids) {
-      const n = (state: string) => counts.find((c) => c.seller_id === id && c.review_state === state)?.n ?? 0;
-      const can = sellers ? await sellers.canSell(id, { activity: 'product_submissions' }) : { allowed: true as const, reason: undefined };
+    for (const [i, id] of ids.entries()) {
+      const n = (state: string) => count.get(`${id}|${state}`) ?? 0;
+      const can = cans[i]!;
       out[id] = {
         approved: n('approved'),
         inReview: n('submitted'),
@@ -451,11 +453,11 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
 
   /** offers.offer.created: add the offer to offer_index and refresh listing_stats */
   async onOfferCreatedFromOffers(event: EventPayload<'offers.offer.created'>): Promise<void> {
-    if (!(await this.repo.getProduct(event.productId))) {
+    const [product, existing] = await Promise.all([this.repo.getProduct(event.productId), this.repo.getOffer(event.offerId)]);
+    if (!product) {
       this.ctx.log.info({ offerId: event.offerId, productId: event.productId }, 'catalog: offer on an unknown product ignored');
       return;
     }
-    const existing = await this.repo.getOffer(event.offerId);
     await this.repo.upsertOffer({
       offer_id: event.offerId,
       product_id: event.productId,
