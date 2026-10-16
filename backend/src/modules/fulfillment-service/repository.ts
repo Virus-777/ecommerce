@@ -123,13 +123,20 @@ export class FulfillmentServiceRepository {
     return out;
   }
 
-  /** Units that entered the warehouse (arrivals, extra units, returns, found units), newest first, for ageing */
-  async inflows(ids: readonly string[]): Promise<LedgerRec[]> {
-    if (!ids.length) return [];
-    return this.#t('ownership_ledger').find(
+  /** Units that entered the warehouse (arrivals, extra units, returns, found units) per SKU enrollment, newest first, for ageing */
+  async inflows(ids: readonly string[]): Promise<Map<string, LedgerRec[]>> {
+    const out = new Map<string, LedgerRec[]>();
+    if (!ids.length) return out;
+    const rows: LedgerRec[] = await this.#t('ownership_ledger').find(
       { sku_enrollment_id: { $in: [...ids] }, to_group: { $in: PHYSICAL }, $or: [{ from_group: null }, { from_group: 'inbound' }] },
       { sort: { at: -1, id: -1 } },
     );
+    for (const r of rows) {
+      const list = out.get(r.sku_enrollment_id);
+      if (list) list.push(r);
+      else out.set(r.sku_enrollment_id, [r]);
+    }
+    return out;
   }
 
   /** Locks a SKU enrollment's ledger (serialises decisions on its balances) */
@@ -140,10 +147,11 @@ export class FulfillmentServiceRepository {
   }
 
   /** Inserts or replaces the day's snapshot of a SKU */
-  async upsertSnapshot(row: SnapshotRec): Promise<void> {
-    await this.#t('storage_snapshots').upsert(row, {
+  /** One day's snapshot rows in one round trip (a second run that day replaces them) */
+  async upsertSnapshots(rows: readonly SnapshotRec[]): Promise<void> {
+    await this.#t('storage_snapshots').upsertMany(rows, {
       key: ['day', 'sku_enrollment_id'],
-      update: { seller_id: row.seller_id, units: row.units, cubic_feet: row.cubic_feet, aged_units: row.aged_units },
+      update: (row) => ({ seller_id: row.seller_id, units: row.units, cubic_feet: row.cubic_feet, aged_units: row.aged_units }),
     });
   }
 }

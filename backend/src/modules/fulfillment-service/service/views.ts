@@ -6,7 +6,7 @@
 import type * as common from '../../../spec/common.js';
 import type { Enrollment, FeeCharge, FeeSchedule, FulfillmentRequest, InboundLine, InboundShipment, OwnedStock, RemovalOrder, ServiceReceipt, ServiceReturn, SkuEnrollment, StockDifference } from '../../../spec/fulfillment-service.js';
 import { renderPdf, type PdfLine } from '../domain/pdf.js';
-import { actorOf, ageBuckets, CHARGE_LABEL, cubicFeet, EXAMPLE_SCHEDULE, onHandBlocks, physicalUnits, plural, qty, rateFor, round4 } from '../domain/rules.js';
+import { actorOf, ageBuckets, CHARGE_LABEL, cubicFeet, EXAMPLE_SCHEDULE, groupBy, onHandBlocks, physicalUnits, plural, qty, rateFor, round4 } from '../domain/rules.js';
 import type { Balances, ChargeRec, EnrollmentRec, InboundLineRec, InboundRec, LedgerRec, ReceiptRec, RemovalRec, RequestRec, ScheduleRec, ServiceReturnRec, SkuRec, StockDifferenceRec } from '../ports.js';
 import { iso, num, Part } from './core.js';
 
@@ -22,14 +22,14 @@ export class Views extends Part {
     return this.stockFrom(skus, balances, inflows);
   }
 
-  stockFrom(skus: readonly SkuRec[], balances: Balances, inflows: readonly LedgerRec[]): Map<string, OwnedStock> {
+  stockFrom(skus: readonly SkuRec[], balances: Balances, inflows: Map<string, LedgerRec[]>): Map<string, OwnedStock> {
     const now = this.now();
     const out = new Map<string, OwnedStock>();
     for (const s of skus) {
       const onHand = physicalUnits(balances, s.id);
       const blocks = onHandBlocks(
         onHand,
-        inflows.filter((f) => f.sku_enrollment_id === s.id),
+        inflows.get(s.id) ?? [],
       );
       out.set(s.id, {
         available: qty(balances, s.id, 'available'),
@@ -160,15 +160,21 @@ export class Views extends Part {
       this.repo.find('fee_charges', { reference: refs }, { orderBy: [['id', 'asc']] }),
       this.repo.find('ownership_ledger', { reference: refs, seller_id: [...new Set(rows.map((r) => r.seller_id))] }, { orderBy: [['at', 'asc']] }),
     ]);
-    const info = await this.skuInfo(lines.map((l) => l.sku_enrollment_id));
-    const evidence = await this.photos(discrepancies.flatMap((d) => d.evidence_media_ids));
+    const [info, evidence] = await Promise.all([this.skuInfo(lines.map((l) => l.sku_enrollment_id)), this.photos(discrepancies.flatMap((d) => d.evidence_media_ids))]);
+    // per shipment (ledger rows and fees by reference and seller)
+    const linesOf = groupBy(lines, (l) => l.inbound_id);
+    const receiptsOf = groupBy(receipts, (x) => x.inbound_id);
+    const movesOf = groupBy(ledger, (m) => `${m.reference}|${m.seller_id}`);
+    const chargesOf = groupBy(charges, (c) => `${c.reference}|${c.seller_id}`);
+    const discOf = new Map<string, (typeof discrepancies)[number]>();
+    for (const d of discrepancies) if (!discOf.has(d.inbound_id)) discOf.set(d.inbound_id, d);
     const out: InboundShipment[] = [];
     for (const r of rows) {
       const complete = r.state === 'received' || r.state === 'closed';
-      const own = lines.filter((l) => l.inbound_id === r.id);
-      const disc = discrepancies.find((d) => d.inbound_id === r.id);
-      const moves = ledger.filter((m) => m.reference === r.ref && m.seller_id === r.seller_id);
-      const ownReceipts = receipts.filter((x) => x.inbound_id === r.id);
+      const own = linesOf.get(r.id) ?? [];
+      const disc = discOf.get(r.id);
+      const moves = movesOf.get(`${r.ref}|${r.seller_id}`) ?? [];
+      const ownReceipts = receiptsOf.get(r.id) ?? [];
       out.push({
         id: r.id,
         ref: r.ref,
@@ -195,7 +201,7 @@ export class Views extends Part {
             }
           : null,
         labels: o.labels ? await this.labels(r, own, info) : [],
-        fees: charges.filter((c) => c.reference === r.ref && c.seller_id === r.seller_id).map((c) => this.charge(c)),
+        fees: (chargesOf.get(`${r.ref}|${r.seller_id}`) ?? []).map((c) => this.charge(c)),
         timeline: this.inboundTimeline(r, moves, disc, ownReceipts),
       });
     }
@@ -228,12 +234,7 @@ export class Views extends Part {
       events.push({ at: x.counted_at.toISOString(), label: 'Units counted', detail: `${plural(received, 'unit')}${damaged ? ` (${damaged} damaged)` : ''}, waiting for stock confirmation`, actor: actorOf(x.counted_by) });
     }
     const actorFor = (m: LedgerRec): common.Actor => ({ kind: m.actor_kind as common.Actor['kind'], id: m.actor_id, name: null });
-    const byTime = new Map<string, LedgerRec[]>();
-    for (const m of moves) {
-      const k = `${m.movement}@${m.at.toISOString()}`;
-      byTime.set(k, [...(byTime.get(k) ?? []), m]);
-    }
-    for (const group of byTime.values()) {
+    for (const group of groupBy(moves, (m) => `${m.movement}@${m.at.toISOString()}`).values()) {
       const m = group[0]!;
       const units = group.reduce((n, x) => n + x.quantity, 0);
       const at = m.at.toISOString();

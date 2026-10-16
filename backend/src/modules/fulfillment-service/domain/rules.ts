@@ -139,6 +139,18 @@ export function sizeTier(d: Dimensions, weightGrams: number): SkuEnrollment['siz
 export const PHYSICAL: StockGroup[] = ['receiving', 'available', 'reserved', 'unsellable', 'returned', 'removal_pending'];
 
 export const qty = (b: Balances, skuId: string, g: StockGroup) => Math.max(0, b.get(skuId)?.[g] ?? 0);
+
+/** Rows by key, in their order (Map.groupBy, which the ES2023 lib does not type yet) */
+export function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const r of rows) {
+    const k = key(r);
+    const list = out.get(k);
+    if (list) list.push(r);
+    else out.set(k, [r]);
+  }
+  return out;
+}
 export const physicalUnits = (b: Balances, skuId: string) => PHYSICAL.reduce((n, g) => n + qty(b, skuId, g), 0);
 
 export const AGE_BUCKETS = [

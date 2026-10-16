@@ -11,6 +11,9 @@ import { ageBuckets, cubicFeet, onHandBlocks, physicalUnits, plural, previousMon
 import type { SkuRec } from '../ports.js';
 import { notFound, Part } from './core.js';
 
+/** SKU enrollments per batch of the storage snapshot job */
+const SNAPSHOT_BATCH = 500;
+
 export class StockPart extends Part {
   async movements(sellerId: string, skuId: string, page: PageRequest) {
     await this.parts.skus.ownSku(sellerId, skuId);
@@ -79,7 +82,7 @@ export class StockPart extends Part {
     for (const s of skus) {
       const blocks = onHandBlocks(
         physicalUnits(balances, s.id),
-        inflows.filter((f) => f.sku_enrollment_id === s.id),
+        inflows.get(s.id) ?? [],
       );
       for (const b of blocks) {
         const reaches = new Date(b.at.getTime() + longTermDays * 86_400_000);
@@ -96,25 +99,25 @@ export class StockPart extends Part {
 
   /** Job fulfillment-service.storage-snapshot: units and volume per seller SKU with age buckets (idempotent per day) */
   async snapshot(day: string = this.core.today()): Promise<{ skus: number }> {
-    const skus = await this.repo.find('sku_enrollments', {}, { limit: 50_000 });
-    if (!skus.length) return { skus: 0 };
     const longTermDays = await this.core.setting('longTermStorageDays', 365);
     const now = this.now();
     let n = 0;
-    for (let i = 0; i < skus.length; i += 500) {
-      const batch = skus.slice(i, i + 500);
+    // every SKU enrollment by id, 500 at a time, one write per batch
+    for (let after: string | null = null; ; ) {
+      const batch: SkuRec[] = await this.repo.find('sku_enrollments', after ? { id: { op: '>', value: after } } : {}, { orderBy: [['id', 'asc']], limit: SNAPSHOT_BATCH });
+      if (!batch.length) break;
       const ids = batch.map((s) => s.id);
       const [balances, inflows] = await Promise.all([this.repo.balances(ids), this.repo.inflows(ids)]);
-      for (const s of batch) {
+      const rows = batch.flatMap((s) => {
         const units = physicalUnits(balances, s.id);
-        if (!units) continue;
-        const blocks = onHandBlocks(
-          units,
-          inflows.filter((f) => f.sku_enrollment_id === s.id),
-        );
-        await this.repo.upsertSnapshot({ day, seller_id: s.seller_id, sku_enrollment_id: s.id, units, cubic_feet: String(round4(units * cubicFeet(s.dimensions))), aged_units: { ...ageBuckets(blocks, now), longTerm: unitsOlderThan(blocks, now, longTermDays) } });
-        n += 1;
-      }
+        if (!units) return [];
+        const blocks = onHandBlocks(units, inflows.get(s.id) ?? []);
+        return [{ day, seller_id: s.seller_id, sku_enrollment_id: s.id, units, cubic_feet: String(round4(units * cubicFeet(s.dimensions))), aged_units: { ...ageBuckets(blocks, now), longTerm: unitsOlderThan(blocks, now, longTermDays) } }];
+      });
+      await this.repo.upsertSnapshots(rows);
+      n += rows.length;
+      if (batch.length < SNAPSHOT_BATCH) break;
+      after = batch.at(-1)!.id;
     }
     return { skus: n };
   }
@@ -124,7 +127,11 @@ export class StockPart extends Part {
     const longTermDays = await this.core.setting('longTermStorageDays', 365);
     const skus = await this.repo.find('sku_enrollments', {}, { limit: 50_000 });
     const bySeller = new Map<string, SkuRec[]>();
-    for (const s of skus) bySeller.set(s.seller_id, [...(bySeller.get(s.seller_id) ?? []), s]);
+    for (const s of skus) {
+      const list = bySeller.get(s.seller_id);
+      if (list) list.push(s);
+      else bySeller.set(s.seller_id, [s]);
+    }
     let sellers = 0;
     const week = Math.floor(this.now().getTime() / (7 * 86_400_000));
     for (const [sellerId, list] of bySeller) {

@@ -11,7 +11,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { RemovalInput, RemovalOrder } from '../../../spec/fulfillment-service.js';
 import { removalOrderMachine } from '../domain/state-machines.js';
-import { addDays, qty } from '../domain/rules.js';
+import { addDays, groupBy, qty } from '../domain/rules.js';
 import type { Balances, RemovalLineRec, RemovalRec, SkuRec } from '../ports.js';
 import type { FulfillmentServiceRepository } from '../repository.js';
 import { invalid, notFound, Part, type By } from './core.js';
@@ -219,8 +219,10 @@ export class RemovalsPart extends Part {
     const skus = await this.repo.find('sku_enrollments', {}, { limit: 20_000 });
     if (!skus.length) return 0;
     const balances = await this.repo.balances(skus.map((s) => s.id));
-    const bySeller = new Map<string, SkuRec[]>();
-    for (const s of skus) if (qty(balances, s.id, 'unsellable') > 0) bySeller.set(s.seller_id, [...(bySeller.get(s.seller_id) ?? []), s]);
+    const bySeller = groupBy(
+      skus.filter((s) => qty(balances, s.id, 'unsellable') > 0),
+      (s) => s.seller_id,
+    );
     let created = 0;
     for (const [sellerId, list] of bySeller) {
       const free = await this.free(this.repo, sellerId, balances);
