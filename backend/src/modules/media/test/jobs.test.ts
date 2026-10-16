@@ -86,7 +86,7 @@ describe('media.purge-deleted', () => {
     expect(t.storage.size()).toBe(before);
     t.clock.advance(2 * DAY);
     await run('media.purge-deleted');
-    expect(before).toBe(10); // original, processed copy, 4 sizes × WebP and JPEG
+    expect(before).toBe(6); // original, processed copy, detail and thumb × WebP and JPEG
     expect(t.storage.size()).toBe(0);
     expect(await t.storage.fetch(asset.url!)).toBeNull();
     expect((await t.media.getAsset(asset.id))?.renditions).toEqual([]);

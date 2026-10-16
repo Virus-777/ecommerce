@@ -10,6 +10,7 @@ import { webhooksRoutes } from './http/webhooks.js';
 import { fileServer } from './http/files.js';
 import { MediaRepository } from './repository.js';
 import { createDevProcessor } from './providers/processing/dev.js';
+import { createSharpProcessor } from './providers/processing/sharp.js';
 import { createDevScanner } from './providers/scanner.js';
 import { createLocalStorage } from './providers/storage/local.js';
 import { createMemoryStorage } from './providers/storage/memory.js';
@@ -24,7 +25,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
   register(ctx) {
     // Storage (MEDIA_STORAGE): the server's disk (local, production) or memory (tests). Both take uploads
@@ -37,7 +38,9 @@ export default defineModule({
         ? createLocalStorage({ dir: ctx.config.media.dir, links })
         : // acceptSignedPut (tests and tools) follows an upload ticket's API URL to a signed upload URL
           createMemoryStorage({ clock: ctx.clock, links, uploadSecret: secretFor(ctx.config, 'media.storage'), resolveUploadUrl: (url) => service.signedStorageUrlFor(url) });
-    const providers = { storage, scanner: createDevScanner(), processor: createDevProcessor() };
+    // images: sharp decodes and resizes them (MEDIA_IMAGE_PROCESSOR=sharp, the default); dev reads headers only (tests)
+    const processor = ctx.config.media.imageProcessor === 'dev' ? createDevProcessor() : createSharpProcessor();
+    const providers = { storage, scanner: createDevScanner(), processor };
     const service = new MediaService({ repo: new MediaRepository(ctx.mongo), ctx, providers });
     ctx.provide(service);
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service), webhooksRoutes(service));
@@ -49,9 +52,11 @@ export default defineModule({
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("sellers.seller.closed", (e) => service.onSellerClosedFromSellers(e.payload));
     ctx.events.on("customers.account.closed", (e) => service.onAccountClosedFromCustomers(e.payload));
+    ctx.events.on("settings.setting.changed", (e) => service.onSettingChangedFromSettings(e.payload));
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("media.process", () => service.process());
+    ctx.jobs.handle("media.rebuild-product-renditions", () => service.rebuildProductRenditions());
     ctx.jobs.handle("media.expire-uploads", () => service.expireUploads());
     ctx.jobs.handle("media.sweep-orphans", () => service.sweepOrphans());
     ctx.jobs.handle("media.expire-generated", () => service.expireGenerated());

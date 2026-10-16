@@ -69,6 +69,11 @@ const schema = z.object({
   /** Where media keeps files: local (the server's disk, MEDIA_STORAGE_DIR) or memory (lost on restart); default local, memory in tests */
   MEDIA_STORAGE: z.enum(['local', 'memory']).optional(),
   MEDIA_STORAGE_DIR: z.string().default('.data/media'),
+  /**
+   * How media decodes and resizes images: sharp (real decoding, resizing and encoding; default) or dev (reads file
+   * headers only and copies bytes: the default in tests, whose fixtures are header-only images)
+   */
+  MEDIA_IMAGE_PROCESSOR: z.enum(['sharp', 'dev']).optional(),
   /** Webhook signing secrets per provider: {"stripe":"…","carrier":"…"} (development and tests default to "dev-webhook-secret") */
   WEBHOOK_SECRETS: z.string().optional(),
   /** How often each server pulls session revocations from identity */
@@ -125,8 +130,8 @@ export interface Config {
   publicUrls: { store: string; seller: string; admin: string };
   /** Public address of this API (no trailing slash): signed file links point here */
   apiUrl: string;
-  /** File storage for media: the server's disk (local, under dir) or memory (tests) */
-  media: { storage: 'local' | 'memory'; dir: string };
+  /** File storage for media: the server's disk (local, under dir) or memory (tests); image processing: sharp or dev (tests) */
+  media: { storage: 'local' | 'memory'; dir: string; imageProcessor: 'sharp' | 'dev' };
   /** Webhook HMAC secrets per provider; `*` applies to any provider (development and tests only) */
   webhookSecrets: Record<string, string>;
   /** Development and tests: sign and accept dev-key tokens */
@@ -200,7 +205,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       admin: (e.ADMIN_URL ?? 'http://localhost:3002').replace(/\/$/, ''),
     },
     apiUrl: (e.API_URL ?? `http://localhost:${e.PORT}`).replace(/\/$/, ''),
-    media: { storage: e.MEDIA_STORAGE ?? (e.NODE_ENV === 'test' ? 'memory' : 'local'), dir: e.MEDIA_STORAGE_DIR },
+    media: {
+      storage: e.MEDIA_STORAGE ?? (e.NODE_ENV === 'test' ? 'memory' : 'local'),
+      dir: e.MEDIA_STORAGE_DIR,
+      imageProcessor: e.MEDIA_IMAGE_PROCESSOR ?? (e.NODE_ENV === 'test' ? 'dev' : 'sharp'),
+    },
     webhookSecrets: { ...(devTokens ? { '*': 'dev-webhook-secret' } : {}), ...(e.WEBHOOK_SECRETS ? JSON.parse(e.WEBHOOK_SECRETS) : {}) },
     devTokens,
     devSigning: { file: e.DEV_SIGNING_KEY_FILE },

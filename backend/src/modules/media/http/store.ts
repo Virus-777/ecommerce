@@ -33,4 +33,6 @@ export const storeRoutes = (service: MediaService) =>
     },
     /** GET /assets/{id}/download: Signed link to one of my private files */
     getStoreDownload: async ({ params, scope, principal }) => service.ownDownload(params.id, storeCaller(scope, principal).filter),
+    /** GET /image-specs: The product image spec (aspect ratio and the detail and thumbnail sizes) */
+    getStoreImageSpecs: async () => service.imageSpecs(),
   });

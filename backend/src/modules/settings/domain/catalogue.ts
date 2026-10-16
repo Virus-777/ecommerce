@@ -249,6 +249,14 @@ export function inferDefinition(module: string, name: string, declared: SettingD
 }
 
 /**
+ * What a module key's spec entry can't declare (the spec format has no label or apply scopes): media.productImage
+ * applies to new uploads only (media itself rebuilds or flags existing images when it changes).
+ */
+const MODULE_KEY_OVERRIDES: Record<string, Partial<Pick<Definition, 'label' | 'applyScopes'>>> = {
+  'media.productImage': { label: 'Product images', applyScopes: ['new_only'] },
+};
+
+/**
  * Every settable key: settings-owned keys plus every module spec's settings. Keys of disabled
  * modules are kept with available = false (shown as unavailable; get() refuses them with UNKNOWN_SETTING).
  */
@@ -257,7 +265,7 @@ export function buildCatalogue(specs: Readonly<Record<string, ModuleSpecDef>>, e
   for (const spec of Object.values(specs)) {
     for (const [name, declared] of Object.entries(spec.settings)) {
       const d = inferDefinition(spec.name, name, declared, enabled.has(spec.name), o);
-      out.set(d.key, d);
+      out.set(d.key, { ...d, ...MODULE_KEY_OVERRIDES[d.key] });
     }
   }
   for (const b of BUILT_INS) {

@@ -16,12 +16,16 @@ import type {
   AssetUpdate,
   DownloadLink,
   ImageCheckResult,
+  ImageIssue,
   ImageMeasurements,
   ImageRules,
+  ImageSpecs,
   MediaAsset,
   MediaAssetDetail,
   MediaOwner,
   MediaPublicApi,
+  ProductImageSpec,
+  RecropItem,
   Rendition,
   StorageEvent,
   UploadRequest,
@@ -30,6 +34,19 @@ import type {
   UsageInput,
 } from '../../spec/media.js';
 import { evaluateImage, passed, type BaselineRules } from './domain/image-check.js';
+import {
+  hasRatio,
+  productImageIssues,
+  productTargets,
+  recropMessage,
+  resolveSpec,
+  sameSpec,
+  toSetting,
+  widthTargets,
+  type ProcessingSpec,
+  type ProductImageSetting,
+  type RenditionSize,
+} from './domain/image-spec.js';
 import {
   GENERATED_PURPOSES,
   MAX_IMAGE_PIXELS,
@@ -92,7 +109,13 @@ const TITLE_MAX = 200;
 const MAX_PROCESSING_ATTEMPTS = 5;
 const PROCESSING_LEASE_MS = 15 * 60_000;
 const BATCH = 100;
-const IMAGE_SIZES = ['thumb', 'small', 'medium', 'large', 'zoom'] as const;
+/** Image rendition sizes, smallest first (detail: product images, between medium and large) */
+const IMAGE_SIZES = ['thumb', 'small', 'medium', 'detail', 'large', 'zoom'] as const;
+/** Usages that show a product photo: a product_image file must meet the product image spec to be attached */
+const PRODUCT_PHOTO_USAGES = ['product_image', 'variant_image', 'offer_photo'];
+/** media.rebuild-product-renditions: images per batch, and the pause between batches (rate limit) */
+const REBUILD_BATCH = 50;
+const REBUILD_PAUSE_MS = 250;
 const TRANSCODED_PURPOSES = ['product_video', 'ad_video'];
 /** Downloads of these are recorded in the action history even when another module checked access */
 const SENSITIVE_PURPOSES = ['verification_document', 'return_evidence', 'case_evidence', 'inspection_photo', 'data_export', ...SENSITIVE_GENERATED];
@@ -127,6 +150,8 @@ const quarantineKey = (key: string) => `removed/${key}`;
  */
 export class MediaService implements MediaPublicApi {
   readonly providers: MediaProviders;
+  /** Version of media.productImage last announced by settings.setting.changed (null until one arrives) */
+  private productImageVersion: number | null = null;
 
   constructor(protected readonly deps: MediaServiceDeps) {
     this.providers = deps.providers;
@@ -159,8 +184,11 @@ export class MediaService implements MediaPublicApi {
     return row ? this.view(row, { signPrivate: true }) : null;
   }
 
-  /** common.MediaRef (id, url, alt, width, height) for embedding in responses; removed files return the placeholder */
-  async refs(assetIds: string[], size: 'thumb' | 'small' | 'medium' | 'large' | 'zoom' = 'medium'): Promise<common.MediaRef[]> {
+  /**
+   * common.MediaRef (id, url, alt, width, height, fileName) for embedding in responses; removed files return the
+   * placeholder. Product images answer with detail or thumb (sizeFor) and carry thumbUrl and detailUrl.
+   */
+  async refs(assetIds: string[], size: 'thumb' | 'small' | 'medium' | 'large' | 'zoom' | 'detail' = 'medium'): Promise<common.MediaRef[]> {
     const unique = [...new Set(assetIds)];
     const rows = new Map((await this.repo.getAssets(unique)).map((r) => [r.id, r]));
     const renditions = groupBy(await this.repo.renditionsOf([...rows.keys()]), (r) => r.asset_id);
@@ -171,18 +199,47 @@ export class MediaService implements MediaPublicApi {
       if (!row) continue;
       if (row.status === 'removed') {
         // taken down without a placeholder: the public URLs stop serving, so there is nothing to embed
-        if (row.show_placeholder !== false) out.push({ id, url: this.storage.publicUrl(PLACEHOLDER_KEY), alt: null, width: null, height: null, bytes: null });
+        if (row.show_placeholder !== false) out.push({ id, url: this.storage.publicUrl(PLACEHOLDER_KEY), alt: null, width: null, height: null, bytes: null, fileName: null, thumbUrl: null, detailUrl: null });
         continue;
       }
       if (row.status !== 'ready') continue;
-      const r = pickRendition(renditions.get(id) ?? [], row.kind === 'video' ? 'poster' : size);
+      const rs = renditions.get(id) ?? [];
+      const r = pickRendition(rs, sizeFor(row, size));
       let url: string;
       if (r && row.visibility === 'public') url = this.storage.publicUrl(r.storage_key);
       else if (r) url = await this.sign(this.storage.buckets.private, r.storage_key, row, ttl, true);
       else url = await this.sign(row.storage_bucket, row.storage_key, row, ttl, false);
-      out.push({ id, url, alt: row.alt, width: r?.width ?? row.width, height: r?.height ?? row.height, bytes: Number(row.size_bytes) });
+      // product images (always public): both sizes, so a response can offer the other one too
+      const both = isProductImage(row) && row.visibility === 'public';
+      const thumb = both ? pickRendition(rs, sizeFor(row, 'thumb')) : undefined;
+      const detail = both ? pickRendition(rs, sizeFor(row, 'detail')) : undefined;
+      out.push({
+        id,
+        url,
+        alt: row.alt,
+        width: r?.width ?? row.width,
+        height: r?.height ?? row.height,
+        bytes: Number(row.size_bytes),
+        fileName: row.file_name,
+        thumbUrl: thumb ? this.storage.publicUrl(thumb.storage_key) : null,
+        detailUrl: detail ? this.storage.publicUrl(detail.storage_key) : null,
+      });
     }
     return out;
+  }
+
+  /** GET /image-specs (store, seller, admin): the product image spec in force */
+  async imageSpecs(): Promise<ImageSpecs> {
+    return { productImage: await this.productImageSpec() };
+  }
+
+  /** The setting media.productImage in force, with the ratio and sizes worked out */
+  async productImageSpec(): Promise<ProductImageSpec> {
+    return resolveSpec(await this.productImageSetting());
+  }
+
+  private async productImageSetting(): Promise<ProductImageSetting> {
+    return toSetting(await this.ctx.settings.get('productImage'));
   }
 
   /** Record that a record uses a file. Fails if the asset is not ready, belongs to another owner (ASSET_NOT_OWNED) or the purpose does not fit the usage. Evidence usages extend retainUntil. */
@@ -203,6 +260,8 @@ export class MediaService implements MediaPublicApi {
     const now = this.now();
     const evidence = isEvidenceKind(usage.kind);
     const days = evidence ? await this.ctx.settings.get('evidenceRetentionDays') : 0;
+    // a product photo must meet the product image spec (seller uploads were checked at upload; staff uploads here)
+    const spec = isProductImage(asset) && PRODUCT_PHOTO_USAGES.includes(usage.kind) ? await this.productImageSpec() : null;
     await this.repo.transaction(async (tx) => {
       const locked = await tx.getAsset(assetId, { forUpdate: true });
       if (!locked) throw notFound();
@@ -211,6 +270,11 @@ export class MediaService implements MediaPublicApi {
       if (existing) {
         if ((usage.refLabel ?? null) !== existing.ref_label && usage.refLabel !== undefined) await tx.updateUsage(existing.id, { ref_label: usage.refLabel ?? null });
       } else {
+        const issues = spec ? productImageIssues({ width: locked.width ?? 0, height: locked.height ?? 0 }, spec) : [];
+        if (issues.length) {
+          const message = issues.map((i) => i.message).join(' ');
+          throw new AppError('VALIDATION_FAILED', message, { issues: [{ path: 'assetId', message }], assetId, codes: issues.map((i) => i.code) });
+        }
         await tx.insertUsage({
           id: newId(),
           asset_id: assetId,
@@ -300,6 +364,7 @@ export class MediaService implements MediaPublicApi {
       created_at: now,
       ready_at: now,
       deleted_at: null,
+      processing_spec: null,
     });
     this.ctx.events.publish('media.asset.ready', { assetId: id, kind: row.kind, purpose: row.purpose, owner: ownerOf(row) }, { actor: SYSTEM_ACTOR });
     return this.view(row, { signPrivate: true });
@@ -420,6 +485,7 @@ export class MediaService implements MediaPublicApi {
         created_at: now,
         ready_at: null,
         deleted_at: null,
+        processing_spec: null,
       });
       // the upload record keeps where the file came from (shown on the asset history)
       await tx.insertUpload({
@@ -496,6 +562,11 @@ export class MediaService implements MediaPublicApi {
 
     const limits = limitFor(req.purpose, (await this.ctx.settings.get('limitsByPurpose')) as unknown as Record<string, PurposeLimit>);
     const type = fileTypeOf(req.contentType, fileName);
+    if (type === 'heic' && req.purpose === 'product_image') {
+      // product images are resized on the server, which can't decode HEIC (whatever limitsByPurpose lists)
+      const allowed = limits.types.filter((t) => t !== 'heic');
+      throw new AppError('FILE_TYPE_NOT_ALLOWED', "HEIC photos aren't accepted for product images. Use JPEG, PNG or WebP (the Seller Center converts the photo when it crops it).", { allowed, contentType: req.contentType });
+    }
     if (!type || !limits.types.includes(type)) {
       throw new AppError('FILE_TYPE_NOT_ALLOWED', `This type of file isn't accepted for a ${label(req.purpose)}. Use ${limits.types.map((t) => t.toUpperCase()).join(', ')}.`, {
         allowed: limits.types,
@@ -562,6 +633,7 @@ export class MediaService implements MediaPublicApi {
         created_at: now,
         ready_at: null,
         deleted_at: null,
+        processing_spec: null,
       });
       await tx.insertUpload({
         id: uploadId,
@@ -1048,7 +1120,8 @@ export class MediaService implements MediaPublicApi {
     const probe = await processor.probe(body, { contentType: asset.content_type, fileName: asset.file_name });
     if (!probe) return { result: 'rejected', reason: 'The file is unsupported or corrupt.' };
     const limits = limitFor(asset.purpose as UploadRequest['purpose'], (await this.ctx.settings.get('limitsByPurpose')) as unknown as Record<string, PurposeLimit>);
-    if (!limits.types.includes(probe.format)) {
+    const product = isProductImage(asset);
+    if (!limits.types.includes(probe.format) || (product && probe.format === 'heic')) {
       return { result: 'rejected', reason: `The file is really a ${probe.format.toUpperCase()}, which isn't accepted for a ${label(asset.purpose)}.` };
     }
     if (probe.kind === 'image' && (!probe.width || !probe.height || Math.max(probe.width, probe.height) > MAX_IMAGE_SIDE || probe.width * probe.height > MAX_IMAGE_PIXELS)) {
@@ -1072,19 +1145,48 @@ export class MediaService implements MediaPublicApi {
     }
     if (probe.kind !== 'image') return { result: 'ready', patch, renditions: [] };
 
+    // product images: the spec in force. Seller uploads (the Seller Center uploads only product photos with this
+    // purpose) that are off the ratio or smaller than the detail size are refused; staff uploads are checked when
+    // they are attached to a product (the purpose also serves category and content images).
+    const setting = product ? await this.productImageSetting() : null;
+    const spec = setting ? resolveSpec(setting) : null;
+    if (spec && asset.owner_kind === 'seller') {
+      const issues = productImageIssues({ width: probe.width ?? 0, height: probe.height ?? 0 }, spec);
+      if (issues.length) return { result: 'rejected', reason: issues.map((i) => i.message).join(' ') };
+    }
+
     // privacy: EXIF and GPS are stripped before any rendition exists
     await step('strip');
     const stripped = await processor.strip(body, probe.format);
     await this.storage.put(this.storage.buckets.private, processedKey(asset.id), stripped, MIME_OF[probe.format as FileType] ?? asset.content_type);
 
     await step('renditions');
-    const widths = (await this.ctx.settings.get('renditionWidths')) as unknown as Record<string, number>;
     const bucket = asset.visibility === 'public' ? this.storage.buckets.public : this.storage.buckets.private;
-    const renditions: RenditionRow[] = [];
-    for (const out of await processor.renditions(stripped, probe, widths)) {
+    const targets = spec
+      ? productTargets(probe.width ?? 0, probe.height ?? 0, spec)
+      : widthTargets((await this.ctx.settings.get('renditionWidths')) as unknown as Record<string, number>, probe.width ?? 0);
+    const renditions = await this.storeRenditions(asset, bucket, await processor.renditions(stripped, probe, targets, { quality: spec?.quality }));
+    if (setting) patch.processing_spec = { ...setting, settingsVersion: this.productImageVersion } satisfies ProcessingSpec;
+
+    await step('check');
+    const { phash, ...measured } = await processor.measure(stripped, probe, { fileName: asset.file_name });
+    const duplicateOf = await this.repo.findDuplicate(ownerFilter(ownerOf(asset)), phash, { id: asset.id, createdAt: asset.created_at });
+    const m: ImageMeasurements = { ...measured, duplicateOf };
+    // a product image the spec accepts needs no other minimum size (the spec's detail size replaces minShortSide)
+    const specOk = spec && !productImageIssues({ width: m.width, height: m.height }, spec).length;
+    const issues = evaluateImage({ format: probe.format, sizeBytes: Number(asset.size_bytes), measured: m }, { aspectRatios: [], formats: [], ...(specOk ? { minShortSide: 0 } : {}) }, await this.baseline());
+    patch.phash = phash;
+    patch.check_result = { assetId: asset.id, passed: passed(issues), rulesSource: 'Platform baseline', measured: m, issues, checkedAt: this.now().toISOString() } satisfies ImageCheckResult;
+    return { result: 'ready', patch, renditions };
+  }
+
+  /** Writes rendition files (product image keys stay the same across rebuilds, so their links keep working) */
+  private async storeRenditions(asset: AssetRow, bucket: string, outputs: { size: string; width: number; height: number; format: string; body: Uint8Array }[]): Promise<RenditionRow[]> {
+    const rows: RenditionRow[] = [];
+    for (const out of outputs) {
       const key = renditionKey(asset.id, out.size, out.format);
       await this.storage.put(bucket, key, out.body, MIME_OF[out.format as FileType] ?? 'image/webp');
-      renditions.push({
+      rows.push({
         asset_id: asset.id,
         size: out.size,
         storage_key: key,
@@ -1095,15 +1197,7 @@ export class MediaService implements MediaPublicApi {
         bytes: out.body.byteLength,
       });
     }
-
-    await step('check');
-    const { phash, ...measured } = await processor.measure(stripped, probe, { fileName: asset.file_name });
-    const duplicateOf = await this.repo.findDuplicate(ownerFilter(ownerOf(asset)), phash, { id: asset.id, createdAt: asset.created_at });
-    const m: ImageMeasurements = { ...measured, duplicateOf };
-    const issues = evaluateImage({ format: probe.format, sizeBytes: Number(asset.size_bytes), measured: m }, { aspectRatios: [], formats: [] }, await this.baseline());
-    patch.phash = phash;
-    patch.check_result = { assetId: asset.id, passed: passed(issues), rulesSource: 'Platform baseline', measured: m, issues, checkedAt: this.now().toISOString() } satisfies ImageCheckResult;
-    return { result: 'ready', patch, renditions };
+    return rows;
   }
 
   /** POST /webhooks/media/processing-results: video transcoding results, matched by provider job reference. Idempotent. */
@@ -1140,6 +1234,105 @@ export class MediaService implements MediaPublicApi {
         duration_seconds: body.durationSeconds == null ? asset.duration_seconds : String(body.durationSeconds),
       },
     });
+  }
+
+  /** settings.setting.changed: a new media.productImage starts media.rebuild-product-renditions at once */
+  async onSettingChangedFromSettings(event: EventPayload<'settings.setting.changed'>): Promise<void> {
+    if (event.key !== 'media.productImage') return;
+    this.productImageVersion = event.version;
+    this.ctx.log.info({ version: event.version, from: event.from, to: event.to }, 'media: the product image spec changed; rebuilding product images');
+    if (this.ctx.config.jobsEnabled) setImmediate(() => void this.ctx.jobs.runNow('media.rebuild-product-renditions'));
+  }
+
+  /**
+   * Job media.rebuild-product-renditions (hourly, and at once when media.productImage changes): ready product
+   * images whose renditions were built with another spec (or before the spec existed) get detail and thumb rebuilt
+   * from the stored original at the spec in force, under the same keys (links keep working; never enlarged; older
+   * small to zoom files stay for order snapshots and old links), and their wrong_aspect flag set or cleared. At most
+   * rebuildBatchLimit images per run, in batches with a pause between them. Idempotent: a rebuilt image records
+   * the spec (processing_spec) and is skipped until the spec changes again.
+   */
+  async rebuildProductRenditions(): Promise<{ rebuilt: number; flagged: number; cleared: number; failed: number }> {
+    const setting = await this.productImageSetting();
+    const spec = resolveSpec(setting);
+    const limit = await this.ctx.settings.get('rebuildBatchLimit');
+    const counts = { rebuilt: 0, flagged: 0, cleared: 0, failed: 0 };
+    while (counts.rebuilt + counts.failed < limit) {
+      const rows = await this.repo.productImagesToRebuild(setting, Math.min(REBUILD_BATCH, limit - counts.rebuilt - counts.failed));
+      if (!rows.length) break;
+      const items: RecropItem[] = [];
+      for (const row of rows) {
+        try {
+          const recrop = await this.rebuildProductImage(row, setting, spec);
+          counts.rebuilt++;
+          if (recrop === null) continue;
+          if (recrop) counts.flagged++;
+          else counts.cleared++;
+          items.push({ assetId: row.id, owner: ownerOf(row), recrop, usages: (await this.repo.usagesOf([row.id], { activeOnly: true })).map(toUsage) });
+        } catch (err) {
+          // recorded as built with this spec, so a file that can't be read isn't retried every run
+          counts.failed++;
+          this.ctx.log.warn({ err, assetId: row.id }, 'media: could not rebuild a product image');
+          await this.repo.updateAsset(row.id, { processing_spec: { ...setting, settingsVersion: this.productImageVersion, failed: true } });
+        }
+      }
+      if (items.length) this.ctx.events.publish('media.product_images.recrop_changed', { aspectRatio: spec.aspectRatio, items }, { actor: SYSTEM_ACTOR });
+      if (rows.length === REBUILD_BATCH) await sleep(REBUILD_PAUSE_MS);
+    }
+    if (counts.rebuilt || counts.failed) {
+      this.ctx.log.info({ ...counts, spec: setting }, 'media: product images rebuilt at the product image spec');
+      await this.audit(
+        {
+          action: 'media.product_images.rebuild',
+          actionLabel: 'Rebuilt product images at the product image spec',
+          category: 'catalog',
+          target: { type: 'setting', id: 'media.productImage', label: 'Product images', sellerId: null, screen: 'admin/settings' },
+          reason: `${counts.rebuilt} rebuilt, ${counts.flagged} to re-crop, ${counts.cleared} no longer to re-crop, ${counts.failed} failed`,
+          after: { spec: setting, ...counts },
+        },
+        { actor: SYSTEM_ACTOR },
+      );
+      this.ctx.events.publish('media.product_images.rebuilt', { aspectRatio: spec.aspectRatio, settingsVersion: this.productImageVersion, ...counts }, { actor: SYSTEM_ACTOR });
+    }
+    return counts;
+  }
+
+  /** Rebuilds one product image; returns its new re-crop flag when it changed (true: off the ratio), else null */
+  private async rebuildProductImage(row: AssetRow, setting: ProductImageSetting, spec: ProductImageSpec): Promise<boolean | null> {
+    const { processor } = this.providers;
+    const stored = await this.storage.get(this.storage.buckets.private, processedKey(row.id));
+    const original = stored ?? (await this.storage.get(row.storage_bucket, row.storage_key));
+    if (!original) throw new Error('The stored file is missing');
+    const probe = await processor.probe(original, { contentType: row.content_type, fileName: row.file_name });
+    if (!probe || probe.kind !== 'image' || !probe.width || !probe.height) throw new Error('The stored file is not a readable image');
+    // the stripped copy is the source of every rendition; an image without one is stripped now
+    const source = stored ?? (await processor.strip(original, probe.format));
+    if (!stored) await this.storage.put(this.storage.buckets.private, processedKey(row.id), source, MIME_OF[probe.format as FileType] ?? row.content_type);
+    const bucket = row.visibility === 'public' ? this.storage.buckets.public : this.storage.buckets.private;
+    const renditions = await this.storeRenditions(row, bucket, await processor.renditions(source, probe, productTargets(probe.width, probe.height, spec), { quality: spec.quality }));
+
+    // the wrong_aspect warning: set while the image is off the ratio (not blocking: the product stays live)
+    const check: ImageCheckResult = checkOf(row) ?? {
+      assetId: row.id,
+      passed: true,
+      rulesSource: 'Platform baseline',
+      measured: { width: probe.width, height: probe.height, aspect: Math.round((probe.width / probe.height) * 10_000) / 10_000, hasAlpha: Boolean(probe.hasAlpha) },
+      issues: [],
+      checkedAt: this.now().toISOString(),
+    };
+    const isFlag = (i: ImageIssue) => i.code === 'wrong_aspect' && i.severity === 'warning';
+    const flaggedBefore = check.issues.some(isFlag);
+    const flagged = !hasRatio(probe.width, probe.height, spec);
+    const patch: AssetPatch = { processing_spec: { ...setting, settingsVersion: this.productImageVersion } satisfies ProcessingSpec };
+    if (flagged || flaggedBefore) {
+      const issues: ImageIssue[] = [...check.issues.filter((i) => !isFlag(i)), ...(flagged ? [{ code: 'wrong_aspect' as const, severity: 'warning' as const, message: recropMessage(spec) }] : [])];
+      patch.check_result = { ...check, issues, passed: passed(issues), checkedAt: this.now().toISOString() } satisfies ImageCheckResult;
+    }
+    await this.repo.transaction(async (tx) => {
+      await tx.saveRenditions(row.id, renditions);
+      await tx.updateAsset(row.id, patch);
+    });
+    return flagged === flaggedBefore ? null : flagged;
   }
 
   /** Job media.expire-uploads (hourly): Expire pending uploads past pendingUploadExpiryHours and delete partial objects */
@@ -1327,7 +1520,7 @@ export class MediaService implements MediaPublicApi {
           if (row.status === 'ready') {
             // built from the key on every read (stored URLs keep working, and follow a new signing key)
             list = rs.map((r) => toRendition(r, this.storage.publicUrl(r.storage_key)));
-            const main = pickRendition(rs, row.kind === 'video' ? 'poster' : 'medium');
+            const main = pickRendition(rs, sizeFor(row, 'medium'));
             url = main ? this.storage.publicUrl(main.storage_key) : null;
           } else if (row.status === 'removed' && row.show_placeholder !== false) {
             url = this.storage.publicUrl(PLACEHOLDER_KEY);
@@ -1488,6 +1681,20 @@ function actorOfPrincipal(p: identity.Principal): common.Actor {
 
 function formatOfRow(row: AssetRow): string {
   return fileTypeOf(row.content_type, row.file_name) ?? row.content_type.split('/')[1] ?? 'unknown';
+}
+
+const isProductImage = (row: Pick<AssetRow, 'purpose' | 'kind'>) => row.purpose === 'product_image' && row.kind === 'image';
+
+/**
+ * The stored rendition size that answers a requested size. Videos: the poster. Product images keep two sizes:
+ * small and thumb answer thumb, medium, large, zoom and detail answer detail (product images processed before the
+ * spec, which have no processing_spec yet: small and large). Other images keep thumb to zoom; detail answers medium.
+ */
+function sizeFor(row: Pick<AssetRow, 'purpose' | 'kind' | 'processing_spec'>, size: RenditionSize | 'poster'): string {
+  if (row.kind === 'video') return 'poster';
+  const small = size === 'thumb' || size === 'small';
+  if (isProductImage(row)) return row.processing_spec ? (small ? 'thumb' : 'detail') : small ? 'small' : 'large';
+  return size === 'detail' ? 'medium' : size;
 }
 
 /** The rendition for a size: exact (WebP first), else the largest smaller one, else the smallest */

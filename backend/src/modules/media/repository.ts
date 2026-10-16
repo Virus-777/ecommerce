@@ -255,6 +255,28 @@ export class MediaRepository {
     return this.#t.assets.find({ status: 'removed', retain_until: { $ne: null, $lte: now } }, { sort: { retain_until: 1 }, limit });
   }
 
+  /**
+   * Ready product images whose renditions were built with another product image spec, or before the spec existed
+   * (no processing_spec), oldest first
+   */
+  async productImagesToRebuild(spec: { aspectRatio: string; detailWidth: number; thumbnailWidth: number; quality: number }, limit: number): Promise<AssetRow[]> {
+    return this.#t.assets.find(
+      {
+        purpose: 'product_image',
+        kind: 'image',
+        status: 'ready',
+        $or: [
+          { processing_spec: null },
+          { 'processing_spec.aspectRatio': { $ne: spec.aspectRatio } },
+          { 'processing_spec.detailWidth': { $ne: spec.detailWidth } },
+          { 'processing_spec.thumbnailWidth': { $ne: spec.thumbnailWidth } },
+          { 'processing_spec.quality': { $ne: spec.quality } },
+        ],
+      },
+      { sort: { created_at: 1 }, limit },
+    );
+  }
+
   /** Storage objects the assets know about, in pages (keyset on id) */
   async storageRefs(afterId: string | null, limit: number): Promise<{ id: string; status: string; bucket: string; key: string }[]> {
     const rows = await this.#t.assets.find({ storage_bucket: { $ne: ERASED_BUCKET }, ...(afterId ? { id: { $gt: afterId } } : {}) }, { sort: { id: 1 }, limit });

@@ -120,6 +120,12 @@ export interface MediaRef {
   height?: number | null;
   /** File size in bytes (media sizeBytes), shown next to attachments and evidence files */
   bytes?: number | null;
+  /** The file's name as uploaded (media fileName), e.g. for attachments and evidence lists */
+  fileName?: string | null;
+  /** Product images only: the thumbnail rendition (cards, lists, cart, orders, gallery strip); null for other files */
+  thumbUrl?: string | null;
+  /** Product images only: the detail rendition (product page); null for other files. url is the size the response asked for (product pages: detail) */
+  detailUrl?: string | null;
 }
 
 export const MediaRef: z.ZodType<MediaRef> = z.object({
@@ -129,6 +135,9 @@ export const MediaRef: z.ZodType<MediaRef> = z.object({
   width: z.number().int().nullish(),
   height: z.number().int().nullish(),
   bytes: z.number().int().describe("File size in bytes (media sizeBytes), shown next to attachments and evidence files").nullish(),
+  fileName: z.string().describe("The file's name as uploaded (media fileName), e.g. for attachments and evidence lists").nullish(),
+  thumbUrl: z.url().describe("Product images only: the thumbnail rendition (cards, lists, cart, orders, gallery strip); null for other files").nullish(),
+  detailUrl: z.url().describe("Product images only: the detail rendition (product page); null for other files. url is the size the response asked for (product pages: detail)").nullish(),
 }).register(apiTypes, { id: "MediaRef" });
 
 export interface DateRange {

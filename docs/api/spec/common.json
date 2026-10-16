@@ -106,7 +106,10 @@
       "alt": "string?",
       "width": "int?",
       "height": "int?",
-      "bytes": { "type": "int?", "desc": "File size in bytes (media sizeBytes), shown next to attachments and evidence files" }
+      "bytes": { "type": "int?", "desc": "File size in bytes (media sizeBytes), shown next to attachments and evidence files" },
+      "fileName": { "type": "string?", "desc": "The file's name as uploaded (media fileName), e.g. for attachments and evidence lists" },
+      "thumbUrl": { "type": "url?", "desc": "Product images only: the thumbnail rendition (cards, lists, cart, orders, gallery strip); null for other files" },
+      "detailUrl": { "type": "url?", "desc": "Product images only: the detail rendition (product page); null for other files. url is the size the response asked for (product pages: detail)" }
     },
     "DateRange": {
       "from": "date",

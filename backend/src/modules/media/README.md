@@ -10,7 +10,8 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 
 ## Owns
 - Upload sessions with expiring upload tickets (website and Android app): the bytes go to the API's PUT /uploads/{id}/content, streamed to storage
-- Processing: malware scan, type sniffing, EXIF/GPS stripping, orientation, image renditions (thumb to zoom), video poster and transcode, document page count
+- Processing: malware scan, type sniffing, decoding, EXIF/GPS stripping, orientation, image renditions (product images: detail and thumb at the product image spec; other images: thumb to zoom), video poster and transcode, document page count
+- The product image spec (setting productImage: aspect ratio, detail and thumbnail widths, quality), served to every app at GET /media/image-specs, enforced on product images, and the rebuild of existing product images when it changes
 - Assets: kind, purpose, owner, visibility (public or private), alt text and title, status
 - Image standard checks against rules supplied by the caller (catalog category rules, ad formats) plus platform baseline checks
 - Usage tracking: which product, offer, return, case, review, ad or page uses a file
@@ -37,6 +38,7 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 | PATCH | `/api/store/media/assets/{id}` | Describe my photo (alt text) | shopper | `AssetUpdate` → `MediaAsset` |
 | DELETE | `/api/store/media/assets/{id}` | Remove my upload before submitting | shopper | 204 No content |
 | GET | `/api/store/media/assets/{id}/download` | Signed link to one of my private files | shopper | `DownloadLink` |
+| GET | `/api/store/media/image-specs` | The product image spec (aspect ratio and the detail and thumbnail sizes) | visitor | `ImageSpecs` |
 
 ## Seller API
 
@@ -51,6 +53,7 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 | DELETE | `/api/seller/media/assets/{id}` | Delete an unused file | seller<br>`media.assets.upload` | 204 No content |
 | POST | `/api/seller/media/assets/{id}/checks` | Check an image against category or placement rules before submitting | seller | `{ rules: ImageRules, rulesSource: string? }` → `ImageCheckResult` |
 | GET | `/api/seller/media/assets/{id}/download` | Signed link to one of the seller's private files | seller | `DownloadLink` |
+| GET | `/api/seller/media/image-specs` | The product image spec the Seller Center crops product photos to _(before seller is chosen)_ | seller | `ImageSpecs` |
 
 ## Admin API
 
@@ -67,6 +70,7 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 | POST | `/api/admin/media/assets/{id}/restore` | Restore a removed file _(audited)_ | staff<br>`media.assets.moderate` | `{ reason: text }` → `MediaAssetDetail` |
 | DELETE | `/api/admin/media/assets/{id}` | Delete an unused platform file _(audited)_ | staff<br>`media.assets.manage` | 204 No content |
 | GET | `/api/admin/media/assets/{id}/download` | Signed link to a private file (verification documents, evidence) _(audited)_ | staff<br>`media.assets.view-private` | `DownloadLink` |
+| GET | `/api/admin/media/image-specs` | The product image spec in force | staff | `ImageSpecs` |
 
 ## Webhooks
 
@@ -113,7 +117,7 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 
 | Field | Type |
 |---|---|
-| size | `enum(thumb|small|medium|large|zoom|poster|video_720|video_1080)` |
+| size | `enum(thumb|small|medium|large|zoom|detail|poster|video_720|video_1080)` Product images: detail (product page) and thumb (cards, lists) at the product image spec; images processed before it may also keep small to zoom. Other images: thumb, small, medium, large, zoom by renditionWidths |
 | url | `url` Signed link to GET /files/{bucket}/{key}: permanent for public files (usable as <img src>), short-lived for private ones |
 | width | `int` |
 | height | `int` |
@@ -139,7 +143,7 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 | title | `string?` |
 | owner | `MediaOwner` |
 | visibility | `enum(public|private)` |
-| url | `url?` Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint. |
+| url | `url?` Public: permanent signed link to the medium rendition (images; the detail rendition for product images) or poster (video). Private files have no URL; use the download endpoint. |
 | renditions | `Rendition[]` |
 | check | `ImageCheckResult?` |
 | rejectionReason | `string?` Unsupported or corrupt file, malware found, size or dimensions outside limits |
@@ -266,6 +270,40 @@ Every uploaded or generated file: images, video and documents. Uploads and signe
 | reason | `text` |
 | showPlaceholder | `bool` Public URLs return a neutral placeholder instead of 404 |
 
+### ImageSize
+
+| Field | Type |
+|---|---|
+| width | `int` |
+| height | `int` |
+
+### ProductImageSpec
+
+| Field | Type |
+|---|---|
+| aspectRatio | `string` W:H, e.g. 1:1 or 4:5 (setting media.productImage) |
+| detailWidth | `int` Product page image width in px |
+| thumbnailWidth | `int` Thumbnail width in px (cards, lists, cart, orders) |
+| quality | `int` WebP and JPEG quality, 50–95 |
+| ratio | `ImageSize` The ratio as two whole numbers |
+| detail | `ImageSize` detailWidth × round(detailWidth × H ÷ W): the size product images are uploaded at, and their minimum |
+| thumbnail | `ImageSize` thumbnailWidth × round(thumbnailWidth × H ÷ W) |
+
+### ImageSpecs
+
+| Field | Type |
+|---|---|
+| productImage | `ProductImageSpec` |
+
+### RecropItem
+
+| Field | Type |
+|---|---|
+| assetId | `uuid` |
+| owner | `MediaOwner` |
+| recrop | `bool` true: the image no longer has the spec's aspect ratio (re-crop it); false: it has it again |
+| usages | `Usage[]` Active usages of the image (catalog: product_image and variant_image with the product id) |
+
 ## Status flows
 
 ### Asset (`MediaAsset.status`)
@@ -324,6 +362,7 @@ complete is called by the client (POST /uploads/{id}/complete) or by the storage
 | created_at | timestamptz |
 | ready_at | timestamptz? |
 | deleted_at | timestamptz? |
+| processing_spec | jsonb? (product images: the spec their renditions were built with: aspectRatio, detailWidth, thumbnailWidth, quality, settingsVersion) |
 
 Indexes: `(owner_kind, owner_id, created_at desc)`, `(status, created_at)`, `(purpose, created_at)`, `(owner_kind, owner_id, phash)`, `(retain_until)`, `(expires_at)`
 
@@ -412,9 +451,12 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | `media.asset.removed` | Staff take a file down | `{ assetId: uuid, reason: text, usages: Usage[], by: Actor }` | - |
 | `media.asset.restored` | A removed file is restored | `{ assetId: uuid, usages: Usage[], by: Actor }` | - |
 | `media.asset.deleted` | A file is deleted | `{ assetId: uuid, owner: MediaOwner }` | - |
+| `media.product_images.recrop_changed` | media.rebuild-product-renditions found product images whose aspect ratio no longer matches the product image spec (recrop true: flagged wrong_aspect, not blocking), or matches it again (recrop false); one event per batch of up to 50 images | `{ aspectRatio: string, items: RecropItem[] }` | - |
+| `media.product_images.rebuilt` | media.rebuild-product-renditions finished a run that changed product images (their renditions are rebuilt at the spec in force): search re-indexes products | `{ aspectRatio: string, settingsVersion: int?, rebuilt: int, flagged: int, cleared: int }` | - |
 
 | Consumes | From | Does |
 |---|---|---|
+| `settings.setting.changed` | settings | key media.productImage: start media.rebuild-product-renditions now (new sizes or quality rebuild the renditions of existing product images; a new aspect ratio flags the images that no longer match) |
 | `sellers.seller.closed` | sellers | Mark the seller's never-used files for deletion after orphanGraceDays; evidence and files used by past orders' snapshots are kept until retainUntil |
 | `customers.account.closed` | customers | Delete the customer's unused uploads; evidence attached to returns and cases is kept until retainUntil, then purged |
 
@@ -423,7 +465,7 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | Function | Signature | Used by |
 |---|---|---|
 | getAsset | `(assetId: uuid) => MediaAsset | null`<br>Asset with renditions and status | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, customers |
-| refs | `(assetIds: uuid[], size?: 'thumb' | 'small' | 'medium' | 'large' | 'zoom') => MediaRef[]`<br>common.MediaRef (id, url, alt, width, height) for embedding in responses; removed files return the placeholder (or are left out when taken down without one) | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, search, cart, orders, wishlist |
+| refs | `(assetIds: uuid[], size?: 'thumb' | 'small' | 'medium' | 'large' | 'zoom' | 'detail') => MediaRef[]`<br>common.MediaRef (id, url, alt, width, height, fileName) for embedding in responses; removed files return the placeholder (or are left out when taken down without one). Default size medium. Product images (purpose product_image) keep only two sizes, detail and thumb: small and thumb answer thumb, medium, large, zoom and detail answer detail, and their refs also carry thumbUrl and detailUrl (null for other files). Other images keep thumb to zoom; detail answers medium for them. | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, search, cart, orders, wishlist |
 | attach | `(assetId: uuid, usage: UsageInput, expectedOwner: MediaOwner) => void`<br>Record that a record uses a file. Fails if the asset is not ready, belongs to another owner (ASSET_NOT_OWNED) or the purpose does not fit the usage. Evidence usages extend retainUntil. | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, warehouse, trust |
 | detach | `(assetId: uuid, usage: { module: string, kind: string, refId: string }) => void`<br>Record that a record no longer uses a file (image replaced, draft deleted) | catalog, offers, sellers, content, advertising, reviews, returns, support, messaging |
 | checkImage | `(assetId: uuid, rules: ImageRules) => ImageCheckResult`<br>Evaluate an image against category or placement rules; the result is stored on the asset | catalog, advertising, content, sellers |
@@ -465,6 +507,7 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | Job | Schedule | Does |
 |---|---|---|
 | `media.process` | every minute | Also started at once when an upload completes. Scan, probe, strip metadata, build renditions, run baseline image checks, start video transcodes; retry with backoff; publish media.asset.ready or media.asset.rejected |
+| `media.rebuild-product-renditions` | hourly | Also started at once when media.productImage changes. Ready product images built with another spec (or before the spec existed) get their detail and thumb renditions rebuilt from the stored original at the spec in force (same storage keys, never enlarged; older small to zoom files are kept for order snapshots and old links), and their wrong_aspect flag set or cleared; at most rebuildBatchLimit images per run, in batches with a pause; idempotent. Publishes media.product_images.recrop_changed per batch and media.product_images.rebuilt with the counts, which are also logged and recorded in the audit history |
 | `media.expire-uploads` | hourly | Expire pending uploads past pendingUploadExpiryHours and delete partial objects |
 | `media.sweep-orphans` | daily | Delete ready files never attached to anything after orphanGraceDays (except generated files, which follow their own expiry) |
 | `media.expire-generated` | hourly | Delete generated files (exports, reports) past expires_at |
@@ -475,9 +518,11 @@ Indexes: `pk (owner_kind, owner_id, day)`
 
 | Key | Default | Rules | Meaning |
 |---|---|---|---|
-| limitsByPurpose | `{"product_image":{"maxMB":20,"types":["jpeg","png","webp","heic"]},"product_video":{"maxMB":500,"types":["mp4","mov"]},"ad_creative":{"maxMB":5,"types":["jpeg","png","webp"]},"verification_document":{"maxMB":10,"types":["pdf","jpeg","png"]},"return_evidence":{"maxMB":15,"types":["jpeg","png","webp","heic","mp4"]},"bulk_file":{"maxMB":25,"types":["csv","xlsx"]}}` | json, seller-visible | Size and type limits per purpose (others default to 20 MB images, 25 MB documents) |
+| productImage | `{"aspectRatio":"1:1","detailWidth":800,"thumbnailWidth":320,"quality":80}` | json, approval: second reviewer, seller-visible | Product images: aspect ratio W:H (whole numbers 1–32, height ÷ width 0.5–2), detail width 480–2048 px (product page; also the minimum upload size), thumbnail width 120–640 px (smaller than detail; cards and lists), WebP/JPEG quality 50–95. Heights follow from the ratio. New uploads use it from the effective date; existing images are rebuilt (sizes, quality) or flagged for re-crop (ratio) by media.rebuild-product-renditions |
+| rebuildBatchLimit | `500` | int, 10–10000 | Product images media.rebuild-product-renditions rebuilds per run (the rest wait for the next run) |
+| limitsByPurpose | `{"product_image":{"maxMB":20,"types":["jpeg","png","webp"]},"product_video":{"maxMB":500,"types":["mp4","mov"]},"ad_creative":{"maxMB":5,"types":["jpeg","png","webp"]},"verification_document":{"maxMB":10,"types":["pdf","jpeg","png"]},"return_evidence":{"maxMB":15,"types":["jpeg","png","webp","heic","mp4"]},"bulk_file":{"maxMB":25,"types":["csv","xlsx"]}}` | json, seller-visible | Size and type limits per purpose (others default to 20 MB images, 25 MB documents). Product images are never HEIC, whatever this lists |
 | renditionWidths | `{"thumb":160,"small":320,"medium":640,"large":1280,"zoom":2048}` | json | Image rendition widths (WebP plus JPEG fallback) |
-| baselineImageRules | `{"minShortSide":500,"formats":["jpeg","png","webp","heic"]}` | json, seller-visible | Checks applied to every image regardless of caller rules |
+| baselineImageRules | `{"minShortSide":500,"formats":["jpeg","png","webp"]}` | json, seller-visible | Checks applied to every image regardless of caller rules (product images: the product image spec's minimum size replaces minShortSide) |
 | uploadUrlTtlMinutes | `15` | duration, minutes, 1–60 | Upload ticket lifetime (the bytes must arrive before it ends) |
 | downloadUrlTtlMinutes | `10` | duration, minutes, 1–60 | Signed download link lifetime for private files (public renditions have permanent links) |
 | pendingUploadExpiryHours | `24` | duration, hours, 1–… | Pending uploads expire after this |
@@ -489,7 +534,7 @@ Indexes: `pk (owner_kind, owner_id, day)`
 
 ## Integrations
 - **Local file system (owner decision: no S3)**: MEDIA_STORAGE=local: two buckets as folders under MEDIA_STORAGE_DIR, public (renditions) and private (originals, documents, evidence, generated files); metadata beside them, atomic writes (temp file + rename), streaming in both directions. Uploads arrive at PUT /api/{area}/media/uploads/{id}/content; downloads are served at GET /files/{bucket}/{key} by signed links the auth middleware verifies (docs/03-auth-middleware.md). MEDIA_STORAGE=memory (tests) behaves the same in memory. The folder must be backed up with the database, and shared between servers when there is more than one. An S3-compatible adapter (presigned uploads and downloads, object-created notifications at POST /webhooks/media/storage-events) can still be added behind the same port.
-- **Image processing (libvips / sharp)**: Decode (including HEIC from phones), auto-orient, strip EXIF and GPS, renditions in WebP and JPEG, perceptual hash, background and sharpness measurements
+- **Image processing (sharp / libvips, MEDIA_IMAGE_PROCESSOR=sharp)**: Decode (a file that doesn't decode is rejected), auto-orient, strip EXIF and GPS, cover-fit resize (centred, never enlarged), renditions in WebP and JPEG, perceptual hash, background and sharpness measurements. The prebuilt binaries can't decode HEIC: HEIC files of other purposes are kept as uploaded (header probe, no renditions); product images are never HEIC. MEDIA_IMAGE_PROCESSOR=dev (the test default) reads headers only and copies bytes
 - **Video transcoding service**: MP4 720p/1080p and poster frame for optional product and ad videos; results by webhook
 - **Malware scanning (ClamAV or provider)**: Scan every upload before it becomes ready; documents and spreadsheets are never served inline
 - **CDN (optional)**: May cache GET /files/marketly-public/… (public renditions, permanent links, Cache-Control public for an hour); a takedown replaces the file at the same link, so cached copies follow within that hour unless purged
@@ -498,7 +543,8 @@ Indexes: `pk (owner_kind, owner_id, day)`
 - Upload flow (website and Android): 1) POST /uploads with purpose, type, size → upload ticket (URL, method, headers, maxBytes, expiresAt); 2) send the bytes to the ticket URL: PUT /api/{area}/media/uploads/{id}/content with the caller's Authorization header (local-disk storage; the API streams them to disk, refusing more than maxBytes); 3) POST /uploads/{id}/complete → 202 processing; 4) poll GET /assets/{id} or just attach: attach waits for ready and returns ILLEGAL_TRANSITION if processing failed. The app can upload several files in parallel and resume after a network change by starting a new upload.
 - Ownership: seller uploads belong to the seller account (any member with media.assets.upload), never to the person; staff uploads for Official Store, content and ads belong to the platform; customer uploads belong to the customer account, guest uploads to the guest session until attached to their return or case. A file can only be attached by its owner's module calls (attach checks expectedOwner), so a seller cannot reuse another seller's images.
 - Deletion rules: a file in use cannot be deleted (ASSET_IN_USE); files attached as evidence (return, case, order, inspection, verification, catalog correction, trust, payment dispute, supplier document) get retainUntil = last use + evidenceRetentionDays and cannot be deleted before that (ASSET_RETAINED) even if the record is closed. Past orders keep their product snapshot image URL; removing a product image does not break past orders because snapshot renditions are kept while referenced (usage kind order_evidence is attached by orders when a snapshot is taken).
-- Image standards: catalog owns per-category rules and passes them to checkImage when a seller submits; the result (measurements and plain-language issues) is stored on the asset and returned by catalog with the submission. media itself only enforces the platform baseline (minimum short side, formats).
+- Image standards: catalog owns per-category rules and passes them to checkImage when a seller submits; the result (measurements and plain-language issues) is stored on the asset and returned by catalog with the submission. media itself only enforces the platform baseline (minimum short side, formats) and the product image spec.
+- Product images (purpose product_image; also what variant_image and offer_photo usages take when they use one): the setting productImage (aspect ratio W:H, detailWidth, thumbnailWidth, quality) is the spec, served by GET /api/{store|seller|admin}/media/image-specs. Clients crop to the ratio and upload at the detail size (no server-side crop rectangle). Processing builds exactly two renditions from the stripped original, detail (detailWidth × detailHeight) and thumb (thumbnailWidth × thumbnailHeight), each WebP and JPEG at quality, cover-fit and centred (a safety net: correct uploads already have the ratio), never enlarged; an image off the ratio (a staff upload used elsewhere, an image from before a ratio change) keeps its own ratio at those widths. The spec used is stored on the asset (processing_spec). Checks: the ratio within 1% (wrong_aspect: 'Crop the image to 4:5. The Seller Center crops it for you when you upload.') and at least the detail size (too_small: 'The image must be at least 800 × 1000.'). Seller uploads (the Seller Center uploads only product photos with this purpose) that fail either are rejected (media.asset.rejected, rejectionReason). Staff uploads are not rejected (the purpose also serves category and content images); attaching one that fails to a product_image, variant_image or offer_photo usage answers VALIDATION_FAILED with the same message. HEIC is refused for product images at upload (FILE_TYPE_NOT_ALLOWED). Category image standards' aspectRatios are ignored for product photos: the global ratio wins. refs answers small/thumb with the thumb rendition and medium/large/zoom/detail with the detail rendition (images processed before the spec: small and large), and fills MediaRef.thumbUrl and detailUrl. When the setting changes, media.rebuild-product-renditions rebuilds existing images (new sizes or quality; same keys, so links keep working) and flags the images whose ratio no longer matches (wrong_aspect warning, not blocking: products stay live; catalog shows Re-crop images and tells the sellers), then search re-indexes.
 - Usage kinds and the upload purposes they accept: product_image and variant_image ← product_image; product_video ← product_video; offer_photo ← offer_photo, product_image; brand_logo ← brand_logo; brand_banner ← store_banner, content_image; category_image ← content_image, product_image; store_logo ← store_logo; store_banner ← store_banner; ad_creative ← ad_creative, ad_video; content_block ← content_image, product_image, product_video, ad_creative; help_article ← content_image; verification_document ← verification_document, other_document; return_evidence ← return_evidence; case_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, verification_document; order_evidence ← product_image, offer_photo, product_video; inspection_photo ← inspection_photo; correction_evidence ← product_image, other_document, verification_document, case_evidence; trust_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, verification_document, other_document, product_image; dispute_evidence ← case_evidence, return_evidence, inspection_photo, message_attachment, other_document; supplier_document ← other_document, inspection_photo, bulk_file; review_photo ← review_photo; message_attachment ← message_attachment; bulk_file ← bulk_file; generated ← generated purposes.
 - Who attaches what (every file a module keeps must be attached, or media.sweep-orphans deletes it after orphanGraceDays): catalog brand banners (brand_banner), category images (category_image), correction evidence (correction_evidence); trust report, appeal and proof files (trust_evidence; reporters and appellants upload them with purpose case_evidence, there is no trust upload purpose); payments dispute evidence (dispute_evidence); purchasing PO attachments (supplier_document) and receipt damage photos (inspection_photo); warehouse damage and return-parcel photos (inspection_photo); inventory discrepancy photos (inspection_photo); orders product snapshot images (order_evidence); wallet gift card code files are generated files (storeGeneratedFile, no usage needed).
 - Privacy: EXIF and GPS are stripped from every image before any rendition is public, which matters for customer return photos taken on phones.

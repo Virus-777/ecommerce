@@ -190,7 +190,7 @@ describe('deletion rules', () => {
 describe('image checks', () => {
   it('evaluates category rules plus the platform baseline and stores the result', async () => {
     const seller = callers.seller();
-    const { asset } = await uploadFile(t, 'seller', seller, { purpose: 'product_image', fileName: 'lifestyle-watermark.png', body: png(800, 600, { seed: 'check' }) });
+    const { asset } = await uploadFile(t, 'seller', seller, { purpose: 'store_banner', fileName: 'lifestyle-watermark.png', body: png(800, 600, { seed: 'check' }) });
     const res = await send('POST', `/api/seller/media/assets/${asset.id}/checks`, seller, {
       rules: { minWidth: 1000, aspectRatios: ['1:1'], background: 'white', allowWatermark: false, formats: ['jpeg'] },
       rulesSource: 'catalog category Monitors',
@@ -207,8 +207,8 @@ describe('image checks', () => {
     const sellerId = newId();
     const seller = callers.seller({ sellerId });
     const body = png(400, 400, { seed: 'dup' });
-    await uploadFile(t, 'seller', seller, { purpose: 'product_image', fileName: 'blurry.png', body });
-    const second = await uploadFile(t, 'seller', seller, { purpose: 'product_image', fileName: 'blurry-again.png', body });
+    await uploadFile(t, 'seller', seller, { purpose: 'store_banner', fileName: 'blurry.png', body });
+    const second = await uploadFile(t, 'seller', seller, { purpose: 'store_banner', fileName: 'blurry-again.png', body });
     const r = await t.media.checkImage(second.asset.id, { aspectRatios: [], formats: [] });
     expect(r.passed).toBe(false);
     expect(r.issues).toEqual(
@@ -336,7 +336,7 @@ describe('admin library', () => {
   it('filters by owner, status and failed checks; private renditions are signed only with view-private', async () => {
     const sellerId = newId();
     const seller = callers.seller({ sellerId });
-    const { asset } = await uploadFile(t, 'seller', seller, { purpose: 'product_image', body: png(300, 300, { seed: 'admin-small' }) });
+    const { asset } = await uploadFile(t, 'seller', seller, { purpose: 'store_banner', body: png(300, 300, { seed: 'admin-small' }) });
     await t.media.checkImage(asset.id, { minWidth: 1000, aspectRatios: [], formats: [] });
     let res = await get(`/api/admin/media/assets?ownerKind=seller&ownerId=${sellerId}&failedChecks=true`, callers.staff());
     expect(res.statusCode, res.body).toBe(200);

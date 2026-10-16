@@ -69,7 +69,8 @@ export const UploadTicket: z.ZodType<UploadTicket> = z.object({
 }).register(common.apiTypes, { id: "media.UploadTicket" });
 
 export interface Rendition {
-  size: "thumb" | "small" | "medium" | "large" | "zoom" | "poster" | "video_720" | "video_1080";
+  /** Product images: detail (product page) and thumb (cards, lists) at the product image spec; images processed before it may also keep small to zoom. Other images: thumb, small, medium, large, zoom by renditionWidths */
+  size: "thumb" | "small" | "medium" | "large" | "zoom" | "detail" | "poster" | "video_720" | "video_1080";
   /** Signed link to GET /files/{bucket}/{key}: permanent for public files (usable as <img src>), short-lived for private ones */
   url: string;
   width: number;
@@ -80,7 +81,7 @@ export interface Rendition {
 }
 
 export const Rendition: z.ZodType<Rendition> = z.object({
-  size: z.enum(["thumb", "small", "medium", "large", "zoom", "poster", "video_720", "video_1080"]),
+  size: z.enum(["thumb", "small", "medium", "large", "zoom", "detail", "poster", "video_720", "video_1080"]).describe("Product images: detail (product page) and thumb (cards, lists) at the product image spec; images processed before it may also keep small to zoom. Other images: thumb, small, medium, large, zoom by renditionWidths"),
   url: z.url().describe("Signed link to GET /files/{bucket}/{key}: permanent for public files (usable as <img src>), short-lived for private ones"),
   width: z.number().int(),
   height: z.number().int(),
@@ -105,7 +106,7 @@ export interface MediaAsset {
   title?: string | null;
   owner: MediaOwner;
   visibility: "public" | "private";
-  /** Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint. */
+  /** Public: permanent signed link to the medium rendition (images; the detail rendition for product images) or poster (video). Private files have no URL; use the download endpoint. */
   url?: string | null;
   renditions: Rendition[];
   check?: ImageCheckResult | null;
@@ -143,7 +144,7 @@ export const MediaAsset: z.ZodType<MediaAsset> = z.object({
     return MediaOwner;
   },
   visibility: z.enum(["public", "private"]),
-  url: z.url().describe("Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint.").nullish(),
+  url: z.url().describe("Public: permanent signed link to the medium rendition (images; the detail rendition for product images) or poster (video). Private files have no URL; use the download endpoint.").nullish(),
   get renditions() {
     return z.array(Rendition);
   },
@@ -368,6 +369,79 @@ export const RemoveRequest: z.ZodType<RemoveRequest> = z.object({
   showPlaceholder: z.boolean().describe("Public URLs return a neutral placeholder instead of 404"),
 }).register(common.apiTypes, { id: "media.RemoveRequest" });
 
+export interface ImageSize {
+  width: number;
+  height: number;
+}
+
+export const ImageSize: z.ZodType<ImageSize> = z.object({
+  width: z.number().int(),
+  height: z.number().int(),
+}).register(common.apiTypes, { id: "media.ImageSize" });
+
+export interface ProductImageSpec {
+  /** W:H, e.g. 1:1 or 4:5 (setting media.productImage) */
+  aspectRatio: string;
+  /** Product page image width in px */
+  detailWidth: number;
+  /** Thumbnail width in px (cards, lists, cart, orders) */
+  thumbnailWidth: number;
+  /** WebP and JPEG quality, 50–95 */
+  quality: number;
+  /** The ratio as two whole numbers */
+  ratio: ImageSize;
+  /** detailWidth × round(detailWidth × H ÷ W): the size product images are uploaded at, and their minimum */
+  detail: ImageSize;
+  /** thumbnailWidth × round(thumbnailWidth × H ÷ W) */
+  thumbnail: ImageSize;
+}
+
+export const ProductImageSpec: z.ZodType<ProductImageSpec> = z.object({
+  aspectRatio: z.string().describe("W:H, e.g. 1:1 or 4:5 (setting media.productImage)"),
+  detailWidth: z.number().int().describe("Product page image width in px"),
+  thumbnailWidth: z.number().int().describe("Thumbnail width in px (cards, lists, cart, orders)"),
+  quality: z.number().int().describe("WebP and JPEG quality, 50–95"),
+  get ratio() {
+    return ImageSize;
+  },
+  get detail() {
+    return ImageSize;
+  },
+  get thumbnail() {
+    return ImageSize;
+  },
+}).register(common.apiTypes, { id: "media.ProductImageSpec" });
+
+export interface ImageSpecs {
+  productImage: ProductImageSpec;
+}
+
+export const ImageSpecs: z.ZodType<ImageSpecs> = z.object({
+  get productImage() {
+    return ProductImageSpec;
+  },
+}).register(common.apiTypes, { id: "media.ImageSpecs" });
+
+export interface RecropItem {
+  assetId: string;
+  owner: MediaOwner;
+  /** true: the image no longer has the spec's aspect ratio (re-crop it); false: it has it again */
+  recrop: boolean;
+  /** Active usages of the image (catalog: product_image and variant_image with the product id) */
+  usages: Usage[];
+}
+
+export const RecropItem: z.ZodType<RecropItem> = z.object({
+  assetId: z.uuid(),
+  get owner() {
+    return MediaOwner;
+  },
+  recrop: z.boolean().describe("true: the image no longer has the spec's aspect ratio (re-crop it); false: it has it again"),
+  get usages() {
+    return z.array(Usage);
+  },
+}).register(common.apiTypes, { id: "media.RecropItem" });
+
 /* ------------------------------------------------------------------ events */
 
 /** media.asset.ready: Processing finished and the file can be used */
@@ -453,14 +527,44 @@ export const MediaAssetDeletedEvent: z.ZodType<MediaAssetDeletedEvent> = z.objec
   },
 });
 
+/** media.product_images.recrop_changed: media.rebuild-product-renditions found product images whose aspect ratio no longer matches the product image spec (recrop true: flagged wrong_aspect, not blocking), or matches it again (recrop false); one event per batch of up to 50 images */
+export interface MediaProductImagesRecropChangedEvent {
+  aspectRatio: string;
+  items: RecropItem[];
+}
+
+export const MediaProductImagesRecropChangedEvent: z.ZodType<MediaProductImagesRecropChangedEvent> = z.object({
+  aspectRatio: z.string(),
+  get items() {
+    return z.array(RecropItem);
+  },
+});
+
+/** media.product_images.rebuilt: media.rebuild-product-renditions finished a run that changed product images (their renditions are rebuilt at the spec in force): search re-indexes products */
+export interface MediaProductImagesRebuiltEvent {
+  aspectRatio: string;
+  settingsVersion?: number | null;
+  rebuilt: number;
+  flagged: number;
+  cleared: number;
+}
+
+export const MediaProductImagesRebuiltEvent: z.ZodType<MediaProductImagesRebuiltEvent> = z.object({
+  aspectRatio: z.string(),
+  settingsVersion: z.number().int().nullish(),
+  rebuilt: z.number().int(),
+  flagged: z.number().int(),
+  cleared: z.number().int(),
+});
+
 /* ------------------------------------------------------------------ public API (in-process) */
 
 /** What other modules may call in-process: `ctx.use('media')` (or `ctx.tryUse` for an optional dependency). */
 export interface MediaPublicApi {
   /** Asset with renditions and status Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, customers. */
   getAsset(assetId: string): Promise<MediaAsset | null>;
-  /** common.MediaRef (id, url, alt, width, height) for embedding in responses; removed files return the placeholder (or are left out when taken down without one) Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, search, cart, orders, wishlist. */
-  refs(assetIds: string[], size?: 'thumb' | 'small' | 'medium' | 'large' | 'zoom'): Promise<common.MediaRef[]>;
+  /** common.MediaRef (id, url, alt, width, height, fileName) for embedding in responses; removed files return the placeholder (or are left out when taken down without one). Default size medium. Product images (purpose product_image) keep only two sizes, detail and thumb: small and thumb answer thumb, medium, large, zoom and detail answer detail, and their refs also carry thumbUrl and detailUrl (null for other files). Other images keep thumb to zoom; detail answers medium for them. Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, search, cart, orders, wishlist. */
+  refs(assetIds: string[], size?: 'thumb' | 'small' | 'medium' | 'large' | 'zoom' | 'detail'): Promise<common.MediaRef[]>;
   /** Record that a record uses a file. Fails if the asset is not ready, belongs to another owner (ASSET_NOT_OWNED) or the purpose does not fit the usage. Evidence usages extend retainUntil. Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging, warehouse, trust. */
   attach(assetId: string, usage: UsageInput, expectedOwner: MediaOwner): Promise<void>;
   /** Record that a record no longer uses a file (image replaced, draft deleted) Used by: catalog, offers, sellers, content, advertising, reviews, returns, support, messaging. */
@@ -522,6 +626,8 @@ export interface MediaDb {
     created_at: Date;
     ready_at: Date | null;
     deleted_at: Date | null;
+    /** product images: the spec their renditions were built with: aspectRatio, detailWidth, thumbnailWidth, quality, settingsVersion */
+    processing_spec: Json | null;
   };
   renditions: {
     asset_id: string;
@@ -699,6 +805,19 @@ export const endpoints = defineEndpoints({
     screens: ["help/case","account/return"],
     phase: 1,
   },
+  getStoreImageSpecs: {
+    area: "store",
+    method: "GET",
+    path: "/image-specs",
+    auth: "visitor",
+    scope: "public",
+    summary: "The product image spec (aspect ratio and the detail and thumbnail sizes)",
+    desc: "The value in force of the setting media.productImage, with the ratio and both sizes worked out (height = round(width × H ÷ W)). The store frames product cards and the gallery at this ratio. Product configuration with no permission; apps may cache it for 10 minutes.",
+    response: () => ImageSpecs,
+    status: 200,
+    screens: ["store/home","store/product","store/search"],
+    phase: 1,
+  },
   createSellerUpload: {
     area: "seller",
     method: "POST",
@@ -864,6 +983,20 @@ export const endpoints = defineEndpoints({
     response: () => DownloadLink,
     status: 200,
     screens: ["seller/finance","seller/bulk-update","seller/return"],
+    phase: 1,
+  },
+  getSellerImageSpecs: {
+    area: "seller",
+    method: "GET",
+    path: "/image-specs",
+    auth: "seller",
+    sellerContext: "optional",
+    scope: "own-seller",
+    summary: "The product image spec the Seller Center crops product photos to",
+    desc: "Same answer as the store's GET /image-specs. Product images uploaded here must have this aspect ratio (1% tolerance) and at least the detail size, or processing rejects them (rejectionReason says what to fix).",
+    response: () => ImageSpecs,
+    status: 200,
+    screens: ["seller/product-new"],
     phase: 1,
   },
   createAdminUpload: {
@@ -1098,6 +1231,19 @@ export const endpoints = defineEndpoints({
     screens: ["admin/seller-application","admin/case","admin/trust","admin/returns"],
     phase: 1,
   },
+  getAdminImageSpecs: {
+    area: "admin",
+    method: "GET",
+    path: "/image-specs",
+    auth: "staff",
+    scope: "staff",
+    summary: "The product image spec in force",
+    desc: "Same answer as the store's GET /image-specs. Staff change it with the settings change flow (POST /api/admin/settings/changes, key media.productImage).",
+    response: () => ImageSpecs,
+    status: 200,
+    screens: ["admin/settings","admin/official"],
+    phase: 1,
+  },
   storageEvent: {
     area: "webhooks",
     method: "POST",
@@ -1238,8 +1384,11 @@ export const spec = defineModuleSpec({
       "media.asset.removed": { when: "Staff take a file down", payload: () => MediaAssetRemovedEvent },
       "media.asset.restored": { when: "A removed file is restored", payload: () => MediaAssetRestoredEvent },
       "media.asset.deleted": { when: "A file is deleted", payload: () => MediaAssetDeletedEvent },
+      "media.product_images.recrop_changed": { when: "media.rebuild-product-renditions found product images whose aspect ratio no longer matches the product image spec (recrop true: flagged wrong_aspect, not blocking), or matches it again (recrop false); one event per batch of up to 50 images", payload: () => MediaProductImagesRecropChangedEvent },
+      "media.product_images.rebuilt": { when: "media.rebuild-product-renditions finished a run that changed product images (their renditions are rebuilt at the spec in force): search re-indexes products", payload: () => MediaProductImagesRebuiltEvent },
     },
     consumes: {
+      "settings.setting.changed": "key media.productImage: start media.rebuild-product-renditions now (new sizes or quality rebuild the renditions of existing product images; a new aspect ratio flags the images that no longer match)",
       "sellers.seller.closed": "Mark the seller's never-used files for deletion after orphanGraceDays; evidence and files used by past orders' snapshots are kept until retainUntil",
       "customers.account.closed": "Delete the customer's unused uploads; evidence attached to returns and cases is kept until retainUntil, then purged"
     },
@@ -1248,6 +1397,10 @@ export const spec = defineModuleSpec({
     "media.process": {
       "schedule": "every minute",
       "does": "Also started at once when an upload completes. Scan, probe, strip metadata, build renditions, run baseline image checks, start video transcodes; retry with backoff; publish media.asset.ready or media.asset.rejected"
+    },
+    "media.rebuild-product-renditions": {
+      "schedule": "hourly",
+      "does": "Also started at once when media.productImage changes. Ready product images built with another spec (or before the spec existed) get their detail and thumb renditions rebuilt from the stored original at the spec in force (same storage keys, never enlarged; older small to zoom files are kept for order snapshots and old links), and their wrong_aspect flag set or cleared; at most rebuildBatchLimit images per run, in batches with a pause; idempotent. Publishes media.product_images.recrop_changed per batch and media.product_images.rebuilt with the counts, which are also logged and recorded in the audit history"
     },
     "media.expire-uploads": {
       "schedule": "hourly",
@@ -1271,6 +1424,25 @@ export const spec = defineModuleSpec({
     }
   },
   settings: {
+    "productImage": {
+      "default": {
+        "aspectRatio": "1:1",
+        "detailWidth": 800,
+        "thumbnailWidth": 320,
+        "quality": 80
+      },
+      "desc": "Product images: aspect ratio W:H (whole numbers 1–32, height ÷ width 0.5–2), detail width 480–2048 px (product page; also the minimum upload size), thumbnail width 120–640 px (smaller than detail; cards and lists), WebP/JPEG quality 50–95. Heights follow from the ratio. New uploads use it from the effective date; existing images are rebuilt (sizes, quality) or flagged for re-crop (ratio) by media.rebuild-product-renditions",
+      "type": "json",
+      "approval": "second_reviewer",
+      "sellerVisible": true
+    },
+    "rebuildBatchLimit": {
+      "default": 500,
+      "desc": "Product images media.rebuild-product-renditions rebuilds per run (the rest wait for the next run)",
+      "type": "int",
+      "min": 10,
+      "max": 10000
+    },
     "limitsByPurpose": {
       "default": {
         "product_image": {
@@ -1278,8 +1450,7 @@ export const spec = defineModuleSpec({
           "types": [
             "jpeg",
             "png",
-            "webp",
-            "heic"
+            "webp"
           ]
         },
         "product_video": {
@@ -1323,7 +1494,7 @@ export const spec = defineModuleSpec({
           ]
         }
       },
-      "desc": "Size and type limits per purpose (others default to 20 MB images, 25 MB documents)",
+      "desc": "Size and type limits per purpose (others default to 20 MB images, 25 MB documents). Product images are never HEIC, whatever this lists",
       "type": "json",
       "sellerVisible": true
     },
@@ -1344,11 +1515,10 @@ export const spec = defineModuleSpec({
         "formats": [
           "jpeg",
           "png",
-          "webp",
-          "heic"
+          "webp"
         ]
       },
-      "desc": "Checks applied to every image regardless of caller rules",
+      "desc": "Checks applied to every image regardless of caller rules (product images: the product image spec's minimum size replaces minShortSide)",
       "type": "json",
       "sellerVisible": true
     },
@@ -1496,7 +1666,8 @@ export const spec = defineModuleSpec({
         "expires_at",
         "created_at",
         "ready_at",
-        "deleted_at"
+        "deleted_at",
+        "processing_spec"
       ],
       "nullable": [
         "sha256",
@@ -1518,7 +1689,8 @@ export const spec = defineModuleSpec({
         "retain_until",
         "expires_at",
         "ready_at",
-        "deleted_at"
+        "deleted_at",
+        "processing_spec"
       ],
       "decimal": [
         "duration_seconds"
@@ -1720,7 +1892,8 @@ export const spec = defineModuleSpec({
                 "date",
                 "null"
               ]
-            }
+            },
+            "processing_spec": {}
           },
           "additionalProperties": false
         }
@@ -2316,6 +2489,8 @@ declare module '../kernel/events/event-map.js' {
     "media.asset.removed": MediaAssetRemovedEvent;
     "media.asset.restored": MediaAssetRestoredEvent;
     "media.asset.deleted": MediaAssetDeletedEvent;
+    "media.product_images.recrop_changed": MediaProductImagesRecropChangedEvent;
+    "media.product_images.rebuilt": MediaProductImagesRebuiltEvent;
   }
 }
 

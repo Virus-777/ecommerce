@@ -50,4 +50,6 @@ export const sellerRoutes = (service: MediaService) =>
       service.runImageCheck(params.id, body.rules, { owner: sellerCaller(sellerId, principal).filter, rulesSource: body.rulesSource }),
     /** GET /assets/{id}/download: Signed link to one of the seller's private files */
     getSellerDownload: async ({ params, sellerId, principal }) => service.ownDownload(params.id, sellerCaller(sellerId, principal).filter),
+    /** GET /image-specs: The product image spec the Seller Center crops product photos to */
+    getSellerImageSpecs: async () => service.imageSpecs(),
   });

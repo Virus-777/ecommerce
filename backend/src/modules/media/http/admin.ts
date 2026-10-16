@@ -64,4 +64,6 @@ export const adminRoutes = (service: MediaService) =>
     },
     /** GET /assets/{id}/download: Signed link to a private file (verification documents, evidence) */
     getAdminDownload: async ({ params, query, actor, requestId }) => service.staffDownload(params.id, query.reason, { actor, requestId }),
+    /** GET /image-specs: The product image spec in force */
+    getAdminImageSpecs: async () => service.imageSpecs(),
   });

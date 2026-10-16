@@ -64,8 +64,37 @@ const isLocale = (l: string) => {
   }
 };
 
-/** Extra checks for particular settings-owned keys */
+/**
+ * media.productImage (the product image spec): the same rules as the Admin Center (validateProductImageSetting in
+ * web-shared) and media (domain/image-spec.ts). The ratio is W:H with whole numbers 1–32, height ÷ width 0.5–2.
+ */
+const RATIO = /^\s*(\d{1,2})\s*:\s*(\d{1,2})\s*$/;
+const ratioParts = (s: string) => {
+  const m = RATIO.exec(s);
+  return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+};
+const productImage = z
+  .object({
+    aspectRatio: z
+      .string()
+      .refine((s) => {
+        const r = ratioParts(s);
+        return !!r && r.w >= 1 && r.h >= 1 && r.w <= 32 && r.h <= 32;
+      }, 'Enter the ratio as width:height with whole numbers 1–32, for example 1:1 or 4:5')
+      .refine((s) => {
+        const r = ratioParts(s);
+        return !r || !r.w || (r.h / r.w >= 0.5 && r.h / r.w <= 2);
+      }, 'Use a ratio between 2:1 (wide) and 1:2 (tall)'),
+    detailWidth: z.number().int('Enter a whole number of pixels').min(480, 'At least 480 px').max(2048, 'At most 2048 px'),
+    thumbnailWidth: z.number().int('Enter a whole number of pixels').min(120, 'At least 120 px').max(640, 'At most 640 px'),
+    quality: z.number().int('Enter a whole number').min(50, 'At least 50').max(95, 'At most 95'),
+  })
+  .strict()
+  .refine((v) => v.thumbnailWidth < v.detailWidth, { message: 'Make the thumbnail smaller than the product-page image', path: ['thumbnailWidth'] });
+
+/** Extra checks for particular keys (settings-owned, and module keys whose shape a json type can't express) */
 const KEY_RULES: Record<string, z.ZodType> = {
+  'media.productImage': productImage,
   'market.country': z.string().regex(/^[A-Z]{2}$/, 'ISO 3166-1 alpha-2 code, e.g. US'),
   'market.currency': z.string().regex(/^[A-Z]{3}$/, 'ISO 4217 code, e.g. USD'),
   'market.timeZone': z.string().refine(isTimeZone, 'an IANA time zone, e.g. America/Los_Angeles'),

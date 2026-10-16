@@ -42,6 +42,7 @@ const assets = new Schema(
     created_at: { type: Date, required: true },
     ready_at: { type: Date, default: null },
     deleted_at: { type: Date, default: null },
+    processing_spec: { type: Schema.Types.Mixed, default: null }, // product images: the spec their renditions were built with: aspectRatio, detailWidth, thumbnailWidth, quality, settingsVersion
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },

@@ -34,15 +34,28 @@ export interface MediaTestApp {
 
 /**
  * media plus audit, whose record/historyOf are stubbed (audit is built in another tranche). Storage is memory
- * (the test default) unless `storage` says local, in `dir`.
+ * (the test default) unless `storage` says local, in `dir`. Images go through the development processor (header
+ * fixtures) unless `processor` is sharp (real images, e.g. made with sharp({ create })).
  */
-export async function mediaApp(opts: { storage?: 'memory' | 'local'; dir?: string } = {}): Promise<MediaTestApp> {
+export async function mediaApp(
+  opts: {
+    storage?: 'memory' | 'local';
+    dir?: string;
+    processor?: 'dev' | 'sharp';
+    /** Setting values in force by full key (media.productImage …); change the object to change them. Others: the spec default */
+    settings?: Record<string, unknown>;
+  } = {},
+): Promise<MediaTestApp> {
   const clock = fixedClock(new Date());
   const audits: audit.RecordInput[] = [];
+  const custom = opts.storage || opts.processor;
   const app = await buildTestApp({
     only: ['media', 'audit'],
     clock,
-    config: { rateLimits: false, ...(opts.storage ? { media: { storage: opts.storage, dir: opts.dir ?? '.data/test-media' } } : {}) },
+    config: {
+      rateLimits: false,
+      ...(custom ? { media: { storage: opts.storage ?? 'memory', dir: opts.dir ?? '.data/test-media', imageProcessor: opts.processor ?? 'dev' } } : {}),
+    },
     apiStubs: {
       audit: {
         record: async (entry) => {
@@ -71,13 +84,15 @@ export async function mediaApp(opts: { storage?: 'memory' | 'local'; dir?: strin
               visibleToSeller: Boolean(a.visibleToSeller),
             })),
       },
+      ...(opts.settings ? { settings: { get: async (key: string) => opts.settings?.[key] ?? null } as never } : {}),
     },
   });
   // tokens are signed at real time: a clock fixed before a slow boot would make them "not yet valid"
   clock.set(new Date());
   const media = app.kernel.boot.apis.get('media') as MediaService;
   const events: EventEnvelope[] = [];
-  for (const name of ['media.asset.ready', 'media.asset.rejected', 'media.asset.removed', 'media.asset.restored', 'media.asset.deleted']) {
+  const published = ['media.asset.ready', 'media.asset.rejected', 'media.asset.removed', 'media.asset.restored', 'media.asset.deleted', 'media.product_images.recrop_changed', 'media.product_images.rebuilt'];
+  for (const name of published) {
     app.kernel.events.subscribe('test', name, (e) => void events.push(e));
   }
   return {

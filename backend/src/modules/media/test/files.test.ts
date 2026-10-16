@@ -44,10 +44,10 @@ describe.each(['memory', 'local'] as const)('files over HTTP with %s storage', (
   it('upload → process → download: a public rendition by its permanent link, as an <img src> would (no token)', async () => {
     const { asset } = await uploadFile(t, 'seller', callers.seller(), { purpose: 'product_image', body: png(1200, 1200, { seed: `public-${kind}` }) });
     expect(asset.status).toBe('ready');
-    expect(asset.url).toMatch(/^http:\/\/localhost:4000\/files\/marketly-public\/renditions\/.+\/medium\.webp\?sig=/);
+    expect(asset.url).toMatch(/^http:\/\/localhost:4000\/files\/marketly-public\/renditions\/.+\/detail\.webp\?sig=/);
     const res = await get(asset.url!);
     expect(res.statusCode, res.body).toBe(200);
-    const key = `renditions/${asset.id}/medium.webp`;
+    const key = `renditions/${asset.id}/detail.webp`; // product images: detail and thumb
     expect(Buffer.from(res.rawPayload).equals(Buffer.from((await storage.get('marketly-public', key))!))).toBe(true);
     expect(res.headers).toMatchObject({
       'content-type': 'image/webp',

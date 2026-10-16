@@ -50,7 +50,7 @@ describe('starting an upload', () => {
   it('checks the type (FILE_TYPE_NOT_ALLOWED, 415) and size (FILE_TOO_LARGE, 413) for the purpose', async () => {
     let res = await startUpload(t, 'seller', callers.seller(), { purpose: 'product_image', fileName: 'a.pdf', contentType: 'application/pdf' });
     expect(res.statusCode).toBe(415);
-    expect(res.json().error).toMatchObject({ code: 'FILE_TYPE_NOT_ALLOWED', details: { allowed: ['jpeg', 'png', 'webp', 'heic'] } });
+    expect(res.json().error).toMatchObject({ code: 'FILE_TYPE_NOT_ALLOWED', details: { allowed: ['jpeg', 'png', 'webp'] } });
     res = await startUpload(t, 'seller', callers.seller(), { purpose: 'ad_creative', sizeBytes: 6 * 1024 * 1024 });
     expect(res.statusCode).toBe(413);
     expect(res.json().error).toMatchObject({ code: 'FILE_TOO_LARGE', details: { maxBytes: 5 * 1024 * 1024 } });
@@ -181,7 +181,8 @@ describe('completing an upload', () => {
 describe('processing', () => {
   it('scans, strips metadata, builds renditions and the baseline check, then publishes media.asset.ready', async () => {
     const before = t.eventsNamed('media.asset.ready').length;
-    const { asset } = await uploadFile(t, 'seller', callers.seller(), { purpose: 'product_image', fileName: 'boots.jpg', contentType: 'image/jpeg', body: jpeg(1600, 1200) });
+    // product images have their own two sizes (product-images.test.ts); other images keep thumb to zoom
+    const { asset } = await uploadFile(t, 'seller', callers.seller(), { purpose: 'store_banner', fileName: 'boots.jpg', contentType: 'image/jpeg', body: jpeg(1600, 1200) });
     expect(asset).toMatchObject({ status: 'ready', width: 1600, height: 1200, contentType: 'image/jpeg' });
     expect(asset.readyAt).toBeTruthy();
     const sizes = [...new Set(asset.renditions.map((r) => r.size))];
@@ -196,7 +197,7 @@ describe('processing', () => {
     expect(Buffer.from(served!.body).includes('GPSLatitude')).toBe(false);
     await t.app.kernel.events.drain();
     const ready = t.eventsNamed('media.asset.ready').slice(before);
-    expect(ready.map((e) => e.payload)).toContainEqual(expect.objectContaining({ assetId: asset.id, kind: 'image', purpose: 'product_image' }));
+    expect(ready.map((e) => e.payload)).toContainEqual(expect.objectContaining({ assetId: asset.id, kind: 'image', purpose: 'store_banner' }));
   });
 
   it('auto-orients: EXIF orientation 6 swaps the sides', async () => {

@@ -4,6 +4,7 @@
  */
 import type { Readable } from 'node:stream';
 import type { ImageMeasurements, MediaDb } from '../../spec/media.js';
+import type { RenditionSize, RenditionTarget } from './domain/image-spec.js';
 
 /* ------------------------------------------------------------------ persistence */
 
@@ -141,7 +142,7 @@ export interface ProbeResult {
 }
 
 export interface RenditionOutput {
-  size: 'thumb' | 'small' | 'medium' | 'large' | 'zoom';
+  size: RenditionSize;
   width: number;
   height: number;
   format: 'webp' | 'jpeg';
@@ -149,12 +150,15 @@ export interface RenditionOutput {
 }
 
 export interface MediaProcessor {
-  /** Reads the real type and dimensions from the bytes; null when the file is unreadable or corrupt */
+  /** Reads the real type and dimensions (auto-oriented) from the bytes; null when the file is unreadable or corrupt */
   probe(body: Uint8Array, hint: { contentType: string; fileName: string }): Promise<ProbeResult | null>;
   /** Auto-orients and strips EXIF, GPS and other metadata from an image */
   strip(body: Uint8Array, format: string): Promise<Uint8Array>;
-  /** Image renditions for the given widths (never upscaled) */
-  renditions(body: Uint8Array, probe: ProbeResult, widths: Record<string, number>): Promise<RenditionOutput[]>;
+  /**
+   * Image renditions, each in WebP and JPEG at quality (default 80), sized by fitSize (domain/image-spec.ts): cover
+   * fit, centred, when a target has a height, else the target width; never larger than the image
+   */
+  renditions(body: Uint8Array, probe: ProbeResult, targets: RenditionTarget[], opts?: { quality?: number }): Promise<RenditionOutput[]>;
   /** Background, sharpness, watermark and text estimates plus a perceptual hash (48-bit integer) */
   measure(body: Uint8Array, probe: ProbeResult, hint: { fileName: string }): Promise<Omit<ImageMeasurements, 'duplicateOf'> & { phash: number }>;
   /** Starts a video transcode (720p, 1080p and a poster frame); the result arrives at POST /webhooks/media/processing-results */

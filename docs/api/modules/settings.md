@@ -569,7 +569,7 @@ Indexes: `unique (key) where open`
 | `settings.change.submitted` | A change is sent for approval | `{ changeId: uuid, ref: string, keys: string[], effectiveAt: datetime, approvalRequestId: uuid }` | - |
 | `settings.change.scheduled` | A change is scheduled (directly or after approval) | `{ changeId: uuid, ref: string, keys: string[], effectiveAt: datetime, applyScope: enum(new_only|open_commitments), sellerVisible: bool, summary: string }` | notifications |
 | `settings.change.cancelled` | A change is cancelled or its approval is rejected | `{ changeId: uuid, ref: string, keys: string[], outcome: enum(cancelled|rejected), reason: text? }` | - |
-| `settings.setting.changed` | A new value takes effect | `{ key: string, module: string, version: int, from: json, to: json, effectiveFrom: datetime, applyScope: enum(new_only|open_commitments), changeId: uuid? }` | - |
+| `settings.setting.changed` | A new value takes effect | `{ key: string, module: string, version: int, from: json, to: json, effectiveFrom: datetime, applyScope: enum(new_only|open_commitments), changeId: uuid? }` | media |
 | `settings.feature_flag.changed` | A feature flag is switched | `{ key: string, enabled: bool, rollout: string, by: Actor }` | - |
 
 | Consumes | From | Does |
