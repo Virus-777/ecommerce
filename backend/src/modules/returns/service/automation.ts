@@ -310,11 +310,16 @@ export class Automation {
   /** Approved returns not dropped off by the deadline are cancelled; unused labels are voided */
   async dropoffExpiry(): Promise<void> {
     const now = this.core.now();
-    const late = await this.repo.find('return_shipments', { status: 'label_issued', drop_off_by: { op: '<', value: now } }, { limit: BATCH });
-    for (const s of late) {
-      const ret = await this.repo.get('returns', s.return_id);
-      if (!ret || ret.status !== 'approved') continue;
-      await this.requests.cancel(ret.id, 'expire', 'The item was not sent back by the drop-off date', { actor: SYSTEM }).catch((err) => this.core.ctx.log.warn({ err, returnId: ret.id }, 'returns: drop-off expiry failed'));
+    // Every unused label past its drop-off date is visited, batch by batch (BUILDING-MODULES §9): a label whose return
+    // is no longer approved is skipped and stays in this state, so a first page alone could fill up with them and
+    // never reach the returns that should expire. (The return's status lives in another collection, so the query
+    // cannot leave those labels out.)
+    const late = this.repo.batches('return_shipments', { status: 'label_issued', drop_off_by: { op: '<', value: now } }, this.jobBatchSize);
+    for await (const batch of late) {
+      const approved = await this.repo.find('returns', { id: [...new Set(batch.map((s) => s.return_id))], status: 'approved' });
+      for (const ret of approved) {
+        await this.requests.cancel(ret.id, 'expire', 'The item was not sent back by the drop-off date', { actor: SYSTEM }).catch((err) => this.core.ctx.log.warn({ err, returnId: ret.id }, 'returns: drop-off expiry failed'));
+      }
     }
   }
 }

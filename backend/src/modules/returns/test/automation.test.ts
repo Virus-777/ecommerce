@@ -103,6 +103,26 @@ describe('jobs', () => {
     }
   });
 
+  it('expires a return not dropped off behind 200 unused labels of returns no longer approved', async () => {
+    const b = await sellerReturn();
+    const approved = await h.call('POST', `/api/seller/returns/requests/${b.ret.id}/approve`, b.seller(), { labelMethod: 'prepaid_label' });
+    const repo = h.service.core.repo;
+    const label = (await repo.get('return_shipments', approved.body.detail.shipment.id))!;
+    const dropOffBy = new Date(approved.body.detail.shipment.dropOffBy).getTime();
+    // 200 unused labels past their drop-off date whose return is gone, first in id and in drop-off order
+    const old = h.clock.now().getTime() - 30 * 86_400_000;
+    const stale = Array.from({ length: 200 }, (_, i) => ({ ...label, id: newId(old + i), return_id: newId(), drop_off_by: new Date(dropOffBy - 86_400_000) }));
+    await repo.insertMany('return_shipments', stale);
+    try {
+      h.clock.set(new Date(dropOffBy + 3_600_000));
+      await job('returns.dropoff-expiry');
+      expect((await detail(b.ret.id, b.sellerId)).detail).toMatchObject({ status: 'cancelled', shipment: { status: 'expired' } });
+    } finally {
+      restore();
+      await h.app.kernel.mongo.db.collection('returns.return_shipments').deleteMany({ _id: { $in: stale.map((s) => s.id) } as never });
+    }
+  });
+
   it('escalates received returns the seller does not inspect in time', async () => {
     const m = await sellerReturn();
     await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/approve`, m.seller(), { labelMethod: 'prepaid_qr' });
