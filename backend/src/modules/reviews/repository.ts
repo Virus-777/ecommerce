@@ -256,18 +256,26 @@ export class ReviewsRepository {
   }
 
   async moderationCounts(since: Date): Promise<{ open: number; byQueue: Record<string, number>; byContentType: Record<string, number>; overdue: number; oldestOpenAt: Date | null }> {
-    const rows = await this.#items.find({ status: 'open' });
-    const byQueue: Record<string, number> = {};
-    const byContentType: Record<string, number> = {};
-    let overdue = 0;
-    let oldest: Date | null = null;
-    for (const r of rows) {
-      byQueue[r.queue] = (byQueue[r.queue] ?? 0) + 1;
-      byContentType[r.content_type] = (byContentType[r.content_type] ?? 0) + 1;
-      if (r.first_reported_at < since) overdue++;
-      if (!oldest || r.first_reported_at < oldest) oldest = r.first_reported_at;
-    }
-    return { open: rows.length, byQueue, byContentType, overdue, oldestOpenAt: oldest };
+    // counted in the database (was every open item read whole)
+    type Group = { _id: string; n: number };
+    const [r] = await this.#items.aggregate<{ queues: Group[]; types: Group[]; totals: { open: number; overdue: number; oldest: Date | null }[] }>([
+      { $match: { status: 'open' } },
+      {
+        $facet: {
+          queues: [{ $group: { _id: '$queue', n: { $sum: 1 } } }, { $sort: { _id: 1 } }],
+          types: [{ $group: { _id: '$content_type', n: { $sum: 1 } } }, { $sort: { _id: 1 } }],
+          totals: [{ $group: { _id: null, open: { $sum: 1 }, overdue: countIf({ $lt: ['$first_reported_at', since] }), oldest: { $min: '$first_reported_at' } } }],
+        },
+      },
+    ]);
+    const totals = r?.totals[0];
+    return {
+      open: totals?.open ?? 0,
+      byQueue: Object.fromEntries((r?.queues ?? []).map((g) => [g._id, g.n])),
+      byContentType: Object.fromEntries((r?.types ?? []).map((g) => [g._id, g.n])),
+      overdue: totals?.overdue ?? 0,
+      oldestOpenAt: totals?.oldest ?? null,
+    };
   }
 
   overdueItems(before: Date, limit: number): Promise<ItemRec[]> {
@@ -394,11 +402,12 @@ export class ReviewsRepository {
   /** Questions with at least one published answer per product */
   async answeredQuestionCounts(productIds: readonly string[]): Promise<Map<string, number>> {
     if (!productIds.length) return new Map();
-    const qs = await this.#questions.find({ product_id: { $in: [...new Set(productIds)] }, status: 'published' });
+    // only the ids and products of the questions (not whole questions)
+    const qs = await this.#questions.aggregate<{ _id: string; product_id: string }>([{ $match: { product_id: { $in: [...new Set(productIds)] }, status: 'published' } }, { $project: { product_id: 1 } }]);
     if (!qs.length) return new Map();
-    const answered = new Set(await this.#answers.distinct<string>('question_id', { question_id: { $in: qs.map((q) => q.id) }, status: 'published' }));
+    const answered = new Set(await this.#answers.distinct<string>('question_id', { question_id: { $in: qs.map((q) => q._id) }, status: 'published' }));
     const out = new Map<string, number>();
-    for (const q of qs) if (answered.has(q.id)) out.set(q.product_id, (out.get(q.product_id) ?? 0) + 1);
+    for (const q of qs) if (answered.has(q._id)) out.set(q.product_id, (out.get(q.product_id) ?? 0) + 1);
     return out;
   }
 

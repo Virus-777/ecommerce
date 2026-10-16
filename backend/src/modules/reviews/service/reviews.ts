@@ -350,10 +350,11 @@ export class ReviewsPart {
     const now = this.core.now();
     // deliveries still inside the review or the feedback window; their orders give titles and packages
     const delivered = (await this.core.deliveredItems(customerId, addDays(now, -Math.max(window, feedbackWindow)))).filter((i) => this.core.isDelivered(i));
-    const orders = await this.core.orders(delivered.map((i) => i.orderId));
-    const reviewed = new Set(
-      (await this.core.repo.find('product_reviews', { customer_id: customerId, status: { op: '<>', value: 'deleted' } })).map((r) => r.product_id),
-    );
+    const [orders, reviews] = await Promise.all([
+      this.core.orders(delivered.map((i) => i.orderId)),
+      this.core.repo.find('product_reviews', { customer_id: customerId, status: { op: '<>', value: 'deleted' } }),
+    ]);
+    const reviewed = new Set(reviews.map((r) => r.product_id));
     const latest = new Map<string, Purchase>();
     for (const p of delivered.map((i) => this.core.purchaseOf(i, orders.get(i.orderId)))) {
       if (!p.delivered || !p.deliveredAt || reviewed.has(p.productId)) continue;
@@ -415,12 +416,17 @@ export class ReviewsPart {
   async statusForItems(customerId: string, orderItemIds: readonly string[]): Promise<ItemReviewStatus[]> {
     const empty = (orderItemId: string): ItemReviewStatus => ({ orderItemId, canReview: false, reviewBy: null, reviewId: null, status: null, statusLabel: null, rating: null, feedbackEligible: false, feedbackGiven: false });
     if (!isUuid(customerId) || !orderItemIds.length) return orderItemIds.map(empty);
-    const items = await this.core.orderItems(customerId, orderItemIds);
+    const [items, window, reviews] = await Promise.all([
+      this.core.orderItems(customerId, orderItemIds),
+      this.core.num('reviewWindowDays'),
+      this.core.repo.find('product_reviews', { customer_id: customerId, status: { op: '<>', value: 'deleted' } }),
+    ]);
     const orders = await this.core.orders([...items.values()].map((i) => i.orderId));
     const purchases = new Map([...items.values()].map((i) => [i.id, this.core.purchaseOf(i, orders.get(i.orderId))]));
     const packages = new Map([...orders.values()].flatMap((o) => this.core.packagesOf(o)).map((p) => [p.groupId, p]));
-    const window = await this.core.num('reviewWindowDays');
-    const reviews = await this.core.repo.find('product_reviews', { customer_id: customerId, status: { op: '<>', value: 'deleted' } });
+    // the feedback state of every package the items are in, in one batched read (was one read per item)
+    const shownPackages = [...new Set([...purchases.values()].map((p) => packages.get(p.groupId)).filter((p): p is NonNullable<typeof p> => Boolean(p)))];
+    const states = await this.feedback.states(customerId, shownPackages);
     const byProduct = new Map(reviews.map((r) => [r.product_id, r]));
     const now = this.core.now();
     const out: ItemReviewStatus[] = [];
@@ -433,7 +439,7 @@ export class ReviewsPart {
       const review = byProduct.get(p.productId);
       const reviewBy = p.delivered && p.deliveredAt ? addDays(p.deliveredAt, window) : null;
       const pkg = packages.get(p.groupId);
-      const fb = pkg ? await this.feedback.packageState(customerId, pkg) : { eligible: false, feedback: null };
+      const fb = (pkg && states.get(pkg.groupId)) || { eligible: false, feedback: null };
       out.push({
         orderItemId: id,
         canReview: Boolean(reviewBy && reviewBy >= now && !review),

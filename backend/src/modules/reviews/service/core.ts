@@ -156,12 +156,10 @@ export class Core {
   async products(ids: readonly string[]): Promise<Map<string, catalog.Product>> {
     const unique = [...new Set(ids.filter(isUuid))];
     const out = new Map<string, catalog.Product>();
-    await Promise.all(
-      unique.map(async (id) => {
-        const p = await this.soft('catalog.getProduct', () => this.ctx.use('catalog').getProduct(id));
-        if (p) out.set(id, p);
-      }),
-    );
+    // batched reads (catalog answers up to 200 products a call) instead of one read per product
+    const chunks = Array.from({ length: Math.ceil(unique.length / 200) }, (_, i) => unique.slice(i * 200, i * 200 + 200));
+    const records = await Promise.all(chunks.map((chunk) => this.soft('catalog.getProducts', () => this.ctx.use('catalog').getProducts(chunk))));
+    for (const r of records.flatMap((list) => list ?? [])) out.set(r.product.id, r.product);
     return out;
   }
 

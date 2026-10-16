@@ -4,7 +4,7 @@
  *
  * Built modules run for real except where a test needs to control the answer:
  *   orders.getOrder / getOrderItem / listDeliveredItems → h.orders (controlled delivery times and states)
- *   catalog.getProduct → h.products (approved products need the whole submission flow)
+ *   catalog.getProduct / getProducts → h.products (approved products need the whole submission flow)
  *   customers.getCustomerByUserId / getCustomer → customer id = account id, names from h.names
  *   sellers.getSeller / getSellers → h.sellers (store names, closed status)
  *   offers.listOwnOffersForProduct / getFeaturedOfferForProduct / listOffersAdmin / listActiveOffersForProduct → h.offers
@@ -111,7 +111,14 @@ export async function boot(): Promise<Kit> {
           return itemInfos().filter((i) => i.customerId === customerId && i.deliveredAt && (!since || i.deliveredAt >= since));
         },
       },
-      catalog: { getProduct: async (id) => structuredClone(h.products.get(id) ?? null) },
+      catalog: {
+        getProduct: async (id) => structuredClone(h.products.get(id) ?? null),
+        getProducts: async (ids) =>
+          ids.flatMap((id) => {
+            const product = h.products.get(id);
+            return product ? [{ product: structuredClone(product), reviewState: 'approved' as const, publication: 'active' as const, purchasable: true, ownerSellerId: null, mergedIntoId: null }] : [];
+          }),
+      },
       customers: {
         getCustomerByUserId: async (id) => customer(id),
         getCustomer: async (id) => customer(id),

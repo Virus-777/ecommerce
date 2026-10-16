@@ -114,17 +114,29 @@ export class Views {
     if (!contents.length) return out;
     const ids = contents.map((c) => c.id);
     const repo = this.core.repo;
-    const items = await repo.find('moderation_items', { content_type: contentType, content_id: ids }, { orderBy: [['first_reported_at', 'desc']] });
+    const [items, appeals, targetHours] = await Promise.all([
+      repo.find('moderation_items', { content_type: contentType, content_id: ids }, { orderBy: [['first_reported_at', 'desc']] }),
+      repo.find('appeals', { content_type: contentType, content_id: ids }, { orderBy: [['submitted_at', 'desc']] }),
+      this.core.num('moderationTargetHours'),
+    ]);
     const decisions = await repo.find('moderation_decisions', { moderation_item_id: items.map((i) => i.id) }, { orderBy: [['decided_at', 'desc']] });
-    const appeals = await repo.find('appeals', { content_type: contentType, content_id: ids }, { orderBy: [['submitted_at', 'desc']] });
-    const targetHours = await this.core.num('moderationTargetHours');
+    // per content, the first in each list's order: its open item, latest decision and latest appeal
+    const contentOf = new Map(items.map((i) => [i.id, i.content_id]));
+    const openBy = new Map<string, ItemRec>();
+    for (const i of items) if (i.status === 'open' && !openBy.has(i.content_id)) openBy.set(i.content_id, i);
+    const decisionBy = new Map<string, DecisionRec>();
+    for (const d of decisions) {
+      const content = contentOf.get(d.moderation_item_id)!;
+      if (!decisionBy.has(content)) decisionBy.set(content, d);
+    }
+    const appealBy = new Map<string, AppealRec>();
+    for (const a of appeals) if (!appealBy.has(a.content_id)) appealBy.set(a.content_id, a);
+    const appealedDecisions = new Set(appeals.map((a) => a.decision_id));
     const now = this.core.now();
     for (const c of contents) {
-      const own = items.filter((i) => i.content_id === c.id);
-      const open = own.find((i) => i.status === 'open') ?? null;
-      const ownIds = new Set(own.map((i) => i.id));
-      const decision = decisions.find((d) => ownIds.has(d.moderation_item_id)) ?? null;
-      const appeal = appeals.find((a) => a.content_id === c.id) ?? null;
+      const open = openBy.get(c.id) ?? null;
+      const decision = decisionBy.get(c.id) ?? null;
+      const appeal = appealBy.get(c.id) ?? null;
       let moderation: ModerationOutcome | null = null;
       const underReview = open && (open.visibility === 'hidden' || ['held', 'pending', 'pending_review'].includes(c.status)) && open.queue !== 'appeal';
       if (underReview) {
@@ -139,7 +151,7 @@ export class Views {
           appealable: false,
         };
       } else if (decision) {
-        const appealed = appeals.some((a) => a.decision_id === decision.id);
+        const appealed = appealedDecisions.has(decision.id);
         const appealable = ADVERSE.has(decision.decision) && Boolean(decision.appeal_by) && now <= decision.appeal_by! && !appealed && ADVERSE_STATES.has(c.status);
         const base = decision.message_to_author ?? AUTHOR_TEXT[decision.reason_code] ?? reasonLabel(decision.reason_code);
         moderation = {
@@ -227,8 +239,7 @@ export class Views {
 
   async myFeedback(rows: readonly FeedbackRec[]): Promise<MyFeedback[]> {
     if (!rows.length) return [];
-    const [list, outcomes] = await Promise.all([this.feedback(rows, { internal: true }), this.outcomes('seller_feedback', rows)]);
-    const publicResponses = await this.responses('seller_feedback', rows.map((r) => r.id), false);
+    const [list, outcomes, publicResponses] = await Promise.all([this.feedback(rows, { internal: true }), this.outcomes('seller_feedback', rows), this.responses('seller_feedback', rows.map((r) => r.id), false)]);
     return rows.map((r, i) => {
       const status = r.status as MyFeedback['status'];
       return {
@@ -270,12 +281,21 @@ export class Views {
   async questions(rows: readonly QuestionRec[], o: { publicOnly: boolean; viewerCustomerId?: string | null }): Promise<Question[]> {
     if (!rows.length) return [];
     const [answers, products] = await Promise.all([this.core.repo.answersOf(rows.map((q) => q.id), { publicOnly: o.publicOnly }), this.core.products(rows.map((q) => q.product_id))]);
-    const voted = o.viewerCustomerId ? await this.core.repo.votedHelpful('answer', answers.map((a) => a.id), o.viewerCustomerId) : null;
-    const unanswered = rows.filter((q) => !answers.some((a) => a.question_id === q.id && a.status === 'published'));
-    const expectations = await this.expectations([...new Set(unanswered.map((q) => q.product_id))]);
+    // answers by question, in their order (helpful first)
+    const answersBy = new Map<string, AnswerRec[]>();
+    for (const a of answers) {
+      const list = answersBy.get(a.question_id);
+      if (list) list.push(a);
+      else answersBy.set(a.question_id, [a]);
+    }
+    const hasPublished = (questionId: string) => (answersBy.get(questionId) ?? []).some((a) => a.status === 'published');
+    const unanswered = rows.filter((q) => !hasPublished(q.id));
+    const [voted, expectations] = await Promise.all([
+      o.viewerCustomerId ? this.core.repo.votedHelpful('answer', answers.map((a) => a.id), o.viewerCustomerId) : null,
+      this.expectations([...new Set(unanswered.map((q) => q.product_id))]),
+    ]);
     return rows.map((q) => {
-      const own = answers.filter((a) => a.question_id === q.id);
-      const hasPublished = own.some((a) => a.status === 'published');
+      const own = answersBy.get(q.id) ?? [];
       return {
         id: q.id,
         productId: q.product_id,
@@ -286,7 +306,7 @@ export class Views {
         status: q.status as Question['status'],
         answers: own.map((a) => this.answerOut(a, voted)),
         answerCount: q.answer_count,
-        answerExpectation: hasPublished ? null : (expectations.get(q.product_id) ?? null),
+        answerExpectation: hasPublished(q.id) ? null : (expectations.get(q.product_id) ?? null),
       };
     });
   }
@@ -295,8 +315,10 @@ export class Views {
   async expectations(productIds: readonly string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();
     if (!productIds.length) return out;
-    const days = await this.core.num('questionAnswerTargetBusinessDays');
-    const offers = await this.core.optional('offers', (api) => api.getFeaturedOfferForProduct(productIds.map((productId) => ({ productId }))));
+    const [days, offers] = await Promise.all([
+      this.core.num('questionAnswerTargetBusinessDays'),
+      this.core.optional('offers', (api) => api.getFeaturedOfferForProduct(productIds.map((productId) => ({ productId })))),
+    ]);
     if (!offers) return out;
     const sellerIds = Object.values(offers).flatMap((o) => (o && o.ownerType === 'seller' && o.sellerId ? [o.sellerId] : []));
     const names = await this.core.sellerNames(sellerIds);
