@@ -384,7 +384,7 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     }
     if (event.outcome !== 'approved' || p.publication !== 'suspended') {
       if (event.outcome === 'approved') this.ctx.log.info({ productId: p.id, publication: p.publication, approvalRequestId: event.requestId }, 'catalog: approved override no longer applies');
-      await this.repo.transaction((tx) => tx.claim(key));
+      await this.repo.claim(key); // one atomic upsert: no transaction needed
       return;
     }
     const request = await this.ctx
