@@ -10,6 +10,7 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Button, Card, Checkbox, Dialog, Field, Icon, PageHeader, Pager, SearchInput, Stat, StatusBadge, TableWrap, Textarea, announce, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, longDate, shortDate, time } from '@/app/parts';
+import { exportNote, useDatasetExport } from './data/dataset-export';
 import { sentForApproval } from './data/finance';
 import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
 import {
@@ -21,7 +22,10 @@ import {
 // Data: GET /api/admin/finance/payout-runs (the newest open run, or ?run=<ref>), …/{id}/payouts (sellers),
 // /finance/payouts?status=failed, /finance/destination-reviews. Writes: submit, approve (Idempotency-Key,
 // the password again above the approver's limit), send-back, payouts/{id}/retry, destination-reviews approve/reject
-// (always the password again: reauthToken, purpose payout-destination), access approval-requests/{id}/remind. (AdminPayoutRun GraphQL fails on Money.formatted, G37.)
+// (always the password again: reauthToken, purpose payout-destination), access approval-requests/{id}/remind,
+// POST reports/exports (dataset finance.admin.payout_run, filter runId; polled, then downloaded).
+// Kept on REST although AdminPayoutRun now answers: the run picker needs the run list, the writes answer REST PayoutRun
+// objects the page reads, and the screen query adds no figure the page shows.
 
 type View = 'approve-run';
 type CheckTone = 'ok' | 'info' | 'warn';
@@ -316,6 +320,8 @@ export default function Payouts() {
     : [];
 
   const loading = runs.isPending || (!!runId && runQ.isPending && !run);
+  const exporter = useDatasetExport('finance.admin.payout_run');
+  const exported = exportNote(exporter.job);
 
   return (
     <AdminLayout active="payouts">
@@ -328,9 +334,11 @@ export default function Payouts() {
             <Button variant="secondary" size="sm" icon="file-text" disabled title="Run statements open from the seller’s finance page">
               Statements
             </Button>
-            <Button variant="secondary" size="sm" icon="download" disabled title="Exporting a run isn’t available yet">
-              Export run
-            </Button>
+            {canPrepare && (
+              <Button variant="secondary" size="sm" icon="download" disabled={!run || exporter.busy} onClick={() => run && void exporter.run({ runId: run.id })}>
+                {exporter.busy ? 'Exporting…' : 'Export run'}
+              </Button>
+            )}
           </>
         }
       />
@@ -339,6 +347,15 @@ export default function Payouts() {
           {notice.body}
         </Alert>
       )}
+      {exporter.error ? (
+        <Alert tone="danger" title="We couldn’t export the run">
+          {errorMessage(exporter.error)}
+        </Alert>
+      ) : exported ? (
+        <Alert tone={exported.tone} title={exported.tone === 'danger' ? 'The export failed' : exported.tone === 'success' ? 'Run exported' : 'Export started'}>
+          {exported.text}
+        </Alert>
+      ) : null}
       {runs.isError && <LoadError error={runs.error} onRetry={() => void runs.refetch()} />}
       {runQ.isError && <LoadError error={runQ.error} onRetry={() => void runQ.refetch()} />}
       {!loading && !runs.isError && !run && (

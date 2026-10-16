@@ -125,7 +125,7 @@ function CategoriesTab({ nodes, setNodes, activeId, setActiveId, attrSet, attrsL
 
   const setCat = (patch: Partial<CategoryNode>) => setNodes((list) => list.map((n) => (n.id === cat.id ? { ...n, ...patch } : n)));
   const setAttr = (id: string, patch: Partial<CategoryAttribute>) => setAttrs(cat.id, attrs.map((a) => (a.id === id ? { ...a, ...patch } : a)));
-  const addAttr = () => setAttrs(cat.id, [...attrs, { id: crypto.randomUUID(), name: '', type: 'Text', values: '', options: [], unit: null, required: false, filterable: false, filled: 0, publishedRequired: false }]);
+  const addAttr = () => setAttrs(cat.id, [...attrs, { id: `new-${crypto.randomUUID()}`, savedId: null, name: '', type: 'Text', values: '', options: [], unit: null, required: false, filterable: false, filled: 0, publishedRequired: false }]);
   const removeAttr = (id: string) => setAttrs(cat.id, attrs.filter((a) => a.id !== id));
   const newlyRequired = attrs.filter((a) => a.required && !a.publishedRequired && a.filled < cat.count);
 
@@ -748,6 +748,7 @@ export default function Categories() {
         rules: r.imageRules,
         attrs: r.attributes.map((x) => ({
           id: x.attribute.id,
+          savedId: x.attribute.id,
           name: x.attribute.name,
           type: attrType(x.attribute),
           values: x.attribute.options.length ? (x.attribute.options.length > 5 ? `${x.attribute.options.length} values` : x.attribute.options.join(', ')) : x.attribute.unit ?? '',
@@ -804,7 +805,7 @@ export default function Categories() {
       for (const [catId, list] of Object.entries(attrEdits)) {
         const id = idMap[catId] ?? catId;
         const rules = catId === active ? attrSet?.rules ?? [] : qc.getQueryData<AttrSet>(['catalog', 'category-attributes', catId])?.rules ?? [];
-        await call(api.PUT('/api/admin/catalog/categories/{id}/attributes', { params: { path: { id } }, body: { attributes: list.filter((a) => !a.inherited).map((a) => toApiAttribute(a, id)), imageRules: rules } }));
+        await call(api.PUT('/api/admin/catalog/categories/{id}/attributes', { params: { path: { id } }, body: { attributes: list.filter((a) => !a.inherited).map(toApiAttribute), imageRules: rules } }));
       }
       return idMap;
     },

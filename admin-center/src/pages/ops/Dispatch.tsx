@@ -10,6 +10,8 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Checkbox, Deadline, Dialog, Field, Icon, IconButton, PageHeader, SearchInput, Select, StatusBadge, TableWrap, Textarea, TextInput, announce } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, dateTime, deadlineTone, shortDate } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
+import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
+import { useDatasetExport } from '@/pages/admin/data/report-export';
 import { ACTIONS, CLAIM_STATUS, RESOLUTIONS, SELLER_FILTERS, TABS, type ActionKey, type DispatchView, type ExceptionKind } from './data/dispatch';
 import { EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
@@ -160,6 +162,7 @@ export default function Dispatch() {
   const canClaim = staff.can('shipping.claims.manage');
   const canCancel = staff.can('orders.orders.cancel');
 
+  const exceptionsExport = useDatasetExport('shipping.admin.exceptions');
   const params = { kind: tab.kind, sellerType: sellerF as 'all', customerNotNotified: notNotified || undefined, q: search || undefined, limit: 100 };
   const list = useQuery({ queryKey: ['shipping', 'exceptions', params], queryFn: () => call(api.GET('/api/admin/shipping/exceptions', { params: { query: params } })) as Promise<{ items: Exception[] }> });
   const counts = useQuery({ queryKey: ['shipping', 'exceptions', 'counts'], queryFn: () => call(api.GET('/api/admin/shipping/exceptions/counts')) as Promise<Counts> });
@@ -317,11 +320,10 @@ export default function Dispatch() {
         title="Dispatch and delivery exceptions"
         sub="Official Store and marketplace orders that are late, unclear or failed. Shipping owns these; seller problems go to the Seller Manager when performance action is needed."
         actions={
-          <Button variant="secondary" size="sm" icon="download" disabled title="Exception exports aren’t available yet">
-            Export
-          </Button>
+          staff.can('reports.exports.create') && staff.can('shipping.exceptions.view') ? <ExportButton exp={exceptionsExport} filters={{ kind: tab.kind, sellerType: sellerF === 'all' ? undefined : sellerF, customerNotNotified: notNotified || undefined, q: search || undefined }} /> : undefined
         }
       />
+      <ExportNotice exp={exceptionsExport} />
       <OpsLegend
         kind="number"
         items={[

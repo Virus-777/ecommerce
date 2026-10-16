@@ -14,7 +14,8 @@ import { CATALOG_TABS, flattenCategories, inReview, PUBLICATION_LABEL, REVIEW_LA
 
 // Design: pages/admin/admin-catalog.html · view "bulk-selection" = rows selected, bulk bar shown.
 // API: GET /api/admin/catalog/products (+ /stats, /categories, /brands, sellers list for filters);
-// bulk Hide/Suspend → POST /products/{id}/publication per product; Request changes → POST /products/{id}/request-changes;
+// Reads need catalog.view. Bulk Hide/Suspend → POST /products/{id}/publication per product (Hide sends no reason: the
+// server records its default text, G68); Request changes → POST /products/{id}/request-changes;
 // Export → POST /products/exports.
 
 type Filters = { cat: string; brand: string; seller: string; review: string; missing: string; pub: string };
@@ -68,11 +69,12 @@ export default function Catalog() {
   const canPublish = can('catalog.products.publish');
   const canReview = can('catalog.products.review');
   const canExport = can('catalog.products.export');
+  const canView = can('catalog.view');
 
-  const stats = useQuery({ queryKey: ['catalog', 'products', 'stats'], queryFn: () => call(api.GET('/api/admin/catalog/products/stats')) });
-  const cats = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')) });
-  const brands = useQuery({ queryKey: ['catalog', 'brands', 'options'], queryFn: () => call(api.GET('/api/admin/catalog/brands', { params: { query: { limit: 100 } } })) });
-  const sellers = useQuery({ queryKey: ['sellers', 'options'], queryFn: () => call(api.GET('/api/admin/sellers/sellers', { params: { query: { limit: 100 } } })) });
+  const stats = useQuery({ queryKey: ['catalog', 'products', 'stats'], queryFn: () => call(api.GET('/api/admin/catalog/products/stats')), enabled: canView });
+  const cats = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')), enabled: canView });
+  const brands = useQuery({ queryKey: ['catalog', 'brands', 'options'], queryFn: () => call(api.GET('/api/admin/catalog/brands', { params: { query: { limit: 100 } } })), enabled: canView });
+  const sellers = useQuery({ queryKey: ['sellers', 'options'], queryFn: () => call(api.GET('/api/admin/sellers/sellers', { params: { query: { limit: 100 } } })), enabled: can('sellers.accounts.view') });
 
   const query = {
     ...TAB_QUERY[tab],
@@ -88,6 +90,7 @@ export default function Catalog() {
     queryKey: ['catalog', 'products', 'list', query, page],
     queryFn: () => call(api.GET('/api/admin/catalog/products', { params: { query: { ...query, page, limit: PAGE_SIZE } } })),
     placeholderData: keepPreviousData,
+    enabled: canView,
   });
   const visible = list.data?.items ?? [];
   const totalPages = Math.max(1, (list.data as { totalPages?: number } | undefined)?.totalPages ?? 1);
@@ -136,7 +139,7 @@ export default function Catalog() {
         rows.map((r) => {
           const id = r.product.id;
           if (mode === 'changes') return call(api.POST('/api/admin/catalog/products/{id}/request-changes', { params: { path: { id } }, body: { reason: text, fields: {} } }));
-          return call(api.POST('/api/admin/catalog/products/{id}/publication', { params: { path: { id } }, body: { publication: mode === 'hide' ? 'hidden' : 'suspended', reason: text } }));
+          return call(api.POST('/api/admin/catalog/products/{id}/publication', { params: { path: { id } }, body: { publication: mode === 'hide' ? 'hidden' : 'suspended', reason: text || undefined } }));
         }),
       );
       const failed = results.flatMap((res, i) => (res.status === 'rejected' ? [{ row: rows[i], error: res.reason }] : []));
@@ -177,7 +180,7 @@ export default function Catalog() {
     if (!reason.trim() || !bulk) return;
     runBulk.mutate({ mode: bulk, text: reason.trim() });
   };
-  const hide = () => runBulk.mutate({ mode: 'hide', text: 'Hidden from the Products list by staff' });
+  const hide = () => runBulk.mutate({ mode: 'hide', text: '' });
 
   const setFilter = (k: keyof Filters, v: string) => {
     setFilters((f) => ({ ...f, [k]: v }));
@@ -185,14 +188,14 @@ export default function Catalog() {
   };
 
   const s = stats.data;
-  const loading = list.isPending;
+  const loading = canView && list.isPending;
 
   return (
     <AdminLayout active="catalog">
       <PageHeader
         crumbs={[{ label: 'Catalog' }, { label: 'Products' }]}
         title="Products"
-        sub={s ? `${num(s.all)} shared products · ${num(s.offers)} offers` : 'Loading…'}
+        sub={s ? `${num(s.all)} shared products · ${num(s.offers)} offers` : canView ? 'Loading…' : undefined}
         actions={
           <>
             {canExport && (
@@ -320,6 +323,11 @@ export default function Catalog() {
             <Icon name="info" className="ic-sm" /> Select products to hide, request changes or update in bulk. Bulk price, stock and suspension need extra permissions.
           </div>
         )}
+        {!canView && (
+          <div className="card-body">
+            <p className="small muted">Your role doesn’t include viewing the catalog.</p>
+          </div>
+        )}
         {list.isError && (
           <div className="card-body">
             <LoadError error={list.error} onRetry={() => void list.refetch()} />
@@ -426,7 +434,7 @@ export default function Catalog() {
                     </tr>
                   );
                 })}
-                {!loading && !list.isError && visible.length === 0 && (
+                {canView && !loading && !list.isError && visible.length === 0 && (
                   <tr>
                     <td colSpan={9}>
                       <EmptyState icon="search-x" title="No products match these filters">
@@ -467,7 +475,7 @@ export default function Catalog() {
                 </Link>
               );
             })}
-            {!loading && !list.isError && visible.length === 0 && (
+            {canView && !loading && !list.isError && visible.length === 0 && (
               <EmptyState icon="search-x" title="No products match these filters">
                 Try another tab or clear a filter.
               </EmptyState>

@@ -98,7 +98,7 @@ export default function Notifications() {
       call(
         api.PUT('/api/admin/notifications/topics/{key}/channels', {
           params: { path: { key: v.topic.key } },
-          body: { channels: v.topic.channels.map((c) => (c.channel === v.channel ? { ...c, enabled: v.on } : c)), reason: `${CHANNEL_LABEL[v.channel]} turned ${v.on ? 'on' : 'off'} on the notification templates screen` },
+          body: { channels: v.topic.channels.map((c) => (c.channel === v.channel ? { ...c, enabled: v.on } : c)) },
         }),
       ),
     onSuccess: (_t, v) => {

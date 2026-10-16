@@ -7,9 +7,9 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, isoInText } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Badge, Button, Card, Checkbox, Deadline, Dialog, EmptyState, Field, Icon, IconButton, KeyValue, Select, Switch, TableWrap, Tabs, Textarea, announce } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Badge, Button, Card, Checkbox, Deadline, Dialog, EmptyState, Field, Icon, IconButton, KeyValue, Select, Switch, TableWrap, Tabs, Textarea, announce, iconFor } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { LoadError, SkeletonLines, dateTime, deadlineLabel, deadlineTone, iconOf, time } from '@/app/parts';
+import { LoadError, SkeletonLines, dateTime, deadlineLabel, deadlineTone, time } from '@/app/parts';
 import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
 import { ALL_AREAS, API_VIEW, APPROVAL_STATUS, byDay, needsMe, noticeHref, noticeTone, routeText, type ApprovalRequest, type InboxSummary, type Notice, type Tab } from './data/inbox';
 
@@ -18,7 +18,7 @@ import { ALL_AREAS, API_VIEW, APPROVAL_STATUS, byDay, needsMe, noticeHref, notic
 // Data: GET notifications/inbox (view, area, unreadOnly, cursor), GET notifications/inbox/summary, POST inbox/{id}/read,
 // POST inbox/read-all, GET/PUT notifications/my-preferences (Notification settings dialog), approval notices open
 // the approval request (GET access/approval-requests/{id}, POST …/approve | …/reject; step-up code when asked).
-// The API has no "mark as unread", so read notices show no toggle.
+// POST inbox/{id}/unread puts a read notice back to unread (the row's toggle).
 
 const LIMIT = 30;
 
@@ -91,6 +91,14 @@ export default function Inbox() {
   const markRead = useMutation({
     mutationFn: (id: string) => call(api.POST('/api/admin/notifications/inbox/{id}/read', { params: { path: { id } } })),
     onSuccess: refresh,
+    onError: (e) => setActionError(errorMessage(e)),
+  });
+  const markUnread = useMutation({
+    mutationFn: (id: string) => call(api.POST('/api/admin/notifications/inbox/{id}/unread', { params: { path: { id } } })),
+    onSuccess: () => {
+      refresh();
+      announce('Marked as unread');
+    },
     onError: (e) => setActionError(errorMessage(e)),
   });
   const markAll = useMutation({
@@ -203,7 +211,7 @@ export default function Inbox() {
                     return (
                       <article key={n.id} className={cx('ab-ntc', isUnread && 'is-unread')}>
                         <span className={`ic t-${tone}`}>
-                          <Icon name={iconOf(n.icon)} className="ic-sm" />
+                          <Icon name={iconFor(n.icon)} className="ic-sm" />
                         </span>
                         <div className="stack gap-1">
                           <span className="row gap-2">
@@ -237,7 +245,11 @@ export default function Inbox() {
                               {label}
                             </Button>
                           ) : null}
-                          {isUnread && <IconButton icon="check" label="Mark as read" disabled={markRead.isPending && markRead.variables === n.id} onClick={() => markRead.mutate(n.id)} />}
+                          {isUnread ? (
+                            <IconButton icon="check" label="Mark as read" disabled={markRead.isPending && markRead.variables === n.id} onClick={() => markRead.mutate(n.id)} />
+                          ) : (
+                            <IconButton icon="mail" label="Mark as unread" disabled={markUnread.isPending && markUnread.variables === n.id} onClick={() => markUnread.mutate(n.id)} />
+                          )}
                         </div>
                       </article>
                     );

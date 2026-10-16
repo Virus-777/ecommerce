@@ -23,7 +23,8 @@ import {
 // Design: pages/admin/admin-product-review.html · view "merge-duplicate" = the merge dialog open.
 // API: queue GET /api/admin/catalog/review-queue; open submission = AdminProductReview (?id=<productId>);
 // decisions POST /products/{id}/approve|request-changes|reject; draft PUT /products/{id}/review-draft;
-// duplicates POST /products/{id}/checks/duplicate/dismiss, POST /products/merge/preview and /products/merge.
+// duplicates POST /products/{id}/checks/duplicate/dismiss, POST /products/merge/preview and /products/merge;
+// a dismissed check opens again with POST /products/{id}/checks/{kind}/restore ("Undo not a duplicate").
 
 type Notice = { tone: 'success' | 'info' | 'danger'; title: string; body: string };
 type FieldComment = { field: string; comment: string };
@@ -76,8 +77,8 @@ export default function ProductReview() {
   const [cat, setCat] = useState('');
   const [notice, setNotice] = useState<Notice | null>(null);
 
-  const cats = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')) });
-  const sellers = useQuery({ queryKey: ['sellers', 'options'], queryFn: () => call(api.GET('/api/admin/sellers/sellers', { params: { query: { limit: 100 } } })) });
+  const cats = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')), enabled: can('catalog.view') });
+  const sellers = useQuery({ queryKey: ['sellers', 'options'], queryFn: () => call(api.GET('/api/admin/sellers/sellers', { params: { query: { limit: 100 } } })), enabled: can('sellers.accounts.view') });
   const sellerName = (id?: string | null) => (id ? sellers.data?.items.find((s) => s.id === id)?.storeName : undefined);
 
   const queueQ = useQuery({
@@ -211,6 +212,20 @@ export default function ProductReview() {
     onSuccess: () => {
       setNotice({ tone: 'success', title: 'Marked not a duplicate', body: 'The duplicate check will not block approval.' });
       void qc.invalidateQueries({ queryKey: ['catalog', 'product-review', activeId] });
+    },
+    onError: (e) => setActionError(errorMessage(e)),
+  });
+
+  const restoreCheck = useMutation({
+    mutationFn: (kind: string) => call(api.POST('/api/admin/catalog/products/{id}/checks/{kind}/restore', { params: { path: { id: sub!.id, kind: lc(kind) as 'duplicate' } }, body: {} })),
+    onSuccess: (_r, kind) => {
+      setNotice(
+        lc(kind) === 'duplicate'
+          ? { tone: 'info', title: 'Duplicate check open again', body: 'The product is back in Duplicates suspected until you merge it or mark it not a duplicate.' }
+          : { tone: 'info', title: 'Check open again', body: 'The finding counts again before approval.' },
+      );
+      void qc.invalidateQueries({ queryKey: ['catalog', 'product-review', activeId] });
+      void qc.invalidateQueries({ queryKey: ['catalog', 'products'] });
     },
     onError: (e) => setActionError(errorMessage(e)),
   });
@@ -539,6 +554,13 @@ export default function ProductReview() {
                         <Badge tone={c.badge === 'Not a duplicate' ? '' : c.tone}>{c.badge}</Badge>
                       </div>
                       <CheckBody body={c.body} />
+                      {c.raw.dismissal && canReview && open && (
+                        <div className="row gap-2">
+                          <Button variant="ghost" size="sm" icon="undo-2" onClick={() => restoreCheck.mutate(c.raw.kind)} disabled={restoreCheck.isPending}>
+                            {lc(c.raw.kind) === 'duplicate' ? 'Undo not a duplicate' : 'Restore check'}
+                          </Button>
+                        </div>
+                      )}
                       {c.kind === 'duplicate' && dup && (
                         <>
                           <div className="aa-cmp">

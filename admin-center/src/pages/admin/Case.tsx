@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router';
 import { ApiError, call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, initials } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, isoInText } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import {
@@ -13,19 +13,21 @@ import {
 } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, dayKey, deadlineLabel, deadlineTone } from '@/app/parts';
-import { sentForApproval, type FeeRules } from './data/finance';
+import ADMIN_CASE from '@marketly/web-shared/api/graphql/admin/AdminCase.graphql?raw';
+import { sentForApproval } from './data/finance';
 import { useDebounced } from './data/customers';
 import {
   CHARGED, ESCALATE_TO, OUTCOMES, OUTCOME_LABEL, PRIORITY_LABEL, REMEDY_LABEL, pacificEndOfDay, toMinor,
-  type ApiPriority, type Assignee, type CaseDetail, type CaseMessage, type CaseRow, type ChargedTo, type DecisionInput, type Outcome,
+  type ApiPriority, type Assignee, type CaseDetail, type CaseMessage, type ChargedTo, type DecisionInput, type Outcome, type RefundImpactPreview,
 } from './data/cases';
 
 // Design: pages/admin/admin-case.html (investigating) · view "decision-recorded" = after "Record decision and send to Finance".
-// Data: the route's CS-… ref resolves through GET /api/admin/support/cases?q=<ref> to the case id; then
-// GET /support/cases/{id} (case file), /payments/orders/{orderId}/refundable (refund cap), /finance/fee-rules
-// (earnings estimate; refundImpactPreview in the AdminCase query fails on Money.formatted, G37) and
-// POST /access/authority-checks (the decider's approval limit). Writes: messages, assign, escalate,
-// decision-draft, decide (Idempotency-Key), resolve. "decision-recorded" follows the case's decision.
+// Data: GET /support/cases/{ref} (case file; the route's CS-… ref is accepted as the id), /payments/orders/{orderId}/refundable
+// (refund cap), the AdminCase screen query with withRemedyPreview (refundImpactPreview: the seller earnings effect of the
+// remedy being drafted; the case file stays on REST because AdminCase has no `can` flags or pending approval) and
+// POST /access/authority-checks (the decider's approval limit and eligible approvers). Writes: messages, assign, escalate,
+// decision-draft, decide (Idempotency-Key), resolve (an escalated case needs a recorded decision first).
+// "decision-recorded" follows the case's decision.
 
 /* ---------------- Evidence ---------------- */
 
@@ -47,7 +49,7 @@ function EvTimeline({ events }: { events: Ev[] }) {
           <div className="stack gap-1">
             <span className="t">{e.t}</span>
             <span className="d">{e.d}</span>
-            {e.body && <div className="small sub">{e.body}</div>}
+            {e.body && <div className="small sub">{isoInText(e.body)}</div>}
           </div>
         </li>
       ))}
@@ -150,18 +152,10 @@ function SumList({ rows }: { rows: Array<[string, ReactNode]> }) {
 
 const EV_STATE = (i: number, n: number): Ev['state'] => (i === n - 1 ? 'current' : 'done');
 
-/** Resolves the route's CS-… ref to the case id: open cases first, then closed ones. */
-async function resolveCaseId(api: ReturnType<typeof useApi>['api'], ref: string): Promise<string | null> {
-  for (const tab of ['all_open', 'closed'] as const) {
-    const page = await call(api.GET('/api/admin/support/cases', { params: { query: { tab, q: ref, limit: 10 } } }));
-    const hit = (page.items as CaseRow[]).find((c) => c.ref === ref);
-    if (hit) return hit.id;
-  }
-  return null;
-}
+const FUNDED_BY: Record<ChargedTo, 'SELLER' | 'PLATFORM' | 'SHARED'> = { seller: 'SELLER', platform: 'PLATFORM', shared: 'SHARED' };
 
 export default function Case() {
-  const { api } = useApi();
+  const { api, gql } = useApi();
   const qc = useQueryClient();
   const { can, accountId, name: myName } = useStaffSession();
   const { ref = '' } = useParams();
@@ -183,15 +177,15 @@ export default function Case() {
   const canAssign = can('support.cases.assign');
   const canDecide = can('support.disputes.decide');
 
-  const idQ = useQuery({ queryKey: ['support', 'case', 'resolve', ref], queryFn: () => resolveCaseId(api, ref), staleTime: Infinity });
-  const caseId = idQ.data ?? undefined;
   const detail = useQuery({
-    queryKey: ['support', 'case', caseId],
-    queryFn: () => call(api.GET('/api/admin/support/cases/{id}', { params: { path: { id: caseId! } } })) as Promise<CaseDetail>,
-    enabled: !!caseId,
+    queryKey: ['support', 'case', ref],
+    queryFn: () => call(api.GET('/api/admin/support/cases/{id}', { params: { path: { id: ref } } })) as Promise<CaseDetail>,
+    enabled: !!ref,
+    retry: (n, e) => !(e instanceof ApiError && e.status === 404) && n < 2,
   });
   const data = detail.data;
   const c = data?.case;
+  const caseId = c?.id;
   const orderId = c?.order?.id;
   const refundable = useQuery({
     queryKey: ['payments', 'refundable', orderId],
@@ -199,7 +193,6 @@ export default function Case() {
     enabled: !!orderId && canDecide,
     retry: false,
   });
-  const fees = useQuery({ queryKey: ['finance', 'fee-rules'], queryFn: () => call(api.GET('/api/admin/finance/fee-rules')) as Promise<FeeRules>, enabled: can('finance.ledger.view'), retry: false });
   const assignees = useQuery({ queryKey: ['support', 'assignees'], queryFn: () => call(api.GET('/api/admin/support/assignees')) as Promise<Assignee[]>, enabled: canAssign && side === 'assign' });
 
   const itemIds = (c?.items ?? []).map((i) => i.orderItemId);
@@ -235,11 +228,26 @@ export default function Case() {
 
   const errors = attempted ? validate(form, maxRefund) : {};
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft({ ...form, [k]: v });
-  const rateBps = fees.data?.active.defaultRateBps;
-  const feeShare = rateBps != null ? Math.round((refundMinor * rateBps) / 10_000) : null;
+  // The seller earnings effect of the drafted refund (AdminCase refundImpactPreview; needs the order).
+  const previewOn = canDecide && !!c?.order && checkAmount > 0 && form.remedy !== 'replacement' && !c?.decision;
+  const preview = useQuery({
+    queryKey: ['support', 'case', ref, 'remedy-preview', checkAmount, form.charged, itemIds.join()],
+    queryFn: async () =>
+      (
+        await gql<{ refundImpactPreview: RefundImpactPreview | null }>(
+          ADMIN_CASE,
+          { ref, orderRef: c!.order!.ref, withRemedyPreview: true, remedyAmount: checkAmount, remedyFundedBy: FUNDED_BY[form.charged], remedyItems: itemIds.length ? itemIds.map((orderItemId) => ({ orderItemId })) : null },
+          'AdminCase',
+        )
+      ).data?.refundImpactPreview ?? null,
+    enabled: previewOn,
+    retry: false,
+    placeholderData: (prev) => prev,
+  });
+  const impact = previewOn ? preview.data : null;
 
   const refresh = () => {
-    void qc.invalidateQueries({ queryKey: ['support', 'case', caseId] });
+    void qc.invalidateQueries({ queryKey: ['support', 'case', ref] });
     void qc.invalidateQueries({ queryKey: ['support', 'cases'] });
     void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
   };
@@ -259,7 +267,7 @@ export default function Case() {
     onSuccess: () => {
       announce('Draft saved');
       setNotice({ tone: 'success', title: 'Draft saved', body: 'Only staff see the draft. Nothing is sent to the parties until you record the decision.' });
-      void qc.invalidateQueries({ queryKey: ['support', 'case', caseId] });
+      void qc.invalidateQueries({ queryKey: ['support', 'case', ref] });
     },
     onError: (e) => setNotice({ tone: 'danger', title: 'The draft wasn’t saved', body: errorMessage(e) }),
   });
@@ -272,7 +280,7 @@ export default function Case() {
         }),
       ) as Promise<CaseDetail>,
     onSuccess: (r) => {
-      qc.setQueryData(['support', 'case', caseId], r);
+      qc.setQueryData(['support', 'case', ref], r);
       refresh();
       setView('decision-recorded');
       announce(r.pendingApproval ? 'Decision sent for approval' : 'Decision recorded');
@@ -349,10 +357,10 @@ export default function Case() {
 
   /* ---------- states ---------- */
 
-  const notFound = idQ.isSuccess && idQ.data === null;
-  const loadErr = idQ.error ?? detail.error;
+  const notFound = detail.error instanceof ApiError && detail.error.status === 404;
+  const loadErr = detail.error;
   const crumbs = [{ label: 'Cases and disputes', to: href('admin/cases') }, { label: ref }];
-  if (notFound || (detail.error instanceof ApiError && detail.error.status === 404)) {
+  if (notFound) {
     return (
       <AdminLayout active="cases">
         <PageHeader crumbs={crumbs} title={`Case ${ref}`} />
@@ -368,7 +376,7 @@ export default function Case() {
       <AdminLayout active="cases">
         <PageHeader crumbs={crumbs} title={`Case ${ref}`} />
         {loadErr ? (
-          <LoadError error={loadErr} onRetry={() => void (idQ.error ? idQ.refetch() : detail.refetch())} />
+          <LoadError error={loadErr} onRetry={() => void detail.refetch()} />
         ) : (
           <div className="ab-main wide">
             <div className="stack gap-5">
@@ -727,6 +735,7 @@ export default function Case() {
                 <p className="small sub">This case is {c.statusLabel.toLowerCase()}.</p>
               ) : (
                 <>
+                  {c.status === 'escalated' && <p className="xs muted">An escalated case is resolved only after a decision is recorded.</p>}
                   {data.decisionDraft && (
                     <p className="xs muted">
                       Draft saved {dateTime(data.decisionDraft.savedAt)}
@@ -757,16 +766,17 @@ export default function Case() {
                   <Field label="Charged to">
                     <Select id="cd-who" options={CHARGED.map((x) => ({ value: x.value, label: x.label }))} value={form.charged} onChange={(e) => set('charged', e.target.value as ChargedTo)} />
                   </Field>
-                  {feeShare != null && form.charged !== 'platform' && (
+                  {impact && form.charged !== 'platform' && (
                     <div className="panel stack gap-1 small">
                       <div className="sum-row">
                         <span>Seller earnings (estimate)</span>
-                        <span>−{formatMoney({ amount: Math.max(0, (form.charged === 'shared' ? Math.round(refundMinor / 2) : refundMinor) - (form.charged === 'shared' ? Math.round(feeShare / 2) : feeShare)), currency: 'USD' })}</span>
+                        <span>{impact.sellerEarningsChange.formatted ?? formatMoney(impact.sellerEarningsChange)}</span>
                       </div>
                       <div className="sum-row">
                         <span>Marketplace fee returned</span>
-                        <span>{formatMoney({ amount: form.charged === 'shared' ? Math.round(feeShare / 2) : feeShare, currency: 'USD' })}</span>
+                        <span>{impact.feeReturned.formatted ?? formatMoney(impact.feeReturned)}</span>
                       </div>
+                      {impact.note && <span className="xs muted">{impact.note}</span>}
                     </div>
                   )}
                   {needsApproval && (

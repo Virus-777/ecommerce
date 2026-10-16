@@ -8,7 +8,7 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Badge, Button, Card, Chip, ChipRow, CopyButton, EmptyState, Icon, KeyValue, PageHeader, StatusBadge, type IconName, type Tone } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, TZ, dateTime, longDate, screenHref, time } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
-import { actorLabel, APPROVAL_LABEL, fieldChanges, isPending, rolesLabel, targetHref, targetMeta, useStaffNames, type AuditEntry as Entry, type FieldChange } from './data/audit';
+import { actorLabel, APPROVAL_LABEL, fieldChanges, isPending, rolesLabel, targetHref, targetMeta, type AuditEntry as Entry, type FieldChange } from './data/audit';
 import './AuditEntry.css';
 
 // Action history entry (admin/audit-entry): designed in React after the design export, following
@@ -140,7 +140,6 @@ export default function AuditEntry() {
   const { api } = useApi();
   const me = useStaffSession();
   const canView = me.can('audit.entries.view');
-  const names = useStaffNames(canView && me.can('access.roles.view'));
   const entryQ = useQuery({
     queryKey: ['audit', 'entry', id],
     queryFn: () => call(api.GET('/api/admin/audit/entries/{id}', { params: { path: { id } } })) as Promise<Entry>,
@@ -190,7 +189,7 @@ export default function AuditEntry() {
     );
   }
 
-  const who = actorLabel(e.actor, names);
+  const who = actorLabel(e.actor);
   const meta = targetMeta(e.target.type);
   const targetTo = targetHref(e.target, screenHref);
   const ref = e.target.ref ?? e.target.id;
@@ -275,7 +274,7 @@ export default function AuditEntry() {
                     <span className="stack gap-0 min-w-0">
                       <span className="t">
                         <Link to={entryHref(r.id)}>
-                          {actorLabel(r.actor, names)}: {r.actionLabel.toLowerCase()}
+                          {actorLabel(r.actor)}: {r.actionLabel.toLowerCase()}
                         </Link>
                       </span>
                       <span className="xs muted">

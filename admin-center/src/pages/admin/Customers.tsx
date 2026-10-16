@@ -10,6 +10,7 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Badge, Button, Drawer, Field, KeyValue, LazyLoad, PageHeader, Pager, SearchInput, Select, StatusBadge, TableWrap, Textarea, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, dayKey, monthYear, shortDate } from '@/app/parts';
+import { exportNote, useDatasetExport } from './data/dataset-export';
 import { sentForApproval } from './data/finance';
 import {
   ACCOUNT_ACTIONS, ACTION_REASONS, DATA_REQUEST_LABEL, STATUS_LABEL, VERIFICATION_LABEL, VERIFIED_TONE, useDebounced,
@@ -21,7 +22,9 @@ import {
 // Data: GET /api/admin/customers/customers (q, status, verification, open cases, abuse reports, joined this week;
 // page), /guest-buyers (Guest buyers chip), /customers/{id} (drawer). Writes: POST /customers/{id}/actions
 // (recorded reason; closing with open obligations goes for approval), /restrictions/{id}/lift,
-// /data-requests/{id}/retry. (AdminCustomer GraphQL fails: Customer.walletAdmin isn't in the schema.)
+// /data-requests/{id}/retry, POST reports/exports (dataset customers.admin.accounts: q, status, verification, joined
+// this week; polled, then downloaded). The drawer stays on REST although AdminCustomer now answers: the screen query
+// has no data requests, abuse report counts or unavailable sections, which the drawer shows.
 
 type View = 'customer-detail';
 type ChipKey = 'all' | 'cases' | 'abuse' | 'new' | 'guest';
@@ -127,7 +130,8 @@ export default function Customers() {
 
   const term = useDebounced(q.trim(), 300);
   const canAct = can('customers.accounts.act');
-  const canSecurity = can('customers.accounts.security') || canAct;
+  // Password reset and sign-out everywhere need both keys (G66c).
+  const canSecurity = can('customers.accounts.security') && canAct;
   const canDataRequests = can('customers.data-requests.manage');
   const guestView = chip === 'guest';
 
@@ -242,6 +246,8 @@ export default function Customers() {
   };
 
   const detailLink = href('admin/customers', 'customer-detail');
+  const exporter = useDatasetExport('customers.admin.accounts');
+  const exported = exportNote(exporter.job);
   const atRisk = (r: Row) => drawerOpen && r.id === currentId;
   const activeRestrictions = (d?.restrictions ?? []).filter((r) => r.state === 'active');
 
@@ -253,8 +259,15 @@ export default function Customers() {
         sub={`${num(accountTotal)} accounts${guestTotal != null ? ` · ${num(guestTotal)} guest buyers with order lookup` : ''} · account actions need a recorded reason`}
         actions={
           can('customers.accounts.export') ? (
-            <Button variant="secondary" size="sm" icon="download" disabled title="The customer export opens from the Reports screen">
-              Export
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="download"
+              disabled={guestView || exporter.busy}
+              title={guestView ? 'The export covers customer accounts, not guest buyers' : undefined}
+              onClick={() => void exporter.run({ q: term || undefined, status: status || undefined, verification: verification || undefined, joinedFrom: chip === 'new' ? weekAgo : undefined })}
+            >
+              {exporter.busy ? 'Exporting…' : 'Export'}
             </Button>
           ) : undefined
         }
@@ -264,6 +277,15 @@ export default function Customers() {
           {notice.body}
         </Alert>
       )}
+      {exporter.error ? (
+        <Alert tone="danger" title="We couldn’t export the customer list">
+          {errorMessage(exporter.error)}
+        </Alert>
+      ) : exported ? (
+        <Alert tone={exported.tone} title={exported.tone === 'danger' ? 'The export failed' : exported.tone === 'success' ? 'Customer list exported' : 'Export started'}>
+          {exported.text}
+        </Alert>
+      ) : null}
       <div className="toolbar">
         <SearchInput id="cu-q" placeholder={guestView ? 'Search guest buyers by name or email' : 'Search by name, email, phone or order number'} value={q} onChange={setQ} />
         {!guestView && (
@@ -596,7 +618,7 @@ export default function Customers() {
             {d.unavailable.length > 0 && <p className="xs muted">Not available right now: {d.unavailable.join(', ')}.</p>}
             <div className="divider" />
             <span className="h4">Account action</span>
-            {!canAct && !canSecurity ? (
+            {!canAct ? (
               <p className="small sub">Your role can view customers but not change their accounts.</p>
             ) : (
               <>

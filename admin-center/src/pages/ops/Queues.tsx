@@ -12,8 +12,9 @@ import { useStaffSession } from '@/app/session';
 import { EmptyRow, OpsLegend, SkeletonRows, humanize, staffName, type StaffRef } from './data/shared';
 
 // Design: pages/ops/ops-queues.html (single view).
-// API: GET workqueues/me (stats, my queues, reminders), GET workqueues/queues (all queues with live counts),
-// GET workqueues/routines/today, GET/POST workqueues/day-end-reviews, GET/POST workqueues/saved-filters,
+// API: GET workqueues/me (stats, queues, reminders and today's day-end review; all=true lists every queue for
+// callers with workqueues.items.view-all), GET workqueues/routines/today (the whole team's routine: /me only
+// carries the checks the caller owns), POST workqueues/day-end-reviews, GET/POST workqueues/saved-filters,
 // GET warehouse/summary (ship today), POST workqueues/items/exports.
 
 interface Oldest {
@@ -81,6 +82,7 @@ interface MyQueues {
   me: { staffId: string; name: string; roles: string[] };
   stats: { assignedToMe: number; queuesILead: number; overdue: number; overdueChangeVsYesterday: number; oldestOpen: Oldest | null };
   queues: QueueRow[];
+  dayEnd: DayEndReview | null;
   reminders: string[];
 }
 interface WarehouseSummary {
@@ -103,30 +105,23 @@ export default function Queues() {
   const [exported, setExported] = useState(false);
   const dayEndRef = useRef<HTMLElement>(null);
 
-  const me = useQuery({ queryKey: ['workqueues', 'me'], queryFn: () => call(api.GET('/api/admin/workqueues/me')) as Promise<MyQueues> });
-  const all = useQuery({ queryKey: ['workqueues', 'queues'], queryFn: () => call(api.GET('/api/admin/workqueues/queues')) as Promise<QueueRow[]>, enabled: scope === 'all' });
-  const routine = useQuery({ queryKey: ['workqueues', 'routine'], queryFn: () => call(api.GET('/api/admin/workqueues/routines/today')) as Promise<RoutineDay> });
-  const dayEnd = useQuery({
-    queryKey: ['workqueues', 'day-end'],
-    queryFn: async () => {
-      try {
-        return (await call(api.GET('/api/admin/workqueues/day-end-reviews/current'))) as DayEndReview;
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 404) return null;
-        throw e;
-      }
-    },
+  // Stats and rows follow the tab: all=true widens both to every queue (the server keeps the caller's own when they lack view-all).
+  const me = useQuery({
+    queryKey: ['workqueues', 'me', scope],
+    queryFn: () => call(api.GET('/api/admin/workqueues/me', { params: { query: scope === 'all' ? { all: true } : {} } } as never)) as Promise<MyQueues>,
+    placeholderData: (prev) => prev,
   });
+  const routine = useQuery({ queryKey: ['workqueues', 'routine'], queryFn: () => call(api.GET('/api/admin/workqueues/routines/today')) as Promise<RoutineDay> });
   const saved = useQuery({ queryKey: ['workqueues', 'saved-filters'], queryFn: () => call(api.GET('/api/admin/workqueues/saved-filters')) as Promise<SavedFilter[]> });
   const wh = useQuery({ queryKey: ['warehouse', 'summary'], queryFn: () => call(api.GET('/api/admin/warehouse/summary', { params: { query: {} } })) as Promise<WarehouseSummary>, enabled: staff.can('warehouse.view'), retry: false });
 
-  const rows = scope === 'mine' ? (me.data?.queues ?? []).filter((q) => q.mine) : (all.data ?? []);
-  const rowsLoading = scope === 'mine' ? me.isPending : all.isPending;
-  const rowsError = scope === 'mine' ? me.error : all.error;
+  const rows = me.isPlaceholderData ? [] : (me.data?.queues ?? []);
+  const rowsLoading = me.isPending || me.isPlaceholderData;
+  const rowsError = me.error;
   const checks = routine.data?.checks ?? [];
   const routineDone = routine.data?.done ?? 0;
   const routineTotal = routine.data?.total ?? 0;
-  const review = dayEnd.data ?? null;
+  const review = me.data?.dayEnd ?? null;
   const filters = saved.data ?? [];
   const sharedBy = [...new Set(filters.filter((f) => f.shared && f.owner?.staffId !== staff.accountId).map((f) => staffName(f.owner)))];
   const stats = me.data?.stats;
@@ -266,7 +261,7 @@ export default function Queues() {
           >
             {rowsError ? (
               <div className="card-body">
-                <LoadError error={rowsError} onRetry={() => void (scope === 'mine' ? me.refetch() : all.refetch())} />
+                <LoadError error={rowsError} onRetry={() => void me.refetch()} />
               </div>
             ) : (
               <>
@@ -405,9 +400,9 @@ export default function Queues() {
               )}
             </div>
             <div className="card-body">
-              {dayEnd.error ? (
-                <LoadError error={dayEnd.error} onRetry={() => void dayEnd.refetch()} />
-              ) : dayEnd.isPending ? (
+              {me.error ? (
+                <LoadError error={me.error} onRetry={() => void me.refetch()} />
+              ) : me.isPending ? (
                 <SkeletonLines rows={4} />
               ) : !review ? (
                 <p className="small muted">Today’s day-end review isn’t ready yet. It’s prepared at 3:00 PM PT.</p>

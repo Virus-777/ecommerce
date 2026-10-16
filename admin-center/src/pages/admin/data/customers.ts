@@ -21,7 +21,7 @@ export const VERIFIED_TONE: Record<Verification, Tone> = { email_and_phone: 'suc
 export type AccountAction = AccountActionInput['action'];
 export type ReasonCode = AccountActionInput['reasonCode'];
 
-/** The design's actions plus the API's other account actions. Security actions need customers.accounts.security. */
+/** The design's actions plus the API's other account actions. Security actions need customers.accounts.act and customers.accounts.security. */
 export const ACCOUNT_ACTIONS: Array<{ value: AccountAction; label: string; security?: boolean }> = [
   { value: 'send_password_reset', label: 'Send password reset link', security: true },
   { value: 'sign_out_everywhere', label: 'Sign out of all devices', security: true },

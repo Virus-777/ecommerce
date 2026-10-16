@@ -373,7 +373,7 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
   const { api } = useApi();
   const qc = useQueryClient();
   const [, setParams] = useSearchParams();
-  const { can, name: me } = useStaffSession();
+  const { can, name: me, accountId } = useStaffSession();
   const canManage = can('promotions.campaigns.manage');
   const canConfirm = can('promotions.funding.confirm');
   const canPublish = can('promotions.campaigns.publish');
@@ -525,6 +525,11 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
   const sentLine = review?.sentAt ? `Sent ${dateTime(review.sentAt)}` : 'Sent';
   const reviewer = (review?.reviewer as { name?: string } | null | undefined)?.name;
   const createdBy = (c?.createdBy as { name?: string } | undefined)?.name;
+  // Separation of duties (G65a): whoever created the campaign or sent it to Finance can't confirm its funding
+  // (SAME_REVIEWER). The creator is known up front; the sender only shows when the server refuses.
+  const refusedSame = decide.error instanceof ApiError && decide.error.code === 'SAME_REVIEWER';
+  const ownCampaign = !!c && c.createdBy?.kind === 'staff' && !!c.createdBy.id && c.createdBy.id === accountId;
+  const sameReviewer = ownCampaign || refusedSame;
   const step = confirmed ? (status === 'scheduled' || status === 'live' || status === 'paused' || status === 'ended' ? 3 : 2) : finance ? 1 : 0;
   const card = preview.data?.productCard;
 
@@ -838,7 +843,7 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
                     <Button variant="secondary" size="sm" onClick={requestChanges} disabled={decide.isPending}>
                       Request changes
                     </Button>
-                    <Button size="sm" icon="check" onClick={() => decide.mutate('confirm')} disabled={decide.isPending}>
+                    <Button size="sm" icon="check" onClick={() => decide.mutate('confirm')} disabled={decide.isPending || sameReviewer} title={sameReviewer ? 'Another Finance reviewer confirms this campaign' : undefined}>
                       Confirm funding
                     </Button>
                   </>
@@ -860,10 +865,16 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
                   ]}
                 />
               )}
-              {decide.isError && (
-                <Alert tone="danger" title="That didn’t work">
-                  {errorMessage(decide.error)}
+              {!confirmed && canConfirm && sameReviewer ? (
+                <Alert tone="warning" title="Another reviewer confirms this one">
+                  {ownCampaign ? 'You created this campaign' : 'You created this campaign or sent it to Finance'}, so you can’t confirm its funding. Ask another Finance reviewer to confirm it. You can still request changes.
                 </Alert>
+              ) : (
+                decide.isError && (
+                  <Alert tone="danger" title="That didn’t work">
+                    {errorMessage(decide.error)}
+                  </Alert>
+                )
               )}
               {!confirmed && canConfirm && (
                 <Field label="Finance comment" error={commentErr || undefined}>
@@ -932,7 +943,7 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
           )}
           {status === 'approved' && (
             <p className="ab-note">
-              <Icon name="info" className="ic-sm" /> Next: Content prepares the banner and campaign page. <Link to={href('admin/content')}>Open Homepage and pages</Link>
+              <Icon name="info" className="ic-sm" /> Next: Content prepares the banner and campaign page. {can('content.view') && <Link to={href('admin/content')}>Open Homepage and pages</Link>}
             </p>
           )}
           {c && <span className="xs muted">{`${c.ref} · ${shortDate(c.createdAt)}`}</span>}

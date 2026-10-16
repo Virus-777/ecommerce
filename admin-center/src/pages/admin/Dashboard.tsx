@@ -5,20 +5,20 @@ import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import ADMIN_DASHBOARD from '@marketly/web-shared/api/graphql/admin/AdminDashboard.graphql?raw';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, isoInText } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Badge, Button, Card, Deadline, EmptyState, Icon, Legend, LineChart, SegmentedControl, SplitBar, Stat, StatusBadge, TableWrap, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, deadlineLabel, deadlineTone, longDate, screenHref, time, weekdayDate } from '@/app/parts';
 import {
-  PERIOD, RANGES, compactMoney, deltaText, exceptionOf, greeting, nextRun,
-  type AdminDashboardData, type AttentionRow, type PayoutRun, type Range, type WorkItem, type WorkSummary,
+  PERIOD, RANGES, compactMoney, deltaText, exceptionOf, greeting, moneyText,
+  type AdminDashboardData, type NextPayoutRun, type Range, type WorkItem,
 } from './data/dashboard';
 
 // Design: pages/admin/admin-dashboard.html (single view).
-// Data: GraphQL AdminDashboard (KPIs, sales split, ads, approvals waiting for me), GET workqueues/summary
-// (needs-attention tiles, overdue dispatch, team on shift), GET finance/payout-runs (next run),
-// POST shipping/exceptions/{id}/notify-seller (Remind), POST reports/exports (Export).
+// Data: GraphQL AdminDashboard (KPIs, sales split, ads, approvals waiting for me, the work summary with needs-attention
+// tiles, overdue dispatch and team on shift, the next payout run), POST shipping/exceptions/{id}/notify-seller (Remind),
+// POST reports/exports (Export).
 
 const TEAM_STATUS: Record<string, string> = { away: 'Away', off: 'Off shift' };
 
@@ -34,13 +34,7 @@ export default function Dashboard() {
     queryKey: ['reports', 'admin-dashboard', range],
     queryFn: async () => (await gql<AdminDashboardData>(ADMIN_DASHBOARD, { period: PERIOD[range], overdueLimit: 5, adListLimit: 3 }, 'AdminDashboard')).data,
     placeholderData: (prev) => prev,
-  });
-  const work = useQuery({ queryKey: ['workqueues', 'summary'], queryFn: () => call(api.GET('/api/admin/workqueues/summary')) as Promise<WorkSummary>, refetchInterval: 60_000 });
-  const runs = useQuery({
-    queryKey: ['finance', 'payout-runs', 'next'],
-    queryFn: () => call(api.GET('/api/admin/finance/payout-runs', { params: { query: { limit: 20 } } })),
-    enabled: can('finance.ledger.view'),
-    retry: false,
+    refetchInterval: 60_000,
   });
 
   const remind = useMutation({
@@ -53,8 +47,9 @@ export default function Dashboard() {
     onSuccess: (w) => {
       setDone((d) => ({ ...d, [w.id]: true }));
       setActionError('');
-      announce(`Reminder sent to ${w.sellerName ?? 'the seller'} for ${w.subject?.ref ?? w.ref}`);
+      announce(`Reminder sent to ${w.sellerName ?? 'the seller'} for ${w.subject?.ref ?? w.title}`);
       void qc.invalidateQueries({ queryKey: ['workqueues'] });
+      void qc.invalidateQueries({ queryKey: ['reports', 'admin-dashboard'] });
     },
     onError: (e) => setActionError(errorMessage(e)),
   });
@@ -68,11 +63,11 @@ export default function Dashboard() {
   const d = dash.data?.adminDashboard ?? null;
   const ads = dash.data?.adDashboard ?? null;
   const approvals = dash.data?.myApprovalSummary ?? null;
-  const w = work.data;
-  const attention = (w?.needsAttention ?? []) as AttentionRow[];
+  const w = dash.data?.workSummary ?? null;
+  const attention = w?.needsAttention ?? [];
   const dispatch = w?.overdueDispatch ?? [];
   const team = w?.team ?? [];
-  const run: PayoutRun | undefined = runs.data ? nextRun(runs.data.items) : undefined;
+  const run = dash.data?.nextPayoutRun ?? undefined;
   const official = d?.series.find((s) => s.key === 'official');
   const sellers = d?.series.find((s) => s.key !== 'official');
   const splitOfficial = d?.split.find((s) => s.key === 'official');
@@ -149,10 +144,10 @@ export default function Dashboard() {
                   <div className="stack gap-2">
                     <div className="row between xs sub">
                       <span>
-                        Official Store {Math.round(splitOfficial.sharePct)}% · {formatMoney(splitOfficial.amount)}
+                        Official Store {Math.round(splitOfficial.sharePct)}% · {moneyText(splitOfficial.amount, formatMoney)}
                       </span>
                       <span>
-                        Sellers {Math.round(splitSellers.sharePct)}% · {formatMoney(splitSellers.amount)}
+                        Sellers {Math.round(splitSellers.sharePct)}% · {moneyText(splitSellers.amount, formatMoney)}
                       </span>
                     </div>
                     <SplitBar a={Math.round(splitOfficial.sharePct)} b={100 - Math.round(splitOfficial.sharePct)} />
@@ -177,12 +172,14 @@ export default function Dashboard() {
             }
             flush
           >
-            {work.isError ? (
-              <div className="card-body">
-                <LoadError error={work.error} onRetry={() => void work.refetch()} />
-              </div>
-            ) : !w ? (
-              <SkeletonLines rows={4} />
+            {!w ? (
+              dash.isPending ? (
+                <SkeletonLines rows={4} />
+              ) : (
+                <div className="card-body">
+                  <p className="small muted">Dispatch work items are not available right now.</p>
+                </div>
+              )
             ) : dispatch.length === 0 ? (
               <div className="card-body">
                 <EmptyState icon="package-check" title="No overdue dispatch">
@@ -214,10 +211,10 @@ export default function Dashboard() {
                     </thead>
                     <tbody>
                       {dispatch.map((r) => {
-                        const ref = r.subject?.ref ?? r.ref;
+                        const ref = r.subject?.ref ?? r.title;
                         const urgent = deadlineTone(r.deadline?.state) === 'danger';
                         const orderTo = r.subject?.ref ? href('admin/order', '', { ref: r.subject.ref }) : undefined;
-                        const owner = (r.assignee as { name?: string } | null)?.name ?? (r.waitingOn === 'seller' ? 'Seller' : r.ownerRole);
+                        const owner = r.assignee?.name ?? (r.waitingOn?.toLowerCase() === 'seller' ? 'Seller' : (r.ownerRole ?? ''));
                         const exc = exceptionOf(r);
                         return (
                           <tr key={r.id} className={urgent ? 'is-flagged' : 'is-warn'}>
@@ -237,8 +234,8 @@ export default function Dashboard() {
                               </span>
                             </td>
                             <td className="cell-name">
-                              <span className="ellip" title={r.summary ?? r.title}>
-                                {r.summary ?? r.title}
+                              <span className="ellip" title={isoInText(r.summary ?? r.title)}>
+                                {isoInText(r.summary ?? r.title)}
                               </span>
                             </td>
                             <td>{r.deadline?.dueAt && <Deadline tone={urgent ? 'danger' : 'warning'}>{deadlineLabel(r.deadline.dueAt)}</Deadline>}</td>
@@ -309,16 +306,14 @@ export default function Dashboard() {
                 </ul>
               )}
             </Card>
-            <PayoutCard run={run} loading={runs.isPending && runs.fetchStatus !== 'idle'} error={runs.isError ? runs.error : null} onRetry={() => void runs.refetch()} hidden={runs.fetchStatus === 'idle' && !runs.data} />
+            <PayoutCard run={run} loading={dash.isPending} hidden={!can('finance.ledger.view')} />
           </div>
         </div>
 
         <div className="stack gap-5">
           <Card titleAs="h3" title="Needs attention" sub="Queues past or near their targets">
-            {work.isError ? (
-              <LoadError error={work.error} onRetry={() => void work.refetch()} />
-            ) : !w ? (
-              <SkeletonLines rows={5} />
+            {!w ? (
+              dash.isPending ? <SkeletonLines rows={5} /> : <p className="small muted">Queue figures are not available right now.</p>
             ) : attention.length === 0 && !approvals?.toDecide ? (
               <EmptyState icon="circle-check" title="All clear">
                 No queue is past or near its target.
@@ -361,7 +356,7 @@ export default function Dashboard() {
           </Card>
           <Card titleAs="h3" title="Team on shift" sub="Leads and backups" flush>
             {!w ? (
-              work.isError ? null : <SkeletonLines rows={4} />
+              dash.isPending ? <SkeletonLines rows={4} /> : null
             ) : team.length === 0 ? (
               <div className="card-body">
                 <p className="small muted">No leads or backups are set for the work queues yet.</p>
@@ -369,7 +364,7 @@ export default function Dashboard() {
             ) : (
               <ul className="list pad">
                 {team.map((t) => {
-                  const covering = (t.coveringFor as { name?: string } | null)?.name;
+                  const covering = t.coveringFor?.name;
                   return (
                     <li key={`${t.staff.staffId}-${t.area}`}>
                       <Avatar name={t.staff.name} />
@@ -377,7 +372,7 @@ export default function Dashboard() {
                         <span className="small strong">{t.staff.name}</span>
                         <span className="xs muted">{t.area}</span>
                       </span>
-                      <span className="xs muted">{TEAM_STATUS[t.status] ?? (covering ? `Backup for ${covering.split(' ')[0]}` : t.role === 'lead' ? 'Lead' : 'Backup')}</span>
+                      <span className="xs muted">{TEAM_STATUS[t.status.toLowerCase()] ?? (covering ? `Backup for ${covering.split(' ')[0]}` : t.role.toLowerCase() === 'lead' ? 'Lead' : 'Backup')}</span>
                     </li>
                   );
                 })}
@@ -390,7 +385,7 @@ export default function Dashboard() {
   );
 }
 
-function PayoutCard({ run, loading, error, onRetry, hidden }: { run?: PayoutRun; loading: boolean; error: unknown; onRetry: () => void; hidden: boolean }) {
+function PayoutCard({ run, loading, hidden }: { run?: NextPayoutRun; loading: boolean; hidden: boolean }) {
   const rows: Array<{ label: string; n: number; tone?: 'warning' | 'danger' }> = run
     ? [
         { label: 'Ready to pay', n: run.readyCount },
@@ -414,8 +409,6 @@ function PayoutCard({ run, loading, error, onRetry, hidden }: { run?: PayoutRun;
     >
       {hidden ? (
         <p className="small muted">Finance staff review and approve payout runs.</p>
-      ) : error ? (
-        <LoadError error={error} onRetry={onRetry} />
       ) : loading ? (
         <SkeletonLines rows={3} />
       ) : !run ? (
@@ -423,7 +416,7 @@ function PayoutCard({ run, loading, error, onRetry, hidden }: { run?: PayoutRun;
       ) : (
         <>
           <div className="row between base">
-            <span className="h2 num">{formatMoney(run.total)}</span>
+            <span className="h2 num">{moneyText(run.total, formatMoney)}</span>
             <span className="small muted">
               {run.sellerCount} seller{run.sellerCount === 1 ? '' : 's'}
             </span>
@@ -443,7 +436,7 @@ function PayoutCard({ run, loading, error, onRetry, hidden }: { run?: PayoutRun;
             ))}
           </ul>
           {run.approval?.required && (
-            <Alert tone="warning" title={run.status === 'pending_approval' ? 'Second review needed' : 'Approval needed'}>
+            <Alert tone="warning" title={run.status.toLowerCase() === 'pending_approval' ? 'Second review needed' : 'Approval needed'}>
               {run.approval.reason}
             </Alert>
           )}

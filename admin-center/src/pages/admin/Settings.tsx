@@ -1,16 +1,16 @@
 import { Fragment, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Button, Card, Dialog, Field, Icon, PageHeader, Select, Switch, Textarea, TextInput } from '@marketly/web-shared/ui';
-import { LoadError, SkeletonLines, date, iconOf, screenHref } from '@/app/parts';
+import { Alert, announce, Badge, Button, Card, Dialog, Field, Icon, PageHeader, Select, Switch, Textarea, TextInput, iconFor } from '@marketly/web-shared/ui';
+import { LoadError, SkeletonLines, date, screenHref } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
 import {
   dayFromToday, fromField, isJsonish, OWNER_SCREEN, sameValue, SCOPE_OPTIONS, sectionIcon, toField,
-  type ApplyScope, type SettingChange, type SettingDefinition, type SettingDetail, type SettingsOverview, type SettingsSection,
+  type ApplyScope, type SettingChange, type SettingDefinition, type SettingsOverview, type SettingsSection,
 } from './data/settings';
 import { ProductImageSettingsCard } from './data/product-image-settings';
 import { effectiveInstant } from './data/staff';
@@ -21,6 +21,8 @@ const PRODUCTS = -1;
 // Design: pages/admin/admin-settings.html · view "review-change" = review dialog for a drafted change.
 // Editing a field never applies it: "Review change" drafts the change on the API (impact preview), the dialog shows
 // old → new, effective date, scope, impact and reason, and only confirming submits it: scheduled, or sent for approval.
+// The overview carries each value's raw `value` and `valueType`, so editing needs no extra reads. The reason is
+// optional while drafting and previewing, and required at submit (POST /changes/{id}/submit { reason }).
 
 function Note({ children }: { children: ReactNode }) {
   return (
@@ -53,19 +55,8 @@ export default function Settings() {
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
 
-  // Raw values of the sections being edited (the overview has display text only).
-  const editKeys = useMemo(() => sections.filter((s) => editing.includes(s.key)).flatMap((s) => s.values.map((v) => v.key).filter((k): k is string => !!k)), [sections, editing]);
-  const valueQs = useQueries({
-    queries: editKeys.map((key) => ({
-      queryKey: ['settings', 'value', key],
-      queryFn: () => call(api.GET('/api/admin/settings/values/{key}', { params: { path: { key } } })) as Promise<SettingDetail>,
-    })),
-  });
-  const current = new Map<string, unknown>();
-  editKeys.forEach((k, i) => {
-    const d = valueQs[i]?.data;
-    if (d) current.set(k, d.current.value);
-  });
+  // Raw values in force, from the overview (settings-owned values carry `value`).
+  const current = useMemo(() => new Map<string, unknown>(sections.filter((s) => s.ownedHere).flatMap((s) => s.values.filter((v) => !!v.key).map((v) => [v.key!, v.value ?? null] as const))), [sections]);
 
   const fieldValue = (key: string): string | boolean | undefined => {
     if (key in draft) return draft[key];
@@ -136,7 +127,7 @@ export default function Settings() {
 
   const draftM = useMutation({
     mutationFn: (v: { i: number; items: Array<{ key: string; value: unknown }>; effective: string }) =>
-      call(api.POST('/api/admin/settings/changes', { body: { items: v.items, effectiveAt: effectiveInstant(v.effective), applyScope: 'new_only', reason: 'Draft from the settings page' } })) as Promise<SettingChange>,
+      call(api.POST('/api/admin/settings/changes', { body: { items: v.items, effectiveAt: effectiveInstant(v.effective), applyScope: 'new_only' } })) as Promise<SettingChange>,
     onSuccess: (c, v) => {
       setChange(c);
       setChangeSection(v.i);
@@ -150,7 +141,7 @@ export default function Settings() {
       call(
         api.PATCH('/api/admin/settings/changes/{id}', {
           params: { path: { id: change!.id } },
-          body: { items: change!.items.map((it) => ({ key: it.key, value: it.to })), effectiveAt: effectiveInstant(v.effective), applyScope: v.scope, reason: v.reason || 'Draft from the settings page' },
+          body: { items: change!.items.map((it) => ({ key: it.key, value: it.to })), effectiveAt: effectiveInstant(v.effective), applyScope: v.scope, ...(v.reason ? { reason: v.reason } : {}) },
         }),
       ) as Promise<SettingChange>,
     onSuccess: (c) => setChange(c),
@@ -287,8 +278,6 @@ export default function Settings() {
     const open = dirty || isEditing;
     const pendingApproval = s.scheduled.some((c) => c.status === 'pending_approval');
     const scheduled = s.scheduled.some((c) => c.status === 'scheduled');
-    const loadingValues = isEditing && editKeys.some((k, idx) => sectionKeys(s).includes(k) && valueQs[idx]?.isPending);
-    const valueErr = isEditing ? valueQs.find((q, idx) => sectionKeys(s).includes(editKeys[idx]) && q.isError) : undefined;
     const link = screenHref(s.link?.screen ?? OWNER_SCREEN[s.key]);
     const bools = s.values.filter((v) => v.key && defs.get(v.key)?.valueType === 'bool');
     const others = s.values.filter((v) => !bools.includes(v));
@@ -359,11 +348,9 @@ export default function Settings() {
             {reviewErr[i]}
           </Alert>
         )}
-        {valueErr && <LoadError error={valueErr.error} onRetry={() => void valueErr.refetch()} />}
-        {loadingValues && <SkeletonLines rows={2} />}
         {others.length > 0 && <div className="ac-fgrid">{others.map((v) => field(v, isEditing))}</div>}
         {bools.length > 0 && <div className="stack gap-3">{bools.map((v) => field(v, isEditing))}</div>}
-        {!s.values.length && <Note>{s.ownedHere ? 'No values yet.' : `Managed in the ${s.ownerModule} screens. ${s.subtitle ?? ''}`}</Note>}
+        {!s.values.length && <Note>No values yet.</Note>}
         {s.scheduled.map((c) => (
           <Note key={c.ref}>
             {c.title} · {date(c.effectiveAt)} · {c.appliesTo}
@@ -448,7 +435,7 @@ export default function Settings() {
                     goTo(i);
                   }}
                 >
-                  <Icon name={iconOf(sectionIcon(s.key), 'settings')} className="ic-sm" />
+                  <Icon name={iconFor(sectionIcon(s.key), 'settings')} className="ic-sm" />
                   {s.title}
                 </a>
               </Fragment>

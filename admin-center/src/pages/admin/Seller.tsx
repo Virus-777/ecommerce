@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
-import { ApiError, call, errorMessage, useApi, type Api } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import AdminSellerQuery from '@marketly/web-shared/api/graphql/admin/AdminSeller.graphql?raw';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
@@ -13,15 +13,16 @@ import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone, monthYear, shortDate } from '@/app/parts';
 import { MessageDialog } from './data/seller-message';
 import {
-  CLOSED_GROUP, CLOSED_RETURN, UUID_RE, cap, initialsOf, isoDay, statusLabel, tintOf, withoutFormatted,
+  CLOSED_GROUP, CLOSED_RETURN, cap, initialsOf, isoDay, statusLabel, tintOf,
   type AdminSellerGql, type Obligations, type Owner, type Payouts, type Restriction, type SellerDetail,
 } from './data/seller';
 
 // Design: pages/admin/admin-seller.html · view "suspend-seller" = the suspend dialog.
-// Route /sellers/:slug carries the seller's ref (SL-…, the list links), its id, or its store slug.
-// Data: GET /api/admin/sellers/sellers/{id} (account, restrictions, performance, appeals, payouts, notes, history),
-// the AdminSeller screen query without Money.formatted (open orders, returns and cases; approvals waiting on the
-// seller), GET …/{id}/suspension-impact and GET /api/admin/access/members (suspend dialog).
+// Route /sellers/:slug carries the seller's store slug (the list links) or its id; both go straight to the detail route.
+// Data: GET /api/admin/sellers/sellers/{slug|id} (account, restrictions, performance, appeals, payouts, notes, history;
+// kept on REST: the page's restriction editing and typed detail come from it), the AdminSeller screen query (open
+// orders, returns and cases; approvals waiting on the seller), GET …/{id}/suspension-impact and
+// POST /api/admin/access/authority-checks (sellers.sellers.suspend: the eligible second reviewers).
 // Writes: POST …/{id}/suspend (always a second reviewer), PATCH /api/admin/sellers/restrictions/{id},
 // POST …/{id}/notes, POST /api/admin/messaging/conversations.
 
@@ -80,26 +81,6 @@ function validate(d: SuspendDraft) {
   return e;
 }
 
-interface Member {
-  account: { id: string; displayName: string; status: string };
-  roles: Array<{ name: string }>;
-}
-
-/** The route's seller key (id, SL- ref or store slug) -> the seller id; null when no seller matches. */
-async function resolveSellerId(api: Api, key: string): Promise<string | null> {
-  if (UUID_RE.test(key)) return key;
-  const search = (q: string) => call(api.GET('/api/admin/sellers/sellers', { params: { query: { q, limit: 10 } } })).then((p) => p.items);
-  if (/^SL-\d+$/i.test(key)) return (await search(key)).find((r) => r.ref.toLowerCase() === key.toLowerCase())?.id ?? null;
-  // A store slug: search by its words, then confirm the slug on the candidates' accounts.
-  const words = key.split('-').filter((w) => w && w !== 'and');
-  let rows = await search(words.join(' '));
-  if (!rows.length && words[0]) rows = await search(words[0]);
-  for (const r of rows.slice(0, 5)) {
-    const d = await call(api.GET('/api/admin/sellers/sellers/{id}', { params: { path: { id: r.id } } }));
-    if (d.account.slug === key) return r.id;
-  }
-  return null;
-}
 
 /** Meter fill for a metric: percent "at least" targets show the value; others show value against twice the limit. */
 function meterPct(value: number, target?: { comparator?: string; threshold?: number; unit?: string }) {
@@ -153,12 +134,17 @@ export default function Seller() {
   const [message, setMessage] = useState(false);
   const [editing, setEditing] = useState<Restriction | null>(null);
 
-  const idQ = useQuery({ queryKey: ['sellers', 'resolve', slug], queryFn: () => resolveSellerId(api, slug), staleTime: Infinity });
-  const id = idQ.data ?? undefined;
-  const detail = useQuery({ queryKey: ['sellers', 'detail', id], queryFn: () => call(api.GET('/api/admin/sellers/sellers/{id}', { params: { path: { id: id! } } })) as Promise<SellerDetail>, enabled: !!id });
+  // The detail route accepts the store slug or the id.
+  const detail = useQuery({
+    queryKey: ['sellers', 'detail', slug],
+    queryFn: () => call(api.GET('/api/admin/sellers/sellers/{id}', { params: { path: { id: slug } } })) as Promise<SellerDetail>,
+    enabled: !!slug,
+    retry: (n, e) => !(e instanceof ApiError && e.status === 404) && n < 2,
+  });
+  const id = detail.data?.account.id;
   const screen = useQuery({
     queryKey: ['sellers', 'screen', id],
-    queryFn: () => gql<AdminSellerGql>(withoutFormatted(AdminSellerQuery), { id, orderPaging: { limit: 50 }, returnPaging: { limit: 50 }, casePaging: { limit: 50 }, trustPaging: { limit: 1 }, historyPaging: { limit: 1 } }),
+    queryFn: () => gql<AdminSellerGql>(AdminSellerQuery, { id, orderPaging: { limit: 50 }, returnPaging: { limit: 50 }, casePaging: { limit: 50 }, trustPaging: { limit: 1 }, historyPaging: { limit: 1 } }, 'AdminSeller'),
     enabled: !!id,
     retry: false,
   });
@@ -168,13 +154,14 @@ export default function Seller() {
     queryFn: () => call(api.GET('/api/admin/sellers/sellers/{id}/suspension-impact', { params: { path: { id: id! } } })),
     enabled: !!id && canSuspend && view === 'suspend-seller',
   });
+  // Who may approve a suspension now (backups included), without needing access to the staff list.
   const members = useQuery({
-    queryKey: ['access', 'members', 'active'],
-    queryFn: () => call(api.GET('/api/admin/access/members', { params: { query: { status: 'active', limit: 100 } } })) as Promise<{ items: Member[] }>,
+    queryKey: ['access', 'authority', 'sellers.sellers.suspend'],
+    queryFn: () => call(api.POST('/api/admin/access/authority-checks', { body: { action: 'sellers.sellers.suspend' } })),
     enabled: canSuspend && view === 'suspend-seller',
     retry: false,
   });
-  const reviewers = (members.data?.items ?? []).filter((m) => m.account.id !== accountId && m.account.status === 'active');
+  const reviewers = (members.data?.eligibleApprovers ?? []).filter((m) => m.accountId !== accountId);
 
   const d = detail.data;
   const sellerId = d?.account.id ?? '';
@@ -201,7 +188,7 @@ export default function Seller() {
           }),
         ),
     onSuccess: (res, dr) => {
-      const reviewer = reviewers.find((m) => m.account.id === dr.reviewer)?.account.displayName ?? 'The second reviewer';
+      const reviewer = reviewers.find((m) => m.accountId === dr.reviewer)?.name ?? 'The second reviewer';
       if (res.state === 'pending_approval') {
         setSentForReview(true);
         setFlash({ title: 'Suspension sent for second review', body: `${reviewer} has been asked to approve the suspension. New sales continue until it is approved.` });
@@ -238,7 +225,7 @@ export default function Seller() {
     suspend.mutate(draft);
   };
 
-  const notFound = (idQ.isSuccess && !idQ.data) || (detail.error instanceof ApiError && detail.error.status === 404);
+  const notFound = detail.error instanceof ApiError && detail.error.status === 404;
   if (notFound) {
     return (
       <AdminLayout active="sellers">
@@ -249,13 +236,13 @@ export default function Seller() {
       </AdminLayout>
     );
   }
-  const loadError = idQ.error ?? detail.error;
+  const loadError = detail.error;
   if (loadError || !d) {
     return (
       <AdminLayout active="sellers">
         <PageHeader crumbs={[{ label: 'Sellers', to: href('admin/sellers') }, { label: '…' }]} title={<span className="sk sk-line short" aria-label="Loading" />} />
         {loadError ? (
-          <LoadError error={loadError} onRetry={() => void (idQ.error ? idQ.refetch() : detail.refetch())} />
+          <LoadError error={loadError} onRetry={() => void detail.refetch()} />
         ) : (
           <div className="aa-split">
             <Card title="Performance vs targets" titleAs="h3">
@@ -742,10 +729,10 @@ export default function Seller() {
           <Textarea id="aa-ss-x" value={draft.details} onChange={(e) => set('details', e.target.value)} placeholder="" />
         </Field>
         <div className="well stack gap-2">
-          <Field label="Second reviewer" hint="Suspension takes effect only after a second reviewer approves." error={errors.reviewer ?? (members.isError ? `We couldn’t load staff members: ${errorMessage(members.error)}` : undefined)}>
+          <Field label="Second reviewer" hint="Suspension takes effect only after a second reviewer approves." error={errors.reviewer ?? (members.isError ? `We couldn’t load the eligible reviewers: ${errorMessage(members.error)}` : undefined)}>
             <Select
               id="aa-ss-rv"
-              options={[{ value: '', label: members.isLoading ? 'Loading…' : 'Choose a reviewer' }, ...reviewers.map((m) => ({ value: m.account.id, label: `${m.account.displayName} · ${m.roles[0]?.name ?? 'Staff'}` }))]}
+              options={[{ value: '', label: members.isLoading ? 'Loading…' : 'Choose a reviewer' }, ...reviewers.map((m) => ({ value: m.accountId, label: `${m.name} · ${m.roleLabel ?? 'Staff'}${m.away ? ' · away' : ''}` }))]}
               value={draft.reviewer}
               onChange={(e) => set('reviewer', e.target.value)}
             />

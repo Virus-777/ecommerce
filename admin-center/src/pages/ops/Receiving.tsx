@@ -10,6 +10,8 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Breadcrumbs, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, PageHeader, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, Textarea, TextInput, announce, type Tone } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, dateTime, shortDate, time, dayKey } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
+import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
+import { useDatasetExport } from '@/pages/admin/data/report-export';
 import { EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
 // Design: pages/ops/ops-receiving.html (Expected list) · view "receiving-<po ref>" (design: receiving-pur-2610-0042) =
@@ -148,6 +150,7 @@ function DeliveryList({ notice }: { notice: string }) {
   const deliveries = useDeliveries();
   const stats = useQuery({ queryKey: ['purchasing', 'deliveries', 'stats'], queryFn: () => call(api.GET('/api/admin/purchasing/deliveries/stats', { params: { query: {} } })) as Promise<Stats> });
   const canRecord = staff.can('purchasing.receipts.record');
+  const receivingExport = useDatasetExport('purchasing.admin.receiving');
 
   const all = (deliveries.data?.items ?? []).filter((d) => d.status !== 'cancelled');
   const rows = all.filter((d) => TAB_STATUSES[tab].includes(d.status));
@@ -227,11 +230,10 @@ function DeliveryList({ notice }: { notice: string }) {
         title="Receiving"
         sub="Inbound purchase deliveries · Reno, NV · Purchasing orders, Warehouse receives, Inventory confirms what can be sold"
         actions={
-          <Button variant="secondary" size="sm" icon="download" disabled title="Receiving exports aren’t available yet">
-            Export
-          </Button>
+          staff.can('reports.exports.create') && staff.can('purchasing.orders.view') ? <ExportButton exp={receivingExport} /> : undefined
         }
       />
+      <ExportNotice exp={receivingExport} />
       {notice && <Alert tone="success" title={notice} />}
       {actionError && <Alert tone="danger">{errorMessage(actionError)}</Alert>}
       {stats.error ? (

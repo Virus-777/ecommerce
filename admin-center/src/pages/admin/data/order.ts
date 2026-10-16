@@ -1,6 +1,6 @@
 // Types and helpers for the admin order 360 (design: pages/admin/admin-order.html and admin-order--issue-refund.html).
-// Data: GraphQL AdminOrder (orderAdmin(ref), partial data allowed: discountFunding answers null, G13/G37),
-// GET orders/orders/{id}/history (the GraphQL auditTrail answers empty), GET access/me + access/approval-actions
+// Data: GraphQL AdminOrder (orderAdmin(ref), partial data allowed; `history` is the order timeline, `auditTrail`
+// only audited staff actions), GET access/me + access/approval-actions
 // (refund approval limits), POST returns/refunds (one request per seller group), POST orders/orders/{id}/cancel-items,
 // POST orders/orders/{id}/notes, POST messaging/conversations (Contact seller).
 import ADMIN_ORDER from '@marketly/web-shared/api/graphql/admin/AdminOrder.graphql?raw';
@@ -25,6 +25,8 @@ interface Who {
 export interface SellerLabel {
   id: string | null;
   name: string;
+  /** The seller's store slug (admin seller detail accepts it); "official-store" for the Official Store. */
+  slug: string | null;
   official: boolean;
   verified: boolean;
   logo: { url: string; alt: string | null } | null;
@@ -109,6 +111,8 @@ export interface OrderAdmin {
   returns: Array<{ id: string; ref: string; items: Array<{ orderItemId: string }>; owner: Who | null; nextDeadline: Due | null }>;
   cases: Array<{ id: string; ref: string; subject: string; status: string; statusLabel: string }>;
   notes: Array<{ id: string; text: string; author: Who | null; at: string }>;
+  /** The order timeline, newest first. */
+  history: HistoryRow[] | null;
 }
 
 export const sum = (xs: Amt[], currency = 'USD'): Amt => ({ amount: xs.reduce((a, x) => a + (x?.amount ?? 0), 0), currency: xs[0]?.currency ?? currency });
@@ -163,7 +167,9 @@ const WARN = /overdue|escalat|exception|failed|declined|late/i;
 /** Order history (newest first) as the design's timeline. */
 export function toTimeline(rows: HistoryRow[], fmt: (iso: string) => string): TimelineEvent[] {
   return rows.map((r, i) => {
-    const who = r.actor?.name ?? (r.actor?.kind === 'system' ? 'System' : r.actor?.kind === 'seller' ? 'Seller' : r.actor?.kind === 'customer' ? 'Customer' : r.actor?.kind === 'staff' ? 'Staff' : '');
+    // GraphQL actor kinds are upper case (SYSTEM, CUSTOMER …); older records have no name.
+    const kind = r.actor?.kind?.toLowerCase();
+    const who = r.actor?.name ?? (kind === 'system' ? 'System' : kind === 'seller' ? 'Seller' : kind === 'customer' ? 'Customer' : kind === 'staff' ? 'Staff' : '');
     return { t: r.label, d: `${fmt(r.at)}${who ? ` · ${who}` : ''}`, state: WARN.test(r.label) ? 'warn' : i === 0 ? 'current' : 'done', body: r.detail ?? undefined };
   });
 }

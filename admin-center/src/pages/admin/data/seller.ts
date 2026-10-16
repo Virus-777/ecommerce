@@ -60,13 +60,6 @@ export const feedbackLabel = (f: unknown) => {
   return v.positivePct != null && v.ratingCount ? `${Math.round(v.positivePct)}% · ${v.ratingCount.toLocaleString('en-US')}` : '';
 };
 
-/** sellers.SellerStats.balances (unknown in OpenAPI). */
-export interface StatsBalances {
-  total?: MoneyValue | null;
-  held?: MoneyValue | null;
-  negativeCount?: number | null;
-}
-
 /** sellers.SellerAdminDetail.owner */
 export interface Owner {
   name?: string | null;
@@ -114,9 +107,6 @@ export interface AdminSellerGql {
     }>;
   } | null;
 }
-
-/** The query text without Money.formatted: the running server answers null for it (G13/G37). */
-export const withoutFormatted = (q: string) => q.replace(/^\s*formatted\s*$/gm, '');
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

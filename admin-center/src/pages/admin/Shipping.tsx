@@ -21,7 +21,7 @@ import {
 // on-time), /methods (customer labels), /profiles (Official Store rates), /zones, /dispatch-targets, /notices,
 // /free-shipping-rules; GET /api/admin/sellers/performance-targets (reply target).
 // Writes: PATCH /carriers/{id}/services/{serviceId} (enable/disable), POST /notices (+ /{id}/publish),
-// POST /notices/preview (checkout preview in the dialog).
+// POST /notices/preview (checkout preview in the dialog), DELETE /notices/{id} (drafts only; published notices are withdrawn).
 
 type Section = 'carriers' | 'destinations' | 'dispatch' | 'calendar' | 'free';
 const SECTIONS: Array<{ value: Section; label: string }> = [
@@ -171,6 +171,17 @@ export default function Shipping() {
       setView('');
       void qc.invalidateQueries({ queryKey: ['shipping'] });
       void qc.invalidateQueries({ queryKey: ['notifications', 'summary', 'staff'] });
+    },
+  });
+
+  const [confirmDelete, setConfirmDelete] = useState('');
+  const remove = useMutation({
+    mutationFn: (n: ServiceNotice) => call(api.DELETE('/api/admin/shipping/notices/{id}', { params: { path: { id: n.id } } })),
+    onSuccess: (_r, n) => {
+      setConfirmDelete('');
+      setFlash(`Draft "${n.title}" deleted.`);
+      announce('Draft notice deleted');
+      void qc.invalidateQueries({ queryKey: ['shipping', 'notices'] });
     },
   });
 
@@ -492,7 +503,22 @@ export default function Shipping() {
                           <span className="small">{effectLabel(n, carriers)}</span>
                         </td>
                         <td>
-                          <StatusBadge status={STATUS_LABEL[n.status] ?? n.status} />
+                          {canNotices && n.status === 'draft' ? (
+                            <span className="row nowrap gap-2">
+                              <StatusBadge status={STATUS_LABEL[n.status] ?? n.status} />
+                              <button
+                                type="button"
+                                className={cx('btn btn-sm', confirmDelete === n.id ? 'btn-danger-soft' : 'btn-ghost')}
+                                disabled={remove.isPending}
+                                onClick={() => (confirmDelete === n.id ? remove.mutate(n) : setConfirmDelete(n.id))}
+                              >
+                                <span>{confirmDelete === n.id ? 'Confirm delete' : 'Delete'}</span>
+                                <span className="sr-only"> draft {n.title}</span>
+                              </button>
+                            </span>
+                          ) : (
+                            <StatusBadge status={STATUS_LABEL[n.status] ?? n.status} />
+                          )}
                         </td>
                       </tr>
                     );
@@ -503,6 +529,11 @@ export default function Shipping() {
           ) : (
             <div className="card-body">
               <span className="small muted">No holidays or service notices yet.</span>
+            </div>
+          )}
+          {remove.error && (
+            <div className="card-body">
+              <span className="xs t-danger-text">{errorMessage(remove.error)}</span>
             </div>
           )}
           {notices.some((n) => n.status === 'live') && (

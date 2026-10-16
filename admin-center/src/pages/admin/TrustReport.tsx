@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
@@ -13,7 +13,7 @@ import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, dateTime, shortDate } from '@/app/parts';
 import { REC_STATE, STATUS_LABEL, ownerLabel, reporterOutcomeFor, subjectHref, subjectIcon, subjectKind, typeOf, type ReportRow, type TrustReportDetail } from './data/trust';
 import {
-  TRUST_ACTIONS, actionDef, actionsFor, available, factorsOf, isClosed, paramsFor, reasonCode, recommendedFor, timelineOf,
+  TRUST_ACTIONS, actionDef, actionsFor, available, factorsOf, isClosed, nextStepOf, paramsFor, reasonCode, timelineOf,
   type CaseAction, type Reversible, type TrustActionKey,
 } from './data/trust-reports';
 import './TrustReport.css';
@@ -25,7 +25,9 @@ import './TrustReport.css';
 // report in the queue. Trust recommends; actions owned by other teams are sent to that team, as on
 // the Trust and risk queue.
 // Data: the URL carries the ref (TR-…): GET /api/admin/trust/reports?q=<ref> resolves the id, then
-// GET /reports/{id}. Actions: POST /reports/{id}/assign, /dismiss (Clear), /evidence-requests (Request info),
+// GET /reports/{id} (nextStep: the recommended next step; subjectHistory: other reports and enforcements per
+// subject). Actions: POST /reports/{id}/assign, /dismiss (Clear), /evidence-requests (Request info),
+// POST /evidence-requests/{id}/cancel (Withdraw request),
 // /recommendations + /recommendations/{id}/route (Restrict listing, Hold payouts, Suspend).
 //
 // Rules applied here (blueprint "Create and edit forms"): the dialog's submit button is never
@@ -159,8 +161,8 @@ function Investigation({ d }: { d: TrustReportDetail }) {
   const [view, setView] = useView<View>();
   const [recorded, setRecorded] = useState<Recorded | null>(null);
   const actions = actionsFor(d);
-  const recommended = recommendedFor(d, actions);
-  const [draft, setDraft] = useState<Draft>({ action: recommended.action, reason: '', note: '' });
+  const step = nextStepOf(d, actions);
+  const [draft, setDraft] = useState<Draft>({ action: step?.action ?? 'request-info', reason: '', note: '' });
   const [attempted, setAttempted] = useState(false);
   const [allFactors, setAllFactors] = useState(false);
   const [tab, setTab] = useState<EvTab>('entities');
@@ -201,6 +203,14 @@ function Investigation({ d }: { d: TrustReportDetail }) {
       qc.setQueryData(['trust', 'report', d.id], r);
       refresh();
       announce(`${d.ref} assigned to you`);
+    },
+  });
+
+  const withdraw = useMutation({
+    mutationFn: (id: string) => call(api.POST('/api/admin/trust/evidence-requests/{id}/cancel', { params: { path: { id } }, body: {} })),
+    onSuccess: () => {
+      refresh();
+      announce('Request withdrawn');
     },
   });
 
@@ -263,7 +273,7 @@ function Investigation({ d }: { d: TrustReportDetail }) {
     : {};
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((x) => ({ ...x, [k]: v }));
 
-  const openAction = (k: TrustActionKey = recommended.action) => {
+  const openAction = (k: TrustActionKey = step?.action ?? 'request-info') => {
     setDraft({ action: k, reason: '', note: '' });
     setAttempted(false);
     submitM.reset();
@@ -292,14 +302,15 @@ function Investigation({ d }: { d: TrustReportDetail }) {
   const reporter = (d.reporter ?? {}) as { name?: string | null; organization?: string | null };
   const reporterName = reporter.organization ?? reporter.name ?? (d.source === 'automated' ? 'automated detection' : 'a reporter');
   const meta = `${d.source === 'automated' ? 'Detected' : 'Reported'} ${shortDate(d.createdAt)} by ${reporterName}${d.reporterCount > 1 ? ` and ${d.reporterCount - 1} more` : ''}`;
-  const histLabel = 'Checks and requests';
+  const history = d.subjectHistory ?? [];
+  const histLabel = d.subjects.some((x) => x.type === 'seller') ? 'Seller history' : d.subjects.some((x) => x.type === 'customer') ? 'Account history' : 'History';
   const tabs = [
     { label: 'Related entities', value: 'entities' as const, count: d.subjects.length + d.linkedCaseRefs.length },
     { label: 'Attachments', value: 'attachments' as const, count: media.length },
-    { label: histLabel, value: 'history' as const, count: d.evidence.length + d.evidenceRequests.length },
+    { label: histLabel, value: 'history' as const, count: history.reduce((n, h) => n + h.totalReports, 0) + d.evidence.length + d.evidenceRequests.length },
   ];
-  const recDef = actionDef(recommended.action);
-  const recC = actions[recommended.action];
+  const recDef = step?.action ? actionDef(step.action) : null;
+  const recC = step?.action ? actions[step.action] : null;
   const assignee = d.assignee;
   const secondsLeft = d.deadline ? Math.max(0, Math.round((new Date(d.deadline.dueAt).getTime() - Date.now()) / 1000)) : 0;
   const override = d.riskOverride as { score?: number; reason?: string; at?: string } | null | undefined;
@@ -566,7 +577,39 @@ function Investigation({ d }: { d: TrustReportDetail }) {
                     ['Merged reports', String(d.mergedReportIds.length)],
                   ]}
                 />
+                {history.length > 0 && (
+                  <>
+                    <div className="divider" />
+                    <ul className="trr-hist">
+                      {history.map((h) => (
+                        <li key={`${h.subject.type}:${h.subject.id}`}>
+                          <span className="ab-cell">
+                            <span className="small">
+                              <Link className="strong" to={subjectHref(h.subject)}>
+                                {h.subject.label}
+                              </Link>{' '}
+                              · {subjectKind(h.subject.type)}
+                            </span>
+                            <span className="xs muted">
+                              {h.totalReports ? `${h.totalReports} other ${h.totalReports === 1 ? 'report' : 'reports'}` : 'No other reports'}
+                              {h.reports.length > 0 && ': '}
+                              {h.reports.map((r, n) => (
+                                <Fragment key={r.id}>
+                                  {n > 0 && ', '}
+                                  <Link to={reportHref(r.ref)}>{r.ref}</Link> {r.title} ({shortDate(r.createdAt)}, {(STATUS_LABEL[r.status] ?? r.status).toLowerCase()}
+                                  {r.outcome ? `, ${r.outcome.replace(/_/g, ' ')}` : ''})
+                                </Fragment>
+                              ))}
+                            </span>
+                          </span>
+                          <Badge tone={h.enforcementsInForce ? 'warning' : ''}>{h.enforcementsInForce ? `${h.enforcementsInForce} in force` : 'No actions in force'}</Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
                 <div className="divider" />
+                {withdraw.isError && <Alert tone="danger" title="The request wasn’t withdrawn">{errorMessage(withdraw.error)}</Alert>}
                 <ul className="trr-hist">
                   {d.evidenceRequests.map((q) => (
                     <li key={q.id}>
@@ -576,6 +619,11 @@ function Investigation({ d }: { d: TrustReportDetail }) {
                         </span>
                         <span className="xs muted">Due {dateTime(q.dueAt)}{q.answer ? ` · Answer: ${q.answer}` : ''}</span>
                       </span>
+                      {q.state === 'open' && canInvestigate && (
+                        <Button variant="ghost" size="sm" onClick={() => withdraw.mutate(q.id)} disabled={withdraw.isPending} srLabel={`to ${q.to.label}`}>
+                          Withdraw request
+                        </Button>
+                      )}
                       <StatusBadge status={REQUEST_LABEL[q.state] ?? q.state} />
                     </li>
                   ))}
@@ -619,16 +667,26 @@ function Investigation({ d }: { d: TrustReportDetail }) {
         </div>
 
         <div className="stack gap-5">
-          {!decided && !isClosed(d) && (
-            <Card title="Recommended next step" className="trr-rec" sub={`${recDef.label} · ${recDef.byTrust ? 'done by Trust' : `sent to ${available(recC) ? recC.owner : 'the owning team'}`}`}>
-              <p className="small">{recommended.text}</p>
-              {allowed(recDef.key) ? (
-                <Button size="sm" icon={recDef.icon} onClick={() => openAction(recDef.key)}>
-                  {recDef.label}: review and confirm
+          {!decided && !isClosed(d) && step && (
+            <Card
+              title="Recommended next step"
+              className="trr-rec"
+              sub={recDef ? `${step.label} · ${recDef.byTrust ? 'done by Trust' : `sent to ${recC && available(recC) ? recC.owner : 'the owning team'}`}` : step.label}
+            >
+              {step.detail && <p className="small">{step.detail}</p>}
+              {recDef ? (
+                allowed(recDef.key) ? (
+                  <Button size="sm" icon={recDef.icon} onClick={() => openAction(recDef.key)}>
+                    {recDef.label}: review and confirm
+                  </Button>
+                ) : (
+                  <span className="xs muted">Your role can view this report but not take this action.</span>
+                )
+              ) : step.key === 'assign' && canInvestigate && !d.assignee ? (
+                <Button size="sm" icon="user-plus" onClick={() => assign.mutate()} disabled={assign.isPending}>
+                  Assign to me
                 </Button>
-              ) : (
-                <span className="xs muted">Your role can view this report but not take this action.</span>
-              )}
+              ) : null}
             </Card>
           )}
 
@@ -716,7 +774,7 @@ function Investigation({ d }: { d: TrustReportDetail }) {
                 title={
                   <span className="row gap-2">
                     <span className="small strong">{a.label}</span>
-                    {a.key === recommended.action && <Badge tone="brand">Recommended</Badge>}
+                    {a.key === step?.action && <Badge tone="brand">Recommended</Badge>}
                   </span>
                 }
                 body={!available(c) ? `Does not apply: ${c.unavailable}` : !allowed(a.key) ? 'Your role can’t take this action.' : `${c.what} · ${a.byTrust ? 'done by Trust' : `sent to ${c.owner}`}`}

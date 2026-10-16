@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
@@ -18,7 +18,7 @@ import {
 // Design: pages/admin/admin-returns.html · view "exception-review" = the refund-without-return drawer
 // (?rt=<ref> picks the return; without it the drawer opens on the first exception in the queue).
 // Data: GET returns/requests (tab, filters, page), GET returns/requests/stats (KPIs, tab counts, queue owner),
-// GET returns/requests/{id} (drawer; the ref is resolved through the list search), POST …/approve-without-return
+// GET returns/requests/{ref} (drawer; the RT- ref is accepted as the id), POST …/approve-without-return
 // (sends the refund to Finance; the response says whether it waits for approval), POST …/request-info,
 // POST reports/exports (dataset returns.admin.requests).
 
@@ -108,21 +108,15 @@ export default function Returns() {
     enabled: open && !rtParam,
   });
   const rtRef = rtParam ?? firstException.data?.items[0]?.ref ?? null;
-  const resolved = useQuery({
-    queryKey: ['returns', 'admin-ref', rtRef],
-    queryFn: async () => {
-      const r = await call(api.GET('/api/admin/returns/requests', { params: { query: { q: rtRef!, page: 1, limit: 5 } } }));
-      return r.items.find((x) => x.ref === rtRef) ?? null;
-    },
-    enabled: open && !!rtRef,
-  });
+  // The detail route takes the RT- ref as the id.
   const detail = useQuery({
-    queryKey: ['returns', 'admin-case', resolved.data?.id],
-    queryFn: () => call(api.GET('/api/admin/returns/requests/{id}', { params: { path: { id: resolved.data!.id } } })) as Promise<ReturnCase>,
-    enabled: open && !!resolved.data,
+    queryKey: ['returns', 'admin-case', rtRef],
+    queryFn: () => call(api.GET('/api/admin/returns/requests/{id}', { params: { path: { id: rtRef! } } })) as Promise<ReturnCase>,
+    enabled: open && !!rtRef,
+    retry: (n, e) => !(e instanceof ApiError && e.status === 404) && n < 2,
   });
   const current = open ? detail.data : undefined;
-  const row = resolved.data;
+  const notFound = detail.error instanceof ApiError && detail.error.status === 404;
 
   // Drawer form, reset when another return is opened.
   const [formFor, setFormFor] = useState('');
@@ -173,7 +167,7 @@ export default function Returns() {
     setPage(1);
   };
 
-  const refundStatus = current?.refundRequest?.status ?? row?.refundStatus ?? null;
+  const refundStatus = current?.refundRequest?.status ?? null;
   const mayPropose = can('returns.exceptions.propose');
   const canSend = !!current && mayPropose && !current.exception && !(refundStatus && SENT_REFUNDS.has(refundStatus));
   const canAsk = !!current && can('returns.requests.manage') && (current.allowedActions ?? current.detail.allowedActions ?? []).includes('request-info');
@@ -258,7 +252,7 @@ export default function Returns() {
         { k: 'Past deadline', v: String(s.pastDeadline), d: `${s.sellerRepliesOverdue} seller repl${s.sellerRepliesOverdue === 1 ? 'y' : 'ies'} overdue`, danger: s.pastDeadline > 0 },
         { k: 'Awaiting inspection', v: String(s.awaitingInspection), d: 'Official Store and Fulfilled by Marketly' },
         { k: 'Refunds pending', v: formatMoney(s.refundsPending), d: `${s.refundsPendingCount} refund${s.refundsPendingCount === 1 ? '' : 's'} · not yet sent` },
-        { k: 'Exceptions', v: String(s.tabCounts.exceptions), d: 'Refund without return' },
+        { k: 'Exceptions', v: String(s.exceptions), d: 'Refund without return' },
       ]
     : [];
   const qo = s?.queueOwner;
@@ -500,9 +494,9 @@ export default function Returns() {
         }
       >
         {!current ? (
-          resolved.isError || detail.isError ? (
-            <LoadError error={resolved.error ?? detail.error} onRetry={() => void (resolved.isError ? resolved.refetch() : detail.refetch())} />
-          ) : (resolved.isSuccess && !resolved.data) || (firstException.isSuccess && !firstException.data.items.length && !rtParam) ? (
+          detail.isError && !notFound ? (
+            <LoadError error={detail.error} onRetry={() => void detail.refetch()} />
+          ) : notFound || (firstException.isSuccess && !firstException.data.items.length && !rtParam) ? (
             <EmptyState icon="search-x" title="Return not found">
               {rtRef ? `No return has the reference ${rtRef}.` : 'There are no exceptions in the queue.'}
             </EmptyState>

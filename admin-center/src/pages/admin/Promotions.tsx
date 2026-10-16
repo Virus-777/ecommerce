@@ -8,11 +8,14 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, BarChart, Badge, Button, Card, Icon, Meter, PageHeader, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, announce, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, shortDate } from '@/app/parts';
+import { ExportButton, ExportNotice } from './data/export-button';
+import { useDatasetExport } from './data/report-export';
 import { FUND_TONE, PROMO_KINDS, STATUS_LABEL, TABS, kindLabel, type CampaignRow, type PromotionsDashboard, type TabKey } from './data/promotions';
 
 // Design: pages/admin/admin-promotions.html (no views).
 // Data: GET /api/admin/promotions/dashboard (KPIs, campaign results, daily discount cost),
-// GET /api/admin/promotions/campaigns (the table; filtered on the page); POST /campaigns/{id}/pause|resume.
+// GET /api/admin/promotions/campaigns (the table; filtered on the page); POST /campaigns/{id}/pause|resume (the
+// reason is optional: the server records a default). Export: dataset promotions.admin.campaigns (POST reports/exports).
 // Rows open the campaign editor (admin/promotion-new?id=…), on the Finance confirmation view while in review.
 
 const pct1 = (n?: number | null) => (n == null ? '—' : `${Math.round(n * 10) / 10}%`);
@@ -40,6 +43,8 @@ export default function Promotions() {
   const canPublish = can('promotions.campaigns.publish');
   const canManage = can('promotions.campaigns.manage');
   const canResults = can('promotions.results.view');
+  const canExport = canResults && can('reports.exports.create');
+  const campaignsExport = useDatasetExport('promotions.admin.campaigns');
 
   const [tab, setTab] = useState<TabKey>('all');
   const [q, setQ] = useState('');
@@ -54,7 +59,7 @@ export default function Promotions() {
     mutationFn: (p: CampaignRow) =>
       p.status === 'paused'
         ? call(api.POST('/api/admin/promotions/campaigns/{id}/resume', { params: { path: { id: p.id } }, body: {} }))
-        : call(api.POST('/api/admin/promotions/campaigns/{id}/pause', { params: { path: { id: p.id } }, body: { reason: 'Paused from Promotions and coupons' } })),
+        : call(api.POST('/api/admin/promotions/campaigns/{id}/pause', { params: { path: { id: p.id } }, body: {} })),
     onSuccess: (c) => {
       announce(`${c.name} ${c.status === 'paused' ? 'paused' : 'resumed'}`);
       void qc.invalidateQueries({ queryKey: ['promotions'] });
@@ -80,13 +85,19 @@ export default function Promotions() {
         title="Promotions and coupons"
         sub="Marketing creates campaigns · Finance confirms funding · Pacific Time"
         actions={
-          canManage ? (
-            <Button size="sm" icon="plus" to={href('admin/promotion-new')}>
-              Create campaign
-            </Button>
+          canManage || canExport ? (
+            <>
+              {canExport && <ExportButton exp={campaignsExport} />}
+              {canManage && (
+                <Button size="sm" icon="plus" to={href('admin/promotion-new')}>
+                  Create campaign
+                </Button>
+              )}
+            </>
           ) : undefined
         }
       />
+      <ExportNotice exp={campaignsExport} />
       {canResults && (
         <div className="ab-kpis k5">
           {(d ? kpis(d, range) : Array.from({ length: 5 }, (_, i) => ({ icon: 'tag' as IconName, label: String(i), value: '', note: '' }))).map((k) => (

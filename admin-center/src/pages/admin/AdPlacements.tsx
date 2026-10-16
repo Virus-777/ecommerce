@@ -111,9 +111,10 @@ export default function AdPlacements() {
       eligiblePages: pages,
       maxPerPage: intOrNull(draft.maxPerPage),
       reason: draft.reason.trim(),
-      ...(capChanged ? { frequencyCap: { ...(p.frequencyCap ?? { label: '' }), perSession: intOrNull(draft.perSession), perDay: intOrNull(draft.perDay) } } : {}),
-      ...(p.dismissal.mode === 'days' || draft.dismissDays ? { dismissal: draft.dismissDays ? { mode: 'days', days: Number(draft.dismissDays), label: '' } : { ...p.dismissal } } : {}),
-    } as Omit<PlacementPatch, 'version'>;
+      // Inputs only: the cap and dismissal labels are made by the server (FrequencyCapInput, DismissalRuleInput).
+      ...(capChanged ? { frequencyCap: { perWindow: p.frequencyCap?.perWindow ?? null, perCampaign: p.frequencyCap?.perCampaign ?? null, perSession: intOrNull(draft.perSession), perDay: intOrNull(draft.perDay) } } : {}),
+      ...(p.dismissal.mode === 'days' || draft.dismissDays ? { dismissal: draft.dismissDays ? { mode: 'days', days: Number(draft.dismissDays) } : { mode: p.dismissal.mode, days: p.dismissal.days ?? null } } : {}),
+    } satisfies Omit<PlacementPatch, 'version'>;
     patch.mutate({ p, body, msg: `${p.name} rules saved. The change applies to new displays now and is recorded in Action history.` });
   };
 

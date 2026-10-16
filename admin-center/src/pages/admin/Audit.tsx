@@ -1,6 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode, useCallback } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
@@ -9,9 +9,11 @@ import { Alert, announce, Avatar, Breadcrumbs, Button, Card, ChipRow, Chip, Icon
 import { LoadError, SkeletonLines, dateTime, screenHref } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
 import {
-  actorLabel, APPROVAL_LABEL, approvalSteps, isPending, rolesLabel, TARGET_FILTERS, targetHref, targetMeta, useStaffNames,
+  actorLabel, APPROVAL_LABEL, approvalSteps, isPending, rolesLabel, TARGET_FILTERS, targetHref, targetMeta, useStaffOptions,
   type AuditCategory, type AuditEntry as Entry,
 } from './data/audit';
+import { useExportJob } from './data/report-export';
+import type { ExportJob } from './data/reports';
 
 // Design: pages/admin/admin-audit.html. Entries from GET /api/admin/audit/entries (filters on the server).
 // ?q=, ?staff=<account id>, ?category= and ?target= preset the filters: the entry page's "Filter the log by…" chips link here.
@@ -59,7 +61,6 @@ export default function Audit() {
   const me = useStaffSession();
   const canView = me.can('audit.entries.view');
   const canExport = me.can('audit.entries.export');
-  const names = useStaffNames(canView && me.can('access.roles.view'));
 
   const [q, setQ] = useState(params.get('q') ?? '');
   const [debounced, setDebounced] = useState(q);
@@ -68,6 +69,7 @@ export default function Audit() {
     return () => clearTimeout(t);
   }, [q]);
   const [staff, setStaff] = useState(params.get('staff') ?? '');
+  const names = useStaffOptions(canView && me.can('access.roles.view'));
   const [target, setTarget] = useState(TARGET_FILTERS.find((t) => t.type === params.get('target'))?.label ?? TARGET_FILTERS[0].label);
   const [range, setRange] = useState(params.get('q') || params.get('staff') ? 'All time' : RANGES[0]);
   const initialCat = params.get('category');
@@ -103,24 +105,28 @@ export default function Audit() {
   const toggleChip = (k: ChipKey) =>
     setChips((cs) => (cs.includes(k) ? cs.filter((c) => c !== k) : k === 'pending' ? [...cs, k] : [...cs.filter((c) => c === 'pending'), k]));
 
-  const exportM = useMutation({
-    mutationFn: () =>
-      call(
-        api.POST('/api/admin/audit/exports', {
-          body: { filters: Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== undefined)), format: 'csv', reason: 'Exported from Action history with the filters shown' },
-        }),
-      ),
-    onSuccess: (job) => {
-      if (job.downloadUrl) window.open(job.downloadUrl, '_blank', 'noopener');
-      setNotice({
-        tone: 'success',
-        title: `Export ${job.ref} ${job.state === 'ready' ? 'is ready' : 'started'}`,
-        text: job.state === 'ready' ? `${job.rowCount ?? ''} actions exported as CSV. The export is recorded in Action history.` : 'The file is being prepared. The export is recorded in Action history; its download link is in My exports.',
-      });
-      announce(`Export ${job.ref} started`);
-    },
-    onError: (e) => setNotice({ tone: 'danger', title: 'The export wasn’t started', text: errorMessage(e) }),
-  });
+  const getExport = useCallback((id: string) => call(api.GET('/api/admin/audit/exports/{id}', { params: { path: { id } } })) as Promise<ExportJob>, [api]);
+  const exp = useExportJob(getExport);
+  const startExport = async () => {
+    setNotice(null);
+    const job = await exp.run(
+      () =>
+        call(
+          api.POST('/api/admin/audit/exports', {
+            body: { filters: Object.fromEntries(Object.entries(filters).filter(([, v]) => v !== undefined)), format: 'csv', reason: 'Exported from Action history with the filters shown' },
+          }),
+        ) as Promise<ExportJob>,
+    );
+    if (!job) return;
+    if (job.state === 'ready') {
+      setNotice({ tone: 'success', title: `Export ${job.ref} is ready`, text: `${job.rowCount ?? 0} actions exported as CSV. The export is recorded in Action history.` });
+      announce(`Export ${job.ref} is ready`);
+    } else if (job.state === 'failed' || job.state === 'expired') {
+      setNotice({ tone: 'danger', title: `Export ${job.ref} ${job.state === 'failed' ? 'failed' : 'expired'}`, text: job.error ?? 'Try again, or narrow the filters.' });
+    } else {
+      setNotice({ tone: 'success', title: `Export ${job.ref} started`, text: 'The file is still being prepared. Check again in a minute; the export is recorded in Action history.' });
+    }
+  };
 
   const staffOptions = [{ value: '', label: 'All staff' }, ...[...names].map(([id, name]) => ({ value: id, label: name }))];
   if (staff && !names.has(staff)) staffOptions.push({ value: staff, label: 'Selected staff member' });
@@ -173,8 +179,8 @@ export default function Audit() {
         </div>
         <div className="actions">
           {canExport ? (
-            <Button variant="secondary" size="sm" icon="download" onClick={() => exportM.mutate()} disabled={exportM.isPending}>
-              Export CSV
+            <Button variant="secondary" size="sm" icon="download" onClick={() => void startExport()} disabled={exp.busy} aria-busy={exp.busy || undefined}>
+              {exp.busy ? 'Preparing export…' : 'Export CSV'}
             </Button>
           ) : (
             <Button variant="secondary" size="sm" icon="download" disabled title="Exporting needs the “Export entries” permission">
@@ -183,9 +189,19 @@ export default function Audit() {
           )}
         </div>
       </div>
+      {!!exp.error && (
+        <Alert tone="danger" title="The export wasn’t started">
+          {errorMessage(exp.error)}
+        </Alert>
+      )}
       {notice && (
         <Alert tone={notice.tone} title={notice.title}>
-          {notice.text}
+          {notice.text}{' '}
+          {exp.job && (exp.job.state === 'ready' || exp.job.state === 'queued' || exp.job.state === 'running') && (
+            <Button variant="link" size="sm" onClick={() => void exp.redownload(exp.job!.id).then(() => undefined)}>
+              {exp.job.state === 'ready' ? 'Download again' : 'Check again'}
+            </Button>
+          )}
         </Alert>
       )}
 
@@ -257,7 +273,7 @@ export default function Audit() {
                         ))}
                       {rows.map((e) => {
                         const warn = isPending(e);
-                        const who = actorLabel(e.actor, names);
+                        const who = actorLabel(e.actor);
                         return (
                           <tr key={e.id} className={cx(warn && 'is-warn', e.id === sel?.id && 'is-selected')} aria-selected={e.id === sel?.id}>
                             <td>
@@ -326,7 +342,7 @@ export default function Audit() {
                       <StatusBadge status={APPROVAL_LABEL[e.approval.state]} />
                     </div>
                     <div className="xs sub">
-                      {dateTime(e.at)} · {actorLabel(e.actor, names)}, {rolesLabel(e)}
+                      {dateTime(e.at)} · {actorLabel(e.actor)}, {rolesLabel(e)}
                     </div>
                     <div className="xs sub">
                       {targetMeta(e.target.type).label} <span className="mono">{e.target.ref ?? e.target.id.slice(0, 8)}</span>
@@ -367,7 +383,7 @@ export default function Audit() {
           >
             <KeyValue
               pairs={[
-                ['Staff', `${actorLabel(sel.actor, names)}, ${rolesLabel(sel)}`],
+                ['Staff', `${actorLabel(sel.actor)}, ${rolesLabel(sel)}`],
                 ['Target', targetCell(sel)],
                 ['Change', <Change e={sel} />],
                 ['Reason', sel.reason ?? 'No reason recorded'],

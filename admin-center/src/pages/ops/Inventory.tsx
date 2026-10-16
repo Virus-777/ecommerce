@@ -10,6 +10,8 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Dialog, Field, Icon, Img, PageHeader, Pager, SearchInput, Select, StatusBadge, SummaryRow, TableWrap, Textarea, TextInput, announce } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, dateTime } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
+import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
+import { useDatasetExport } from '@/pages/admin/data/report-export';
 import { BeforeAfter, EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
 // Design: pages/ops/ops-inventory.html · view "adjust-stock" = the Adjust stock dialog.
@@ -189,6 +191,7 @@ export default function Inventory() {
 
   const canAdjust = staff.can('inventory.stock.adjust-official');
   const summary = useQuery({ queryKey: ['inventory', 'summary'], queryFn: () => call(api.GET('/api/admin/inventory/summary', { params: { query: { ownerType: 'official' } as never } })) as Promise<Summary> });
+  const stockExport = useDatasetExport('inventory.admin.stock');
   const params = { ownerType: 'official' as const, q: search || undefined, filter: (grp || undefined) as never, zone: zone || undefined, page, limit: LIMIT };
   const items = useQuery({ queryKey: ['inventory', 'stock-items', params], queryFn: () => call(api.GET('/api/admin/inventory/stock-items', { params: { query: params } })) as Promise<Page<StockItem>>, placeholderData: keepPreviousData });
   const low = useQuery({ queryKey: ['inventory', 'low-stock'], queryFn: () => call(api.GET('/api/admin/inventory/low-stock', { params: { query: { limit: 5 } as never } })) as Promise<Page<LowStock>> });
@@ -269,9 +272,7 @@ export default function Inventory() {
         sub="Reno, NV warehouse · company-owned stock only. Seller stock is never mixed in."
         actions={
           <>
-            <Button variant="secondary" size="sm" icon="download" disabled title="Stock exports aren’t available yet">
-              Export
-            </Button>
+            {staff.can('reports.exports.create') && staff.can('inventory.stock.view') && <ExportButton exp={stockExport} filters={{ ownerType: 'official', q: search || undefined, filter: grp || undefined, zone: zone || undefined }} />}
             {canAdjust && (
               <Button size="sm" icon="sliders-horizontal" onClick={() => openAdjust()} disabled={!pickList.length}>
                 Adjust stock
@@ -280,6 +281,7 @@ export default function Inventory() {
           </>
         }
       />
+      <ExportNotice exp={stockExport} />
       {summary.error ? (
         <LoadError error={summary.error} onRetry={() => void summary.refetch()} />
       ) : (

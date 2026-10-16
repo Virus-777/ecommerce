@@ -9,6 +9,8 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Card, Deadline, Field, Icon, Meter, PageHeader, Select, Stat, StatusBadge, TableWrap, Textarea, TextInput, announce } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, dayKey, deadlineLabel, deadlineTone, time, weekdayDate } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
+import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
+import { useDatasetExport } from '@/pages/admin/data/report-export';
 import { EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows, humanize } from './data/shared';
 
 // Design: pages/ops/ops-finance-checks.html (single view): the settlement checks for the previous market day.
@@ -127,6 +129,7 @@ export default function FinanceChecks() {
   const canDisputes = staff.can('payments.disputes.manage');
   // The day being checked: the previous market day's settlement.
   const date = useMemo(() => dayKey(new Date(Date.now() - 86_400_000)), []);
+  const checksExport = useDatasetExport('finance.admin.checks');
   const [draft, setDraft] = useState<Draft | null>(null);
   const [tried, setTried] = useState(false);
   const [notice, setNotice] = useState('');
@@ -330,9 +333,7 @@ export default function FinanceChecks() {
         sub={sub}
         actions={
           <>
-            <Button variant="secondary" size="sm" icon="download" disabled title="Finance check exports aren’t available yet">
-              Export
-            </Button>
+            {staff.can('reports.exports.create') && staff.can('finance.reconciliation.work') && <ExportButton exp={checksExport} filters={{ date }} />}
             <Button size="sm" icon="circle-check" disabled={!allDone || d?.status === 'completed' || complete.isPending} onClick={() => complete.mutate()}>
               {d?.status === 'completed' ? 'Day check completed' : 'Complete day check'}
             </Button>
@@ -340,6 +341,7 @@ export default function FinanceChecks() {
         }
       />
       {d?.status === 'completed' && <Alert tone="success" title={`Day check for ${weekdayDate(d.date)} completed${d.completedAt ? ` at ${time(d.completedAt)}` : ''}${d.completedBy?.name ? ` by ${d.completedBy.name}` : ''}. The summary went to the Business Owner.`} />}
+      <ExportNotice exp={checksExport} />
       {complete.error && <Alert tone="danger">{errorMessage(complete.error)}</Alert>}
       {day.error && <LoadError error={day.error} onRetry={() => void day.refetch()} />}
       <div className="ac-main">

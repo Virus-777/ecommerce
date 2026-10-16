@@ -102,6 +102,7 @@ export default function Content() {
   const { api } = useApi();
   const qc = useQueryClient();
   const { can } = useStaffSession();
+  const canView = can('content.view');
   const canManage = can('content.homepage.manage');
   const canPublish = can('content.homepage.publish');
   const canPages = can('content.pages.manage');
@@ -115,9 +116,9 @@ export default function Content() {
   const [device, setDevice] = useState<'desktop' | 'phone'>('desktop');
   const [notice, setNotice] = useState<{ tone: 'success' | 'info'; title: string } | null>(null);
 
-  const home = useQuery({ queryKey: ['content', 'homepage'], enabled: canManage, queryFn: () => call(api.GET('/api/admin/content/homepage')) });
-  const versions = useQuery({ queryKey: ['content', 'homepage', 'versions'], enabled: canManage, queryFn: () => call(api.GET('/api/admin/content/homepage/versions', { params: { query: { limit: 10 } } })) });
-  const pages = useQuery({ queryKey: ['content', 'pages'], enabled: canPages, queryFn: () => call(api.GET('/api/admin/content/pages', { params: { query: { limit: 50 } } })) });
+  const home = useQuery({ queryKey: ['content', 'homepage'], enabled: canView, queryFn: () => call(api.GET('/api/admin/content/homepage')) });
+  const versions = useQuery({ queryKey: ['content', 'homepage', 'versions'], enabled: canView, queryFn: () => call(api.GET('/api/admin/content/homepage/versions', { params: { query: { limit: 10 } } })) });
+  const pages = useQuery({ queryKey: ['content', 'pages'], enabled: canView, queryFn: () => call(api.GET('/api/admin/content/pages', { params: { query: { limit: 50 } } })) });
 
   const sections = [...(home.data?.sections ?? [])].sort((a, b) => a.position - b.position);
   const h = home.data;
@@ -278,7 +279,7 @@ export default function Content() {
           ? { label: 'Publish order', run: () => layout.mutate('publish'), note: 'Draft changes saved. Customers see them after you publish.' }
           : { label: 'Publish order', run: undefined, note: 'Draft changes saved. A Content Manager publishes them.' };
 
-  if (!canManage) {
+  if (!canView) {
     return (
       <AdminLayout active="content">
         <div className="page-head">
@@ -287,8 +288,8 @@ export default function Content() {
             <h1 className="h1">Homepage and pages</h1>
           </div>
         </div>
-        <Alert tone="info" title="You don’t have access to the homepage editor">
-          Your role can’t manage homepage sections. Ask a Content Manager if you need changes.
+        <Alert tone="info" title="You don’t have access to Homepage and pages">
+          Viewing the homepage layout and campaign pages needs the “View content” permission. A Platform Administrator can change your roles in Staff and permissions.
         </Alert>
       </AdminLayout>
     );
@@ -306,9 +307,11 @@ export default function Content() {
           <Button variant="secondary" size="sm" icon="eye" to={href('store/home')}>
             Preview homepage
           </Button>
-          <Button size="sm" icon="plus" onClick={() => openEdit()}>
-            Add section
-          </Button>
+          {canManage && (
+            <Button size="sm" icon="plus" onClick={() => openEdit()}>
+              Add section
+            </Button>
+          )}
         </div>
       </div>
 
@@ -367,26 +370,34 @@ export default function Content() {
                     </Link>
                   ) : (
                     <>
-                      <IconButton icon="arrow-up" label={`Move ${s.title} up`} disabled={i === 0 || order.isPending} onClick={() => move(i, -1)} />
-                      <IconButton icon="arrow-down" label={`Move ${s.title} down`} disabled={i === sections.length - 1 || order.isPending} onClick={() => move(i, 1)} />
+                      {canManage && <IconButton icon="arrow-up" label={`Move ${s.title} up`} disabled={i === 0 || order.isPending} onClick={() => move(i, -1)} />}
+                      {canManage && <IconButton icon="arrow-down" label={`Move ${s.title} down`} disabled={i === sections.length - 1 || order.isPending} onClick={() => move(i, 1)} />}
                       <IconButton icon="eye" label={`Preview ${s.title}`} onClick={() => announce(`${s.title}: ${s.description}`)} />
-                      <Button variant="ghost" size="sm" to={href('admin/content', 'edit-section')} onClick={(e) => (e.preventDefault(), openEdit(s))}>
-                        Edit
-                      </Button>
+                      {canManage && (
+                        <Button variant="ghost" size="sm" to={href('admin/content', 'edit-section')} onClick={(e) => (e.preventDefault(), openEdit(s))}>
+                          Edit
+                        </Button>
+                      )}
                     </>
                   )}
                 </span>
               </div>
             ))}
-            <div className="card-foot">
-              <span className="ab-note grow">{publishBtn.note}</span>
-              <Button variant="ghost" size="sm" disabled={!h?.hasDraft || layout.isPending} onClick={() => layout.mutate('discard')}>
-                Discard draft
-              </Button>
-              <Button size="sm" disabled={!publishBtn.run || layout.isPending} onClick={publishBtn.run}>
-                {publishBtn.label}
-              </Button>
-            </div>
+            {canManage ? (
+              <div className="card-foot">
+                <span className="ab-note grow">{publishBtn.note}</span>
+                <Button variant="ghost" size="sm" disabled={!h?.hasDraft || layout.isPending} onClick={() => layout.mutate('discard')}>
+                  Discard draft
+                </Button>
+                <Button size="sm" disabled={!publishBtn.run || layout.isPending} onClick={publishBtn.run}>
+                  {publishBtn.label}
+                </Button>
+              </div>
+            ) : (
+              <div className="card-foot">
+                <span className="ab-note grow">View only: a Content Manager edits and publishes the homepage.</span>
+              </div>
+            )}
           </section>
 
           <Card
@@ -409,11 +420,7 @@ export default function Content() {
                 </Alert>
               </div>
             )}
-            {!canPages ? (
-              <div className="card-body">
-                <span className="small muted">Your role can’t manage campaign pages.</span>
-              </div>
-            ) : pages.isError ? (
+            {pages.isError ? (
               <div className="card-body">
                 <LoadError error={pages.error} onRetry={() => void pages.refetch()} />
               </div>

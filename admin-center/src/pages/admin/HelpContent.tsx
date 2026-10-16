@@ -678,11 +678,16 @@ function ArticleForm({ a, categories }: { a?: ArticleAdmin; categories: S['conte
                 <span className="ab-cell">
                   <span className="strong">Content review</span>
                   <span className="xs muted">Another Content editor checks accuracy and links</span>
+                  {status === 'in_review' && a?.draftAuthor?.name && <span className="xs muted">Written by {a.draftAuthor.name}</span>}
+                  {status === 'in_review' && canEdit && a && !a.canApprove && <span className="xs muted">You wrote this version, so another Content editor approves it.</span>}
                   {status === 'in_review' && canEdit && (
                     <span className="row gap-2">
-                      <Button size="sm" onClick={() => transition.mutate('approve')} disabled={transition.isPending}>
-                        Approve
-                      </Button>
+                      {/* canApprove: in review and the caller isn't the draft's author (SAME_REVIEWER otherwise). */}
+                      {a?.canApprove && (
+                        <Button size="sm" onClick={() => transition.mutate('approve')} disabled={transition.isPending}>
+                          Approve
+                        </Button>
+                      )}
                       <Button variant="ghost" size="sm" onClick={() => transition.mutate('requestChanges')} disabled={transition.isPending}>
                         Request changes
                       </Button>
@@ -706,6 +711,7 @@ export default function HelpContent() {
   const [params, setParams] = useSearchParams();
   const { api } = useApi();
   const { can } = useStaffSession();
+  const canView = can('content.view');
   const canHelp = can('content.help.manage');
   const canPolicies = can('content.policies.edit');
 
@@ -714,9 +720,9 @@ export default function HelpContent() {
   const [cat, setCat] = useState('');
   const [page, setPage] = useState(1);
 
-  const summary = useQuery({ queryKey: ['content', 'help-summary'], enabled: canHelp, queryFn: () => call(api.GET('/api/admin/content/help/summary')) });
-  const items = useQuery({ queryKey: ['content', 'help-items'], enabled: canHelp, queryFn: () => call(api.GET('/api/admin/content/help/items', { params: { query: { limit: 100 } } })) });
-  const policies = useQuery({ queryKey: ['content', 'policies'], enabled: canPolicies, queryFn: () => call(api.GET('/api/admin/content/policies')) });
+  const summary = useQuery({ queryKey: ['content', 'help-summary'], enabled: canView, queryFn: () => call(api.GET('/api/admin/content/help/summary')) });
+  const items = useQuery({ queryKey: ['content', 'help-items'], enabled: canView, queryFn: () => call(api.GET('/api/admin/content/help/items', { params: { query: { limit: 100 } } })) });
+  const policies = useQuery({ queryKey: ['content', 'policies'], enabled: canView, queryFn: () => call(api.GET('/api/admin/content/policies')) });
 
   const openEditor = (p: Record<string, string>) => {
     setParams({ view: 'edit-policy', ...p });
@@ -770,7 +776,7 @@ export default function HelpContent() {
   ];
   const open = (r: Item) => (r.type === 'policy' ? openEditor({ policy: r.id }) : openEditor({ article: r.id }));
 
-  if (!canHelp) {
+  if (!canView) {
     return (
       <AdminLayout active="help-content">
         <div className="page-head">
@@ -780,7 +786,7 @@ export default function HelpContent() {
           </div>
         </div>
         <Alert tone="info" title="You don’t have access to help content">
-          Your role can’t manage help articles and policies.
+          Viewing help articles and policies needs the “View content” permission. A Platform Administrator can change your roles in Staff and permissions.
         </Alert>
       </AdminLayout>
     );
@@ -795,9 +801,11 @@ export default function HelpContent() {
           <p className="sub small">Content maintains articles; each policy has a business owner and an approval step</p>
         </div>
         <div className="actions">
-          <Button variant="secondary" size="sm" icon="plus" onClick={() => openEditor({ new: 'article' })}>
-            New article
-          </Button>
+          {canHelp && (
+            <Button variant="secondary" size="sm" icon="plus" onClick={() => openEditor({ new: 'article' })}>
+              New article
+            </Button>
+          )}
           {canPolicies && (
             <Button size="sm" icon="file-plus" to={href('admin/help-content', 'edit-policy')} onClick={(e) => (e.preventDefault(), openEditor({}))}>
               New policy version
@@ -899,7 +907,7 @@ export default function HelpContent() {
                     </span>
                   </td>
                   <td>
-                    {r.type === 'policy' && !canPolicies ? null : (
+                    {(r.type === 'policy' ? !canPolicies : !canHelp) ? null : (
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => open(r)}>
                         <span>Edit</span>
                         <span className="sr-only"> {r.title}</span>

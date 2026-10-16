@@ -85,3 +85,20 @@ export const toMinor = (s: string): number => {
   const n = Number(s.replace(/[$,\s]/g, ''));
   return s.trim() && Number.isFinite(n) ? Math.round(n * 100) : NaN;
 };
+
+interface GqlMoney {
+  amount: number;
+  currency: string;
+  formatted?: string | null;
+}
+/** AdminCase `refundImpactPreview` (withRemedyPreview): the seller earnings effect of a proposed refund. */
+export interface RefundImpactPreview {
+  fundedBy: string;
+  afterPayout: boolean;
+  note: string | null;
+  refund: GqlMoney;
+  sellerEarningsChange: GqlMoney;
+  feeReturned: GqlMoney;
+  platformShare: GqlMoney;
+  balanceAfter: GqlMoney | null;
+}

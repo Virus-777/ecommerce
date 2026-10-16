@@ -38,7 +38,10 @@ export function flattenTree(tree: ApiCategory[], parent: string | null = null): 
 export const ATTR_TYPES = ['Text', 'Number', 'List', 'List · variation', 'Yes / No'];
 
 export interface CategoryAttribute {
+  /** Row key in the editor (the saved id, or a local key for a new row). */
   id: string;
+  /** The attribute's id once saved; null for a row added here (the server makes the id). */
+  savedId: string | null;
   name: string;
   type: string;
   /** Options (lists) or unit (numbers). */
@@ -60,9 +63,12 @@ export function attrType(a: ApiAttribute): string {
   return a.kind === 'number' ? 'Number' : a.kind === 'bool' ? 'Yes / No' : 'Text';
 }
 
-export function toApiAttribute(a: CategoryAttribute, categoryId: string): ApiAttribute {
+export type AttributeInput = components['schemas']['catalog.AttributeInput'];
+
+/** Editor row -> AttributeInput: saved attributes keep their id; new ones go without (no categoryId: the route names it). */
+export function toApiAttribute(a: CategoryAttribute): AttributeInput {
   const kind = a.type === 'Number' ? 'number' : a.type === 'Yes / No' ? 'bool' : a.type.startsWith('List') ? 'enum' : 'text';
-  return { id: a.id, categoryId, name: a.name.trim(), kind, unit: a.unit, options: a.options, required: a.required, filterable: a.filterable, variantDefining: a.type === 'List · variation' };
+  return { ...(a.savedId ? { id: a.savedId } : {}), name: a.name.trim(), kind, unit: a.unit, options: a.options, required: a.required, filterable: a.filterable, variantDefining: a.type === 'List · variation' };
 }
 
 export const ruleIcon = (r: ImageRule): IconName => {

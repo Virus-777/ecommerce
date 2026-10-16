@@ -5,6 +5,8 @@ import { call, errorMessage, type Api } from '@marketly/web-shared/api';
 import { Button, Dialog, Field, TextInput, Textarea } from '@marketly/web-shared/ui';
 import { fromZonedInput, toPacificInput, type AdCampaign } from './ads';
 
+const OPTIONAL_REASON: CampaignAction[] = ['pause', 'finish'];
+
 export type CampaignAction = 'pause' | 'resume' | 'finish' | 'schedule' | 'activate' | 'archive' | 'renew' | 'submit' | 'approve' | 'request-changes' | 'reject';
 
 /** Which staff permission each action needs (advertising.md, Admin API). */
@@ -36,7 +38,7 @@ export const ACTION_LABEL: Record<CampaignAction, string> = {
   reject: 'Reject',
 };
 
-/** Actions that need input before they run. */
+/** Actions that need input before they run. Pause and finish take an optional reason (the server records a default). */
 export const NEEDS_INPUT: Partial<Record<CampaignAction, 'reason' | 'dates'>> = { pause: 'reason', finish: 'reason', renew: 'dates', 'request-changes': 'reason', reject: 'reason' };
 
 type Post = (path: string, init: { body?: unknown; params: { path: { id: string } } }) => Promise<{ data?: AdCampaign; error?: unknown; response: Response }>;
@@ -58,6 +60,7 @@ export interface PendingAction {
 /** Reason (pause, finish, request changes, reject) or dates (renew) for a campaign action. */
 export function CampaignActionDialog({ pending, busy, error, onClose, onConfirm }: { pending: PendingAction | null; busy: boolean; error: unknown; onClose: () => void; onConfirm: (body: Record<string, unknown>) => void }) {
   const kind = pending ? NEEDS_INPUT[pending.action] : undefined;
+  const optional = !!pending && OPTIONAL_REASON.includes(pending.action);
   const [reason, setReason] = useState('');
   const [start, setStart] = useState('');
   const [end, setEnd] = useState('');
@@ -78,8 +81,8 @@ export function CampaignActionDialog({ pending, busy, error, onClose, onConfirm 
   }
   const submit = () => {
     if (kind === 'reason') {
-      if (!reason.trim()) return setErr('Enter a reason. It is recorded in Action history.');
-      onConfirm({ reason: reason.trim() });
+      if (!reason.trim() && !optional) return setErr('Enter a reason. It is recorded in Action history.');
+      onConfirm(reason.trim() ? { reason: reason.trim() } : {});
     } else if (kind === 'dates') {
       const s = fromZonedInput(start);
       const e = fromZonedInput(end);
@@ -106,7 +109,7 @@ export function CampaignActionDialog({ pending, busy, error, onClose, onConfirm 
       }
     >
       {kind === 'reason' && (
-        <Field label="Reason" error={err || (error ? errorMessage(error) : undefined)}>
+        <Field label="Reason" optional={optional} hint={optional ? 'Recorded in Action history.' : undefined} error={err || (error ? errorMessage(error) : undefined)}>
           <Textarea id="ad-act-reason" value={reason} onChange={(e) => (setReason(e.target.value), setErr(''))} />
         </Field>
       )}

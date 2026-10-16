@@ -12,16 +12,16 @@ import {
   type TimelineEvent,
 } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
-import { LoadError, SkeletonLines, dateTime, deadlineTone, monthYear } from '@/app/parts';
+import { LoadError, dateTime, deadlineTone, monthYear } from '@/app/parts';
 import {
   ADMIN_ORDER, CANCELLABLE, CANCEL_REASONS, FUNDED_BY, REFUND_REASONS, defaultFunding, parseMinor, sum, toInput, toTimeline, usd, withinLimit,
-  type Amt, type HistoryRow, type MyLimit, type OrderAdmin, type OrderGroup, type OrderItem, type SellerLabel,
+  type Amt, type MyLimit, type OrderAdmin, type OrderGroup, type OrderItem, type SellerLabel,
 } from './data/order';
 
 // Design: pages/admin/admin-order.html · view "issue-refund" = the refund dialog. Submitting sends one refund request
 // per seller group (POST returns/refunds); within the staff member's refund limit it is approved at once, above it the
 // response carries the approval and the page shows "sent for approval".
-// Data: GraphQL AdminOrder(ref) (partial data allowed), GET orders/orders/{id}/history, GET access/me and
+// Data: GraphQL AdminOrder(ref) (partial data allowed; `history` is the order timeline), GET access/me and
 // access/approval-actions (limits), POST orders/orders/{id}/cancel-items, …/notes, POST messaging/conversations.
 
 type View = 'issue-refund';
@@ -38,7 +38,7 @@ interface RefundForm {
 
 const EMPTY_FORM: RefundForm = { selected: {}, amounts: {}, reason: '', funding: '', note: '', notify: true };
 const tintOf = (name: string) => String(((name.charCodeAt(0) || 0) % 6) + 1);
-const money = (m?: Amt | null) => formatMoney(m ?? { amount: 0, currency: 'USD' });
+const money = (m?: Amt | null) => m?.formatted ?? formatMoney(m ?? { amount: 0, currency: 'USD' });
 
 /** Timeline with the design's "At risk:" note on warning events (shared Timeline lacks it). */
 function History({ events }: { events: TimelineEvent[] }) {
@@ -95,11 +95,6 @@ export default function Order() {
     enabled: !!ref,
   });
   const o = q.data ?? null;
-  const history = useQuery({
-    queryKey: ['orders', 'admin-order', ref, 'history'],
-    queryFn: () => call(api.GET('/api/admin/orders/orders/{id}/history', { params: { path: { id: o!.id } } })),
-    enabled: !!o,
-  });
   const me = useQuery({ queryKey: ['access', 'me', accountId], queryFn: () => call(api.GET('/api/admin/access/me')) });
   const actions = useQuery({ queryKey: ['access', 'approval-actions'], queryFn: () => call(api.GET('/api/admin/access/approval-actions')), staleTime: 10 * 60_000, enabled: view === 'issue-refund' });
 
@@ -299,7 +294,7 @@ export default function Order() {
 
   const t = o.totals;
   const pay = o.payment;
-  const events = history.data ? toTimeline(history.data.items as HistoryRow[], (iso) => dateTime(iso)) : [];
+  const events = toTimeline(o.history ?? [], (iso) => dateTime(iso));
   const fundingTotals = o.moneyBySeller;
 
   return (
@@ -366,7 +361,7 @@ export default function Order() {
                 title={
                   <span className="row gap-2">
                     <LogoTile initials={initials(s.name)} tint={tintOf(s.name)} size="sm" />
-                    <span>{s.name}</span>
+                    <span>{!s.official && s.slug && can('sellers.accounts.view') ? <Link to={href('admin/seller', '', { slug: s.slug })}>{s.name}</Link> : s.name}</span>
                     {s.official ? (
                       <Badge tone="brand" icon="badge-check">
                         Official
@@ -611,7 +606,7 @@ export default function Order() {
               ) : undefined
             }
           >
-            {history.isError ? <LoadError error={history.error} onRetry={() => void history.refetch()} /> : history.isPending ? <SkeletonLines rows={4} /> : events.length ? <History events={events} /> : <p className="small muted">No history yet.</p>}
+            {events.length ? <History events={events} /> : <p className="small muted">No history yet.</p>}
           </Card>
         </div>
 

@@ -10,6 +10,7 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Button, Card, Deadline, Dialog, Field, Icon, KeyValue, Legend, Meter, PageHeader, SegmentedControl, SplitBar, Stat, StatusBadge, TableWrap, Tabs, Textarea, announce, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone } from '@/app/parts';
+import { exportNote, useDatasetExport } from './data/dataset-export';
 import {
   PERIODS, feeRulePairs, pct, periodRange, reconEdge, refundEdge, refundWhy,
   type Dispute, type Edge, type FeeRules, type FinanceOverview, type Money, type Period, type ReconItem, type Refund,
@@ -18,7 +19,8 @@ import {
 // Design: pages/admin/admin-finance.html · views "disputes-and-chargebacks" and "refunds-failing"
 // are the tabs of the Finance queues card.
 // Data: GET /api/admin/finance/overview (KPIs, money flow, discount funding), /finance/fee-rules, the open
-// reconciliation items (Unexplained amounts), /payments/disputes and /payments/refunds?failing=true.
+// reconciliation items (Unexplained amounts), /payments/disputes and /payments/refunds?failing=true; Export =
+// POST reports/exports (dataset finance.admin.overview for the shown range, payment-date basis; polled, then downloaded).
 
 type Tab = 'disputes-and-chargebacks' | 'refunds-failing';
 
@@ -131,6 +133,8 @@ export default function Finance() {
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
 
   const range = periodRange(period);
+  const exporter = useDatasetExport('finance.admin.overview');
+  const exported = exportNote(exporter.job);
   const canLedger = can('finance.ledger.view');
   const canRecon = can('finance.reconciliation.work');
   const canDisputes = can('payments.disputes.manage');
@@ -276,9 +280,11 @@ export default function Finance() {
         actions={
           <>
             <SegmentedControl items={PERIODS} active={period} onChange={setPeriod} />
-            <Button variant="secondary" size="sm" icon="download" disabled title="Exporting the finance overview isn’t available yet">
-              Export
-            </Button>
+            {canLedger && (
+              <Button variant="secondary" size="sm" icon="download" disabled={exporter.busy} onClick={() => void exporter.run({ from: range.from, to: range.to, basis: 'payment_date' })}>
+                {exporter.busy ? 'Exporting…' : 'Export'}
+              </Button>
+            )}
           </>
         }
       />
@@ -287,6 +293,15 @@ export default function Finance() {
           Your role doesn’t include the finance ledger. Ask a Finance Manager if you need access.
         </Alert>
       )}
+      {exporter.error ? (
+        <Alert tone="danger" title="We couldn’t export the overview">
+          {errorMessage(exporter.error)}
+        </Alert>
+      ) : exported ? (
+        <Alert tone={exported.tone} title={exported.tone === 'danger' ? 'The export failed' : exported.tone === 'success' ? 'Finance overview exported' : 'Export started'}>
+          {exported.text}
+        </Alert>
+      ) : null}
       {overview.isError && <LoadError error={overview.error} onRetry={() => void overview.refetch()} />}
       {canLedger && (
         <div className="ab-kpis k6">

@@ -5,12 +5,12 @@ import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useIsPhone } from '@marketly/web-shared/lib/hooks';
-import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
+import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Dialog, EmptyState, Field, Icon, LogoTile, Meter, Pager, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, TextInput, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError } from '@/app/parts';
-import { SELLER_STATUS, feedbackLabel, initialsOf, signedMoney, statusLabel, tintOf, useDebounced, useInView, type ApplicationRow, type SellerRow, type StatsBalances } from './data/seller';
+import { SELLER_STATUS, feedbackLabel, initialsOf, signedMoney, statusLabel, tintOf, useDebounced, useInView, type ApplicationRow, type SellerRow } from './data/seller';
 
 // Design: pages/admin/admin-sellers.html (single view). Status tabs link to "#" in the design;
 // here they filter the list, in sync with the Status filter.
@@ -100,11 +100,11 @@ export default function Sellers() {
   const totalPages = (listQ.data as { totalPages?: number } | undefined)?.totalPages ?? 1;
   const more = useInView<HTMLDivElement>(() => void phoneQ.fetchNextPage(), isPhone && phoneQ.hasNextPage && !phoneQ.isFetchingNextPage);
 
-  const categories = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')) as Promise<Category[]>, staleTime: 300_000 });
+  const categories = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')) as Promise<Category[]>, staleTime: 300_000, enabled: can('catalog.view') });
   const catOpts = [{ value: '', label: 'Any category' }, ...(categories.data ?? []).filter((c) => !c.parentId).map((c) => ({ value: c.id, label: c.name }))];
 
   // Open applications: the Applications button and links for sellers whose account is still in review.
-  const canApps = can('sellers.applications.review');
+  const canApps = can('sellers.applications.view');
   const apps = useQuery({
     queryKey: ['sellers', 'applications', 'list', 'all'],
     queryFn: () => call(api.GET('/api/admin/sellers/applications', { params: { query: { limit: 100 } } })),
@@ -116,7 +116,7 @@ export default function Sellers() {
 
   const sellerTo = (r: SellerRow) => {
     const appRef = ['applied', 'information_required', 'under_review'].includes(r.status) ? appByStore.get(r.storeName.toLowerCase()) : undefined;
-    return appRef ? href('admin/seller-application', '', { ref: appRef }) : href('admin/seller', '', { slug: r.ref });
+    return appRef ? href('admin/seller-application', '', { ref: appRef }) : href('admin/seller', '', { slug: r.slug });
   };
   const rowEdge = (r: SellerRow) => (r.status === 'suspended' ? 'flagged' : r.onTimeDispatchPct != null && r.onTimeDispatchPct < TARGET && r.status !== 'closed' ? 'warn' : '');
 
@@ -136,7 +136,7 @@ export default function Sellers() {
     { value: '', label: 'All', count: stats.data ? total : undefined },
     ...TAB_ORDER.map((s) => ({ value: s, label: SELLER_STATUS[s]!, count: stats.data ? (byStatus[s] ?? 0) : undefined })),
   ];
-  const balances = (stats.data?.balances ?? null) as StatsBalances | null;
+  const balances = stats.data?.balances ?? null;
 
   const sendInvite = useMutation({
     mutationFn: () => call(api.POST('/api/admin/sellers/seller-invitations', { body: { email: email.trim(), businessName: business.trim() } })),
@@ -267,7 +267,7 @@ export default function Sellers() {
             value={stats.isLoading ? kpi(undefined) : balances?.total ? formatMoney(balances.total) : '—'}
             note={
               balances?.total
-                ? `${formatMoney(balances.held ?? ({ amount: 0, currency: balances.total.currency } as MoneyValue))} held · ${balances.negativeCount ?? 0} negative`
+                ? `${formatMoney(balances.held)} held · ${balances.negativeCount} negative`
                 : stats.data
                   ? 'Balance totals not available'
                   : ' '

@@ -10,6 +10,8 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Breadcrumbs, Button, Card, Checkbox, Deadline, EmptyState, Field, Icon, Img, KeyValue, OptionCard, PageHeader, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, Textarea, TextInput, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, dateTime, deadlineLabel, deadlineTone, shortDate } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
+import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
+import { useDatasetExport } from '@/pages/admin/data/report-export';
 import { CONDITIONS, OUTCOMES, outcomeDisabled, stockMovement, type Grade, type Outcome } from './data/returns';
 import { BeforeAfter, EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
@@ -94,6 +96,7 @@ function Queue() {
   const staff = useStaffSession();
   const [tab, setTab] = useState<Tab>('received');
   const canInspect = staff.can('returns.inspections.record');
+  const inspectionsExport = useDatasetExport('returns.admin.inspections');
   const list = useQuery({ queryKey: ['returns', 'inspections', tab], queryFn: () => call(api.GET('/api/admin/returns/inspections', { params: { query: { tab, limit: 100 } } })) as Promise<{ items: QueueRow[] }> });
   const stats = useQuery({ queryKey: ['returns', 'inspections', 'stats'], queryFn: () => call(api.GET('/api/admin/returns/inspections/stats')) as Promise<Stats> });
   const start = useMutation({
@@ -145,11 +148,10 @@ function Queue() {
         title="Return inspection"
         sub="Official Store returns received at Reno, NV. Warehouse inspects, Inventory records the stock outcome, Finance approves the refund."
         actions={
-          <Button variant="secondary" size="sm" icon="download" disabled title="Return exports aren’t available yet">
-            Export
-          </Button>
+          staff.can('reports.exports.create') && staff.can('returns.inspections.record') ? <ExportButton exp={inspectionsExport} filters={{ tab }} /> : undefined
         }
       />
+      <ExportNotice exp={inspectionsExport} />
       {start.error && <Alert tone="danger">{errorMessage(start.error)}</Alert>}
       {stats.error ? (
         <LoadError error={stats.error} onRetry={() => void stats.refetch()} />

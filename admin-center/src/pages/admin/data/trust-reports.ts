@@ -131,20 +131,20 @@ export function actionsFor(d: TrustReportDetail): Record<TrustActionKey, CaseAct
   };
 }
 
-/** A next step derived from the report's state (the API has no recommended step). */
-export function recommendedFor(d: TrustReportDetail, actions: Record<TrustActionKey, CaseAction>): { action: TrustActionKey; text: string } {
-  const openRequest = d.evidenceRequests.some((r) => r.state === 'open');
-  const ra = actions['request-info'];
-  if (!openRequest && available(ra) && d.riskLevel !== 'low') return { action: 'request-info', text: `${ra.what}, due in 5 days, before deciding. Nothing else changes while the request is open.` };
-  const owner = (['restrict-listing', 'suspend', 'hold-payouts'] as const).find((k) => {
-    const c = actions[k];
-    return available(c) && !c.done;
-  });
-  if (owner && d.riskLevel === 'high') {
-    const c = actions[owner] as Exclude<CaseAction, { unavailable: string }>;
-    return { action: owner, text: `${c.what}. ${c.owner} carries it out from their queue and records the reason.` };
-  }
-  return { action: 'clear', text: d.riskLevel === 'low' ? 'The risk score is low. Close the report if the evidence does not show a breach.' : 'If the checks and answers do not show a breach, close the report and tell the reporter.' };
+/**
+ * The report's next step as the API states it (TrustReport.nextStep: label and detail), with the action on this
+ * page that carries it out, when there is one: ask for proof, recommend an owner action, or clear the report.
+ */
+export function nextStepOf(d: TrustReportDetail, actions: Record<TrustActionKey, CaseAction>): { key: string; label: string; detail: string | null; action: TrustActionKey | null } | null {
+  const n = d.nextStep;
+  if (!n) return null;
+  const pick = (...keys: TrustActionKey[]) => keys.find((k) => available(actions[k]) && !(actions[k] as { done?: unknown }).done) ?? null;
+  const action =
+    n.key === 'gather_evidence' ? pick('request-info')
+    : n.key === 'add_recommendation' ? pick('restrict-listing', 'suspend', 'hold-payouts')
+    : n.key === 'resolve' ? 'clear'
+    : null;
+  return { key: n.key, label: n.label, detail: n.detail ?? null, action };
 }
 
 const SUSPEND_REASON: Record<string, string> = {

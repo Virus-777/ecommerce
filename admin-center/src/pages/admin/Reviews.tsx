@@ -16,7 +16,8 @@ import {
 
 // Design: pages/admin/admin-reviews.html (reported content: queue + decision) ·
 // view "q-a-and-seller-responses" = the Q&A answers and seller responses tables.
-// API: GET /api/admin/reviews/moderation-items (status open / decided), /moderation-items/{id}, /moderation-reasons;
+// API: GET /api/admin/reviews/moderation-items (status open / decided; decided items carry `decision`: outcome, reason,
+// moderator), /moderation-items/{id}, /moderation-reasons;
 // POST /moderation-items/{id}/decide and /refer; staff answers POST /reviews/questions/{id}/answers.
 
 type View = 'q-a-and-seller-responses';
@@ -581,25 +582,38 @@ export default function Reviews() {
                       </td>
                     </tr>
                   )}
-                  {(decidedQ.data?.items ?? []).map((d) => (
-                    <tr key={d.id}>
-                      <td>
-                        <span className="stack gap-0">
-                          <span className="small strong">{d.title}</span>
-                          <span className="xs muted">{KIND_LABEL[d.contentType]}</span>
-                        </span>
-                      </td>
-                      <td>
-                        <StatusBadge status={d.visibility === 'hidden' ? 'Removed' : 'Kept'} tone={d.visibility === 'hidden' ? 'danger' : 'success'} />
-                      </td>
-                      <td>
-                        <span className="small">{d.reasons.map((r) => reasonLabel(r, reasons)).join(', ')}</span>
-                      </td>
-                      <td>
-                        <span className="small">Reported {dateTime(d.firstReportedAt)}</span>
-                      </td>
-                    </tr>
-                  ))}
+                  {(decidedQ.data?.items ?? []).map((d) => {
+                    // The recorded decision (outcome, reason, moderator); older items fall back to visibility and reports.
+                    const dec = d.decision;
+                    const removed = dec ? dec.outcome === 'remove' || dec.outcome === 'reject_response' : d.visibility === 'hidden';
+                    const who = dec ? (dec.by.name ?? (dec.by.kind === 'system' ? 'Trust and Risk enforcement' : 'Marketly staff')) : null;
+                    return (
+                      <tr key={d.id}>
+                        <td>
+                          <span className="stack gap-0">
+                            <span className="small strong">{d.title}</span>
+                            <span className="xs muted">{KIND_LABEL[d.contentType]}</span>
+                          </span>
+                        </td>
+                        <td>
+                          <StatusBadge status={dec?.outcomeLabel ?? (removed ? 'Removed' : 'Kept')} tone={removed ? 'danger' : dec?.outcome === 'request_edit' ? 'warning' : 'success'} />
+                        </td>
+                        <td>
+                          <span className="small">{dec ? dec.reason : d.reasons.map((r) => reasonLabel(r, reasons)).join(', ')}</span>
+                        </td>
+                        <td>
+                          {dec ? (
+                            <span className="stack gap-0">
+                              <span className="small">{who}</span>
+                              <span className="xs muted">{dateTime(dec.at)}</span>
+                            </span>
+                          ) : (
+                            <span className="small">Reported {dateTime(d.firstReportedAt)}</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {decidedQ.isSuccess && decidedQ.data.items.length === 0 && (
                     <tr>
                       <td colSpan={4}>

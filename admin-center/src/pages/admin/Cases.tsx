@@ -9,6 +9,7 @@ import { Alert, Avatar, Badge, Button, Deadline, Dialog, Field, Icon, LazyLoad, 
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, deadlineLabel, deadlineTone } from '@/app/parts';
 import { useDebounced } from './data/customers';
+import { exportNote, useDatasetExport } from './data/dataset-export';
 import {
   API_SORT, API_TAB, PRIORITY_LABEL, PRIORITY_TONE, TAB_LABEL, minutesLabel,
   type ApiPriority, type Assignee, type CaseCategory, type CaseRow, type CaseStats, type SortKey, type TabKey,
@@ -16,7 +17,8 @@ import {
 
 // Design: pages/admin/admin-cases.html · view "bulk-assign" = Unassigned tab with its rows selected and the bulk bar.
 // Data: GET /api/admin/support/cases (tab, q, category, priority, sort, page), /cases/stats (KPIs, tab counts),
-// /categories, /assignees. Writes: POST /cases/assign (bulk owner), /cases/priority (bulk priority with a reason).
+// /categories, /assignees. Writes: POST /cases/assign (bulk owner), /cases/priority (bulk priority, optional reason),
+// POST /api/admin/reports/exports (dataset support.admin.cases, the current tab and filters; polled, then downloaded).
 
 const LIMIT = 25;
 
@@ -84,7 +86,6 @@ export default function Cases() {
   const [priOpen, setPriOpen] = useState(false);
   const [newPri, setNewPri] = useState<ApiPriority>('high');
   const [priReason, setPriReason] = useState('');
-  const [priErr, setPriErr] = useState('');
   const preselected = useRef(false);
 
   const canAssign = can('support.cases.assign');
@@ -171,7 +172,7 @@ export default function Cases() {
     onError: (e) => setDone({ tone: 'danger', title: 'The cases weren’t assigned', body: errorMessage(e) }),
   });
   const setPriority = useMutation({
-    mutationFn: (v: { caseIds: string[]; priority: ApiPriority; reason: string }) => call(api.POST('/api/admin/support/cases/priority', { body: v })),
+    mutationFn: (v: { caseIds: string[]; priority: ApiPriority; reason?: string }) => call(api.POST('/api/admin/support/cases/priority', { body: v })),
     onSuccess: (_r, v) => {
       setDone({ tone: 'success', title: `Priority set to ${PRIORITY_LABEL[v.priority]} on ${plural(v.caseIds.length)}`, body: 'Sort by priority to see the new order.' });
       setPriOpen(false);
@@ -180,13 +181,12 @@ export default function Cases() {
     },
   });
 
-  const applyPriority = () => {
-    if (!priReason.trim()) {
-      setPriErr('Enter a reason. It is recorded on every case.');
-      return;
-    }
-    setPriority.mutate({ caseIds: ids, priority: newPri, reason: priReason.trim() });
-  };
+  // The reason is optional (G68): left out, each case records "Priority changed from the case list".
+  const applyPriority = () => setPriority.mutate({ caseIds: ids, priority: newPri, reason: priReason.trim() || undefined });
+
+  const exporter = useDatasetExport('support.admin.cases');
+  const exported = exportNote(exporter.job);
+  const exportFilters = { tab: API_TAB[tab], q: term || undefined, category: cat || undefined, priority: pri || undefined };
 
   const legend = [
     ...(rows.some((c) => tone(c) === 'danger') ? [{ tone: 'danger' as const, label: 'Red edge = urgent: overdue or past target' }] : []),
@@ -203,9 +203,11 @@ export default function Cases() {
         sub={ownerLine ? ownerLine.charAt(0).toUpperCase() + ownerLine.slice(1) : undefined}
         actions={
           <>
-            <Button variant="secondary" size="sm" icon="download" disabled title="Exporting the case queue isn’t available yet">
-              Export
-            </Button>
+            {can('support.cases.view') && (
+              <Button variant="secondary" size="sm" icon="download" disabled={exporter.busy} onClick={() => void exporter.run(exportFilters)}>
+                {exporter.busy ? 'Exporting…' : 'Export'}
+              </Button>
+            )}
             {canHandle && (
               <Button size="sm" icon="plus" disabled title="Open a case from the customer or the order">
                 New case
@@ -214,6 +216,15 @@ export default function Cases() {
           </>
         }
       />
+      {exporter.error ? (
+        <Alert tone="danger" title="We couldn’t export the case queue">
+          {errorMessage(exporter.error)}
+        </Alert>
+      ) : exported ? (
+        <Alert tone={exported.tone} title={exported.tone === 'danger' ? 'The export failed' : exported.tone === 'success' ? 'Case queue exported' : 'Export started'}>
+          {exported.text}
+        </Alert>
+      ) : null}
       {stats.isError && <LoadError error={stats.error} onRetry={() => void stats.refetch()} />}
       <div className="ab-kpis k5">
         {stats.isPending
@@ -308,7 +319,6 @@ export default function Cases() {
                 size="sm"
                 onClick={() => {
                   setPriReason('');
-                  setPriErr('');
                   setPriority.reset();
                   setPriOpen(true);
                 }}
@@ -479,15 +489,8 @@ export default function Cases() {
             <Radio key={p} id={`cs-setpri-${p}`} name="cs-setpri" label={PRIORITY_LABEL[p]} checked={newPri === p} onChange={() => setNewPri(p)} />
           ))}
         </fieldset>
-        <Field label="Reason" error={priErr || undefined}>
-          <Textarea
-            id="cs-setpri-reason"
-            value={priReason}
-            onChange={(e) => {
-              setPriReason(e.target.value);
-              setPriErr('');
-            }}
-          />
+        <Field label="Reason (optional)" hint="Recorded on every case. Left empty, the history says the priority was changed from the case list.">
+          <Textarea id="cs-setpri-reason" value={priReason} onChange={(e) => setPriReason(e.target.value)} />
         </Field>
       </Dialog>
     </AdminLayout>

@@ -90,8 +90,8 @@ function ReportCard({ r, detail, first, onDismiss }: { r: ReportRow; detail?: Tr
           )}
           <span className="small strong">Linked records</span>
           <div className="ab-links">
-            {links.map((l) => (
-              <Link key={l.label} className="ab-link" to={l.to}>
+            {links.map((l, i) => (
+              <Link key={`${i}-${l.label}`} className="ab-link" to={l.to}>
                 <Icon name={l.icon} />
                 {l.label}
               </Link>

@@ -1,18 +1,22 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import {
-  ApiError, call, errorMessage, parseRatio, PRODUCT_IMAGE_LIMITS, productImageSpecKey, resolveProductImageSpec, sizeText, useApi, useProductImageSpec, validateProductImageSetting,
+  call, errorMessage, parseRatio, PRODUCT_IMAGE_LIMITS, productImageSpecKey, resolveProductImageSpec, sizeText, useApi, useProductImageSpec, validateProductImageSetting,
   type ProductImageSetting,
 } from '@marketly/web-shared/api';
 import { Alert, announce, Badge, Button, Card, Field, Select, TextInput } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
+import { date } from '@/app/parts';
 import { effectiveInstant } from './staff';
-import type { SettingChange } from './settings';
+import { dayFromToday, type SettingChange, type SettingDetail } from './settings';
 
 // Settings › Product images (designed in React; no design file): the aspect ratio every product image is cropped
 // to, the product-page and thumbnail sizes the backend keeps, and the encoder quality. Saved as the setting
-// `media.productImage` through the settings change flow (draft → submit; second reviewer as the setting
-// requires). New uploads use it; see web-shared/docs/BACKEND-PRODUCT-IMAGES.md for existing images.
+// `media.productImage` through the settings change flow (draft → submit with a reason; a second reviewer
+// approves, as the definition says). The current values come from GET media/image-specs; the definition
+// (GET settings/values/media.productImage) gives the notice period (minLeadDays), and GET settings/changes?key=…
+// lists changes waiting for approval or scheduled. Existing images are rebuilt or flagged for re-crop by the
+// backend's job once the change takes effect.
 
 const SETTING_KEY = 'media.productImage';
 
@@ -71,7 +75,22 @@ export function ProductImageSettingsCard({ id }: { id?: string }) {
   const { spec, loading } = useProductImageSpec();
   const current: ProductImageSetting = { aspectRatio: spec.aspectRatio, detailWidth: spec.detailWidth, thumbnailWidth: spec.thumbnailWidth, quality: spec.quality };
 
+  const detail = useQuery({ queryKey: ['settings', 'value', SETTING_KEY], queryFn: () => call(api.GET('/api/admin/settings/values/{key}', { params: { path: { key: SETTING_KEY } } })) as Promise<SettingDetail>, enabled: can('settings.view') });
+  const pending = useQuery({
+    queryKey: ['settings', 'changes', SETTING_KEY],
+    enabled: can('settings.view'),
+    queryFn: async () => {
+      const [a, b] = await Promise.all(
+        (['pending_approval', 'scheduled'] as const).map((status) => call(api.GET('/api/admin/settings/changes', { params: { query: { key: SETTING_KEY, status, limit: 5 } } })) as Promise<{ items: SettingChange[] }>),
+      );
+      return [...a.items, ...b.items];
+    },
+  });
+  const lead = detail.data?.definition.minLeadDays ?? 0;
+  const earliest = dayFromToday(lead);
+
   const [form, setForm] = useState<Form>(() => toForm(current));
+  const [effective, setEffective] = useState('');
   const [reason, setReason] = useState('');
   const [tried, setTried] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'success' | 'info' | 'danger'; title: string; text: string } | null>(null);
@@ -88,12 +107,17 @@ export function ProductImageSettingsCard({ id }: { id?: string }) {
   const changed = JSON.stringify(value) !== JSON.stringify(current);
   const set = (k: keyof Form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  const effectiveDay = effective && effective > earliest ? effective : earliest;
   const save = useMutation({
     mutationFn: async () => {
       const draft = (await call(
-        api.POST('/api/admin/settings/changes', { body: { items: [{ key: SETTING_KEY, value }], effectiveAt: effectiveInstant(''), applyScope: 'new_only', reason: reason.trim() } }),
+        api.POST('/api/admin/settings/changes', { body: { items: [{ key: SETTING_KEY, value }], effectiveAt: effectiveInstant(effectiveDay), applyScope: 'new_only', reason: reason.trim() } }),
       )) as SettingChange;
-      if (draft.impact.blocking.length) return draft;
+      if (draft.impact.blocking.length) {
+        // Don't leave a draft behind that can't be submitted.
+        await call(api.POST('/api/admin/settings/changes/{id}/cancel', { params: { path: { id: draft.id } }, body: { reason: 'Not saved: blocked by the impact check' } })).catch(() => undefined);
+        return draft;
+      }
       return (await call(api.POST('/api/admin/settings/changes/{id}/submit', { params: { path: { id: draft.id } }, body: { reason: reason.trim() } }))) as SettingChange;
     },
     onSuccess: (c) => {
@@ -104,25 +128,23 @@ export function ProductImageSettingsCard({ id }: { id?: string }) {
       const what = `${value.aspectRatio}, product page ${sizeText(preview.detail)}, thumbnail ${sizeText(preview.thumbnail)}, quality ${value.quality}`;
       if (c.status === 'pending_approval') {
         const who = c.impact.approvers.join(' or ') || 'a second reviewer';
-        setNotice({ tone: 'info', title: 'Sent for approval', text: `${what}. ${who} approves it; until then new uploads keep the current settings.` });
+        setNotice({ tone: 'info', title: 'Sent for approval', text: `${what}. ${who} approves it; it takes effect ${date(c.effectiveAt)}. Until then the current settings stay in place.` });
       } else {
-        setNotice({ tone: 'success', title: 'Product image settings saved', text: `${what}. New uploads use them from now on.` });
+        setNotice({ tone: 'success', title: 'Product image settings scheduled', text: `${what}. They take effect ${date(c.effectiveAt)}.` });
       }
       announce('Product image settings sent');
       setReason('');
       setTried(false);
       void qc.invalidateQueries({ queryKey: productImageSpecKey('admin') });
+      void qc.invalidateQueries({ queryKey: ['settings'] });
     },
-    onError: (e) => {
-      // Backend not updated yet: the setting doesn't exist.
-      const missing = e instanceof ApiError && (e.status === 404 || /UNKNOWN_SETTING|SETTING_NOT_FOUND|NOT_FOUND/.test(e.code));
-      setNotice(
-        missing
-          ? { tone: 'info', title: 'The server doesn’t have this setting yet', text: 'The backend update for product images (docs/BACKEND-PRODUCT-IMAGES.md) adds media.productImage. Until then every app uses 1:1, 800 × 800 and 320 × 320.' }
-          : { tone: 'danger', title: 'The change wasn’t saved', text: errorMessage(e) },
-      );
-    },
+    onError: (e) => setNotice({ tone: 'danger', title: 'The change wasn’t saved', text: errorMessage(e) }),
   });
+  const waiting = pending.data ?? [];
+  const valueOf = (c: SettingChange) => {
+    const v = c.items.find((i) => i.key === SETTING_KEY)?.to as ProductImageSetting | undefined;
+    return v ? `${v.aspectRatio}, product page ${v.detailWidth} px, thumbnail ${v.thumbnailWidth} px, quality ${v.quality}` : c.items.map((i) => i.toText).join(', ');
+  };
 
   const submit = () => {
     setTried(true);
@@ -141,7 +163,21 @@ export function ProductImageSettingsCard({ id }: { id?: string }) {
       title="Product images"
       titleClassName="h3"
       sub="Every product image is cropped to this ratio when it is uploaded, then kept in two sizes: the product page and the thumbnail used in lists, search, cart, orders and the app."
-      actions={spec.fromServer ? <Badge tone="success">Saved on the server</Badge> : <Badge tone="warning">App defaults in use</Badge>}
+      actions={
+        <>
+          {waiting.some((c) => c.status === 'pending_approval') && (
+            <Badge tone="warning" icon="hourglass">
+              Approval pending
+            </Badge>
+          )}
+          {waiting.some((c) => c.status === 'scheduled') && (
+            <Badge tone="warning" icon="calendar-clock">
+              Change scheduled
+            </Badge>
+          )}
+          {spec.fromServer ? <Badge tone="success">Saved on the server</Badge> : <Badge tone="warning">App defaults in use</Badge>}
+        </>
+      }
     >
       <div className="stack gap-4">
         {notice && (
@@ -150,10 +186,16 @@ export function ProductImageSettingsCard({ id }: { id?: string }) {
           </Alert>
         )}
         {!spec.fromServer && !loading && (
-          <Alert tone="info" title="Not on the server yet">
-            The server doesn’t serve product image settings yet, so the apps use 1:1, 800 × 800 and 320 × 320. Changes can be saved once the backend update is in.
+          <Alert tone="warning" title="The saved settings couldn’t be loaded">
+            The values below are the apps’ defaults (1:1, 800 × 800 and 320 × 320). Reload the page before changing them.
           </Alert>
         )}
+        {waiting.map((c) => (
+          <Alert key={c.id} tone="info" title={c.status === 'pending_approval' ? `${c.ref} is waiting for approval` : `${c.ref} is scheduled`}>
+            {valueOf(c)} · takes effect {date(c.effectiveAt)}
+            {c.status === 'pending_approval' ? `. ${c.impact.approvers.join(' or ') || 'A second reviewer'} approves it.` : '.'}
+          </Alert>
+        ))}
         <div className="grid md2 lg4 gap-3">
           <Field label="Aspect ratio" error={tried && form.ratio !== 'custom' ? errors.aspectRatio : undefined}>
             <Select id="pi-ratio" options={RATIOS} value={form.ratio} onChange={(e) => set('ratio')(e.target.value)} disabled={!canPropose} />
@@ -184,6 +226,9 @@ export function ProductImageSettingsCard({ id }: { id?: string }) {
         </div>
         {canPropose ? (
           <div className="grid md2 gap-3 items-end">
+            <Field label="Takes effect" hint={lead ? `At least ${lead} days from today, so sellers are told before it starts.` : 'The change can start today.'}>
+              <TextInput id="pi-effective" type="date" icon="calendar" min={earliest} value={effectiveDay} onChange={(e) => setEffective(e.target.value)} />
+            </Field>
             <Field label="Reason for the change" error={tried && !reason.trim() ? 'Say why, for the change history and the approver.' : undefined}>
               <TextInput id="pi-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Portrait photos for fashion" />
             </Field>

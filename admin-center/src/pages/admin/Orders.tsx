@@ -18,8 +18,8 @@ import {
 // Design: pages/admin/admin-orders.html · view "overdue-dispatch" = the saved filter with the
 // late-by/owner columns, the bulk bar and the applied-filter chips.
 // Data: GET orders/orders (filters, q, page), GET orders/saved-filters (+ POST to save), GET sellers/sellers (seller filter),
-// GET shipping/exceptions?kind=late_dispatch (exception ids behind the overdue rows), POST shipping/exceptions/bulk and
-// …/{id}/notify-seller (remind, assign, escalate), POST orders/exports (Export CSV).
+// rows' openExceptionIds (open delivery exceptions behind the overdue rows), POST shipping/exceptions/{id}/notify-seller
+// (Remind), POST shipping/exceptions/bulk (bulk remind, assign, escalate), POST orders/exports (Export CSV).
 
 type View = 'overdue-dispatch';
 
@@ -117,16 +117,6 @@ export default function Orders() {
     }),
   });
   const canManageExceptions = can('shipping.exceptions.manage');
-  const exceptions = useQuery({
-    queryKey: ['shipping', 'exceptions', 'late_dispatch', 'open'],
-    queryFn: async () => {
-      const [open, inProgress, escalated] = await Promise.all(
-        (['open', 'in_progress', 'escalated'] as const).map((status) => call(api.GET('/api/admin/shipping/exceptions', { params: { query: { kind: 'late_dispatch', status, limit: 100 } } }))),
-      );
-      return [...open.items, ...inProgress.items, ...escalated.items];
-    },
-    enabled: overdue && canManageExceptions,
-  });
 
   const rows: AdminOrderRow[] = list.data?.items ?? [];
   const total = list.data?.total ?? rows.length;
@@ -138,10 +128,8 @@ export default function Orders() {
   const sellerOpts = [{ value: '', label: 'Any seller' }, ...(sellersQ.data?.items ?? []).map((s) => ({ value: s.id, label: s.storeName }))];
   const filterOpts = (k: keyof OrderFilters) => (k === 'seller' ? sellerOpts : FILTER_OPTIONS[k]);
   const chipValue = (k: keyof OrderFilters) => optLabel(filterOpts(k), filters[k]);
-  /** Open late-dispatch exceptions per order ref. */
-  const excByRef = new Map<string, string[]>();
-  for (const x of exceptions.data ?? []) if (x.orderRef) excByRef.set(x.orderRef, [...(excByRef.get(x.orderRef) ?? []), x.id]);
-  const excIds = (refs: AdminOrderRow[]) => refs.flatMap((o) => excByRef.get(o.ref) ?? []);
+  /** Open delivery exceptions on the rows (oldest due first). */
+  const excIds = (refs: AdminOrderRow[]) => refs.flatMap((o) => o.openExceptionIds ?? []);
 
   /** Any manual filter change leaves the saved filter. */
   const changeFilters = (next: OrderFilters) => {
@@ -174,6 +162,11 @@ export default function Orders() {
     mutationFn: async (a: { action: 'notify_seller' | 'assign' | 'escalate'; orders: AdminOrderRow[]; msg: string }) => {
       const ids = excIds(a.orders);
       if (!ids.length) throw new Error('none');
+      if (a.action === 'notify_seller' && a.orders.length === 1) {
+        // One order: remind about its oldest open exception.
+        await call(api.POST('/api/admin/shipping/exceptions/{id}/notify-seller', { params: { path: { id: ids[0]! } }, body: {} }));
+        return { ...a, r: { failed: [] as unknown[] } };
+      }
       const body =
         a.action === 'assign'
           ? { ids, action: a.action, ownerStaffId: accountId }
@@ -390,7 +383,7 @@ export default function Orders() {
                       const n = ss.length;
                       const edge = rowEdge(o);
                       const flags = rowFlags(o);
-                      const hasExc = (excByRef.get(o.ref) ?? []).length > 0;
+                      const hasExc = (o.openExceptionIds ?? []).length > 0;
                       return (
                         <tr key={o.ref} className={edgeClass(edge)}>
                           {overdue && canManageExceptions && (

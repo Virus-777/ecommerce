@@ -147,11 +147,13 @@ const LIST_SCREEN: Partial<Record<string, ScreenId>> = {
   payment: 'admin/finance',
 };
 
-/** Where a subject opens in the Admin Center: its detail screen when the URL can carry it, else its list. */
-export function subjectHref(s: Pick<TrustSubject, 'type' | 'ref' | 'label' | 'screen'>): string {
+/** Where a subject opens in the Admin Center: its detail screen when the URL can carry it (sellers by `slug`,
+ * /sellers/:slug; others by `ref`), else its list. */
+export function subjectHref(s: Pick<TrustSubject, 'type' | 'ref' | 'label' | 'screen' | 'slug'>): string {
   const ref = s.ref ?? undefined;
-  if (s.screen && ref) {
-    const h = screenHref(s.screen, null, { ref, slug: ref, key: ref, id: ref });
+  const slug = s.slug ?? (s.type === 'seller' ? undefined : ref);
+  if (s.screen && (ref || slug)) {
+    const h = screenHref(s.screen, null, Object.fromEntries(Object.entries({ ref, slug, key: ref, id: ref }).filter((e): e is [string, string] => !!e[1])));
     if (h) return h;
   }
   const q = ref ?? s.label;

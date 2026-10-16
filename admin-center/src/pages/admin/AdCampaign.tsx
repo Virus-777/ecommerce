@@ -18,7 +18,7 @@ import {
 // Design: pages/admin/admin-ad-campaign.html (step 1) and --placement-audience, --schedule-limits,
 // --creative-preview, --approval (steps 2–5). One draft object is kept across the steps; the step is the view.
 // A new campaign is created as a draft on the first save (POST /api/admin/advertising/campaigns) and then
-// edited with PATCH {changes, version}; the URL carries ?ref=AD-… (resolved through the list search) or ?id=.
+// edited with PATCH {changes, version}; the URL carries ?ref=AD-… or ?id= (GET campaigns/{id} takes either).
 // Creatives: images uploaded through media (purpose ad_creative) + POST …/creatives; the ad text is a text creative.
 // Step 4 runs POST …/check and GET …/preview; step 5 submits, and reviewers approve or send back from there.
 
@@ -62,16 +62,17 @@ const TIME_ZONES = [
   { value: 'America/Los_Angeles', label: 'Pacific Time (PT)', short: 'PT' },
   { value: 'America/New_York', label: 'Eastern Time (ET)', short: 'ET' },
 ];
+// Inputs only (FrequencyCapInput, DismissalRuleInput): the server writes the labels.
 const FREQUENCIES = [
-  { value: 'session', label: 'Once per session', cap: { perSession: 1, label: 'Once per session' } },
-  { value: 'day', label: 'Once per day', cap: { perDay: 1, label: 'Once a day' } },
-  { value: 'campaign', label: 'Once per campaign', cap: { perCampaign: 1, label: 'Once per campaign' } },
-  { value: 'week2', label: 'Twice per week', cap: { perWindow: { count: 2, days: 7 }, label: 'Twice per week' } },
+  { value: 'session', label: 'Once per session', cap: { perSession: 1 } },
+  { value: 'day', label: 'Once per day', cap: { perDay: 1 } },
+  { value: 'campaign', label: 'Once per campaign', cap: { perCampaign: 1 } },
+  { value: 'week2', label: 'Twice per week', cap: { perWindow: { count: 2, days: 7 } } },
 ];
 const DISMISS = [
-  { value: 'days7', label: 'Do not show again for 7 days', rule: { mode: 'days' as const, days: 7, label: 'Closing hides that campaign for 7 days' } },
-  { value: 'campaign', label: 'Do not show again this campaign', rule: { mode: 'campaign' as const, label: 'Closing hides that campaign until it ends' } },
-  { value: 'session', label: 'Show again next session', rule: { mode: 'session' as const, label: 'Closing hides it for the rest of the visit' } },
+  { value: 'days7', label: 'Do not show again for 7 days', rule: { mode: 'days' as const, days: 7 } },
+  { value: 'campaign', label: 'Do not show again this campaign', rule: { mode: 'campaign' as const } },
+  { value: 'session', label: 'Show again next session', rule: { mode: 'session' as const } },
 ];
 const PRIORITIES = [
   { value: '3', label: 'High (3)' },
@@ -298,26 +299,16 @@ export default function AdCampaign() {
   const deskFile = useRef<HTMLInputElement>(null);
   const phoneFile = useRef<HTMLInputElement>(null);
 
-  // The record the URL names: ?id= directly, ?ref= through the campaign list search (refs are searchable).
-  const resolved = useQuery({
-    queryKey: ['advertising', 'campaign-ref', ref],
-    queryFn: async () => {
-      const page = (await call(api.GET('/api/admin/advertising/campaigns', { params: { query: { q: ref!, limit: 10 } } }))) as Page<{ id: string; ref: string }>;
-      const hit = page.items.find((c) => c.ref === ref);
-      if (!hit) throw new ApiError(404, "NOT_FOUND", `No campaign ${ref}.`);
-      return hit.id;
-    },
-    enabled: !!ref && !idParam,
-    retry: false,
-  });
-  const campaignId = idParam ?? resolved.data ?? null;
+  // The record the URL names: ?id= or ?ref=AD-… (the detail route accepts both); writes use the loaded id.
+  const urlKey = idParam ?? ref;
   const campaign = useQuery({
-    queryKey: ['advertising', 'campaign', campaignId],
-    queryFn: () => call(api.GET('/api/admin/advertising/campaigns/{id}', { params: { path: { id: campaignId! } } })) as Promise<Campaign>,
-    enabled: !!campaignId,
+    queryKey: ['advertising', 'campaign', urlKey],
+    queryFn: () => call(api.GET('/api/admin/advertising/campaigns/{id}', { params: { path: { id: urlKey! } } })) as Promise<Campaign>,
+    enabled: !!urlKey,
     retry: false,
   });
   const c = campaign.data;
+  const campaignId = c?.id ?? null;
   useEffect(() => {
     if (c && c.id !== loadedId) {
       setD(draftOf(c));
@@ -382,8 +373,8 @@ export default function AdCampaign() {
       frequencyCap: f ?? null,
       dismissal: ds ?? null,
       priority: Number(x.priority),
-      budget: cap != null ? ({ billing: 'none', deliveryCap: cap, spent: { amount: 0, currency: 'USD' } } as AdCampaignInput['budget']) : null,
-      stopWithPromotion: !!x.promoId && x.stopWithPromo,
+      budget: cap != null ? { billing: 'none', deliveryCap: cap } : null,
+      ...(x.promoId ? { stopWithPromotion: x.stopWithPromo } : {}),
       creativeIds,
       afterApproval: x.afterApproval,
       noteToReviewers: x.note.trim() || null,
@@ -410,7 +401,7 @@ export default function AdCampaign() {
       return { saved, textId };
     },
     onSuccess: ({ saved, textId }) => {
-      qc.setQueryData(['advertising', 'campaign', saved.id], saved);
+      qc.setQueryData(['advertising', 'campaign', urlKey ?? saved.id], saved);
       setD((p) => ({ ...p, textId }));
       setLoadedId(saved.id);
       setSavedAt(time(saved.updatedAt));
@@ -487,7 +478,7 @@ export default function AdCampaign() {
       return call(api.POST('/api/admin/advertising/campaigns/{id}/submit', { params: { path: { id: saved.id } }, body: { noteToReviewers: d.note.trim() || undefined } })) as Promise<Campaign>;
     },
     onSuccess: (r) => {
-      qc.setQueryData(['advertising', 'campaign', r.id], r);
+      qc.setQueryData(['advertising', 'campaign', urlKey ?? r.id], r);
       const waiting = r.approvals.filter((a) => a.state === 'waiting').map((a) => `${a.reviewer?.name ? `${a.reviewer.name} (${ROLE[a.role]})` : ROLE[a.role]}`);
       setNotice({ tone: 'success', title: r.status === 'in_review' ? 'Submitted for approval' : `Campaign ${statusLabel(r.status).toLowerCase()}`, body: waiting.length ? `Waiting for ${waiting.join(' and ')} to review. You'll get a notification when it's approved.` : undefined });
       announce('Submitted for approval');
@@ -500,7 +491,7 @@ export default function AdCampaign() {
     mutationFn: ({ p, body }: { p: PendingAction; body?: Record<string, unknown> }) => runCampaignAction(api, p.id, p.action, body),
     onSuccess: (r, { p }) => {
       setPending(null);
-      qc.setQueryData(['advertising', 'campaign', r.id], r);
+      qc.setQueryData(['advertising', 'campaign', urlKey ?? r.id], r);
       const waiting = r.approvals.filter((a) => a.state === 'waiting').map((a) => ROLE[a.role]);
       const title =
         p.action === 'approve'
@@ -526,8 +517,8 @@ export default function AdCampaign() {
   };
 
   // ---------- loading / not found ----------
-  if ((ref || idParam) && (resolved.error || campaign.error)) {
-    const e = resolved.error ?? campaign.error;
+  if ((ref || idParam) && campaign.error) {
+    const e = campaign.error;
     const nf = e instanceof ApiError && e.status === 404;
     return (
       <AdminLayout active="ads">
@@ -544,7 +535,7 @@ export default function AdCampaign() {
             </EmptyState>
           </div>
         ) : (
-          <LoadError error={e} onRetry={() => void (resolved.error ? resolved.refetch() : campaign.refetch())} />
+          <LoadError error={e} onRetry={() => void campaign.refetch()} />
         )}
       </AdminLayout>
     );
@@ -554,7 +545,7 @@ export default function AdCampaign() {
   const nErr = Object.values(errors).filter(Boolean).length;
   const adv = ADVERTISERS.find((a) => a.kind === d.advertiser) ?? ADVERTISERS[0];
   const typeLabel = placement?.name ?? 'Ad';
-  const ownerName = members.data?.items.find((m) => m.account.id === d.ownerId)?.account.displayName ?? c?.owner?.name ?? '';
+  const ownerName = (c?.owner?.id && c.owner.id === d.ownerId ? c.owner.name : null) ?? members.data?.items.find((m) => m.account.id === d.ownerId)?.account.displayName ?? c?.owner?.name ?? '';
   const checks: Check[] = checkResult ? toChecks(checkResult.checks) : c ? toChecks(c.checks) : [];
   const conflicts = checkResult?.conflicts ?? c?.conflicts ?? [];
   const reach = checkResult?.estimatedWeeklyReach ?? c?.audience.estimatedWeeklyReach;

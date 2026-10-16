@@ -18,7 +18,8 @@ import { pendingNote, periodRange, priceLimitPct, STATUS_FILTERS, STATUS_LABEL, 
 
 // Design: pages/admin/admin-official.html (trading + company offers) ·
 // view "price-change" = the Change price dialog (?view=price-change&offer=<offerId>).
-// API: GET /api/admin/finance/trading (KPIs, daily sales), GET /api/admin/offers/official/offers, GET /api/admin/offers/offers?productId
+// API: GET /api/admin/finance/trading (KPIs, daily sales), GET /api/admin/offers/official/offers (offers.official.view; unitCost and
+// marginPct from the recorded buying cost; stock.state and lowStockThreshold for low stock), GET /api/admin/offers/offers?productId
 // (other offers), POST /api/admin/offers/official/offers/{id}/price-changes (approval above the caller's limit, from access/me limits).
 
 type View = 'price-change';
@@ -35,7 +36,6 @@ const STOREFRONT: Array<{ icon: IconName; label: string; link: string; to: strin
   { icon: 'file-text', label: 'Service policies', link: 'Edit', to: href('admin/help-content') },
 ];
 
-const LOW_STOCK = 10;
 const MARGIN_WARN = 25;
 const MARGIN_DANGER = 10;
 const PAGE_SIZE = 20;
@@ -74,7 +74,10 @@ function validate(d: Draft, o: OfficialRow) {
   return e;
 }
 
-function AvailableCell({ n }: { n: number }) {
+/** Low stock as the API reports it (the item's threshold, else the default low-stock threshold). */
+const isLow = (s: OfficialRow['stock']) => s.available > 0 && (s.state === 'low_stock' || (s.lowStockThreshold != null && s.available <= s.lowStockThreshold));
+
+function AvailableCell({ n, low }: { n: number; low: boolean }) {
   if (n === 0)
     return (
       <span className="stack gap-0">
@@ -84,7 +87,7 @@ function AvailableCell({ n }: { n: number }) {
         <span className="xs muted">Not sellable</span>
       </span>
     );
-  if (n < LOW_STOCK)
+  if (low)
     return (
       <span className="stack gap-0">
         <span className="strong num t-warning-text">
@@ -104,6 +107,7 @@ export default function Official() {
   const qc = useQueryClient();
   const { accountId, can } = useStaffSession();
   const canPrice = can('offers.official.price');
+  const canView = can('offers.official.view');
   const [view] = useView<View>();
   const [params, setParams] = useSearchParams();
   const [period, setPeriod] = useState<Period>('14');
@@ -127,13 +131,14 @@ export default function Official() {
   /* ----- Offers table ----- */
   const me = useQuery({ queryKey: ['access', 'me', accountId], queryFn: () => call(api.GET('/api/admin/access/me')) });
   const limit = priceLimitPct(me.data?.limits as Parameters<typeof priceLimitPct>[0]);
-  const cats = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')) });
+  const cats = useQuery({ queryKey: ['catalog', 'categories', 'admin'], queryFn: () => call(api.GET('/api/admin/catalog/categories')), enabled: can('catalog.view') });
   const filter = STATUS_FILTERS.find((f) => f.value === status) ?? STATUS_FILTERS[0];
   const query = { q: q.trim() || undefined, categoryId: cat || undefined, ...filter.query };
   const list = useQuery({
     queryKey: ['offers', 'official', 'list', query, page],
     queryFn: () => call(api.GET('/api/admin/offers/official/offers', { params: { query: { ...query, page, limit: PAGE_SIZE } } })),
     placeholderData: keepPreviousData,
+    enabled: canView,
   });
   const rows = list.data?.items ?? [];
   const pageInfo = list.data as { total?: number; totalPages?: number } | undefined;
@@ -373,6 +378,11 @@ export default function Official() {
             />
           </div>
         </div>
+        {!canView && (
+          <div className="card-body">
+            <p className="small muted">Your role doesn’t include viewing Official Store offers.</p>
+          </div>
+        )}
         {list.isError && (
           <div className="card-body">
             <LoadError error={list.error} onRetry={() => void list.refetch()} />
@@ -394,7 +404,7 @@ export default function Official() {
               </tr>
             </thead>
             <tbody>
-              {list.isPending && (
+              {canView && list.isPending && (
                 <tr>
                   <td colSpan={7}>
                     <SkeletonLines rows={5} />
@@ -404,7 +414,8 @@ export default function Official() {
               {rows.map((o) => {
                 const m = o.marginPct;
                 const avail = o.stock.available;
-                const edge = avail === 0 ? 'flagged' : avail < LOW_STOCK || (m != null && m < MARGIN_WARN) ? 'warn' : '';
+                const low = isLow(o.stock);
+                const edge = avail === 0 ? 'flagged' : low || (m != null && m < MARGIN_WARN) ? 'warn' : '';
                 const note = pendingNote(o.pendingPriceChange, shortDate, formatMoney) ?? o.note;
                 return (
                   <tr key={o.offer.id} className={cx(edge && `is-${edge}`)}>
@@ -429,7 +440,7 @@ export default function Official() {
                     <td className="r">{o.unitCost ? formatMoney(o.unitCost) : '—'}</td>
                     <td className="r">{m != null ? <span className={cx('strong', m < MARGIN_WARN && 't-warning-text')}>{pct(m)}</span> : <span className="muted">—</span>}</td>
                     <td className="r">
-                      <AvailableCell n={avail} />
+                      <AvailableCell n={avail} low={low} />
                     </td>
                     <td>
                       <StatusBadge status={STATUS_LABEL[o.offer.status]} />

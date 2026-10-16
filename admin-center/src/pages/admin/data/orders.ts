@@ -1,6 +1,6 @@
 // Filters and row helpers for the admin "All orders" screen (design: pages/admin/admin-orders.html and
 // admin-orders--overdue-dispatch.html). Data: GET /api/admin/orders/orders (filters, page), GET orders/saved-filters,
-// GET shipping/exceptions (late_dispatch, for the overdue bulk actions), POST shipping/exceptions/bulk, POST orders/exports.
+// rows' openExceptionIds (shipping exceptions/{id}/notify-seller and exceptions/bulk), POST orders/exports.
 import type { components } from '@marketly/web-shared/api';
 import type { IconName, Tone } from '@marketly/web-shared/ui';
 import { dayKey } from '@/app/parts';

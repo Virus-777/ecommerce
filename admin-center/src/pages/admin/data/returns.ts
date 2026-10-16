@@ -73,15 +73,16 @@ export const STATIC_OPTIONS: Record<'type' | 'refund' | 'deadline', Opt[]> = {
   ],
 };
 
-/** Customer reason codes (the list filter takes the code; rows show the label). */
+/** The reason filter's options: customer reason codes (rows carry reasonCode, and the server's label in reason).
+ * No endpoint lists the codes, so the options stay here, with the server's labels. */
 export const REASONS: Array<{ value: string; label: string }> = [
-  { value: 'damaged', label: 'Damaged on arrival' },
+  { value: 'damaged', label: 'Arrived damaged' },
   { value: 'defective', label: 'Defective or not working' },
   { value: 'not_as_described', label: 'Not as described' },
   { value: 'wrong_item', label: 'Wrong item sent' },
-  { value: 'missing_parts', label: 'Missing parts' },
-  { value: 'wrong_size', label: 'Wrong size' },
-  { value: 'changed_mind', label: 'Changed mind' },
+  { value: 'missing_parts', label: 'Missing parts or accessories' },
+  { value: 'wrong_size', label: 'Wrong size or fit' },
+  { value: 'changed_mind', label: 'Changed my mind' },
   { value: 'better_price', label: 'Found a better price' },
   { value: 'no_longer_needed', label: 'No longer needed' },
   { value: 'other', label: 'Other' },

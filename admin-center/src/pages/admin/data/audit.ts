@@ -56,16 +56,16 @@ export const APPROVAL_LABEL: Record<ApprovalState, string> = {
 };
 export const isPending = (e: AuditEntry) => e.approval.state === 'pending' || e.approval.state === 'partially_approved';
 
-/** Staff names by account id: entries carry actor ids, and actor names are often null (gap). */
-export function useStaffNames(enabled = true): Map<string, string> {
+/** Staff for the "All staff" filter (account id → name); a picker, so it needs access.roles.view. */
+export function useStaffOptions(enabled = true): Map<string, string> {
   const { api } = useApi();
   const q = useQuery({ queryKey: ['access', 'members'], queryFn: () => call(api.GET('/api/admin/access/members', { params: { query: { limit: 100 } } })), enabled, staleTime: 5 * 60_000, retry: false });
   return new Map((q.data?.items ?? []).map((m) => [m.account.id, m.account.displayName]));
 }
 
-export function actorLabel(a: AuditEntry['actor'], names: Map<string, string>): string {
+/** The actor's name as recorded (G70); records from before names were recorded fall back to the actor kind. */
+export function actorLabel(a: AuditEntry['actor']): string {
   if (a.name) return a.name;
-  if (a.id && names.has(a.id)) return names.get(a.id)!;
   return a.kind === 'system' ? 'Marketly (system)' : a.kind === 'seller' ? 'Seller' : a.kind === 'customer' ? 'Customer' : 'Staff member';
 }
 export const rolesLabel = (e: AuditEntry) => e.actorRoles.map((r) => r.name).join(', ') || (e.actor.kind === 'staff' ? 'Staff' : e.actor.kind === 'system' ? 'System' : e.actor.kind.replace(/^./, (c) => c.toUpperCase()));
