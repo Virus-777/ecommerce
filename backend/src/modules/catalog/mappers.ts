@@ -17,6 +17,18 @@ import type { AttributeRow, AuthorizedSellerRow, BrandRow, CheckDismissalRow, Ch
 
 export const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
+/** Items by key, in their order (one pass instead of a filter per key) */
+export function groupBy<T>(items: readonly T[], key: (t: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const it of items) {
+    const k = key(it);
+    const list = out.get(k);
+    if (list) list.push(it);
+    else out.set(k, [it]);
+  }
+  return out;
+}
+
 export const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x) => x != null).map(String) : []);
 export const stringMap = (v: unknown): Record<string, string> =>
   v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => x != null).map(([k, x]) => [k, String(x)])) : {};

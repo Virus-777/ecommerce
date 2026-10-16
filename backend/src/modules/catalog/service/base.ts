@@ -63,7 +63,9 @@ export function buildTaxonomy(rows: CategoryRow[]): Taxonomy {
   const kids = new Map<string | null, CategoryRow[]>();
   for (const r of rows) {
     const k = r.parent_id && byId.has(r.parent_id) ? r.parent_id : null;
-    kids.set(k, [...(kids.get(k) ?? []), r]);
+    const list = kids.get(k);
+    if (list) list.push(r);
+    else kids.set(k, [r]);
   }
   for (const list of kids.values()) list.sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
   const path = (id: string | null | undefined) => {
@@ -78,14 +80,14 @@ export function buildTaxonomy(rows: CategoryRow[]): Taxonomy {
     return out;
   };
   const subtree = (id: string) => {
-    const out: string[] = [];
+    const out = new Set<string>();
     const walk = (cid: string) => {
-      if (out.includes(cid)) return;
-      out.push(cid);
+      if (out.has(cid)) return;
+      out.add(cid);
       for (const c of kids.get(cid) ?? []) walk(c.id);
     };
     if (byId.has(id)) walk(id);
-    return out;
+    return [...out];
   };
   return {
     rows,

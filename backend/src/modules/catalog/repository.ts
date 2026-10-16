@@ -371,18 +371,19 @@ export class CatalogRepository {
 
   async productStats(): Promise<ProductStatsCounts> {
     const notMerged = { merged_into_id: null };
-    const suspected = await this.#duplicateSuspectedIds();
     const products = this.#t.products;
-    return {
-      all: await products.count(notMerged),
-      active: await products.count({ ...notMerged, publication: 'active', review_state: 'approved' }),
-      hidden: await products.count({ ...notMerged, publication: 'hidden' }),
-      suspended: await products.count({ ...notMerged, publication: 'suspended' }),
-      missingContent: await products.count({ ...notMerged, ...MISSING_CONTENT }),
-      duplicatesSuspected: suspected.length ? await products.count({ ...notMerged, id: oneOf(suspected) }) : 0,
-      inReview: await this.#t.submissions.count({ state: 'open', paused_at: null }),
-      offers: await this.#t.offers.count({ status: { $nin: ['removed', null] } }),
-    };
+    // independent counts, read at once (never called inside a transaction)
+    const [all, active, hidden, suspended, missingContent, duplicatesSuspected, inReview, offers] = await Promise.all([
+      products.count(notMerged),
+      products.count({ ...notMerged, publication: 'active', review_state: 'approved' }),
+      products.count({ ...notMerged, publication: 'hidden' }),
+      products.count({ ...notMerged, publication: 'suspended' }),
+      products.count({ ...notMerged, ...MISSING_CONTENT }),
+      this.#duplicateSuspectedIds().then((ids) => (ids.length ? products.count({ ...notMerged, id: oneOf(ids) }) : 0)),
+      this.#t.submissions.count({ state: 'open', paused_at: null }),
+      this.#t.offers.count({ status: { $nin: ['removed', null] } }),
+    ]);
+    return { all, active, hidden, suspended, missingContent, duplicatesSuspected, inReview, offers };
   }
 
   async productsInCategories(categoryIds: string[], reviewStates: string[]): Promise<ProductRow[]> {
@@ -576,7 +577,9 @@ export class CatalogRepository {
   async pausedCounts(sellerIds: string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (!sellerIds.length) return out;
-    const owners = new Map((await this.#t.products.find({ owner_seller_id: oneOf(sellerIds) })).map((p) => [p.id, p.owner_seller_id!]));
+    // only the id and owner of each product (not whole product documents)
+    const owned = await this.#t.products.aggregate<{ _id: string; owner_seller_id: string }>([{ $match: { owner_seller_id: oneOf(sellerIds) } }, { $project: { owner_seller_id: 1 } }]);
+    const owners = new Map(owned.map((p) => [p._id, p.owner_seller_id]));
     if (!owners.size) return out;
     const subs = await this.#t.submissions.find({ product_id: oneOf([...owners.keys()]), state: 'open', paused_at: { $ne: null } });
     for (const s of subs) {

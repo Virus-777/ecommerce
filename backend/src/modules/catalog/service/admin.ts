@@ -9,7 +9,7 @@ import type { AffectedSeller, CatalogMatch, CorrectionSuggestion, MergedRecord, 
 import type { ExportJob } from '../../../spec/reports.js';
 import { IDENTITY_FIELDS, isCorrectableField, linesOf, matchQuality, PARCEL_COLUMNS, PARCEL_FIELDS, sameOptions, variantLabel } from '../domain/rules.js';
 import { checkListPrice, checkParcelValue, currentListPrice } from './products.js';
-import { stringMap, strings, toCorrection } from '../mappers.js';
+import { groupBy, stringMap, strings, toCorrection } from '../mappers.js';
 import type { CorrectionRow, OfferIndexRow, ProductFilter, ProductRow, VariantRow } from '../ports.js';
 import { invalid, notFound, requireReason, type By, type Viewer } from './base.js';
 import { CatalogReview } from './review.js';
@@ -786,8 +786,7 @@ export class CatalogAdmin extends CatalogReview {
     const liveIds = source.filter((s) => s.live).map((s) => s.id);
     const eligible: OfferIndexRow[] = [];
     for (let i = 0; i < liveIds.length; i += 500) eligible.push(...(await this.repo.offersOf(liveIds.slice(i, i + 500))).filter((o) => o.eligible));
-    const eligibleBy = new Map<string, OfferIndexRow[]>();
-    for (const o of eligible) eligibleBy.set(o.product_id, [...(eligibleBy.get(o.product_id) ?? []), o]);
+    const eligibleBy = groupBy(eligible, (o) => o.product_id);
     const now = this.now();
 
     const perCategory = new Map<string, { products: number; offers: number }>();

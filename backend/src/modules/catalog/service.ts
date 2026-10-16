@@ -44,9 +44,9 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     const variant = await this.repo.getVariant(variantId);
     const product = variant && (await this.repo.getProduct(variant.product_id));
     if (!variant || !product) throw new AppError('NOT_FOUND', 'Variant not found');
-    const brand = product.brand_id ? await this.repo.getBrand(product.brand_id) : undefined;
     const imageId = strings(variant.media_ids)[0] ?? strings(product.media_ids)[0];
-    const image = imageId ? (await this.refsMap([imageId])).get(imageId) : undefined;
+    const [brand, refs] = await Promise.all([product.brand_id ? this.repo.getBrand(product.brand_id) : undefined, this.refsMap([imageId])]);
+    const image = imageId ? refs.get(imageId) : undefined;
     return {
       productId: product.id,
       variantId,
@@ -187,9 +187,16 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     const tax = await this.taxonomy();
     const row = tax.rows.find((c) => c.slug === slug);
     if (!row || !tax.visible(row.id)) return null;
-    const category = await this.categoryNode(row.id, false);
-    const breadcrumb = await Promise.all(tax.path(row.id).map(async (c) => ({ ...(await this.categoryNode(c.id, false)), children: [] })));
-    const filters = (await this.effectiveAttributes(row.id, tax)).map((a) => a.attribute).filter((a) => a.filterable);
+    // one tree for the category and its breadcrumb (it was built once per node)
+    const [nodes, attributes] = await Promise.all([this.categoryNodes(false, tax), this.effectiveAttributes(row.id, tax)]);
+    const node = (id: string) => {
+      const n = nodes.get(id);
+      if (!n) throw new AppError('NOT_FOUND', 'Category not found');
+      return n;
+    };
+    const category = node(row.id);
+    const breadcrumb = tax.path(row.id).map((c) => ({ ...node(c.id), children: [] }));
+    const filters = attributes.map((a) => a.attribute).filter((a) => a.filterable);
     return { category, breadcrumb, filters };
   }
 
@@ -267,17 +274,17 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
     let row = await this.repo.getProduct(id);
     if (row?.merged_into_id) row = await this.repo.getProduct(row.merged_into_id);
     if (!row || row.merged_into_id || row.review_state !== 'approved' || row.publication !== 'active') throw new AppError('NOT_FOUND', 'Product not found');
-    const product = (await this.productViews([row])).get(row.id)!;
-    // the store detail adds the new-listing flag and the best-seller rank (search, optional; G25e, G25f)
+    // the store detail adds the new-listing flag and the best-seller rank (search, optional; G25e, G25f), read with the product
     const search = this.ctx.tryUse('search');
-    const [ranks, windowDays] = await Promise.all([
+    const [views, ranks, windowDays] = await Promise.all([
+      this.productViews([row]),
       search ? search.bestSellerRanks([row.id]).catch((err) => (this.ctx.log.debug({ err }, 'catalog: best-seller rank unavailable'), null)) : null,
       // the window search's New listing badge uses (its spec default when settings is off)
       this.ctx.settings.read('search.newArrivalsWindowDays').catch(() => null),
     ]);
     const days = Number(windowDays);
     return {
-      ...product,
+      ...views.get(row.id)!,
       isNewListing: row.listed_at && Number.isFinite(days) && days > 0 ? this.now().getTime() - row.listed_at.getTime() <= days * 86_400_000 : null,
       bestSellerRank: ranks?.[row.id] ?? null,
     };

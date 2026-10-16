@@ -8,7 +8,7 @@ import { brandStatusMachine } from '../domain/state-machines.js';
 import { attributeFilled, imageRulesOf, normalize, slugify } from '../domain/rules.js';
 import { stringMap, toAttribute } from '../mappers.js';
 import type { AttributeRow, BrandRow, CategoryRow, ProductRow } from '../ports.js';
-import { invalid, notFound, requireReason, type By } from './base.js';
+import { invalid, notFound, requireReason, type By, type Taxonomy } from './base.js';
 import { CatalogViews } from './views.js';
 
 const PLATFORM = { kind: 'platform' as const };
@@ -37,17 +37,22 @@ export class CatalogTaxonomy extends CatalogViews {
   /* ================================================================ categories */
 
   protected async categoryNode(id: string, admin: boolean): Promise<Category> {
-    const find = (list: Category[]): Category | undefined => {
-      for (const c of list) {
-        if (c.id === id) return c;
-        const hit = find(c.children);
-        if (hit) return hit;
-      }
-      return undefined;
-    };
-    const node = find(await this.categoryTree({ includeHidden: true, admin }));
+    const node = (await this.categoryNodes(admin)).get(id);
     if (!node) throw notFound('Category');
     return node;
+  }
+
+  /** Every node of the full tree (hidden ones included) by id, from one build of the tree */
+  protected async categoryNodes(admin: boolean, tax?: Taxonomy): Promise<Map<string, Category>> {
+    const out = new Map<string, Category>();
+    const walk = (list: Category[]) => {
+      for (const c of list) {
+        out.set(c.id, c);
+        walk(c.children);
+      }
+    };
+    walk(await this.categoryTree({ includeHidden: true, admin, tax }));
+    return out;
   }
 
   private async uniqueSlug(base: string, taken: (slug: string) => Promise<boolean>) {

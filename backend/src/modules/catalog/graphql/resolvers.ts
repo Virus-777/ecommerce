@@ -26,27 +26,49 @@ const pagingIn = (p: PageInput | null | undefined): PageInput => ({
   ...(p?.limit ? { limit: p.limit } : {}),
 });
 
+/**
+ * A read done once per GraphQL request (the context object) and shared by every field that asks for it: a field
+ * on each item of a list (a product's category, a category's filters and attributes) reads once, not per item.
+ */
+function perRequest<K, V>(read: (key: K) => Promise<V>) {
+  const memo = new WeakMap<object, Map<K, Promise<V>>>();
+  return (key: K, ctx: GraphQLContext | undefined): Promise<V> => {
+    if (!ctx) return read(key);
+    let byKey = memo.get(ctx);
+    if (!byKey) memo.set(ctx, (byKey = new Map()));
+    let hit = byKey.get(key);
+    if (!hit) byKey.set(key, (hit = read(key)));
+    return hit;
+  };
+}
+
 export function graphqlMappers(service: CatalogService) {
   const attributeOut = (a: Attribute) => ({ ...a, kind: up(a.kind) });
+  const categoryAttributes = perRequest((id: string) => service.categoryAttributes(id));
+  // every category of the full tree by id
+  const categoryNodes = perRequest(async (_: null) => {
+    const out = new Map<string, Category>();
+    const walk = (list: Category[]) => {
+      for (const c of list) {
+        out.set(c.id, c);
+        walk(c.children);
+      }
+    };
+    walk(await service.listCategories({ includeHidden: true }));
+    return out;
+  });
 
   const categoryOut = (c: Category): Record<string, unknown> => ({
     ...c,
     children: c.children.map(categoryOut),
-    filters: async () => (await service.categoryAttributes(c.id)).attributes.filter((a) => a.filterable).map((a) => ({ name: a.name, kind: a.kind, unit: a.unit ?? null, options: a.options })),
-    attributes: async () => (await service.categoryAttributes(c.id)).attributes.map(attributeOut),
+    filters: async (_args: unknown, ctx?: GraphQLContext) =>
+      (await categoryAttributes(c.id, ctx)).attributes.filter((a) => a.filterable).map((a) => ({ name: a.name, kind: a.kind, unit: a.unit ?? null, options: a.options })),
+    attributes: async (_args: unknown, ctx?: GraphQLContext) => (await categoryAttributes(c.id, ctx)).attributes.map(attributeOut),
   });
 
-  const categoryById = async (id: string | null | undefined) => {
+  const categoryById = async (id: string | null | undefined, ctx?: GraphQLContext) => {
     if (!id) return null;
-    const find = (list: Category[]): Category | null => {
-      for (const c of list) {
-        if (c.id === id) return c;
-        const hit = find(c.children);
-        if (hit) return hit;
-      }
-      return null;
-    };
-    const c = find(await service.listCategories({ includeHidden: true }));
+    const c = (await categoryNodes(null, ctx)).get(id);
     return c ? categoryOut({ ...c, offerCount: null }) : null;
   };
 
@@ -58,7 +80,7 @@ export function graphqlMappers(service: CatalogService) {
 
   const productOut = (p: Product): Record<string, unknown> => ({
     ...p,
-    category: () => categoryById(p.categoryId),
+    category: (_args: unknown, ctx?: GraphQLContext) => categoryById(p.categoryId, ctx),
     specs: pairs(p.specs),
     variants: p.variants.map((v) => ({ ...v, options: pairs(v.options), listPrice: money(v.listPrice) })),
   });
@@ -70,7 +92,7 @@ export function graphqlMappers(service: CatalogService) {
     evidence: c.evidence.map((e) => ({
       ...e,
       matchedProduct: () => productById(e.matchedProductId),
-      suggestedCategory: () => categoryById(e.suggestedCategoryId),
+      suggestedCategory: (_args: unknown, ctx?: GraphQLContext) => categoryById(e.suggestedCategoryId, ctx),
       media: null,
     })),
     dismissal: c.dismissal ? { ...c.dismissal, by: actorOut(c.dismissal.by), matchedProduct: () => productById(c.dismissal!.matchedProductId) } : null,
@@ -103,7 +125,8 @@ export function graphqlMappers(service: CatalogService) {
       imagesToRecrop: own ? (a.imagesToRecrop ?? []) : null,
       reviewDraft: a.reviewDraft ? { ...a.reviewDraft, decision: up(a.reviewDraft.decision), fields: pairs(a.reviewDraft.fields), savedBy: actorOut(a.reviewDraft.savedBy) } : null,
       owner: { type: up(a.owner), sellerId: a.ownerSellerId ?? null },
-      duplicateCandidates: async () => (await Promise.all(a.duplicateCandidates.map((d) => productById(d.id)))).filter(Boolean),
+      // one batched read (a duplicate check lists 20 candidates at most)
+      duplicateCandidates: async () => (await service.getProducts(a.duplicateCandidates.map((d) => d.id))).map((r) => productOut(r.product)),
       checks: a.checks.map(checkOut),
     };
   };

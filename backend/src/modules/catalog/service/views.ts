@@ -2,7 +2,7 @@
 import type * as common from '../../../spec/common.js';
 import type { Attribute, Brand, BrandAdmin, Category, ImageRule, Product, ProductAdmin, ProductSummary, RequestedBrand, Variant } from '../../../spec/catalog.js';
 import { completeness, imageRulesOf, type Completeness } from '../domain/rules.js';
-import { evidenceOf, imageRulesOfRow, iso, LOG_ACTIONS, stringMap, strings, toAttribute, toBrand, toBrandAdmin, toCheck, toLogEntry, toReviewDraft, toSubmission } from '../mappers.js';
+import { evidenceOf, groupBy, imageRulesOfRow, iso, LOG_ACTIONS, stringMap, strings, toAttribute, toBrand, toBrandAdmin, toCheck, toLogEntry, toReviewDraft, toSubmission } from '../mappers.js';
 import type { AttributeRow, BrandRow, CategoryRow, ImageStandardRow, ProductRow, SubmissionRow, VariantRow } from '../ports.js';
 import { CatalogBase, type Taxonomy, type Viewer } from './base.js';
 
@@ -15,9 +15,9 @@ export interface EffectiveAttribute {
 export class CatalogViews extends CatalogBase {
   /* ================================================================ categories and attributes */
 
-  protected async categoryTree(opts: { includeHidden: boolean; admin: boolean }): Promise<Category[]> {
-    const tax = await this.taxonomy();
-    const stats = new Map((await this.repo.categoryStats()).map((s) => [s.category_id, s]));
+  protected async categoryTree(opts: { includeHidden: boolean; admin: boolean; tax?: Taxonomy }): Promise<Category[]> {
+    const [tax, statRows] = await Promise.all([opts.tax ?? this.taxonomy(), this.repo.categoryStats()]);
+    const stats = new Map(statRows.map((s) => [s.category_id, s]));
     const refs = await this.refsMap(tax.rows.map((r) => r.image_media_id));
     const node = (r: CategoryRow): Category => ({
       id: r.id,
@@ -71,10 +71,11 @@ export class CatalogViews extends CatalogBase {
 
   /* ================================================================ brands */
 
-  protected async brandViews(rows: BrandRow[]): Promise<Map<string, Brand>> {
-    const stats = new Map((await this.repo.brandStats(rows.map((r) => r.id), null)).map((s) => [s.brand_id, s]));
-    const refs = await this.refsMap(rows.flatMap((r) => [r.logo_media_id, r.banner_media_id]));
-    return new Map(rows.map((r) => [r.id, toBrand(r, stats.get(r.id)?.product_count ?? 0, refs)]));
+  /** `refs`: media refs that already cover the brands' logos and banners (read with other images in one call) */
+  protected async brandViews(rows: BrandRow[], refs?: Promise<Map<string, common.MediaRef>>): Promise<Map<string, Brand>> {
+    const [stats, media] = await Promise.all([this.repo.brandStats(rows.map((r) => r.id), null), refs ?? this.refsMap(rows.flatMap((r) => [r.logo_media_id, r.banner_media_id]))]);
+    const statsBy = new Map(stats.map((s) => [s.brand_id, s]));
+    return new Map(rows.map((r) => [r.id, toBrand(r, statsBy.get(r.id)?.product_count ?? 0, media)]));
   }
 
   protected async brandAdmins(rows: BrandRow[]): Promise<BrandAdmin[]> {
@@ -97,16 +98,23 @@ export class CatalogViews extends CatalogBase {
 
   protected async productViews(rows: ProductRow[], loaded?: { variants?: VariantRow[]; tax?: Taxonomy }): Promise<Map<string, Product>> {
     if (!rows.length) return new Map();
-    const tax = loaded?.tax ?? (await this.taxonomy());
-    const variants = loaded?.variants ?? (await this.repo.variantsOf(rows.map((r) => r.id)));
-    const brands = await this.brandViews(await this.repo.getBrands(rows.flatMap((r) => (r.brand_id ? [r.brand_id] : []))));
-    const refs = await this.refsMap([...rows.flatMap((r) => [...strings(r.media_ids), r.video_media_id]), ...variants.flatMap((v) => strings(v.media_ids))]);
+    const [tax, variants, brandRows] = await Promise.all([
+      loaded?.tax ?? this.taxonomy(),
+      loaded?.variants ?? this.repo.variantsOf(rows.map((r) => r.id)),
+      this.repo.getBrands(rows.flatMap((r) => (r.brand_id ? [r.brand_id] : []))),
+    ]);
+    // one media read for product, variant and brand images
+    const refsRead = this.refsMap([
+      ...rows.flatMap((r) => [...strings(r.media_ids), r.video_media_id]),
+      ...variants.flatMap((v) => strings(v.media_ids)),
+      ...brandRows.flatMap((b) => [b.logo_media_id, b.banner_media_id]),
+    ]);
+    const [refs, brands] = await Promise.all([refsRead, this.brandViews(brandRows, refsRead)]);
+    const variantsBy = groupBy(variants, (v) => v.product_id);
     const pick = (ids: string[]) => ids.flatMap((id) => (refs.has(id) ? [refs.get(id)!] : []));
     return new Map(
       rows.map((r) => {
-        const vs: Variant[] = variants
-          .filter((v) => v.product_id === r.id)
-          .map((v) => ({
+        const vs: Variant[] = (variantsBy.get(r.id) ?? []).map((v) => ({
             id: v.id,
             options: stringMap(v.options),
             gtin: v.gtin,
@@ -154,9 +162,20 @@ export class CatalogViews extends CatalogBase {
   protected async completenessOf(rows: ProductRow[], variants: VariantRow[], tax: Taxonomy): Promise<Map<string, Completeness>> {
     const catIds = [...new Set(rows.flatMap((r) => tax.path(r.category_id).map((c) => c.id)))];
     const [attrs, standards, minDescription] = await Promise.all([this.repo.attributesOf(catIds), this.repo.imageStandardsOf(catIds), this.ctx.settings.get('minDescriptionLength')]);
+    const variantsBy = groupBy(variants, (v) => v.product_id);
+    // required attributes per category, worked out once for all its products
+    const requiredBy = new Map<string, Attribute[]>();
+    const requiredOf = async (categoryId: string) => {
+      let required = requiredBy.get(categoryId);
+      if (!required) {
+        required = (await this.effectiveAttributes(categoryId, tax, attrs)).filter((a) => a.attribute.required).map((a) => a.attribute);
+        requiredBy.set(categoryId, required);
+      }
+      return required;
+    };
     const out = new Map<string, Completeness>();
     for (const r of rows) {
-      const required = r.category_id ? (await this.effectiveAttributes(r.category_id, tax, attrs)).filter((a) => a.attribute.required).map((a) => a.attribute) : [];
+      const required = r.category_id ? await requiredOf(r.category_id) : [];
       const standard = this.imageStandardFor(r.category_id, tax, standards);
       const minImages = Math.max(standard?.min_count ?? 1, imageRulesOf(standard ? imageRulesOfRow(standard.rules) : [])?.minCount ?? 1);
       out.set(
@@ -174,7 +193,7 @@ export class CatalogViews extends CatalogBase {
             modelNumber: r.model_number,
             mpn: r.mpn,
             noGtin: r.no_gtin,
-            variants: variants.filter((v) => v.product_id === r.id).map((v) => ({ options: stringMap(v.options), gtin: v.gtin })),
+            variants: (variantsBy.get(r.id) ?? []).map((v) => ({ options: stringMap(v.options), gtin: v.gtin })),
           },
           { requiredAttributes: required, minDescription, minImages },
         ),
@@ -190,8 +209,7 @@ export class CatalogViews extends CatalogBase {
   protected async adminViews(rows: ProductRow[], viewer: Viewer): Promise<ProductAdmin[]> {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
-    const tax = await this.taxonomy();
-    const variants = await this.repo.variantsOf(ids);
+    const [tax, variants] = await Promise.all([this.taxonomy(), this.repo.variantsOf(ids)]);
     const [views, logs, subs, listing, complete] = await Promise.all([
       this.productViews(rows, { variants, tax }),
       this.repo.logsOf(ids),
@@ -202,35 +220,38 @@ export class CatalogViews extends CatalogBase {
     const staff = viewer.kind === 'staff' || viewer.kind === 'system';
     const subBy = new Map<string, SubmissionRow>(subs.map((s) => [s.product_id, s]));
     // checks are read for every viewer (duplicateSuspected), but only staff see them
-    const checks = await this.repo.checksOf(subs.map((s) => s.id));
+    const [checks, drafts] = await Promise.all([
+      this.repo.checksOf(subs.map((s) => s.id)),
+      viewer.kind === 'staff' && viewer.staffId ? this.repo.draftsOf(subs.filter((s) => s.state === 'open').map((s) => s.id), viewer.staffId) : [],
+    ]);
     const dismissals = await this.repo.dismissalsOf(checks.filter((c) => c.kind === 'duplicate').map((c) => c.id));
-    const drafts = viewer.kind === 'staff' && viewer.staffId ? await this.repo.draftsOf(subs.filter((s) => s.state === 'open').map((s) => s.id), viewer.staffId) : [];
+    const checksBy = groupBy(checks, (c) => c.submission_id);
+    const draftBy = new Map(drafts.map((d) => [d.submission_id, d]));
+    const logsBy = groupBy(logs, (g) => g.product_id);
     const listingBy = new Map(listing.map((l) => [l.product_id, l]));
+    const dismissed = new Set(dismissals.map((d) => `${d.check_id}|${d.matched_product_id}`));
 
     // duplicate candidates: matched products of the latest duplicate check that are still open
     const candidateIds = new Map<string, string[]>();
     for (const s of subs) {
-      const c = checks.find((x) => x.submission_id === s.id && x.kind === 'duplicate');
+      const c = checksBy.get(s.id)?.find((x) => x.kind === 'duplicate');
       if (!c || c.result === 'pass' || (c.dismissed_at && !c.dismissed_matched_product_id)) continue;
-      candidateIds.set(
-        s.product_id,
-        [
-          ...new Set(
-            evidenceOf(c.evidence)
-              .filter((e) => e.matchedProductId && !dismissals.some((d) => d.check_id === c.id && d.matched_product_id === e.matchedProductId))
-              .map((e) => e.matchedProductId!),
-          ),
-        ],
-      );
+      candidateIds.set(s.product_id, [
+        ...new Set(
+          evidenceOf(c.evidence)
+            .filter((e) => e.matchedProductId && !dismissed.has(`${c.id}|${e.matchedProductId}`))
+            .map((e) => e.matchedProductId!),
+        ),
+      ]);
     }
     const candidateSummaries = staff ? await this.summaries(await this.repo.getProducts([...candidateIds.values()].flat())) : new Map<string, ProductSummary>();
     const now = this.now();
 
     return rows.map((r) => {
       const sub = subBy.get(r.id) ?? null;
-      const subChecks = sub ? checks.filter((c) => c.submission_id === sub.id) : [];
+      const subChecks = sub ? (checksBy.get(sub.id) ?? []) : [];
       const dupIds = candidateIds.get(r.id) ?? [];
-      const draft = sub ? drafts.find((d) => d.submission_id === sub.id) : undefined;
+      const draft = sub ? draftBy.get(sub.id) : undefined;
       const l = listingBy.get(r.id);
       const c = complete.get(r.id)!;
       return {
@@ -241,7 +262,7 @@ export class CatalogViews extends CatalogBase {
         publication: r.publication as ProductAdmin['publication'],
         version: r.version,
         missing: c.missing,
-        reviewLog: logs.filter((g) => g.product_id === r.id && (LOG_ACTIONS as readonly string[]).includes(g.action)).map(toLogEntry),
+        reviewLog: (logsBy.get(r.id) ?? []).filter((g) => (LOG_ACTIONS as readonly string[]).includes(g.action)).map(toLogEntry),
         duplicateCandidates: staff ? dupIds.flatMap((id) => (candidateSummaries.has(id) ? [candidateSummaries.get(id)!] : [])) : [],
         submission: sub ? toSubmission(sub, now, { staff }) : null,
         checks: staff ? subChecks.map((c) => toCheck(c, dismissals)) : [],

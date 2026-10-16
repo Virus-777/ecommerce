@@ -16,7 +16,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.1.0',
+  version: '2.1.1',
   schemas,
   register(ctx) {
     const service = new CatalogService({ repo: new CatalogRepository(ctx.mongo), ctx });
