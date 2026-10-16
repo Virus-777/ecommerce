@@ -554,12 +554,33 @@ export class SettingsService implements SettingsPublicApi {
   /** Sections registered by other modules, loaded now (a failing provider is shown as unavailable) */
   async #moduleSections(): Promise<SettingsSection[]> {
     const providers = [...this.#sections.values()].sort((a, b) => a.order - b.order);
+    if (!providers.length) return [];
+    const [defs, open, tz] = await Promise.all([this.#defs(), this.repo.openChanges(), this.#timeZone()]);
     return Promise.all(
       providers.map(async (p) => {
         try {
           const s = await p.load();
-          const values = (s.values ?? []).map((v) => ({ ...v, value: v.value ?? null, valueType: v.valueType ?? null }));
-          return { ...s, key: s.key ?? p.key, ownedHere: false, scheduled: s.scheduled ?? [], values };
+          // A value whose key is a runtime setting (e.g. finance.minimumPayout) is edited through POST /changes:
+          // settings adds its type, its scheduled change and the section's last change from its own records.
+          const settingKeys = (s.values ?? []).map((v) => v.key).filter((k): k is string => !!k && !!defs.get(k)?.available);
+          const scheduledHere = open.filter((c) => c.items.some((i) => settingKeys.includes(i.key)));
+          const values = (s.values ?? []).map((v) => {
+            const def = v.key ? defs.get(v.key) : undefined;
+            if (!def?.available) return { ...v, value: v.value ?? null, valueType: v.valueType ?? null };
+            const next = scheduledHere.find((c) => c.status === 'scheduled' && c.items.some((i) => i.key === def.key));
+            const item = next?.items.find((i) => i.key === def.key);
+            return { ...v, value: v.value ?? null, valueType: v.valueType ?? def.valueType, hint: v.hint ?? (item && next ? `Changes to ${item.toText} on ${dateText(next.effectiveAt, tz)}` : null) };
+          });
+          const last = !s.lastChange && settingKeys.length ? await this.repo.lastChangeAmong(settingKeys) : null;
+          return {
+            ...s,
+            key: s.key ?? p.key,
+            // true only when every value is a runtime setting (edited through POST /changes); else edited through link
+            ownedHere: s.ownedHere === true && settingKeys.length > 0 && settingKeys.length === (s.values ?? []).length,
+            values,
+            lastChange: s.lastChange ?? (last ? this.#lastChange(last) : null),
+            scheduled: [...(s.scheduled ?? []), ...scheduledHere.map((c) => this.#scheduledChange(c, defs, tz))],
+          };
         } catch (err) {
           this.ctx.log.warn({ err, section: p.key }, 'settings: section provider failed');
           return { key: p.key, title: p.key, subtitle: 'Could not load this section', ownerModule: 'unknown', ownedHere: false, values: [], lastChange: null, scheduled: [], link: null, available: false };

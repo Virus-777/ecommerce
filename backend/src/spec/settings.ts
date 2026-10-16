@@ -897,8 +897,8 @@ export interface SettingsPublicApi {
   businessCalendar(): Promise<{ isOpen(at: string): boolean, isBusinessDay(day: string): boolean, addBusinessMinutes(from: string, minutes: number): string, addBusinessDays(from: string, days: number): string, nextOpen(after: string): string }>;
   /** Feature flag check Used by: *. */
   isEnabled(flagKey: string, subject?: { accountId?: string, realm?: string }): Promise<boolean>;
-  /** Called at boot by modules that own a section of the settings page (returns, finance, shipping, advertising) so the overview shows their current values, last change and scheduled changes with a link to their own edit endpoints Used by: returns, finance, shipping, advertising, sellers, support. */
-  registerSection(provider: { key: string, order: number, load: () => SettingsSection }): Promise<void>;
+  /** Called after boot by modules that own a section of the settings page (returns, finance, shipping, advertising, sellers, support) so the overview shows their current values, last change and scheduled changes with a link to their own edit endpoints. A value whose key is a runtime setting gets its type, scheduled change and last change from settings; a section whose values are all runtime settings may set ownedHere (edited through POST /changes) Used by: returns, finance, shipping, advertising, sellers, support. */
+  registerSection(provider: { key: string, order: number, load: () => SettingsSection | Promise<SettingsSection> }): Promise<void>;
   /** Owning modules explain what a change of their declared settings does to existing commitments (open orders, sellers, content) Used by: checkout, orders, shipping, support, content, notifications. */
   registerImpactEstimator(keyPrefix: string, estimate: (change: { key: string, from: unknown, to: unknown, effectiveAt: string, applyScope: string }) => ImpactItem[]): Promise<void>;
   /** Public market facts for any screen: support hours and open now, closures in the next 60 days, active maintenance notice, guest checkout and public feature flags (the web-facing subset of AppConfig) Used by: graphql. */
