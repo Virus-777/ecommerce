@@ -5,7 +5,19 @@ import { compareBinCodes, deadlineOf, parseActor, suggestBox, WAVE_DONE_STATUSES
 import type { BinRec, BoxRec, FulfillmentRec, LineRec, PackageItemRec, PackageRec, ParcelRec, PutawayRec, WaveRec } from '../ports.js';
 import { iso, type Core, type StockInfo } from './core.js';
 
-export const binView = (b: BinRec, assigned: number): Bin => ({ id: b.id, locationId: b.location_id, code: b.code, zone: b.zone, kind: b.kind as Bin['kind'], barcode: b.barcode, active: b.active, assignedItems: assigned });
+/** Rows by key, in their order (Map.groupBy, which the ES2023 lib does not type yet) */
+export function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const r of rows) {
+    const k = key(r);
+    const list = out.get(k);
+    if (list) list.push(r);
+    else out.set(k, [r]);
+  }
+  return out;
+}
+
+export const binView =(b: BinRec, assigned: number): Bin => ({ id: b.id, locationId: b.location_id, code: b.code, zone: b.zone, kind: b.kind as Bin['kind'], barcode: b.barcode, active: b.active, assignedItems: assigned });
 
 export const boxView = (b: BoxRec): BoxType => ({ id: b.id, name: b.name, dimensions: b.dimensions, maxWeight: b.max_weight ?? null, kind: b.kind as BoxType['kind'], active: b.active });
 
@@ -119,22 +131,15 @@ export class Views {
       this.core.cfg(),
     ]);
     const items = packages.length ? await this.core.repo.find('package_items', { package_id: packages.map((p) => p.id) }) : [];
-    const group = <T, K extends keyof T>(rows: T[], key: K) => {
-      const m = new Map<string, T[]>();
-      for (const r of rows) {
-        const k = String(r[key]);
-        m.set(k, [...(m.get(k) ?? []), r]);
-      }
-      return m;
-    };
     const labelUrls = new Map<string, string>();
     const labelled = packages.filter((p) => p.shipment_id && ['labelled', 'packed', 'dispatched'].includes(p.status));
     if (o.labels !== false && labelled.length) {
-      const groups = [...new Set(recs.filter((r) => labelled.some((p) => p.fulfillment_id === r.id)).map((r) => r.seller_group_id))];
+      const withLabels = new Set(labelled.map((p) => p.fulfillment_id));
+      const groups = [...new Set(recs.filter((r) => withLabels.has(r.id)).map((r) => r.seller_group_id))];
       const shipments = await this.core.soft('shipping', 'label links', (s) => s.listShipmentsForGroups(groups));
       for (const list of shipments?.values() ?? []) for (const s of list) if (s.label?.labelUrl) labelUrls.set(s.id, s.label.labelUrl);
     }
-    return { lines: group(lines, 'fulfillment_id'), packages: group(packages, 'fulfillment_id'), items: group(items, 'package_id'), boxes, labelUrls, dueSoonMinutes: cfg.atRiskMinutes };
+    return { lines: groupBy(lines, (l) => l.fulfillment_id), packages: groupBy(packages, (p) => p.fulfillment_id), items: groupBy(items, (i) => i.package_id), boxes, labelUrls, dueSoonMinutes: cfg.atRiskMinutes };
   }
 
   pkg(p: PackageRec, f: FulfillmentRec, parts: FulfillmentParts): Package {
@@ -192,10 +197,11 @@ export class Views {
     if (!recs.length) return [];
     const [lines, cfg] = await Promise.all([this.core.repo.find('fulfillment_lines', { fulfillment_id: recs.map((r) => r.id) }), this.core.cfg()]);
     const waveIds = [...new Set(recs.map((r) => r.wave_id).filter((x): x is string => Boolean(x)))];
-    const waves = waveIds.length ? await this.core.repo.find('waves', { id: waveIds }) : [];
+    const waves = new Map((waveIds.length ? await this.core.repo.find('waves', { id: waveIds }) : []).map((w) => [w.id, w]));
+    const byFulfillment = groupBy(lines, (l) => l.fulfillment_id);
     const now = this.core.now();
     return recs.map((f) => {
-      const own = lines.filter((l) => l.fulfillment_id === f.id && l.state !== 'cancelled');
+      const own = (byFulfillment.get(f.id) ?? []).filter((l) => l.state !== 'cancelled');
       return {
         id: f.id,
         orderRef: f.order_ref,
@@ -206,7 +212,7 @@ export class Views {
         shipBy: f.ship_by.toISOString(),
         itemCount: own.reduce((n, l) => n + l.quantity, 0),
         pickedCount: own.reduce((n, l) => n + l.picked, 0),
-        waveRef: waves.find((w) => w.id === f.wave_id)?.ref ?? null,
+        waveRef: (f.wave_id ? waves.get(f.wave_id)?.ref : null) ?? null,
         holdReason: f.hold_reason,
       };
     });
@@ -218,19 +224,24 @@ export class Views {
     const fulfillments = await this.core.repo.find('fulfillments', { wave_id: ids }, { orderBy: [['ship_by', 'asc']] });
     const [lines, cfg] = await Promise.all([fulfillments.length ? this.core.repo.find('fulfillment_lines', { fulfillment_id: fulfillments.map((f) => f.id) }) : Promise.resolve([]), this.core.cfg()]);
     const now = this.core.now();
+    const byWave = groupBy(fulfillments, (f) => f.wave_id ?? '');
+    const byFulfillment = groupBy(lines, (l) => l.fulfillment_id);
     return recs.map((w) => {
-      const fs = fulfillments.filter((f) => f.wave_id === w.id);
+      const fs = byWave.get(w.id) ?? [];
       const orders: WaveOrder[] = fs.map((f) => ({
         fulfillmentId: f.id,
         orderRef: f.order_ref,
         deadline: this.deadline(f, now, cfg.atRiskMinutes),
         status: f.status,
-        lines: walkingOrder(lines.filter((l) => l.fulfillment_id === f.id)).map(lineView),
+        lines: walkingOrder(byFulfillment.get(f.id) ?? []).map(lineView),
       }));
-      const live = lines.filter((l) => fs.some((f) => f.id === l.fulfillment_id) && l.state !== 'cancelled');
+      // the wave's lines in the order they were read (fulfillment ids are unique to one wave)
+      const own = new Set(fs.map((f) => f.id));
+      const live = lines.filter((l) => own.has(l.fulfillment_id) && l.state !== 'cancelled');
       const units = live.reduce((n, l) => n + l.quantity, 0);
       const picked = live.reduce((n, l) => n + Math.min(l.picked, l.quantity), 0);
-      const pending = walkingOrder(live.filter((l) => l.state === 'pending' && fs.find((f) => f.id === l.fulfillment_id)?.status !== 'on_hold'));
+      const held = new Set(fs.filter((f) => f.status === 'on_hold').map((f) => f.id));
+      const pending = walkingOrder(live.filter((l) => l.state === 'pending' && !held.has(l.fulfillment_id)));
       const alerts: string[] = [];
       for (const f of fs) {
         if (f.status === 'on_hold') alerts.push(f.hold_reason?.startsWith('Damage') ? `Damage reported on ${f.order_ref}` : `Shortage reported on ${f.order_ref}`);

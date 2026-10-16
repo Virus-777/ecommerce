@@ -490,9 +490,9 @@ export class Packing {
     if (!ids.length) return out;
     const items = await this.repo.find('package_items', { order_item_id: ids });
     if (!items.length) return out;
-    const pkgs = await this.repo.find('packages', { id: [...new Set(items.map((i) => i.package_id))] });
+    const voided = new Set((await this.repo.find('packages', { id: [...new Set(items.map((i) => i.package_id))] })).filter((x) => x.status === 'voided').map((x) => x.id));
     for (const it of items) {
-      if (pkgs.find((x) => x.id === it.package_id)?.status === 'voided') continue;
+      if (voided.has(it.package_id)) continue;
       out[it.order_item_id] = [...new Set([...(out[it.order_item_id] ?? []), ...(it.serial_numbers ?? [])])];
     }
     return out;

@@ -114,6 +114,11 @@ export class WarehouseRepository {
     return this.#t(table).page({ $and: conds }, page, { column: o.order.column, direction: o.order.direction });
   }
 
+  /** The held fulfillment that noted an inventory discrepancy (fulfillments.discrepancy_ids[].id) */
+  heldWithDiscrepancy(discrepancyId: string): Promise<Recs['fulfillments'] | undefined> {
+    return this.#t('fulfillments').findOne({ status: 'on_hold', 'discrepancy_ids.id': discrepancyId });
+  }
+
   /** Assigned stock items per bin */
   async assignmentCounts(binIds: string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();

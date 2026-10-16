@@ -461,8 +461,8 @@ export class Fulfillments {
 
   /** inventory.discrepancy.resolved: the report closes; reallocated → the held order resumes by itself */
   async onDiscrepancyResolved(e: EventPayload<'inventory.discrepancy.resolved'>): Promise<void> {
-    const candidates = e.orderId ? await this.repo.find('fulfillments', { order_id: e.orderId }) : await this.repo.find('fulfillments', { status: 'on_hold' }, { limit: 500 });
-    const f = candidates.find((x) => x.discrepancy_ids.some((d) => d.id === e.discrepancyId));
+    // by order when the event names it, else the held fulfillment that noted it (was the first 500 held ones, filtered here)
+    const f = e.orderId ? (await this.repo.find('fulfillments', { order_id: e.orderId })).find((x) => x.discrepancy_ids.some((d) => d.id === e.discrepancyId)) : await this.repo.heldWithDiscrepancy(e.discrepancyId);
     if (!f) {
       this.core.ctx.log.debug({ discrepancyId: e.discrepancyId }, 'warehouse: resolved discrepancy of no fulfillment, ignored');
       return;

@@ -42,8 +42,8 @@ export class Summary {
       this.repo.count('return_parcels', { status: 'expected', ...(locationId ? { location_id: locationId } : {}) }),
       this.repo.count('return_parcels', { status: 'received', ...(locationId ? { location_id: locationId } : {}) }),
     ]);
-    const ids = new Set(active.map((f) => f.id));
-    const scopedPacked = locationId ? packedToday.filter((p) => ids.has(p.fulfillment_id) || dispatchedToday.some((f) => f.id === p.fulfillment_id)) : packedToday;
+    const ids = new Set([...active, ...dispatchedToday].map((f) => f.id));
+    const scopedPacked = locationId ? packedToday.filter((p) => ids.has(p.fulfillment_id)) : packedToday;
     const windowEnd = now.getTime() + cfg.atRiskMinutes * 60_000;
     const unpacked = active.filter((f) => UNPACKED_STATUSES.includes(f.status));
     const isLate = (f: FulfillmentRec) => f.ship_by.getTime() <= now.getTime();

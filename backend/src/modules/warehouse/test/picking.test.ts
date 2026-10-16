@@ -152,6 +152,16 @@ describe('waves and picking', () => {
     expect((await h.pickAll(o.fulfillment.id)).status).toBe('picked');
   });
 
+  it('a resolution that names no order finds the held order by its report', async () => {
+    const a = h.item('SHORT-B', 'Pot, Enamel');
+    await assign(a, 'A-01-1');
+    const o = await h.picking([{ item: a, quantity: 2 }]);
+    expect((await h.call('POST', `/pick-lines/${o.fulfillment.lines[0].id}/report-shortage`, { quantityFound: 0 })).body.status).toBe('on_hold');
+    const d = h.discrepancies.at(-1);
+    await h.publish('inventory', 'inventory.discrepancy.resolved', { discrepancyId: d.id, resolution: 'reallocated' });
+    expect((await h.call('GET', `/fulfillments/${o.fulfillment.id}`)).body).toMatchObject({ status: 'picking', holdReason: null });
+  });
+
   it('damage needs photos; an adjusted report waits for staff to resume', async () => {
     const a = h.item('DMG-A', 'Vase, Glass');
     await assign(a, 'A-02-1');
