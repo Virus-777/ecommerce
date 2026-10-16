@@ -74,6 +74,7 @@ fulfillments.index({"status":1,"ship_by":1}, {"name":"fulfillments_status_ship_b
 fulfillments.index({"wave_id":1}, {"name":"fulfillments_wave_id_b7710f"});
 fulfillments.index({"order_id":1}, {"name":"fulfillments_order_id_4c5e85"});
 fulfillments.index({"seller_group_id":1}, {"name":"fulfillments_seller_group_id_17f3a9"});
+fulfillments.index({"status":1,"updated_at":1}, {"name":"fulfillments_status_updated_at_b8de80"});
 
 const fulfillment_lines = new Schema(
   {
@@ -177,6 +178,7 @@ const packages = new Schema(
 packages.index({"fulfillment_id":1}, {"name":"packages_fulfillment_id_26a36a"});
 packages.index({"tracking_number":1}, {"name":"packages_tracking_number_3d9cae","unique":true,"partialFilterExpression":{"tracking_number":{"$type":"string"}}});
 packages.index({"shipment_id":1}, {"name":"packages_shipment_id_048e7e"});
+packages.index({"packed_at":1}, {"name":"packages_packed_at_718ea9"});
 
 const package_items = new Schema(
   {

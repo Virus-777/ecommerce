@@ -2377,6 +2377,13 @@ export const spec = defineModuleSpec({
           "key": {
             "seller_group_id": 1
           }
+        },
+        {
+          "name": "fulfillments_status_updated_at_b8de80",
+          "key": {
+            "status": 1,
+            "updated_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -2950,6 +2957,12 @@ export const spec = defineModuleSpec({
           "name": "packages_shipment_id_048e7e",
           "key": {
             "shipment_id": 1
+          }
+        },
+        {
+          "name": "packages_packed_at_718ea9",
+          "key": {
+            "packed_at": 1
           }
         }
       ],
