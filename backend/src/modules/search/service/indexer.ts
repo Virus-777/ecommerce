@@ -7,7 +7,7 @@ import { SYSTEM_ACTOR } from '../../../kernel/auth/index.js';
 import { isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
-import type { Product } from '../../../spec/catalog.js';
+import type { Brand, Product } from '../../../spec/catalog.js';
 import type * as common from '../../../spec/common.js';
 import type * as offersSpec from '../../../spec/offers.js';
 import { aggregatesFromOffers, buildDocument, type SourceOffer } from '../domain/document.js';
@@ -41,20 +41,22 @@ export class SearchIndexer extends SearchBase {
       await this.repo.transaction((tx) => tx.deleteDocument(productId));
       return 'removed';
     }
-    const t = tree ?? (await this.categoryTree());
-    const path = t.path(product.categoryId).map((c) => ({ id: c.id, name: c.name, slug: c.slug }));
-    // catalog answers getBrandBySlug for active brands only (undefined = catalog could not answer: keep it usable)
-    const activeBrand = product.brand ? await this.optional('catalog', 'brand', (c) => c.getBrandBySlug(product.brand!.slug)) : null;
-    const brandActive = Boolean(product.brand) && activeBrand !== null;
-    const [source, rating, existing] = await Promise.all([
+    // everything else the document is built from, read at once
+    const [t, activeBrand, source, rating, existing, withThumbnails] = await Promise.all([
+      tree ?? this.categoryTree(),
+      // catalog answers getBrandBySlug for active brands only (undefined = catalog could not answer: keep it usable)
+      product.brand ? this.optional('catalog', 'brand', (c) => c.getBrandBySlug(product.brand!.slug)) : null,
       this.sourceOffers(productId),
       this.optional('reviews', 'ratings', async (r) => (await r.getRatingSummaries([productId])).find((s) => s.productId === productId)),
       this.repo.getDocument(productId),
+      this.withThumbnails(product),
     ]);
+    const path = t.path(product.categoryId).map((c) => ({ id: c.id, name: c.name, slug: c.slug }));
+    const brandActive = Boolean(product.brand) && activeBrand !== null;
     const now = this.now();
     const built = buildDocument(
       {
-        product: await this.withThumbnails(product),
+        product: withThumbnails,
         categoryPath: path,
         offers: source?.offers ?? [],
         featuredOfferId: source?.featuredOfferId ?? null,
@@ -164,9 +166,8 @@ export class SearchIndexer extends SearchBase {
 
   /** Recompute a document's offer aggregates after an in-place offer row change */
   protected async refreshAggregates(productId: string) {
-    const doc = await this.repo.getDocument(productId);
+    const [doc, rows] = await Promise.all([this.repo.getDocument(productId), this.repo.offerRows([productId])]);
     if (!doc) return;
-    const rows = await this.repo.offerRows([productId]);
     await this.repo.updateDocument(productId, aggregatesFromOffers(doc, rows), this.now());
   }
 
@@ -476,12 +477,20 @@ export class SearchIndexer extends SearchBase {
 
   /** search.refresh-delivery-flags: delivery aggregates from offer rows ('Ships today' is checked against the cutoff at query time) */
   async refreshDeliveryFlags(): Promise<void> {
-    const ids = await this.repo.documentIds({});
-    for (let i = 0; i < ids.length; i += 500) {
-      const chunk = ids.slice(i, i + 500);
+    // the whole index in bounded batches (a keyset walk by product id)
+    for (let after: string | null = null; ; ) {
+      const chunk = await this.repo.documentIdsAfter(after, 500);
+      if (!chunk.length) break;
+      after = chunk.at(-1)!;
       const [docs, rows] = await Promise.all([this.repo.getDocuments(chunk), this.repo.offerRows(chunk)]);
+      const rowsBy = new Map<string, typeof rows>();
+      for (const r of rows) {
+        const list = rowsBy.get(r.product_id);
+        if (list) list.push(r);
+        else rowsBy.set(r.product_id, [r]);
+      }
       for (const d of docs) {
-        const mine = rows.filter((r) => r.product_id === d.product_id);
+        const mine = rowsBy.get(d.product_id) ?? [];
         const inStock = mine.filter((r) => r.in_stock);
         const featured = mine.find((r) => r.offer_id === d.featured_offer_id);
         const fastest = inStock.length ? Math.min(...inStock.map((r) => r.dispatch_days)) : null;
@@ -500,10 +509,7 @@ export class SearchIndexer extends SearchBase {
     const queries = await this.repo.popularQueries(since, 2000);
     await this.repo.replaceTerms('query', queries.map((q) => ({ term: q.normalized, targetId: null, weight: q.count })), now);
 
-    const tree = await this.categoryTree();
-    const ids = await this.repo.documentIds({});
-    const docs = await this.repo.getDocuments(ids);
-    const live = docs.filter((d) => d.offer_count > 0);
+    const [tree, live] = await Promise.all([this.categoryTree(), this.repo.liveDocumentSummaries()]);
     const perCategory = new Map<string, number>();
     for (const d of live) for (const c of d.category_path_ids) perCategory.set(c, (perCategory.get(c) ?? 0) + 1);
     const categoryRows = [...tree.byId.values()]
@@ -512,20 +518,22 @@ export class SearchIndexer extends SearchBase {
     await this.repo.replaceTerms('category', categoryRows, now);
 
     // brands: only the active ones (catalog answers getBrandBySlug for active brands only)
-    const brands = new Map<string, { name: string; n: number; productId: string }>();
+    const brands = new Map<string, { name: string; n: number }>();
     for (const d of live) {
       if (!d.brand_id) continue;
-      const b = brands.get(d.brand_id) ?? { name: d.brand_name ?? '', n: 0, productId: d.product_id };
+      const b = brands.get(d.brand_id) ?? { name: d.brand_name ?? '', n: 0 };
       b.n++;
       brands.set(d.brand_id, b);
     }
-    const brandRows: { term: string; targetId: string; weight: number }[] = [];
-    for (const [id, b] of brands) {
-      const product = await this.optional('catalog', 'brand', (c) => c.getProduct(b.productId));
-      const active = product?.brand ? await this.optional('catalog', 'brand', (c) => c.getBrandBySlug(product.brand!.slug)) : undefined;
-      if (active === null) continue;
-      brandRows.push({ term: product?.brand?.name ?? b.name, targetId: id, weight: b.n });
+    // catalog's brands in batches (was two catalog reads per brand); a brand catalog does not know keeps its indexed name
+    const current = new Map<string, Brand>();
+    const brandIds = [...brands.keys()];
+    for (let i = 0; i < brandIds.length; i += 200) {
+      for (const b of (await this.optional('catalog', 'brands', (c) => c.getBrands(brandIds.slice(i, i + 200)))) ?? []) current.set(b.id, b);
     }
+    const brandRows = [...brands]
+      .filter(([id]) => !current.has(id) || current.get(id)!.status === 'active')
+      .map(([id, b]) => ({ term: current.get(id)?.name ?? b.name, targetId: id, weight: b.n }));
     await this.repo.replaceTerms('brand', brandRows, now);
 
     // stores keep their membership from seller events; weights follow product counts

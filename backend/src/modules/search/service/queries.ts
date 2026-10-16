@@ -111,7 +111,13 @@ export class SearchQueries extends SearchIndexer {
     } catch (err) {
       this.filterError(err);
     }
-    const tree = await this.categoryTree();
+    const raw = query.q?.trim() || null;
+    // independent reads at once: the category tree, whether best selling can be offered, the synonyms
+    const [tree, bestSellingAvailable, sets] = await Promise.all([
+      this.categoryTree(),
+      this.setting('bestSellingMinOrders').then((minOrders) => this.engine.bestSellingAvailable(minOrders)),
+      raw ? this.synonymSets() : [],
+    ]);
     const ef: EngineFilters = { inStockOnly: f.inStockOnly ?? (await this.setting('excludeOutOfStockByDefault')) };
 
     // category: a slug (REST, category page) or ids (GraphQL)
@@ -128,11 +134,19 @@ export class SearchQueries extends SearchIndexer {
       if (!node) throw this.ctx.error('INVALID_FILTER', 'Unknown category', { filter: 'category' });
       if (!categoryNodes.some((n) => n.id === id)) categoryNodes.push(node);
     }
+
+    // the category's filters and the brand and store slugs, looked up at once; checked below in the order given
+    const brandSlugs = (f.brandSlugs ?? []).filter((token) => !isUuid(token));
+    const storeSlugs = mode.kind === 'seller' ? [] : (f.sellerSlugs ?? []).filter((token) => !isUuid(token));
+    const [detail, brandsBySlug, storesBySlug] = await Promise.all([
+      categoryNodes.length === 1 ? this.optional('catalog', 'category', (c) => c.getCategoryBySlug(categoryNodes[0]!.slug)) : undefined,
+      Promise.all(brandSlugs.map(async (token) => [token, await this.optional('catalog', 'brand', (c) => c.getBrandBySlug(token))] as const)).then((list) => new Map(list)),
+      Promise.all(storeSlugs.map(async (token) => [token, await this.optional('sellers', 'store', (s) => s.getStorefrontBySlug(token))] as const)).then((list) => new Map(list)),
+    ]);
     if (categoryNodes.length) {
       ef.categoryIds = categoryNodes.map((n) => n.id);
       categoryToken = categoryNodes[0]!.slug;
       if (categoryNodes.length === 1) {
-        const detail = await this.optional('catalog', 'category', (c) => c.getCategoryBySlug(categoryNodes[0]!.slug));
         if (detail === null) throw this.ctx.error('INVALID_FILTER', `Unknown category '${categoryNodes[0]!.slug}'`, { filter: 'category' });
         category = { node: categoryNodes[0]!, filters: (detail?.filters ?? []).filter((a) => a.filterable) };
       }
@@ -146,7 +160,7 @@ export class SearchQueries extends SearchIndexer {
         brandTokens.set(token, token);
         continue;
       }
-      const brand = await this.optional('catalog', 'brand', (c) => c.getBrandBySlug(token));
+      const brand = brandsBySlug.get(token);
       if (!brand) throw this.ctx.error('INVALID_FILTER', `Unknown brand '${token}'`, { filter: 'brand' });
       brandTokens.set(token, brand.id);
     }
@@ -163,7 +177,7 @@ export class SearchQueries extends SearchIndexer {
           sellerTokens.set(token, token);
           continue;
         }
-        const store = await this.optional('sellers', 'store', (s) => s.getStorefrontBySlug(token));
+        const store = storesBySlug.get(token);
         if (!store) throw this.ctx.error('INVALID_FILTER', `Unknown store '${token}'`, { filter: 'seller' });
         sellerTokens.set(token, store.seller.id);
       }
@@ -203,8 +217,6 @@ export class SearchQueries extends SearchIndexer {
     const engineQuery: EngineQuery = { text: null, filters: ef, marketTime: this.marketTime() };
 
     // sort
-    const minOrders = await this.setting('bestSellingMinOrders');
-    const bestSellingAvailable = await this.engine.bestSellingAvailable(minOrders);
     let sort: SortKey = query.sort ?? 'recommended';
     if (sort === 'best_selling' && !bestSellingAvailable) {
       if (opts.strictSort) throw this.ctx.error('SORT_NOT_AVAILABLE', 'Best selling is offered once there is enough sales history');
@@ -212,14 +224,12 @@ export class SearchQueries extends SearchIndexer {
     }
 
     // text: synonyms, GTINs and spelling correction
-    const raw = query.q?.trim() || null;
     const text: Prepared['text'] = { raw, normalized: null, correctedTo: null, correctionApplied: false, searchInsteadFor: null, synonymsUsed: [] };
     const exact = Boolean(query.exact);
     if (raw) {
       const normalized = normalizeQuery(raw);
       text.normalized = normalized;
       const gtin = queryGtin(raw);
-      const sets = await this.synonymSets();
       const exp = expandQuery(normalized, sets);
       text.synonymsUsed = exp.used;
       engineQuery.text = { groups: exp.groups, gtin };
@@ -641,15 +651,13 @@ export class SearchQueries extends SearchIndexer {
 
   protected async emptyGuidanceOf(p: Prepared, applied: Chip[]): Promise<EmptyGuidance> {
     const base = p.engineQuery;
-    const removable = [];
-    for (const chip of applied) {
-      const count = await this.engine.count({ ...base, filters: this.withoutChip(p, chip) });
-      removable.push({ filter: this.appliedFilter(chip, p), resultCount: count });
-    }
     const cleared: EngineFilters = { inStockOnly: await this.setting('excludeOutOfStockByDefault'), ...(p.categoryIsFilter || !base.filters.categoryIds ? {} : { categoryIds: base.filters.categoryIds }) };
-    const clearAllCount = applied.length ? await this.engine.count({ ...base, filters: cleared }) : null;
-    // nearby categories: where the words find something, or the category's neighbours
-    const nearbyCounts = await this.engine.facets({ ...base, filters: { inStockOnly: true } }, []);
+    // the count without each filter, without all of them, and nearby categories: where the words find something
+    const [removable, clearAllCount, nearbyCounts] = await Promise.all([
+      Promise.all(applied.map(async (chip) => ({ filter: this.appliedFilter(chip, p), resultCount: await this.engine.count({ ...base, filters: this.withoutChip(p, chip) }) }))),
+      applied.length ? this.engine.count({ ...base, filters: cleared }) : null,
+      this.engine.facets({ ...base, filters: { inStockOnly: true } }, []),
+    ]);
     const tree = p.tree;
     const current = p.category?.node ?? null;
     const neighbourIds = current ? [...(current.parentId ? tree.byId.get(current.parentId)?.children ?? [] : tree.roots), ...current.children].filter((id) => id !== current.id) : [...tree.byId.keys()];
@@ -685,7 +693,7 @@ export class SearchQueries extends SearchIndexer {
 
   /** Everything around the results: total, correction, applied filters, facets, sorts, store match, category, guidance */
   async context(p: Prepared, searchId: string): Promise<SearchContext> {
-    const [summary, counts] = await Promise.all([this.engine.summary(p.engineQuery), this.engine.facets(p.engineQuery, p.attributeKeys)]);
+    const [summary, counts, storeMatch] = await Promise.all([this.engine.summary(p.engineQuery), this.engine.facets(p.engineQuery, p.attributeKeys), this.storeMatchOf(p)]);
     const sellerIds = [...counts.sellers.keys(), ...(p.engineQuery.filters.sellerIds ?? [])];
     const sellers = await this.sellerLabels(sellerIds);
     const names = new Map([...sellers].map(([id, s]) => [id, s.name]));
@@ -695,12 +703,14 @@ export class SearchQueries extends SearchIndexer {
       sellers: [...p.sellerTokens].map(([token, id]) => ({ key: token, name: names.get(id) ?? token })),
       attributes: p.attributeNames,
     };
-    for (const b of labels.brands) {
-      if (b.name !== b.key) continue;
-      // a selected brand without results this time: its name from any of its documents
-      const [docId] = await this.repo.documentIds({ brandIds: [p.brandTokens.get(b.key)!] });
-      const doc = docId ? await this.repo.getDocument(docId) : undefined;
-      if (doc?.brand_name) b.name = doc.brand_name;
+    // selected brands without results this time: their names from any of their documents
+    const unnamed = labels.brands.filter((b) => b.name === b.key);
+    if (unnamed.length) {
+      const docNames = await this.repo.brandNamesOfDocuments(unnamed.map((b) => p.brandTokens.get(b.key)!));
+      for (const b of unnamed) {
+        const name = docNames.get(p.brandTokens.get(b.key)!);
+        if (name) b.name = name;
+      }
     }
     const applied = chips(p.state, labels, { categoryIsFilter: p.categoryIsFilter, currency: this.ctx.config.market.currency });
     const total = summary.total;
@@ -708,6 +718,11 @@ export class SearchQueries extends SearchIndexer {
       total === 0
         ? 'No results'
         : `${total} ${total === 1 ? 'result' : 'results'} from ${summary.sellers} ${summary.sellers === 1 ? 'seller' : 'sellers'}${summary.official ? (summary.sellers === 1 ? ', the Official Store' : ', including the Official Store') : ''}`;
+    const [facets, category, emptyGuidance] = await Promise.all([
+      this.facetsOf(p, counts, sellers),
+      this.categoryContextOf(p, counts, summary.sellers),
+      total === 0 ? this.emptyGuidanceOf(p, applied) : null,
+    ]);
     return {
       searchId,
       query: { raw: p.text.raw, normalized: p.text.normalized, correctedTo: p.text.correctedTo, correctionApplied: p.text.correctionApplied, searchInsteadFor: p.text.searchInsteadFor },
@@ -715,11 +730,11 @@ export class SearchQueries extends SearchIndexer {
       totalLabel,
       appliedFilters: applied.map((c) => this.appliedFilter(c, p)),
       clearAllQuery: toQueryString(clearAll(p.state, { categoryIsFilter: p.categoryIsFilter })),
-      facets: await this.facetsOf(p, counts, sellers),
+      facets,
       sorts: this.sortsOf(p),
-      storeMatch: await this.storeMatchOf(p),
-      category: await this.categoryContextOf(p, counts, summary.sellers),
-      emptyGuidance: total === 0 ? await this.emptyGuidanceOf(p, applied) : null,
+      storeMatch,
+      category,
+      emptyGuidance,
       fromPriceNote: FROM_PRICE_NOTE,
       rankingNote: RANKING_NOTE,
     };
@@ -925,57 +940,65 @@ export class SearchQueries extends SearchIndexer {
   async suggestions(prefix: string, session: SearchSession | undefined, limit = 5): Promise<Suggestions> {
     const per = Math.min(Math.max(limit, 1), 10);
     const norm = normalizeQuery(prefix);
-    const owner = await this.recentOwner(session);
-    const recentRows = owner ? await this.repo.recentSearches(owner, await this.setting('recentSearchesMax')) : [];
-    const recent = recentRows.filter((r) => !norm || normalizeQuery(r.query).startsWith(norm)).slice(0, per).map(this.recentOut);
-    const empty: Suggestions = { query: prefix, queries: [], categories: [], brands: [], stores: [], products: [], recent };
-    if (!norm) return empty;
-    const threshold = await this.setting('typoSimilarityThreshold');
-    const tree = await this.categoryTree();
+    const recentOf = async () => {
+      const owner = await this.recentOwner(session);
+      const rows = owner ? await this.repo.recentSearches(owner, await this.setting('recentSearchesMax')) : [];
+      return rows.filter((r) => !norm || normalizeQuery(r.query).startsWith(norm)).slice(0, per).map(this.recentOut);
+    };
+    if (!norm) return { query: prefix, queries: [], categories: [], brands: [], stores: [], products: [], recent: await recentOf() };
+    const words = tokens(norm);
     const prefixOf = (text: string) => (text.toLowerCase().startsWith(norm) ? norm : '');
 
-    // queries: popular queries, with a spelling fix first when the words look misspelled
-    const queryTerms = await this.engine.suggestTerms('query', norm, threshold, per);
-    const queries = queryTerms.map((t) => ({ text: t.term, matchedPrefix: prefixOf(t.term), categoryScope: null }));
-    const words = tokens(norm);
-    // the last word may still be being typed: it is fixed only when no known word starts with it
-    const fixed = await Promise.all(
-      words.map(async (w, i) => (i === words.length - 1 && (w.length < 4 || (await this.engine.knownPrefix(w))) ? w : ((await this.engine.correctWord(w, threshold)) ?? w))),
-    );
+    // asked on every key press: the independent reads run at once, in two rounds (the second needs the first's terms)
+    const [recent, threshold, tree] = await Promise.all([recentOf(), this.setting('typoSimilarityThreshold'), this.categoryTree()]);
+    const [queryTerms, fixed, categoryTerms, brandTerms, storeTerms] = await Promise.all([
+      this.engine.suggestTerms('query', norm, threshold, per),
+      // the last word may still be being typed: it is fixed only when no known word starts with it
+      Promise.all(words.map(async (w, i) => (i === words.length - 1 && (w.length < 4 || (await this.engine.knownPrefix(w))) ? w : ((await this.engine.correctWord(w, threshold)) ?? w)))),
+      this.engine.suggestTerms('category', norm, threshold, per),
+      this.engine.suggestTerms('brand', norm, threshold, per),
+      this.engine.suggestTerms('store', norm, threshold, per),
+    ]);
     const corrected = fixed.join(' ');
+    const brandIds = brandTerms.map((t) => t.target_id!).filter(Boolean);
+    const storeIds = storeTerms.map((t) => t.target_id!).filter(Boolean);
+    const [scoped, brandCounts, brandsById, cards, storeCounts, storeCats, docs] = await Promise.all([
+      this.engine.categoriesForPrefix(corrected, per),
+      this.engine.productCountsByBrand(brandIds),
+      // brands with indexed products, as catalog has them now
+      this.repo.brandNamesOfDocuments(brandIds).then(async (indexed) => {
+        const brands = indexed.size ? await this.optional('catalog', 'brands', (c) => c.getBrands([...indexed.keys()])) : [];
+        return new Map((brands ?? []).map((b) => [b.id, b]));
+      }),
+      storeIds.length ? this.optional('sellers', 'store cards', (s) => s.getStorefrontCard(storeIds)).then((found) => found ?? []) : [],
+      this.engine.productCountsBySeller(storeIds),
+      this.engine.sellerCategoryCounts(storeIds),
+      this.engine.suggestProducts(corrected, threshold, per),
+    ]);
+
+    // queries: popular queries, with a spelling fix first when the words look misspelled
+    const queries = queryTerms.map((t) => ({ text: t.term, matchedPrefix: prefixOf(t.term), categoryScope: null }));
     if (corrected !== norm && !queries.some((q) => q.text === corrected)) queries.unshift({ text: corrected, matchedPrefix: '', categoryScope: null });
 
     // categories: names that match, then the query scoped to the categories where it finds most
     const categories: Suggestions['categories'] = [];
-    for (const t of await this.engine.suggestTerms('category', norm, threshold, per)) {
+    for (const t of categoryTerms) {
       const node = t.target_id ? tree.byId.get(t.target_id) : undefined;
       if (node && node.visible) categories.push({ text: node.name, matchedPrefix: prefixOf(node.name), categoryScope: tree.crumb(node) });
     }
     const scopeText = queries[0]?.text ?? norm;
-    for (const c of await this.engine.categoriesForPrefix(corrected, per)) {
+    for (const c of scoped) {
       const node = tree.byId.get(c.categoryId);
       if (node && node.visible && !categories.some((x) => x.categoryScope?.id === node.id && x.text === scopeText)) categories.push({ text: scopeText, matchedPrefix: prefixOf(scopeText), categoryScope: tree.crumb(node) });
     }
 
     // brands (active ones only: brand terms exist for active brands)
-    const brandTerms = await this.engine.suggestTerms('brand', norm, threshold, per);
-    const brandCounts = await this.engine.productCountsByBrand(brandTerms.map((t) => t.target_id!).filter(Boolean));
-    const brands: Suggestions['brands'] = [];
-    for (const t of brandTerms) {
-      if (!t.target_id) continue;
-      const [docId] = await this.repo.documentIds({ brandIds: [t.target_id] });
-      const product = docId ? await this.optional('catalog', 'brand', (c) => c.getProduct(docId)) : undefined;
-      const brand = product?.brand;
-      if (!brand) continue;
-      brands.push({ brandId: brand.id, name: brand.name, slug: brand.slug, logo: brand.logo ?? null, productCount: brandCounts.get(brand.id) ?? 0 });
-    }
+    const brands: Suggestions['brands'] = brandIds.flatMap((id) => {
+      const brand = brandsById.get(id);
+      return brand ? [{ brandId: brand.id, name: brand.name, slug: brand.slug, logo: brand.logo ?? null, productCount: brandCounts.get(brand.id) ?? 0 }] : [];
+    });
 
     // stores: lead to the store page, never into product results
-    const storeTerms = await this.engine.suggestTerms('store', norm, threshold, per);
-    const storeIds = storeTerms.map((t) => t.target_id!).filter(Boolean);
-    const cards = storeIds.length ? ((await this.optional('sellers', 'store cards', (s) => s.getStorefrontCard(storeIds))) ?? []) : [];
-    const storeCounts = await this.engine.productCountsBySeller(storeIds);
-    const storeCats = await this.engine.sellerCategoryCounts(storeIds);
     const stores: Suggestions['stores'] = storeIds
       .map((id) => cards.find((c) => c.id === id))
       .filter((c): c is NonNullable<typeof c> => Boolean(c))
@@ -987,8 +1010,7 @@ export class SearchQueries extends SearchIndexer {
       });
 
     // products
-    const docs: DocRow[] = await this.engine.suggestProducts(corrected, threshold, per);
-    const products = docs.map((d) => ({
+    const products = docs.map((d: DocRow) => ({
       productId: d.product_id,
       slug: d.slug,
       title: d.title,

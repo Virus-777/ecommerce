@@ -240,21 +240,26 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
 
     async search(q, sort, weights, window) {
       const pipeline = base(q);
-      const total = await count(pipeline);
-      if (!total || window.limit <= 0) return { hits: [], total };
-      const found = await agg([...pipeline, ...scoreStages(q, weights), { $sort: ORDER[sort] }, { $skip: window.offset }, { $limit: window.limit }, { $project: { terms: 0, m: 0 } }]);
-      return { hits: found.map(toHit), total };
+      if (window.limit <= 0) return { hits: [], total: await count(pipeline) };
+      // the count and the page at once (a page of nothing is cheap)
+      const [total, found] = await Promise.all([
+        count(pipeline),
+        agg([...pipeline, ...scoreStages(q, weights), { $sort: ORDER[sort] }, { $skip: window.offset }, { $limit: window.limit }, { $project: { terms: 0, m: 0 } }]),
+      ]);
+      return { hits: total ? found.map(toHit) : [], total };
     },
 
     count: (q) => count(base(q)),
 
     async summary(q) {
       const pipeline = base(q);
-      const total = await count(pipeline);
-      const [s] = await agg<{ sellers: string[]; official: boolean | null }>([
-        ...pipeline,
-        { $unwind: '$m' },
-        { $group: { _id: null, sellers: { $addToSet: { $ifNull: ['$m.seller_id', 'official'] } }, official: { $max: '$m.official' } } },
+      const [total, [s]] = await Promise.all([
+        count(pipeline),
+        agg<{ sellers: string[]; official: boolean | null }>([
+          ...pipeline,
+          { $unwind: '$m' },
+          { $group: { _id: null, sellers: { $addToSet: { $ifNull: ['$m.seller_id', 'official'] } }, official: { $max: '$m.official' } } },
+        ]),
       ]);
       return { total, sellers: s?.sellers.length ?? 0, official: Boolean(s?.official) };
     },
@@ -262,71 +267,71 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
     async facets(q, attributeKeys) {
       const f = q.filters;
 
-      const categories = new Map(
-        (await agg<{ _id: string; n: number }>([...base(q, 'category'), { $unwind: '$category_path_ids' }, { $group: { _id: '$category_path_ids', n: { $sum: 1 } } }])).map((r) => [r._id, r.n]),
-      );
-
-      const activeBrands = (await termRows.distinct<string>('target_id', { kind: 'brand', target_id: { $ne: null } })).filter(Boolean);
-      const brands = await agg<{ _id: string; name: string | null; n: number }>([
-        ...base(q, 'brand'),
-        { $match: { brand_id: { $in: activeBrands } } },
-        { $group: { _id: '$brand_id', name: { $max: '$brand_name' }, n: { $sum: 1 } } },
-        { $sort: { n: -1, name: 1 } },
-      ]);
-
       /** Products per value of an offer field, over the offers that pass the other filters */
       const offerFacet = (omit: 'seller' | 'condition', field: string) =>
         agg<{ _id: string | null; n: number }>([...base(q, omit), { $unwind: '$m' }, { $group: { _id: { v: `$m.${field}`, p: '$_id' } } }, { $group: { _id: '$_id.v', n: { $sum: 1 } } }]);
-      const sellerRows = await offerFacet('seller', 'seller_id');
-      const conditionRows = await offerFacet('condition', 'condition');
-      const official = await count([...base(q, 'seller'), { $match: { 'm.official': true } }]);
+      type AttrRow = { _id: { k: string; v: string }; n: number };
+      const attrQuery = (keys: string[], omit?: FacetOmit): Promise<AttrRow[]> =>
+        keys.length
+          ? agg<AttrRow>([
+              ...base(q, omit),
+              { $project: { a: { $objectToArray: { $ifNull: ['$attributes', {}] } } } },
+              { $unwind: '$a' },
+              { $match: { 'a.k': { $in: keys }, 'a.v': { $type: 'array' } } },
+              { $unwind: '$a.v' },
+              { $group: { _id: { k: '$a.k', v: '$a.v', p: '$_id' } } },
+              { $group: { _id: { k: '$_id.k', v: '$_id.v' }, n: { $sum: 1 } } },
+            ])
+          : Promise.resolve([]);
+      const filtered = new Set((f.attributes ?? []).map((a) => a.key));
 
-      const [ratingRow] = await agg<Record<string, number>>([
-        ...base(q, 'rating'),
-        { $group: Object.fromEntries([['_id', null], ...[1, 2, 3, 4, 5].map((n) => [`r${n}`, { $sum: { $cond: [{ $gte: ['$rating', n] }, 1, 0] } }])]) },
-      ]);
-
-      const [availRow] = await agg<{ in_stock: number; total: number }>([...base(q, 'availability'), { $group: { _id: null, in_stock: { $sum: { $cond: ['$eo.in_stock', 1, 0] } }, total: { $sum: 1 } } }]);
-
-      // free delivery and ships today count products with such an offer among those passing the other filters (m)
-      const [deliveryRow] = await agg<{ free: number; today: number }>([
-        ...base(q, 'delivery'),
-        {
-          $group: {
-            _id: null,
-            free: { $sum: { $cond: [{ $in: [true, '$m.free_delivery'] }, 1, 0] } },
-            today: {
-              $sum: {
-                $cond: [{ $and: [{ $in: [0, '$m.dispatch_days'] }, { $or: [{ $eq: [{ $ifNull: ['$same_day_cutoff', null] }, null] }, { $gt: ['$same_day_cutoff', q.marketTime] }] }] }, 1, 0],
+      // every count is its own read of the index: they run at once
+      const [categoryRows, brands, sellerRows, conditionRows, official, [ratingRow], [availRow], [deliveryRow], [priceRow], ...attrRows] = await Promise.all([
+        agg<{ _id: string; n: number }>([...base(q, 'category'), { $unwind: '$category_path_ids' }, { $group: { _id: '$category_path_ids', n: { $sum: 1 } } }]),
+        termRows.distinct<string>('target_id', { kind: 'brand', target_id: { $ne: null } }).then((ids) =>
+          agg<{ _id: string; name: string | null; n: number }>([
+            ...base(q, 'brand'),
+            { $match: { brand_id: { $in: ids.filter(Boolean) } } },
+            { $group: { _id: '$brand_id', name: { $max: '$brand_name' }, n: { $sum: 1 } } },
+            { $sort: { n: -1, name: 1 } },
+          ]),
+        ),
+        offerFacet('seller', 'seller_id'),
+        offerFacet('condition', 'condition'),
+        count([...base(q, 'seller'), { $match: { 'm.official': true } }]),
+        agg<Record<string, number>>([
+          ...base(q, 'rating'),
+          { $group: Object.fromEntries([['_id', null], ...[1, 2, 3, 4, 5].map((n) => [`r${n}`, { $sum: { $cond: [{ $gte: ['$rating', n] }, 1, 0] } }])]) },
+        ]),
+        agg<{ in_stock: number; total: number }>([...base(q, 'availability'), { $group: { _id: null, in_stock: { $sum: { $cond: ['$eo.in_stock', 1, 0] } }, total: { $sum: 1 } } }]),
+        // free delivery and ships today count products with such an offer among those passing the other filters (m)
+        agg<{ free: number; today: number }>([
+          ...base(q, 'delivery'),
+          {
+            $group: {
+              _id: null,
+              free: { $sum: { $cond: [{ $in: [true, '$m.free_delivery'] }, 1, 0] } },
+              today: {
+                $sum: {
+                  $cond: [{ $and: [{ $in: [0, '$m.dispatch_days'] }, { $or: [{ $eq: [{ $ifNull: ['$same_day_cutoff', null] }, null] }, { $gt: ['$same_day_cutoff', q.marketTime] }] }] }, 1, 0],
+                },
               },
             },
           },
-        },
+        ]),
+        agg<{ min: number | null; max: number | null }>([...base(q, 'price'), { $group: { _id: null, min: { $min: '$eo.price' }, max: { $max: '$eo.price' } } }]),
+        // attributes: the unfiltered ones together, each filtered one without its own filter
+        attrQuery(attributeKeys.filter((k) => !filtered.has(k))),
+        ...attributeKeys.filter((k) => filtered.has(k)).map((k) => attrQuery([k], `attr:${k}`)),
       ]);
 
-      const [priceRow] = await agg<{ min: number | null; max: number | null }>([...base(q, 'price'), { $group: { _id: null, min: { $min: '$eo.price' }, max: { $max: '$eo.price' } } }]);
-
+      const categories = new Map(categoryRows.map((r) => [r._id, r.n]));
       const attributes = new Map<string, Map<string, number>>();
-      const filtered = new Set((f.attributes ?? []).map((a) => a.key));
-      const attrQuery = async (keys: string[], omit?: FacetOmit) => {
-        if (!keys.length) return;
-        const found = await agg<{ _id: { k: string; v: string }; n: number }>([
-          ...base(q, omit),
-          { $project: { a: { $objectToArray: { $ifNull: ['$attributes', {}] } } } },
-          { $unwind: '$a' },
-          { $match: { 'a.k': { $in: keys }, 'a.v': { $type: 'array' } } },
-          { $unwind: '$a.v' },
-          { $group: { _id: { k: '$a.k', v: '$a.v', p: '$_id' } } },
-          { $group: { _id: { k: '$_id.k', v: '$_id.v' }, n: { $sum: 1 } } },
-        ]);
-        for (const r of found) {
-          const m = attributes.get(r._id.k) ?? new Map<string, number>();
-          m.set(String(r._id.v), (m.get(String(r._id.v)) ?? 0) + r.n);
-          attributes.set(r._id.k, m);
-        }
-      };
-      await attrQuery(attributeKeys.filter((k) => !filtered.has(k)));
-      for (const k of attributeKeys.filter((k) => filtered.has(k))) await attrQuery([k], `attr:${k}`);
+      for (const r of attrRows.flat() as AttrRow[]) {
+        const m = attributes.get(r._id.k) ?? new Map<string, number>();
+        m.set(String(r._id.v), (m.get(String(r._id.v)) ?? 0) + r.n);
+        attributes.set(r._id.k, m);
+      }
 
       const result: FacetCounts = {
         categories,
@@ -383,9 +388,13 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
       const first = p.charAt(0);
       const or: Doc[] = [...(ps.length ? [prefixMatch(ps)] : []), ...(first ? [{ title_norm: { $regex: `(^| )${escapeRegExp(first)}` } }] : [])];
       if (!or.length) return [];
-      const found = await agg([{ $match: { offer_count: { $gt: 0 }, $or: or } }]);
+      // asked while typing: rank the candidates on the few fields that decide, then read the chosen documents whole
+      const found = await agg([
+        { $match: { offer_count: { $gt: 0 }, $or: or } },
+        { $project: { title: 1, title_norm: 1, in_stock: 1, popularity: 1, rating_count: 1, 'terms.t': 1 } },
+      ]);
       const startsWith = (d: Doc) => ps.length > 0 && ps.every((s) => ((d.terms ?? []) as { t: string }[]).some((x) => x.t.startsWith(s)));
-      return found
+      const ids = found
         .filter((d) => startsWith(d) || wordSimilarity(p, d.title_norm) >= threshold)
         .sort(
           (a, b) =>
@@ -396,7 +405,10 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
             byKey(a.title, b.title),
         )
         .slice(0, limit)
-        .map(docOut);
+        .map((d) => d._id as string);
+      if (!ids.length) return [];
+      const byId = new Map((await agg([{ $match: { _id: { $in: ids } } }, { $project: { terms: 0 } }])).map((d) => [d._id as string, d]));
+      return ids.flatMap((id) => (byId.has(id) ? [docOut(byId.get(id)!)] : []));
     },
 
     async categoriesForPrefix(prefix, limit) {
@@ -494,7 +506,16 @@ export function createMongoSearchEngine(store: ModuleStore, terms: TermLookup): 
     },
 
     async bestSellingAvailable(minOrders) {
-      const [r] = await agg<{ n: number }>([{ $group: { _id: null, n: { $sum: '$sales_30d' } } }]);
+      if (!(minOrders > 0)) return minOrders <= 0; // NaN: never available
+      if (!Number.isFinite(minOrders)) return false;
+      // asked on every search: rather than summing every document, the top sellers by the (sales_30d) index. Each
+      // product with sales adds at least 1, so the total reaches minOrders exactly when the top ceil(minOrders) do
+      const [r] = await agg<{ n: number }>([
+        { $match: { sales_30d: { $gt: 0 } } },
+        { $sort: { sales_30d: -1 } },
+        { $limit: Math.ceil(minOrders) },
+        { $group: { _id: null, n: { $sum: '$sales_30d' } } },
+      ]);
       return (r?.n ?? 0) >= minOrders;
     },
   };

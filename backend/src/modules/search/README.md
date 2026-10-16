@@ -601,7 +601,7 @@ One full reindex at a time (REINDEX_ALREADY_RUNNING). Scoped jobs only mark docu
 | best_seller_rank | int? (rank in best_seller_category_id by sales_30d; null outside the top 100) |
 | best_seller_category_id | uuid? |
 
-Indexes: `gin(terms jsonb_path_ops)`, `gin(title_norm gin_trgm_ops)`, `gin(seller_ids)`, `gin(category_path_ids)`, `gin(attributes jsonb_path_ops)`, `(in_stock, featured_price)`, `(first_listed_at)`, `(rating, rating_count)`
+Indexes: `gin(terms jsonb_path_ops)`, `gin(title_norm gin_trgm_ops)`, `gin(seller_ids)`, `gin(category_path_ids)`, `gin(attributes jsonb_path_ops)`, `(in_stock, featured_price)`, `(first_listed_at)`, `(rating, rating_count)`, `(brand_id)`, `(sales_30d)`
 
 **search_offers**: Offer-level rows so seller, condition and price filters show the matching seller's price (e.g. Official Store filter shows company offers)
 

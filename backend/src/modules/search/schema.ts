@@ -68,6 +68,8 @@ search_documents.index({"attributes.$**":1}, {"name":"search_documents_attribute
 search_documents.index({"in_stock":1,"featured_price":1}, {"name":"search_documents_in_stock_featured_price_546790"});
 search_documents.index({"first_listed_at":1}, {"name":"search_documents_first_listed_at_101932"});
 search_documents.index({"rating":1,"rating_count":1}, {"name":"search_documents_rating_rating_count_ab0d13"});
+search_documents.index({"brand_id":1}, {"name":"search_documents_brand_id_ca2fee"});
+search_documents.index({"sales_30d":1}, {"name":"search_documents_sales_30d_5ac83c"});
 
 /** Offer-level rows so seller, condition and price filters show the matching seller's price (e.g. Official Store filter shows company offers) */
 const search_offers = new Schema(

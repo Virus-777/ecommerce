@@ -2197,6 +2197,18 @@ export const spec = defineModuleSpec({
             "rating": 1,
             "rating_count": 1
           }
+        },
+        {
+          "name": "search_documents_brand_id_ca2fee",
+          "key": {
+            "brand_id": 1
+          }
+        },
+        {
+          "name": "search_documents_sales_30d_5ac83c",
+          "key": {
+            "sales_30d": 1
+          }
         }
       ],
       "unenforced": []

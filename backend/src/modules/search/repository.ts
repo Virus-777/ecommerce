@@ -137,6 +137,33 @@ export class SearchRepository {
     return rows.map((r) => r._id);
   }
 
+  /** Brands that have documents, each with the brand name of its first document (by product id) */
+  async brandNamesOfDocuments(brandIds: string[]): Promise<Map<string, string | null>> {
+    if (!brandIds.length) return new Map();
+    const rows = await this.#t.docs.aggregate<{ _id: string; name: string | null }>([
+      { $match: { brand_id: oneOf(brandIds) } },
+      { $sort: { _id: 1 } },
+      { $group: { _id: '$brand_id', name: { $first: '$brand_name' } } },
+    ]);
+    return new Map(rows.map((r) => [r._id, r.name ?? null]));
+  }
+
+  /** Documents with offers, only the fields suggestion terms are made from (not whole documents with their search terms) */
+  async liveDocumentSummaries(): Promise<Pick<DocRow, 'product_id' | 'title' | 'brand_id' | 'brand_name' | 'category_path_ids' | 'popularity' | 'rating_count'>[]> {
+    const rows = await this.#t.docs.aggregate<Record<string, unknown>>([
+      { $match: { offer_count: { $gt: 0 } } },
+      { $sort: { _id: 1 } },
+      { $project: { title: 1, brand_id: 1, brand_name: 1, category_path_ids: 1, popularity: 1, rating_count: 1 } },
+    ]);
+    return rows.map((d) => this.#t.docs.fromDoc(d));
+  }
+
+  /** One page of document ids after `afterId`, in id order (jobs walk the whole index in bounded batches) */
+  async documentIdsAfter(afterId: string | null, limit: number): Promise<string[]> {
+    const rows = await this.#t.docs.aggregate<{ _id: string }>([{ $match: afterId ? { _id: { $gt: afterId } } : {} }, { $sort: { _id: 1 } }, { $limit: limit }, { $project: { _id: 1 } }]);
+    return rows.map((r) => r._id);
+  }
+
   async productIdsForOffers(offerIds: string[]): Promise<string[]> {
     if (!offerIds.length) return [];
     return this.#t.offers.distinct<string>('product_id', { offer_id: oneOf(offerIds) });
@@ -343,11 +370,16 @@ export class SearchRepository {
 
   async moveRecentSearches(from: { kind: 'customer' | 'guest'; id: string }, to: { kind: 'customer' | 'guest'; id: string }, max: number): Promise<number> {
     const rows = await this.#ownerRows(from);
+    // read once and kept in step with the deletes below (was read again for every row)
+    let target = await this.#ownerRows(to);
     // the same search on both sides: the newer one stays
     for (const r of rows) {
-      const same = (await this.#ownerRows(to)).filter((x) => sameSearch(x, r));
+      const same = target.filter((x) => sameSearch(x, r));
       if (same.some((x) => x.searched_at > r.searched_at)) await this.#t.recent.delete(r.id);
-      else if (same.length) await this.#t.recent.deleteMany({ id: oneOf(same.map((x) => x.id)) });
+      else if (same.length) {
+        await this.#t.recent.deleteMany({ id: oneOf(same.map((x) => x.id)) });
+        target = target.filter((x) => !same.includes(x));
+      }
     }
     const moved = await this.#t.recent.updateMany({ owner_kind: from.kind, owner_id: from.id }, { owner_kind: to.kind, owner_id: to.id });
     await this.#trimRecent(to, max);
