@@ -299,6 +299,34 @@ describe('rule-based holds', () => {
     expect((await k.svc.getSellerBalances(S)).settlementRules).toMatchObject({ newSellerHoldDays: null, newSellerUntil: null });
   });
 
+  it('balancesForSellers answers every seller as getSellerBalances does, in one batch', async () => {
+    // B owes money (a debit past its balance, aged into an amount owed)
+    const [A, B, C, D] = [newId(), newId(), newId(), newId()];
+    await credit(B, 1_000);
+    expect((await k.call('POST', `${ADMIN}/adjustments`, k.staff, { sellerId: B, direction: 'debit', amount: USD(9_000), reasonCode: 'other', reason: 'Refunds after payout' }, idem())).status).toBe(201);
+    k.clock.advance(31 * DAY);
+    await k.svc.negativeBalanceAge();
+    await k.app.kernel.events.drain();
+    // A: a delivered sale this period, a credit and a hold; C: nothing at all; D: closed, so its final statement is issued
+    const ord = k.order(A, [{ title: 'Lamp', quantity: 2, price: 5_000 }]);
+    await k.accept(ord);
+    await k.deliver(ord);
+    await credit(A, 3_000);
+    expect((await k.call('POST', `${ADMIN}/holds`, k.staff, { sellerId: A, amount: USD(1_000), reasonCode: 'other', reason: 'Checking a claim', reviewDate: plusDays(5) }, idem())).status).toBe(201);
+    await credit(D, 2_000);
+    await k.emit('sellers.seller.closed', { sellerId: D, reasonCode: 'seller_request', closedBy: { kind: 'system', id: null } });
+    expect(await k.svc.core.repo.findOne('statements', { seller_id: D, status: 'issued' })).toBeTruthy();
+
+    const batch = await k.svc.balancesForSellers([A, B, C, D, 'not-a-seller', A]);
+    expect([...batch.keys()]).toEqual([A, B, C, D]);
+    // asOf is the time of each answer (the test clock runs on)
+    for (const id of [A, B, C, D]) expect({ ...batch.get(id), asOf: null }).toEqual({ ...(await k.svc.getSellerBalances(id)), asOf: null });
+    expect(batch.get(A)).toMatchObject({ salesProceeds: USD(10_000), held: USD(1_000), holds: [expect.objectContaining({ reason: 'Checking a claim' })] });
+    expect(batch.get(B)).toMatchObject({ negative: true, amountOwed: USD(8_000) });
+    expect(batch.get(C)).toMatchObject({ salesProceeds: USD(0), pending: USD(0), available: USD(0), held: USD(0), holds: [], amountOwed: null, nextPayout: null });
+    expect(await k.svc.balancesForSellers([])).toEqual(new Map());
+  });
+
   it('lists holds due for review in Finance\'s queue', async () => {
     k.clock.advance(40 * DAY);
     await k.app.kernel.jobs.runNow('finance.holds.review-due');

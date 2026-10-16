@@ -213,6 +213,39 @@ export class FinanceRepository {
     return this.#entries.page({ $and: conds }, page, { column: 'at', direction: 'desc' });
   }
 
+  /**
+   * Per seller: the sum of its entries of `types` from its own start instant on (sales proceeds since the last
+   * statement, for several sellers' balances). Sellers that share a start share one clause of the one aggregation.
+   */
+  async sumsSince(starts: ReadonlyMap<string, Date>, types: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!starts.size || !types.length) return out;
+    const byStart = new Map<number, string[]>();
+    for (const [sellerId, from] of starts) {
+      const list = byStart.get(from.getTime());
+      if (list) list.push(sellerId);
+      else byStart.set(from.getTime(), [sellerId]);
+    }
+    const rows = await this.#entries.aggregate<{ _id: string; n: unknown }>([
+      { $match: { type: { $in: types }, $or: [...byStart].map(([from, ids]) => ({ seller_id: { $in: ids }, at: { $gte: new Date(from) } })) } },
+      { $group: { _id: '$seller_id', n: { $sum: '$amount' } } },
+    ]);
+    for (const r of rows) out.set(r._id, Number(r.n ?? 0));
+    return out;
+  }
+
+  /** The period end (YYYY-MM-DD) of each seller's latest issued statement; sellers without one are left out */
+  async lastStatementEnds(sellerIds: readonly string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!sellerIds.length) return out;
+    const rows = await this.#t('statements').aggregate<{ _id: string; to: string }>([
+      { $match: { seller_id: { $in: [...new Set(sellerIds)] }, status: 'issued' } },
+      { $group: { _id: '$seller_id', to: { $max: '$period_to' } } },
+    ]);
+    for (const r of rows) out.set(r._id, r.to);
+    return out;
+  }
+
   /** Sum of entries per (market date, seller, type) for a range of instants */
   async dailyTypeSums(from: Date, to: Date, timeZone: string, types: string[], sellerId?: string): Promise<DailyTypeSum[]> {
     if (!types.length) return [];

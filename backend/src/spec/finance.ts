@@ -2095,6 +2095,8 @@ export interface FinancePublicApi {
   calculateFee(input: FeeCalcInput): Promise<FeeCalculation>;
   /** Balances for dashboards and seller detail Used by: sellers, reports, graphql. */
   getSellerBalances(sellerId: string): Promise<SellerBalances>;
+  /** Batched getSellerBalances (the admin seller list): the same balances getSellerBalances gives for each seller (zeros for a seller without an account yet), from a few reads for all of them. Ids that are not uuids are left out (getSellerBalances answers them Not found). Used by: sellers. */
+  balancesForSellers(sellerIds: string[]): Promise<Map<string, SellerBalances>>;
   /** Posts a seller ad charge, kept separate from commission Used by: advertising. */
   recordAdCharge(input: { sellerId: string, campaignId: string, campaignRef: string, period: common.DateRange, amount: common.Money, description: string }): Promise<LedgerEntry>;
   /** Posts a fulfillment-service fee (storage, handling, receiving, returns processing, removal; kind = the FeeCharge type) to the seller ledger as service_fee, kept separate from commission and ad charges. Same idempotencyKey returns the first entry. Used by: fulfillment-service. */
@@ -3697,7 +3699,7 @@ export const spec = defineModuleSpec({
   summary: "Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.",
   dependsOn: ["orders","payments","sellers","access"],
   optionalDeps: ["returns","advertising","promotions","purchasing","inventory","shipping","support","wallet","workqueues","notifications","audit","identity","media","reports","settings","offers"],
-  publicApi: ["previewRefundImpact","sellerBalanceTotals","bookedRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","companyCostsByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
+  publicApi: ["previewRefundImpact","sellerBalanceTotals","bookedRefundImpact","calculateFee","getSellerBalances","balancesForSellers","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","companyCostsByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
   permissions: [
     {
       "key": "finance.ledger.view",

@@ -27,6 +27,17 @@ const REFERENCE_KINDS: readonly Reference['kind'][] = ['order', 'order_item', 'r
 const factId = (key: string) => detId(`trading:${key}`);
 const walletEntry = (id: string) => (isUuid(id) ? id : null);
 
+/** Rows by a key, each list in the order the rows came */
+function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const r of rows) {
+    const list = out.get(key(r));
+    if (list) list.push(r);
+    else out.set(key(r), [r]);
+  }
+  return out;
+}
+
 export class LedgerPart extends Part {
   /* ---------------------------------------------------------------- lookups */
 
@@ -611,71 +622,100 @@ export class LedgerPart extends Part {
 
   /* ---------------------------------------------------------------- balances and the ledger */
 
+  /** One seller's balances (the seller finance header, seller 360): balancesFor with one seller */
   async balances(sellerId: string): Promise<SellerBalances> {
+    return (await this.balancesFor([sellerId])).get(sellerId)!;
+  }
+
+  /**
+   * Balances of several sellers (the admin seller list), the same reads for one seller or a thousand: accounts, holds,
+   * amounts owed, last statements, payout destinations, seller names and the sales proceeds since each seller's last
+   * statement, each read once for all of them. A seller without an account yet gets zeros.
+   */
+  async balancesFor(sellerIds: readonly string[]): Promise<Map<string, SellerBalances>> {
+    const ids = [...new Set(sellerIds)];
+    const out = new Map<string, SellerBalances>();
+    if (!ids.length) return out;
     const tz = this.core.tz();
     const today = this.core.today();
-    // the seller's finance header reads independent records: side by side
-    const [acct, name, holds, owed, last, dest, scheduleSetting, releaseTime, minimum, days] = await Promise.all([
-      this.repo.findOne('seller_accounts', { seller_id: sellerId }),
-      this.core.sellerName(sellerId),
-      this.repo.find('holds', { seller_id: sellerId, status: 'active' }, { orderBy: [['review_date', 'asc']] }),
-      this.repo.find('amounts_owed', { seller_id: sellerId, status: 'open' }, { orderBy: [['since', 'asc']] }),
-      this.repo.findOne('statements', { seller_id: sellerId, status: 'issued' }, { orderBy: [['period_to', 'desc']] }),
-      this.core.destinationOf(sellerId),
+    // independent records: side by side
+    const [accounts, sellers, holds, owed, lastEnds, dests, scheduleSetting, releaseTime, minimum, days] = await Promise.all([
+      this.repo.find('seller_accounts', { seller_id: ids }),
+      this.core.sellerInfo(ids),
+      this.repo.find('holds', { seller_id: ids, status: 'active' }, { orderBy: [['review_date', 'asc']] }),
+      this.repo.find('amounts_owed', { seller_id: ids, status: 'open' }, { orderBy: [['since', 'asc']] }),
+      this.repo.lastStatementEnds(ids),
+      this.core.destinations(ids),
       this.core.setting('payoutSchedule'),
       this.core.setting('payoutReleaseTime'),
       this.core.num('minimumPayout', 2500),
       this.core.num('availableAfterDeliveryDays', 7),
     ]);
-    const pending = acct?.pending ?? 0;
-    const available = acct?.available ?? 0;
-    const held = acct?.held ?? 0;
-    const periodFrom = last ? addDays(last.period_to, 1) : addDays(today, -6);
-    const [infos, own] = await Promise.all([
+    // sales proceeds count from the day after the last statement (the last 7 days without one), never after today
+    const periodFrom = new Map<string, string>();
+    for (const id of ids) {
+      const last = lastEnds.get(id);
+      const from = last ? addDays(last, 1) : addDays(today, -6);
+      periodFrom.set(id, from <= today ? from : today);
+    }
+    const [infos, proceeds] = await Promise.all([
       this.core.approvalInfos(holds.map((h) => h.approval_request_id)),
-      this.repo.find('ledger_entries', { seller_id: sellerId, type: ['sale', 'shipping_charge', 'seller_discount'], at: { op: '>=', value: dayStart(periodFrom <= today ? periodFrom : today, tz) } }),
+      this.repo.sumsSince(new Map(ids.map((id) => [id, dayStart(periodFrom.get(id)!, tz)])), ['sale', 'shipping_charge', 'seller_discount']),
     ]);
-    const proceeds = own.reduce((s, r) => s + r.amount, 0);
+    const accountOf = new Map(accounts.map((a) => [a.seller_id, a]));
+    const holdsOf = groupBy(holds, (h) => h.seller_id);
+    const owedOf = groupBy(owed, (o) => o.seller_id);
+    const now = this.now();
     const schedule = String(scheduleSetting);
-    const slot = nextSlot(this.now(), schedule, String(releaseTime), tz);
-    const inNewSellerPeriod = Boolean(acct?.new_seller_until && acct.new_seller_extra_days && acct.new_seller_until >= today);
-    const newSellerDays = inNewSellerPeriod ? acct!.new_seller_extra_days : null;
-    const estimate = Math.max(0, available);
-    const blocked = this.payoutBlockOf(acct, dest);
-    return {
-      sellerId,
-      asOf: this.now().toISOString(),
-      salesProceeds: this.money(proceeds),
-      salesPeriod: { from: periodFrom <= today ? periodFrom : today, to: today },
-      pending: this.money(pending),
-      available: this.money(available),
-      held: this.money(held),
-      holds: holds.map((h) => toHold(h, name, h.approval_request_id ? (infos.get(h.approval_request_id) ?? null) : null)),
-      negative: available < 0,
-      amountOwed: owed.length ? this.money(owed.reduce((s, o) => s + o.remaining, 0)) : null,
-      owedDueBy: owed.find((o) => o.due_by)?.due_by ?? null,
-      nextPayout:
-        dest.status.status === 'missing'
-          ? null
-          : {
-              estimatedAmount: this.money(estimate),
-              scheduledFor: slot.payDate,
-              cutoffAt: slot.cutoffAt.toISOString(),
-              destination: dest.status,
-              arrivesNote: 'Usually 1 business day after sending',
-              note: blocked.blocked ? `Not paid while: ${blocked.reasons.join('; ')}` : estimate < minimum ? `Below the ${fmt(minimum, this.core.currency())} minimum; the balance rolls to the next payout` : 'Estimate. Earnings that become available before the cutoff are added; new holds or refunds reduce it.',
-            },
-      settlementRules: {
-        schedule: scheduleLabel(schedule),
-        availableAfterDeliveryDays: days,
-        minimumPayout: this.money(minimum),
-        newSellerHoldDays: newSellerDays,
-        newSellerUntil: inNewSellerPeriod ? acct!.new_seller_until : null,
-        refundAfterPayout: 'Deducted from later earnings; if none, the balance shows the amount owed',
-        text: `Earnings become available ${days} days after delivery${newSellerDays ? ` (${days + newSellerDays} days for items delivered until ${acct!.new_seller_until}, your new-seller period)` : ''} and are paid ${scheduleLabel(schedule).toLowerCase()} to a verified account. Balances under ${fmt(minimum, this.core.currency())} roll to the next payout.`,
-      },
-      destination: dest.status,
-    };
+    const slot = nextSlot(now, schedule, String(releaseTime), tz);
+    for (const sellerId of ids) {
+      const acct = accountOf.get(sellerId);
+      const dest = dests.get(sellerId)!;
+      const name = sellers.get(sellerId)!.name;
+      const sellerOwed = owedOf.get(sellerId) ?? [];
+      const pending = acct?.pending ?? 0;
+      const available = acct?.available ?? 0;
+      const held = acct?.held ?? 0;
+      const inNewSellerPeriod = Boolean(acct?.new_seller_until && acct.new_seller_extra_days && acct.new_seller_until >= today);
+      const newSellerDays = inNewSellerPeriod ? acct!.new_seller_extra_days : null;
+      const estimate = Math.max(0, available);
+      const blocked = this.payoutBlockOf(acct, dest);
+      out.set(sellerId, {
+        sellerId,
+        asOf: now.toISOString(),
+        salesProceeds: this.money(proceeds.get(sellerId) ?? 0),
+        salesPeriod: { from: periodFrom.get(sellerId)!, to: today },
+        pending: this.money(pending),
+        available: this.money(available),
+        held: this.money(held),
+        holds: (holdsOf.get(sellerId) ?? []).map((h) => toHold(h, name, h.approval_request_id ? (infos.get(h.approval_request_id) ?? null) : null)),
+        negative: available < 0,
+        amountOwed: sellerOwed.length ? this.money(sellerOwed.reduce((s, o) => s + o.remaining, 0)) : null,
+        owedDueBy: sellerOwed.find((o) => o.due_by)?.due_by ?? null,
+        nextPayout:
+          dest.status.status === 'missing'
+            ? null
+            : {
+                estimatedAmount: this.money(estimate),
+                scheduledFor: slot.payDate,
+                cutoffAt: slot.cutoffAt.toISOString(),
+                destination: dest.status,
+                arrivesNote: 'Usually 1 business day after sending',
+                note: blocked.blocked ? `Not paid while: ${blocked.reasons.join('; ')}` : estimate < minimum ? `Below the ${fmt(minimum, this.core.currency())} minimum; the balance rolls to the next payout` : 'Estimate. Earnings that become available before the cutoff are added; new holds or refunds reduce it.',
+              },
+        settlementRules: {
+          schedule: scheduleLabel(schedule),
+          availableAfterDeliveryDays: days,
+          minimumPayout: this.money(minimum),
+          newSellerHoldDays: newSellerDays,
+          newSellerUntil: inNewSellerPeriod ? acct!.new_seller_until : null,
+          refundAfterPayout: 'Deducted from later earnings; if none, the balance shows the amount owed',
+          text: `Earnings become available ${days} days after delivery${newSellerDays ? ` (${days + newSellerDays} days for items delivered until ${acct!.new_seller_until}, your new-seller period)` : ''} and are paid ${scheduleLabel(schedule).toLowerCase()} to a verified account. Balances under ${fmt(minimum, this.core.currency())} roll to the next payout.`,
+        },
+        destination: dest.status,
+      });
+    }
+    return out;
   }
 
   /** Whether a seller can be paid (verified destination, no restriction, holds not covering everything) */

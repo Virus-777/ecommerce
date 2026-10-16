@@ -84,6 +84,11 @@ export class FinanceService implements FinancePublicApi {
     return this.ledger.balances(sellerId);
   }
 
+  /** Batched getSellerBalances (the admin seller list); ids that are not uuids are left out (getSellerBalances: Not found) */
+  balancesForSellers(sellerIds: string[]): Promise<Map<string, SellerBalances>> {
+    return this.ledger.balancesFor(sellerIds.filter((id) => isUuid(id)));
+  }
+
   /** Posts a seller ad charge, kept separate from commission */
   recordAdCharge(input: { sellerId: string; campaignId: string; campaignRef: string; period: common.DateRange; amount: common.Money; description: string }): Promise<LedgerEntry> {
     return this.ledger.recordAdCharge(input);

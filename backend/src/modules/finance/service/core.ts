@@ -373,8 +373,13 @@ export class Core {
 
   /** Destination statuses of several sellers: two reads for all of them */
   async destinationStatuses(sellerIds: readonly string[]): Promise<Map<string, DestinationStatus>> {
+    return new Map([...(await this.destinations(sellerIds))].map(([id, d]) => [id, d.status]));
+  }
+
+  /** destinationOf for several sellers: two reads for all of them */
+  async destinations(sellerIds: readonly string[]): Promise<Map<string, Destination>> {
     const ids = [...new Set(sellerIds)];
-    const out = new Map<string, DestinationStatus>();
+    const out = new Map<string, Destination>();
     if (!ids.length) return out;
     const rows = await this.repo.find('payout_destinations', { seller_id: ids }, { orderBy: [['deposits_sent_at', 'desc']] });
     const reviews = await this.repo.find('destination_reviews', { seller_id: ids, status: 'under_review' }, { orderBy: [['requested_at', 'desc']] });
@@ -387,7 +392,7 @@ export class Core {
     }
     const reviewOf = new Map<string, ReviewRec>();
     for (const r of reviews) if (!reviewOf.has(r.seller_id)) reviewOf.set(r.seller_id, r);
-    for (const id of ids) out.set(id, this.destinationFrom(rowsOf.get(id) ?? [], reviewOf.get(id), attempts).status);
+    for (const id of ids) out.set(id, this.destinationFrom(rowsOf.get(id) ?? [], reviewOf.get(id), attempts));
     return out;
   }
 
