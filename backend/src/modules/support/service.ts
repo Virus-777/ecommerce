@@ -9,6 +9,7 @@ import { Cases } from './service/cases.js';
 import { Core, type SupportServiceDeps } from './service/core.js';
 import { Decisions } from './service/decisions.js';
 import { Reads } from './service/reads.js';
+import { registerSupportSettingsSection } from './service/settings-section.js';
 import { Views } from './service/views.js';
 
 export type { SupportServiceDeps };
@@ -32,6 +33,11 @@ export class SupportService implements SupportPublicApi {
     this.decisions = new Decisions(this.core, this.views, this.cases);
     this.reads = new Reads(this.core, this.views, this.cases);
     this.automation = new Automation(this.core, this.cases, this.decisions);
+  }
+
+  /** After boot: the Support targets section of the settings page (G76) */
+  registerSettingsSection(): Promise<void> {
+    return registerSupportSettingsSection(this.core.ctx.tryUse('settings'), this.core);
   }
 
   /* ---------------- public API (in-process) */

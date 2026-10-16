@@ -26,6 +26,8 @@ export default defineModule({
     // default case categories (staff changes are kept) and the support.admin.cases export dataset
     await service.core.seedCategories().catch((err) => ctx.log.warn({ err }, 'support: seeding categories failed; retrying on first use'));
     ctx.afterBoot(() => service.reads.registerDatasets());
+    // the Support targets section of the settings page (G76)
+    ctx.afterBoot(() => service.registerSettingsSection());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("returns.return.escalated", (e) => service.onReturnEscalatedFromReturns(e.payload));
