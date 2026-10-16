@@ -981,7 +981,7 @@ Indexes: `(kind, target_id)`, `(product_id)`, `(campaign_id)`
 | creative_id | uuid → creatives |
 | device | text |
 
-Indexes: `unique (campaign_id, creative_id)`
+Indexes: `unique (campaign_id, creative_id)`, `(creative_id)`
 
 **approval_steps**: Required reviewers per campaign submission
 
@@ -995,6 +995,8 @@ Indexes: `unique (campaign_id, creative_id)`
 | state | text |
 | note | text? |
 | decided_at | timestamptz? |
+
+Indexes: `(campaign_id)`
 
 **creatives**: Creative library
 
@@ -1038,6 +1040,8 @@ Indexes: `(status, created_at)`, `(seller_id)`
 | comment | text? |
 | at | timestamptz |
 
+Indexes: `(creative_id)`
+
 **campaign_log**: Lifecycle timeline with actor and reason
 
 | Column | Type |
@@ -1051,6 +1055,8 @@ Indexes: `(status, created_at)`, `(seller_id)`
 | actor_kind | text |
 | actor_id | text? |
 | at | timestamptz |
+
+Indexes: `(campaign_id, action, at)`
 
 **ad_events**: Displays, clicks, dismissals (append-only, partitioned by day; retained 13 months)
 
@@ -1070,7 +1076,7 @@ Indexes: `(status, created_at)`, `(seller_id)`
 | at | timestamptz |
 | cost | bigint? |
 
-Indexes: `(campaign_id, at)`, `(visitor_key, campaign_id, kind, at)`
+Indexes: `(campaign_id, at)`, `(visitor_key, campaign_id, kind, at)`, `(at)`, `(customer_id, kind, at)`, `(placement_key, kind, at)`
 
 **frequency_state**: Per visitor and campaign counters and suppression (TTL-cleaned)
 
@@ -1088,7 +1094,7 @@ Indexes: `(campaign_id, at)`, `(visitor_key, campaign_id, kind, at)`
 | last_display_at | timestamptz? |
 | suppressed_until | timestamptz? |
 
-Indexes: `unique (visitor_key, campaign_id)`
+Indexes: `unique (visitor_key, campaign_id)`, `(window_started_at)`
 
 **attributions**: Orders attributed to a click within the attribution period
 
@@ -1103,7 +1109,7 @@ Indexes: `unique (visitor_key, campaign_id)`
 | attributed_at | timestamptz |
 | reversed | bool |
 
-Indexes: `unique (order_id, campaign_id)`
+Indexes: `unique (order_id, campaign_id)`, `(attributed_at)`
 
 **daily_stats**: Read model per campaign and day
 
@@ -1118,7 +1124,7 @@ Indexes: `unique (order_id, campaign_id)`
 | attributed_orders | int |
 | attributed_sales | bigint |
 
-Indexes: `unique (campaign_id, day)`
+Indexes: `unique (campaign_id, day)`, `(day)`
 
 **ad_charges**: Seller ad charges per campaign and day, posted to finance as a separate statement line
 
@@ -1139,7 +1145,7 @@ Indexes: `unique (campaign_id, day)`
 | statement_ref | text? |
 | reason | text? |
 
-Indexes: `unique (campaign_id, day)`, `(seller_id, state)`
+Indexes: `unique (campaign_id, day)`, `(seller_id, state)`, `(state, day)`
 
 ## Events
 

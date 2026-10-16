@@ -4018,6 +4018,12 @@ export const spec = defineModuleSpec({
             "creative_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "campaign_creatives_creative_id_96207b",
+          "key": {
+            "creative_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -4107,7 +4113,14 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "approval_steps_campaign_id_fe3eae",
+          "key": {
+            "campaign_id": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "creatives": {
@@ -4387,7 +4400,14 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "creative_reviews_creative_id_96207b",
+          "key": {
+            "creative_id": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "campaign_log": {
@@ -4479,7 +4499,16 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "campaign_log_campaign_id_action_at_980101",
+          "key": {
+            "campaign_id": 1,
+            "action": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "ad_events": {
@@ -4600,6 +4629,28 @@ export const spec = defineModuleSpec({
           "key": {
             "visitor_key": 1,
             "campaign_id": 1,
+            "kind": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "ad_events_at_76991a",
+          "key": {
+            "at": 1
+          }
+        },
+        {
+          "name": "ad_events_customer_id_kind_at_b0a0bb",
+          "key": {
+            "customer_id": 1,
+            "kind": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "ad_events_placement_key_kind_at_0e1d7a",
+          "key": {
+            "placement_key": 1,
             "kind": 1,
             "at": 1
           }
@@ -4733,6 +4784,12 @@ export const spec = defineModuleSpec({
             "campaign_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "frequency_state_window_started_at_757614",
+          "key": {
+            "window_started_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -4820,6 +4877,12 @@ export const spec = defineModuleSpec({
             "campaign_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "attributions_attributed_at_4e8ff2",
+          "key": {
+            "attributed_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -4926,6 +4989,12 @@ export const spec = defineModuleSpec({
             "day": 1
           },
           "unique": true
+        },
+        {
+          "name": "daily_stats_day_ac3205",
+          "key": {
+            "day": 1
+          }
         }
       ],
       "unenforced": []
@@ -5071,6 +5140,13 @@ export const spec = defineModuleSpec({
           "key": {
             "seller_id": 1,
             "state": 1
+          }
+        },
+        {
+          "name": "ad_charges_state_day_47a65e",
+          "key": {
+            "state": 1,
+            "day": 1
           }
         }
       ],

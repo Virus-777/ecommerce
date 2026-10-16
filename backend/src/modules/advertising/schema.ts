@@ -136,6 +136,7 @@ const campaign_creatives = new Schema(
   collectionOptions("advertising.campaign_creatives", { generatedId: true }),
 );
 campaign_creatives.index({"campaign_id":1,"creative_id":1}, {"name":"campaign_creatives_campaign_id_creative_id_a68c6e","unique":true});
+campaign_creatives.index({"creative_id":1}, {"name":"campaign_creatives_creative_id_96207b"});
 
 /** Required reviewers per campaign submission */
 const approval_steps = new Schema(
@@ -153,6 +154,7 @@ const approval_steps = new Schema(
   },
   collectionOptions("advertising.approval_steps"),
 );
+approval_steps.index({"campaign_id":1}, {"name":"approval_steps_campaign_id_fe3eae"});
 
 /** Creative library */
 const creatives = new Schema(
@@ -202,6 +204,7 @@ const creative_reviews = new Schema(
   },
   collectionOptions("advertising.creative_reviews"),
 );
+creative_reviews.index({"creative_id":1}, {"name":"creative_reviews_creative_id_96207b"});
 
 /** Lifecycle timeline with actor and reason */
 const campaign_log = new Schema(
@@ -220,6 +223,7 @@ const campaign_log = new Schema(
   },
   collectionOptions("advertising.campaign_log"),
 );
+campaign_log.index({"campaign_id":1,"action":1,"at":1}, {"name":"campaign_log_campaign_id_action_at_980101"});
 
 /** Displays, clicks, dismissals (append-only, partitioned by day; retained 13 months) */
 const ad_events = new Schema(
@@ -244,6 +248,9 @@ const ad_events = new Schema(
 );
 ad_events.index({"campaign_id":1,"at":1}, {"name":"ad_events_campaign_id_at_625292"});
 ad_events.index({"visitor_key":1,"campaign_id":1,"kind":1,"at":1}, {"name":"ad_events_visitor_key_campaign_id_kind_at_84749e"});
+ad_events.index({"at":1}, {"name":"ad_events_at_76991a"});
+ad_events.index({"customer_id":1,"kind":1,"at":1}, {"name":"ad_events_customer_id_kind_at_b0a0bb"});
+ad_events.index({"placement_key":1,"kind":1,"at":1}, {"name":"ad_events_placement_key_kind_at_0e1d7a"});
 
 /** Per visitor and campaign counters and suppression (TTL-cleaned) */
 const frequency_state = new Schema(
@@ -265,6 +272,7 @@ const frequency_state = new Schema(
   collectionOptions("advertising.frequency_state", { generatedId: true }),
 );
 frequency_state.index({"visitor_key":1,"campaign_id":1}, {"name":"frequency_state_visitor_key_campaign_id_e17dc0","unique":true});
+frequency_state.index({"window_started_at":1}, {"name":"frequency_state_window_started_at_757614"});
 
 /** Orders attributed to a click within the attribution period */
 const attributions = new Schema(
@@ -283,6 +291,7 @@ const attributions = new Schema(
   collectionOptions("advertising.attributions"),
 );
 attributions.index({"order_id":1,"campaign_id":1}, {"name":"attributions_order_id_campaign_id_48ba7c","unique":true});
+attributions.index({"attributed_at":1}, {"name":"attributions_attributed_at_4e8ff2"});
 
 /** Read model per campaign and day */
 const daily_stats = new Schema(
@@ -301,6 +310,7 @@ const daily_stats = new Schema(
   collectionOptions("advertising.daily_stats", { generatedId: true }),
 );
 daily_stats.index({"campaign_id":1,"day":1}, {"name":"daily_stats_campaign_id_day_efa68d","unique":true});
+daily_stats.index({"day":1}, {"name":"daily_stats_day_ac3205"});
 
 /** Seller ad charges per campaign and day, posted to finance as a separate statement line */
 const ad_charges = new Schema(
@@ -326,6 +336,7 @@ const ad_charges = new Schema(
 );
 ad_charges.index({"campaign_id":1,"day":1}, {"name":"ad_charges_campaign_id_day_efa68d","unique":true});
 ad_charges.index({"seller_id":1,"state":1}, {"name":"ad_charges_seller_id_state_e600c9"});
+ad_charges.index({"state":1,"day":1}, {"name":"ad_charges_state_day_47a65e"});
 
 /** Table name → schema */
 export const schemas = {
