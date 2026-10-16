@@ -241,6 +241,7 @@ shipments.index({"return_id":1}, {"name":"shipments_return_id_a479ef"});
 shipments.index({"carrier_code":1,"tracking_number":1}, {"name":"shipments_carrier_code_tracking_number_3537b2"});
 shipments.index({"seller_id":1,"status":1}, {"name":"shipments_seller_id_status_b608db"});
 shipments.index({"status":1,"shipped_at":1}, {"name":"shipments_status_shipped_at_2796e0"});
+shipments.index({"status":1,"_id":1}, {"name":"shipments_status__id_1ab776"});
 
 const shipment_lines = new Schema(
   {

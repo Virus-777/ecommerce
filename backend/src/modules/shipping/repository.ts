@@ -69,6 +69,23 @@ export class ShippingRepository {
     return this.#t(table).find(whereFilter(where), { sort, limit: o?.limit, forUpdate: o?.forUpdate });
   }
 
+  /**
+   * Every matching row of a table keyed by `id`, in batches of `size` (keyset on id: each batch reads the rows
+   * after the last id of the one before). Jobs walk their candidates with it, so rows a job skips (already
+   * handled, not due yet) never hide the rows after them, and only one batch is in memory at a time.
+   * The walk ends with the first batch shorter than `size`.
+   */
+  async *batches<T extends TableName>(table: T, where: Where<Recs[T]>, size: number): AsyncGenerator<Recs[T][]> {
+    const filter = whereFilter(where);
+    let afterId: string | null = null;
+    for (;;) {
+      const rows: Recs[T][] = await this.#t(table).find(afterId ? { $and: [filter, { id: { $gt: afterId } }] } : filter, { sort: { id: 1 }, limit: size });
+      if (rows.length) yield rows;
+      if (rows.length < size) return;
+      afterId = (rows.at(-1) as { id: string }).id;
+    }
+  }
+
   count<T extends TableName>(table: T, where: Where<Recs[T]>): Promise<number> {
     return this.#t(table).count(whereFilter(where));
   }

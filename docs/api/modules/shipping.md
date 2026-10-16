@@ -1364,7 +1364,7 @@ Indexes: `(status, from_date)`
 | recorded_by | jsonb |
 | created_at | timestamptz |
 
-Indexes: `(order_id)`, `(group_id)`, `(return_id)`, `(carrier_code, tracking_number)`, `(seller_id, status)`, `(status, shipped_at)`
+Indexes: `(order_id)`, `(group_id)`, `(return_id)`, `(carrier_code, tracking_number)`, `(seller_id, status)`, `(status, shipped_at)`, `(status, id)`
 
 **shipment_lines**
 

@@ -95,6 +95,8 @@ export class Core {
   readonly ctx: ModuleContext<'shipping'>;
   readonly carriers: CarrierPort;
   #seeded: Promise<void> | null = null;
+  /** Rows per read when a job walks its candidates (repo.batches); tests lower it to walk several batches */
+  jobBatchSize = 200;
 
   constructor(deps: ShippingServiceDeps) {
     this.repo = deps.repo;

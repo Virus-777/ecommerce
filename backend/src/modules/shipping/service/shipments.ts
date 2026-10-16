@@ -1042,26 +1042,32 @@ export class Shipments {
   /** Job: failed deliveries past chooseBy without a choice follow the default (return to seller) */
   async failedDeliveryDefault(): Promise<void> {
     const now = this.core.now();
-    const rows = await this.repo.find('shipments', { status: ['delivery_failed', 'held_for_pickup'] }, { limit: 200 });
-    for (const s of rows) {
-      const info = s.failed_delivery;
-      if (!info || info.chosen || new Date(info.chooseBy).getTime() > now.getTime()) continue;
-      const chosen = { choice: 'return_to_seller' as const, redeliveryDate: null, chosenAt: now.toISOString(), chosenBy: SYSTEM };
-      const batch = new Batch({ actor: SYSTEM });
-      const done = await this.repo.transaction(async (tx) => {
-        const fresh = await tx.get('shipments', s.id, { forUpdate: true });
-        if (!fresh?.failed_delivery || fresh.failed_delivery.chosen || !['delivery_failed', 'held_for_pickup'].includes(fresh.status)) return null;
-        const to = shipmentMachine.next(fresh.status as never, 'return_to_sender');
-        const after = await tx.update('shipments', s.id, { status: to, failed_delivery: { ...fresh.failed_delivery, chosen } });
-        await tx.insert('tracking_events', { id: newId(), shipment_id: s.id, code: 'returning', label: EVENT_LABELS.returning, detail: 'No next step was chosen in time; returning to the seller', location: null, source: 'system', carrier_event_id: null, at: now });
-        this.statusChanged(batch, after, fresh.status, to, now);
-        return after;
-      });
-      if (!done) continue;
-      await this.core.flush(batch);
-      this.core.publish('shipping.delivery_choice.made', { shipmentId: s.id, orderId: s.order_id, choice: 'return_to_seller', redeliveryDate: null });
-      await this.exceptions.defaultApplied(done);
-    }
+    // Every failed delivery is visited, batch by batch (BUILDING-MODULES §9): packages still inside their choice
+    // window, or already decided, are skipped and stay in these statuses, so a first page alone could fill up with
+    // them and never reach the ones past chooseBy. Packages the job returns leave the statuses as it goes.
+    const failed = this.repo.batches('shipments', { status: ['delivery_failed', 'held_for_pickup'] }, this.core.jobBatchSize);
+    for await (const batch of failed) for (const s of batch) await this.applyDefaultChoice(s, now);
+  }
+
+  /** The default next step (return to seller) for one failed delivery past chooseBy without a choice */
+  private async applyDefaultChoice(s: ShipmentRec, now: Date): Promise<void> {
+    const info = s.failed_delivery;
+    if (!info || info.chosen || new Date(info.chooseBy).getTime() > now.getTime()) return;
+    const chosen = { choice: 'return_to_seller' as const, redeliveryDate: null, chosenAt: now.toISOString(), chosenBy: SYSTEM };
+    const batch = new Batch({ actor: SYSTEM });
+    const done = await this.repo.transaction(async (tx) => {
+      const fresh = await tx.get('shipments', s.id, { forUpdate: true });
+      if (!fresh?.failed_delivery || fresh.failed_delivery.chosen || !['delivery_failed', 'held_for_pickup'].includes(fresh.status)) return null;
+      const to = shipmentMachine.next(fresh.status as never, 'return_to_sender');
+      const after = await tx.update('shipments', s.id, { status: to, failed_delivery: { ...fresh.failed_delivery, chosen } });
+      await tx.insert('tracking_events', { id: newId(), shipment_id: s.id, code: 'returning', label: EVENT_LABELS.returning, detail: 'No next step was chosen in time; returning to the seller', location: null, source: 'system', carrier_event_id: null, at: now });
+      this.statusChanged(batch, after, fresh.status, to, now);
+      return after;
+    });
+    if (!done) return;
+    await this.core.flush(batch);
+    this.core.publish('shipping.delivery_choice.made', { shipmentId: s.id, orderId: s.order_id, choice: 'return_to_seller', redeliveryDate: null });
+    await this.exceptions.defaultApplied(done);
   }
 
   /* ---------------------------------------------------------------- returns */

@@ -7,6 +7,7 @@ import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import { format, money } from '../../../kernel/lib/money.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
+import type { Where } from '../../../kernel/mongo/index.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
 import type { CarrierClaim, ClaimInput, DeliveryException, ExceptionCounts, OpenExceptionInput, ShippingShipmentExceptionEvent } from '../../../spec/shipping.js';
@@ -618,23 +619,30 @@ export class Exceptions {
     const now = this.core.now();
     const labelCutoff = new Date(now.getTime() - cfg.labelScanGraceHours * HOUR_MS);
     const shippedCutoff = new Date(now.getTime() - cfg.validTrackingWithinHours * HOUR_MS);
-    const candidates = [
-      ...(await this.repo.find('shipments', { kind: ['outbound', 'replacement'], tracking_state: ['missing', 'invalid'], status: ['shipped', 'label_created'] }, { limit: 200 })),
-      ...(await this.repo.find('shipments', { kind: ['outbound', 'replacement'], tracking_state: 'pending', status: 'label_created', created_at: { op: '<=', value: labelCutoff } }, { limit: 200 })),
-      ...(await this.repo.find('shipments', { kind: ['outbound', 'replacement'], tracking_state: 'pending', status: 'shipped', shipped_at: { op: '<=', value: shippedCutoff } }, { limit: 200 })),
+    const outbound: ShipmentRec['kind'][] = ['outbound', 'replacement'];
+    const groups: Where<ShipmentRec>[] = [
+      { kind: outbound, tracking_state: ['missing', 'invalid'], status: ['shipped', 'label_created'] },
+      { kind: outbound, tracking_state: 'pending', status: 'label_created', created_at: { op: '<=', value: labelCutoff } },
+      { kind: outbound, tracking_state: 'pending', status: 'shipped', shipped_at: { op: '<=', value: shippedCutoff } },
     ];
-    const raised = await this.shipmentsWithException(candidates, 'missing_tracking');
-    for (const s of candidates) {
-      if (raised.has(s.id)) continue;
-      const situation =
-        s.tracking_state === 'missing'
-          ? 'Shipped without a tracking number'
-          : s.tracking_state === 'invalid'
-            ? `${(s.carrier_code ?? 'Carrier').toUpperCase()} number not recognized`
-            : s.status === 'label_created'
-              ? `Label created, no scan ${cfg.labelScanGraceHours} h`
-              : `Shipped, no carrier scan ${cfg.validTrackingWithinHours} h`;
-      await this.openMissingTracking(s, situation, { actor: SYSTEM });
+    // Every candidate is visited, batch by batch (BUILDING-MODULES §9): packages that already have a missing_tracking
+    // exception stay candidates until a scan arrives, so reading only a first page would let them crowd out new ones.
+    for (const where of groups) {
+      for await (const batch of this.repo.batches('shipments', where, this.core.jobBatchSize)) {
+        const raised = await this.shipmentsWithException(batch, 'missing_tracking');
+        for (const s of batch) {
+          if (raised.has(s.id)) continue;
+          const situation =
+            s.tracking_state === 'missing'
+              ? 'Shipped without a tracking number'
+              : s.tracking_state === 'invalid'
+                ? `${(s.carrier_code ?? 'Carrier').toUpperCase()} number not recognized`
+                : s.status === 'label_created'
+                  ? `Label created, no scan ${cfg.labelScanGraceHours} h`
+                  : `Shipped, no carrier scan ${cfg.validTrackingWithinHours} h`;
+          await this.openMissingTracking(s, situation, { actor: SYSTEM });
+        }
+      }
     }
   }
 
@@ -650,10 +658,18 @@ export class Exceptions {
     const cfg = await this.core.cfg();
     const now = this.core.now();
     const cutoff = new Date(now.getTime() - cfg.stalledNoScanDays * DAY_MS);
-    const moving = await this.repo.find('shipments', { status: ['shipped', 'in_transit', 'out_for_delivery'], shipped_at: { op: '<=', value: cutoff } }, { limit: 300 });
+    // Every package shipped before the cutoff and still moving is visited, batch by batch (BUILDING-MODULES §9):
+    // reviewed packages and ones scanned recently are skipped, and stay candidates, so a first page alone could
+    // fill up with them and never reach the stalled ones.
+    const moving = this.repo.batches('shipments', { status: ['shipped', 'in_transit', 'out_for_delivery'], shipped_at: { op: '<=', value: cutoff } }, this.core.jobBatchSize);
+    for await (const batch of moving) await this.stalledBatch(batch, cutoff, now);
+  }
+
+  /** One batch of detectStalled: a review for each package without a review and without a carrier scan since the cutoff */
+  private async stalledBatch(batch: readonly ShipmentRec[], cutoff: Date, now: Date): Promise<void> {
     // one review per package: a resolved one is not reopened every day
-    const reviewed = await this.shipmentsWithException(moving, 'lost_or_damaged');
-    for (const s of moving) {
+    const reviewed = await this.shipmentsWithException(batch, 'lost_or_damaged');
+    for (const s of batch) {
       if (reviewed.has(s.id)) continue;
       const last = (await this.repo.find('tracking_events', { shipment_id: s.id, source: ['carrier_webhook', 'carrier_poll'] }, { orderBy: [['at', 'desc']], limit: 1 }))[0];
       const since = last?.at ?? s.shipped_at!;

@@ -5853,6 +5853,13 @@ export const spec = defineModuleSpec({
             "status": 1,
             "shipped_at": 1
           }
+        },
+        {
+          "name": "shipments_status__id_1ab776",
+          "key": {
+            "status": 1,
+            "_id": 1
+          }
         }
       ],
       "unenforced": []
