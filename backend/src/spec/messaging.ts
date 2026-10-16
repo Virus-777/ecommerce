@@ -2087,7 +2087,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "messages_conversation_id_author_id_client_message_be4921",
+          "name": "messages_conversation_id_author_id_client_message_4aceea",
           "key": {
             "conversation_id": 1,
             "author_id": 1,
@@ -2096,10 +2096,10 @@ export const spec = defineModuleSpec({
           "unique": true,
           "partial": {
             "author_id": {
-              "$type": "string"
+              "$gte": ""
             },
             "client_message_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }

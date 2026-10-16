@@ -66,10 +66,10 @@ const ledger = new Schema(
   collectionOptions("wallet.ledger"),
 );
 ledger.index({"customer_id":1,"at":1}, {"name":"ledger_customer_id_at_4e57ca"});
-ledger.index({"idempotency_key":1}, {"name":"ledger_idempotency_key_9416f7","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
-ledger.index({"refund_id":1,"kind":1}, {"name":"ledger_refund_id_kind_912ccd","unique":true,"partialFilterExpression":{"$and":[{"refund_id":{"$type":"string"}},{"refund_id":{"$type":"string"}}]}});
-ledger.index({"order_id":1}, {"name":"ledger_order_id_9876c3","partialFilterExpression":{"order_id":{"$type":"string"}}});
-ledger.index({"hold_id":1}, {"name":"ledger_hold_id_d89f1e","partialFilterExpression":{"hold_id":{"$type":"string"}}});
+ledger.index({"idempotency_key":1}, {"name":"ledger_idempotency_key_ef6453","unique":true,"partialFilterExpression":{"idempotency_key":{"$gte":""}}});
+ledger.index({"refund_id":1,"kind":1}, {"name":"ledger_refund_id_kind_4d7ffc","unique":true,"partialFilterExpression":{"$and":[{"refund_id":{"$gte":""}},{"refund_id":{"$gte":""}}]}});
+ledger.index({"order_id":1}, {"name":"ledger_order_id_36a929","partialFilterExpression":{"order_id":{"$gte":""}}});
+ledger.index({"hold_id":1}, {"name":"ledger_hold_id_e9c7c8","partialFilterExpression":{"hold_id":{"$gte":""}}});
 
 const holds = new Schema(
   {
@@ -118,7 +118,7 @@ const gift_card_batches = new Schema(
 );
 gift_card_batches.index({"idempotency_key":1}, {"name":"gift_card_batches_idempotency_key_b82ef6","unique":true});
 gift_card_batches.index({"status":1,"created_at":1}, {"name":"gift_card_batches_status_created_at_de0a8c"});
-gift_card_batches.index({"codes_expire_at":1}, {"name":"gift_card_batches_codes_expire_at_b88650","partialFilterExpression":{"codes_ciphertext":{"$type":"string"}}});
+gift_card_batches.index({"codes_expire_at":1}, {"name":"gift_card_batches_codes_expire_at_26faf6","partialFilterExpression":{"codes_ciphertext":{"$gte":""}}});
 
 const goodwill_grants = new Schema(
   {
@@ -147,8 +147,8 @@ const goodwill_grants = new Schema(
 goodwill_grants.index({"idempotency_key":1}, {"name":"goodwill_grants_idempotency_key_b82ef6","unique":true});
 goodwill_grants.index({"state":1,"created_at":1}, {"name":"goodwill_grants_state_created_at_b9168f"});
 goodwill_grants.index({"customer_id":1,"created_at":1}, {"name":"goodwill_grants_customer_id_created_at_a89138"});
-goodwill_grants.index({"approval_request_id":1}, {"name":"goodwill_grants_approval_request_id_7e5ff9","partialFilterExpression":{"approval_request_id":{"$type":"string"}}});
-goodwill_grants.index({"ledger_entry_id":1}, {"name":"goodwill_grants_ledger_entry_id_b1fdb3","partialFilterExpression":{"ledger_entry_id":{"$type":"string"}}});
+goodwill_grants.index({"approval_request_id":1}, {"name":"goodwill_grants_approval_request_id_2817aa","partialFilterExpression":{"approval_request_id":{"$gte":""}}});
+goodwill_grants.index({"ledger_entry_id":1}, {"name":"goodwill_grants_ledger_entry_id_2ce0fd","partialFilterExpression":{"ledger_entry_id":{"$gte":""}}});
 
 const gift_cards = new Schema(
   {
@@ -201,7 +201,7 @@ const credit_corrections = new Schema(
 );
 credit_corrections.index({"idempotency_key":1}, {"name":"credit_corrections_idempotency_key_b82ef6","unique":true});
 credit_corrections.index({"customer_id":1,"state":1,"created_at":1}, {"name":"credit_corrections_customer_id_state_created_at_46288a"});
-credit_corrections.index({"approval_request_id":1}, {"name":"credit_corrections_approval_request_id_7e5ff9","partialFilterExpression":{"approval_request_id":{"$type":"string"}}});
+credit_corrections.index({"approval_request_id":1}, {"name":"credit_corrections_approval_request_id_2817aa","partialFilterExpression":{"approval_request_id":{"$gte":""}}});
 
 /** Phase 4 experiment: points earned and spent */
 const loyalty_entries = new Schema(

@@ -7,8 +7,9 @@
  *   - types, NOT NULL, enum values and `check >= 0` become the validator; tsvector columns are not stored;
  *   - unique columns become unique indexes (nullable ones partial, so several rows may hold null: the spec's meaning);
  *     `unique nulls not distinct` is a plain unique index (MongoDB treats nulls as equal);
- *   - `where …` becomes a partialFilterExpression: is null → {$type: 'null'} (rows store explicit nulls),
- *     is not null → {$type: <the column's type>}, = and in → equality and $in, a bare boolean → true,
+ *   - `where …` becomes a partialFilterExpression: is null → null equality (rows store explicit nulls),
+ *     is not null → {$gte: ''} on strings, else {$type: <the column's type>} (see present()), = and in → equality
+ *     and $in, a bare boolean → true,
  *     <> on an enum column → $in of its other values;
  *   - lower()/upper() → a case-insensitive collation; coalesce(col, …) → col (nulls are equal); gin on an array →
  *     a multikey index; gin(col jsonb_path_ops) → a wildcard index; gin(col gin_trgm_ops) → a plain index;
@@ -80,11 +81,16 @@ function bsonOf(sqlType: string): string | string[] | undefined {
   }
 }
 
-/** One $type value that matches every non-null value of the column (partial filters) */
-function typeOf(c: Column): string | undefined {
+/**
+ * A partial-filter condition that matches every non-null value of the column. MongoDB only uses a partial index when
+ * the query implies its filter: `col = 'x'` implies `col >= ''` but not `$type: 'string'`, so strings take the lower
+ * bound. Other types keep $type (their partial indexes serve range scans, which neither form helps).
+ */
+function present(c: Column): Record<string, unknown> | undefined {
   const b = bsonOf(c.sqlType);
-  if (Array.isArray(b)) return 'number';
-  return b;
+  if (b === 'string') return { $gte: '' };
+  if (Array.isArray(b)) return { $type: 'number' };
+  return b === undefined ? undefined : { $type: b };
 }
 
 function property(c: Column): Record<string, unknown> {
@@ -146,12 +152,12 @@ function partialFilter(where: string, columns: Map<string, Column>): Record<stri
       if (!c) throw new Error(`unknown column ${name}`);
       return c;
     };
-    if ((m = /^(\w+)\s+is\s+null$/i.exec(term))) conds.push({ [col(m[1]!).name]: { $type: 'null' } });
+    if ((m = /^(\w+)\s+is\s+null$/i.exec(term))) conds.push({ [col(m[1]!).name]: null });
     else if ((m = /^(\w+)\s+is\s+not\s+null$/i.exec(term))) {
       const c = col(m[1]!);
-      const t = typeOf(c);
-      if (!t) throw new Error(`is not null on ${c.name} (any type)`);
-      conds.push({ [c.name]: { $type: t } });
+      const p = present(c);
+      if (!p) throw new Error(`is not null on ${c.name} (any type)`);
+      conds.push({ [c.name]: p });
     } else if ((m = /^(\w+)\s*=\s*(.+)$/.exec(term))) conds.push({ [col(m[1]!).name]: literal(m[2]!) });
     else if ((m = /^(\w+)\s+in\s*\((.+)\)$/i.exec(term))) conds.push({ [col(m[1]!).name]: { $in: splitTop(m[2]!).map(literal) } });
     else if ((m = /^(\w+)\s+not\s+in\s*\((.+)\)$/i.exec(term))) {
@@ -267,8 +273,8 @@ function indexOf(idx: string, table: string, columns: Map<string, Column>, probl
     for (const k of Object.keys(key)) {
       const c = columns.get(k);
       if (!c?.nullable || coalesced.has(k)) continue;
-      const t = typeOf(c);
-      if (t) conds.push({ [k]: { $type: t } });
+      const p = present(c);
+      if (p) conds.push({ [k]: p });
     }
     if (conds.length) {
       const all = [...(partial ? ((partial.$and as Record<string, unknown>[] | undefined) ?? [partial]) : []), ...conds];
@@ -317,8 +323,8 @@ export function collectionDefs(mod: ModuleSpec, plans: TablePlan[], problems: st
     }
     for (const c of stored) {
       if (!c.unique || c.name === idField) continue;
-      const t = typeOf(c);
-      const def: Omit<IndexDef, 'name'> = { key: { [c.name]: 1 }, unique: true, ...(c.nullable && t ? { partial: { [c.name]: { $type: t } } } : {}) };
+      const p = c.nullable ? present(c) : undefined;
+      const def: Omit<IndexDef, 'name'> = { key: { [c.name]: 1 }, unique: true, ...(p ? { partial: { [c.name]: p } } : {}) };
       indexes.push({ name: indexName(table.name, def), ...def });
     }
     for (const idx of table.indexes ?? []) {

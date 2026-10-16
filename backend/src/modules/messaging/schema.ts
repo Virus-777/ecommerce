@@ -90,7 +90,7 @@ const messages = new Schema(
   collectionOptions("messaging.messages"),
 );
 messages.index({"conversation_id":1,"at":-1}, {"name":"messages_conversation_id_at_a84000"});
-messages.index({"conversation_id":1,"author_id":1,"client_message_id":1}, {"name":"messages_conversation_id_author_id_client_message_be4921","unique":true,"partialFilterExpression":{"author_id":{"$type":"string"},"client_message_id":{"$type":"string"}}});
+messages.index({"conversation_id":1,"author_id":1,"client_message_id":1}, {"name":"messages_conversation_id_author_id_client_message_4aceea","unique":true,"partialFilterExpression":{"author_id":{"$gte":""},"client_message_id":{"$gte":""}}});
 
 const message_reports = new Schema(
   {

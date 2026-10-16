@@ -122,7 +122,7 @@ describe('schema from the spec', () => {
     // the column is unique anyway; the partial index is checked through its own definition
     const partial = defs.items!.indexes.find((i) => i.partial && i.unique && 'status' in i.key)!;
     expect(partial.partial).toEqual({ status: { $in: ['draft', 'active'] } });
-    expect(defs.items!.indexes.find((i) => !i.unique && i.partial)!.partial).toEqual({ archived_at: { $type: 'null' } });
+    expect(defs.items!.indexes.find((i) => !i.unique && i.partial)!.partial).toEqual({ archived_at: null });
     expect(await items.count({})).toBeGreaterThan(0);
   });
 

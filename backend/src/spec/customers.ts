@@ -2383,16 +2383,14 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "addresses_customer_id_375599",
+          "name": "addresses_customer_id_86b96d",
           "key": {
             "customer_id": 1
           },
           "unique": true,
           "partial": {
             "is_default": true,
-            "deleted_at": {
-              "$type": "null"
-            }
+            "deleted_at": null
           }
         }
       ],

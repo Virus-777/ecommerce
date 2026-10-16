@@ -3591,24 +3591,24 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "cases_approval_request_id_7e5ff9",
+          "name": "cases_approval_request_id_2817aa",
           "key": {
             "approval_request_id": 1
           },
           "partial": {
             "approval_request_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
         {
-          "name": "cases_trust_report_id_f68c33",
+          "name": "cases_trust_report_id_dd8c42",
           "key": {
             "trust_report_id": 1
           },
           "partial": {
             "trust_report_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }

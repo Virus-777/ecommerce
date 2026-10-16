@@ -6026,7 +6026,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "tracking_events_shipment_id_carrier_event_id_a423f8",
+          "name": "tracking_events_shipment_id_carrier_event_id_b81369",
           "key": {
             "shipment_id": 1,
             "carrier_event_id": 1
@@ -6034,7 +6034,7 @@ export const spec = defineModuleSpec({
           "unique": true,
           "partial": {
             "carrier_event_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -6456,14 +6456,12 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "dispatch_watch_due_at_521eba",
+          "name": "dispatch_watch_due_at_6bae3b",
           "key": {
             "due_at": 1
           },
           "partial": {
-            "overdue_since": {
-              "$type": "null"
-            }
+            "overdue_since": null
           }
         }
       ],

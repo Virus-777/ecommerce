@@ -135,7 +135,7 @@ const verification_checks = new Schema(
 );
 verification_checks.index({"application_id":1}, {"name":"verification_checks_application_id_ff174c"});
 verification_checks.index({"seller_id":1,"kind":1}, {"name":"verification_checks_seller_id_kind_eccc95"});
-verification_checks.index({"provider":1,"provider_ref":1}, {"name":"verification_checks_provider_provider_ref_ccced3","unique":true,"partialFilterExpression":{"provider":{"$type":"string"},"provider_ref":{"$type":"string"}}});
+verification_checks.index({"provider":1,"provider_ref":1}, {"name":"verification_checks_provider_provider_ref_cb40dd","unique":true,"partialFilterExpression":{"provider":{"$gte":""},"provider_ref":{"$gte":""}}});
 
 const information_requests = new Schema(
   {
@@ -321,7 +321,7 @@ const performance_events = new Schema(
   collectionOptions("sellers.performance_events"),
 );
 performance_events.index({"seller_id":1,"kind":1,"occurred_at":1}, {"name":"performance_events_seller_id_kind_occurred_at_dbc50a"});
-performance_events.index({"kind":1,"subject_id":1}, {"name":"performance_events_kind_subject_id_c4de1b","unique":true,"partialFilterExpression":{"subject_id":{"$type":"string"}}});
+performance_events.index({"kind":1,"subject_id":1}, {"name":"performance_events_kind_subject_id_dd4613","unique":true,"partialFilterExpression":{"subject_id":{"$gte":""}}});
 
 const performance_snapshots = new Schema(
   {

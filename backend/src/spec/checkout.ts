@@ -2284,14 +2284,14 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "sessions_order_id_4fe168",
+          "name": "sessions_order_id_eb9bf0",
           "key": {
             "order_id": 1
           },
           "unique": true,
           "partial": {
             "order_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },

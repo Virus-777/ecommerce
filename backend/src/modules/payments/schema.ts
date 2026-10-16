@@ -154,7 +154,7 @@ refunds.index({"idempotency_key":1}, {"name":"refunds_idempotency_key_b82ef6","u
 refunds.index({"order_id":1}, {"name":"refunds_order_id_4c5e85"});
 refunds.index({"checkout_session_id":1}, {"name":"refunds_checkout_session_id_db7d43"});
 refunds.index({"status":1,"next_attempt_at":1}, {"name":"refunds_status_next_attempt_at_0fe682"});
-refunds.index({"origin":1,"origin_id":1}, {"name":"refunds_origin_origin_id_c661ff","unique":true,"partialFilterExpression":{"$and":[{"origin_id":{"$type":"string"},"origin":{"$in":["return","case","exception","correction","orphan_payment"]},"status":{"$in":["requested","processing","sent","failed"]}},{"origin_id":{"$type":"string"}}]}});
+refunds.index({"origin":1,"origin_id":1}, {"name":"refunds_origin_origin_id_c8d830","unique":true,"partialFilterExpression":{"$and":[{"origin_id":{"$gte":""},"origin":{"$in":["return","case","exception","correction","orphan_payment"]},"status":{"$in":["requested","processing","sent","failed"]}},{"origin_id":{"$gte":""}}]}});
 refunds.index({"origin":1,"origin_id":1}, {"name":"refunds_origin_origin_id_e9fa93"});
 refunds.index({"intent_id":1}, {"name":"refunds_intent_id_050910"});
 refunds.index({"idempotency_key":1}, {"name":"refunds_idempotency_key_c702b4"});
@@ -225,7 +225,7 @@ const disputes = new Schema(
 disputes.index({"ref":1}, {"name":"disputes_ref_8cef23","unique":true});
 disputes.index({"provider":1,"provider_case_id":1}, {"name":"disputes_provider_provider_case_id_90110f","unique":true});
 disputes.index({"status":1,"evidence_due_at":1}, {"name":"disputes_status_evidence_due_at_ded67e"});
-disputes.index({"approval_request_id":1}, {"name":"disputes_approval_request_id_7e5ff9","partialFilterExpression":{"approval_request_id":{"$type":"string"}}});
+disputes.index({"approval_request_id":1}, {"name":"disputes_approval_request_id_2817aa","partialFilterExpression":{"approval_request_id":{"$gte":""}}});
 disputes.index({"intent_id":1}, {"name":"disputes_intent_id_050910"});
 disputes.index({"order_id":1}, {"name":"disputes_order_id_4c5e85"});
 

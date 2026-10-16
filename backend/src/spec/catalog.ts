@@ -3577,14 +3577,14 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "variants_gtin_745cc2",
+          "name": "variants_gtin_c1ae9d",
           "key": {
             "gtin": 1
           },
           "unique": true,
           "partial": {
             "gtin": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },

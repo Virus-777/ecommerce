@@ -176,7 +176,7 @@ const packages = new Schema(
   collectionOptions("warehouse.packages"),
 );
 packages.index({"fulfillment_id":1}, {"name":"packages_fulfillment_id_26a36a"});
-packages.index({"tracking_number":1}, {"name":"packages_tracking_number_3d9cae","unique":true,"partialFilterExpression":{"tracking_number":{"$type":"string"}}});
+packages.index({"tracking_number":1}, {"name":"packages_tracking_number_e8616a","unique":true,"partialFilterExpression":{"tracking_number":{"$gte":""}}});
 packages.index({"shipment_id":1}, {"name":"packages_shipment_id_048e7e"});
 packages.index({"packed_at":1}, {"name":"packages_packed_at_718ea9"});
 

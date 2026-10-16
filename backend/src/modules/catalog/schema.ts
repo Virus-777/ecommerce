@@ -146,7 +146,7 @@ const variants = new Schema(
   },
   collectionOptions("catalog.variants"),
 );
-variants.index({"gtin":1}, {"name":"variants_gtin_745cc2","unique":true,"partialFilterExpression":{"gtin":{"$type":"string"}}});
+variants.index({"gtin":1}, {"name":"variants_gtin_c1ae9d","unique":true,"partialFilterExpression":{"gtin":{"$gte":""}}});
 variants.index({"product_id":1,"position":1}, {"name":"variants_product_id_position_6a100c"});
 
 /** Every submission, decision, publication change and merge */

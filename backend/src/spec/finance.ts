@@ -4636,14 +4636,14 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "ledger_entries_source_event_id_dd5c60",
+          "name": "ledger_entries_source_event_id_325c84",
           "key": {
             "source_event_id": 1
           },
           "unique": true,
           "partial": {
             "source_event_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
@@ -5551,14 +5551,14 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "adjustments_idempotency_key_9416f7",
+          "name": "adjustments_idempotency_key_ef6453",
           "key": {
             "idempotency_key": 1
           },
           "unique": true,
           "partial": {
             "idempotency_key": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
@@ -6472,26 +6472,26 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "payouts_provider_payout_id_c948ca",
+          "name": "payouts_provider_payout_id_99902c",
           "key": {
             "provider_payout_id": 1
           },
           "unique": true,
           "partial": {
             "provider_payout_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
         {
-          "name": "payouts_idempotency_key_9416f7",
+          "name": "payouts_idempotency_key_ef6453",
           "key": {
             "idempotency_key": 1
           },
           "unique": true,
           "partial": {
             "idempotency_key": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
@@ -6879,7 +6879,7 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "trading_targets_period_category_id_66b3df",
+          "name": "trading_targets_period_category_id_ae48fe",
           "key": {
             "period": 1,
             "category_id": 1
@@ -6887,7 +6887,7 @@ export const spec = defineModuleSpec({
           "unique": true,
           "partial": {
             "category_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }

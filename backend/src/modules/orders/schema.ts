@@ -208,7 +208,7 @@ const cancellations = new Schema(
 );
 cancellations.index({"group_id":1,"status":1}, {"name":"cancellations_group_id_status_e331f0"});
 cancellations.index({"status":1,"respond_by":1}, {"name":"cancellations_status_respond_by_d4d721"});
-cancellations.index({"order_id":1,"idempotency_key":1}, {"name":"cancellations_order_id_idempotency_key_7c78b9","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
+cancellations.index({"order_id":1,"idempotency_key":1}, {"name":"cancellations_order_id_idempotency_key_21d838","unique":true,"partialFilterExpression":{"idempotency_key":{"$gte":""}}});
 cancellations.index({"order_id":1}, {"name":"cancellations_order_id_4c5e85"});
 
 /** Projection of shipping events for display, search by tracking number and flags */

@@ -22,13 +22,6 @@ import type {
 type LoyaltyRow = WalletDb['loyalty_entries'];
 type ForUpdate = { forUpdate?: boolean };
 
-/**
- * Equal to `value`, written so MongoDB can use the spec's partial indexes on a nullable column ("where col is not
- * null" is stored as the partial filter { col: { $type: 'string' } }): the query planner only picks a partial index
- * when the filter repeats its condition, and a bare equality does not.
- */
-const present = <V extends string | readonly string[]>(value: V) => (typeof value === 'string' ? { $eq: value, $type: 'string' } : { $in: [...value], $type: 'string' });
-
 /** The total of a `{ $group: { _id: null, total: … } }` aggregation (0 when nothing matched) */
 const sumOf = (rows: { total?: number }[]) => Number(rows[0]?.total ?? 0);
 
@@ -150,15 +143,15 @@ export class WalletRepository {
   }
 
   entryByKey(idempotencyKey: string): Promise<EntryRow | undefined> {
-    return this.#t.ledger.findOne({ idempotency_key: present(idempotencyKey) });
+    return this.#t.ledger.findOne({ idempotency_key: idempotencyKey });
   }
 
   entriesOfRefund(refundId: string): Promise<EntryRow[]> {
-    return this.#t.ledger.find({ refund_id: present(refundId) }, { sort: { at: 1, id: 1 } });
+    return this.#t.ledger.find({ refund_id: refundId }, { sort: { at: 1, id: 1 } });
   }
 
   entryOfHold(holdId: string, kind: string): Promise<EntryRow | undefined> {
-    return this.#t.ledger.findOne({ hold_id: present(holdId), kind });
+    return this.#t.ledger.findOne({ hold_id: holdId, kind });
   }
 
   /** Credit used on an order (captures, positive) and credit already given back for it (order_refund_returned) */
@@ -222,11 +215,11 @@ export class WalletRepository {
   }
 
   grantByApproval(requestId: string): Promise<GrantRow | undefined> {
-    return this.#t.grants.findOne({ approval_request_id: present(requestId) });
+    return this.#t.grants.findOne({ approval_request_id: requestId });
   }
 
   grantsOfEntries(entryIds: readonly string[]): Promise<GrantRow[]> {
-    return this.#t.grants.find({ ledger_entry_id: present([...new Set(entryIds)]) });
+    return this.#t.grants.find({ ledger_entry_id: { $in: [...new Set(entryIds)] } });
   }
 
   async updateGrant(id: string, patch: Partial<Pick<GrantRow, 'state' | 'approval_request_id' | 'decided_by' | 'ledger_entry_id'>>): Promise<GrantRow> {
@@ -278,7 +271,7 @@ export class WalletRepository {
   }
 
   correctionByApproval(requestId: string): Promise<CorrectionRow | undefined> {
-    return this.#t.corrections.findOne({ approval_request_id: present(requestId) });
+    return this.#t.corrections.findOne({ approval_request_id: requestId });
   }
 
   async updateCorrection(

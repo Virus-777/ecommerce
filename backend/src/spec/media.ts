@@ -2144,14 +2144,12 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "uploads_url_expires_at_d3b144",
+          "name": "uploads_url_expires_at_2b4841",
           "key": {
             "url_expires_at": 1
           },
           "partial": {
-            "completed_at": {
-              "$type": "null"
-            }
+            "completed_at": null
           }
         },
         {
@@ -2249,18 +2247,16 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "usages_asset_id_5de728",
+          "name": "usages_asset_id_b669ae",
           "key": {
             "asset_id": 1
           },
           "partial": {
-            "detached_at": {
-              "$type": "null"
-            }
+            "detached_at": null
           }
         },
         {
-          "name": "usages_asset_id_module_kind_ref_id_5d1b3b",
+          "name": "usages_asset_id_module_kind_ref_id_15181a",
           "key": {
             "asset_id": 1,
             "module": 1,
@@ -2269,9 +2265,7 @@ export const spec = defineModuleSpec({
           },
           "unique": true,
           "partial": {
-            "detached_at": {
-              "$type": "null"
-            }
+            "detached_at": null
           }
         },
         {

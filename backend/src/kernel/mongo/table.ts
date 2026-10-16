@@ -542,7 +542,7 @@ const TYPE_TESTS: Record<string, (v: unknown) => boolean> = {
 
 /**
  * Whether a row falls under an index's partial filter, i.e. the index covers it (insertIfAbsent). Handles what the
- * generator writes ($and, $or, $type, $in, $eq, $exists, equality); for anything else it assumes the row is covered,
+ * generator writes ($and, $or, $type, $in, $eq, $gte, $exists, equality); for anything else it assumes the row is covered,
  * which only checks one key too many.
  */
 function fallsUnder(partial: NonNullable<MongoIndexDef['partial']>, valueOf: (field: string) => unknown): boolean {
@@ -561,9 +561,10 @@ function fallsUnder(partial: NonNullable<MongoIndexDef['partial']>, valueOf: (fi
         if (op === '$type' && !(TYPE_TESTS[String(x)]?.(v) ?? true)) return false;
         if (op === '$in' && !(x as unknown[]).some((y) => y === v)) return false;
         if (op === '$eq' && x !== v) return false;
+        if (op === '$gte' && !(typeof v === typeof x && (v as string) >= (x as string))) return false; // `>= ''`: any string
         if (op === '$exists' && x && v === null) return false;
       }
-    } else if (cond !== v) return false;
+    } else if (cond === null ? v != null : cond !== v) return false; // null equality matches a missing field too
   }
   return true;
 }

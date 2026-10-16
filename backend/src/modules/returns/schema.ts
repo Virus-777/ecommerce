@@ -296,7 +296,7 @@ const refund_requests = new Schema(
   collectionOptions("returns.refund_requests"),
 );
 refund_requests.index({"ref":1}, {"name":"refund_requests_ref_8cef23","unique":true});
-refund_requests.index({"idempotency_key":1}, {"name":"refund_requests_idempotency_key_9416f7","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
+refund_requests.index({"idempotency_key":1}, {"name":"refund_requests_idempotency_key_ef6453","unique":true,"partialFilterExpression":{"idempotency_key":{"$gte":""}}});
 refund_requests.index({"status":1,"created_at":1}, {"name":"refund_requests_status_created_at_de0a8c"});
 refund_requests.index({"order_id":1}, {"name":"refund_requests_order_id_4c5e85"});
 refund_requests.index({"return_id":1}, {"name":"refund_requests_return_id_a479ef"});
@@ -362,7 +362,7 @@ const replacements = new Schema(
   },
   collectionOptions("returns.replacements"),
 );
-replacements.index({"idempotency_key":1}, {"name":"replacements_idempotency_key_9416f7","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
+replacements.index({"idempotency_key":1}, {"name":"replacements_idempotency_key_ef6453","unique":true,"partialFilterExpression":{"idempotency_key":{"$gte":""}}});
 replacements.index({"return_id":1}, {"name":"replacements_return_id_a479ef"});
 replacements.index({"case_id":1}, {"name":"replacements_case_id_ddb8b4"});
 replacements.index({"order_id":1}, {"name":"replacements_order_id_4c5e85"});

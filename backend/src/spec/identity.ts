@@ -3218,14 +3218,12 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "two_step_methods_account_id_0cdbcc",
+          "name": "two_step_methods_account_id_d530af",
           "key": {
             "account_id": 1
           },
           "partial": {
-            "removed_at": {
-              "$type": "null"
-            }
+            "removed_at": null
           }
         }
       ],
@@ -3692,7 +3690,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "devices_account_id_installation_id_6628f8",
+          "name": "devices_account_id_installation_id_b097ab",
           "key": {
             "account_id": 1,
             "installation_id": 1
@@ -3702,12 +3700,12 @@ export const spec = defineModuleSpec({
             "$and": [
               {
                 "installation_id": {
-                  "$type": "string"
+                  "$gte": ""
                 }
               },
               {
                 "installation_id": {
-                  "$type": "string"
+                  "$gte": ""
                 }
               }
             ]
@@ -3871,14 +3869,12 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "sessions_account_id_e9a213",
+          "name": "sessions_account_id_73d912",
           "key": {
             "account_id": 1
           },
           "partial": {
-            "revoked_at": {
-              "$type": "null"
-            }
+            "revoked_at": null
           }
         },
         {
@@ -3888,24 +3884,22 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "sessions_seller_id_effa4c",
+          "name": "sessions_seller_id_fd3c6a",
           "key": {
             "seller_id": 1
           },
           "partial": {
-            "revoked_at": {
-              "$type": "null"
-            }
+            "revoked_at": null
           }
         },
         {
-          "name": "sessions_previous_token_hash_240581",
+          "name": "sessions_previous_token_hash_c08431",
           "key": {
             "previous_token_hash": 1
           },
           "partial": {
             "previous_token_hash": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
@@ -4210,13 +4204,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "invitations_account_id_21b4bc",
+          "name": "invitations_account_id_11e586",
           "key": {
             "account_id": 1
           },
           "partial": {
             "account_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -4346,13 +4340,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "guest_sessions_previous_token_hash_240581",
+          "name": "guest_sessions_previous_token_hash_c08431",
           "key": {
             "previous_token_hash": 1
           },
           "partial": {
             "previous_token_hash": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },

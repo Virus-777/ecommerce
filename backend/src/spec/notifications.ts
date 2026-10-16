@@ -3797,14 +3797,14 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "delivery_events_provider_event_id_72f92f",
+          "name": "delivery_events_provider_event_id_2696e1",
           "key": {
             "provider_event_id": 1
           },
           "unique": true,
           "partial": {
             "provider_event_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
@@ -4149,14 +4149,12 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "push_devices_account_id_907cfb",
+          "name": "push_devices_account_id_bd0395",
           "key": {
             "account_id": 1
           },
           "partial": {
-            "invalidated_at": {
-              "$type": "null"
-            }
+            "invalidated_at": null
           }
         }
       ],
@@ -4264,16 +4262,14 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "suppressions_channel_address_hash_92b7f3",
+          "name": "suppressions_channel_address_hash_e90a8a",
           "key": {
             "channel": 1,
             "address_hash": 1
           },
           "unique": true,
           "partial": {
-            "removed_at": {
-              "$type": "null"
-            }
+            "removed_at": null
           }
         },
         {

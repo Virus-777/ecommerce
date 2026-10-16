@@ -2942,14 +2942,14 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "packages_tracking_number_3d9cae",
+          "name": "packages_tracking_number_e8616a",
           "key": {
             "tracking_number": 1
           },
           "unique": true,
           "partial": {
             "tracking_number": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },

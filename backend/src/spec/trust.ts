@@ -2916,7 +2916,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "reports_dedupe_key_2ab325",
+          "name": "reports_dedupe_key_00168e",
           "key": {
             "dedupe_key": 1
           },
@@ -2930,7 +2930,7 @@ export const spec = defineModuleSpec({
               ]
             },
             "dedupe_key": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
@@ -3403,13 +3403,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "recommendations_approval_request_id_7e5ff9",
+          "name": "recommendations_approval_request_id_2817aa",
           "key": {
             "approval_request_id": 1
           },
           "partial": {
             "approval_request_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -3602,13 +3602,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "enforcements_reversal_request_id_cf0374",
+          "name": "enforcements_reversal_request_id_caf55f",
           "key": {
             "reversal_request_id": 1
           },
           "partial": {
             "reversal_request_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -3827,7 +3827,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "appeals_source_external_appeal_id_d96e81",
+          "name": "appeals_source_external_appeal_id_b1062b",
           "key": {
             "source": 1,
             "external_appeal_id": 1
@@ -3837,12 +3837,12 @@ export const spec = defineModuleSpec({
             "$and": [
               {
                 "external_appeal_id": {
-                  "$type": "string"
+                  "$gte": ""
                 }
               },
               {
                 "external_appeal_id": {
-                  "$type": "string"
+                  "$gte": ""
                 }
               }
             ]

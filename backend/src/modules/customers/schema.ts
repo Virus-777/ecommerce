@@ -67,7 +67,7 @@ const addresses = new Schema(
   collectionOptions("customers.addresses"),
 );
 addresses.index({"customer_id":1}, {"name":"addresses_customer_id_dc4488"});
-addresses.index({"customer_id":1}, {"name":"addresses_customer_id_375599","unique":true,"partialFilterExpression":{"is_default":true,"deleted_at":{"$type":"null"}}});
+addresses.index({"customer_id":1}, {"name":"addresses_customer_id_86b96d","unique":true,"partialFilterExpression":{"is_default":true,"deleted_at":null}});
 
 const marketing_preferences = new Schema(
   {

@@ -189,7 +189,7 @@ const delivery_events = new Schema(
   },
   collectionOptions("notifications.delivery_events"),
 );
-delivery_events.index({"provider_event_id":1}, {"name":"delivery_events_provider_event_id_72f92f","unique":true,"partialFilterExpression":{"provider_event_id":{"$type":"string"}}});
+delivery_events.index({"provider_event_id":1}, {"name":"delivery_events_provider_event_id_2696e1","unique":true,"partialFilterExpression":{"provider_event_id":{"$gte":""}}});
 delivery_events.index({"delivery_id":1,"at":1}, {"name":"delivery_events_delivery_id_at_511d79"});
 
 /** Seller member preferences, set by the owner or the member */
@@ -258,7 +258,7 @@ const push_devices = new Schema(
   collectionOptions("notifications.push_devices"),
 );
 push_devices.index({"token_hash":1}, {"name":"push_devices_token_hash_ff3baa","unique":true});
-push_devices.index({"account_id":1}, {"name":"push_devices_account_id_907cfb","partialFilterExpression":{"invalidated_at":{"$type":"null"}}});
+push_devices.index({"account_id":1}, {"name":"push_devices_account_id_bd0395","partialFilterExpression":{"invalidated_at":null}});
 
 const suppressions = new Schema(
   {
@@ -278,7 +278,7 @@ const suppressions = new Schema(
   },
   collectionOptions("notifications.suppressions"),
 );
-suppressions.index({"channel":1,"address_hash":1}, {"name":"suppressions_channel_address_hash_92b7f3","unique":true,"partialFilterExpression":{"removed_at":{"$type":"null"}}});
+suppressions.index({"channel":1,"address_hash":1}, {"name":"suppressions_channel_address_hash_e90a8a","unique":true,"partialFilterExpression":{"removed_at":null}});
 suppressions.index({"account_id":1}, {"name":"suppressions_account_id_05e878"});
 
 const broadcasts = new Schema(

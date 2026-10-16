@@ -46,9 +46,7 @@ export class CheckoutRepository {
   }
 
   findSessionByOrder(orderId: string): Promise<SessionRow | undefined> {
-    // repeats the unique index's partial filter ({ order_id: { $type: 'string' } }) so MongoDB can use it; a bare
-    // equality scans the collection
-    return this.#t.sessions.findOne({ order_id: { $eq: orderId, $type: 'string' } });
+    return this.#t.sessions.findOne({ order_id: orderId });
   }
 
   /** Open guest sessions of a visitor session (claimed at sign-in) */

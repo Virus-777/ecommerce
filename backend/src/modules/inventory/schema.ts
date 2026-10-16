@@ -60,7 +60,7 @@ stock_items.index({"owner_type":1,"seller_id":1,"sku":1}, {"name":"stock_items_o
 stock_items.index({"seller_id":1,"archived":1}, {"name":"stock_items_seller_id_archived_9df3a8"});
 stock_items.index({"offer_id":1}, {"name":"stock_items_offer_id_959ceb"});
 stock_items.index({"variant_id":1}, {"name":"stock_items_variant_id_c68aaa"});
-stock_items.index({"service_location_id":1}, {"name":"stock_items_service_location_id_978694","partialFilterExpression":{"service_location_id":{"$type":"string"}}});
+stock_items.index({"service_location_id":1}, {"name":"stock_items_service_location_id_f4911e","partialFilterExpression":{"service_location_id":{"$gte":""}}});
 
 /** Current quantities per item and location; changed only together with a movement row */
 const stock_levels = new Schema(
@@ -216,7 +216,7 @@ const held_stock = new Schema(
   },
   collectionOptions("inventory.held_stock"),
 );
-held_stock.index({"review_date":1}, {"name":"held_stock_review_date_b2ef9d","partialFilterExpression":{"released_at":{"$type":"null"}}});
+held_stock.index({"review_date":1}, {"name":"held_stock_review_date_c428ef","partialFilterExpression":{"released_at":null}});
 held_stock.index({"stock_item_id":1,"location_id":1}, {"name":"held_stock_stock_item_id_location_id_b33c25"});
 
 /** Counted receipts from purchasing and from the fulfillment service waiting for confirmation */

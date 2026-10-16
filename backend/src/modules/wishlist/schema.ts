@@ -22,7 +22,7 @@ const lists = new Schema(
   },
   collectionOptions("wishlist.lists"),
 );
-lists.index({"share_token":1}, {"name":"lists_share_token_9bb967","unique":true,"partialFilterExpression":{"share_token":{"$type":"string"}}});
+lists.index({"share_token":1}, {"name":"lists_share_token_4cfe3e","unique":true,"partialFilterExpression":{"share_token":{"$gte":""}}});
 lists.index({"customer_id":1}, {"name":"lists_customer_id_dc4488"});
 lists.index({"customer_id":1}, {"name":"lists_customer_id_a07bbe","unique":true,"partialFilterExpression":{"is_default":true}});
 

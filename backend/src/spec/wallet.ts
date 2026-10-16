@@ -1663,19 +1663,19 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "ledger_idempotency_key_9416f7",
+          "name": "ledger_idempotency_key_ef6453",
           "key": {
             "idempotency_key": 1
           },
           "unique": true,
           "partial": {
             "idempotency_key": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
         {
-          "name": "ledger_refund_id_kind_912ccd",
+          "name": "ledger_refund_id_kind_4d7ffc",
           "key": {
             "refund_id": 1,
             "kind": 1
@@ -1685,36 +1685,36 @@ export const spec = defineModuleSpec({
             "$and": [
               {
                 "refund_id": {
-                  "$type": "string"
+                  "$gte": ""
                 }
               },
               {
                 "refund_id": {
-                  "$type": "string"
+                  "$gte": ""
                 }
               }
             ]
           }
         },
         {
-          "name": "ledger_order_id_9876c3",
+          "name": "ledger_order_id_36a929",
           "key": {
             "order_id": 1
           },
           "partial": {
             "order_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
         {
-          "name": "ledger_hold_id_d89f1e",
+          "name": "ledger_hold_id_e9c7c8",
           "key": {
             "hold_id": 1
           },
           "partial": {
             "hold_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -2012,13 +2012,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "gift_card_batches_codes_expire_at_b88650",
+          "name": "gift_card_batches_codes_expire_at_26faf6",
           "key": {
             "codes_expire_at": 1
           },
           "partial": {
             "codes_ciphertext": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -2195,24 +2195,24 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "goodwill_grants_approval_request_id_7e5ff9",
+          "name": "goodwill_grants_approval_request_id_2817aa",
           "key": {
             "approval_request_id": 1
           },
           "partial": {
             "approval_request_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
         {
-          "name": "goodwill_grants_ledger_entry_id_b1fdb3",
+          "name": "goodwill_grants_ledger_entry_id_2ce0fd",
           "key": {
             "ledger_entry_id": 1
           },
           "partial": {
             "ledger_entry_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -2537,13 +2537,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "credit_corrections_approval_request_id_7e5ff9",
+          "name": "credit_corrections_approval_request_id_2817aa",
           "key": {
             "approval_request_id": 1
           },
           "partial": {
             "approval_request_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }

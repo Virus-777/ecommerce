@@ -7137,7 +7137,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "verification_checks_provider_provider_ref_ccced3",
+          "name": "verification_checks_provider_provider_ref_cb40dd",
           "key": {
             "provider": 1,
             "provider_ref": 1
@@ -7145,10 +7145,10 @@ export const spec = defineModuleSpec({
           "unique": true,
           "partial": {
             "provider": {
-              "$type": "string"
+              "$gte": ""
             },
             "provider_ref": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -8204,7 +8204,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "performance_events_kind_subject_id_c4de1b",
+          "name": "performance_events_kind_subject_id_dd4613",
           "key": {
             "kind": 1,
             "subject_id": 1
@@ -8212,7 +8212,7 @@ export const spec = defineModuleSpec({
           "unique": true,
           "partial": {
             "subject_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }

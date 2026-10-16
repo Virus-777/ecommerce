@@ -52,7 +52,7 @@ const ledger_entries = new Schema(
   },
   collectionOptions("finance.ledger_entries"),
 );
-ledger_entries.index({"source_event_id":1}, {"name":"ledger_entries_source_event_id_dd5c60","unique":true,"partialFilterExpression":{"source_event_id":{"$type":"string"}}});
+ledger_entries.index({"source_event_id":1}, {"name":"ledger_entries_source_event_id_325c84","unique":true,"partialFilterExpression":{"source_event_id":{"$gte":""}}});
 ledger_entries.index({"seller_id":1,"at":-1}, {"name":"ledger_entries_seller_id_at_b94f3a"});
 ledger_entries.index({"ref_kind":1,"ref_id":1}, {"name":"ledger_entries_ref_kind_ref_id_b04193"});
 ledger_entries.index({"statement_id":1}, {"name":"ledger_entries_statement_id_c911a6"});
@@ -212,7 +212,7 @@ const adjustments = new Schema(
   collectionOptions("finance.adjustments"),
 );
 adjustments.index({"ref":1}, {"name":"adjustments_ref_8cef23","unique":true});
-adjustments.index({"idempotency_key":1}, {"name":"adjustments_idempotency_key_9416f7","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
+adjustments.index({"idempotency_key":1}, {"name":"adjustments_idempotency_key_ef6453","unique":true,"partialFilterExpression":{"idempotency_key":{"$gte":""}}});
 adjustments.index({"seller_id":1,"created_at":-1}, {"name":"adjustments_seller_id_created_at_0d3517"});
 adjustments.index({"status":1}, {"name":"adjustments_status_1a3d22"});
 
@@ -363,8 +363,8 @@ const payouts = new Schema(
   collectionOptions("finance.payouts"),
 );
 payouts.index({"ref":1}, {"name":"payouts_ref_8cef23","unique":true});
-payouts.index({"provider_payout_id":1}, {"name":"payouts_provider_payout_id_c948ca","unique":true,"partialFilterExpression":{"provider_payout_id":{"$type":"string"}}});
-payouts.index({"idempotency_key":1}, {"name":"payouts_idempotency_key_9416f7","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
+payouts.index({"provider_payout_id":1}, {"name":"payouts_provider_payout_id_99902c","unique":true,"partialFilterExpression":{"provider_payout_id":{"$gte":""}}});
+payouts.index({"idempotency_key":1}, {"name":"payouts_idempotency_key_ef6453","unique":true,"partialFilterExpression":{"idempotency_key":{"$gte":""}}});
 payouts.index({"seller_id":1,"requested_on":-1}, {"name":"payouts_seller_id_requested_on_15d75a"});
 payouts.index({"run_id":1,"status":1}, {"name":"payouts_run_id_status_97e082"});
 payouts.index({"status":1,"paid_at":1}, {"name":"payouts_status_paid_at_56ae60"});
@@ -433,7 +433,7 @@ const trading_targets = new Schema(
   },
   collectionOptions("finance.trading_targets"),
 );
-trading_targets.index({"period":1,"category_id":1}, {"name":"trading_targets_period_category_id_66b3df","unique":true,"partialFilterExpression":{"category_id":{"$type":"string"}}});
+trading_targets.index({"period":1,"category_id":1}, {"name":"trading_targets_period_category_id_ae48fe","unique":true,"partialFilterExpression":{"category_id":{"$gte":""}}});
 
 const recon_days = new Schema(
   {

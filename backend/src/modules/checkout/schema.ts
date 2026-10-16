@@ -55,7 +55,7 @@ const sessions = new Schema(
 sessions.index({"customer_id":1,"status":1}, {"name":"sessions_customer_id_status_68f973"});
 sessions.index({"guest_session_id":1,"status":1}, {"name":"sessions_guest_session_id_status_92c84c"});
 sessions.index({"status":1,"expires_at":1}, {"name":"sessions_status_expires_at_613245"});
-sessions.index({"order_id":1}, {"name":"sessions_order_id_4fe168","unique":true,"partialFilterExpression":{"order_id":{"$type":"string"}}});
+sessions.index({"order_id":1}, {"name":"sessions_order_id_eb9bf0","unique":true,"partialFilterExpression":{"order_id":{"$gte":""}}});
 sessions.index({"payment_intent_id":1}, {"name":"sessions_payment_intent_id_f5eb05"});
 sessions.index({"email":1}, {"name":"sessions_email_896614"});
 sessions.index({"contact_name":1}, {"name":"sessions_contact_name_65950b"});

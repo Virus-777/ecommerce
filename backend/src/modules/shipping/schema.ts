@@ -274,7 +274,7 @@ const tracking_events = new Schema(
   collectionOptions("shipping.tracking_events"),
 );
 tracking_events.index({"shipment_id":1,"at":1}, {"name":"tracking_events_shipment_id_at_eaf00c"});
-tracking_events.index({"shipment_id":1,"carrier_event_id":1}, {"name":"tracking_events_shipment_id_carrier_event_id_a423f8","unique":true,"partialFilterExpression":{"carrier_event_id":{"$type":"string"}}});
+tracking_events.index({"shipment_id":1,"carrier_event_id":1}, {"name":"tracking_events_shipment_id_carrier_event_id_b81369","unique":true,"partialFilterExpression":{"carrier_event_id":{"$gte":""}}});
 
 const tracking_corrections = new Schema(
   {
@@ -354,7 +354,7 @@ const dispatch_watch = new Schema(
   },
   collectionOptions("shipping.dispatch_watch"),
 );
-dispatch_watch.index({"due_at":1}, {"name":"dispatch_watch_due_at_521eba","partialFilterExpression":{"overdue_since":{"$type":"null"}}});
+dispatch_watch.index({"due_at":1}, {"name":"dispatch_watch_due_at_6bae3b","partialFilterExpression":{"overdue_since":null}});
 
 const exceptions = new Schema(
   {

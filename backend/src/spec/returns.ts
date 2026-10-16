@@ -6388,14 +6388,14 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "refund_requests_idempotency_key_9416f7",
+          "name": "refund_requests_idempotency_key_ef6453",
           "key": {
             "idempotency_key": 1
           },
           "unique": true,
           "partial": {
             "idempotency_key": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
@@ -6767,14 +6767,14 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "replacements_idempotency_key_9416f7",
+          "name": "replacements_idempotency_key_ef6453",
           "key": {
             "idempotency_key": 1
           },
           "unique": true,
           "partial": {
             "idempotency_key": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },

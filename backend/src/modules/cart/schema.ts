@@ -29,8 +29,8 @@ const carts = new Schema(
   },
   collectionOptions("cart.carts"),
 );
-carts.index({"customer_id":1}, {"name":"carts_customer_id_519502","unique":true,"partialFilterExpression":{"status":"active","customer_id":{"$type":"string"}}});
-carts.index({"guest_session_id":1}, {"name":"carts_guest_session_id_0e01a2","unique":true,"partialFilterExpression":{"status":"active","guest_session_id":{"$type":"string"}}});
+carts.index({"customer_id":1}, {"name":"carts_customer_id_40c2a6","unique":true,"partialFilterExpression":{"status":"active","customer_id":{"$gte":""}}});
+carts.index({"guest_session_id":1}, {"name":"carts_guest_session_id_9ea2ba","unique":true,"partialFilterExpression":{"status":"active","guest_session_id":{"$gte":""}}});
 carts.index({"status":1,"expires_at":1}, {"name":"carts_status_expires_at_613245"});
 carts.index({"customer_id":1,"status":1}, {"name":"carts_customer_id_status_68f973"});
 carts.index({"guest_session_id":1,"status":1}, {"name":"carts_guest_session_id_status_92c84c"});
@@ -104,8 +104,8 @@ const saved_items = new Schema(
   },
   collectionOptions("cart.saved_items"),
 );
-saved_items.index({"customer_id":1,"offer_id":1}, {"name":"saved_items_customer_id_offer_id_73c1a6","unique":true,"partialFilterExpression":{"customer_id":{"$type":"string"}}});
-saved_items.index({"guest_session_id":1,"offer_id":1}, {"name":"saved_items_guest_session_id_offer_id_7c74e7","unique":true,"partialFilterExpression":{"guest_session_id":{"$type":"string"}}});
+saved_items.index({"customer_id":1,"offer_id":1}, {"name":"saved_items_customer_id_offer_id_8a21a5","unique":true,"partialFilterExpression":{"customer_id":{"$gte":""}}});
+saved_items.index({"guest_session_id":1,"offer_id":1}, {"name":"saved_items_guest_session_id_offer_id_4c13c2","unique":true,"partialFilterExpression":{"guest_session_id":{"$gte":""}}});
 saved_items.index({"guest_session_id":1}, {"name":"saved_items_guest_session_id_a02466"});
 saved_items.index({"customer_id":1,"saved_at":1}, {"name":"saved_items_customer_id_saved_at_8ababc"});
 

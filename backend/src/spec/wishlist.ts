@@ -946,14 +946,14 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "lists_share_token_9bb967",
+          "name": "lists_share_token_4cfe3e",
           "key": {
             "share_token": 1
           },
           "unique": true,
           "partial": {
             "share_token": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },

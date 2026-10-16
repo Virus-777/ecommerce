@@ -1518,7 +1518,7 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "carts_customer_id_519502",
+          "name": "carts_customer_id_40c2a6",
           "key": {
             "customer_id": 1
           },
@@ -1526,12 +1526,12 @@ export const spec = defineModuleSpec({
           "partial": {
             "status": "active",
             "customer_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
         {
-          "name": "carts_guest_session_id_0e01a2",
+          "name": "carts_guest_session_id_9ea2ba",
           "key": {
             "guest_session_id": 1
           },
@@ -1539,7 +1539,7 @@ export const spec = defineModuleSpec({
           "partial": {
             "status": "active",
             "guest_session_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
@@ -1957,7 +1957,7 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "saved_items_customer_id_offer_id_73c1a6",
+          "name": "saved_items_customer_id_offer_id_8a21a5",
           "key": {
             "customer_id": 1,
             "offer_id": 1
@@ -1965,12 +1965,12 @@ export const spec = defineModuleSpec({
           "unique": true,
           "partial": {
             "customer_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
         {
-          "name": "saved_items_guest_session_id_offer_id_7c74e7",
+          "name": "saved_items_guest_session_id_offer_id_4c13c2",
           "key": {
             "guest_session_id": 1,
             "offer_id": 1
@@ -1978,7 +1978,7 @@ export const spec = defineModuleSpec({
           "unique": true,
           "partial": {
             "guest_session_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },

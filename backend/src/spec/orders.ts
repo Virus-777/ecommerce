@@ -4798,7 +4798,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "cancellations_order_id_idempotency_key_7c78b9",
+          "name": "cancellations_order_id_idempotency_key_21d838",
           "key": {
             "order_id": 1,
             "idempotency_key": 1
@@ -4806,7 +4806,7 @@ export const spec = defineModuleSpec({
           "unique": true,
           "partial": {
             "idempotency_key": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },

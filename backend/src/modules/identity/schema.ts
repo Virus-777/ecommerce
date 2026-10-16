@@ -74,7 +74,7 @@ const two_step_methods = new Schema(
   },
   collectionOptions("identity.two_step_methods"),
 );
-two_step_methods.index({"account_id":1}, {"name":"two_step_methods_account_id_0cdbcc","partialFilterExpression":{"removed_at":{"$type":"null"}}});
+two_step_methods.index({"account_id":1}, {"name":"two_step_methods_account_id_d530af","partialFilterExpression":{"removed_at":null}});
 
 const recovery_codes = new Schema(
   {
@@ -155,7 +155,7 @@ const devices = new Schema(
   collectionOptions("identity.devices"),
 );
 devices.index({"account_id":1,"last_active_at":-1}, {"name":"devices_account_id_last_active_at_93cd7a"});
-devices.index({"account_id":1,"installation_id":1}, {"name":"devices_account_id_installation_id_6628f8","unique":true,"partialFilterExpression":{"$and":[{"installation_id":{"$type":"string"}},{"installation_id":{"$type":"string"}}]}});
+devices.index({"account_id":1,"installation_id":1}, {"name":"devices_account_id_installation_id_b097ab","unique":true,"partialFilterExpression":{"$and":[{"installation_id":{"$gte":""}},{"installation_id":{"$gte":""}}]}});
 
 /** One per sign-in. Refresh tokens rotate inside a session (family); reuse of a rotated token revokes the session. */
 const sessions = new Schema(
@@ -183,10 +183,10 @@ const sessions = new Schema(
   collectionOptions("identity.sessions"),
 );
 sessions.index({"refresh_token_hash":1}, {"name":"sessions_refresh_token_hash_cfae96","unique":true});
-sessions.index({"account_id":1}, {"name":"sessions_account_id_e9a213","partialFilterExpression":{"revoked_at":{"$type":"null"}}});
+sessions.index({"account_id":1}, {"name":"sessions_account_id_73d912","partialFilterExpression":{"revoked_at":null}});
 sessions.index({"device_id":1}, {"name":"sessions_device_id_220b2b"});
-sessions.index({"seller_id":1}, {"name":"sessions_seller_id_effa4c","partialFilterExpression":{"revoked_at":{"$type":"null"}}});
-sessions.index({"previous_token_hash":1}, {"name":"sessions_previous_token_hash_240581","partialFilterExpression":{"previous_token_hash":{"$type":"string"}}});
+sessions.index({"seller_id":1}, {"name":"sessions_seller_id_fd3c6a","partialFilterExpression":{"revoked_at":null}});
+sessions.index({"previous_token_hash":1}, {"name":"sessions_previous_token_hash_c08431","partialFilterExpression":{"previous_token_hash":{"$gte":""}}});
 sessions.index({"revoked_at":1}, {"name":"sessions_revoked_at_7223f4","partialFilterExpression":{"revoked_at":{"$type":"date"}}});
 
 /** Sellers an account may act for. Written only by the sellers module through grantSellerContext / revokeSellerContext. */
@@ -238,7 +238,7 @@ const invitations = new Schema(
 invitations.index({"token_hash":1}, {"name":"invitations_token_hash_ff3baa","unique":true});
 invitations.index({"status":1,"expires_at":1}, {"name":"invitations_status_expires_at_613245"});
 invitations.index({"email":1}, {"name":"invitations_email_896614"});
-invitations.index({"account_id":1}, {"name":"invitations_account_id_21b4bc","partialFilterExpression":{"account_id":{"$type":"string"}}});
+invitations.index({"account_id":1}, {"name":"invitations_account_id_11e586","partialFilterExpression":{"account_id":{"$gte":""}}});
 
 /** Visitor sessions (auth v3): one per app install before sign-in; in the store also the guest session */
 const guest_sessions = new Schema(
@@ -261,7 +261,7 @@ const guest_sessions = new Schema(
 );
 guest_sessions.index({"refresh_token_hash":1}, {"name":"guest_sessions_refresh_token_hash_cfae96","unique":true});
 guest_sessions.index({"expires_at":1}, {"name":"guest_sessions_expires_at_ce8dd0"});
-guest_sessions.index({"previous_token_hash":1}, {"name":"guest_sessions_previous_token_hash_240581","partialFilterExpression":{"previous_token_hash":{"$type":"string"}}});
+guest_sessions.index({"previous_token_hash":1}, {"name":"guest_sessions_previous_token_hash_c08431","partialFilterExpression":{"previous_token_hash":{"$gte":""}}});
 guest_sessions.index({"claimed_at":1}, {"name":"guest_sessions_claimed_at_2ba7aa","partialFilterExpression":{"claimed_at":{"$type":"date"}}});
 
 /** Orders a guest session may open */

@@ -90,7 +90,7 @@ const uploads = new Schema(
   },
   collectionOptions("media.uploads"),
 );
-uploads.index({"url_expires_at":1}, {"name":"uploads_url_expires_at_d3b144","partialFilterExpression":{"completed_at":{"$type":"null"}}});
+uploads.index({"url_expires_at":1}, {"name":"uploads_url_expires_at_2b4841","partialFilterExpression":{"completed_at":null}});
 uploads.index({"asset_id":1}, {"name":"uploads_asset_id_1d40bd"});
 
 const usages = new Schema(
@@ -109,8 +109,8 @@ const usages = new Schema(
   },
   collectionOptions("media.usages"),
 );
-usages.index({"asset_id":1}, {"name":"usages_asset_id_5de728","partialFilterExpression":{"detached_at":{"$type":"null"}}});
-usages.index({"asset_id":1,"module":1,"kind":1,"ref_id":1}, {"name":"usages_asset_id_module_kind_ref_id_5d1b3b","unique":true,"partialFilterExpression":{"detached_at":{"$type":"null"}}});
+usages.index({"asset_id":1}, {"name":"usages_asset_id_b669ae","partialFilterExpression":{"detached_at":null}});
+usages.index({"asset_id":1,"module":1,"kind":1,"ref_id":1}, {"name":"usages_asset_id_module_kind_ref_id_15181a","unique":true,"partialFilterExpression":{"detached_at":null}});
 usages.index({"module":1,"kind":1,"ref_id":1}, {"name":"usages_module_kind_ref_id_2127aa"});
 
 const processing_jobs = new Schema(

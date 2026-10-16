@@ -46,7 +46,7 @@ reports.index({"status":1,"risk_score":-1}, {"name":"reports_status_risk_score_1
 reports.index({"type":1,"status":1}, {"name":"reports_type_status_1f6d43"});
 reports.index({"assignee_staff_id":1,"status":1}, {"name":"reports_assignee_staff_id_status_c5c7a6"});
 reports.index({"merged_into_id":1}, {"name":"reports_merged_into_id_62e0a0"});
-reports.index({"dedupe_key":1}, {"name":"reports_dedupe_key_2ab325","unique":true,"partialFilterExpression":{"status":{"$in":["open","under_review","escalated"]},"dedupe_key":{"$type":"string"}}});
+reports.index({"dedupe_key":1}, {"name":"reports_dedupe_key_00168e","unique":true,"partialFilterExpression":{"status":{"$in":["open","under_review","escalated"]},"dedupe_key":{"$gte":""}}});
 reports.index({"reporter_kind":1,"reporter_id":1,"created_at":-1}, {"name":"reports_reporter_kind_reporter_id_created_at_d2e805"});
 
 const report_subjects = new Schema(
@@ -133,7 +133,7 @@ const recommendations = new Schema(
 );
 recommendations.index({"owner_team":1,"state":1}, {"name":"recommendations_owner_team_state_fa6246"});
 recommendations.index({"report_id":1}, {"name":"recommendations_report_id_e9fd72"});
-recommendations.index({"approval_request_id":1}, {"name":"recommendations_approval_request_id_7e5ff9","partialFilterExpression":{"approval_request_id":{"$type":"string"}}});
+recommendations.index({"approval_request_id":1}, {"name":"recommendations_approval_request_id_2817aa","partialFilterExpression":{"approval_request_id":{"$gte":""}}});
 
 const enforcements = new Schema(
   {
@@ -167,7 +167,7 @@ enforcements.index({"ref":1}, {"name":"enforcements_ref_8cef23","unique":true});
 enforcements.index({"report_id":1}, {"name":"enforcements_report_id_e9fd72"});
 enforcements.index({"execution_state":1}, {"name":"enforcements_execution_state_b5a075"});
 enforcements.index({"owner_team":1,"recorded_at":-1}, {"name":"enforcements_owner_team_recorded_at_fd9e1a"});
-enforcements.index({"reversal_request_id":1}, {"name":"enforcements_reversal_request_id_cf0374","partialFilterExpression":{"reversal_request_id":{"$type":"string"}}});
+enforcements.index({"reversal_request_id":1}, {"name":"enforcements_reversal_request_id_caf55f","partialFilterExpression":{"reversal_request_id":{"$gte":""}}});
 
 /** Lookup of active enforcement by target */
 const enforcement_targets = new Schema(
@@ -210,7 +210,7 @@ const appeals = new Schema(
 appeals.index({"ref":1}, {"name":"appeals_ref_8cef23","unique":true});
 appeals.index({"state":1,"decide_by":1}, {"name":"appeals_state_decide_by_b1f298"});
 appeals.index({"enforcement_id":1}, {"name":"appeals_enforcement_id_594751"});
-appeals.index({"source":1,"external_appeal_id":1}, {"name":"appeals_source_external_appeal_id_d96e81","unique":true,"partialFilterExpression":{"$and":[{"external_appeal_id":{"$type":"string"}},{"external_appeal_id":{"$type":"string"}}]}});
+appeals.index({"source":1,"external_appeal_id":1}, {"name":"appeals_source_external_appeal_id_b1062b","unique":true,"partialFilterExpression":{"$and":[{"external_appeal_id":{"$gte":""}},{"external_appeal_id":{"$gte":""}}]}});
 appeals.index({"appellant_kind":1,"appellant_id":1}, {"name":"appeals_appellant_kind_appellant_id_db5193"});
 
 const report_notes = new Schema(

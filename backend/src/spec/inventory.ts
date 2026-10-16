@@ -3074,13 +3074,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "stock_items_service_location_id_978694",
+          "name": "stock_items_service_location_id_f4911e",
           "key": {
             "service_location_id": 1
           },
           "partial": {
             "service_location_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         }
@@ -3972,14 +3972,12 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "held_stock_review_date_b2ef9d",
+          "name": "held_stock_review_date_c428ef",
           "key": {
             "review_date": 1
           },
           "partial": {
-            "released_at": {
-              "$type": "null"
-            }
+            "released_at": null
           }
         },
         {

@@ -3421,7 +3421,7 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "refunds_origin_origin_id_c661ff",
+          "name": "refunds_origin_origin_id_c8d830",
           "key": {
             "origin": 1,
             "origin_id": 1
@@ -3431,7 +3431,7 @@ export const spec = defineModuleSpec({
             "$and": [
               {
                 "origin_id": {
-                  "$type": "string"
+                  "$gte": ""
                 },
                 "origin": {
                   "$in": [
@@ -3453,7 +3453,7 @@ export const spec = defineModuleSpec({
               },
               {
                 "origin_id": {
-                  "$type": "string"
+                  "$gte": ""
                 }
               }
             ]
@@ -3848,13 +3848,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "disputes_approval_request_id_7e5ff9",
+          "name": "disputes_approval_request_id_2817aa",
           "key": {
             "approval_request_id": 1
           },
           "partial": {
             "approval_request_id": {
-              "$type": "string"
+              "$gte": ""
             }
           }
         },
