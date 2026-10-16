@@ -22,6 +22,13 @@ import type {
 type LoyaltyRow = WalletDb['loyalty_entries'];
 type ForUpdate = { forUpdate?: boolean };
 
+/**
+ * Equal to `value`, written so MongoDB can use the spec's partial indexes on a nullable column ("where col is not
+ * null" is stored as the partial filter { col: { $type: 'string' } }): the query planner only picks a partial index
+ * when the filter repeats its condition, and a bare equality does not.
+ */
+const present = <V extends string | readonly string[]>(value: V) => (typeof value === 'string' ? { $eq: value, $type: 'string' } : { $in: [...value], $type: 'string' });
+
 /** The total of a `{ $group: { _id: null, total: … } }` aggregation (0 when nothing matched) */
 const sumOf = (rows: { total?: number }[]) => Number(rows[0]?.total ?? 0);
 
@@ -143,15 +150,15 @@ export class WalletRepository {
   }
 
   entryByKey(idempotencyKey: string): Promise<EntryRow | undefined> {
-    return this.#t.ledger.findOne({ idempotency_key: idempotencyKey });
+    return this.#t.ledger.findOne({ idempotency_key: present(idempotencyKey) });
   }
 
   entriesOfRefund(refundId: string): Promise<EntryRow[]> {
-    return this.#t.ledger.find({ refund_id: refundId }, { sort: { at: 1, id: 1 } });
+    return this.#t.ledger.find({ refund_id: present(refundId) }, { sort: { at: 1, id: 1 } });
   }
 
   entryOfHold(holdId: string, kind: string): Promise<EntryRow | undefined> {
-    return this.#t.ledger.findOne({ hold_id: holdId, kind });
+    return this.#t.ledger.findOne({ hold_id: present(holdId), kind });
   }
 
   /** Credit used on an order (captures, positive) and credit already given back for it (order_refund_returned) */
@@ -191,10 +198,6 @@ export class WalletRepository {
     return this.#t.holds.findOne({ quote_id: quoteId, state: 'held' }, { forUpdate: o?.forUpdate });
   }
 
-  holdsOfQuote(quoteId: string): Promise<HoldRow[]> {
-    return this.#t.holds.find({ quote_id: quoteId }, { sort: { expires_at: -1 } });
-  }
-
   async updateHold(id: string, patch: Partial<Pick<HoldRow, 'state' | 'order_id' | 'expires_at'>>): Promise<HoldRow> {
     return orThrow(await this.#t.holds.update(id, patch), `wallet: hold ${id}`);
   }
@@ -219,11 +222,11 @@ export class WalletRepository {
   }
 
   grantByApproval(requestId: string): Promise<GrantRow | undefined> {
-    return this.#t.grants.findOne({ approval_request_id: requestId });
+    return this.#t.grants.findOne({ approval_request_id: present(requestId) });
   }
 
   grantsOfEntries(entryIds: readonly string[]): Promise<GrantRow[]> {
-    return this.#t.grants.find({ ledger_entry_id: { $in: [...new Set(entryIds)] } });
+    return this.#t.grants.find({ ledger_entry_id: present([...new Set(entryIds)]) });
   }
 
   async updateGrant(id: string, patch: Partial<Pick<GrantRow, 'state' | 'approval_request_id' | 'decided_by' | 'ledger_entry_id'>>): Promise<GrantRow> {
@@ -275,7 +278,7 @@ export class WalletRepository {
   }
 
   correctionByApproval(requestId: string): Promise<CorrectionRow | undefined> {
-    return this.#t.corrections.findOne({ approval_request_id: requestId });
+    return this.#t.corrections.findOne({ approval_request_id: present(requestId) });
   }
 
   async updateCorrection(
@@ -372,9 +375,12 @@ export class WalletRepository {
   async balanceSnapshots(afterCustomerId: string | null, limit: number): Promise<BalanceSnapshot[]> {
     const accounts = await this.#t.accounts.find(afterCustomerId ? { customer_id: { $gt: afterCustomerId } } : {}, { sort: { customer_id: 1 }, limit });
     const ids = accounts.map((a) => a.customer_id);
-    const ledger = await this.#sumsBy('ledger', 'amount', { customer_id: { $in: ids } });
-    const lots = await this.#sumsBy('lots', 'remaining', { customer_id: { $in: ids }, state: 'active' });
-    const holds = await this.#sumsBy('holds', 'amount', { customer_id: { $in: ids }, state: 'held' });
+    // a job outside any transaction: the three sums are read at the same time
+    const [ledger, lots, holds] = await Promise.all([
+      this.#sumsBy('ledger', 'amount', { customer_id: { $in: ids } }),
+      this.#sumsBy('lots', 'remaining', { customer_id: { $in: ids }, state: 'active' }),
+      this.#sumsBy('holds', 'amount', { customer_id: { $in: ids }, state: 'held' }),
+    ]);
     return accounts.map(
       (a): BalanceSnapshot => ({
         customerId: a.customer_id,
