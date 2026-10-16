@@ -13,6 +13,7 @@ import { LedgerPart } from './service/ledger.js';
 import { PayoutsPart } from './service/payouts.js';
 import { ReconPart } from './service/recon.js';
 import { ReportsPart } from './service/reports.js';
+import { registerFinanceSettingsSections } from './service/settings-section.js';
 import { StatementsPart } from './service/statements.js';
 
 export type { FinanceServiceDeps };
@@ -45,6 +46,11 @@ export class FinanceService implements FinancePublicApi {
     this.recon = new ReconPart(this.core);
     this.credits = new CreditsPart(this.core);
     this.core.parts = { ledger: this.ledger, fees: this.fees, holds: this.holds, payouts: this.payouts, statements: this.statements, destinations: this.destinations, reports: this.reports, recon: this.recon, credits: this.credits };
+  }
+
+  /** After boot: the Commission and fees and the Payouts and holds sections of the settings page (G76) */
+  registerSettingsSections(): Promise<void> {
+    return registerFinanceSettingsSections(this.core.ctx.tryUse('settings'), this.core, this.fees);
   }
 
   /* ---------------- public API (in-process) */

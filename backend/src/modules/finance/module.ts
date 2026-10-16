@@ -36,6 +36,8 @@ export default defineModule({
       await service.core.ensureRules();
       await service.reports.registerDatasets();
     });
+    // the Commission and fees and the Payouts and holds sections of the settings page (G76)
+    ctx.afterBoot(() => service.registerSettingsSections());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));
