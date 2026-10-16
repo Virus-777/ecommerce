@@ -229,10 +229,13 @@ export class ContentPages extends ContentTiles {
   }
 
   protected async resolveBlocks(all: PageBlock[]): Promise<PageBlock[]> {
-    const hidden = await this.hiddenFeatureSellers(all);
+    // read at once: banner images of every block (those of hidden blocks are simply not used)
+    const [hidden, refs, max] = await Promise.all([
+      this.hiddenFeatureSellers(all),
+      this.refsMap(all.flatMap((b) => (b.banner?.images ?? []).map((i) => i.id))),
+      this.ctx.settings.get('maxSectionProducts'),
+    ]);
     const blocks = all.filter((b) => !(b.type === 'seller_feature' && b.sellerId && hidden.has(b.sellerId)));
-    const refs = await this.refsMap(blocks.flatMap((b) => (b.banner?.images ?? []).map((i) => i.id)));
-    const max = await this.ctx.settings.get('maxSectionProducts');
     return Promise.all(
       blocks.map(async (b) => {
         let products: ProductTile[] = [];
@@ -250,7 +253,7 @@ export class ContentPages extends ContentTiles {
   }
 
   protected async storePageFrom(p: PageRow, snap: PageSnapshot, version: VersionRow | undefined): Promise<StorePage> {
-    const blocks = await this.resolveBlocks(snap.blocks ?? []);
+    const [blocks, about] = await Promise.all([this.resolveBlocks(snap.blocks ?? []), snap.kind === 'about' ? this.aboutFacts() : null]);
     const url = this.pageUrl({ kind: snap.kind, slug: snap.slug ?? p.slug });
     const updatedAt = (version?.published_at ?? version?.created_at ?? p.updated_at).toISOString();
     const productCount = blocks.reduce((n, b) => n + b.products.length, 0);
@@ -272,7 +275,7 @@ export class ContentPages extends ContentTiles {
       notes: snap.kind === 'collection' ? COLLECTION_NOTES : snap.linkedPromotionId ? ['Prices and stock are live'] : [],
       updatedAt,
       version: version?.number ?? 0,
-      about: snap.kind === 'about' ? await this.aboutFacts() : null,
+      about,
     };
   }
 

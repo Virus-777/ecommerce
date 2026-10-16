@@ -99,9 +99,9 @@ export class ContentHomepage extends ContentPages {
   }
 
   protected async homepageVersions(repo: ContentRepository = this.repo) {
-    const [live] = await repo.versionsOf('homepage', HOMEPAGE_ID, ['live']);
-    const [draft] = await repo.versionsOf('homepage', HOMEPAGE_ID, ['draft']);
-    return { live, draft };
+    // one read for both (newest first)
+    const versions = await repo.versionsOf('homepage', HOMEPAGE_ID, ['live', 'draft']);
+    return { live: versions.find((v) => v.state === 'live'), draft: versions.find((v) => v.state === 'draft') };
   }
 
   protected layoutOf(v: VersionRow | undefined | null): LayoutSnapshot {
@@ -740,16 +740,15 @@ export class ContentHomepage extends ContentPages {
 
   /* ---------------------------------------------------------------- store homepage */
 
-  private async visibleAt(s: SectionSnap, at: Date): Promise<boolean> {
+  /** `campaignActive`: whether a promotion is running, asked once per promotion for the whole layout */
+  private async visibleAt(s: SectionSnap, at: Date, campaignActive: (campaignId: string) => Promise<boolean>): Promise<boolean> {
     if (s.kind === 'ad_position') return true;
     if (s.status !== 'published' && s.status !== 'scheduled') return false;
     if (!inWindow(at, s.showFrom, s.removeAt)) return false;
     if (s.config.hiddenByPromotion) return false;
     // a linked promotion, or a deals source limited to one promotion: the section hides when it is not running
     for (const campaignId of unique([s.linkedPromotionId, this.dealsCampaignOf(s)].filter((x): x is string => Boolean(x)))) {
-      const promotions = this.ctx.tryUse('promotions');
-      const active = await this.soft('promotions.isCampaignActive', promotions && (() => promotions.isCampaignActive(campaignId)), { active: true });
-      if (!active.active) return false;
+      if (!(await campaignActive(campaignId))) return false;
     }
     return true;
   }
@@ -813,8 +812,19 @@ export class ContentHomepage extends ContentPages {
   }
 
   protected async buildHomepage(layout: LayoutSnapshot, version: number, at: Date): Promise<ResolvedHomepage> {
-    const visible: SectionSnap[] = [];
-    for (const s of layout.sections) if (await this.visibleAt(s, at)) visible.push(s);
+    const promotions = this.ctx.tryUse('promotions');
+    const asked = new Map<string, Promise<boolean>>();
+    const campaignActive = (campaignId: string) => {
+      let answer = asked.get(campaignId);
+      if (!answer) {
+        answer = this.soft('promotions.isCampaignActive', promotions && (() => promotions.isCampaignActive(campaignId)), { active: true }).then((r) => r.active);
+        asked.set(campaignId, answer);
+      }
+      return answer;
+    };
+    // every section checked at once, kept in layout order
+    const shown = await Promise.all(layout.sections.map((s) => this.visibleAt(s, at, campaignActive)));
+    const visible = layout.sections.filter((_, i) => shown[i]);
     const pageIds = unique(visible.flatMap((s) => [s.linkedPageId, s.config.productSource?.collectionId].filter((x): x is string => Boolean(x))));
     const pages = new Map((await this.repo.getPages(pageIds)).map((p) => [p.id, p]));
     const sections = await Promise.all(visible.map((s) => this.resolveSection(s, pages)));

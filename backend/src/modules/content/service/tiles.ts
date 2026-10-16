@@ -45,8 +45,9 @@ export class ContentTiles extends ContentBase {
     } else if (source.mode === 'collection') {
       if (source.collectionId && (opts.depth ?? 0) < 2) {
         const r = await this.collectionSources(source.collectionId, { live: true });
-        for (const s of r.sources) {
-          const sub = await this.resolveSource(s, { ...opts, limit: MAX_RESOLVE, depth: (opts.depth ?? 0) + 1 });
+        // the collection's sources resolve at once; their products keep the blocks' order
+        const subs = await Promise.all(r.sources.map((s) => this.resolveSource(s, { ...opts, limit: MAX_RESOLVE, depth: (opts.depth ?? 0) + 1 })));
+        for (const sub of subs) {
           items.push(...sub.items);
           rule ??= sub.rule;
         }
@@ -219,8 +220,9 @@ export class ContentTiles extends ContentBase {
       out = await this.fromCatalog(ids);
     }
     if (opts.categoryId && catalogApi) {
-      const products = await Promise.all(ids.map((id) => this.soft('catalog.getProduct', () => catalogApi.getProduct(id), null as catalog.Product | null)));
-      const tree = await this.categoryIndex();
+      // one batched read (at most MAX_RESOLVE ids) instead of a catalog read per product
+      const [records, tree] = await Promise.all([this.soft('catalog.getProducts', () => catalogApi.getProducts(ids), [] as catalog.ProductRecord[]), this.categoryIndex()]);
+      const products = records.map((r) => r.product);
       const inCategory = (cid: string | null | undefined): boolean => {
         let cur = cid ? tree.get(cid) : undefined;
         while (cur) {
@@ -229,7 +231,7 @@ export class ContentTiles extends ContentBase {
         }
         return false;
       };
-      const keep = new Set(products.filter((p) => p && inCategory(p.categoryId)).map((p) => p!.id));
+      const keep = new Set(products.filter((p) => inCategory(p.categoryId)).map((p) => p.id));
       out = out.filter((r) => keep.has(r.productId));
     }
     if (opts.includeHidden) await this.markSuspendedSellers(out);
@@ -251,41 +253,41 @@ export class ContentTiles extends ContentBase {
     const catalogApi = this.ctx.tryUse('catalog');
     if (!catalogApi) return ids.map((id) => this.missing(id));
     const offersApi = this.ctx.tryUse('offers');
-    const featured = offersApi ? await this.soft('offers.getFeaturedOfferForProduct', () => offersApi.getFeaturedOfferForProduct(ids.map((productId) => ({ productId }))), null) : null;
-    const rows = await Promise.all(
-      ids.map(async (id) => {
-        const [product, purchasable] = await Promise.all([
-          this.soft('catalog.getProduct', () => catalogApi.getProduct(id), null as catalog.Product | null),
-          this.soft('catalog.isPurchasable', () => catalogApi.isPurchasable(id), false),
-        ]);
-        if (!product || !purchasable) return this.missing(id);
-        const offer = featured ? (featured[id] ?? null) : undefined;
-        const r: ResolvedProduct = {
+    // the featured offers and the products (with whether they can be bought) in two batched reads
+    const [featured, records] = await Promise.all([
+      offersApi ? this.soft('offers.getFeaturedOfferForProduct', () => offersApi.getFeaturedOfferForProduct(ids.map((productId) => ({ productId }))), null) : null,
+      this.soft('catalog.getProducts', () => catalogApi.getProducts(ids), [] as catalog.ProductRecord[]),
+    ]);
+    const recordOf = new Map(records.map((r) => [r.product.id, r]));
+    const rows = ids.map((id): ResolvedProduct => {
+      const record = recordOf.get(id);
+      if (!record?.purchasable) return this.missing(id);
+      const product = record.product;
+      const offer = featured ? (featured[id] ?? null) : undefined;
+      return {
+        productId: id,
+        offerId: offer?.id ?? null,
+        sellerId: offer?.sellerId ?? null,
+        available: offer !== null,
+        hiddenReason: offer === null ? 'offer_paused' : null,
+        tile: {
           productId: id,
+          slug: product.slug,
           offerId: offer?.id ?? null,
-          sellerId: offer?.sellerId ?? null,
-          available: offer !== null,
-          hiddenReason: offer === null ? 'offer_paused' : null,
-          tile: {
-            productId: id,
-            slug: product.slug,
-            offerId: offer?.id ?? null,
-            title: product.title,
-            image: product.images[0] ?? null,
-            price: offer?.price ?? null,
-            wasPrice: null,
-            fromPrice: false,
-            sellerName: offer?.sellerName ?? null,
-            officialStore: offer?.ownerType === 'official',
-            availability: offer ? 'in_stock' : null,
-            checkedAt: this.now().toISOString(),
-            badge: null,
-            rank: null,
-          },
-        };
-        return r;
-      }),
-    );
+          title: product.title,
+          image: product.images[0] ?? null,
+          price: offer?.price ?? null,
+          wasPrice: null,
+          fromPrice: false,
+          sellerName: offer?.sellerName ?? null,
+          officialStore: offer?.ownerType === 'official',
+          availability: offer ? 'in_stock' : null,
+          checkedAt: this.now().toISOString(),
+          badge: null,
+          rank: null,
+        },
+      };
+    });
     // tiles are cards: the image in the thumbnail size (catalog sends the product-page size)
     const thumbs = await this.refsMap(rows.map((r) => r.tile.image?.id), 'thumb');
     for (const r of rows) if (r.tile.image) r.tile.image = thumbs.get(r.tile.image.id) ?? r.tile.image;
@@ -354,19 +356,21 @@ export class ContentTiles extends ContentBase {
     const now = this.now();
     const live = pages.filter((p) => (!p.publish_at || p.publish_at <= now) && (!p.unpublish_at || p.unpublish_at > now));
     const catalogApi = this.ctx.tryUse('catalog');
-    const brands = catalogApi ? await this.soft('catalog.getBrands', () => catalogApi.getBrands(ids), [] as catalog.Brand[]) : [];
-    const brandSlugs = new Map(brands.map((b) => [b.id, b.slug]));
-    const tiles: BrandTile[] = [];
-    for (const id of ids) {
+    const shown = ids.flatMap((id) => {
       const page = live.find((p) => p.brand_id === id);
-      if (!page) continue;
-      const v = page.live_version_id ? await this.repo.getVersion(page.live_version_id) : undefined;
-      const snap = v?.snapshot as unknown as PageDraftInput | undefined;
-      const count = (await this.collectionItems(page.id)).length;
-      const refs = await this.refsMap([snap?.coverImage?.id]);
-      tiles.push({ brandId: id, slug: brandSlugs.get(id) ?? null, pageSlug: page.slug, name: page.title, logo: (snap?.coverImage?.id && refs.get(snap.coverImage.id)) || null, productCount: count });
-    }
-    return tiles;
+      return page ? [{ id, page }] : [];
+    });
+    // the brands, their pages' live versions and their available products, read at once
+    const [brands, versions, counts] = await Promise.all([
+      catalogApi ? this.soft('catalog.getBrands', () => catalogApi.getBrands(ids), [] as catalog.Brand[]) : [],
+      this.repo.getVersions(shown.flatMap((x) => (x.page.live_version_id ? [x.page.live_version_id] : []))),
+      Promise.all(shown.map(async (x) => (await this.collectionItems(x.page.id)).length)),
+    ]);
+    const brandSlugs = new Map(brands.map((b) => [b.id, b.slug]));
+    const coverOf = new Map(versions.map((v) => [v.id, (v.snapshot as unknown as PageDraftInput | undefined)?.coverImage?.id ?? null]));
+    const covers = shown.map((x) => (x.page.live_version_id ? (coverOf.get(x.page.live_version_id) ?? null) : null));
+    const refs = await this.refsMap(covers);
+    return shown.map(({ id, page }, i) => ({ brandId: id, slug: brandSlugs.get(id) ?? null, pageSlug: page.slug, name: page.title, logo: (covers[i] && refs.get(covers[i])) || null, productCount: counts[i]! }));
   }
 
   /** Available products of a live collection page, in order */
@@ -379,8 +383,9 @@ export class ContentTiles extends ContentBase {
     const blocks = (snap?.blocks ?? []).filter((b) => b.productSource && (!opts.blockId || b.id === opts.blockId));
     const out: ResolvedProduct[] = [];
     const seen = new Set<string>();
-    for (const b of blocks) {
-      const r = await this.resolveSource(b.productSource, { categoryId: opts.categoryId, limit: MAX_RESOLVE });
+    // the blocks resolve at once; their products keep the blocks' order
+    const resolved = await Promise.all(blocks.map((b) => this.resolveSource(b.productSource, { categoryId: opts.categoryId, limit: MAX_RESOLVE })));
+    for (const r of resolved) {
       for (const item of r.items) {
         if (seen.has(item.productId)) continue;
         seen.add(item.productId);

@@ -197,8 +197,13 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
       summary,
       { live: opts.live },
     );
-    for (const p of await this.repo.listPages({})) {
-      const base: VersionRow | undefined = p.draft_version_id ? await this.repo.getVersion(p.draft_version_id) : p.live_version_id ? await this.repo.getVersion(p.live_version_id) : undefined;
+    const pages = await this.repo.listPages({});
+    const baseIdOf = (p: PageRow) => p.draft_version_id ?? p.live_version_id;
+    // every page's draft (else live) version in one read
+    const bases = new Map((await this.repo.getVersions(pages.flatMap((p) => baseIdOf(p) ?? []))).map((v) => [v.id, v]));
+    for (const p of pages) {
+      const baseId = baseIdOf(p);
+      const base: VersionRow | undefined = baseId ? bases.get(baseId) : undefined;
       const snap = base?.snapshot as unknown as PageDraftInput | undefined;
       if (!base || !snap?.blocks) continue;
       let changed = false;
@@ -263,11 +268,13 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
   /** sellers.seller.closed: seller_feature blocks stay hidden for good; pages naming the seller are flagged for their owner (once per closure) */
   async onSellerClosedFromSellers(event: EventPayload<'sellers.seller.closed'>, eventId?: string): Promise<void> {
     this.invalidateHome();
-    const flagged: PageRow[] = [];
-    for (const p of await this.repo.listPages({})) {
-      const versions = await this.repo.getVersions([p.live_version_id, p.draft_version_id].filter((x): x is string => Boolean(x)));
-      if (versions.some((v) => ((v.snapshot as unknown as PageDraftInput | null)?.blocks ?? []).some((b) => b.type === 'seller_feature' && b.sellerId === event.sellerId))) flagged.push(p);
-    }
+    const pages = await this.repo.listPages({});
+    const versions = await this.pageVersionsById(pages);
+    const featuresSeller = (id: string | null) => {
+      const v = id ? versions.get(id) : undefined;
+      return ((v?.snapshot as unknown as PageDraftInput | null)?.blocks ?? []).some((b) => b.type === 'seller_feature' && b.sellerId === event.sellerId);
+    };
+    const flagged = pages.filter((p) => featuresSeller(p.live_version_id) || featuresSeller(p.draft_version_id));
     // the claim and the flags commit together: a redelivered event flags nothing twice
     await this.repo.transaction(async (tx) => {
       if (!(await tx.claim(`seller-closed:${eventId ?? event.sellerId}`))) return;
@@ -310,20 +317,22 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
       .map((r) => this.snapOf(r))
       .filter((s) => s.linkedPromotionId === campaignId || this.dealsCampaignOf(s) === campaignId)
       .map((s) => ({ id: s.id, kind: s.kind, ...(s.heading ? { heading: s.heading } : {}), status: s.status }));
-    const pages: { id: string; slug: string; title: string; status: string; url: string }[] = [];
-    for (const p of await this.repo.listPages({})) {
-      if (p.status === 'removed') continue;
-      let linked = p.linked_promotion_id === campaignId;
-      if (!linked) {
-        const versions = await this.repo.getVersions([p.live_version_id, p.draft_version_id].filter((x): x is string => Boolean(x)));
-        linked = versions.some((v) => {
-          const snap = v.snapshot as unknown as PageDraftInput | null;
-          return snap?.linkedPromotionId === campaignId || (snap?.blocks ?? []).some((b) => b.productSource?.mode === 'rule' && b.productSource.rule?.kind === 'deals' && b.productSource.rule.campaignId === campaignId);
-        });
-      }
-      if (linked) pages.push({ id: p.id, slug: p.slug, title: p.title, status: p.status, url: this.pageUrl(p) });
-    }
+    const candidates = (await this.repo.listPages({})).filter((p) => p.status !== 'removed');
+    const versions = await this.pageVersionsById(candidates.filter((p) => p.linked_promotion_id !== campaignId));
+    const linksCampaign = (id: string | null) => {
+      const snap = (id ? versions.get(id)?.snapshot : null) as unknown as PageDraftInput | null | undefined;
+      return snap?.linkedPromotionId === campaignId || (snap?.blocks ?? []).some((b) => b.productSource?.mode === 'rule' && b.productSource.rule?.kind === 'deals' && b.productSource.rule.campaignId === campaignId);
+    };
+    const pages = candidates
+      .filter((p) => p.linked_promotion_id === campaignId || linksCampaign(p.live_version_id) || linksCampaign(p.draft_version_id))
+      .map((p) => ({ id: p.id, slug: p.slug, title: p.title, status: p.status, url: this.pageUrl(p) }));
     return { sections, pages };
+  }
+
+  /** The live and draft versions of pages, by id, in one read */
+  private async pageVersionsById(pages: PageRow[]): Promise<Map<string, VersionRow>> {
+    const ids = pages.flatMap((p) => [p.live_version_id, p.draft_version_id].filter((x): x is string => Boolean(x)));
+    return new Map((await this.repo.getVersions(ids)).map((v) => [v.id, v]));
   }
 
   /* ---------------------------------------------------------------- jobs */
@@ -370,12 +379,11 @@ export class ContentService extends ContentPolicies implements ContentPublicApi 
     const catalogApi = this.ctx.tryUse('catalog');
     const out = new Map<string, catalog.Product>();
     if (!catalogApi) return out;
-    await Promise.all(
-      [...new Set(ids)].map(async (id) => {
-        const p = await this.soft('catalog.getProduct', () => catalogApi.getProduct(id), null);
-        if (p) out.set(id, p);
-      }),
-    );
+    // batched reads (catalog answers up to 200 products a call) instead of one read per product
+    const unique = [...new Set(ids)];
+    const chunks = Array.from({ length: Math.ceil(unique.length / 200) }, (_, i) => unique.slice(i * 200, i * 200 + 200));
+    const records = await Promise.all(chunks.map((chunk) => this.soft('catalog.getProducts', () => catalogApi.getProducts(chunk), [] as catalog.ProductRecord[])));
+    for (const r of records.flat()) out.set(r.product.id, r.product);
     return out;
   }
 
