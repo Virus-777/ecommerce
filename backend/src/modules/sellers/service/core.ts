@@ -60,6 +60,20 @@ export const TRUST_TEAM: common.Actor = { kind: 'system', id: null, name: 'Trust
 export const invalid = (issues: { path: string; message: string }[], message = 'Some details need fixing') => new AppError('VALIDATION_FAILED', message, { issues });
 export const notFound = (what: string) => new AppError('NOT_FOUND', `${what} not found`);
 
+/** `fn` over the items with at most `limit` calls running at once; results in the items' order (outside transactions only) */
+export async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
 export class Core {
   readonly repo: SellersRepository;
   readonly ctx: ModuleContext<'sellers'>;

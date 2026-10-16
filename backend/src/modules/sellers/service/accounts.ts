@@ -37,7 +37,7 @@ import { launchReadinessReviewMachine, payoutReadinessMachine, sellerAccountStat
 import * as map from '../mappers.js';
 import type { ApplicationRec, SellerListFilter, SellerRec } from '../ports.js';
 import type { SellersRepository } from '../repository.js';
-import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
+import { invalid, mapLimit, notFound, Part, SYSTEM, type By } from './core.js';
 
 const SELLING = ['approved', 'restricted', 'suspended'];
 const DATASET = 'sellers.admin.accounts';
@@ -63,7 +63,11 @@ export class AccountsPart extends Part {
 
   async snapshots(rows: SellerRec[]): Promise<SellerSnapshot[]> {
     if (!rows.length) return [];
-    const active = await this.repo.find('restrictions', { seller_id: rows.map((r) => r.id), state: 'active' });
+    const active = new Map<string, string[]>();
+    for (const r of await this.repo.find('restrictions', { seller_id: rows.map((r) => r.id), state: 'active' })) {
+      if (active.has(r.seller_id)) active.get(r.seller_id)!.push(r.id);
+      else active.set(r.seller_id, [r.id]);
+    }
     return rows.map((s) => ({
       id: s.id,
       ref: s.ref,
@@ -72,7 +76,7 @@ export class AccountsPart extends Part {
       status: s.status as SellerSnapshot['status'],
       verified: s.verification_state === 'verified',
       canSellNew: this.canSellNew(s),
-      activeRestrictionIds: active.filter((r) => r.seller_id === s.id).map((r) => r.id),
+      activeRestrictionIds: active.get(s.id) ?? [],
       launchReady: this.launchReady(s),
     }));
   }
@@ -747,14 +751,22 @@ export class AccountsPart extends Part {
   async sellerRows(rows: SellerRec[], viewer: { canSeeBalances: boolean }): Promise<SellerRow[]> {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
-    const profiles = new Map<string, Awaited<ReturnType<SellersRepository['getProfile']>>>();
-    for (const id of ids) profiles.set(id, await this.repo.getProfile(id));
-    const refs = await this.core.mediaRefs([...profiles.values()].map((p) => p?.logo_media_id));
-    const dispatch = await this.parts.performance.dispatchPct(ids);
-    const restrictions = await this.repo.find('restrictions', { seller_id: ids, state: 'active' });
-    const warnings = await this.repo.find('warnings', { seller_id: ids, state: 'open' }, { orderBy: [['issued_at', 'desc']] });
-    const apps = new Map((await this.repo.getMany('applications', rows.map((r) => r.application_id).filter((x): x is string => Boolean(x)))).map((a) => [a.id, a]));
-    const categories = await this.core.optional('catalog', 'categories', null, (c) => c.listCategories({ includeHidden: true }));
+    const [profileRows, dispatch, restrictions, warnings, appRows, categories] = await Promise.all([
+      this.repo.getProfiles(ids),
+      this.parts.performance.dispatchPct(ids),
+      this.repo.find('restrictions', { seller_id: ids, state: 'active' }),
+      this.repo.find('warnings', { seller_id: ids, state: 'open' }, { orderBy: [['issued_at', 'desc']] }),
+      this.repo.getMany('applications', rows.map((r) => r.application_id).filter((x): x is string => Boolean(x))),
+      this.core.optional('catalog', 'categories', null, (c) => c.listCategories({ includeHidden: true })),
+    ]);
+    const profiles = new Map(profileRows.map((p) => [p.seller_id, p]));
+    const refs = await this.core.mediaRefs(profileRows.map((p) => p.logo_media_id));
+    const apps = new Map(appRows.map((a) => [a.id, a]));
+    const restrictionsOf = new Map<string, string[]>();
+    for (const r of restrictions) restrictionsOf.set(r.seller_id, [...(restrictionsOf.get(r.seller_id) ?? []), r.title]);
+    // newest open warning per seller (the list is newest first)
+    const warningOf = new Map<string, string>();
+    for (const w of warnings) if (!warningOf.has(w.seller_id)) warningOf.set(w.seller_id, w.title);
     const catName = new Map<string, string>();
     const walk = (list: { id: string; name: string; children?: unknown[] }[]) => {
       for (const c of list) {
@@ -763,15 +775,18 @@ export class AccountsPart extends Part {
       }
     };
     walk((categories ?? []) as never);
-    const out: SellerRow[] = [];
-    for (const s of rows) {
+    const caseRange = { from: this.core.today(addDays(this.now(), -365)), to: this.core.today() };
+    // other modules answer per seller (no batch API): a few sellers at a time instead of one after another
+    return mapLimit(rows, 8, async (s): Promise<SellerRow> => {
       const p = profiles.get(s.id);
-      const feedback = await this.core.optional('reviews', 'feedback', null, (r) => r.getSellerFeedbackSummary(s.id));
-      const cases = await this.core.optional('support', 'cases', null, (x) => x.sellerCaseStats(s.id, { from: this.core.today(addDays(this.now(), -365)), to: this.core.today() }));
-      const bal = viewer.canSeeBalances ? await this.core.optional('finance', 'balances', null, (f) => f.getSellerBalances(s.id)) : undefined;
-      const rs = restrictions.filter((r) => r.seller_id === s.id);
+      const [feedback, cases, bal] = await Promise.all([
+        this.core.optional('reviews', 'feedback', null, (r) => r.getSellerFeedbackSummary(s.id)),
+        this.core.optional('support', 'cases', null, (x) => x.sellerCaseStats(s.id, caseRange)),
+        viewer.canSeeBalances ? this.core.optional('finance', 'balances', null, (f) => f.getSellerBalances(s.id)) : undefined,
+      ]);
+      const rs = restrictionsOf.get(s.id) ?? [];
       const cat = ((apps.get(s.application_id ?? '')?.business ?? {}) as { categoryIds?: string[] }).categoryIds?.[0];
-      out.push({
+      return {
         id: s.id,
         ref: s.ref,
         slug: s.slug,
@@ -786,12 +801,11 @@ export class AccountsPart extends Part {
         balance: bal ? bal.available : null,
         held: bal ? bal.held : null,
         negativeBalance: Boolean(bal?.negative),
-        restrictionSummary: s.status === 'suspended' ? 'Suspended' : rs.length ? rs.map((r) => r.title).join(' · ') : null,
-        warningNote: warnings.find((w) => w.seller_id === s.id)?.title ?? null,
+        restrictionSummary: s.status === 'suspended' ? 'Suspended' : rs.length ? rs.join(' · ') : null,
+        warningNote: warningOf.get(s.id) ?? null,
         mainCategory: cat ? (catName.get(cat) ?? null) : null,
-      });
-    }
-    return out;
+      };
+    });
   }
 
   async listSellers(q: ListSellersQuery, page: PageRequest, viewer: { canSeeBalances: boolean }): Promise<common.Page<SellerRow>> {
@@ -813,20 +827,26 @@ export class AccountsPart extends Part {
   }
 
   async getSellerStats(viewer: { canSeeBalances: boolean }): Promise<SellerStats> {
-    const byStatus = await this.repo.countSellersByStatus();
-    // finance's figures, for staff who may see seller balances (like the list's balance columns)
-    const balances = viewer.canSeeBalances ? ((await this.core.optional('finance', 'balances', null, (f) => f.sellerBalanceTotals())) ?? null) : null;
     const now = this.now();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    // independent counts side by side; finance's figures only for staff who may see seller balances (like the list's balance columns)
+    const [byStatus, balances, addedThisMonth, belowDispatchTarget, appealsUnderReview, applicationsWaiting] = await Promise.all([
+      this.repo.countSellersByStatus(),
+      viewer.canSeeBalances ? this.core.optional('finance', 'balances', null, (f) => f.sellerBalanceTotals()).then((b) => b ?? null) : null,
+      this.repo.countSellersCreatedSince(monthStart),
+      this.repo.countBelowDispatch(),
+      this.repo.count('appeals', { state: ['submitted', 'under_review'] }),
+      this.repo.count('applications', { state: ['submitted', 'under_review', 'information_required'] }),
+    ]);
     return {
       sellingNow: (byStatus.approved ?? 0) + (byStatus.restricted ?? 0),
-      addedThisMonth: await this.repo.countSellersCreatedSince(monthStart),
-      belowDispatchTarget: await this.repo.countBelowDispatch(),
+      addedThisMonth,
+      belowDispatchTarget,
       restrictedOrSuspended: (byStatus.restricted ?? 0) + (byStatus.suspended ?? 0),
-      appealsUnderReview: await this.repo.count('appeals', { state: ['submitted', 'under_review'] }),
+      appealsUnderReview,
       balances,
       byStatus,
-      applicationsWaiting: await this.repo.count('applications', { state: ['submitted', 'under_review', 'information_required'] }),
+      applicationsWaiting,
     };
   }
 

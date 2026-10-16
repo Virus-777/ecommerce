@@ -227,14 +227,15 @@ export class PerformancePart extends Part {
         c.replyHoursTotal = f.total;
       }
     }
-    c.violations = (await this.repo.performanceFacts(sellerId, addDays(now, -vWindow))).find((f) => f.kind === 'policy_violation')?.n ?? 0;
+    c.violations = (await this.repo.performanceFacts(sellerId, addDays(now, -vWindow), ['policy_violation']))[0]?.n ?? 0;
     c.unresolvedPastDeadline = await this.repo.unresolvedCasesPastDeadline(sellerId, now.getTime());
     return c;
   }
 
-  async liveMetrics(sellerId: string, now: Date = this.now()) {
+  /** `targets`: the targets in force at `now` when the caller already has them (the daily job, for every seller) */
+  async liveMetrics(sellerId: string, now: Date = this.now(), targets?: Record<MetricKey, PerformanceTarget>) {
     const counts = await this.countsFor(sellerId, now);
-    const metrics = computeMetrics(counts, await this.targetsInForce(this.core.today(now)));
+    const metrics = computeMetrics(counts, targets ?? (await this.targetsInForce(this.core.today(now))));
     return { counts, metrics, overall: overallOf(metrics.map((m) => m.status)) };
   }
 
@@ -247,25 +248,32 @@ export class PerformancePart extends Part {
   async computePerformance() {
     const now = this.now();
     const window = await this.core.setting('performanceWindowDays');
-    const sellers = await this.repo.find('sellers', { status: SELLING }, { orderBy: [['id', 'asc']], limit: 5000 });
-    const previous = new Map<string, SnapshotRec>();
-    for (const s of await this.repo.latestSnapshots(sellers.map((x) => x.id), 1)) previous.set(s.seller_id, s);
-    for (const seller of sellers) {
-      const { counts, metrics, overall } = await this.liveMetrics(seller.id, now);
-      await this.repo.insert('performance_snapshots', {
-        id: newId(),
-        seller_id: seller.id,
-        computed_at: now,
-        window_from: isoDate(addDays(now, -window)),
-        window_to: this.core.today(now),
-        order_count: counts.orders,
-        metrics: Object.fromEntries(metrics.map((m) => [m.key, m])) as never,
-        overall,
-      });
-      const before = previous.get(seller.id);
-      const missedBefore = new Set(before ? this.snapshotMetrics(before).filter((m) => isMiss(m.status)).map((m) => m.key) : []);
-      const newMisses = metrics.filter((m) => isMiss(m.status) && !missedBefore.has(m.key)).map((m) => m.key);
-      if (newMisses.length) this.core.publish('sellers.performance.below_target', { sellerId: seller.id, metrics: newMisses, overall });
+    const targets = await this.targetsInForce(this.core.today(now));
+    // every selling seller, 500 at a time (keyset on id)
+    for (let after: string | null = null; ; ) {
+      const sellers: SellerRec[] = await this.repo.find('sellers', { status: SELLING, ...(after ? { id: { op: '>', value: after } } : {}) }, { orderBy: [['id', 'asc']], limit: 500 });
+      if (!sellers.length) return;
+      after = sellers.at(-1)!.id;
+      const previous = new Map<string, SnapshotRec>();
+      for (const s of await this.repo.latestSnapshots(sellers.map((x) => x.id), 1)) previous.set(s.seller_id, s);
+      for (const seller of sellers) {
+        const { counts, metrics, overall } = await this.liveMetrics(seller.id, now, targets);
+        await this.repo.insert('performance_snapshots', {
+          id: newId(),
+          seller_id: seller.id,
+          computed_at: now,
+          window_from: isoDate(addDays(now, -window)),
+          window_to: this.core.today(now),
+          order_count: counts.orders,
+          metrics: Object.fromEntries(metrics.map((m) => [m.key, m])) as never,
+          overall,
+        });
+        const before = previous.get(seller.id);
+        const missedBefore = new Set(before ? this.snapshotMetrics(before).filter((m) => isMiss(m.status)).map((m) => m.key) : []);
+        const newMisses = metrics.filter((m) => isMiss(m.status) && !missedBefore.has(m.key)).map((m) => m.key);
+        if (newMisses.length) this.core.publish('sellers.performance.below_target', { sellerId: seller.id, metrics: newMisses, overall });
+      }
+      if (sellers.length < 500) return;
     }
   }
 
@@ -332,15 +340,26 @@ export class PerformancePart extends Part {
   /** sellers.auto-warnings: warn on repeated misses, propose restrictions to the Seller Manager (never restrict automatically) */
   async autoWarnings() {
     if (this.ctx.config.launchPhase < 2) return;
-    const sellers = await this.repo.find('sellers', { status: ['approved', 'restricted'] }, { limit: 5000 });
+    // every approved or restricted seller, 500 at a time (keyset on id)
+    for (let after: string | null = null; ; ) {
+      const sellers: SellerRec[] = await this.repo.find('sellers', { status: ['approved', 'restricted'], ...(after ? { id: { op: '>', value: after } } : {}) }, { orderBy: [['id', 'asc']], limit: 500 });
+      if (!sellers.length) return;
+      after = sellers.at(-1)!.id;
+      await this.autoWarningsFor(sellers);
+      if (sellers.length < 500) return;
+    }
+  }
+
+  private async autoWarningsFor(sellers: SellerRec[]) {
     const snaps = await this.repo.latestSnapshots(sellers.map((s) => s.id), 3);
     const bySeller = new Map<string, SnapshotRec[]>();
     for (const s of snaps) bySeller.set(s.seller_id, [...(bySeller.get(s.seller_id) ?? []), s]);
+    const openWarnings = await this.repo.find('warnings', { seller_id: sellers.map((s) => s.id), state: 'open', kind: 'performance' });
     for (const seller of sellers) {
       const list = bySeller.get(seller.id) ?? [];
       if (list.length < 2) continue;
       const perSnap = list.map((s) => new Map(this.snapshotMetrics(s).map((m) => [m.key, m])));
-      const open = await this.repo.find('warnings', { seller_id: seller.id, state: 'open', kind: 'performance' });
+      const open = openWarnings.filter((w) => w.seller_id === seller.id);
       for (const key of METRICS) {
         const recent = perSnap.slice(0, 2).map((m) => m.get(key));
         if (!recent.every((m) => m && isMiss(m.status))) continue;

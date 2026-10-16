@@ -130,6 +130,10 @@ export class SellersRepository {
     return this.#t('store_profiles').get(sellerId);
   }
 
+  getProfiles(sellerIds: readonly string[]): Promise<ProfileRec[]> {
+    return this.#t('store_profiles').getMany([...new Set(sellerIds)]);
+  }
+
   upsertProfile(row: ProfileRec): Promise<ProfileRec> {
     return this.#t('store_profiles').upsert(row);
   }
@@ -237,10 +241,11 @@ export class SellersRepository {
     return Boolean(await events.insertIfAbsent(row, ['kind', 'subject_id']));
   }
 
-  async performanceFacts(sellerId: string, since: Date): Promise<PerformanceFacts[]> {
+  /** Count and value total per kind since a time (`kinds`: only those kinds) */
+  async performanceFacts(sellerId: string, since: Date, kinds?: readonly PerfEventRec['kind'][]): Promise<PerformanceFacts[]> {
     const events = this.#t('performance_events');
     const rows = await events.aggregate<{ _id: string; n: number; total: unknown }>([
-      { $match: { seller_id: sellerId, occurred_at: { $gte: since } } },
+      { $match: { seller_id: sellerId, ...(kinds ? { kind: { $in: [...kinds] } } : {}), occurred_at: { $gte: since } } },
       { $group: { _id: '$kind', n: { $sum: 1 }, total: { $sum: '$value' } } },
     ]);
     const out = rows.map((r) => ({ kind: r._id, n: r.n, total: num(r.total) }));
