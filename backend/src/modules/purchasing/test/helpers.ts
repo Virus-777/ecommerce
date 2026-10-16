@@ -100,7 +100,10 @@ export function makeStubs() {
     refs: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, url: `https://files.example/${id}.jpg`, alt: null }))),
   };
   const notifications = { notify: vi.fn(async () => ({ noticeIds: [], deliveryIds: [] })) };
-  return { stock, addStock, sales, locations, inventory, access, audit, media, notifications };
+  // finance is off in these tests; the stub records the trading costs purchasing reports (buying cost of receipts)
+  const companyCosts: { kind: string; amount: { amount: number; currency: string }; reference: { kind: string; id: string; ref?: string | null }; at: string }[] = [];
+  const finance = { recordCompanyCost: async (input: (typeof companyCosts)[number]) => void companyCosts.push(input) };
+  return { stock, addStock, sales, locations, inventory, access, audit, media, notifications, finance, companyCosts };
 }
 
 export type Stubs = ReturnType<typeof makeStubs>;
@@ -110,7 +113,7 @@ export async function purchasingApp(stubs: Stubs) {
   const app = await buildTestApp({
     only: ['purchasing', 'access', 'audit', 'media', 'notifications'],
     clock,
-    apiStubs: { inventory: stubs.inventory, access: stubs.access, audit: stubs.audit, media: stubs.media, notifications: stubs.notifications } as never,
+    apiStubs: { inventory: stubs.inventory, access: stubs.access, audit: stubs.audit, media: stubs.media, notifications: stubs.notifications, finance: stubs.finance } as never,
   });
   return { app, clock };
 }

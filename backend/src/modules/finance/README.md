@@ -113,9 +113,9 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 
 | Field | Type |
 |---|---|
-| kind | `enum(order|order_item|return|refund|case|chargeback|payout|adjustment|ad_campaign|fulfillment_service|statement|seller|reconciliation)` |
+| kind | `enum(order|order_item|return|refund|case|chargeback|payout|adjustment|ad_campaign|fulfillment_service|statement|seller|reconciliation|receipt)` |
 | id | `string` |
-| ref | `string?` Human reference, e.g. MK-261005-17730, RT-…, PO-… |
+| ref | `string?` Human reference, e.g. MK-261005-17730, RT-…, PO-…, REC-… (a purchasing receipt: the buying cost of the units received) |
 
 ### SettlementRules
 

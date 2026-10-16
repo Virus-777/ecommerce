@@ -12,16 +12,16 @@ import * as reports from './reports.js';
 /* ------------------------------------------------------------------ types */
 
 export interface Reference {
-  kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "fulfillment_service" | "statement" | "seller" | "reconciliation";
+  kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "fulfillment_service" | "statement" | "seller" | "reconciliation" | "receipt";
   id: string;
-  /** Human reference, e.g. MK-261005-17730, RT-…, PO-… */
+  /** Human reference, e.g. MK-261005-17730, RT-…, PO-…, REC-… (a purchasing receipt: the buying cost of the units received) */
   ref?: string | null;
 }
 
 export const Reference: z.ZodType<Reference> = z.object({
-  kind: z.enum(["order", "order_item", "return", "refund", "case", "chargeback", "payout", "adjustment", "ad_campaign", "fulfillment_service", "statement", "seller", "reconciliation"]),
+  kind: z.enum(["order", "order_item", "return", "refund", "case", "chargeback", "payout", "adjustment", "ad_campaign", "fulfillment_service", "statement", "seller", "reconciliation", "receipt"]),
   id: z.string(),
-  ref: z.string().describe("Human reference, e.g. MK-261005-17730, RT-…, PO-…").nullish(),
+  ref: z.string().describe("Human reference, e.g. MK-261005-17730, RT-…, PO-…, REC-… (a purchasing receipt: the buying cost of the units received)").nullish(),
 }).register(common.apiTypes, { id: "finance.Reference" });
 
 export interface SettlementRules {

@@ -193,6 +193,9 @@ describe('receiving', () => {
     expect(confirmed).toMatchObject({ status: 'confirmed', confirmedBy: { name: 'Ana Silva' }, totals: { sellable: 128 } });
     const timeline = (await call('GET', `/purchase-orders/${po.id}`)).json().timeline.filter((t: { label: string }) => t.label.startsWith('Stock made available'));
     expect(timeline).toHaveLength(1);
+    // the buying cost of the received units goes to finance once, keyed on the receipt
+    const costs = stubs.companyCosts.filter((c) => c.reference.id === r.id);
+    expect(costs).toEqual([{ kind: 'buying_cost', amount: confirmed.buyingCost, reference: { kind: 'receipt', id: r.id, ref: confirmed.ref }, at: expect.any(String) }]);
 
     // receiving stats see the open shortages
     const stats = (await call('GET', '/deliveries/stats')).json();

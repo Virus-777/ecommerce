@@ -276,13 +276,28 @@ export class Receipts {
     }
     const sellable = (event.lines ?? []).reduce((n, l) => n + (l.sellable ?? 0), 0);
     const at = meta?.at ? new Date(meta.at) : this.core.now();
-    await this.core.repo.transaction(async (tx) => {
+    const confirmed = await this.core.repo.transaction(async (tx) => {
       const cur = await tx.getReceipt(receipt.id, { forUpdate: true });
-      if (!cur || !receiptMachine.can(cur.status, 'confirm')) return;
+      if (!cur || !receiptMachine.can(cur.status, 'confirm')) return null;
       // receipts submitted before inboundId was kept get it here
-      await tx.updateReceipt(cur.id, { status: receiptMachine.next(cur.status, 'confirm'), confirmedBy: event.confirmedBy, confirmedAt: at, ...(cur.inboundId ? {} : { inboundId: event.inboundId ?? null }) });
+      const after = await tx.updateReceipt(cur.id, { status: receiptMachine.next(cur.status, 'confirm'), confirmedBy: event.confirmedBy, confirmedAt: at, ...(cur.inboundId ? {} : { inboundId: event.inboundId ?? null }) });
       await tx.addEvent({ ...this.core.event(cur.purchaseOrderId, `Stock made available · ${cur.ref}`, `${units(sellable)} sellable`, event.confirmedBy), at });
+      return after;
     });
+    if (confirmed) await this.recordBuyingCost(confirmed, at);
+  }
+
+  /**
+   * The Official Store's buying cost of a confirmed receipt (received units at their purchase order unit cost) goes to
+   * finance's trading costs, for the margin and the Purchasing cost report. Finance keys it on the receipt and the
+   * confirmation time, so a redelivered event records it once.
+   */
+  private async recordBuyingCost(receipt: ReceiptRow, at: Date) {
+    const finance = this.core.ctx.tryUse('finance');
+    if (!finance) return;
+    const view = (await this.core.views.receipts([receipt]))[0];
+    if (!view || view.buyingCost.amount <= 0) return;
+    await finance.recordCompanyCost({ kind: 'buying_cost', amount: view.buyingCost, reference: { kind: 'receipt', id: receipt.id, ref: receipt.ref }, at: at.toISOString() });
   }
 
   /** Export rows for reports dataset purchasing.admin.receiving (receiving records), one row per counted line */
