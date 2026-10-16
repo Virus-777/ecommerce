@@ -267,28 +267,32 @@ export class ReportsPart extends Part {
 
   /* ---------------------------------------------------------------- sellers (admin) */
 
+  /**
+   * The admin seller list: filtered, sorted (most recently changed first) and paged in the database
+   * (repo.sellerAccountsPage); only the page's rows are then looked up (names, amounts owed, destinations, last payout).
+   * The search asks sellers for matching sellers first (its search, at most 100) and lists their accounts.
+   */
   async sellerRows(f: { q?: string | null; filter?: string | null }, page: PageRequest): Promise<common.Page<SellerFinanceRow>> {
-    let accounts = await this.repo.find('seller_accounts', {}, { orderBy: [['updated_at', 'desc']] });
-    if (f.q?.trim()) {
-      const found = await this.core.optionalDep(() => this.ctx.use('sellers').searchSellers({ search: f.q!.trim() }, { limit: 100 }));
-      const ids = new Set((found?.items ?? []).map((s) => s.id));
-      accounts = accounts.filter((a) => ids.has(a.seller_id) || a.seller_id === f.q!.trim());
+    const q = f.q?.trim();
+    let sellerIds: string[] | undefined;
+    if (q) {
+      const found = await this.core.optionalDep(() => this.ctx.use('sellers').searchSellers({ search: q }, { limit: 100 }));
+      sellerIds = [...(found?.items ?? []).map((s) => s.id), q]; // q itself may be a seller id
     }
-    const owedBySeller = new Map<string, number>();
-    for (const o of await this.repo.find('amounts_owed', { status: 'open' })) owedBySeller.set(o.seller_id, (owedBySeller.get(o.seller_id) ?? 0) + o.remaining);
-    // destination statuses of every account only when the filter needs them, else of the page
-    let dests = f.filter === 'destination_issue' ? await this.core.destinationStatuses(accounts.map((a) => a.seller_id)) : undefined;
-    if (f.filter === 'negative') accounts = accounts.filter((a) => a.available < 0);
-    else if (f.filter === 'held') accounts = accounts.filter((a) => a.held > 0);
-    else if (f.filter === 'owed') accounts = accounts.filter((a) => owedBySeller.has(a.seller_id));
-    else if (f.filter === 'destination_issue') accounts = accounts.filter((a) => dests!.get(a.seller_id)!.status !== 'verified');
-    const paged = pageOf(accounts, page);
+    const paged = await this.repo.sellerAccountsPage({ sellerIds, filter: f.filter }, page);
     const ids = paged.items.map((a) => a.seller_id);
-    const [names, minimum, last] = await Promise.all([this.core.sellerInfo(ids), this.core.num('minimumPayout', 2500), this.repo.lastPayouts(ids)]);
-    dests ??= await this.core.destinationStatuses(ids);
+    const [names, minimum, last, dests, owed] = await Promise.all([
+      this.core.sellerInfo(ids),
+      this.core.num('minimumPayout', 2500),
+      this.repo.lastPayouts(ids),
+      this.core.destinationStatuses(ids),
+      ids.length ? this.repo.find('amounts_owed', { status: 'open', seller_id: ids }) : [],
+    ]);
+    const owedBySeller = new Map<string, number>();
+    for (const o of owed) owedBySeller.set(o.seller_id, (owedBySeller.get(o.seller_id) ?? 0) + o.remaining);
     const items = paged.items.map((a): SellerFinanceRow => {
       const o = owedBySeller.get(a.seller_id) ?? 0;
-      return { sellerId: a.seller_id, sellerName: names.get(a.seller_id)?.name ?? 'Seller', pending: this.money(a.pending), available: this.money(a.available), held: this.money(a.held), negative: a.available < 0, owed: o ? this.money(o) : null, nextPayout: a.available >= minimum ? this.money(a.available) : null, destination: dests!.get(a.seller_id)!, lastPayoutStatus: last.get(a.seller_id)?.status ?? null };
+      return { sellerId: a.seller_id, sellerName: names.get(a.seller_id)?.name ?? 'Seller', pending: this.money(a.pending), available: this.money(a.available), held: this.money(a.held), negative: a.available < 0, owed: o ? this.money(o) : null, nextPayout: a.available >= minimum ? this.money(a.available) : null, destination: dests.get(a.seller_id)!, lastPayoutStatus: last.get(a.seller_id)?.status ?? null };
     });
     return { ...paged, items };
   }

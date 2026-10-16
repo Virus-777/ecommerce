@@ -27,6 +27,7 @@ const seller_accounts = new Schema(
   },
   collectionOptions("finance.seller_accounts"),
 );
+seller_accounts.index({"updated_at":-1,"_id":-1}, {"name":"seller_accounts_updated_at__id_1e76cf"});
 
 /** Append-only seller ledger. Corrections are new entries, never edits. */
 const ledger_entries = new Schema(

@@ -4496,7 +4496,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "seller_accounts_updated_at__id_1e76cf",
+          "key": {
+            "updated_at": -1,
+            "_id": -1
+          }
+        }
+      ],
       "unenforced": []
     },
     "ledger_entries": {

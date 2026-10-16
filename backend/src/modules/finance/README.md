@@ -1027,6 +1027,8 @@ The open statement of a period exists from the seller's approval (or the previou
 | new_seller_extra_days | int? (extra days after delivery before earnings become available during the period) |
 | updated_at | timestamptz |
 
+Indexes: `(updated_at desc, seller_id desc)`
+
 **ledger_entries**: Append-only seller ledger. Corrections are new entries, never edits.
 
 | Column | Type |

@@ -1,10 +1,23 @@
-import type { PageRequest } from '../../kernel/lib/pagination.js';
+import { AppError } from '../../kernel/errors/index.js';
+import { decodeCursor, type PageRequest } from '../../kernel/lib/pagination.js';
 import { orThrow } from '../../kernel/lib/or-throw.js';
 import { contains, whereFilter, type Filter, type ModuleStore, type Table as Collection, type Where } from '../../kernel/mongo/index.js';
 import type * as common from '../../spec/common.js';
 import type { AccountRec, DailyTypeSum, Db, EntryRec, FindOptions, IdTable, Table } from './ports.js';
 
 type Row = Record<string, unknown>;
+
+/**
+ * A cursor of the admin seller list must be one Table.pageAggregate wrote: [{ $date: updated_at }, seller id].
+ * Anything else (a cursor of another list, or of the old in-memory list, which was an offset) is refused with the
+ * error decodeCursor gives a cursor it cannot read, instead of quietly answering an empty page.
+ */
+function checkAccountsCursor(cursor: string): void {
+  const [at, id, ...rest] = decodeCursor(cursor);
+  const date = typeof at === 'object' && at !== null ? (at as { $date?: unknown }).$date : undefined;
+  if (typeof date === 'string' && !Number.isNaN(Date.parse(date)) && typeof id === 'string' && !rest.length) return;
+  throw new AppError('VALIDATION_FAILED', 'Invalid cursor', { issues: [{ path: 'cursor', message: 'not a cursor from this list' }] });
+}
 
 /**
  * finance.* (MongoDB, docs/04-mongodb-migration.md): seller accounts, the ledger, earnings lots, fees, holds,
@@ -142,6 +155,49 @@ export class FinanceRepository {
     await accounts.insertIfAbsent({ seller_id: sellerId, pending: 0, available: 0, held: 0, currency, negative_since: null, payouts_blocked_reason: null, fee_override_set_id: null, updated_at: now });
     // lock-by-write: a second transaction changing this balance conflicts and runs again after this one commits
     return orThrow(await accounts.findOne({ seller_id: sellerId }, { forUpdate: true }), `finance: seller account ${sellerId}`);
+  }
+
+  /**
+   * The admin seller list (GET /api/admin/finance/sellers): seller accounts, most recently changed first (ties by
+   * seller id, newest id first), filtered and paged in the database. Index (updated_at desc, seller_id desc).
+   *
+   * - `sellerIds`: only these sellers (the search: sellers' search results plus an exact seller id)
+   * - `negative` / `held`: available below zero / held above zero
+   * - `owed`: an open amount owed exists (amounts_owed)
+   * - `destination_issue`: the payout destination status is not 'verified', which (Core.destinationFrom) is when the
+   *   seller has no active verified destination, or has one with a change under review. A verified destination is
+   *   always active (destinations.ts deactivates one by marking it replaced), so that is the whole condition.
+   *
+   * The page has a `total` in cursor mode too, as it had when the list was paged in memory.
+   */
+  async sellerAccountsPage(f: { sellerIds?: readonly string[]; filter?: string | null }, page: PageRequest): Promise<common.Page<AccountRec>> {
+    const t = this.#t('seller_accounts');
+    const match: Row = {};
+    if (f.sellerIds) match._id = { $in: [...new Set(f.sellerIds)] };
+    if (f.filter === 'negative') match.available = { $lt: 0 };
+    if (f.filter === 'held') match.held = { $gt: 0 };
+    const pipeline: Row[] = [{ $match: match }];
+    // the filters on other collections: one indexed lookup per account (at most one row each), then a match on it
+    if (f.filter === 'owed') {
+      pipeline.push(
+        { $lookup: { from: this.#collection('amounts_owed'), localField: '_id', foreignField: 'seller_id', pipeline: [{ $match: { status: 'open' } }, { $limit: 1 }, { $project: { _id: 1 } }], as: '_owed' } },
+        { $match: { _owed: { $ne: [] } } },
+        { $project: { _owed: 0 } },
+      );
+    }
+    if (f.filter === 'destination_issue') {
+      pipeline.push(
+        { $lookup: { from: this.#collection('payout_destinations'), localField: '_id', foreignField: 'seller_id', pipeline: [{ $match: { active: true, status: 'verified' } }, { $limit: 1 }, { $project: { _id: 1 } }], as: '_verified' } },
+        { $lookup: { from: this.#collection('destination_reviews'), localField: '_id', foreignField: 'seller_id', pipeline: [{ $match: { status: 'under_review' } }, { $limit: 1 }, { $project: { _id: 1 } }], as: '_review' } },
+        { $match: { $or: [{ _verified: [] }, { _review: { $ne: [] } }] } },
+        { $project: { _verified: 0, _review: 0 } },
+      );
+    }
+    if (page.mode === 'cursor' && page.cursor) checkAccountsCursor(page.cursor);
+    const order = { key: 'updated_at', direction: 'desc' } as const;
+    if (page.mode === 'page') return t.pageAggregate(pipeline, page, order); // counts in the same aggregation
+    const [result, [count]] = await Promise.all([t.pageAggregate(pipeline, page, order), t.aggregate<{ n: number }>([...pipeline, { $count: 'n' }])]);
+    return { ...result, total: count?.n ?? 0 };
   }
 
   /** Ledger page for a seller with filters, newest first */
