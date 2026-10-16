@@ -373,7 +373,7 @@ export class Table<R extends object> {
       const r = await this.model.updateOne(this.#keyFilter(values, key), { $setOnInsert: doc }, { session: this.session, upsert: true, runValidators: true });
       return r.upsertedCount ? this.fromDoc(doc) : undefined;
     }
-    for (const k of this.#uniqueKeysOf(values)) if (await this.exists(k.filter, { collation: k.collation })) return undefined;
+    if (await this.#anyTaken(this.#uniqueKeysOf(values))) return undefined;
     try {
       return await this.insert(values);
     } catch (err) {
@@ -415,6 +415,21 @@ export class Table<R extends object> {
       keys.push({ filter, collation: index.collation });
     }
     return keys;
+  }
+
+  /** Whether a row holds any of the keys: one read per collation (an $or of the keys), not one per key */
+  async #anyTaken(keys: readonly { filter: Filter; collation?: Collation }[]): Promise<boolean> {
+    const byCollation = new Map<string, { filters: Filter[]; collation?: Collation }>();
+    for (const k of keys) {
+      const id = k.collation ? `${k.collation.locale}/${k.collation.strength}` : '';
+      const group = byCollation.get(id) ?? { filters: [], collation: k.collation };
+      group.filters.push(k.filter);
+      byCollation.set(id, group);
+    }
+    for (const { filters, collation } of byCollation.values()) {
+      if (await this.exists(filters.length === 1 ? filters[0]! : { $or: filters }, { collation })) return true;
+    }
+    return false;
   }
 
   /**
