@@ -1121,7 +1121,7 @@ Indexes: `unique (campaign_id, seller_id)`, `(seller_id, state)`, `(state, respo
 | ineligible_reasons | jsonb |
 | included | bool |
 
-Indexes: `unique (participation_id, offer_id)`
+Indexes: `unique (participation_id, offer_id)`, `(offer_id)`
 
 **flash_items**: Deal price, deal stock and purchase limit per offer in a flash sale
 
@@ -1139,7 +1139,7 @@ Indexes: `unique (participation_id, offer_id)`
 | state | text |
 | sold_out_at | timestamptz? |
 
-Indexes: `unique (campaign_id, offer_id)`
+Indexes: `unique (campaign_id, offer_id)`, `(offer_id, state)`
 
 **coupon_codes**
 

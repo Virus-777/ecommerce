@@ -29,8 +29,9 @@ export class OpsPart extends Part {
   async endFlashItems(offerIds: string[], reason: string) {
     if (!offerIds.length) return;
     const items = await this.repo.find('flash_items', { offer_id: offerIds, state: ['active', 'sold_out'] });
+    const campaigns = new Map((await this.repo.getMany('campaigns', items.map((f) => f.campaign_id))).map((c) => [c.id, c]));
     for (const f of items) {
-      const camp = await this.repo.get('campaigns', f.campaign_id);
+      const camp = campaigns.get(f.campaign_id);
       if (!camp || !OPEN.includes(camp.status)) continue;
       await this.repo.transaction(async (tx) => {
         await tx.update('flash_items', f.id, { state: this.core.step(flashItemMachine, f.state, 'end') });
@@ -46,8 +47,9 @@ export class OpsPart extends Part {
     const pos = await this.repo.find('participation_offers', { offer_id: e.offerId, included: true });
     if (!pos.length) return;
     const parts = await this.repo.find('participations', { id: pos.map((p) => p.participation_id), state: ['accepted', 'withdrawal_requested'] } as never);
+    const campaigns = new Map((await this.repo.getMany('campaigns', parts.map((p) => p.campaign_id))).map((c) => [c.id, c]));
     for (const p of parts) {
-      const camp = await this.repo.get('campaigns', p.campaign_id);
+      const camp = campaigns.get(p.campaign_id);
       if (!camp || !PUBLISHED.includes(camp.status)) continue;
       const note = `Price raised from ${moneyFull(e.from.amount, e.from.currency)} to ${moneyFull(e.to.amount, e.to.currency)} during the campaign`;
       const key = `${e.offerId}:${e.priceChangeId ?? e.termsVersion}`;
@@ -72,9 +74,12 @@ export class OpsPart extends Part {
 
   async onStockChanged(e: EventPayload<'inventory.stock.changed'>) {
     if (!e.offerId) return;
+    // stock changes are frequent: the offer's flash items, eligible rows and their campaigns in three reads
     const items = await this.repo.find('flash_items', { offer_id: e.offerId, state: ['active', 'sold_out'] });
+    const rows = await this.repo.find('eligible_offers', { offer_id: e.offerId });
+    const campaigns = new Map((await this.repo.getMany('campaigns', [...items, ...rows].map((r) => r.campaign_id))).map((c) => [c.id, c]));
     for (const f of items) {
-      const camp = await this.repo.get('campaigns', f.campaign_id);
+      const camp = campaigns.get(f.campaign_id);
       if (!camp || !OPEN.includes(camp.status)) continue;
       const left = f.deal_stock - f.claimed - f.reserved;
       if (left <= e.available) continue;
@@ -87,9 +92,8 @@ export class OpsPart extends Part {
       if (soldOut) this.core.publish('promotions.flash_item.sold_out', { campaignId: f.campaign_id, offerId: f.offer_id, at: this.now().toISOString() });
     }
     // participation stock rules
-    const rows = await this.repo.find('eligible_offers', { offer_id: e.offerId });
     for (const r of rows) {
-      const camp = await this.repo.get('campaigns', r.campaign_id);
+      const camp = campaigns.get(r.campaign_id);
       const minStock = (camp?.participation as { minStock?: number | null } | null)?.minStock;
       if (!camp || !OPEN.includes(camp.status) || minStock == null) continue;
       const below = e.available < minStock;

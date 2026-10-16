@@ -155,6 +155,7 @@ const participation_offers = new Schema(
   collectionOptions("promotions.participation_offers", { generatedId: true }),
 );
 participation_offers.index({"participation_id":1,"offer_id":1}, {"name":"participation_offers_participation_id_offer_id_cc16d0","unique":true});
+participation_offers.index({"offer_id":1}, {"name":"participation_offers_offer_id_959ceb"});
 
 /** Deal price, deal stock and purchase limit per offer in a flash sale */
 const flash_items = new Schema(
@@ -176,6 +177,7 @@ const flash_items = new Schema(
   collectionOptions("promotions.flash_items"),
 );
 flash_items.index({"campaign_id":1,"offer_id":1}, {"name":"flash_items_campaign_id_offer_id_094333","unique":true});
+flash_items.index({"offer_id":1,"state":1}, {"name":"flash_items_offer_id_state_3e3269"});
 
 const coupon_codes = new Schema(
   {

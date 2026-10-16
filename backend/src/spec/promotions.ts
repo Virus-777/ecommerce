@@ -4743,6 +4743,12 @@ export const spec = defineModuleSpec({
             "offer_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "participation_offers_offer_id_959ceb",
+          "key": {
+            "offer_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -4869,6 +4875,13 @@ export const spec = defineModuleSpec({
             "offer_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "flash_items_offer_id_state_3e3269",
+          "key": {
+            "offer_id": 1,
+            "state": 1
+          }
         }
       ],
       "unenforced": []
