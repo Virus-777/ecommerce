@@ -28,12 +28,20 @@ export class Sweep {
     let escalated = 0;
 
     // deadlines moved later by a refresh: back to on_time
-    for (const r of await core.repo.staleDeadlineStates(until)) await core.repo.updateItem(r.id, { deadline_state: 'on_time' });
+    await core.repo.setDeadlineState(
+      (await core.repo.staleDeadlineStates(until)).map((r) => r.id),
+      'on_time',
+    );
 
     let after: { dueAt: Date; id: string } | null = null;
     for (;;) {
       const batch: ItemRow[] = await core.repo.sweepBatch(until, after, BATCH);
       if (!batch.length) break;
+      // items already marked overdue in their history (one read per batch)
+      const marked = await core.repo.itemsWithEvent(
+        batch.map((r) => r.id),
+        'overdue',
+      );
       for (const row of batch) {
         checked++;
         const queue = queues.get(row.queue_key);
@@ -46,7 +54,7 @@ export class Sweep {
         }
         if (state !== 'overdue' || !queue) continue;
         // once per item (items can be raised already overdue, so the history is the marker, not the stored state)
-        if (!(await core.repo.hasEvent(row.id, 'overdue'))) {
+        if (!marked.has(row.id)) {
           overdue++;
           await core.history(row.id, 'overdue', 'Passed its deadline', SYSTEM);
           const receiver = await core.receiverOf(queue);

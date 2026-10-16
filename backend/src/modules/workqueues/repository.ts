@@ -202,6 +202,11 @@ export class WorkqueuesRepository {
     return this.#t.items.find({ state: { $in: ACTIVE }, deadline_state: { $ne: 'on_time' }, due_at: { $gt: until } }, { limit: 1000 });
   }
 
+  /** Sets the stored deadline state of these items */
+  async setDeadlineState(ids: string[], state: string): Promise<void> {
+    if (ids.length) await this.#t.items.updateMany({ id: { $in: ids } }, { deadline_state: state });
+  }
+
   async queueCounts(now: Date, dueSoonMinutes: number): Promise<QueueCountRow[]> {
     const soon = new Date(now.getTime() + dueSoonMinutes * 60_000);
     const rows = await this.#t.items.aggregate<{ _id: string; open: number; overdue: number; due_soon: number }>([
@@ -269,8 +274,9 @@ export class WorkqueuesRepository {
     return (itemIds.length ? this.#t.events.find({ item_id: { $in: itemIds } }, { sort: { at: 1, id: 1 } }) : []);
   }
 
-  hasEvent(itemId: string, kind: string): Promise<boolean> {
-    return this.#t.events.exists({ item_id: itemId, kind });
+  /** The items among itemIds with a history entry of this kind */
+  async itemsWithEvent(itemIds: string[], kind: string): Promise<Set<string>> {
+    return new Set(itemIds.length ? await this.#t.events.distinct<string>('item_id', { item_id: { $in: itemIds }, kind }) : []);
   }
 
   async insertNote(row: ItemNoteRow): Promise<void> {
