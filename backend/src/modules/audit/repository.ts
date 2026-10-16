@@ -275,45 +275,43 @@ export class AuditRepository {
 
   async insertEntries(rows: readonly NewChainRow[]): Promise<{ id: string; seq: number }[]> {
     const out: { id: string; seq: number }[] = [];
-    // one after another (seq is numbered in this order); each chunk is one round trip
+    // one after another (seq is numbered in this order); each chunk is one counter update and one insert
     for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
       const chunk = rows.slice(i, i + INSERT_CHUNK);
-      const docs: Partial<EntryRow>[] = [];
-      for (const r of chunk) {
-        docs.push({
-          id: r.id,
-          seq: await this.store.nextValue('entries.seq'),
-          at: r.at,
-          actor_kind: r.actorKind,
-          actor_id: r.actorId,
-          actor_name: r.actorName,
-          actor_roles: (json(r.actorRoles) ?? []) as EntryRow['actor_roles'],
-          action: r.action,
-          action_label: r.actionLabel,
-          module: r.module,
-          category: r.category,
-          target_type: r.targetType,
-          target_id: r.targetId,
-          target_ref: r.targetRef,
-          target_label: r.targetLabel,
-          target_screen: r.targetScreen,
-          seller_id: r.sellerId,
-          reason: r.reason,
-          before: json(r.before) as EntryRow['before'],
-          after: json(r.after) as EntryRow['after'],
-          before_text: r.beforeText,
-          after_text: r.afterText,
-          evidence: (json(r.evidence) ?? []) as EntryRow['evidence'],
-          approval_request_id: r.approvalRequestId,
-          approval_note: r.approvalNote,
-          request_id: r.requestId,
-          ip: r.ip,
-          visible_to_seller: r.visibleToSeller,
-          search_words: searchWords(r.searchText),
-          prev_hash: buffer(r.prevHash),
-          hash: buffer(r.hash),
-        });
-      }
+      const seqs = await this.store.nextValues('entries.seq', chunk.length);
+      const docs: Partial<EntryRow>[] = chunk.map((r, j) => ({
+        id: r.id,
+        seq: seqs[j]!,
+        at: r.at,
+        actor_kind: r.actorKind,
+        actor_id: r.actorId,
+        actor_name: r.actorName,
+        actor_roles: (json(r.actorRoles) ?? []) as EntryRow['actor_roles'],
+        action: r.action,
+        action_label: r.actionLabel,
+        module: r.module,
+        category: r.category,
+        target_type: r.targetType,
+        target_id: r.targetId,
+        target_ref: r.targetRef,
+        target_label: r.targetLabel,
+        target_screen: r.targetScreen,
+        seller_id: r.sellerId,
+        reason: r.reason,
+        before: json(r.before) as EntryRow['before'],
+        after: json(r.after) as EntryRow['after'],
+        before_text: r.beforeText,
+        after_text: r.afterText,
+        evidence: (json(r.evidence) ?? []) as EntryRow['evidence'],
+        approval_request_id: r.approvalRequestId,
+        approval_note: r.approvalNote,
+        request_id: r.requestId,
+        ip: r.ip,
+        visible_to_seller: r.visibleToSeller,
+        search_words: searchWords(r.searchText),
+        prev_hash: buffer(r.prevHash),
+        hash: buffer(r.hash),
+      }));
       await this.#t.entries.insertMany(docs);
       const targets = chunk.flatMap((r) => r.relatedTargets.map((x) => ({ entry_id: r.id, target_type: x.type, target_id: x.id, at: r.at })));
       await this.#t.targets.insertMany(targets);
