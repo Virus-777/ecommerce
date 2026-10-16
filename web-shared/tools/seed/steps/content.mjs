@@ -177,7 +177,7 @@ async function policies(ctx) {
     if (v.state === 'in_review' && !ownerDone) v = await api.post(`/api/admin/content/policy-versions/${v.id}/approve`, ctx.approver, { approve: true, note: 'Checked against the returns and shipping settings' });
     if (v.state === 'in_review' && v.approval?.approvalRequestId) {
       // Morgan's approval became an access request for the Business Owner step: Olivia, the other owner, decides it
-      await tolerate409(() => api.post(`/api/admin/access/approval-requests/${v.approval.approvalRequestId}/approve`, t, { note: 'Approved as Business Owner' }, { headers: { 'x-step-up-code': '000000' } }));
+      await tolerate409(() => api.post(`/api/admin/access/approval-requests/${v.approval.approvalRequestId}/approve`, t, { note: 'Approved as Business Owner', reauthToken: 'dev-reauth.approval' }));
       for (let i = 0; i < 10 && v.state === 'in_review'; i++) {
         await new Promise((r) => setTimeout(r, 500));
         v = await api.get(`/api/admin/content/policy-versions/${v.id}`, t);

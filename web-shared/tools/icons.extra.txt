@@ -3,3 +3,22 @@ chevron-down
 x
 map-pin-off
 log-in
+# Notice icons the API sends (backend notifications/domain/catalog.ts, current Lucide names; G27)
+at-sign
+circle-arrow-up
+circle-check-big
+circle-pause
+circle-question-mark
+corner-up-left
+crop
+file-question-mark
+key
+mail-x
+octagon-alert
+repeat
+rocket
+shield-x
+square-pen
+trash
+user
+archive

@@ -1,27 +1,56 @@
-// Step 1: accept the two Business Owner invitations made by `npm run bootstrap-owner` (password + authenticator),
-// keep their TOTP secrets in the state file, and check their roles are active.
+// Step 1: the two Business Owners accept the staff invitations made by `npm run bootstrap-owner` (link + pass code +
+// a new password; staff have no authenticator since 2026-10-14), then each signs in to the Admin Center with email
+// and password, and their Business Owner roles are checked.
 import { existsSync, readFileSync } from 'node:fs';
-import { totp } from '../lib/codes.mjs';
-import { ApiError, sleep } from '../lib/http.mjs';
+import { ApiError } from '../lib/http.mjs';
 import { OWNERS, PASSWORD } from '../data.mjs';
 
-/** Parses bootstrap-owner output: "Invited Name <email> as … (account <uuid>)." + "Accept link: …#token=<t>" */
+const DEVICE = { kind: 'web', name: 'Marketly seed' };
+
+/**
+ * Parses the output of `npm run bootstrap-owner`, and of `npm run staff-link` appended to the same file:
+ *   Invited Ana Lee <ana@example.com> as Business Owner (account <uuid>).
+ *     Link: http://…/invitation#token=<t>
+ *     Pass code: ABCD-EFGH
+ *   New invitation link and pass code for ana@example.com (the previous ones no longer work). …
+ *     Link: …
+ *     Pass code: …
+ * A later block for the same email replaces the link and pass code (and keeps the account id). Files written
+ * before 2026-10-14 ("Accept link:", no pass code) still give the account ids.
+ */
 export function parseBootstrap(file) {
   if (!existsSync(file)) return {};
-  const text = readFileSync(file, 'utf8');
   const out = {};
-  const re = /Invited (.+?) <([^>]+)> as .*?\(account ([0-9a-f-]{36})\)\.?\s*\n\s*Accept link: (\S+)/g;
-  for (const m of text.matchAll(re)) {
-    const token = new URL(m[4]).hash.replace(/^#token=/, '');
-    out[m[2].toLowerCase()] = { name: m[1], email: m[2].toLowerCase(), accountId: m[3], token };
+  let cur = null;
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+    let m;
+    if ((m = line.match(/^Invited (.+?) <([^>]+)> as .*?\(account ([0-9a-f-]{36})\)/))) {
+      cur = m[2].toLowerCase();
+      out[cur] = { ...out[cur], name: m[1], email: cur, accountId: m[3], token: null, passCode: null };
+    } else if ((m = line.match(/^New invitation link and pass code for (\S+?) \(/))) {
+      cur = m[1].toLowerCase();
+      out[cur] = { email: cur, ...out[cur], token: null, passCode: null };
+    } else if (cur && (m = line.match(/^\s+(?:Accept link|Link): (\S+)/))) {
+      out[cur].token = new URL(m[1]).hash.replace(/^#token=/, '');
+    } else if (cur && (m = line.match(/^\s+Pass code: (\S+)/))) {
+      out[cur].passCode = m[1];
+    } else if (!/^\s/.test(line)) {
+      cur = null; // any other message (a password reset link, the closing note)
+    }
   }
   return out;
 }
 
+/** An Admin Center visitor session (every call needs a token; this is how the website starts one) */
 async function adminVisitor(ctx) {
-  // the real bootstrap call (the only one without a token): an admin visitor session
-  const r = await ctx.api.req('POST', '/api/public/identity/app-sessions', { headers: { 'x-app-proof': 'dev' }, body: { audience: 'admin', device: { kind: 'web', name: 'Marketly seed' } } });
+  const r = await ctx.api.req('POST', '/api/public/identity/app-sessions', { headers: { 'x-app-proof': 'dev' }, body: { audience: 'admin', device: DEVICE } });
   return r.body.accessToken;
+}
+
+/** Email + password sign-in to the Admin Center, as its sign-in page does; returns the result status */
+async function signIn(ctx, email, password) {
+  const r = await ctx.api.post('/api/public/identity/sessions', await adminVisitor(ctx), { email, password, audience: 'admin', keepSignedIn: false, device: DEVICE });
+  return r.status;
 }
 
 async function accept(ctx, key, inv) {
@@ -31,50 +60,25 @@ async function accept(ctx, key, inv) {
     ctx.log.reused('owner', `${inv.name} (accepted earlier)`);
     return;
   }
-  const device = { kind: 'web', name: 'Marketly seed' };
-  const v = await adminVisitor(ctx);
-  let accepted;
+  const relink = `npm run staff-link -- --email ${inv.email} >> ${ctx.opts.bootstrapFile}  (in the backend folder, server stopped or not)`;
+  if (!inv.token || !inv.passCode) throw new Error(`${inv.email}: no link or pass code in ${ctx.opts.bootstrapFile}. Get new ones: ${relink}`);
   try {
-    accepted = await ctx.api.post('/api/public/identity/invitations/accept', v, { token: inv.token, password: PASSWORD, device });
-  } catch (err) {
-    if (err instanceof ApiError && (err.status === 410 || err.status === 404 || err.status === 409 || err.code === 'INVITATION_INVALID')) {
-      // accepted earlier without the state file: the account is usable if its roles are active
-      const me = await ctx.api.get('/api/admin/access/me', ctx.tokens.staff(inv.accountId));
-      if (me.account?.status === 'active') {
-        owners[key] = { ...saved, accountId: inv.accountId, email: inv.email, name: inv.name, accepted: true, password: saved.password ?? PASSWORD };
-        ctx.state.save();
-        ctx.log.warn(`${inv.name}: invitation already used and no TOTP secret in the state file; sign-in details are whatever was set then`);
-        return;
-      }
-    }
-    throw err;
-  }
-  const setup = accepted.twoStepSetup;
-  if (!setup?.manualEntryKey) {
-    owners[key] = { accountId: accepted.account.id, email: inv.email, name: inv.name, password: PASSWORD, accepted: true };
+    const r = await ctx.api.post('/api/public/identity/invitations/accept', await adminVisitor(ctx), { token: inv.token, passCode: inv.passCode, password: PASSWORD, device: DEVICE });
+    owners[key] = { accountId: r.account?.id ?? inv.accountId, email: inv.email, name: inv.name, password: PASSWORD, accepted: true };
     ctx.state.save();
-    ctx.log.created('owner', `${inv.name} (no authenticator step)`);
-    return;
-  }
-  // keep the secret before confirming, so a failure here never loses it
-  owners[key] = { accountId: accepted.account.id, email: inv.email, name: inv.name, password: PASSWORD, totpSecret: setup.manualEntryKey, otpauthUri: setup.otpauthUri ?? null, accepted: false };
-  ctx.state.save();
-  let lastErr;
-  for (const offset of [0, 1, -1]) {
-    try {
-      const done = await ctx.api.post('/api/public/identity/invitations/two-step', v, { token: inv.token, setupId: setup.setupId, code: totp(setup.manualEntryKey, Date.now(), offset), device });
-      owners[key].accepted = true;
-      owners[key].recoveryCodes = done.recoveryCodes?.codes ?? [];
+    ctx.log.created('owner', `${inv.name} accepted the invitation (pass code + password)`);
+  } catch (err) {
+    if (!(err instanceof ApiError)) throw err;
+    // used before, without this state file: fine if the seed's password signs in
+    const status = await signIn(ctx, inv.email, PASSWORD).catch(() => null);
+    if (status === 'signed_in') {
+      owners[key] = { ...saved, accountId: inv.accountId, email: inv.email, name: inv.name, password: PASSWORD, accepted: true };
       ctx.state.save();
-      ctx.log.created('owner', `${inv.name} accepted (password + authenticator)`);
+      ctx.log.warn(`${inv.name}: invitation not accepted (${err.code}), but the account signs in with the seed's password`);
       return;
-    } catch (err) {
-      lastErr = err;
-      if (!(err instanceof ApiError) || err.code !== 'CODE_INVALID') throw err;
-      await sleep(500);
     }
+    throw new Error(`${inv.email}: invitation not accepted (${err.message}). A wrong or used pass code or an expired link needs new ones: ${relink}`);
   }
-  throw lastErr;
 }
 
 export async function ownersStep(ctx) {
@@ -82,7 +86,7 @@ export async function ownersStep(ctx) {
   for (const [key, o] of Object.entries(OWNERS)) {
     const inv = invites[o.email];
     const saved = ctx.state.section('owners')[key];
-    if (!inv) {
+    if (!inv?.accountId) {
       if (saved?.accountId) {
         ctx.log.reused('owner', `${o.name} (from the state file)`);
         continue;
@@ -92,11 +96,15 @@ export async function ownersStep(ctx) {
     if (saved?.accountId && saved.accountId !== inv.accountId) {
       throw new Error(`${o.email}: the state file has account ${saved.accountId} but bootstrap-owner made ${inv.accountId}. The database was reset: delete web-shared/.seed/state.json and run the seed again.`);
     }
-    await accept(ctx, key, inv);
+    await accept(ctx, key, { ...inv, name: inv.name ?? o.name });
   }
-  // both are Business Owners now (roles activate on acceptance)
   for (const key of Object.keys(OWNERS)) {
     const o = ctx.owner(key);
+    // the real sign-in: email and password, no second step for staff
+    const status = await signIn(ctx, o.email ?? OWNERS[key].email, o.password ?? PASSWORD);
+    if (status !== 'signed_in') throw new Error(`${o.name}: Admin Center sign-in answered ${status}, expected signed_in`);
+    ctx.log.info(`${o.name}: signs in to the Admin Center with email and password`);
+    // later steps act as these accounts with dev staff tokens, so approval limits and two-person rules apply
     const me = await ctx.api.get('/api/admin/access/me', ctx.tokens.staff(o.accountId));
     const roles = JSON.stringify(me.roles ?? []);
     if (!roles.includes('business_owner')) ctx.log.warn(`${o.name}: Business Owner role not active (${roles.slice(0, 120)})`);

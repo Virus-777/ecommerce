@@ -233,11 +233,11 @@ async function returnRefund(ctx, rec, a) {
   await step('receive', { note: 'Parcel arrived at our shop' });
   await step('inspection', { conditionOutcome: 'as_described', grade: 'like_new', proposedStockOutcome: 'restock', checks: [{ label: 'Tags attached, unused', passed: true }], notes: 'Unused with tags' });
   await step('remedy', { kind: 'full_refund', explanation: 'Full refund for the returned pack' }, { idem: randomUUID() });
-  // a refund waiting for review is approved by a Business Owner (dev step-up code)
+  // a refund waiting for review is approved by a Business Owner (dev-key re-auth proof for amounts above stepUpAbove)
   const refunds = await ctx.api.get(`/api/admin/returns/refunds?orderId=${rec.orderId}&limit=20`, ctx.staff).catch(() => ({ items: [] }));
   for (const r of refunds.items ?? []) {
     if (!['under_review', 'pending_approval', 'requested'].includes(r.status)) continue;
-    await ctx.api.post(`/api/admin/returns/refunds/${r.id}/approve`, ctx.approver, { note: 'Returned unused, seller confirmed', stepUpCode: '000000' }, { idem: randomUUID() }).catch((err) => ctx.log.warn(`${rec.ref}: refund ${r.ref} not approved (${err.message})`));
+    await ctx.api.post(`/api/admin/returns/refunds/${r.id}/approve`, ctx.approver, { note: 'Returned unused, seller confirmed', reauthToken: 'dev-reauth.approval' }, { idem: randomUUID() }).catch((err) => ctx.log.warn(`${rec.ref}: refund ${r.ref} not approved (${err.message})`));
   }
   ctx.log.info(`${rec.ref}: return refunded by the seller; payments.process-refunds sends the money`);
 }

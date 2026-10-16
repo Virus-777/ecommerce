@@ -1,6 +1,6 @@
 // Marketly UI components. Each maps 1:1 to a helper in the design prototype (design/README.md,
 // "Component inventory") and renders the design's markup and classes from src/styles/marketly.css.
-export { Icon, LogoMark, type IconName } from './Icon';
+export { Icon, LogoMark, iconFor, type IconName } from './Icon';
 export { Button, IconButton, CopyButton, type ButtonVariant } from './Button';
 export { Badge, StatusBadge, Sponsored, Count, statusTone, STATUS_TONE, type Tone } from './Badge';
 export { Img, Avatar, LogoTile, tintClass, type Tint } from './Media';

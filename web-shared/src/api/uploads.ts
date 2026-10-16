@@ -91,9 +91,24 @@ export async function uploadMedia(session: Session, file: File, purpose: UploadP
   return asset;
 }
 
-/** Best preview URL of a ready image asset. */
+/** Best preview URL of a ready image asset (product images keep `detail` and `thumb`; other images `small` too). */
 export const assetPreview = (a: Pick<MediaAsset, 'renditions' | 'url'>): string =>
-  a.renditions?.find((r) => r.size === 'small')?.url ?? a.renditions?.[0]?.url ?? a.url ?? '';
+  a.renditions?.find((r) => r.size === 'thumb')?.url ?? a.renditions?.find((r) => r.size === 'small')?.url ?? a.renditions?.[0]?.url ?? a.url ?? '';
+
+/**
+ * The name to show for an uploaded file (attachments, evidence, documents): the API's `fileName` (MediaRef and
+ * MediaAsset, G31d). Only records without one fall back to the last segment of the URL's path (signed URLs carry
+ * a storage key there, not the uploaded name).
+ */
+export function mediaFileName(m: { fileName?: string | null; url?: string | null }, fallback = 'File'): string {
+  if (m.fileName) return m.fileName;
+  try {
+    const last = new URL(m.url ?? '', 'http://x').pathname.split('/').filter(Boolean).pop();
+    return last ? decodeURIComponent(last) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 /** "212 KB" */
 export const fileSize = (bytes?: number | null): string =>

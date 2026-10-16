@@ -15,15 +15,16 @@ export const OWNERS = {
 
 /* ---------------------------------------------------------------- taxonomy */
 
+/** `color` and `shape` draw the category tile images (G24; subcategories use the parent's colour) */
 export const CATEGORIES = [
-  { key: 'electronics', name: 'Electronics', subs: ['Headphones', 'Speakers', 'Smart home', 'Cameras', 'Wearables'] },
-  { key: 'computers', name: 'Computers', subs: ['Monitors', 'Storage', 'Keyboards', 'Laptops', 'Accessories'] },
-  { key: 'home', name: 'Home & Kitchen', subs: ['Cookware', 'Bedding', 'Lighting', 'Coffee & tea', 'Cleaning'] },
-  { key: 'fashion', name: 'Fashion', subs: ['Knitwear', 'Shoes', 'Bags', 'Outerwear', 'Accessories'] },
-  { key: 'sports', name: 'Sports & Outdoors', subs: ['Hiking', 'Running', 'Yoga', 'Cycling', 'Camping'] },
-  { key: 'beauty', name: 'Beauty', subs: ['Skincare', 'Hair', 'Fragrance', 'Bath'] },
-  { key: 'toys', name: 'Toys & Games', subs: ['Puzzles', 'Board games', 'Building sets'] },
-  { key: 'pets', name: 'Pet Supplies', subs: ['Dog', 'Cat', 'Small pets'] },
+  { key: 'electronics', name: 'Electronics', color: '#3f6fb5', shape: 'ring', subs: ['Headphones', 'Speakers', 'Smart home', 'Cameras', 'Wearables'] },
+  { key: 'computers', name: 'Computers', color: '#5b6068', shape: 'square', subs: ['Monitors', 'Storage', 'Keyboards', 'Laptops', 'Accessories'] },
+  { key: 'home', name: 'Home & Kitchen', color: '#b5713f', shape: 'circle', subs: ['Cookware', 'Bedding', 'Lighting', 'Coffee & tea', 'Cleaning'] },
+  { key: 'fashion', name: 'Fashion', color: '#8a4f7d', shape: 'diamond', subs: ['Knitwear', 'Shoes', 'Bags', 'Outerwear', 'Accessories'] },
+  { key: 'sports', name: 'Sports & Outdoors', color: '#6b7346', shape: 'bar', subs: ['Hiking', 'Running', 'Yoga', 'Cycling', 'Camping'] },
+  { key: 'beauty', name: 'Beauty', color: '#e0a64a', shape: 'circle', subs: ['Skincare', 'Hair', 'Fragrance', 'Bath'] },
+  { key: 'toys', name: 'Toys & Games', color: '#d0574a', shape: 'square', subs: ['Puzzles', 'Board games', 'Building sets'] },
+  { key: 'pets', name: 'Pet Supplies', color: '#2a8c8c', shape: 'ring', subs: ['Dog', 'Cat', 'Small pets'] },
 ];
 
 export const BRANDS = ['Halden', 'Kestrel', 'Brightline', 'Mosswood', 'Tidewell', 'Trailhead', 'Corvo', 'Pellar', 'Nordvik', 'Aster', 'Northwind'];

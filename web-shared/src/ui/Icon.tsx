@@ -16,6 +16,33 @@ export function Icon({ name, className, ...rest }: IconProps) {
   return <C aria-hidden="true" className={className} {...rest} />;
 }
 
+/** Old Lucide aliases that notices stored before G27 still carry, mapped to the current names. */
+const LEGACY_ICONS: Record<string, IconName> = {
+  'alert-triangle': 'triangle-alert',
+  'x-circle': 'circle-x',
+  'check-circle': 'circle-check',
+  'check-circle-2': 'circle-check-big',
+  'alert-circle': 'circle-alert',
+  'alert-octagon': 'octagon-alert',
+  'help-circle': 'circle-help',
+  'minus-circle': 'circle-minus',
+  'pause-circle': 'circle-pause',
+  'arrow-up-circle': 'circle-arrow-up',
+  edit: 'square-pen',
+  'file-question': 'file-question-mark',
+};
+
+/**
+ * An icon name the API sends (notices, notification topics) as an IconName: current Lucide names as they are,
+ * old aliases mapped, and anything the registry doesn't have becomes `fallback`.
+ *   <Icon name={iconFor(notice.icon)} />
+ */
+export function iconFor(name: string | null | undefined, fallback: IconName = 'bell'): IconName {
+  if (!name) return fallback;
+  const n = LEGACY_ICONS[name] ?? name;
+  return n in ICONS ? (n as IconName) : fallback;
+}
+
 const LOGO_PATHS = (
   <>
     <rect x="1" y="1" width="30" height="30" rx="9" fill="var(--brand)" />

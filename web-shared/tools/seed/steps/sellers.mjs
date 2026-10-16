@@ -1,14 +1,16 @@
 // Step 5: marketplace sellers. For each: the owner signs in to the store (dev Google sign-in), staff invite the
-// business (code computed), the owner applies (business, verification + documents, payout, return address,
-// agreements), staff review and approve, the owner confirms the payout test deposits (computed amounts), sets up
-// shipping and the storefront, submits products, asks for the launch review (staff pass it), staff approve the
-// products, and the seller publishes offers with stock. Then offers on other sellers' products.
+// business (code from the invitation email in the dev outbox), the owner applies (business, verification +
+// documents, payout, return address, agreements), staff review and approve, the owner confirms the payout test
+// deposits (amounts from GET /api/dev/finance/test-deposits), sets up shipping and the storefront, submits
+// products, asks for the launch review (staff pass it), staff approve the products and set their list prices,
+// and the seller publishes offers with stock. Then offers on other sellers' products.
 import { ApiError, poll } from '../lib/http.mjs';
 import { onePagePdf, productPng } from '../lib/files.mjs';
 import { providerDestinationId, sellerInvitationCode, testDeposits } from '../lib/codes.mjs';
+import { invitationCodeFromOutbox, isNotFound, testDepositsFromDev } from '../lib/outbox.mjs';
 import { EXTRA_OFFERS, PRODUCTS, SELLERS, usd } from '../data.mjs';
 import { uploadProductPhotos } from './media.mjs';
-import { approveProduct, findProduct, productInput, variantIds } from './official.mjs';
+import { approveProduct, ensureListPrices, findProduct, productInput, variantIds } from './official.mjs';
 
 const STORE = '/api/store/sellers';
 const ADMIN = '/api/admin/sellers';
@@ -31,18 +33,45 @@ async function ownerAccount(ctx, s) {
   return r.accountId;
 }
 
+/**
+ * Invites the business to apply and returns the invitation code from the invitation email in the dev outbox
+ * (R1, data.invite.code). Computes the code only when the backend has no outbox route (404).
+ */
 async function invitation(ctx, s) {
   const r = rec(ctx, s.key);
-  if (r.invitationId) return sellerInvitationCode(r.invitationId);
-  const list = await ctx.api.all(`${ADMIN}/seller-invitations`, ctx.staff);
-  let inv = list.find((i) => i.email.toLowerCase() === s.owner.email && i.state === 'sent');
-  if (!inv) {
-    inv = await ctx.api.post(`${ADMIN}/seller-invitations`, ctx.staff, { email: s.owner.email, businessName: `${s.storeName} LLC`, message: 'We would love to have you on Marketly.' });
+  const send = async () => {
+    const since = Date.now() - 1000;
+    const inv = await ctx.api.post(`${ADMIN}/seller-invitations`, ctx.staff, { email: s.owner.email, businessName: `${s.storeName} LLC`, message: 'We would love to have you on Marketly.' });
     ctx.log.created('seller invitation', `${s.storeName} (${s.owner.email})`);
+    r.invitationId = inv.id;
+    ctx.state.save();
+    return since;
+  };
+  let since = null;
+  if (!r.invitationId) {
+    const list = await ctx.api.all(`${ADMIN}/seller-invitations`, ctx.staff);
+    const open = list.find((i) => i.email.toLowerCase() === s.owner.email && i.state === 'sent');
+    if (open) {
+      r.invitationId = open.id;
+      ctx.state.save();
+    } else since = await send();
   }
-  r.invitationId = inv.id;
-  ctx.state.save();
-  return sellerInvitationCode(inv.id);
+  try {
+    let code = await invitationCodeFromOutbox(ctx, s.owner.email, since, since ? 60_000 : 0);
+    if (!code) {
+      // sent before the backend last started: the outbox lives in memory, so the email is gone. Send a new one.
+      await ctx.api.post(`${ADMIN}/seller-invitations/${r.invitationId}/revoke`, ctx.staff, undefined).catch(() => {});
+      since = await send();
+      code = await invitationCodeFromOutbox(ctx, s.owner.email, since, 60_000);
+      if (!code) throw new Error(`${s.storeName}: the invitation email did not reach the dev outbox (is JOBS_ENABLED=true?)`);
+    }
+    ctx.log.info(`${s.storeName}: invitation code from the dev outbox`);
+    return code;
+  } catch (err) {
+    if (!isNotFound(err)) throw err;
+    ctx.log.warn(`${s.storeName}: no dev outbox on this backend (GET /api/dev/notifications/outbox → 404); invitation code computed`);
+    return sellerInvitationCode(r.invitationId);
+  }
 }
 
 async function currentApplication(ctx, token) {
@@ -136,7 +165,16 @@ async function payout(ctx, s) {
     return ['verification_pending', 'verified'].includes(d.destination?.status) ? d : null;
   }, { timeoutMs: 30_000 });
   if (dest.destination.status === 'verification_pending') {
-    const [a, b] = testDeposits(providerDestinationId(ROUTING, s.account));
+    let a;
+    let b;
+    try {
+      [a, b] = (await testDepositsFromDev(ctx, r.sellerId)).map((m) => m.amount);
+    } catch (err) {
+      if (!isNotFound(err)) throw err;
+      // an older backend without the dev route: the dev payout provider's amounts, computed
+      ctx.log.warn(`${s.storeName}: GET /api/dev/finance/test-deposits → 404; test deposits computed`);
+      [a, b] = testDeposits(providerDestinationId(ROUTING, s.account));
+    }
     const res = await ctx.api.post('/api/seller/finance/payout-destination/confirm-deposits', t, { amounts: [usd(a), usd(b)] });
     if (res.destination?.status !== 'verified') ctx.log.warn(`${s.storeName}: payout destination is ${res.destination?.status} after the test deposits`);
     else ctx.log.info(`${s.storeName}: payout account verified (test deposits $0.${String(a).padStart(2, '0')} and $0.${String(b).padStart(2, '0')})`);
@@ -334,6 +372,8 @@ async function ownOffers(ctx, s) {
       pr.approved = true;
       ctx.state.set(`product.${p.key}`, pr);
     }
+    // sellers can't send listPrice: staff set it, so the offer's was-price (list price basis) is verified
+    await ensureListPrices(ctx, p, pr);
     for (const v of p.variants) {
       await sellerOffer(ctx, s, `offer.${p.key}.${v.key}`, { productId: pr.id, variantId: pr.variants[v.key], label: `${p.title} · ${Object.values(v.options).join(' / ')}`, price: v.price, was: v.was, stock: v.stock, sku: v.sku });
     }

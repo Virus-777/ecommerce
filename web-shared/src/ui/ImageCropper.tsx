@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { sizeText, type ProductImageSpec } from '../api/imageSpec';
-import { encode, loadImage, renamed, renderCrop, type CropRect, type LoadedImage } from '../lib/crop';
+import { encode, isHeic, loadImage, renamed, renderCrop, type CropRect, type LoadedImage } from '../lib/crop';
 import { useElementWidth } from '../lib/hooks';
 import { Alert } from './Structure';
 import { Button } from './Button';
@@ -9,6 +9,8 @@ import { Dialog } from './Overlays';
 // Product image cropper (designed in React; no design file). The frame has the configured aspect ratio; the seller
 // drags the photo to place it and zooms with the slider (or arrow keys and +/−). "Use this crop" cuts the area,
 // scales it to the product-page size and makes the thumbnail, so the upload is already the right shape and size.
+// HEIC photos aren't supported (the backend refuses them with 415): the step says "Save it as JPG or PNG first"
+// and offers Skip only.
 
 export interface ProcessedImage {
   /** The product-page image to upload (exactly spec.detail, WebP or JPEG). */
@@ -194,7 +196,7 @@ function CropStep({ file, spec, last, onDone, onSkip, onCancel }: { file: File; 
         {file.name} · product images are {ratioText}. Drag the photo to place the product, and zoom with the slider. It is saved at {sizeText(spec.detail)} for the product page and {sizeText(spec.thumbnail)} for lists.
       </p>
       {loadError ? (
-        <Alert tone="danger" title="This image can’t be used">
+        <Alert tone="danger" title={isHeic(file) ? 'HEIC photos aren’t supported' : 'This image can’t be used'}>
           {loadError}
         </Alert>
       ) : tooSmall && img ? (

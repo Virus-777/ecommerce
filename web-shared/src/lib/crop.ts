@@ -16,17 +16,23 @@ export interface LoadedImage {
   height: number;
 }
 
+/** HEIC/HEIF photos (the iPhone default). Product images don't accept them: the backend answers 415 at upload. */
+export const isHeic = (file: Blob): boolean => /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test((file as File).name ?? '');
+
+/** What to tell the person when they pick a HEIC photo. */
+export const HEIC_NOT_SUPPORTED = 'HEIC photos aren’t supported. Save it as JPG or PNG first (on iPhone: Settings › Camera › Formats › Most Compatible).';
+
 /**
- * Decodes an image file with its EXIF orientation applied. Throws a readable error for files the browser can't
- * open (HEIC outside Safari, damaged files).
+ * Decodes an image file with its EXIF orientation applied. Throws a readable error for HEIC photos (not supported
+ * for product images) and for files that can't be opened (damaged files).
  */
 export async function loadImage(file: Blob): Promise<LoadedImage> {
+  if (isHeic(file)) throw new Error(HEIC_NOT_SUPPORTED);
   try {
     const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
     return { bitmap, width: bitmap.width, height: bitmap.height };
   } catch {
-    const heic = /hei[cf]/i.test(file.type) || /\.hei[cf]$/i.test((file as File).name ?? '');
-    throw new Error(heic ? 'This browser can’t open HEIC photos. Save it as JPG or PNG first (on iPhone: Settings › Camera › Formats › Most Compatible).' : 'This file couldn’t be opened as an image. Try a JPG, PNG or WebP file.');
+    throw new Error('This file couldn’t be opened as an image. Try a JPG, PNG or WebP file.');
   }
 }
 
@@ -87,7 +93,7 @@ export async function encode(c: HTMLCanvasElement, quality: number): Promise<Blo
   return jpeg;
 }
 
-/** A file name for the processed image: "photo.heic" → "photo.webp". */
+/** A file name for the processed image: "photo.png" → "photo.webp". */
 export function renamed(name: string, type: string): string {
   const base = name.replace(/\.[^.]+$/, '') || 'image';
   return `${base}.${type === 'image/webp' ? 'webp' : 'jpg'}`;

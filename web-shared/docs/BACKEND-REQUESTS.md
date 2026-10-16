@@ -2,6 +2,10 @@
 
 The web apps don't change `backend/`. This file lists what they need from it: **requests** (changes we ask for, with a proposed spec) and **gaps** (things the API doesn't provide; the apps work around them until they are decided). Keep it current as screens are wired.
 
+> **Backend answers (2026-10-16):** every item below has a status and the exact fields or endpoints to use in [BACKEND-ANSWERS.md](BACKEND-ANSWERS.md).
+>
+> **Web integration (2026-10-16, backend `e7a23235`):** the three apps now use those answers. The G1–G79 tables still describe the workarounds as they were; what is still open after the integration is **R4** and **G80–G95** below.
+
 ## Requests
 
 ### R1. Development outbox endpoint (needed for the seed script and for testing sign-up by hand) — requested 2026-10-13
@@ -52,6 +56,24 @@ DELETE /api/dev/outbox
 ### R3. Product image crop and sizes (setting, read endpoint, detail/thumb renditions, checks) — requested 2026-10-16
 
 Staff set the product image aspect ratio and the product-page and thumbnail sizes in the Admin Center; sellers crop to that ratio before upload; the backend keeps exactly two sizes. Full guide: [BACKEND-PRODUCT-IMAGES.md](BACKEND-PRODUCT-IMAGES.md). The web apps are built against it and fall back to 1:1 / 800 × 800 / 320 × 320 until it ships. Note: the only image processor today is the development one, which does not resize at all.
+
+### R4. Persisted GraphQL operations the web apps need (production blocker) — requested 2026-10-16
+
+**Why.** Production store and seller GraphQL accept persisted ids only (`GRAPHQL_PERSISTED_ONLY`). The web client now sends the manifest id for every operation in `docs/api/graphql/operations/<area>/manifest.json` (Apollo's format, like the Android app), and production runs the manifest's text. Fields a page adds to that text, and operations that aren't in the manifest, work in development only. In development the client warns in the console for each case.
+
+**Proposal.** Add these to the persisted operations (then the web team copies the manifest with `npm run gen:api`):
+
+| Area | Operation | Add | Today |
+|---|---|---|---|
+| seller | `SellerOrderDetail` | `groups.items.onLabelQuantity`; shipment `label { id labelUrl }` | Development only: the page adds them to the text (G41, G54c) |
+| seller | new `SellerCategories` | `categories { id name children { id name children { id name } } }` (no seller REST route lists the tree) | Products, Inventory and product submission filters fail in production |
+| seller | new `SellerProductCard($id)` | `myProduct(id)` with slug, variant `listPrice` and images, category attributes, submission, review log, own offers (text in `seller-center/src/pages/data/products.ts`) | Offer and product pages fail in production |
+| seller | `SellerReturnDetail` | `earningsImpact.labelChargeEstimated` | Read from REST |
+| store | `OrderDetail` | `groups.items.productSlug` | Links use a slug made from the title (product routes resolve by id) |
+| store | `OrderList` | `groups.items { offerId quantity actions productId productSlug }` | Buy again reads the order first |
+| store | `ReturnDetail` | `shipment.dropOffCode`, `refundEstimate` | Extra REST read |
+| store | `CaseDetail` | attachment `fileName` | Attachments show "Attachment n" |
+| store | screen queries (HomePage, CategoryPage, SearchResults, ProductPage, SellerStorefront) | `ImageFields` with `thumbUrl` and `detailUrl`; card stock state and offer count; `homePage(device)`; ProductPage purchase-box choice state (`selectedBy`, featured offer, `officialStore`) and review `viewerReported` | The web store stays on REST for these screens; worth doing if the Android app uses them |
 
 ## Gaps (worked around in the web apps)
 
@@ -167,3 +189,24 @@ Bugs and contract questions first, then missing data. Each is worked around in t
 |---|---|---|---|
 | G78 | **Bug:** seller return notices have an empty product name and a raw instant: "Return request … items from (). Respond by 2026-10-15T16:58:28.953Z." (notification template variables not filled; dates not formatted). Raw ISO instants also appear in other server text: the admin order timeline ("New dispatch estimate 2026-10-19T11:21:10.115Z") and the Operations routine summary ("next pickup 2026-10-15T23:00:00.000Z") | Sellers and staff read broken sentences | The apps rewrite ISO instants in server text to Pacific time (`isoInText`); the empty "()" needs the template fixed. Ask: format dates in the template with the market time zone, and fill the product name |
 | G79 | **Content:** a delivery-exception alert shown to the seller on the order page reads "Shipped, no carrier scan 24 h. Request valid tracking details; never imply delivery." — staff guidance ("never imply delivery") leaking into seller-facing text | Sellers see internal instructions | Shown as sent. Ask: separate seller-facing copy from staff guidance for delivery exceptions |
+
+### Found while adopting the backend answers (2026-10-16)
+
+| # | Gap | Effect in the apps | Workaround |
+|---|---|---|---|
+| G80 | **Bug (G41 follow-up, reproduced twice):** an order line of 2; buy a label for 1, then record a manual shipment for the other. The line splits: the shipped half keeps the original id, which the label points to, and the new line holds the labelled unit with `onLabelQuantity: 0`, so it can be shipped or cancelled again (the cancel returned 201 on MK-261015-00001) | A labelled unit can be cancelled or shipped twice | None. Ask: move the label's item reference and `onLabelQuantity` with the labelled unit when a line splits |
+| G81 | G34 isn't in effect: applied coupons still come back as "Coupon HOMEWEEK15", not "<campaign name> (<CODE>)" | Cart and checkout show the old label | The apps show `label` as sent |
+| G82 | `POST /api/store/advertising/events` rejects the whole batch when one impression token is bad (400 `INVALID_IMPRESSION_TOKEN`) | One stale token loses the other events | The store sends one event per request. Ask: accept the good events and list the bad ones |
+| G83 | Slugs and cues still missing on some tiles: `promotions.FlashItem` and `DealProduct` have no product slug; `content.ProductTile` has no `sellerSlug`, delivery cue or offer count | Home, Deals and Collection make an extra `/search/cards` call | Extra call |
+| G84 | `audit/summary.byActor` mixes keys: one person's entries are keyed by account id, another's by name | Action history "by person" doesn't group by person | Shown as sent |
+| G85 | `FundingReview` has no `sentBy` | "The person who sent it can't confirm funding" is only known after the server refuses (`SAME_REVIEWER`) | The creator case is checked up front; the sender case shows the server's refusal |
+| G86 | Seller questions `state=all` leaves out skipped questions | A skipped question disappears; "Answer instead" is only reachable right after skipping | Minor; the design hides skipped questions |
+| G87 | `media.productImage` needs 14 days' notice (`minLeadDays`) | Settings › Products can't apply a change sooner | The card asks for a "Takes effect" date. Ask: confirm 14 days is intended for this setting, and mention it in the R3 answer |
+| G88 | Seller product corrections can set a spec but not remove one | The old seed's "List price" spec rows stay on 11 approved seller products | Gone after a database reset and re-seed. Ask: allow removing a spec in a correction |
+| G89 | Ref lookups still missing: admin seller detail doesn't accept the `SL-` ref (slug and id work); seller application detail answers 400 for an `SA-` ref | Links by ref need the id | Seller applications are still found with a list search |
+| G90 | No endpoint lists the customer return reason codes and labels | The admin returns reason filter keeps its own list | Client list with the server's labels |
+| G91 | Purchase order `ReceiptSummary` has no `inboundId` (only `purchasing.Receipt` has it) | The Purchasing page can't link a receipt to its inbound | Not linked |
+| G92 | Support case detail `seller` has no `slug` | Admin case page links the seller by id | Link by id |
+| G93 | GraphQL `case(ref)` returns null for a dev-token customer with no customer profile | Testing help cases with dev customer tokens | Test with a seeded customer |
+| G94 | Official Store profile has no delivery or warranty terms | The Official Store promise strip ("Free delivery over $35…") is still the design's text | Design text |
+| G95 | **Doc fixes in BACKEND-ANSWERS:** R1: the invitation code is at `data.invite.code` (topic `seller.application.invitation`), not `data.invite.url`; G10: `PATCH /api/admin/catalog/products/{id}/variants/{variantId}` requires `reason`. **Data:** the seeded `companyLine` setting still says San Francisco; old notices keep empty refs, incomplete links and old icon names (no backfill, by decision) | — | The seed and apps follow the real behaviour |

@@ -581,7 +581,7 @@ REST list endpoints take **either** `cursor` (Android infinite scroll) **or** `p
 
 ### 4.7 Uploads (reviews, returns, cases, messages, seller application)
 
-`POST /api/store/media/uploads { purpose, fileName, contentType, sizeBytes, sha256? }` → `UploadTicket{ uploadId, assetId, method, url, headers, maxBytes, expiresAt }` → `PUT` the bytes to `url` with the returned `headers` (+ Bearer; dev storage is the API's own `/api/store/media/uploads/{id}/content`) → `POST /api/store/media/uploads/{id}/complete` (202) → poll `GET /api/store/media/assets/{id}` until `status: "ready"` (processing is the `media.process` job) → pass `assetId`s as `mediaIds`. Purposes: `return_evidence` (15 MB; jpeg/png/webp/heic/mp4), `review_photo`, `case_evidence`, `message_attachment`, `verification_document`. `MediaRef` has no file name.
+`POST /api/store/media/uploads { purpose, fileName, contentType, sizeBytes, sha256? }` → `UploadTicket{ uploadId, assetId, method, url, headers, maxBytes, expiresAt }` → `PUT` the bytes to `url` with the returned `headers` (+ Bearer; dev storage is the API's own `/api/store/media/uploads/{id}/content`) → `POST /api/store/media/uploads/{id}/complete` (202) → poll `GET /api/store/media/assets/{id}` until `status: "ready"` (processing is the `media.process` job) → pass `assetId`s as `mediaIds`. Purposes: `return_evidence` (15 MB; jpeg/png/webp/heic/mp4), `review_photo`, `case_evidence`, `message_attachment`, `verification_document`. `MediaRef.fileName` is the uploaded file name (G31d; `mediaFileName()` in web-shared/src/api/uploads.ts).
 
 ### 4.8 Suggested client module (`web-shared/src/api/`; an uncommitted implementation already exists there: check it against this list)
 

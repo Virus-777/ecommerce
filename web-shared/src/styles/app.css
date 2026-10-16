@@ -68,3 +68,6 @@
 
 /* Read-only chips (labels shown in chip style, e.g. Seller Center › Store › categories you sell in). */
 .app .u-cursor-default { cursor: default; }
+
+/* A button whose label may wrap (long refs in narrow side cards). */
+.app .btn.btn-wrap { white-space: normal; padding-block: var(--sp-2); line-height: var(--lh-tight, 1.25); text-align: center; }

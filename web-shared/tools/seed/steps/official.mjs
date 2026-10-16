@@ -7,7 +7,10 @@ import { gtinFor } from '../lib/codes.mjs';
 import { OFFICIAL_LOCATION, PRODUCTS, usd } from '../data.mjs';
 import { uploadProductPhotos } from './media.mjs';
 
-/** The catalog product input of a seed product (seller and admin share it; listPrice only on admin) */
+/**
+ * The catalog product input of a seed product (seller and admin share it). The was-price check reads the variant's
+ * `listPrice` (G10): admin inputs carry it; sellers can't send it, so staff set it after approval (ensureListPrices).
+ */
 export function productInput(ctx, p, photos, { admin }) {
   return {
     title: p.title,
@@ -15,8 +18,7 @@ export function productInput(ctx, p, photos, { admin }) {
     categoryId: ctx.state.get(`category.${p.cat}.${p.sub}`),
     description: p.description,
     keyFeatures: p.features,
-    // the was-price check reads the manufacturer list price from the product specs ("List price"), not variants
-    specs: { Brand: p.brand, ...p.specs, ...(listPriceOf(p) ? { 'List price': `$${(listPriceOf(p) / 100).toFixed(2)}` } : {}) },
+    specs: { Brand: p.brand, ...p.specs },
     includedItems: p.included,
     imageIds: photos.productImageIds,
     modelNumber: p.model,
@@ -33,8 +35,24 @@ export function productInput(ctx, p, photos, { admin }) {
   };
 }
 
-/** Highest was-price of a product's variants (its manufacturer list price), or null */
-export const listPriceOf = (p) => Math.max(0, ...p.variants.map((v) => v.was ?? 0)) || null;
+/**
+ * Staff set each variant's manufacturer list price (`listPrice`, which the was-price check reads; G10) where it is
+ * missing: PATCH /api/admin/catalog/products/{id}/variants/{variantId}, allowed on approved products without a new
+ * review. Needed for seller products (sellers can't send listPrice) and products created before G10.
+ */
+export async function ensureListPrices(ctx, p, rec) {
+  if (rec.listPrices || !p.variants.some((v) => v.was)) return;
+  const r = await ctx.api.get(`/api/admin/catalog/products/${rec.id}`, ctx.staff);
+  const product = r.product ?? r;
+  for (const v of p.variants.filter((x) => x.was)) {
+    const variantId = rec.variants?.[v.key];
+    if (!variantId || product.variants.find((x) => x.id === variantId)?.listPrice?.amount === v.was) continue;
+    await ctx.api.patch(`/api/admin/catalog/products/${rec.id}/variants/${variantId}`, ctx.staff, { listPrice: usd(v.was), reason: 'Manufacturer list price (MSRP) checked' });
+    ctx.log.info(`${p.title} · ${Object.values(v.options).join(' / ')}: list price $${(v.was / 100).toFixed(2)}`);
+  }
+  rec.listPrices = true;
+  ctx.state.set(`product.${p.key}`, rec);
+}
 
 /** Variant id by our variant key, matching on the option values */
 export function variantIds(p, product) {
@@ -122,20 +140,8 @@ async function ensureProduct(ctx, p) {
   const { api, state, log } = ctx;
   const t = ctx.staff;
   let rec = state.get(`product.${p.key}`);
-  if (rec?.approved && (rec.listPrice || !listPriceOf(p))) return rec;
   if (rec?.approved) {
-    // created before the list price was in the specs: edit, resubmit, approve again
-    const photos = state.get(`photos.${p.key}`);
-    await api.patch(`/api/admin/catalog/products/${rec.id}`, t, productInput(ctx, p, photos, { admin: true }));
-    try {
-      await api.post(`/api/admin/catalog/products/${rec.id}/submit`, t, undefined);
-    } catch (err) {
-      if (!(err instanceof ApiError) || err.status !== 409) throw err;
-    }
-    await approveProduct(ctx, rec.id, 'List price added to the specs');
-    rec.listPrice = true;
-    state.set(`product.${p.key}`, rec);
-    log.info(`${p.title}: list price added`);
+    await ensureListPrices(ctx, p, rec);
     return rec;
   }
   let product = rec?.id ? (await api.get(`/api/admin/catalog/products/${rec.id}`, t)).product : await findProduct(ctx, p.title);
@@ -152,8 +158,8 @@ async function ensureProduct(ctx, p) {
   }
   await approveProduct(ctx, product.id, 'Official Store product: photos, details and GTINs checked');
   rec.approved = true;
-  rec.listPrice = Boolean(listPriceOf(p));
   state.set(`product.${p.key}`, rec);
+  await ensureListPrices(ctx, p, rec);
   return rec;
 }
 

@@ -1,40 +1,11 @@
-// Values the seed computes because the API only sends them by email or bank statement (brief §2.4).
+// Values the seed computes: identifiers, tracking numbers and webhook signatures. The seller invitation
+// code and payout test deposits come from the dev routes (lib/outbox.mjs); their computed versions below are the
+// fallback for a backend without those routes (404).
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 
 /** The dev APP_SECRET used while DEV_TOKENS is on (backend/src/kernel/config/index.ts) */
 export const DEV_APP_SECRET = 'dev-app-secret-not-for-production-use-0000';
 export const DEV_WEBHOOK_SECRET = 'dev-webhook-secret';
-
-/* ---------------------------------------------------------------- TOTP (RFC 6238, SHA-1, 30 s, 6 digits) */
-
-function base32(s) {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  const clean = s.replace(/[\s=-]/g, '').toUpperCase();
-  let bits = 0;
-  let value = 0;
-  const out = [];
-  for (const c of clean) {
-    const i = alphabet.indexOf(c);
-    if (i < 0) throw new Error(`not base32: ${c}`);
-    value = (value << 5) | i;
-    bits += 5;
-    if (bits >= 8) {
-      out.push((value >>> (bits - 8)) & 0xff);
-      bits -= 8;
-    }
-  }
-  return Buffer.from(out);
-}
-
-export function totp(secretBase32, at = Date.now(), stepOffset = 0) {
-  const counter = Math.floor(at / 1000 / 30) + stepOffset;
-  const msg = Buffer.alloc(8);
-  msg.writeBigUInt64BE(BigInt(counter));
-  const h = createHmac('sha1', base32(secretBase32)).update(msg).digest();
-  const o = h[h.length - 1] & 0x0f;
-  const n = ((h[o] & 0x7f) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3];
-  return String(n % 1_000_000).padStart(6, '0');
-}
 
 /* ---------------------------------------------------------------- sellers */
 
