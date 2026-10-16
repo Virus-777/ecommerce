@@ -6,3 +6,7 @@ export { ApiError, errorMessage, toApiError } from './errors';
 export type { Audience, SessionSnapshot, SessionTokens, TokenClaims, TokenKind } from './session';
 export type { paths, components } from './openapi';
 export { uploadMedia, useUploads, assetPreview, fileSize, type MediaAsset, type UploadItem, type UploadPurpose } from './uploads';
+export {
+  useProductImageSpec, ProductImageRatio, resolveProductImageSpec, validateProductImageSetting, parseRatio, renditionUrl, sizeText, productImageSpecKey,
+  DEFAULT_PRODUCT_IMAGE_SETTING, DEFAULT_PRODUCT_IMAGE_SPEC, PRODUCT_IMAGE_LIMITS, type ProductImageSetting, type ProductImageSpec, type Size,
+} from './imageSpec';

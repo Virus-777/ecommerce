@@ -12,5 +12,6 @@ export {
 } from './Structure';
 export { Field, TextInput, Select, Textarea, Checkbox, Radio, Switch, OptionCard, FileDrop } from './Forms';
 export { Dialog, Drawer } from './Overlays';
+export { ImageCropper, type ProcessedImage } from './ImageCropper';
 export { LineChart, BarChart, Sparkline, Legend, SplitBar } from './Charts';
 export { announce } from './announce';

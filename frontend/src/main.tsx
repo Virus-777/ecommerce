@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
-import { ApiProvider } from '@marketly/web-shared/api';
+import { ApiProvider, ProductImageRatio } from '@marketly/web-shared/api';
 import { createAppRouter } from '@marketly/web-shared/routes';
 import '@marketly/web-shared/styles/marketly.css';
 import '@marketly/web-shared/styles/app.css';
@@ -19,7 +19,13 @@ document.addEventListener('click', (e) => {
 const router = createAppRouter({
   pages: PAGES,
   notFound: PAGES['store/not-found']!,
-  wrap: (children) => <SessionProvider>{children}</SessionProvider>,
+  wrap: (children) => (
+    <SessionProvider>
+      {/* Product image frames follow the configured aspect ratio (Admin Center › Settings › Product images). */}
+      <ProductImageRatio />
+      {children}
+    </SessionProvider>
+  ),
   extraRoutes: EMAIL_LINK_ROUTES,
   // /design/check (development only) opens each design sample as a visitor or as the sample customer
   designCheck: import.meta.env.DEV ? { useSessions: useDesignCheckSessions } : undefined,

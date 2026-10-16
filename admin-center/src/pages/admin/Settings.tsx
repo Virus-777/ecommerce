@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
@@ -12,7 +12,11 @@ import {
   dayFromToday, fromField, isJsonish, OWNER_SCREEN, sameValue, SCOPE_OPTIONS, sectionIcon, toField,
   type ApplyScope, type SettingChange, type SettingDefinition, type SettingDetail, type SettingsOverview, type SettingsSection,
 } from './data/settings';
+import { ProductImageSettingsCard } from './data/product-image-settings';
 import { effectiveInstant } from './data/staff';
+
+/** Section-list index of the Products section (not one of the API's sections). */
+const PRODUCTS = -1;
 
 // Design: pages/admin/admin-settings.html · view "review-change" = review dialog for a drafted change.
 // Editing a field never applies it: "Review change" drafts the change on the API (impact preview), the dialog shows
@@ -84,10 +88,25 @@ export default function Settings() {
     setFieldErr((e) => ({ ...e, [key]: '' }));
   };
 
+  // Keep the selected section visible inside the scrolling section list (only the list moves, not the page).
+  useEffect(() => {
+    const nav = document.querySelector<HTMLElement>('.ac-setnav');
+    const a = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!nav || !a || nav.scrollHeight <= nav.clientHeight) return;
+    // The sticky list is the items' offset parent, so offsetTop is already measured from it.
+    const top = a.offsetParent === nav ? a.offsetTop : a.offsetTop - nav.offsetTop;
+    if (top < nav.scrollTop) nav.scrollTop = top - 8;
+    else if (top + a.offsetHeight > nav.scrollTop + nav.clientHeight) nav.scrollTop = top + a.offsetHeight - nav.clientHeight + 8;
+  }, [active]);
   const goTo = (i: number) => {
     setActive(i);
-    document.getElementById(`set-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById(i === PRODUCTS ? 'set-products' : `set-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  // The Products section (product image crop and sizes) is the web app's own card; it follows Catalog in the list.
+  const productsAt = (() => {
+    const c = sections.findIndex((s) => s.key === 'catalog');
+    return c >= 0 ? c + 1 : sections.length;
+  })();
   const startEdit = (i: number) => {
     setActive(i);
     setEditing((e) => (e.includes(sections[i].key) ? e : [...e, sections[i].key]));
@@ -145,7 +164,7 @@ export default function Settings() {
         }),
       )) as SettingChange;
       if (c.impact.blocking.length) return c;
-      return (await call(api.POST('/api/admin/settings/changes/{id}/submit', { params: { path: { id: c.id } } }))) as SettingChange;
+      return (await call(api.POST('/api/admin/settings/changes/{id}/submit', { params: { path: { id: c.id } }, body: { reason: reason.trim() } }))) as SettingChange;
     },
     onSuccess: (c) => {
       if (c.status === 'draft') {
@@ -359,6 +378,21 @@ export default function Settings() {
   const scheduledAll = overviewQ.data?.scheduled ?? [];
   const shownSection = sections[changeSection];
 
+  const productsLink = (
+    <a
+      href="#"
+      className={cx(active === PRODUCTS && 'is-active')}
+      aria-current={active === PRODUCTS ? 'page' : undefined}
+      onClick={(e) => {
+        e.preventDefault();
+        goTo(PRODUCTS);
+      }}
+    >
+      <Icon name="package" className="ic-sm" />
+      Products
+    </a>
+  );
+
   if (!canView) {
     return (
       <AdminLayout active="settings">
@@ -403,20 +437,23 @@ export default function Settings() {
         <div className="ac-set">
           <nav className="ac-setnav only-desktop" aria-label="Settings sections">
             {sections.map((s, i) => (
-              <a
-                key={s.key}
-                href="#"
-                className={cx(i === active && 'is-active')}
-                aria-current={i === active ? 'page' : undefined}
-                onClick={(e) => {
-                  e.preventDefault();
-                  goTo(i);
-                }}
-              >
-                <Icon name={iconOf(sectionIcon(s.key), 'settings')} className="ic-sm" />
-                {s.title}
-              </a>
+              <Fragment key={s.key}>
+                {i === productsAt && productsLink}
+                <a
+                  href="#"
+                  className={cx(i === active && 'is-active')}
+                  aria-current={i === active ? 'page' : undefined}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    goTo(i);
+                  }}
+                >
+                  <Icon name={iconOf(sectionIcon(s.key), 'settings')} className="ic-sm" />
+                  {s.title}
+                </a>
+              </Fragment>
             ))}
+            {productsAt >= sections.length && productsLink}
           </nav>
           <div className="stack gap-5">
             {(overviewQ.isPending || defsQ.isPending) &&
@@ -425,7 +462,13 @@ export default function Settings() {
                   <SkeletonLines rows={3} />
                 </Card>
               ))}
-            {!overviewQ.isPending && !defsQ.isPending && sections.map(sectionCard)}
+            {!overviewQ.isPending && !defsQ.isPending && (
+              <>
+                {sections.slice(0, productsAt).map((s, i) => sectionCard(s, i))}
+                <ProductImageSettingsCard id="set-products" />
+                {sections.slice(productsAt).map((s, i) => sectionCard(s, i + productsAt))}
+              </>
+            )}
           </div>
         </div>
       )}

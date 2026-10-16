@@ -1,13 +1,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useSearchParams } from 'react-router';
-import { ApiError, call, errorMessage, uploadMedia, useApi, type components } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, renditionUrl, sizeText, uploadMedia, useApi, useProductImageSpec, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import {
-  Alert, Badge, Button, Card, Checkbox, Chip, EmptyState, Field, FileDrop, Icon, IconButton, Img, KeyValue, Meter, PageHeader, Select, StatusLegend, Switch, TableWrap, Textarea, TextInput, Timeline, announce, type IconName, type TimelineEvent,
+  Alert, Badge, Button, Card, Checkbox, Chip, EmptyState, Field, FileDrop, Icon, IconButton, ImageCropper, Img, KeyValue, Meter, PageHeader, Select, StatusLegend, Switch, TableWrap, Textarea, TextInput, Timeline, announce, type IconName, type ProcessedImage, type TimelineEvent,
 } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { FormSkeleton, LoadError, fmtDay, fmtFull, fmtWhen, inputAmount, reviewLabel, toMinor } from './data/catalog-parts';
@@ -249,6 +249,9 @@ function ProductForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [banner, setBanner] = useState<{ tone: 'success' | 'danger' | 'warning'; title: string; text: ReactNode } | null>(null);
   const fileSeq = useRef(0);
+  // Product images are cropped to the configured ratio and sized in the browser before upload (ImageCropper).
+  const { spec: imageSpec } = useProductImageSpec();
+  const [cropQueue, setCropQueue] = useState<File[]>([]);
 
   const state = product?.reviewState ?? 'DRAFT';
   const cr = state === 'CHANGES_REQUESTED';
@@ -339,18 +342,25 @@ function ProductForm({
   const status = reviewLabel(state);
   const statusTone = state === 'SUBMITTED' ? 'info' : cr ? 'warning' : state === 'APPROVED' ? 'success' : state === 'REJECTED' ? 'danger' : '';
 
+  // Picked files go through the cropper first; each confirmed crop uploads the product-page image.
   const addFiles = (files: File[]) => {
-    const imgs = files.filter((x) => /^image\//.test(x.type));
-    if (!imgs.length) return;
-    const added: Photo[] = imgs.map((file) => ({ key: `u${++fileSeq.current}`, name: file.name, url: URL.createObjectURL(file), status: 'uploading' }));
-    setF((s) => ({ ...s, photos: [...s.photos, ...added] }));
-    announce(`${imgs.length} image${imgs.length > 1 ? 's' : ''} uploading`);
-    added.forEach((a, i) =>
-      uploadMedia(session, imgs[i], 'product_image').then(
-        (asset) => setF((s) => ({ ...s, photos: s.photos.map((p) => (p.key === a.key ? { ...p, status: 'ready', assetId: asset.id, url: asset.renditions?.find((r) => r.size === 'small')?.url ?? asset.url ?? p.url } : p)) })),
-        (e) => setF((s) => ({ ...s, photos: s.photos.map((p) => (p.key === a.key ? { ...p, status: 'failed', error: errorMessage(e) } : p)) })),
-      ),
+    const imgs = files.filter((x) => /^image\//.test(x.type) || /\.hei[cf]$/i.test(x.name));
+    if (imgs.length) setCropQueue(imgs);
+  };
+  const uploadCropped = (img: ProcessedImage) => {
+    const a: Photo = { key: `u${++fileSeq.current}`, name: img.sourceName, url: img.thumbUrl, status: 'uploading' };
+    setF((s) => ({ ...s, photos: [...s.photos, a] }));
+    announce(`${img.sourceName} uploading`);
+    uploadMedia(session, img.file, 'product_image').then(
+      (asset) => setF((s) => ({ ...s, photos: s.photos.map((p) => (p.key === a.key ? { ...p, status: 'ready', assetId: asset.id, url: renditionUrl(asset, 'thumb') ?? p.url } : p)) })),
+      (e) => setF((s) => ({ ...s, photos: s.photos.map((p) => (p.key === a.key ? { ...p, status: 'failed', error: errorMessage(e) } : p)) })),
     );
+  };
+  // A skipped image is listed with the reason when it couldn't be used (unreadable or too small).
+  const skipped = (file: File, reason?: string) => {
+    if (!reason) return;
+    const error = reason === 'too small' ? `smaller than ${sizeText(imageSpec.detail)}, so it wasn’t added` : reason;
+    setF((s) => ({ ...s, photos: [...s.photos, { key: `u${++fileSeq.current}`, name: file.name, url: '', status: 'failed', error }] }));
   };
   const removePhoto = (k: string) => setF((s) => ({ ...s, photos: s.photos.filter((p) => p.key !== k) }));
   const makeMain = (k: string) => setF((s) => ({ ...s, photos: [...s.photos.filter((p) => p.key === k), ...s.photos.filter((p) => p.key !== k)] }));
@@ -803,9 +813,9 @@ function ProductForm({
                       {i === 0 && <Badge tone={i === 0 && photoComment ? 'danger' : 'solid'}>Main</Badge>}
                       {p.status === 'uploading' && <span className="spinner" aria-label="Uploading" />}
                       {editable && p.status !== 'uploading' && (
-                        <span className="row gap-1">
-                          {i > 0 && p.status === 'ready' && <IconButton icon="star" label={`Make image ${i + 1} the main image`} onClick={() => makeMain(p.key)} />}
-                          <IconButton icon="trash-2" label={`Remove image ${i + 1}`} onClick={() => removePhoto(p.key)} />
+                        <span className="sa-thumb-acts">
+                          {i > 0 && p.status === 'ready' && <IconButton icon="star" size="sm" label={`Make image ${i + 1} the main image`} onClick={() => makeMain(p.key)} />}
+                          <IconButton icon="trash-2" size="sm" label={`Remove image ${i + 1}`} onClick={() => removePhoto(p.key)} />
                         </span>
                       )}
                     </div>
@@ -834,10 +844,21 @@ function ProductForm({
                 )
               )}
             </div>
-            {editable && <FileDrop title="Drag images here or browse" hint="JPG, PNG, WebP or HEIC · up to 20 MB each" accept="image/jpeg,image/png,image/webp,image/heic" onFiles={addFiles} />}
+            {editable && (
+              <FileDrop
+                title="Drag images here or browse"
+                hint={`JPG, PNG or WebP · you crop each one to ${imageSpec.ratio.width}:${imageSpec.ratio.height} · at least ${sizeText(imageSpec.detail)}`}
+                accept="image/jpeg,image/png,image/webp,image/heic"
+                onFiles={addFiles}
+              />
+            )}
+            {cropQueue.length > 0 && <ImageCropper files={cropQueue} spec={imageSpec} onProcessed={uploadCropped} onSkip={skipped} onClose={() => setCropQueue([])} />}
             <div className="well stack gap-2">
               <span className="small strong">Image standards</span>
               <ul className="ul small sub stack gap-1">
+                <li>
+                  Every image is cropped to {imageSpec.ratio.width}:{imageSpec.ratio.height} and saved at {sizeText(imageSpec.detail)} for the product page and {sizeText(imageSpec.thumbnail)} for lists, search and the app.
+                </li>
                 {imageRules.length ? (
                   imageRules.map((r) => <li key={r.text}>{r.text}</li>)
                 ) : (
