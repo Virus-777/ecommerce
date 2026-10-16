@@ -4666,6 +4666,19 @@ export const spec = defineModuleSpec({
           "key": {
             "statement_id": 1
           }
+        },
+        {
+          "name": "ledger_entries_lot_id_1a5b8e",
+          "key": {
+            "lot_id": 1
+          }
+        },
+        {
+          "name": "ledger_entries_type_at_177bdf",
+          "key": {
+            "type": 1,
+            "at": 1
+          }
         }
       ],
       "unenforced": []
@@ -4799,6 +4812,18 @@ export const spec = defineModuleSpec({
           "key": {
             "seller_id": 1,
             "state": 1
+          }
+        },
+        {
+          "name": "earnings_lots_payout_id_6e27aa",
+          "key": {
+            "payout_id": 1
+          }
+        },
+        {
+          "name": "earnings_lots_order_id_4c5e85",
+          "key": {
+            "order_id": 1
           }
         }
       ],
@@ -5208,7 +5233,20 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "refund_allocations_payment_refund_id_8f3d6d",
+          "key": {
+            "payment_refund_id": 1
+          }
+        },
+        {
+          "name": "refund_allocations_applied_at_c264fb",
+          "key": {
+            "applied_at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "holds": {
@@ -5369,6 +5407,13 @@ export const spec = defineModuleSpec({
           "key": {
             "status": 1,
             "review_date": 1
+          }
+        },
+        {
+          "name": "holds_ref_kind_ref_id_b04193",
+          "key": {
+            "ref_kind": 1,
+            "ref_id": 1
           }
         }
       ],
@@ -6044,6 +6089,13 @@ export const spec = defineModuleSpec({
             "status": 1,
             "requested_at": 1
           }
+        },
+        {
+          "name": "destination_reviews_seller_id_status_b608db",
+          "key": {
+            "seller_id": 1,
+            "status": 1
+          }
         }
       ],
       "unenforced": []
@@ -6458,9 +6510,16 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "payouts_status_1a3d22",
+          "name": "payouts_status_paid_at_56ae60",
           "key": {
-            "status": 1
+            "status": 1,
+            "paid_at": 1
+          }
+        },
+        {
+          "name": "payouts_retry_of_769ca9",
+          "key": {
+            "retry_of": 1
           }
         }
       ],

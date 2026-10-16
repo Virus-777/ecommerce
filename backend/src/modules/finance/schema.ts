@@ -56,6 +56,8 @@ ledger_entries.index({"source_event_id":1}, {"name":"ledger_entries_source_event
 ledger_entries.index({"seller_id":1,"at":-1}, {"name":"ledger_entries_seller_id_at_b94f3a"});
 ledger_entries.index({"ref_kind":1,"ref_id":1}, {"name":"ledger_entries_ref_kind_ref_id_b04193"});
 ledger_entries.index({"statement_id":1}, {"name":"ledger_entries_statement_id_c911a6"});
+ledger_entries.index({"lot_id":1}, {"name":"ledger_entries_lot_id_1a5b8e"});
+ledger_entries.index({"type":1,"at":1}, {"name":"ledger_entries_type_at_177bdf"});
 
 /** Net earnings per seller order item, moving pending → available → paid out */
 const earnings_lots = new Schema(
@@ -79,6 +81,8 @@ const earnings_lots = new Schema(
 earnings_lots.index({"order_item_id":1}, {"name":"earnings_lots_order_item_id_77c58a","unique":true});
 earnings_lots.index({"state":1,"available_at":1}, {"name":"earnings_lots_state_available_at_3f2fda"});
 earnings_lots.index({"seller_id":1,"state":1}, {"name":"earnings_lots_seller_id_state_e600c9"});
+earnings_lots.index({"payout_id":1}, {"name":"earnings_lots_payout_id_6e27aa"});
+earnings_lots.index({"order_id":1}, {"name":"earnings_lots_order_id_4c5e85"});
 
 const fee_rule_sets = new Schema(
   {
@@ -154,6 +158,8 @@ const refund_allocations = new Schema(
   },
   collectionOptions("finance.refund_allocations"),
 );
+refund_allocations.index({"payment_refund_id":1}, {"name":"refund_allocations_payment_refund_id_8f3d6d"});
+refund_allocations.index({"applied_at":1}, {"name":"refund_allocations_applied_at_c264fb"});
 
 const holds = new Schema(
   {
@@ -181,6 +187,7 @@ const holds = new Schema(
 );
 holds.index({"seller_id":1,"status":1}, {"name":"holds_seller_id_status_b608db"});
 holds.index({"status":1,"review_date":1}, {"name":"holds_status_review_date_6cd2b9"});
+holds.index({"ref_kind":1,"ref_id":1}, {"name":"holds_ref_kind_ref_id_b04193"});
 
 const adjustments = new Schema(
   {
@@ -299,6 +306,7 @@ const destination_reviews = new Schema(
   collectionOptions("finance.destination_reviews"),
 );
 destination_reviews.index({"status":1,"requested_at":1}, {"name":"destination_reviews_status_requested_at_0f4c95"});
+destination_reviews.index({"seller_id":1,"status":1}, {"name":"destination_reviews_seller_id_status_b608db"});
 
 const payout_runs = new Schema(
   {
@@ -359,7 +367,8 @@ payouts.index({"provider_payout_id":1}, {"name":"payouts_provider_payout_id_c948
 payouts.index({"idempotency_key":1}, {"name":"payouts_idempotency_key_9416f7","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
 payouts.index({"seller_id":1,"requested_on":-1}, {"name":"payouts_seller_id_requested_on_15d75a"});
 payouts.index({"run_id":1,"status":1}, {"name":"payouts_run_id_status_97e082"});
-payouts.index({"status":1}, {"name":"payouts_status_1a3d22"});
+payouts.index({"status":1,"paid_at":1}, {"name":"payouts_status_paid_at_56ae60"});
+payouts.index({"retry_of":1}, {"name":"payouts_retry_of_769ca9"});
 
 /** Issued statements are immutable; later corrections appear on the next statement */
 const statements = new Schema(

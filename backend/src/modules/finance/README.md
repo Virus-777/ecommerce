@@ -1048,7 +1048,7 @@ The open statement of a period exists from the seller's approval (or the previou
 | recorded_by | text? |
 | source_event_id | text? unique |
 
-Indexes: `(seller_id, at desc)`, `(ref_kind, ref_id)`, `(statement_id)`
+Indexes: `(seller_id, at desc)`, `(ref_kind, ref_id)`, `(statement_id)`, `(lot_id)`, `(type, at)`
 
 **earnings_lots**: Net earnings per seller order item, moving pending → available → paid out
 
@@ -1066,7 +1066,7 @@ Indexes: `(seller_id, at desc)`, `(ref_kind, ref_id)`, `(statement_id)`
 | available_at | timestamptz? |
 | payout_id | uuid? |
 
-Indexes: `(state, available_at)`, `(seller_id, state)`
+Indexes: `(state, available_at)`, `(seller_id, state)`, `(payout_id)`, `(order_id)`
 
 **fee_rule_sets**
 
@@ -1130,6 +1130,8 @@ Indexes: `(rule_set_id, category_id) unique`
 | breakdown | jsonb |
 | applied_at | timestamptz? |
 
+Indexes: `(payment_refund_id)`, `(applied_at)`
+
 **holds**
 
 | Column | Type |
@@ -1152,7 +1154,7 @@ Indexes: `(rule_set_id, category_id) unique`
 | approval_request_id | uuid? |
 | trust_report_id | uuid? (set when the hold executes a trust recommendation; kept through approval so finance.hold.placed carries it when the approved hold is placed) |
 
-Indexes: `(seller_id, status)`, `(status, review_date)`
+Indexes: `(seller_id, status)`, `(status, review_date)`, `(ref_kind, ref_id)`
 
 **adjustments**
 
@@ -1253,7 +1255,7 @@ Indexes: `(seller_id, active)`
 | decided_at | timestamptz? |
 | reason | text? |
 
-Indexes: `(status, requested_at)`
+Indexes: `(status, requested_at)`, `(seller_id, status)`
 
 **payout_runs**
 
@@ -1303,7 +1305,7 @@ Indexes: `(status, scheduled_release)`, `unique (cutoff_at) where status <> 'can
 | negative_offset | bigint |
 | idempotency_key | text unique? |
 
-Indexes: `(seller_id, requested_on desc)`, `(run_id, status)`, `(status)`
+Indexes: `(seller_id, requested_on desc)`, `(run_id, status)`, `(status, paid_at)`, `(retry_of)`
 
 **statements**: Issued statements are immutable; later corrections appear on the next statement
 
