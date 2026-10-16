@@ -6,7 +6,7 @@ import type { AdCampaign, AdCampaignSummary, ApprovalStep, Audience, CampaignMet
 import type * as common from '../../../spec/common.js';
 import { advertiserRef, allowedActions, budgetLabel, budgetOf, deliveryLabel, isPaid, pagesLabel, pct, periodLabel, shortDate, STEP_SCOPE } from '../domain/rules.js';
 import type { CampaignRec, CreativeRec, ItemRec, PlacementRec, StatTotals, StepRec } from '../ports.js';
-import { decodeActor, notFound, Part } from './core.js';
+import { decodeActor, groupBy, notFound, Part } from './core.js';
 
 /** A campaign row with its placement, promoted items and creatives */
 export interface Model {
@@ -54,6 +54,8 @@ export class ViewsPart extends Part {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
     const [items, creatives] = await Promise.all([this.repo.find('campaign_items', { campaign_id: ids }), this.repo.find('campaign_creatives', { campaign_id: ids })]);
+    const itemsOf = groupBy(items, (i) => i.campaign_id);
+    const creativesOf = groupBy(creatives, (c) => c.campaign_id);
     const out: Model[] = [];
     for (const row of rows) {
       const placement = await this.core.placementById(row.placement_id);
@@ -61,8 +63,8 @@ export class ViewsPart extends Part {
       out.push({
         row,
         placement,
-        items: items.filter((i) => i.campaign_id === row.id),
-        creatives: creatives.filter((c) => c.campaign_id === row.id).map((c) => ({ creative_id: c.creative_id, device: c.device })),
+        items: itemsOf.get(row.id) ?? [],
+        creatives: (creativesOf.get(row.id) ?? []).map((c) => ({ creative_id: c.creative_id, device: c.device })),
         pages: (row.pages ?? []) as string[],
         categoryIds: (row.page_category_ids ?? []) as string[],
         audience: row.audience as unknown as Audience,

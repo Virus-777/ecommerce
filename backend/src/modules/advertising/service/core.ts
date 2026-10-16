@@ -65,6 +65,17 @@ export const SYSTEM_BY: By = { actor: SYSTEM };
 export const invalid = (issues: { path: string; message: string }[], message = 'Some details need fixing') => new AppError('VALIDATION_FAILED', message, { issues });
 export const notFound = (what: string) => new AppError('NOT_FOUND', `${what} not found`);
 
+/** Rows grouped by a key, in their order (Map.groupBy, which the ES2023 lib of this project does not have yet) */
+export function groupBy<T, K>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
+  const out = new Map<K, T[]>();
+  for (const r of rows) {
+    const list = out.get(key(r));
+    if (list) list.push(r);
+    else out.set(key(r), [r]);
+  }
+  return out;
+}
+
 /** Actors in text columns: kind:id */
 export const encodeActor = (a: common.Actor | null | undefined): string => (a ? (a.id ? `${a.kind}:${a.id}` : a.kind) : 'system');
 export function decodeActor(s: string | null | undefined): common.Actor | null {
@@ -98,6 +109,8 @@ export interface OfferInfo {
 }
 
 const CACHE_MS = 15_000;
+/** Most offers or products kept in the one-minute caches; a full cache starts over */
+const CACHE_ENTRIES = 5_000;
 
 export class Core {
   readonly repo: AdvertisingRepository;
@@ -323,6 +336,8 @@ export class Core {
     if (hit && t - hit.at < 60_000) return hit.p;
     const p = await this.optional('catalog', (c) => c.getProduct(productId));
     const info = p ? { id: p.id, title: p.title, image: p.images?.[0] ?? null, categoryId: p.categoryId ?? null, brandId: p.brand?.id ?? null, brandName: p.brand?.name ?? null } : null;
+    // every viewed product page can land here: keep the cache bounded
+    if (this.#products.size >= CACHE_ENTRIES) this.#products.clear();
     this.#products.set(productId, { at: t, p: info });
     return info;
   }
@@ -346,20 +361,26 @@ export class Core {
       return true;
     });
     if (!missing.length) return out;
-    const found = await this.optional('offers', (o) => Promise.all(missing.map((id) => o.getOffer(id))));
+    const found = await this.optional('offers', (o) => o.getOffers(missing));
     if (!found) return out.size ? out : undefined;
-    const offers = found.filter((x): x is NonNullable<typeof x> => Boolean(x));
-    const stock = (await this.optional('inventory', (i) => i.getAvailability(offers.map((o) => o.stockItemId)))) ?? {};
-    const minStock = await this.num('minPromotedStock', 10);
-    const sellerNames = await this.sellerNames(offers.map((o) => o.sellerId));
+    const offers = Object.values(found).filter((x): x is NonNullable<typeof x> => Boolean(x));
+    const byId = new Map(offers.map((o) => [o.id, o]));
+    const [stock, minStock, sellerNames] = await Promise.all([
+      this.optional('inventory', (i) => i.getAvailability(offers.map((o) => o.stockItemId))).then((s) => s ?? {}),
+      this.num('minPromotedStock', 10),
+      this.sellerNames(offers.map((o) => o.sellerId)),
+    ]);
+    const productIds = [...new Set(offers.map((o) => o.productId))];
+    const products = new Map(await Promise.all(productIds.map(async (id) => [id, await this.product(id)] as const)));
+    if (this.#offers.size >= CACHE_ENTRIES) this.#offers.clear();
     for (const id of missing) {
-      const o = offers.find((x) => x.id === id);
+      const o = byId.get(id);
       if (!o) {
         out.set(id, null);
         this.#offers.set(id, { at: t, info: null });
         continue;
       }
-      const p = await this.product(o.productId);
+      const p = products.get(o.productId);
       const available = stock[o.stockItemId]?.available ?? null;
       const reason = o.status !== 'active' ? `Offer is ${o.status.replace(/_/g, ' ')}` : available !== null && available < 1 ? 'Out of stock' : available !== null && available < minStock ? `Only ${available} in stock (at least ${minStock} needed)` : null;
       const info: OfferInfo = {

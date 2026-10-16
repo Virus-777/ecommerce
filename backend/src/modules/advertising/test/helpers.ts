@@ -139,6 +139,7 @@ export async function boot(): Promise<Kit> {
     apiStubs: {
       offers: {
         getOffer: async (id: string) => (offers.has(id) ? toOffer(offers.get(id)!) : null),
+        getOffers: async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, offers.has(id) ? toOffer(offers.get(id)!) : null])),
         getOwnOffer: async (sellerId: string, id: string) => (offers.get(id)?.sellerId === sellerId ? toOffer(offers.get(id)!) : null),
         listOffersAdmin: async (f: any) => {
           const items = [...offers.values()].filter((o) => (!f.sellerId || o.sellerId === f.sellerId) && (!f.status?.length || f.status.includes(o.status))).map(toOffer);

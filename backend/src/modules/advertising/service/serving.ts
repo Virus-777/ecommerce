@@ -92,14 +92,19 @@ export class ServingPart extends Part {
     const refs = mediaIds.length ? await this.core.optionalMedia((api) => api.refs(mediaIds, 'large')) : [];
     const media = new Map((refs ?? []).map((r) => [r.id, r]));
     const [totals, sellers] = await Promise.all([this.repo.totals(ids), this.core.sellerNames(models.map((m) => m.row.seller_id))]);
-    const promos = new Map<string, { name: string; code: string | null } | null>();
-    for (const id of new Set(models.map((m) => m.row.linked_promotion_id).filter((x): x is string => Boolean(x)))) {
-      const p = await this.core.optional('promotions', (api) => api.getPublicCampaign(id));
-      promos.set(id, p ? { name: p.name, code: p.code ?? null } : null);
-    }
+    const promoIds = [...new Set(models.map((m) => m.row.linked_promotion_id).filter((x): x is string => Boolean(x)))];
+    const promos = new Map(
+      await Promise.all(
+        promoIds.map(async (id) => {
+          const p = await this.core.optional('promotions', (api) => api.getPublicCampaign(id));
+          return [id, p ? { name: p.name, code: p.code ?? null } : null] as const;
+        }),
+      ),
+    );
     return models.map((m) => {
       const r = m.row;
-      const own = creatives.filter((c) => m.creatives.some((x) => x.creative_id === c.id) && (!o.approvedOnly || c.status === 'approved') && (c.kind !== 'video' || m.placement.key === 'video'));
+      const mine = new Set(m.creatives.map((x) => x.creative_id));
+      const own = creatives.filter((c) => mine.has(c.id) && (!o.approvedOnly || c.status === 'approved') && (c.kind !== 'video' || m.placement.key === 'video'));
       const sellerName = r.seller_id ? (sellers.get(r.seller_id) ?? null) : null;
       return {
         m,
@@ -267,8 +272,9 @@ export class ServingPart extends Part {
     if (!list.length) return [];
     const ids = list.map((e) => e.m.row.id);
     const rows = await this.repo.frequencyRows(v.keys, ids);
-    const needToday = list.filter((e) => e.m.cap?.perDay && e.m.cap?.perWindow).map((e) => e.m.row.id);
-    const needTotal = list.filter((e) => e.m.cap?.perCampaign).map((e) => e.m.row.id);
+    const needToday = new Set(list.filter((e) => e.m.cap?.perDay && e.m.cap?.perWindow).map((e) => e.m.row.id));
+    const needTotal = new Set(list.filter((e) => e.m.cap?.perCampaign).map((e) => e.m.row.id));
+    const rowsOf = new Map<string, typeof rows>();
     // counters on frequency_state (one row per key; the keys count the same displays, so the largest counts).
     // Rows from before display_day was kept that displayed today count today's displays from ad_events, once.
     const day = this.core.today(now);
@@ -277,18 +283,20 @@ export class ServingPart extends Part {
     const total = new Map<string, number>();
     const legacyToday: string[] = [];
     for (const r of rows) {
-      if (needToday.includes(r.campaign_id)) {
+      if (rowsOf.has(r.campaign_id)) rowsOf.get(r.campaign_id)!.push(r);
+      else rowsOf.set(r.campaign_id, [r]);
+      if (needToday.has(r.campaign_id)) {
         if (r.display_day === day) today.set(r.campaign_id, Math.max(today.get(r.campaign_id) ?? 0, r.day_displays ?? 0));
         else if (r.display_day == null && r.last_display_at && r.last_display_at.getTime() >= dayStart.getTime()) legacyToday.push(r.campaign_id);
       }
-      if (needTotal.includes(r.campaign_id)) total.set(r.campaign_id, Math.max(total.get(r.campaign_id) ?? 0, r.total_displays ?? 0));
+      if (needTotal.has(r.campaign_id)) total.set(r.campaign_id, Math.max(total.get(r.campaign_id) ?? 0, r.total_displays ?? 0));
     }
     if (legacyToday.length) for (const [id, n] of await this.repo.displayCounts(v.keys, legacyToday, dayStart)) today.set(id, Math.max(today.get(id) ?? 0, n));
     const rules = await this.core.rules();
     let out = list.filter((e) => {
       if (e.m.row.delivery_cap !== null && e.displays >= e.m.row.delivery_cap) return false;
       const block = frequencyBlock(
-        rows.filter((r) => r.campaign_id === e.m.row.id),
+        rowsOf.get(e.m.row.id) ?? [],
         e.m.cap ?? { label: '' },
         rules.dismissStopsForSession && e.m.dismissal.mode === 'not_dismissible' ? { ...e.m.dismissal, mode: 'session' } : e.m.dismissal,
         v.sessionId,
@@ -298,13 +306,14 @@ export class ServingPart extends Part {
       return !block;
     });
     // paid campaigns: fresh spend against the daily and total limits
-    const paid = out.filter((e) => e.m.row.billing !== 'none' && e.m.row.seller_id);
-    if (paid.length) {
-      const fresh = new Map((await this.repo.getMany('campaigns', paid.map((e) => e.m.row.id))).map((c) => [c.id, c]));
-      const spend = await this.repo.spendOn(paid.map((e) => e.m.row.id), this.core.today(now));
+    const paid = new Set(out.filter((e) => e.m.row.billing !== 'none' && e.m.row.seller_id));
+    if (paid.size) {
+      const paidIds = [...paid].map((e) => e.m.row.id);
+      const [freshRows, spend] = await Promise.all([this.repo.getMany('campaigns', paidIds), this.repo.spendOn(paidIds, this.core.today(now))]);
+      const fresh = new Map(freshRows.map((c) => [c.id, c]));
       out = out.filter((e) => {
         const c = fresh.get(e.m.row.id);
-        if (!c || !paid.includes(e)) return true;
+        if (!c || !paid.has(e)) return true;
         if (c.status !== 'live') return false;
         const unit = c.billing === 'cpc' ? (c.rate ?? 0) : 0;
         if (c.total_limit !== null && (c.spent + unit > c.total_limit || c.spent >= c.total_limit)) return false;
