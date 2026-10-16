@@ -41,6 +41,11 @@ const TEAM: { key: keyof World['staff']; first: string; last: string; roles: str
   { key: 'finance', first: 'Fay', last: 'Foster', roles: ['finance_manager'] },
   // prepares payout runs that the Finance Manager approves (nobody approves their own run)
   { key: 'financeStaff', first: 'Felix', last: 'Jensen', roles: ['finance_staff'] },
+  // store content (content flow): the Business Owner role holds no content permissions, so a Content Manager writes
+  // the policies, help articles, homepage and About page, and a second one reviews them (no author approves their
+  // own work); policies then go to a Business Owner for the final approval
+  { key: 'content', first: 'Nadia', last: 'Park', roles: ['content_manager'] },
+  { key: 'contentReviewer', first: 'Leo', last: 'Walsh', roles: ['content_manager'] },
 ];
 
 /** The owner file: the two Business Owners, and whether each has accepted their invitation yet */

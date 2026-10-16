@@ -82,7 +82,7 @@ export interface OrderWorld {
 export interface World {
   owner?: Staff;
   deputy?: Staff;
-  staff: Partial<Record<'seller' | 'catalog' | 'orders' | 'finance' | 'financeStaff' | 'support' | 'marketing' | 'marketingReviewer' | 'operations' | 'trust', Staff>>;
+  staff: Partial<Record<'seller' | 'catalog' | 'orders' | 'finance' | 'financeStaff' | 'support' | 'marketing' | 'marketingReviewer' | 'operations' | 'trust' | 'content' | 'contentReviewer', Staff>>;
   categories: Map<string, string>;
   brands: Map<string, string>;
   sellers: SellerWorld[];

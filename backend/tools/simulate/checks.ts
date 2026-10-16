@@ -9,6 +9,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import type { MongoStore } from '../../src/kernel/mongo/index.js';
+import { STORE_POLICY_KEYS } from './content-data.js';
 import type { Sim } from './sim.js';
 
 type Db = MongoStore['db'];
@@ -290,6 +291,21 @@ export async function runChecks(db: Db, sim: Sim): Promise<CheckResult[]> {
       }
     }
     return problems.length ? problems : columns ? null : 'no reference columns found in the spec';
+  });
+
+  /* ---------------------------------------------------------------- store content */
+
+  await check(`every policy the store links to has a version in force (${STORE_POLICY_KEYS.join(', ')})`, async () => {
+    // in force: published (current, or scheduled and past its date, or superseded later) with an effective date
+    // that has passed; the same rule as content's inForce, which GET /api/store/content/policies/{key} answers with
+    const now = new Date();
+    const policies = await all('content.policies', { key: { $in: STORE_POLICY_KEYS } });
+    const versions = await all('content.policy_versions', { policy_id: { $in: policies.map((p) => p._id) }, state: { $in: ['current', 'scheduled', 'superseded'] }, effective_at: { $lte: now } });
+    const missing = STORE_POLICY_KEYS.filter((key) => {
+      const p = policies.find((x) => x.key === key);
+      return !p || !versions.some((v) => v.policy_id === p._id);
+    });
+    return missing.length ? `no version in force for: ${missing.join(', ')} (the store's sign-up and policy pages fail)` : null;
   });
 
   /* ---------------------------------------------------------------- audit and events */

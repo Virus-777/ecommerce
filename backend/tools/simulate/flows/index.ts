@@ -6,6 +6,7 @@ import type { Sim } from '../sim.js';
 import { adminReadsFlow, screensFlow } from './admin.js';
 import { cancellationFlow, messagesFlow, returnFlow, reviewFlow, supportFlow, trustFlow } from './aftersales.js';
 import { catalogFlow, officialStoreFlow, searchFlow } from './catalog.js';
+import { contentFlow } from './content.js';
 import { fulfilmentFlow } from './fulfilment.js';
 import { financeFlow, paymentsFlow } from './money.js';
 import { sellersFlow } from './sellers.js';
@@ -24,6 +25,9 @@ export const FLOWS: FlowDef[] = [
   { name: '3a catalog', needs: ['2 sellers'], run: catalogFlow },
   { name: '3b official store', needs: ['1 staff'], run: officialStoreFlow },
   { name: '3c search', needs: ['3a catalog'], run: searchFlow },
+  // store content (policies, navigation, help, About, homepage): the Content Managers hired in 1, the homepage
+  // built from the categories, sellers and products of 2 and 3a
+  { name: '3d store content', needs: ['1 staff', '2 sellers', '3a catalog'], run: contentFlow },
   { name: '4a promotion', needs: ['1 staff'], run: promotionFlow },
   { name: '4b customers', needs: ['3a catalog'], run: customersFlow },
   { name: '5 fulfilment', needs: ['4b customers'], run: fulfilmentFlow },
