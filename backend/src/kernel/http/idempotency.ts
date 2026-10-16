@@ -41,10 +41,9 @@ export function mongoIdempotencyStore(store: MongoStore, clock: Clock = systemCl
   return {
     async begin(scope, key, requestHash) {
       const _id = idOf(scope, key);
-      const r = await keys.updateOne({ _id }, { $setOnInsert: { scope, key, request_hash: requestHash, status: 'in_progress', created_at: clock.now() } }, { upsert: true });
-      if (r.upsertedCount) return null;
-      const row = (await keys.findOne({ _id }).lean()) as KeyDoc | null;
-      if (!row) return this.begin(scope, key, requestHash);
+      // one round trip: the key's document as it was before (null: this request created it and runs)
+      const row = (await keys.findOneAndUpdate({ _id }, { $setOnInsert: { scope, key, request_hash: requestHash, status: 'in_progress', created_at: clock.now() } }, { upsert: true, new: false, lean: true })) as KeyDoc | null;
+      if (!row) return null;
       if (clock.now().getTime() - row.created_at.getTime() > TTL_MS) {
         await keys.deleteOne({ _id, created_at: row.created_at });
         return this.begin(scope, key, requestHash);
