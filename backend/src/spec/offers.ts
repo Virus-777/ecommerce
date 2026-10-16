@@ -3917,10 +3917,26 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "offers_variant_id_status_price_amount_b11e29",
+          "key": {
+            "variant_id": 1,
+            "status": 1,
+            "price_amount": 1
+          }
+        },
+        {
           "name": "offers_seller_id_status__id_be35e0",
           "key": {
             "seller_id": 1,
             "status": 1,
+            "_id": 1
+          }
+        },
+        {
+          "name": "offers_seller_id_updated_at__id_17ac35",
+          "key": {
+            "seller_id": 1,
+            "updated_at": 1,
             "_id": 1
           }
         },
@@ -4935,10 +4951,11 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
-          "name": "bulk_update_rows_job_id_result_f72243",
+          "name": "bulk_update_rows_job_id_result_row_no_3d30e0",
           "key": {
             "job_id": 1,
-            "result": 1
+            "result": 1,
+            "row_no": 1
           }
         }
       ],

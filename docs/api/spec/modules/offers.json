@@ -1243,7 +1243,9 @@
         "unique nulls not distinct (owner_type, seller_id, variant_id) where condition = 'new' and status <> 'removed'",
         "unique (stock_item_id) where status <> 'removed'",
         "(product_id, variant_id, status)",
+        "(variant_id, status, price_amount)",
         "(seller_id, status, id)",
+        "(seller_id, updated_at, id)",
         "(status, id)",
         "(stock_item_id)",
         "(shipping_profile_id, status)",
@@ -1409,7 +1411,7 @@
       },
       "indexes": [
         "pk (job_id, row_no)",
-        "(job_id, result)"
+        "(job_id, result, row_no)"
       ]
     }
   ],

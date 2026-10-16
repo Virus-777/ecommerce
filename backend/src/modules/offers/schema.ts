@@ -64,7 +64,9 @@ offers.index({"owner_type":1,"seller_id":1,"seller_sku":1}, {"name":"offers_owne
 offers.index({"owner_type":1,"seller_id":1,"variant_id":1}, {"name":"offers_owner_type_seller_id_variant_id_107cf9","unique":true,"partialFilterExpression":{"condition":"new","status":{"$in":["draft","active","paused","out_of_stock","ineligible"]}}});
 offers.index({"stock_item_id":1}, {"name":"offers_stock_item_id_428230","unique":true,"partialFilterExpression":{"status":{"$in":["draft","active","paused","out_of_stock","ineligible"]}}});
 offers.index({"product_id":1,"variant_id":1,"status":1}, {"name":"offers_product_id_variant_id_status_43e526"});
+offers.index({"variant_id":1,"status":1,"price_amount":1}, {"name":"offers_variant_id_status_price_amount_b11e29"});
 offers.index({"seller_id":1,"status":1,"_id":1}, {"name":"offers_seller_id_status__id_be35e0"});
+offers.index({"seller_id":1,"updated_at":1,"_id":1}, {"name":"offers_seller_id_updated_at__id_17ac35"});
 offers.index({"status":1,"_id":1}, {"name":"offers_status__id_1ab776"});
 offers.index({"stock_item_id":1}, {"name":"offers_stock_item_id_597367"});
 offers.index({"shipping_profile_id":1,"status":1}, {"name":"offers_shipping_profile_id_status_e4b547"});
@@ -242,7 +244,7 @@ const bulk_update_rows = new Schema(
   collectionOptions("offers.bulk_update_rows", { generatedId: true }),
 );
 bulk_update_rows.index({"job_id":1,"row_no":1}, {"name":"bulk_update_rows_job_id_row_no_a435ac","unique":true});
-bulk_update_rows.index({"job_id":1,"result":1}, {"name":"bulk_update_rows_job_id_result_f72243"});
+bulk_update_rows.index({"job_id":1,"result":1,"row_no":1}, {"name":"bulk_update_rows_job_id_result_row_no_3d30e0"});
 
 /** Table name → schema */
 export const schemas = {

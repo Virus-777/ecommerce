@@ -945,7 +945,7 @@ Nothing changes until apply. Only rows marked ready are applied; error rows are 
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `unique nulls not distinct (owner_type, seller_id, seller_sku)`, `unique nulls not distinct (owner_type, seller_id, variant_id) where condition = 'new' and status <> 'removed'`, `unique (stock_item_id) where status <> 'removed'`, `(product_id, variant_id, status)`, `(seller_id, status, id)`, `(status, id)`, `(stock_item_id)`, `(shipping_profile_id, status)`, `gin(title gin_trgm_ops)`
+Indexes: `unique nulls not distinct (owner_type, seller_id, seller_sku)`, `unique nulls not distinct (owner_type, seller_id, variant_id) where condition = 'new' and status <> 'removed'`, `unique (stock_item_id) where status <> 'removed'`, `(product_id, variant_id, status)`, `(variant_id, status, price_amount)`, `(seller_id, status, id)`, `(seller_id, updated_at, id)`, `(status, id)`, `(stock_item_id)`, `(shipping_profile_id, status)`, `gin(title gin_trgm_ops)`
 
 **offer_price_history**: Every price in force and when; basis for 'lowest price in the last 30 days' was-price checks
 
@@ -1087,7 +1087,7 @@ Indexes: `(seller_id, uploaded_at)`, `(state, expires_at)`
 | error_code | text? |
 | error_message | text? |
 
-Indexes: `pk (job_id, row_no)`, `(job_id, result)`
+Indexes: `pk (job_id, row_no)`, `(job_id, result, row_no)`
 
 ## Events
 
