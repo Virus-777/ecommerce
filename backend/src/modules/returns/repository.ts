@@ -28,6 +28,20 @@ const REFUND_CHILDREN = ['items', 'order_item_ids', 'history'];
 /** The json columns of a table (Mixed paths of its generated schema) */
 const jsonColumns = (schema: Schema) => new Set(Object.entries(schema.paths).filter(([, p]) => p.instance === 'Mixed').map(([k]) => k));
 
+/** Rows per key, in their order */
+function groupBy<T, K>(rows: readonly T[], key: (r: T) => K): Map<K, T[]> {
+  const out = new Map<K, T[]>();
+  for (const r of rows) {
+    const list = out.get(key(r));
+    if (list) list.push(r);
+    else out.set(key(r), [r]);
+  }
+  return out;
+}
+
+/** What queue figures need of a refund request (no items or history) */
+export type RefundFacts = Pick<RefundRec, 'owner_type' | 'return_id' | 'total'>;
+
 /**
  * returns.policy_versions, category_exceptions, seller_terms, returns, return_items, return_shipments,
  * inspection_drafts, return_evidence, inspections, refund_requests (with refund_request_items and
@@ -39,7 +53,11 @@ export class ReturnsRepository {
   readonly #returns: Table<ReturnRec>;
   readonly #json = new Map<string, Set<string>>();
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(
+    private readonly store: ModuleStore,
+    /** Bound to a transaction: its session takes one operation at a time, so reads never run together */
+    readonly inTransaction = false,
+  ) {
     this.#items = store.table<ItemRow>('refund_request_items');
     this.#events = store.table<EventRow>('refund_request_events');
     this.#returns = this.#t('returns');
@@ -52,7 +70,15 @@ export class ReturnsRepository {
 
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: ReturnsRepository) => Promise<T>): Promise<T> {
-    return this.store.transaction((tx) => fn(new ReturnsRepository(tx)));
+    return this.store.transaction((tx) => fn(new ReturnsRepository(tx, true)));
+  }
+
+  /** Independent reads: together outside a transaction, one after another inside one */
+  async reads<T extends unknown[]>(...fns: { [K in keyof T]: () => Promise<T[K]> }): Promise<T> {
+    if (!this.inTransaction) return (await Promise.all(fns.map((f) => f()))) as T;
+    const out: unknown[] = [];
+    for (const f of fns) out.push(await f());
+    return out as T;
   }
 
   /* ---------------------------------------------------------------- generic table access */
@@ -143,6 +169,11 @@ export class ReturnsRepository {
     return { ...p, items: await this.#hydrate(p.items as unknown as Row[]) };
   }
 
+  /** Owner, return and total of up to limit refund requests in these statuses (queue figures: no items or history read) */
+  refundFacts(statuses: readonly string[], limit: number): Promise<RefundFacts[]> {
+    return this.#t('refund_requests').aggregate<RefundFacts>([{ $match: { status: { $in: [...statuses] } } }, { $limit: limit }, { $project: { _id: 0, owner_type: 1, return_id: 1, total: 1 } }]);
+  }
+
   /** Units per order item in returns that are not cancelled or rejected */
   async usedQuantities(orderItemIds: string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();
@@ -202,14 +233,20 @@ export class ReturnsRepository {
   async #hydrate(rows: Row[]): Promise<RefundRec[]> {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id as string);
-    // one after the other: this may run in a transaction
-    const its = await this.#items.find({ refund_request_id: { $in: ids } }, { sort: { refund_request_id: 1, position: 1 } });
-    const evs = await this.#events.find({ refund_request_id: { $in: ids } }, { sort: { at: 1, id: 1 } });
+    const [its, evs] = await this.reads(
+      () => this.#items.find({ refund_request_id: { $in: ids } }, { sort: { refund_request_id: 1, position: 1 } }),
+      () => this.#events.find({ refund_request_id: { $in: ids } }, { sort: { at: 1, id: 1 } }),
+    );
+    const itemsOf = groupBy(its, (i) => i.refund_request_id);
+    const eventsOf = groupBy(evs, (e) => e.refund_request_id);
     return rows.map((r) => {
-      const mine: RefundItem[] = its.filter((i) => i.refund_request_id === r.id).map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity, amount: Number(i.amount) }));
-      const history: common.TimelineEvent[] = evs
-        .filter((e) => e.refund_request_id === r.id)
-        .map((e) => ({ at: new Date(e.at).toISOString(), label: e.label, detail: e.detail, actor: e.actor_kind ? ({ kind: e.actor_kind, id: e.actor_id, ...(e.actor_name ? { name: e.actor_name } : {}) } as common.Actor) : null }));
+      const mine: RefundItem[] = (itemsOf.get(r.id as string) ?? []).map((i) => ({ orderItemId: i.order_item_id, quantity: i.quantity, amount: Number(i.amount) }));
+      const history: common.TimelineEvent[] = (eventsOf.get(r.id as string) ?? []).map((e) => ({
+        at: new Date(e.at).toISOString(),
+        label: e.label,
+        detail: e.detail,
+        actor: e.actor_kind ? ({ kind: e.actor_kind, id: e.actor_id, ...(e.actor_name ? { name: e.actor_name } : {}) } as common.Actor) : null,
+      }));
       return { ...r, items: mine, order_item_ids: mine.map((i) => i.orderItemId), history } as unknown as RefundRec;
     });
   }

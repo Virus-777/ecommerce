@@ -163,20 +163,22 @@ export class Reads {
     const now = this.core.now();
     const repo = this.core.repo;
     const base: ReturnFilter = { sellerId, ownerType: 'seller' };
-    const awaiting = await repo.find('returns', { seller_id: sellerId, status: 'requested', platform_handling: false }, { orderBy: [['response_due_at', 'asc']] });
-    const overdue = awaiting.filter((r) => r.response_due_at && r.response_due_at.getTime() < now.getTime());
-    // Fulfilled by Marketly returns are inspected by Marketly, not the seller
-    const received = await repo.find('returns', { seller_id: sellerId, status: 'received', fulfilled_by: { op: '<>', value: 'marketly_service' } });
-    const receivedAggs = await this.core.loadMany(received.map((r) => r.id));
-    const receivedTimes = [...receivedAggs.values()].map((a) => this.core.receivedAt(a)).filter((d): d is Date => !!d);
-    const disputes = await repo.listReturns({ ...base, disputed: true, statuses: OPEN_STATUSES }, { mode: 'cursor', cursor: null, limit: 100 });
-    const withEvidence = disputes.items.length ? new Set((await repo.find('return_evidence', { return_id: disputes.items.map((r) => r.id), party: 'seller' })).map((e) => e.return_id)) : new Set<string>();
-    const [requests, toInspect, disputesTab, closed] = await Promise.all([
+    const [awaiting, received, disputes, requests, toInspect, disputesTab, closed] = await Promise.all([
+      repo.find('returns', { seller_id: sellerId, status: 'requested', platform_handling: false }, { orderBy: [['response_due_at', 'asc']] }),
+      // Fulfilled by Marketly returns are inspected by Marketly, not the seller
+      repo.find('returns', { seller_id: sellerId, status: 'received', fulfilled_by: { op: '<>', value: 'marketly_service' } }),
+      repo.listReturns({ ...base, disputed: true, statuses: OPEN_STATUSES }, { mode: 'cursor', cursor: null, limit: 100 }),
       repo.countReturns(this.sellerFilter(sellerId, { tab: 'requests' })),
       repo.countReturns(this.sellerFilter(sellerId, { tab: 'to_inspect' })),
       repo.countReturns(this.sellerFilter(sellerId, { tab: 'disputes' })),
       repo.countReturns(this.sellerFilter(sellerId, { tab: 'closed' })),
     ]);
+    const overdue = awaiting.filter((r) => r.response_due_at && r.response_due_at.getTime() < now.getTime());
+    const [receivedAggs, withEvidence] = await Promise.all([
+      this.core.loadMany(received.map((r) => r.id)),
+      disputes.items.length ? repo.find('return_evidence', { return_id: disputes.items.map((r) => r.id), party: 'seller' }).then((rows) => new Set(rows.map((e) => e.return_id))) : new Set<string>(),
+    ]);
+    const receivedTimes = [...receivedAggs.values()].map((a) => this.core.receivedAt(a)).filter((d): d is Date => !!d);
     return {
       responseOverdue: overdue.length,
       overdueRef: overdue[0]?.ref ?? null,
@@ -273,14 +275,9 @@ export class Reads {
       tab('inspecting'),
       tab('refund_pending'),
     ]);
-    const pending = await repo.find('refund_requests', { status: PENDING_REFUND }, { limit: 5000 });
-    const recipients = await this.core.soft('access', 'queue owner', (a) => a.resolveRecipients('returns_manager'));
-    const names = async (ids: (string | null | undefined)[]) => {
-      const out: (string | null)[] = [];
-      for (const id of ids) out.push(id ? ((await this.core.soft('access', 'staff ref', (a) => a.getStaffRef(id)))?.name ?? null) : null);
-      return out;
-    };
-    const [lead, backup] = await names([recipients?.leadAccountId, recipients?.viaBackup ? recipients.accountIds[0] : null]);
+    const [pending, recipients] = await Promise.all([repo.refundFacts(PENDING_REFUND, 5000), this.core.soft('access', 'queue owner', (a) => a.resolveRecipients('returns_manager'))]);
+    const nameOf = async (id: string | null | undefined) => (id ? ((await this.core.soft('access', 'staff ref', (a) => a.getStaffRef(id)))?.name ?? null) : null);
+    const [lead, backup] = await Promise.all([nameOf(recipients?.leadAccountId), nameOf(recipients?.viaBackup ? recipients.accountIds[0] : null)]);
     return {
       open,
       openOfficial,
@@ -317,21 +314,25 @@ export class Reads {
   async inspectionStats(): Promise<InspectionQueueStats> {
     const repo = this.core.repo;
     const now = this.core.now();
-    // oldest first (the list pages newest first)
-    const received = (await repo.listReturns(this.inspectionFilter('received'), { mode: 'cursor', cursor: null, limit: 500 })).items.sort((a, b) => a.requested_at.getTime() - b.requested_at.getTime());
-    const aggs = await this.core.loadMany(received.map((r) => r.id));
-    const overdue = [...aggs.values()].filter((a) => (this.views.inspectBy(a)?.getTime() ?? Infinity) < now.getTime());
-    const arriving = await repo.countReturns(this.inspectionFilter('arriving'));
     const weekAgo = new Date(now.getTime() - 7 * DAY);
-    const decided = (await repo.find('inspections', { inspected_at: { op: '>=', value: weekAgo } })).map((i) => i.return_id);
-    const decidedOfficial = decided.length ? await repo.countReturns({ marketlyDock: true, ids: [...new Set(decided)] }) : 0;
-    // refunds of dock returns with Finance: the Official Store's, and the seller-funded ones of Fulfilled by Marketly returns
-    const pendingRefunds = await repo.find('refund_requests', { status: ['requested', 'under_review'] }, { limit: 5000 });
-    const serviceReturns = new Set(
-      pendingRefunds.some((r) => r.owner_type === 'seller' && r.return_id)
-        ? (await repo.find('returns', { id: [...new Set(pendingRefunds.filter((r) => r.owner_type === 'seller' && r.return_id).map((r) => r.return_id!))], fulfilled_by: 'marketly_service' })).map((r) => r.id)
-        : [],
-    );
+    const [receivedPage, arriving, inspected, pendingRefunds] = await Promise.all([
+      repo.listReturns(this.inspectionFilter('received'), { mode: 'cursor', cursor: null, limit: 500 }),
+      repo.countReturns(this.inspectionFilter('arriving')),
+      repo.find('inspections', { inspected_at: { op: '>=', value: weekAgo } }),
+      // refunds of dock returns with Finance: the Official Store's, and the seller-funded ones of Fulfilled by Marketly returns
+      repo.refundFacts(['requested', 'under_review'], 5000),
+    ]);
+    // oldest first (the list pages newest first)
+    const received = receivedPage.items.sort((a, b) => a.requested_at.getTime() - b.requested_at.getTime());
+    const decided = [...new Set(inspected.map((i) => i.return_id))];
+    const sellerReturnIds = [...new Set(pendingRefunds.filter((r) => r.owner_type === 'seller' && r.return_id).map((r) => r.return_id!))];
+    const [aggs, decidedOfficial, serviceRows] = await Promise.all([
+      this.core.loadMany(received.map((r) => r.id)),
+      decided.length ? repo.countReturns({ marketlyDock: true, ids: decided }) : 0,
+      sellerReturnIds.length ? repo.find('returns', { id: sellerReturnIds, fulfilled_by: 'marketly_service' }) : [],
+    ]);
+    const overdue = [...aggs.values()].filter((a) => (this.views.inspectBy(a)?.getTime() ?? Infinity) < now.getTime());
+    const serviceReturns = new Set(serviceRows.map((r) => r.id));
     const withFinance = pendingRefunds.filter((r) => r.owner_type === 'official' || (r.return_id && serviceReturns.has(r.return_id)));
     return {
       waiting: received.length,
@@ -428,10 +429,11 @@ export class Reads {
     const orders = this.core.ctx.use('orders');
     const infos = (await Promise.all(ids.map((id) => this.core.quiet('order item', () => orders.getOrderItem(id))))).filter((x): x is NonNullable<typeof x> => !!x);
     const facts = new Map<string, ItemFactsInput>();
-    for (const orderId of [...new Set(infos.map((i) => i.orderId))]) {
-      const order = await this.core.quiet('order', () => orders.getOrder(orderId));
+    const wanted = new Set(ids);
+    const orderList = await Promise.all([...new Set(infos.map((i) => i.orderId))].map((orderId) => this.core.quiet('order', () => orders.getOrder(orderId))));
+    for (const order of orderList) {
       for (const i of order?.groups.flatMap((g) => g.items) ?? []) {
-        if (ids.includes(i.id)) facts.set(i.id, { orderItemId: i.id, state: i.state, quantity: i.quantity, deliveredAt: i.deliveredAt ?? null, returnWindowEndsAt: i.returnWindowEndsAt ?? null, windowDays: i.returnTerms.windowDays });
+        if (wanted.has(i.id)) facts.set(i.id, { orderItemId: i.id, state: i.state, quantity: i.quantity, deliveredAt: i.deliveredAt ?? null, returnWindowEndsAt: i.returnWindowEndsAt ?? null, windowDays: i.returnTerms.windowDays });
       }
     }
     // the order could not be read: the item's own facts (window from delivery to its return-by)
@@ -440,10 +442,10 @@ export class Reads {
       const days = i.deliveredAt && i.returnWindowEndsAt ? Math.max(0, Math.round((new Date(i.returnWindowEndsAt).getTime() - new Date(i.deliveredAt).getTime()) / DAY)) : 0;
       facts.set(i.id, { orderItemId: i.id, state: i.state, quantity: i.quantity, deliveredAt: i.deliveredAt ?? null, returnWindowEndsAt: i.returnWindowEndsAt ?? null, windowDays: days });
     }
-    const known = await this.eligibilityFromFacts([...facts.values()]);
+    const known = new Map((await this.eligibilityFromFacts([...facts.values()])).map((k) => [k.orderItemId, k]));
     return orderItemIds.map(
       (id) =>
-        known.find((k) => k.orderItemId === id) ?? { orderItemId: id, eligible: false, ineligibleReason: null, message: 'Open the order to see return options', quantityPurchased: 0, quantityReturnable: 0, returnBy: null, latestReturn: null },
+        known.get(id) ?? { orderItemId: id, eligible: false, ineligibleReason: null, message: 'Open the order to see return options', quantityPurchased: 0, quantityReturnable: 0, returnBy: null, latestReturn: null },
     );
   }
 
@@ -453,13 +455,9 @@ export class Reads {
     const rows = await this.core.repo.find('returns', { order_id: orderId }, { orderBy: [['requested_at', 'desc']] });
     const aggs = await this.core.loadMany(rows.map((r) => r.id));
     const v: Visibility = viewer.area === 'admin' ? { area: 'admin' } : viewer.area === 'seller' ? { area: 'seller', sellerId: viewer.sellerId ?? '' } : { area: 'store', customerId: viewer.customerId ?? null, guestSessionId: viewer.guestSessionId ?? null };
-    const out: ReturnCase[] = [];
-    for (const r of rows) {
-      const agg = aggs.get(r.id)!;
-      if (!(await this.core.canSee(r, v))) continue;
-      out.push(viewer.area === 'store' ? await this.storeCase(agg) : await this.views.returnCase(agg, viewer.area));
-    }
-    return out;
+    const seen = await Promise.all(rows.map((r) => this.core.canSee(r, v)));
+    const visible = rows.filter((_, n) => seen[n]).map((r) => aggs.get(r.id)!);
+    return Promise.all(visible.map((agg) => (viewer.area === 'store' ? this.storeCase(agg) : this.views.returnCase(agg, viewer.area))));
   }
 
   /** The customer's view in the ReturnCase shape: the detail only, seller and staff fields left empty */

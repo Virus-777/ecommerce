@@ -133,9 +133,9 @@ export class Policies {
 
   async sellerReturnTermsFor(sellerIds: string[]): Promise<Record<string, EffectiveTerms>> {
     const baseline = await this.core.baseline();
-    const out: Record<string, EffectiveTerms> = {};
-    for (const id of [...new Set(sellerIds)]) out[id] = await this.resolveTerms(id, null, null, { baseline });
-    return out;
+    const ids = [...new Set(sellerIds)];
+    const terms = await Promise.all(ids.map((id) => this.resolveTerms(id, null, null, { baseline })));
+    return Object.fromEntries(ids.map((id, n) => [id, terms[n]!]));
   }
 
   /* ---------------------------------------------------------------- views */
