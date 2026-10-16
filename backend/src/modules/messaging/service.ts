@@ -27,7 +27,7 @@ import type * as orders from '../../spec/orders.js';
 import { buyerName, DAY, groupSellerId, HOUR, isOfficialConversation, itemSummary, marketplaceSellerId, MINUTE, OFFICIAL_STORE_ID, OFFICIAL_STORE_NAME, promotionalPhrase, replyRounds, responseTimeLabel, SUPPORT_LABEL, SUPPORT_TEAM_ID } from './domain/rules.js';
 import { conversationMachine, messageReportMachine, sellerReplyMachine } from './domain/state-machines.js';
 import type { ConversationKey, ConversationRec, MessageRec, ParticipantRec, ReplyStatsRec, ReportRec, TemplateRec } from './ports.js';
-import { Core, guestKey, invalid, meOf, notFound, SYSTEM, type Author, type By, type Cfg, type MessagingServiceDeps, type Prepared, type Viewer } from './service/core.js';
+import { Core, groupBy, guestKey, invalid, meOf, notFound, SYSTEM, type Author, type By, type Cfg, type MessagingServiceDeps, type Prepared, type Viewer } from './service/core.js';
 
 export type { MessagingServiceDeps, Viewer, By };
 
@@ -73,14 +73,19 @@ export class MessagingService implements MessagingPublicApi {
   async views(v: Viewer, rows: readonly ConversationRec[], o: { live?: boolean } = {}): Promise<ConversationView[]> {
     if (!rows.length) return [];
     const [bundles, cards, replyStats] = await Promise.all([this.core.bundles(rows), this.core.cards(rows), this.replyStatsOf(rows, !!o.live)]);
-    const out: ConversationView[] = [];
-    for (const b of bundles) {
-      const live = o.live ? await this.core.live(v, b.conv) : undefined;
-      const may = o.live && v.kind === 'customer' ? (await this.core.customerMayWrite(v, b.conv)).allowed : undefined;
-      const x = { cards, replyStats, ...(live ? { subject: live.subject, dispatchWarning: live.dispatchWarning } : {}), ...(may === undefined ? {} : { mayWrite: may }) };
-      out.push({ conversation: this.core.conversationOf(v, b, x), summary: this.core.summaryOf(v, b, x) });
-    }
-    return out;
+    return Promise.all(
+      bundles.map(async (b): Promise<ConversationView> => {
+        const [live, may] = o.live ? await Promise.all([this.core.live(v, b.conv), v.kind === 'customer' ? this.core.customerMayWrite(v, b.conv).then((m) => m.allowed) : undefined]) : [undefined, undefined];
+        const x = { cards, replyStats, ...(live ? { subject: live.subject, dispatchWarning: live.dispatchWarning } : {}), ...(may === undefined ? {} : { mayWrite: may }) };
+        return { conversation: this.core.conversationOf(v, b, x), summary: this.core.summaryOf(v, b, x) };
+      }),
+    );
+  }
+
+  /** The conversations among rows the viewer takes part in, in their order (checked together) */
+  private async visibleOf(v: Viewer, rows: readonly ConversationRec[]): Promise<ConversationRec[]> {
+    const seen = await Promise.all(rows.map((c) => this.core.visible(v, c)));
+    return rows.filter((_, n) => seen[n]);
   }
 
   private async one(v: Viewer, c: ConversationRec, live = true): Promise<Conversation> {
@@ -342,30 +347,31 @@ export class MessagingService implements MessagingPublicApi {
 
   /** GET store /unread-count */
   async unreadCounts(v: Viewer): Promise<{ conversations: number; messages: number }> {
-    const rows = await this.unreadRows(v);
+    const { rows } = await this.unreadRows(v);
     return { conversations: rows.length, messages: rows.reduce((n, r) => n + r.unread_count, 0) };
   }
 
-  private async unreadRows(v: Viewer): Promise<ParticipantRec[]> {
+  /** The viewer's participant rows with unread messages, and their conversations (the ones the viewer still reaches) */
+  private async unreadRows(v: Viewer): Promise<{ rows: ParticipantRec[]; convs: ConversationRec[] }> {
     const me = meOf(v);
     let rows: ParticipantRec[];
     if (v.kind === 'customer' && !v.customerId) {
       // a guest: the guest participant of the orders whose conversations this session started (and legacy session rows)
-      if (!v.guestSessionId) return [];
+      if (!v.guestSessionId) return { rows: [], convs: [] };
       const orders = [...new Set((await this.repo.find('conversations', { guest_session_id: v.guestSessionId })).map((c) => c.order_id).filter((x): x is string => !!x))];
-      rows = [
-        ...(orders.length ? await this.repo.find('participants', { kind: 'guest', participant_id: orders.map(guestKey), unread_count: { op: '>', value: 0 } }) : []),
-        ...(await this.repo.find('participants', { kind: 'customer', participant_id: v.guestSessionId, unread_count: { op: '>', value: 0 } })),
-      ];
+      const [guestRows, sessionRows] = await Promise.all([
+        orders.length ? this.repo.find('participants', { kind: 'guest', participant_id: orders.map(guestKey), unread_count: { op: '>', value: 0 } }) : [],
+        this.repo.find('participants', { kind: 'customer', participant_id: v.guestSessionId, unread_count: { op: '>', value: 0 } }),
+      ]);
+      rows = [...guestRows, ...sessionRows];
     } else {
       rows = await this.repo.find('participants', { kind: me.kind, participant_id: [me.id], unread_count: { op: '>', value: 0 } });
     }
-    if (!rows.length) return [];
+    if (!rows.length) return { rows: [], convs: [] };
     // only conversations the viewer still reaches (a seller's staff conversations, a customer's own threads)
-    const convs = await this.repo.getMany('conversations', rows.map((r) => r.conversation_id));
-    const ok = new Set<string>();
-    for (const c of convs) if (await this.core.visible(v, c)) ok.add(c.id);
-    return rows.filter((r) => ok.has(r.conversation_id));
+    const convs = await this.visibleOf(v, await this.repo.getMany('conversations', rows.map((r) => r.conversation_id)));
+    const ok = new Set(convs.map((c) => c.id));
+    return { rows: rows.filter((r) => ok.has(r.conversation_id)), convs };
   }
 
   /** POST /messages/{id}/report (store and seller) */
@@ -911,9 +917,7 @@ export class MessagingService implements MessagingPublicApi {
 
   async viewsForOrder(v: Viewer, orderId: string): Promise<ConversationView[]> {
     const rows = await this.repo.find('conversations', { order_id: orderId }, { orderBy: [['last_message_at', 'desc']] });
-    const visible: ConversationRec[] = [];
-    for (const c of rows) if (await this.core.visible(v, c)) visible.push(c);
-    return this.views(v, visible);
+    return this.views(v, await this.visibleOf(v, rows));
   }
 
   /** The conversation linked to a return, case or item, batched (Return.conversation) */
@@ -928,8 +932,8 @@ export class MessagingService implements MessagingPublicApi {
     const rows = await this.repo.find('conversations', { [col]: subject.id } as never, { orderBy: [['last_message_at', 'desc']] });
     // customer-seller threads first, then support and staff threads
     rows.sort((a, b) => (a.kind === 'order' ? 0 : 1) - (b.kind === 'order' ? 0 : 1));
-    for (const c of rows) if (await this.core.visible(v, c)) return (await this.views(v, [c]))[0]!;
-    return null;
+    const [first] = await this.visibleOf(v, rows);
+    return first ? (await this.views(v, [first]))[0]! : null;
   }
 
   /** Unread counts and who wrote, for the account overview tile and header badge */
@@ -939,9 +943,8 @@ export class MessagingService implements MessagingPublicApi {
   }
 
   async unreadSummaryFor(v: Viewer): Promise<{ conversations: number; messages: number; fromNames: string[] }> {
-    const rows = await this.unreadRows(v);
+    const { rows, convs } = await this.unreadRows(v);
     if (!rows.length) return { conversations: 0, messages: 0, fromNames: [] };
-    const convs = await this.repo.getMany('conversations', rows.map((r) => r.conversation_id));
     convs.sort((a, b) => b.last_message_at.getTime() - a.last_message_at.getTime());
     const views = await this.views(v, convs);
     return { conversations: rows.length, messages: rows.reduce((n, r) => n + r.unread_count, 0), fromNames: [...new Set(views.map((x) => x.summary.counterparty.name))] };
@@ -976,8 +979,10 @@ export class MessagingService implements MessagingPublicApi {
     if (!ids.length) return out;
     const convs = await this.repo.find('conversations', { customer_id: ids }, { orderBy: [['last_message_at', 'desc']] });
     const [parts, reports] = await Promise.all([this.repo.participantsOf(convs.filter((c) => c.seller_id).map((c) => c.id)), this.repo.reportCounts(convs.map((c) => c.id))]);
+    const byCustomer = groupBy(convs, (c) => c.customer_id);
+    const sellerNameOf = new Map(parts.filter((p) => p.kind === 'seller').reverse().map((p) => [p.conversation_id, p.name]));
     for (const id of ids) {
-      const mine = convs.filter((c) => c.customer_id === id);
+      const mine = byCustomer.get(id) ?? [];
       const counterparties = new Map<string, { kind: 'seller' | 'official_store'; sellerId: string | null; name: string; conversationCount: number; lastMessageAt: string }>();
       for (const c of mine) {
         if (c.kind !== 'order') continue;
@@ -988,7 +993,7 @@ export class MessagingService implements MessagingPublicApi {
           cur.conversationCount += 1;
           continue;
         }
-        const name = sellerId ? (parts.find((p) => p.conversation_id === c.id && p.kind === 'seller')?.name ?? 'Seller') : OFFICIAL_STORE_NAME;
+        const name = sellerId ? (sellerNameOf.get(c.id) ?? 'Seller') : OFFICIAL_STORE_NAME;
         counterparties.set(k, { kind: sellerId ? 'seller' : 'official_store', sellerId, name, conversationCount: 1, lastMessageAt: c.last_message_at.toISOString() });
       }
       out[id] = {

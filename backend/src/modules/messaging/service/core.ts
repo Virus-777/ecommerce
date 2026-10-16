@@ -266,7 +266,9 @@ export class Core {
   async bundles(rows: readonly ConversationRec[], perConversation = 20): Promise<Bundle[]> {
     const ids = rows.map((r) => r.id);
     const [parts, recent] = await Promise.all([this.repo.participantsOf(ids), this.repo.recentMessages(ids, perConversation)]);
-    return rows.map((conv) => ({ conv, participants: parts.filter((p) => p.conversation_id === conv.id), recent: recent.filter((m) => m.conversation_id === conv.id) }));
+    const partsOf = groupBy(parts, (p) => p.conversation_id);
+    const recentOf = groupBy(recent, (m) => m.conversation_id);
+    return rows.map((conv) => ({ conv, participants: partsOf.get(conv.id) ?? [], recent: recentOf.get(conv.id) ?? [] }));
   }
 
   /** Storefront cards (name, logo, verified, location) of the sellers in these conversations */
@@ -762,6 +764,17 @@ export class Core {
       return m;
     });
   }
+}
+
+/** Rows per key, in their order */
+export function groupBy<T, K>(rows: readonly T[], key: (r: T) => K): Map<K, T[]> {
+  const out = new Map<K, T[]>();
+  for (const r of rows) {
+    const list = out.get(key(r));
+    if (list) list.push(r);
+    else out.set(key(r), [r]);
+  }
+  return out;
 }
 
 function sameOwner(a: media.MediaOwner, b: media.MediaOwner): boolean {
