@@ -57,7 +57,7 @@ export interface GraphQLContext {
   permissions: Map<string, Promise<boolean>>;
   /** Whether the caller holds a permission, as `can` in REST handlers (dev-token permissions included), memoized per request */
   can(permission: string): Promise<boolean>;
-  /** The signed-in customer's customer id (own-customer record scope), null for anyone else */
+  /** The signed-in customer's customer id (own-customer record scope), null for anyone else; memoized per request */
   customerId(): Promise<string | null>;
   /** Epoch ms after which fields still resolving answer QUERY_TIMEOUT */
   deadline?: number;
@@ -359,6 +359,7 @@ export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOpti
         errorFormatter: errorFormatter(production) as never,
         context: (request: FastifyRequest): GraphQLContext => {
           const permissions = new Map<string, Promise<boolean>>();
+          let customerId: Promise<string | null> | undefined;
           return {
             area,
             principal: request.auth?.principal ?? null,
@@ -370,7 +371,8 @@ export async function registerGraphQL(app: FastifyInstance, o: GraphQLKernelOpti
               if (!permissions.has(permission)) permissions.set(permission, o.auth.can(request.auth, permission));
               return permissions.get(permission)!;
             },
-            customerId: () => o.auth.customerIdOf(request.auth?.principal),
+            // asked by many fields of one query (each order, each address …): looked up once per request
+            customerId: () => (customerId ??= o.auth.customerIdOf(request.auth?.principal)),
             deadline: Date.now() + limits.timeoutMs,
           };
         },
