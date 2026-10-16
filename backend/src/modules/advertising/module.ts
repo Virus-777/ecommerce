@@ -26,6 +26,8 @@ export default defineModule({
     ctx.http.routes(storeRoutes(service), sellerRoutes(service), adminRoutes(service));
     ctx.graphql.resolvers(resolvers(service));
     ctx.afterBoot(() => service.reports.registerDataset());
+    // the Advertising rules section of the settings page (G76)
+    ctx.afterBoot(() => service.registerSettingsSection());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("promotions.campaign.ended", (e) => service.onCampaignEndedFromPromotions(e.payload));

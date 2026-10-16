@@ -14,6 +14,7 @@ import { ReportsPart } from './service/reports.js';
 import { SellerPart } from './service/sellers.js';
 import { ServingPart } from './service/serving.js';
 import { SetupPart } from './service/setup.js';
+import { registerAdvertisingSettingsSection } from './service/settings-section.js';
 import { ViewsPart } from './service/views.js';
 
 export type { AdvertisingServiceDeps };
@@ -52,6 +53,11 @@ export class AdvertisingService implements AdvertisingPublicApi {
   async seed(): Promise<void> {
     for (const row of placementSeedRows()) await this.core.repo.insertIfAbsent('placements', row);
     await this.core.repo.insertIfAbsent('global_rules', rulesSeedRow());
+  }
+
+  /** After boot: the Advertising rules section of the settings page (G76) */
+  registerSettingsSection(): Promise<void> {
+    return registerAdvertisingSettingsSection(this.core.ctx.tryUse('settings'), this.core, this.setup);
   }
 
   /* ---------------- public API (in-process) */
