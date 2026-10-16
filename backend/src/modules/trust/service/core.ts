@@ -141,18 +141,19 @@ export class Core {
 
   /** Staff references (name and role label from access) */
   async staffRefs(ids: (string | null | undefined)[]): Promise<Map<string, StaffRef>> {
-    const out = new Map<string, StaffRef>();
     const access = this.ctx.use('access');
-    for (const id of [...new Set(ids.filter((x): x is string => !!x && isUuid(x)))]) {
-      let ref: Awaited<ReturnType<typeof access.getStaffRef>> = null;
-      try {
-        ref = await access.getStaffRef(id);
-      } catch (err) {
-        if (!isAppError(err)) this.ctx.log.warn({ err, id }, 'trust: staff reference failed');
-      }
-      out.set(id, { staffId: id, name: ref?.name ?? 'Staff member', role: ref?.roleLabel ?? null });
-    }
-    return out;
+    const unique = [...new Set(ids.filter((x): x is string => !!x && isUuid(x)))];
+    const refs = await Promise.all(
+      unique.map(async (id) => {
+        try {
+          return await access.getStaffRef(id);
+        } catch (err) {
+          if (!isAppError(err)) this.ctx.log.warn({ err, id }, 'trust: staff reference failed');
+          return null;
+        }
+      }),
+    );
+    return new Map(unique.map((id, n): [string, StaffRef] => [id, { staffId: id, name: refs[n]?.name ?? 'Staff member', role: refs[n]?.roleLabel ?? null }]));
   }
 
   /** Media references (empty when media is off) */
@@ -185,16 +186,17 @@ export class Core {
     const ids = [...new Set(reportIds)].filter(isUuid);
     const out = new Map<string, Agg>();
     if (!ids.length) return out;
-    // one read after another: inside a transaction (write) the session runs one operation at a time
-    const reports = await repo.find('reports', { id: ids });
-    const subjects = await repo.find('report_subjects', { report_id: ids });
-    const evidence = await repo.find('evidence', { report_id: ids }, { orderBy: [['added_at', 'asc'], ['id', 'asc']] });
-    const requests = await repo.find('evidence_requests', { report_id: ids }, { orderBy: [['due_at', 'asc'], ['id', 'asc']] });
-    const recs = await repo.find('recommendations', { report_id: ids }, { orderBy: [['id', 'asc']] });
-    const enfs = await repo.find('enforcements', { report_id: ids }, { orderBy: [['recorded_at', 'asc'], ['id', 'asc']] });
-    const notes = await repo.find('report_notes', { report_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
-    const events = await repo.find('report_events', { report_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
-    const merged = await repo.find('reports', { merged_into_id: ids });
+    const [reports, subjects, evidence, requests, recs, enfs, notes, events, merged] = await repo.reads(
+      () => repo.find('reports', { id: ids }),
+      () => repo.find('report_subjects', { report_id: ids }),
+      () => repo.find('evidence', { report_id: ids }, { orderBy: [['added_at', 'asc'], ['id', 'asc']] }),
+      () => repo.find('evidence_requests', { report_id: ids }, { orderBy: [['due_at', 'asc'], ['id', 'asc']] }),
+      () => repo.find('recommendations', { report_id: ids }, { orderBy: [['id', 'asc']] }),
+      () => repo.find('enforcements', { report_id: ids }, { orderBy: [['recorded_at', 'asc'], ['id', 'asc']] }),
+      () => repo.find('report_notes', { report_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
+      () => repo.find('report_events', { report_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
+      () => repo.find('reports', { merged_into_id: ids }),
+    );
     for (const r of reports) out.set(r.id, { report: r, subjects: [], evidence: [], requests: [], recommendations: [], enforcements: [], notes: [], events: [], mergedIds: [] });
     for (const x of subjects) out.get(x.report_id)?.subjects.push(x);
     for (const x of evidence) out.get(x.report_id)?.evidence.push(x);
