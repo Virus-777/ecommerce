@@ -3,11 +3,12 @@ import { Link } from 'react-router';
 import { call, useApi, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, type MoneyValue } from '@marketly/web-shared/lib/format';
+import { formatMoney, type MoneyValue, isoInText } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Badge, Button, Card, Deadline, Icon, Legend, LineChart, Meter, Stat, StatusLegend, TableWrap, type Tone } from '@marketly/web-shared/ui';
+import { Badge, Button, Card, Deadline, Icon, Meter, StatusLegend, TableWrap, type Tone } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { helpLinkTo } from './data/help-articles';
+import { PeriodPerformance } from './data/period-dashboard';
 import { dateTime, deadlineLabel, deadlineTone, LoadError, longDate, screenHref, shortDate, SkeletonLines, time, weekdayDate, date } from './data/home';
 
 // Design: pages/seller/seller-dashboard.html (no views).
@@ -90,7 +91,6 @@ function meterPct(m: Metric): number {
   return Math.max(0, Math.min(100, Math.round((m.value / threshold) * 100)));
 }
 
-const kfmt = (v: number) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${Math.round(v)}`);
 
 /** Work-queue tile; the shared QueueTile only announces "(urgent)", the design also marks amber tiles "(at risk)". */
 function Tile({ t }: { t: WorkTile }) {
@@ -193,11 +193,6 @@ export default function Dashboard() {
   const sales = (d?.sales ?? null) as Sales | null;
   const perf = (d?.performance ?? null) as Performance | null;
   const metrics = PERF_KEYS.map((k) => perf?.metrics.find((m) => m.key === k)).filter((m): m is Metric => !!m);
-  const series = sales?.series.find((s) => s.key === 'sales') ?? sales?.series[0];
-  const points = series?.points ?? [];
-  const values = points.map((p) => p.y / 100);
-  const hasSales = values.some((v) => v > 0);
-  const days = points.length || 14;
   const news = [
     ...((d?.announcements ?? []) as Announcement[]).map((a) => ({ key: `a-${a.title}`, icon: 'file-text' as const, title: a.title, tag: a.kind ? a.kind.charAt(0).toUpperCase() + a.kind.slice(1) : undefined, body: a.body ?? '', when: a.effectiveFrom ? `Effective ${date(a.effectiveFrom)}` : undefined, link: announcementLink(a), strong: !!a.effectiveFrom })),
     ...((changes.data?.items ?? []) as UpcomingChange[]).map((c) => ({
@@ -319,43 +314,7 @@ export default function Dashboard() {
               ]}
             />
           </Card>
-          <Card
-            title="Sales"
-            titleAs="h3"
-            sub={`Last ${days} days · ${sales?.basis ?? 'item sales before fees, by order date'}`}
-            actions={
-              <Link className="small strong" to={href('seller/reports')}>
-                Open report
-              </Link>
-            }
-          >
-            {!d ? (
-              <SkeletonLines rows={4} />
-            ) : !sales ? (
-              <p className="small sub">Sales figures aren’t available right now.</p>
-            ) : (
-              <>
-                <div className="row gap-6">
-                  <Stat
-                    label={`${days}-day sales`}
-                    value={formatMoney(sales.gross)}
-                    delta={sales.deltaPct !== null ? `${Math.abs(sales.deltaPct).toFixed(1)}%` : undefined}
-                    dir={sales.deltaPct !== null ? (sales.deltaPct < 0 ? 'down' : 'up') : undefined}
-                    good={sales.deltaPct !== null ? sales.deltaPct >= 0 : undefined}
-                    note={sales.deltaPct !== null ? `vs prior ${days} days` : 'No earlier period to compare'}
-                  />
-                  <Stat label="Orders" value={String(sales.orders)} note={sales.averageOrder ? `avg ${formatMoney(sales.averageOrder)}` : undefined} />
-                  <Stat label="Today so far" value={formatMoney(sales.today)} note={`${sales.todayOrders} order${sales.todayOrders === 1 ? '' : 's'}`} />
-                </div>
-                <Legend items={[`${storeName} sales`]} />
-                {hasSales ? (
-                  <LineChart labels={points.map((p) => p.label)} series={[{ name: 'Sales', data: values }]} fmt={kfmt} area label={`Daily sales for ${storeName}, last ${days} days`} />
-                ) : (
-                  <p className="small sub">No sales in the last {days} days yet.</p>
-                )}
-              </>
-            )}
-          </Card>
+          <PeriodPerformance today={sales ? { gross: sales.today, orders: sales.todayOrders } : undefined} />
         </div>
         <div className="stack gap-5">
           <PayoutsCard />
@@ -423,7 +382,7 @@ export default function Dashboard() {
                       ) : (
                         <span className="small strong">{n.title}</span>
                       )}
-                      {n.body && <span className="xs sub">{n.body}</span>}
+                      {n.body && <span className="xs sub">{isoInText(n.body)}</span>}
                       <span className={n.strong ? 'xs strong' : 'xs muted'}>
                         {n.when}
                         {n.link && (
@@ -449,6 +408,7 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
+      <PeriodPerformance part="details" />
     </SellerLayout>
   );
 }

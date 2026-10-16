@@ -104,6 +104,8 @@ export function useElementWidth<T extends HTMLElement>(): [RefObject<T | null>, 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Read it now too: ResizeObserver reports on the next rendered frame, which never comes in a hidden tab.
+    setWidth(Math.round(el.getBoundingClientRect().width));
     const ro = new ResizeObserver(([e]) => setWidth(Math.round(e.contentRect.width)));
     ro.observe(el);
     return () => ro.disconnect();
