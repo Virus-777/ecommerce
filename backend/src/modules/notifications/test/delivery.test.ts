@@ -72,6 +72,21 @@ describe('sensitive messages', () => {
     expect(mail!.message.subject).toBe('You already have a Marketly account');
     expect(mail!.message.text).not.toContain('123456');
   });
+
+  it('sends a resent code for the same request, but not the same code twice', async () => {
+    const email = `resend-${newId().slice(0, 6)}@example.com`;
+    const challengeId = newId();
+    const issued = (code: string, ttlMs: number) => ({ challengeId, accountId: null, purpose: 'email_verification', channel: 'email', to: email, code, existingAccount: false, expiresAt: new Date(clock.now().getTime() + ttlMs).toISOString() });
+    await publish(app, 'identity.verification.code_issued', issued('111111', 600_000));
+    // Resend code: the same challenge with a new code and a later expiry
+    await publish(app, 'identity.verification.code_issued', issued('222222', 660_000));
+    // the resend event delivered a second time
+    await publish(app, 'identity.verification.code_issued', issued('222222', 660_000));
+    const texts = emailsTo(email).map((m) => m.message.text);
+    expect(texts).toHaveLength(2);
+    expect(texts.join(' ')).toContain('111111');
+    expect(texts.join(' ')).toContain('222222');
+  });
 });
 
 describe('bounces and suppressions', () => {

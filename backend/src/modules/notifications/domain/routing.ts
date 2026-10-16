@@ -210,16 +210,18 @@ export const sellerShips = (g: { ownerType?: string | null; fulfilledBy?: string
 
 export const ROUTES: Routes = {
   /* ---------------------------------------------------------------- identity */
+  // keyed by the code's expiry too: a resend issues a new code for the same challenge (new expiresAt) and must be
+  // sent, while a redelivered event (same expiresAt) is still a duplicate
   'identity.verification.code_issued': {
     sends: (p, f) => [
       p.existingAccount
-        ? { topic: 'customer.account.already_registered', to: [{ kind: 'email', email: p.to, accountId: p.accountId }], link: L('account', p.accountId ?? p.challengeId, 'auth/sign-in', 'Sign in'), dedupe: `code:${p.challengeId}` }
+        ? { topic: 'customer.account.already_registered', to: [{ kind: 'email', email: p.to, accountId: p.accountId }], link: L('account', p.accountId ?? p.challengeId, 'auth/sign-in', 'Sign in'), dedupe: `code:${p.challengeId}:${p.expiresAt}` }
         : {
             topic: 'customer.account.verification_code',
             to: [p.channel === 'sms' ? { kind: 'phone', phone: p.to, accountId: p.accountId } : { kind: 'email', email: p.to, accountId: p.accountId }],
             link: L('account', p.accountId ?? p.challengeId, CODE_SCREENS[p.purpose], 'Enter code'),
             context: { code: { value: p.code, expires: f.until(p.expiresAt) } },
-            dedupe: `code:${p.challengeId}`,
+            dedupe: `code:${p.challengeId}:${p.expiresAt}`,
           },
     ],
   },
