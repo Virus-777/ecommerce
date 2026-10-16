@@ -20,7 +20,7 @@ import type {
   RoleRef,
   StaffRef,
 } from '../../../spec/access.js';
-import { loadDirectory, type Directory } from '../directory.js';
+import { loadDirectory, loadStaffDirectory, type Directory, type StaffDirectory } from '../directory.js';
 import {
   amountText,
   bestFor,
@@ -59,6 +59,7 @@ import {
   EXPIRY_GRACE_MS,
   iso,
   uniq,
+  groupBy,
   by,
   roleRef,
   moneyOf,
@@ -96,8 +97,8 @@ export class Approvals {
     await this.core.ready();
     const act = await this.core.requireAction(action);
     const dir = await loadDirectory(this.core.repo, this.core.now());
-    const snapshot = await this.snapshotFor(act, dir, principal.accountId ?? null, this.amountOf(act, amount));
     const amt = this.amountOf(act, amount);
+    const snapshot = await this.snapshotFor(act, dir, principal.accountId ?? null, amt);
     const kind = act.limit_kind as LimitKind;
     const mode = act.second_reviewer as SecondMode;
     const label = act.label;
@@ -172,7 +173,7 @@ export class Approvals {
     await this.core.ready();
     const row = await this.core.repo.getRequest(requestId);
     if (!row) return { required: false, reason: 'Approval request not found', approvalRequestId: requestId, approvers: [] };
-    const dir = await loadDirectory(this.core.repo, this.core.now());
+    const dir = await loadStaffDirectory(this.core.repo, this.core.now());
     const [info] = await this.approvalInfos([row], dir);
     return info!;
   }
@@ -787,8 +788,9 @@ export class Approvals {
     const dir = dirIn ?? (await loadDirectory(this.core.repo, now));
     const [decisions, actions] = await Promise.all([this.core.repo.decisionsOf(rows.map((r) => r.id)), this.core.repo.listActions()]);
     const actionByKey = new Map(actions.map((a) => [a.key, a]));
+    const decisionsOf = groupBy(decisions, (d) => d.request_id);
     const prepared = rows.map((row) => {
-      const ds = decisions.filter((d) => d.request_id === row.id);
+      const ds = decisionsOf.get(row.id) ?? [];
       const snapshot = this.snapshotOf(row);
       const state = this.stateOf(row, ds);
       const open = (DECIDABLE as readonly string[]).includes(row.status);
@@ -877,12 +879,13 @@ export class Approvals {
     return { dueAt: iso(due), state: open && left < 0 ? 'overdue' : open && left <= DUE_SOON_MS ? 'due_soon' : 'on_time' };
   }
 
-  async approvalInfos(rows: RequestRow[], dir: Directory): Promise<common.ApprovalInfo[]> {
+  async approvalInfos(rows: RequestRow[], dir: StaffDirectory): Promise<common.ApprovalInfo[]> {
     const decisions = await this.core.repo.decisionsOf(rows.map((r) => r.id));
     const ids = uniq(decisions.filter((d) => d.decision === 'approved' || d.decision === 'rejected').map((d) => d.by_account_id));
     const refs = await this.core.staffRefs(ids, dir);
+    const decisionsOf = groupBy(decisions, (d) => d.request_id);
     return rows.map((row) => {
-      const ds = decisions.filter((d) => d.request_id === row.id);
+      const ds = decisionsOf.get(row.id) ?? [];
       const snapshot = this.snapshotOf(row);
       const state = this.stateOf(row, ds);
       const names = (decision: string) => ds.filter((d) => d.decision === decision).map((d) => refs.get(d.by_account_id)?.name ?? 'Staff member');

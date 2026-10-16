@@ -27,6 +27,7 @@ import {
   type BootstrapOwnerResult,
   DECIDABLE,
   BATCH,
+  groupBy,
   iso,
   by,
 } from './service/core.js';
@@ -222,8 +223,8 @@ export class AccessService implements AccessPublicApi {
       await this.core.repo.upsertCoverage({ ...c, lead_account_id: c.lead_account_id === accountId ? null : c.lead_account_id, backup_account_ids: backups.filter((b) => b !== accountId), updated_by: 'system', updated_at: this.core.now() });
       touched.push(c.role_id);
     }
-    const nominated = await this.core.repo.findRequests({ statuses: OPEN_REQUEST });
-    for (const r of nominated.filter((x) => x.nominated_reviewer_id === accountId)) await this.core.repo.updateRequest(r.id, { nominated_reviewer_id: null });
+    const nominated = await this.core.repo.findRequests({ statuses: OPEN_REQUEST, nominatedReviewerId: accountId });
+    for (const r of nominated) await this.core.repo.updateRequest(r.id, { nominated_reviewer_id: null });
     await this.away.publishCoverageFor(touched);
     if (open.length || touched.length) {
       await this.core.audit(
@@ -291,7 +292,7 @@ export class AccessService implements AccessPublicApi {
     const open = await this.core.repo.findRequests({ statuses: DECIDABLE }, { order: 'created_asc', limit: 1000 });
     if (!open.length) return;
     const dir = await loadDirectory(this.core.repo, now);
-    const decisions = await this.core.repo.decisionsOf(open.map((r) => r.id));
+    const decisions = groupBy(await this.core.repo.decisionsOf(open.map((r) => r.id)), (d) => d.request_id);
     for (const r of open) {
       const last = r.last_reminded_at?.getTime() ?? 0;
       let overdue = false;
@@ -302,7 +303,7 @@ export class AccessService implements AccessPublicApi {
         if (now.getTime() < due - before || last >= windowStart) continue;
       } else if (now.getTime() - r.created_at.getTime() < after || now.getTime() - last < after) continue;
       const snapshot = this.approvals.snapshotOf(r);
-      const state = this.approvals.stateOf(r, decisions.filter((d) => d.request_id === r.id));
+      const state = this.approvals.stateOf(r, decisions.get(r.id) ?? []);
       const to = new Set(this.approvals.eligiblePeople(snapshot, state, dir, null));
       if (overdue) {
         for (const key of stepRoleKeys(snapshot, state)) {
@@ -318,9 +319,7 @@ export class AccessService implements AccessPublicApi {
   /** Job access.expire-assignments (hourly): Expire role assignments past expiresAt (temporary access) */
   async expireAssignments(): Promise<void> {
     await this.core.ready();
-    const now = this.core.now();
-    const active = await this.core.repo.listAssignments({ statuses: ['active'] });
-    for (const a of active.filter((x) => x.expires_at && x.expires_at <= now)) {
+    for (const a of await this.core.repo.expiredAssignments(this.core.now())) {
       const after = await this.members.endAssignment(a.id, 'expire', SYSTEM_ACTOR, 'Temporary access ended');
       await this.core.audit(
         { action: 'access.role.expire', actionLabel: 'Temporary role ended', target: { type: 'staff', id: a.account_id }, relatedTargets: [{ type: 'role', id: a.role_id }], before: { status: a.status, expiresAt: iso(a.expires_at!) }, after: { status: after.status } },

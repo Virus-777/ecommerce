@@ -31,6 +31,7 @@ const requestFilter = (f: RequestFilter): Filter => ({
   ...(f.targetIds ? { target_id: oneOf(f.targetIds) } : {}),
   ...(f.sellerIds ? { seller_id: oneOf(f.sellerIds) } : {}),
   ...(f.requestedById ? { requested_by_id: f.requestedById } : {}),
+  ...(f.nominatedReviewerId ? { nominated_reviewer_id: f.nominatedReviewerId } : {}),
   ...(f.dueBefore || f.expiresBefore
     ? { $and: [...(f.dueBefore ? [{ due_at: { $lt: f.dueBefore } }] : []), ...(f.expiresBefore ? [{ expires_at: { $lte: f.expiresBefore } }] : [])] }
     : {}),
@@ -137,6 +138,10 @@ export class AccessRepository {
     return this.#t.roles.get(id, opts);
   }
 
+  getRoles(ids: string[]): Promise<RoleRow[]> {
+    return this.#t.roles.getMany(ids);
+  }
+
   getRoleByKey(key: string): Promise<RoleRow | undefined> {
     return this.#t.roles.findOne({ key });
   }
@@ -203,6 +208,11 @@ export class AccessRepository {
       },
       { sort: { granted_at: 1, id: 1 } },
     );
+  }
+
+  /** Active assignments whose expiresAt has passed (temporary access to end) */
+  expiredAssignments(at: Date): Promise<AssignmentRow[]> {
+    return this.#t.assignments.find({ status: 'active', expires_at: { $lte: at } }, { sort: { granted_at: 1, id: 1 } });
   }
 
   getAssignment(id: string, opts?: { forUpdate?: boolean }): Promise<AssignmentRow | undefined> {

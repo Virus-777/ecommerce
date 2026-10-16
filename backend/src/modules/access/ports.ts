@@ -27,6 +27,7 @@ export interface RequestFilter {
   targetIds?: string[];
   sellerIds?: string[];
   requestedById?: string;
+  nominatedReviewerId?: string;
   /** due_at before this instant */
   dueBefore?: Date;
   expiresBefore?: Date;

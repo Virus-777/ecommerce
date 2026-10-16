@@ -17,7 +17,7 @@ import type {
   RecipientResolution,
   RoleCoverage,
 } from '../../../spec/access.js';
-import { loadDirectory, type Directory } from '../directory.js';
+import { loadDirectory, loadStaffDirectory, type Directory, type StaffDirectory } from '../directory.js';
 import type { Issue } from '../domain/limits.js';
 import { awayPeriodMachine } from '../domain/state-machines.js';
 import type { AwayRow, RoleRow } from '../ports.js';
@@ -39,10 +39,10 @@ export class AwayPeriods {
   /** Who receives a role's work and notices right now: lead, or the covering backup while the lead is away (the lead keeps a copy) */
   async resolveRecipients(roleKey: string): Promise<RecipientResolution> {
     await this.core.ready();
-    const dir = await loadDirectory(this.core.repo, this.core.now());
+    const dir = await loadStaffDirectory(this.core.repo, this.core.now());
     const role = dir.roleByKey.get(roleKey);
     if (!role) return { roleKey, leadAccountId: null, accountIds: [], ccAccountIds: [], viaBackup: false, escalationRoleKey: null };
-    const unavailable = await this.unavailableAccounts(this.routingCandidates(role.id, dir), dir);
+    const unavailable = await this.unavailableAccounts(this.routingCandidates(role.id, dir));
     const r = this.route(role, dir, unavailable);
     return {
       roleKey,
@@ -57,7 +57,7 @@ export class AwayPeriods {
   /** Leads, backups and who receives each role's work today (GET /coverage without gaps), for the admin dashboard */
   async coverageNow(filter: { workArea?: string }): Promise<RoleCoverage[]> {
     await this.core.ready();
-    const dir = await loadDirectory(this.core.repo, this.core.now());
+    const dir = await loadStaffDirectory(this.core.repo, this.core.now());
     return (await this.coverageOfRoles(dir)).roles.filter((r) => !filter?.workArea || r.workArea === filter.workArea);
   }
 
@@ -187,7 +187,7 @@ export class AwayPeriods {
 
   async getCoverage(): Promise<Coverage> {
     await this.core.ready();
-    return this.coverageOfRoles(await loadDirectory(this.core.repo, this.core.now()));
+    return this.coverageOfRoles(await loadStaffDirectory(this.core.repo, this.core.now()));
   }
 
   async awayViews(rows: AwayRow[], dir: Directory): Promise<AwayPeriod[]> {
@@ -213,13 +213,13 @@ export class AwayPeriods {
     }));
   }
 
-  private routingCandidates(roleId: string, dir: Directory): string[] {
+  private routingCandidates(roleId: string, dir: StaffDirectory): string[] {
     const cov = dir.coverage.get(roleId);
     return uniq([...(cov?.lead ? [cov.lead] : []), ...(cov?.backups ?? []), ...dir.membersOf(roleId), ...dir.away.flatMap((a) => a.coverage.filter((c) => c.role_id === roleId).map((c) => c.covered_by_account_id))]);
   }
 
   /** Who receives a role's work now: the lead, else (lead away or locked) the person covering the role, the first available backup, or any available member */
-  private route(role: RoleRow, dir: Directory, unavailable: Set<string>): { lead: string | null; receiving: string[]; viaBackup: boolean; leadAwayUntil: Date | null } {
+  private route(role: RoleRow, dir: StaffDirectory, unavailable: Set<string>): { lead: string | null; receiving: string[]; viaBackup: boolean; leadAwayUntil: Date | null } {
     const cov = dir.coverage.get(role.id);
     const lead = cov?.lead ?? null;
     const available = (acc: string) => !unavailable.has(acc) && !dir.awayOf(acc);
@@ -235,7 +235,7 @@ export class AwayPeriods {
     return { lead: null, receiving: backup ? [backup] : members, viaBackup: false, leadAwayUntil: null };
   }
 
-  async coverageOfRoles(dir: Directory, only?: string[]): Promise<Coverage> {
+  async coverageOfRoles(dir: StaffDirectory, only?: string[]): Promise<Coverage> {
     const roles = this.core.sortRoles(dir.roles.filter((r) => !r.archived_at && (!only || only.includes(r.id))));
     const candidates = uniq(roles.flatMap((r) => this.routingCandidates(r.id, dir)));
     const accounts = await this.core.accounts(candidates);
@@ -289,11 +289,11 @@ export class AwayPeriods {
   /** Announces who receives each role's work now (identity statuses may lag behind the event that triggered this) */
   async publishCoverageFor(roleIds: string[], forceUnavailable?: Set<string>, forceAvailable?: Set<string>) {
     if (!roleIds.length) return;
-    const dir = await loadDirectory(this.core.repo, this.core.now());
+    const dir = await loadStaffDirectory(this.core.repo, this.core.now());
     for (const roleId of uniq(roleIds)) {
       const role = dir.roleById.get(roleId);
       if (!role) continue;
-      const unavailable = await this.unavailableAccounts(this.routingCandidates(roleId, dir), dir);
+      const unavailable = await this.unavailableAccounts(this.routingCandidates(roleId, dir));
       for (const a of forceUnavailable ?? []) unavailable.add(a);
       for (const a of forceAvailable ?? []) unavailable.delete(a);
       const r = this.route(role, dir, unavailable);
@@ -309,7 +309,7 @@ export class AwayPeriods {
     );
   }
 
-  private async unavailableAccounts(ids: string[], _dir: Directory): Promise<Set<string>> {
+  private async unavailableAccounts(ids: string[]): Promise<Set<string>> {
     const accounts = await this.core.accounts(ids);
     return new Set([...accounts.values()].filter((a) => a.status === 'locked' || a.status === 'disabled' || a.status === 'closed').map((a) => a.id));
   }

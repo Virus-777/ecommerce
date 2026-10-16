@@ -19,7 +19,7 @@ import type {
   StaffMemberDetail,
   StaffRef,
 } from '../../../spec/access.js';
-import { loadDirectory, type Directory } from '../directory.js';
+import { loadDirectory, loadStaffDirectory, type Directory } from '../directory.js';
 import type { Issue } from '../domain/limits.js';
 import { BUSINESS_OWNER, PLATFORM_ADMINISTRATOR } from '../domain/seed.js';
 import { roleAssignmentMachine } from '../domain/state-machines.js';
@@ -69,14 +69,16 @@ export class Members {
   /** Active roles of a staff member (audit stores them with each entry) */
   async rolesOf(accountId: string): Promise<RoleRef[]> {
     await this.core.ready();
-    const dir = await loadDirectory(this.core.repo, this.core.now());
-    return this.core.sortRoles(dir.rolesOf(accountId)).map(roleRef);
+    // audit asks on every staff entry: the person's assignments and their roles only, not the whole directory
+    const assignments = await this.core.repo.activeAssignments(this.core.now(), { accountId });
+    const roles = await this.core.repo.getRoles(uniq(assignments.map((a) => a.role_id)));
+    return this.core.sortRoles(roles.filter((r) => !r.archived_at)).map(roleRef);
   }
 
   /** Everyone holding a role (assignment pickers in workqueues and support) */
   async membersOfRole(roleKey: string): Promise<StaffRef[]> {
     await this.core.ready();
-    const dir = await loadDirectory(this.core.repo, this.core.now());
+    const dir = await loadStaffDirectory(this.core.repo, this.core.now());
     const role = dir.roleByKey.get(roleKey);
     if (!role) return [];
     const ids = dir.membersOf(role.id);
@@ -122,8 +124,7 @@ export class Members {
   /** A staff member's display name and role label (roleLabel) for assignee, owner, reviewer and decider columns */
   async getStaffRef(staffId: string): Promise<StaffRef | null> {
     await this.core.ready();
-    const dir = await loadDirectory(this.core.repo, this.core.now());
-    const accounts = await this.core.accounts([staffId]);
+    const [dir, accounts] = await Promise.all([loadStaffDirectory(this.core.repo, this.core.now()), this.core.accounts([staffId])]);
     const known = accounts.has(staffId) || dir.rolesOf(staffId).length > 0 || (await this.core.repo.listAssignments({ accountId: staffId })).length > 0;
     if (!known) return null;
     return (await this.core.staffRefs([staffId], dir, accounts)).get(staffId) ?? null;

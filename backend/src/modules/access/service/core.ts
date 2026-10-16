@@ -11,7 +11,7 @@ import type * as audit from '../../../spec/audit.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
 import type { RoleRef, StaffMember, StaffRef } from '../../../spec/access.js';
-import type { Directory } from '../directory.js';
+import type { StaffDirectory } from '../directory.js';
 import { normalizeLimit, type Issue } from '../domain/limits.js';
 import {
   BUSINESS_OWNER,
@@ -78,6 +78,17 @@ export const BATCH = 200;
 
 export const iso = (d: Date | string) => new Date(d).toISOString();
 export const uniq = <T>(xs: Iterable<T>) => [...new Set(xs)];
+/** Items by key, in their order (Map.groupBy once the TypeScript lib is ES2024) */
+export const groupBy = <T, K>(xs: Iterable<T>, key: (x: T) => K): Map<K, T[]> => {
+  const out = new Map<K, T[]>();
+  for (const x of xs) {
+    const k = key(x);
+    const list = out.get(k);
+    if (list) list.push(x);
+    else out.set(k, [x]);
+  }
+  return out;
+};
 export const by = (actor: common.Actor) => (actor.id ? `${actor.kind}:${actor.id}` : actor.kind);
 export const actorFrom = (text: string | null | undefined): common.Actor | null => {
   if (!text) return null;
@@ -286,7 +297,7 @@ export class Core {
   }
 
   /** Approver roles in route order: the usual approvers first, the Business Owner last */
-  roleRefsOf(keys: string[], dir: Directory): RoleRef[] {
+  roleRefsOf(keys: string[], dir: StaffDirectory): RoleRef[] {
     const rank = (r: RoleRow) => (r.kind === 'owner' ? 9 : (KIND_ORDER[r.kind] ?? 5));
     return uniq(keys)
       .map((k) => dir.roleByKey.get(k))
@@ -337,7 +348,7 @@ export class Core {
     return new Map((await this.ctx.use('identity').getAccounts(want)).map((a) => [a.id, a]));
   }
 
-  async staffRefs(ids: string[], dir: Directory, known?: Accounts): Promise<Map<string, StaffRef>> {
+  async staffRefs(ids: string[], dir: StaffDirectory, known?: Accounts): Promise<Map<string, StaffRef>> {
     const want = uniq(ids.filter(Boolean));
     const accounts = known ?? (await this.accounts(want));
     const missing = want.filter((id) => !accounts.has(id));
