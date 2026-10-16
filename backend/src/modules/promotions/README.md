@@ -1074,7 +1074,7 @@ Indexes: `unique (campaign_id, kind, target_id)`, `(kind, target_id)`
 | reason | text? |
 | refreshed_at | timestamptz |
 
-Indexes: `(offer_id, campaign_id)`, `(campaign_id, seller_id)`
+Indexes: `(offer_id, campaign_id)`, `(campaign_id, seller_id)`, `(seller_id, eligible)`
 
 **funding_reviews**: Finance confirmation per submission
 
@@ -1111,7 +1111,7 @@ Indexes: `(offer_id, campaign_id)`, `(campaign_id, seller_id)`
 | reason | text? |
 | updated_at | timestamptz |
 
-Indexes: `unique (campaign_id, seller_id)`, `(seller_id, state)`
+Indexes: `unique (campaign_id, seller_id)`, `(seller_id, state)`, `(state, respond_by)`
 
 **participation_offers**
 
@@ -1179,6 +1179,8 @@ Indexes: `unique (customer_id, campaign_id)`
 | result | jsonb |
 | valid_until | timestamptz |
 
+Indexes: `(input_hash, valid_until)`, `(valid_until)`
+
 **redemptions**: Reserved then committed discounts per order
 
 | Column | Type |
@@ -1201,7 +1203,7 @@ Indexes: `unique (customer_id, campaign_id)`
 | expires_at | timestamptz? |
 | created_at | timestamptz |
 
-Indexes: `unique (reservation_id, campaign_id)`, `(campaign_id, state)`, `(customer_id, campaign_id)`, `(order_id)`
+Indexes: `unique (reservation_id, campaign_id)`, `(campaign_id, state)`, `(customer_id, campaign_id)`, `(order_id)`, `(idempotency_key, state)`, `(evaluation_id, idempotency_key)`, `(state, expires_at)`
 
 **redemption_lines**: Per order item allocation; the source for fundingSplitFor and refundShare
 
@@ -1218,7 +1220,7 @@ Indexes: `unique (reservation_id, campaign_id)`, `(campaign_id, state)`, `(custo
 | seller_part | bigint |
 | reversed | bigint |
 
-Indexes: `(order_item_id)`
+Indexes: `(order_item_id)`, `(redemption_id, line_id)`
 
 **usage_counters**: Per-customer uses and units for limits (row-locked during reservation)
 
@@ -1240,7 +1242,7 @@ Indexes: `unique (campaign_id, customer_key)`
 | created_at | timestamptz |
 | sent_at | timestamptz? |
 
-Indexes: `unique (customer_id, campaign_id)`
+Indexes: `unique (customer_id, campaign_id)`, `(campaign_id, sent_at)`
 
 **campaign_log**: Every submission, decision, status change, edit and removal with reason
 
@@ -1254,6 +1256,8 @@ Indexes: `unique (customer_id, campaign_id)`
 | actor_kind | text |
 | actor_id | text? |
 | at | timestamptz |
+
+Indexes: `(campaign_id, action)`, `(campaign_id, at)`
 
 **campaign_results_daily**: Read model rolled up from order, redemption and return events
 

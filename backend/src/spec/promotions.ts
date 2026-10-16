@@ -4400,6 +4400,13 @@ export const spec = defineModuleSpec({
             "campaign_id": 1,
             "seller_id": 1
           }
+        },
+        {
+          "name": "eligible_offers_seller_id_eligible_3f0aba",
+          "key": {
+            "seller_id": 1,
+            "eligible": 1
+          }
         }
       ],
       "unenforced": []
@@ -4664,6 +4671,13 @@ export const spec = defineModuleSpec({
           "key": {
             "seller_id": 1,
             "state": 1
+          }
+        },
+        {
+          "name": "participations_state_respond_by_6efedc",
+          "key": {
+            "state": 1,
+            "respond_by": 1
           }
         }
       ],
@@ -5099,7 +5113,21 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "evaluations_input_hash_valid_until_241d9d",
+          "key": {
+            "input_hash": 1,
+            "valid_until": 1
+          }
+        },
+        {
+          "name": "evaluations_valid_until_893844",
+          "key": {
+            "valid_until": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "redemptions": {
@@ -5279,6 +5307,27 @@ export const spec = defineModuleSpec({
           "key": {
             "order_id": 1
           }
+        },
+        {
+          "name": "redemptions_idempotency_key_state_daa49c",
+          "key": {
+            "idempotency_key": 1,
+            "state": 1
+          }
+        },
+        {
+          "name": "redemptions_evaluation_id_idempotency_key_744b64",
+          "key": {
+            "evaluation_id": 1,
+            "idempotency_key": 1
+          }
+        },
+        {
+          "name": "redemptions_state_expires_at_26fb45",
+          "key": {
+            "state": 1,
+            "expires_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -5391,6 +5440,13 @@ export const spec = defineModuleSpec({
           "name": "redemption_lines_order_item_id_219b1b",
           "key": {
             "order_item_id": 1
+          }
+        },
+        {
+          "name": "redemption_lines_redemption_id_line_id_d138a5",
+          "key": {
+            "redemption_id": 1,
+            "line_id": 1
           }
         }
       ],
@@ -5529,6 +5585,13 @@ export const spec = defineModuleSpec({
             "campaign_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "event_reminders_campaign_id_sent_at_10f24c",
+          "key": {
+            "campaign_id": 1,
+            "sent_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -5609,7 +5672,22 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "campaign_log_campaign_id_action_7696ab",
+          "key": {
+            "campaign_id": 1,
+            "action": 1
+          }
+        },
+        {
+          "name": "campaign_log_campaign_id_at_625292",
+          "key": {
+            "campaign_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "campaign_results_daily": {

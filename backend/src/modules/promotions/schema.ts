@@ -94,6 +94,7 @@ const eligible_offers = new Schema(
 );
 eligible_offers.index({"offer_id":1,"campaign_id":1}, {"name":"eligible_offers_offer_id_campaign_id_5e8d3d"});
 eligible_offers.index({"campaign_id":1,"seller_id":1}, {"name":"eligible_offers_campaign_id_seller_id_0c96f1"});
+eligible_offers.index({"seller_id":1,"eligible":1}, {"name":"eligible_offers_seller_id_eligible_3f0aba"});
 
 /** Finance confirmation per submission */
 const funding_reviews = new Schema(
@@ -139,6 +140,7 @@ const participations = new Schema(
 );
 participations.index({"campaign_id":1,"seller_id":1}, {"name":"participations_campaign_id_seller_id_bfe0f4","unique":true});
 participations.index({"seller_id":1,"state":1}, {"name":"participations_seller_id_state_e600c9"});
+participations.index({"state":1,"respond_by":1}, {"name":"participations_state_respond_by_6efedc"});
 
 const participation_offers = new Schema(
   {
@@ -221,6 +223,8 @@ const evaluations = new Schema(
   },
   collectionOptions("promotions.evaluations"),
 );
+evaluations.index({"input_hash":1,"valid_until":1}, {"name":"evaluations_input_hash_valid_until_241d9d"});
+evaluations.index({"valid_until":1}, {"name":"evaluations_valid_until_893844"});
 
 /** Reserved then committed discounts per order */
 const redemptions = new Schema(
@@ -251,6 +255,9 @@ redemptions.index({"reservation_id":1,"campaign_id":1}, {"name":"redemptions_res
 redemptions.index({"campaign_id":1,"state":1}, {"name":"redemptions_campaign_id_state_7d7059"});
 redemptions.index({"customer_id":1,"campaign_id":1}, {"name":"redemptions_customer_id_campaign_id_42f422"});
 redemptions.index({"order_id":1}, {"name":"redemptions_order_id_4c5e85"});
+redemptions.index({"idempotency_key":1,"state":1}, {"name":"redemptions_idempotency_key_state_daa49c"});
+redemptions.index({"evaluation_id":1,"idempotency_key":1}, {"name":"redemptions_evaluation_id_idempotency_key_744b64"});
+redemptions.index({"state":1,"expires_at":1}, {"name":"redemptions_state_expires_at_26fb45"});
 
 /** Per order item allocation; the source for fundingSplitFor and refundShare */
 const redemption_lines = new Schema(
@@ -271,6 +278,7 @@ const redemption_lines = new Schema(
   collectionOptions("promotions.redemption_lines", { generatedId: true }),
 );
 redemption_lines.index({"order_item_id":1}, {"name":"redemption_lines_order_item_id_219b1b"});
+redemption_lines.index({"redemption_id":1,"line_id":1}, {"name":"redemption_lines_redemption_id_line_id_d138a5"});
 
 /** Per-customer uses and units for limits (row-locked during reservation) */
 const usage_counters = new Schema(
@@ -299,6 +307,7 @@ const event_reminders = new Schema(
   collectionOptions("promotions.event_reminders", { generatedId: true }),
 );
 event_reminders.index({"customer_id":1,"campaign_id":1}, {"name":"event_reminders_customer_id_campaign_id_3c8831","unique":true});
+event_reminders.index({"campaign_id":1,"sent_at":1}, {"name":"event_reminders_campaign_id_sent_at_10f24c"});
 
 /** Every submission, decision, status change, edit and removal with reason */
 const campaign_log = new Schema(
@@ -316,6 +325,8 @@ const campaign_log = new Schema(
   },
   collectionOptions("promotions.campaign_log"),
 );
+campaign_log.index({"campaign_id":1,"action":1}, {"name":"campaign_log_campaign_id_action_7696ab"});
+campaign_log.index({"campaign_id":1,"at":1}, {"name":"campaign_log_campaign_id_at_625292"});
 
 /** Read model rolled up from order, redemption and return events */
 const campaign_results_daily = new Schema(
