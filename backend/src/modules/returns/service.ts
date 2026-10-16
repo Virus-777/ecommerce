@@ -9,6 +9,7 @@ import { Decisions } from './service/decisions.js';
 import { Handling } from './service/handling.js';
 import { Policies } from './service/policies.js';
 import { Reads } from './service/reads.js';
+import { registerReturnsSettingsSection } from './service/settings-section.js';
 import { Refunds } from './service/refunds.js';
 import { Requests } from './service/requests.js';
 import { Views } from './service/views.js';
@@ -40,6 +41,11 @@ export class ReturnsService implements ReturnsPublicApi {
     this.requests = new Requests(this.core, this.views, this.policies, this.decisions, this.handling);
     this.reads = new Reads(this.core, this.views);
     this.automation = new Automation(this.core, this.views, this.requests, this.decisions, this.handling, this.refunds);
+  }
+
+  /** After boot: the Returns baseline section of the Admin Center settings page (G76) */
+  registerSettingsSection(): Promise<void> {
+    return registerReturnsSettingsSection(this.core.ctx.tryUse('settings'), this.policies, () => this.core.tz);
   }
 
   /* ---------------- public API (in-process) */

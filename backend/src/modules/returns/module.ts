@@ -29,6 +29,8 @@ export default defineModule({
     ctx.graphql.resolvers(resolvers(service));
     // export datasets returns.admin.requests, returns.admin.inspections and returns.seller.requests (reports reads rows through exportRows)
     ctx.afterBoot(() => service.reads.registerDatasets());
+    // the Returns baseline section of the Admin Center settings page (G76)
+    ctx.afterBoot(() => service.registerSettingsSection());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.item.delivered", (e) => service.onItemDeliveredFromOrders(e.payload));
