@@ -36,11 +36,17 @@ import type { PurchasingRepository } from './repository.js';
 export const SHIP_TO_NAME = 'Marketly warehouse';
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
-const groupBy = <T>(items: readonly T[], key: (t: T) => string) => {
+/** Items by key, in their order */
+export function groupBy<T>(items: readonly T[], key: (t: T) => string): Map<string, T[]> {
   const m = new Map<string, T[]>();
-  for (const i of items) m.set(key(i), [...(m.get(key(i)) ?? []), i]);
+  for (const i of items) {
+    const k = key(i);
+    const list = m.get(k);
+    if (list) list.push(i);
+    else m.set(k, [i]);
+  }
   return m;
-};
+}
 
 export interface ViewDeps {
   repo: PurchasingRepository;

@@ -12,6 +12,7 @@ import type { PurchaseOrder, ReorderSuggestion } from '../../../spec/purchasing.
 import { addDays, invalid, invalidMany, OPEN_PO_STATUSES, openQty, suggestedQuantity } from '../domain/rules.js';
 import type { PoRow, StockInfo, SupplierItemRow } from '../ports.js';
 import type { Caller, Core, NewLine } from './core.js';
+import { groupBy } from '../views.js';
 
 /** Sales velocity window for reorder suggestions (inventory.getSalesRate) */
 const SALES_RATE_DAYS = 30;
@@ -44,11 +45,8 @@ export class ReorderSuggestions {
     // every draft ships to the chosen company warehouse, or inventory's default one (never copied from an earlier PO)
     const shipTo = (await this.shipToLocation(body.shipToLocationId ?? null)).id;
     const items = await this.core.repo.itemsForStock({ stockItemIds: ids });
-    const bySupplier = new Map<string, string[]>();
-    for (const id of ids) {
-      const sid = suggestions.get(id)!.supplier!.id;
-      bySupplier.set(sid, [...(bySupplier.get(sid) ?? []), id]);
-    }
+    const priceRow = new Map(items.map((i) => [`${i.supplierId}:${i.stockItemId}`, i]));
+    const bySupplier = groupBy(ids, (id) => suggestions.get(id)!.supplier!.id);
     const suppliers = new Map((await this.core.repo.getSuppliers([...bySupplier.keys()])).map((s) => [s.id, s]));
     for (const s of suppliers.values()) if (!s.active) throw new AppError('SUPPLIER_INACTIVE', `${s.name} is deactivated.`, { supplierId: s.id });
     const today = this.core.today();
@@ -56,7 +54,7 @@ export class ReorderSuggestions {
     for (const [supplierId, stockIds] of bySupplier) {
       const supplier = suppliers.get(supplierId)!;
       const lines: NewLine[] = stockIds.map((sid) => {
-        const item = items.find((i) => i.stockItemId === sid && i.supplierId === supplierId)!;
+        const item = priceRow.get(`${supplierId}:${sid}`)!;
         return {
           stockItemId: sid,
           sku: info.get(sid)!.sku,
@@ -103,13 +101,14 @@ export class ReorderSuggestions {
       this.core.inventory().getSalesRate(scoped, SALES_RATE_DAYS),
     ]);
     const supplierById = new Map(suppliers.map((s) => [s.id, s]));
+    const onOrderOf = groupBy(onOrder, (l) => l.stockItemId);
     const out: (ReorderSuggestion & { gap: number })[] = [];
     const pending: string[] = [];
     for (const id of scoped) {
       const a = availability?.[id];
       if (!a) continue;
       const reorderPoint = a.lowStockThreshold ?? null;
-      const lines = onOrder.filter((l) => l.stockItemId === id);
+      const lines = onOrderOf.get(id) ?? [];
       const incoming = lines.filter((l) => l.status !== 'draft').reduce((n, l) => n + openQty(l), 0);
       const drafted = lines.filter((l) => l.status === 'draft').reduce((n, l) => n + l.qtyOrdered, 0);
       if (!filter.includeAll && (reorderPoint === null || a.available + incoming + drafted > reorderPoint)) continue;

@@ -409,15 +409,20 @@ export class Receipts {
     const out = new Map<string, string>();
     const warehouse = this.core.ctx.tryUse('warehouse');
     if (!warehouse) return out;
-    for (const id of new Set(stockItemIds)) {
-      try {
-        const bin = await warehouse.suggestBin(id, locationId);
-        if (bin?.code) out.set(id, bin.code);
-      } catch (err) {
-        if (!isNotImplemented(err)) this.core.ctx.log.warn({ err }, 'warehouse.suggestBin failed; no bin suggested');
-        if (isNotImplemented(err)) break;
-      }
-    }
+    // one call per item (warehouse has no batch suggestion), side by side
+    const ids = [...new Set(stockItemIds)];
+    const bins = await Promise.all(
+      ids.map((id) =>
+        warehouse.suggestBin(id, locationId).catch((err) => {
+          if (!isNotImplemented(err)) this.core.ctx.log.warn({ err }, 'warehouse.suggestBin failed; no bin suggested');
+          return null;
+        }),
+      ),
+    );
+    ids.forEach((id, i) => {
+      const code = bins[i]?.code;
+      if (code) out.set(id, code);
+    });
     return out;
   }
 }

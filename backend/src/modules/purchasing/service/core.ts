@@ -69,11 +69,7 @@ export const poTarget = (po: PoRow, supplierName?: string) => ({ type: 'purchase
 export const poSnapshot = (p: PoRow) => ({ status: p.status, total: { amount: p.totalAmount, currency: p.currency }, freight: { amount: p.freightAmount, currency: p.currency }, paymentTerms: p.paymentTerms, expectedDate: p.expectedDate, notes: p.notes });
 export const dockText = (dock: string) => (/^dock\b/i.test(dock) ? dock : `dock ${dock}`);
 
-export function groupBy<T>(items: readonly T[], key: (t: T) => string): Map<string, T[]> {
-  const m = new Map<string, T[]>();
-  for (const i of items) m.set(key(i), [...(m.get(key(i)) ?? []), i]);
-  return m;
-}
+export { groupBy } from '../views.js';
 
 export class Core {
   readonly repo: PurchasingRepository;

@@ -282,11 +282,18 @@ export class PurchasingRepository {
     const pos = await this.#t.pos.find({ status: oneOf(OPEN_INCOMING) });
     if (!pos.length) return [];
     const poIds = pos.map((p) => p.id);
-    const openLines = (await this.#t.lines.find({ purchase_order_id: oneOf(poIds) })).filter((l) => l.qty_ordered - l.qty_received - l.qty_closed > 0);
-    const delayed = new Set(await this.#t.deliveries.distinct<string>('purchase_order_id', { purchase_order_id: oneOf(poIds), status: 'delayed' }));
+    const [lines, delayedIds] = await Promise.all([this.#t.lines.find({ purchase_order_id: oneOf(poIds) }), this.#t.deliveries.distinct<string>('purchase_order_id', { purchase_order_id: oneOf(poIds), status: 'delayed' })]);
+    const openLines = new Map<string, T<'purchase_order_lines'>[]>();
+    for (const l of lines) {
+      if (l.qty_ordered - l.qty_received - l.qty_closed <= 0) continue;
+      const list = openLines.get(l.purchase_order_id);
+      if (list) list.push(l);
+      else openLines.set(l.purchase_order_id, [l]);
+    }
+    const delayed = new Set(delayedIds);
     return pos
       .filter((po) => {
-        const open = openLines.filter((l) => l.purchase_order_id === po.id);
+        const open = openLines.get(po.id) ?? [];
         if (!open.length) return false;
         if (po.status === 'partly_received' || delayed.has(po.id)) return true;
         return open.some((l) => {
