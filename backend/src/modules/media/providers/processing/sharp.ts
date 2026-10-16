@@ -61,9 +61,12 @@ export function createSharpProcessor(): MediaProcessor {
       for (const t of targets) {
         const { width, height } = fitSize(W, H, t);
         const resized = open(body).resize({ width, height, fit: 'cover', position: 'centre', withoutEnlargement: true });
-        const webp = await resized.clone().webp({ quality }).toBuffer({ resolveWithObject: true });
-        // JPEG has no transparency: transparent areas become white
-        const jpeg = await resized.clone().flatten({ background: '#ffffff' }).jpeg({ quality, progressive: true }).toBuffer({ resolveWithObject: true });
+        // both encodings at once (libvips runs them on its own threads)
+        const [webp, jpeg] = await Promise.all([
+          resized.clone().webp({ quality }).toBuffer({ resolveWithObject: true }),
+          // JPEG has no transparency: transparent areas become white
+          resized.clone().flatten({ background: '#ffffff' }).jpeg({ quality, progressive: true }).toBuffer({ resolveWithObject: true }),
+        ]);
         out.push({ size: t.size, width: webp.info.width, height: webp.info.height, format: 'webp', body: new Uint8Array(webp.data) });
         out.push({ size: t.size, width: jpeg.info.width, height: jpeg.info.height, format: 'jpeg', body: new Uint8Array(jpeg.data) });
       }
@@ -74,16 +77,18 @@ export function createSharpProcessor(): MediaProcessor {
       if (!DECODED.includes(probe.format)) return dev.measure(body, probe, hint);
       const width = probe.width ?? 0;
       const height = probe.height ?? 0;
+      // three independent small copies of the image, made at once
+      const [backgroundWhiteness, sharpnessScore, phash] = await Promise.all([borderWhiteness(body), sharpness(body), differenceHash(body)]);
       return {
         width,
         height,
         aspect: height ? Math.round((width / height) * 10_000) / 10_000 : 0,
         hasAlpha: Boolean(probe.hasAlpha),
-        backgroundWhiteness: await borderWhiteness(body),
-        sharpness: await sharpness(body),
+        backgroundWhiteness,
+        sharpness: sharpnessScore,
         watermarkLikely: null,
         textCoverage: null,
-        phash: await differenceHash(body),
+        phash,
       };
     },
 

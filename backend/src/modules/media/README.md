@@ -364,7 +364,7 @@ complete is called by the client (POST /uploads/{id}/complete) or by the storage
 | deleted_at | timestamptz? |
 | processing_spec | jsonb? (product images: the spec their renditions were built with: aspectRatio, detailWidth, thumbnailWidth, quality, settingsVersion) |
 
-Indexes: `(owner_kind, owner_id, created_at desc)`, `(status, created_at)`, `(purpose, created_at)`, `(owner_kind, owner_id, phash)`, `(retain_until)`, `(expires_at)`
+Indexes: `(owner_kind, owner_id, created_at desc)`, `(status, created_at)`, `(purpose, created_at)`, `(owner_kind, owner_id, phash)`, `(retain_until)`, `(expires_at)`, `(storage_key)`
 
 **renditions**
 
@@ -395,7 +395,7 @@ Indexes: `pk (asset_id, size, format)`
 | created_by_kind | text |
 | created_by_id | text? |
 
-Indexes: `(url_expires_at) where completed_at is null`
+Indexes: `(url_expires_at) where completed_at is null`, `(asset_id)`
 
 **usages**
 
@@ -428,7 +428,7 @@ Indexes: `(asset_id) where detached_at is null`, `unique (asset_id, module, kind
 | created_at | timestamptz |
 | finished_at | timestamptz? |
 
-Indexes: `(status, next_attempt_at)`, `(provider_ref)`
+Indexes: `(status, next_attempt_at)`, `(provider_ref)`, `(asset_id)`
 
 **upload_counters**: Daily per-owner counts and bytes for rate limits and quotas
 

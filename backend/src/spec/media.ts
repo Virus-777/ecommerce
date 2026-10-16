@@ -1940,6 +1940,12 @@ export const spec = defineModuleSpec({
           "key": {
             "expires_at": 1
           }
+        },
+        {
+          "name": "assets_storage_key_e7bc48",
+          "key": {
+            "storage_key": 1
+          }
         }
       ],
       "unenforced": []
@@ -2146,6 +2152,12 @@ export const spec = defineModuleSpec({
             "completed_at": {
               "$type": "null"
             }
+          }
+        },
+        {
+          "name": "uploads_asset_id_1d40bd",
+          "key": {
+            "asset_id": 1
           }
         }
       ],
@@ -2393,6 +2405,12 @@ export const spec = defineModuleSpec({
           "name": "processing_jobs_provider_ref_d17a01",
           "key": {
             "provider_ref": 1
+          }
+        },
+        {
+          "name": "processing_jobs_asset_id_1d40bd",
+          "key": {
+            "asset_id": 1
           }
         }
       ],

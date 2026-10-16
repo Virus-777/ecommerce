@@ -54,6 +54,7 @@ assets.index({"purpose":1,"created_at":1}, {"name":"assets_purpose_created_at_10
 assets.index({"owner_kind":1,"owner_id":1,"phash":1}, {"name":"assets_owner_kind_owner_id_phash_3462da"});
 assets.index({"retain_until":1}, {"name":"assets_retain_until_4aedba"});
 assets.index({"expires_at":1}, {"name":"assets_expires_at_ce8dd0"});
+assets.index({"storage_key":1}, {"name":"assets_storage_key_e7bc48"});
 
 const renditions = new Schema(
   {
@@ -90,6 +91,7 @@ const uploads = new Schema(
   collectionOptions("media.uploads"),
 );
 uploads.index({"url_expires_at":1}, {"name":"uploads_url_expires_at_d3b144","partialFilterExpression":{"completed_at":{"$type":"null"}}});
+uploads.index({"asset_id":1}, {"name":"uploads_asset_id_1d40bd"});
 
 const usages = new Schema(
   {
@@ -130,6 +132,7 @@ const processing_jobs = new Schema(
 );
 processing_jobs.index({"status":1,"next_attempt_at":1}, {"name":"processing_jobs_status_next_attempt_at_0fe682"});
 processing_jobs.index({"provider_ref":1}, {"name":"processing_jobs_provider_ref_d17a01"});
+processing_jobs.index({"asset_id":1}, {"name":"processing_jobs_asset_id_1d40bd"});
 
 /** Daily per-owner counts and bytes for rate limits and quotas */
 const upload_counters = new Schema(

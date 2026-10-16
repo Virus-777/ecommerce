@@ -1182,22 +1182,23 @@ export class MediaService implements MediaPublicApi {
 
   /** Writes rendition files (product image keys stay the same across rebuilds, so their links keep working) */
   private async storeRenditions(asset: AssetRow, bucket: string, outputs: { size: string; width: number; height: number; format: string; body: Uint8Array }[]): Promise<RenditionRow[]> {
-    const rows: RenditionRow[] = [];
-    for (const out of outputs) {
-      const key = renditionKey(asset.id, out.size, out.format);
-      await this.storage.put(bucket, key, out.body, MIME_OF[out.format as FileType] ?? 'image/webp');
-      rows.push({
-        asset_id: asset.id,
-        size: out.size,
-        storage_key: key,
-        url: asset.visibility === 'public' ? this.storage.publicUrl(key) : this.storage.objectUrl(bucket, key),
-        width: out.width,
-        height: out.height,
-        format: out.format,
-        bytes: out.body.byteLength,
-      });
-    }
-    return rows;
+    // the files are independent: written at once
+    return Promise.all(
+      outputs.map(async (out) => {
+        const key = renditionKey(asset.id, out.size, out.format);
+        await this.storage.put(bucket, key, out.body, MIME_OF[out.format as FileType] ?? 'image/webp');
+        return {
+          asset_id: asset.id,
+          size: out.size,
+          storage_key: key,
+          url: asset.visibility === 'public' ? this.storage.publicUrl(key) : this.storage.objectUrl(bucket, key),
+          width: out.width,
+          height: out.height,
+          format: out.format,
+          bytes: out.body.byteLength,
+        };
+      }),
+    );
   }
 
   /** POST /webhooks/media/processing-results: video transcoding results, matched by provider job reference. Idempotent. */
@@ -1260,7 +1261,7 @@ export class MediaService implements MediaPublicApi {
     while (counts.rebuilt + counts.failed < limit) {
       const rows = await this.repo.productImagesToRebuild(setting, Math.min(REBUILD_BATCH, limit - counts.rebuilt - counts.failed));
       if (!rows.length) break;
-      const items: RecropItem[] = [];
+      const changed: { row: AssetRow; recrop: boolean }[] = [];
       for (const row of rows) {
         try {
           const recrop = await this.rebuildProductImage(row, setting, spec);
@@ -1268,7 +1269,7 @@ export class MediaService implements MediaPublicApi {
           if (recrop === null) continue;
           if (recrop) counts.flagged++;
           else counts.cleared++;
-          items.push({ assetId: row.id, owner: ownerOf(row), recrop, usages: (await this.repo.usagesOf([row.id], { activeOnly: true })).map(toUsage) });
+          changed.push({ row, recrop });
         } catch (err) {
           // recorded as built with this spec, so a file that can't be read isn't retried every run
           counts.failed++;
@@ -1276,7 +1277,12 @@ export class MediaService implements MediaPublicApi {
           await this.repo.updateAsset(row.id, { processing_spec: { ...setting, settingsVersion: this.productImageVersion, failed: true } });
         }
       }
-      if (items.length) this.ctx.events.publish('media.product_images.recrop_changed', { aspectRatio: spec.aspectRatio, items }, { actor: SYSTEM_ACTOR });
+      if (changed.length) {
+        // the usages of every changed image in one read
+        const usages = groupBy(await this.repo.usagesOf(changed.map((c) => c.row.id), { activeOnly: true }), (u) => u.asset_id);
+        const items: RecropItem[] = changed.map(({ row, recrop }) => ({ assetId: row.id, owner: ownerOf(row), recrop, usages: (usages.get(row.id) ?? []).map(toUsage) }));
+        this.ctx.events.publish('media.product_images.recrop_changed', { aspectRatio: spec.aspectRatio, items }, { actor: SYSTEM_ACTOR });
+      }
       if (rows.length === REBUILD_BATCH) await sleep(REBUILD_PAUSE_MS);
     }
     if (counts.rebuilt || counts.failed) {
