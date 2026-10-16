@@ -54,6 +54,7 @@ intents.index({"status":1,"next_check_at":1}, {"name":"intents_status_next_check
 intents.index({"provider":1,"provider_ref":1}, {"name":"intents_provider_provider_ref_178b7f"});
 intents.index({"status":1,"updated_at":1,"_id":1}, {"name":"intents_status_updated_at__id_3b6830"});
 intents.index({"customer_id":1,"status":1,"updated_at":1}, {"name":"intents_customer_id_status_updated_at_bc92c4"});
+intents.index({"idempotency_key":1}, {"name":"intents_idempotency_key_c702b4"});
 
 /** Captured money per seller group */
 const allocations = new Schema(
@@ -89,6 +90,9 @@ const captures = new Schema(
   collectionOptions("payments.captures"),
 );
 captures.index({"idempotency_key":1}, {"name":"captures_idempotency_key_b82ef6","unique":true});
+captures.index({"intent_id":1}, {"name":"captures_intent_id_050910"});
+captures.index({"idempotency_key":1}, {"name":"captures_idempotency_key_c702b4"});
+captures.index({"status":1,"at":1}, {"name":"captures_status_at_b24391"});
 
 /** Every adapter call with outcome (no card data) */
 const provider_calls = new Schema(
@@ -152,6 +156,10 @@ refunds.index({"checkout_session_id":1}, {"name":"refunds_checkout_session_id_db
 refunds.index({"status":1,"next_attempt_at":1}, {"name":"refunds_status_next_attempt_at_0fe682"});
 refunds.index({"origin":1,"origin_id":1}, {"name":"refunds_origin_origin_id_c661ff","unique":true,"partialFilterExpression":{"$and":[{"origin_id":{"$type":"string"},"origin":{"$in":["return","case","exception","correction","orphan_payment"]},"status":{"$in":["requested","processing","sent","failed"]}},{"origin_id":{"$type":"string"}}]}});
 refunds.index({"origin":1,"origin_id":1}, {"name":"refunds_origin_origin_id_e9fa93"});
+refunds.index({"intent_id":1}, {"name":"refunds_intent_id_050910"});
+refunds.index({"idempotency_key":1}, {"name":"refunds_idempotency_key_c702b4"});
+refunds.index({"ref":1}, {"name":"refunds_ref_51f02f"});
+refunds.index({"provider_ref":1}, {"name":"refunds_provider_ref_d17a01"});
 
 /** Refund amount per order item; the cap check sums these */
 const refund_items = new Schema(
@@ -167,6 +175,7 @@ const refund_items = new Schema(
   collectionOptions("payments.refund_items", { generatedId: true }),
 );
 refund_items.index({"order_item_id":1}, {"name":"refund_items_order_item_id_219b1b"});
+refund_items.index({"refund_id":1}, {"name":"refund_items_refund_id_1de318"});
 
 const refund_log = new Schema(
   {
@@ -182,6 +191,7 @@ const refund_log = new Schema(
   },
   collectionOptions("payments.refund_log"),
 );
+refund_log.index({"refund_id":1,"at":1}, {"name":"refund_log_refund_id_at_83910a"});
 
 const disputes = new Schema(
   {
@@ -216,6 +226,8 @@ disputes.index({"ref":1}, {"name":"disputes_ref_8cef23","unique":true});
 disputes.index({"provider":1,"provider_case_id":1}, {"name":"disputes_provider_provider_case_id_90110f","unique":true});
 disputes.index({"status":1,"evidence_due_at":1}, {"name":"disputes_status_evidence_due_at_ded67e"});
 disputes.index({"approval_request_id":1}, {"name":"disputes_approval_request_id_7e5ff9","partialFilterExpression":{"approval_request_id":{"$type":"string"}}});
+disputes.index({"intent_id":1}, {"name":"disputes_intent_id_050910"});
+disputes.index({"order_id":1}, {"name":"disputes_order_id_4c5e85"});
 
 /** Dispute history: opened, owner set, evidence saved and submitted, concession asked and decided, deadlines, outcome (Dispute.history) */
 const dispute_log = new Schema(
@@ -255,7 +267,8 @@ const saved_methods = new Schema(
   },
   collectionOptions("payments.saved_methods"),
 );
-saved_methods.index({"customer_id":1}, {"name":"saved_methods_customer_id_2673e7","partialFilterExpression":{"removed_at":{"$type":"null"}}});
+saved_methods.index({"customer_id":1}, {"name":"saved_methods_customer_id_dc4488"});
+saved_methods.index({"provider":1,"provider_method_id":1}, {"name":"saved_methods_provider_provider_method_id_a0c693"});
 
 /** Raw provider events, deduplicated by provider event id */
 const webhook_events = new Schema(

@@ -250,9 +250,12 @@ export class PaymentsService implements PaymentsPublicApi {
     const lookup = this.core.lookup();
     const main = await this.intents.intentOfOrder(orderId, (await lookup.order(orderId))?.paymentIntentId);
     if (!main) throw notFound('Payment for this order');
-    const sessionAttempts = await this.core.repo.find('intents', { checkout_session_id: main.checkout_session_id }, { orderBy: [['created_at', 'asc']] });
-    const linked = await this.core.repo.find('intents', { order_id: orderId });
-    const attempts = [...sessionAttempts, ...linked.filter((x) => !sessionAttempts.some((s) => s.id === x.id))];
+    const [sessionAttempts, linked] = await Promise.all([
+      this.core.repo.find('intents', { checkout_session_id: main.checkout_session_id }, { orderBy: [['created_at', 'asc']] }),
+      this.core.repo.find('intents', { order_id: orderId }),
+    ]);
+    const seen = new Set(sessionAttempts.map((s) => s.id));
+    const attempts = [...sessionAttempts, ...linked.filter((x) => !seen.has(x.id))];
     const [rows, totals, refundable] = await Promise.all([
       this.views.paymentRows(attempts, lookup),
       this.core.repo.intentRefundTotals(main.id),

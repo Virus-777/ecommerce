@@ -929,8 +929,10 @@ export class Intents {
       }
     }
     const captures = await this.repo.find('captures', { status: 'unknown' }, { orderBy: [['at', 'asc']], limit: 50 });
-    for (const intentId of new Set(captures.map((c) => c.intent_id))) {
-      const i = await this.repo.get('intents', intentId);
+    const intentIds = [...new Set(captures.map((c) => c.intent_id))];
+    const intents = new Map((intentIds.length ? await this.repo.find('intents', { id: intentIds }) : []).map((i) => [i.id, i]));
+    for (const intentId of intentIds) {
+      const i = intents.get(intentId);
       if (i) await this.resolveUnknownCaptures(i, { actor: SYSTEM });
     }
   }

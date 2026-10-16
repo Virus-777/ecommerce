@@ -2835,6 +2835,12 @@ export const spec = defineModuleSpec({
             "status": 1,
             "updated_at": 1
           }
+        },
+        {
+          "name": "intents_idempotency_key_c702b4",
+          "key": {
+            "idempotency_key": 1
+          }
         }
       ],
       "unenforced": []
@@ -3015,6 +3021,25 @@ export const spec = defineModuleSpec({
             "idempotency_key": 1
           },
           "unique": true
+        },
+        {
+          "name": "captures_intent_id_050910",
+          "key": {
+            "intent_id": 1
+          }
+        },
+        {
+          "name": "captures_idempotency_key_c702b4",
+          "key": {
+            "idempotency_key": 1
+          }
+        },
+        {
+          "name": "captures_status_at_b24391",
+          "key": {
+            "status": 1,
+            "at": 1
+          }
         }
       ],
       "unenforced": []
@@ -3440,6 +3465,30 @@ export const spec = defineModuleSpec({
             "origin": 1,
             "origin_id": 1
           }
+        },
+        {
+          "name": "refunds_intent_id_050910",
+          "key": {
+            "intent_id": 1
+          }
+        },
+        {
+          "name": "refunds_idempotency_key_c702b4",
+          "key": {
+            "idempotency_key": 1
+          }
+        },
+        {
+          "name": "refunds_ref_51f02f",
+          "key": {
+            "ref": 1
+          }
+        },
+        {
+          "name": "refunds_provider_ref_d17a01",
+          "key": {
+            "provider_ref": 1
+          }
         }
       ],
       "unenforced": []
@@ -3511,6 +3560,12 @@ export const spec = defineModuleSpec({
           "name": "refund_items_order_item_id_219b1b",
           "key": {
             "order_item_id": 1
+          }
+        },
+        {
+          "name": "refund_items_refund_id_1de318",
+          "key": {
+            "refund_id": 1
           }
         }
       ],
@@ -3587,7 +3642,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "refund_log_refund_id_at_83910a",
+          "key": {
+            "refund_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "disputes": {
@@ -3794,6 +3857,18 @@ export const spec = defineModuleSpec({
               "$type": "string"
             }
           }
+        },
+        {
+          "name": "disputes_intent_id_050910",
+          "key": {
+            "intent_id": 1
+          }
+        },
+        {
+          "name": "disputes_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -3986,14 +4061,16 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "saved_methods_customer_id_2673e7",
+          "name": "saved_methods_customer_id_dc4488",
           "key": {
             "customer_id": 1
-          },
-          "partial": {
-            "removed_at": {
-              "$type": "null"
-            }
+          }
+        },
+        {
+          "name": "saved_methods_provider_provider_method_id_a0c693",
+          "key": {
+            "provider": 1,
+            "provider_method_id": 1
           }
         }
       ],

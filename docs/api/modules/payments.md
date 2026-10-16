@@ -569,7 +569,7 @@ The provider takes the money back when a chargeback opens; finance holds the sel
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) where status in ('created','authorizing','requires_action','pending_check','authorized','partially_captured','captured')`, `(order_id)`, `(status, next_check_at)`, `(provider, provider_ref)`, `(status, updated_at, id)`, `(customer_id, status, updated_at)`
+Indexes: `(checkout_session_id, attempt_no)`, `unique (checkout_session_id) where status in ('created','authorizing','requires_action','pending_check','authorized','partially_captured','captured')`, `(order_id)`, `(status, next_check_at)`, `(provider, provider_ref)`, `(status, updated_at, id)`, `(customer_id, status, updated_at)`, `(idempotency_key)`
 
 **allocations**: Captured money per seller group
 
@@ -596,6 +596,8 @@ Indexes: `(intent_id)`, `(group_id)`
 | provider_ref | text? |
 | idempotency_key | text unique |
 | at | timestamptz |
+
+Indexes: `(intent_id)`, `(idempotency_key)`, `(status, at)`
 
 **provider_calls**: Every adapter call with outcome (no card data)
 
@@ -646,7 +648,7 @@ Indexes: `(intent_id, at)`, `(refund_id, at)`
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(order_id)`, `(checkout_session_id)`, `(status, next_attempt_at)`, `unique (origin, origin_id) where origin_id is not null and origin <> 'cancellation' and status <> 'cancelled'`, `(origin, origin_id)`
+Indexes: `(order_id)`, `(checkout_session_id)`, `(status, next_attempt_at)`, `unique (origin, origin_id) where origin_id is not null and origin <> 'cancellation' and status <> 'cancelled'`, `(origin, origin_id)`, `(intent_id)`, `(idempotency_key)`, `(ref)`, `(provider_ref)`
 
 **refund_items**: Refund amount per order item; the cap check sums these
 
@@ -658,7 +660,7 @@ Indexes: `(order_id)`, `(checkout_session_id)`, `(status, next_attempt_at)`, `un
 | seller_id | uuid? |
 | amount | int |
 
-Indexes: `(order_item_id)`
+Indexes: `(order_item_id)`, `(refund_id)`
 
 **refund_log**
 
@@ -671,6 +673,8 @@ Indexes: `(order_item_id)`
 | detail | text? |
 | actor | jsonb |
 | at | timestamptz |
+
+Indexes: `(refund_id, at)`
 
 **disputes**
 
@@ -699,7 +703,7 @@ Indexes: `(order_item_id)`
 | opened_at | timestamptz |
 | decided_at | timestamptz? |
 
-Indexes: `unique (provider, provider_case_id)`, `(status, evidence_due_at)`, `(approval_request_id) where approval_request_id is not null`
+Indexes: `unique (provider, provider_case_id)`, `(status, evidence_due_at)`, `(approval_request_id) where approval_request_id is not null`, `(intent_id)`, `(order_id)`
 
 **dispute_log**: Dispute history: opened, owner set, evidence saved and submitted, concession asked and decided, deadlines, outcome (Dispute.history)
 
@@ -733,7 +737,7 @@ Indexes: `(dispute_id, at)`
 | removed_at | timestamptz? |
 | created_at | timestamptz |
 
-Indexes: `(customer_id) where removed_at is null`
+Indexes: `(customer_id)`, `(provider, provider_method_id)`
 
 **webhook_events**: Raw provider events, deduplicated by provider event id
 
