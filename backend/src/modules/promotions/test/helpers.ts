@@ -12,6 +12,7 @@ import type * as access from '../../../spec/access.js';
 import type * as audit from '../../../spec/audit.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type { CampaignInput } from '../../../spec/promotions.js';
+import type { ReportsPublicApi } from '../../../spec/reports.js';
 import type { PromotionsService } from '../service.js';
 
 export const STORE = '/api/store/promotions';
@@ -91,7 +92,8 @@ function toOffer(o: FakeOffer) {
   } as any;
 }
 
-export async function boot(): Promise<Kit> {
+/** reports: optional stubs of the reports public API (left out, reports is not running) */
+export async function boot(o: { reports?: Partial<ReportsPublicApi> } = {}): Promise<Kit> {
   const clock = movingClock();
   const offers = new Map<string, FakeOffer>();
   const audits: audit.RecordInput[] = [];
@@ -160,6 +162,7 @@ export async function boot(): Promise<Kit> {
           return newId();
         },
       },
+      ...(o.reports ? { reports: o.reports } : {}),
     },
   });
   const events: EventEnvelope[] = [];

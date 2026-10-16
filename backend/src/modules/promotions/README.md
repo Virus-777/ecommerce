@@ -623,7 +623,7 @@ Discounts and sales campaigns: markdowns, percentage and fixed coupons, minimum-
 | promotedOrders | `int` |
 | discountCost | `FundingBreakdown` |
 | sharedCost | `Money` |
-| officialMargin | `{"before":"number?","after":"number?","changePts":"number?"}` |
+| officialMargin | `{"before":{"type":"number?","desc":"Official Store gross margin % over the same number of days just before the range (reports.officialMargin); null when reports is off or nothing was costed"},"after":{"type":"number?","desc":"Official Store gross margin % in the range"},"changePts":{"type":"number?","desc":"after − before in points; without both, the change of official revenue over its cost basis on promoted orders"}}` |
 | couponRedemptions | `int` |
 | redemptionShareOfOrders | `number` |
 | returnsOnPromotedPct | `number` |

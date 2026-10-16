@@ -1187,8 +1187,11 @@ export interface PromotionsDashboard {
   discountCost: FundingBreakdown;
   sharedCost: common.Money;
   officialMargin: {
+    /** Official Store gross margin % over the same number of days just before the range (reports.officialMargin); null when reports is off or nothing was costed */
     before?: number | null;
+    /** Official Store gross margin % in the range */
     after?: number | null;
+    /** after − before in points; without both, the change of official revenue over its cost basis on promoted orders */
     changePts?: number | null;
   };
   couponRedemptions: number;
@@ -1217,9 +1220,9 @@ export const PromotionsDashboard: z.ZodType<PromotionsDashboard> = z.object({
     return common.Money;
   },
   officialMargin: z.object({
-    before: z.number().nullish(),
-    after: z.number().nullish(),
-    changePts: z.number().nullish(),
+    before: z.number().describe("Official Store gross margin % over the same number of days just before the range (reports.officialMargin); null when reports is off or nothing was costed").nullish(),
+    after: z.number().describe("Official Store gross margin % in the range").nullish(),
+    changePts: z.number().describe("after − before in points; without both, the change of official revenue over its cost basis on promoted orders").nullish(),
   }),
   couponRedemptions: z.number().int(),
   redemptionShareOfOrders: z.number(),

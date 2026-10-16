@@ -1107,6 +1107,8 @@ export class CampaignsPart extends Part {
       const c = models.get(id);
       if (c) results.push(await this.result(c, rows.filter((r) => r.campaign_id === id), c.status));
     }
+    const fromReports = await this.reportFigures(from, to);
+    const margin = fromReports.marginBefore != null && fromReports.marginAfter != null ? Math.round((fromReports.marginAfter - fromReports.marginBefore) * 10) / 10 : null;
     return {
       range: { from, to },
       timeZone: this.ctx.config.market.timeZone,
@@ -1117,12 +1119,17 @@ export class CampaignsPart extends Part {
         rows.filter((r) => models.get(r.campaign_id)?.funding.owner === 'shared').reduce((a, r) => a + r.cost_platform + r.cost_seller, 0),
         cur,
       ),
-      officialMargin: { before: null, after: null, changePts: basis > 0 ? Math.round(((sum(rows, 'official_revenue') - basis) / basis) * 1000) / 10 : null },
+      // Official Store margin % from reports: the same number of days before the range, and the range itself
+      officialMargin: {
+        before: fromReports.marginBefore,
+        after: fromReports.marginAfter,
+        changePts: margin ?? (basis > 0 ? Math.round(((sum(rows, 'official_revenue') - basis) / basis) * 1000) / 10 : null),
+      },
       couponRedemptions: sum(couponRows, 'redemptions'),
       redemptionShareOfOrders: orders > 0 ? Math.round((sum(couponRows, 'orders') / orders) * 1000) / 10 : 0,
       returnsOnPromotedPct: orders > 0 ? Math.round((sum(rows, 'returned_items') / orders) * 1000) / 10 : 0,
-      // the store-wide return rate comes from reports, which promotions cannot read yet: null, never 0 as a stand-in
-      storeReturnsPct: null,
+      // the store-wide return rate from reports; null (never 0 as a stand-in) when reports is off or nothing sold
+      storeReturnsPct: fromReports.storeReturnsPct,
       tabs: [
         tab('live', 'Live', (r) => r.status === 'live'),
         tab('scheduled', 'Scheduled', (r) => r.status === 'scheduled'),
@@ -1134,6 +1141,32 @@ export class CampaignsPart extends Part {
       dailyCost: daily,
       results,
     };
+  }
+
+  /**
+   * Official Store margin before and during a range, and the store-wide return rate, from reports
+   * (reports.officialMargin, storeReturnRate). Nulls when reports is off or answers nothing.
+   */
+  private async reportFigures(from: string, to: string): Promise<{ marginBefore: number | null; marginAfter: number | null; storeReturnsPct: number | null }> {
+    const api = this.ctx.tryUse('reports');
+    if (!api) return { marginBefore: null, marginAfter: null, storeReturnsPct: null };
+    const day = 86_400_000;
+    const days = Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / day) + 1;
+    const shift = (d: string, n: number) => new Date(Date.parse(`${d}T12:00:00Z`) + n * day).toISOString().slice(0, 10);
+    const quiet = async <T,>(what: string, fn: () => Promise<T>): Promise<T | null> => {
+      try {
+        return await fn();
+      } catch (err) {
+        this.ctx.log.warn({ err }, `promotions: ${what} from reports unavailable`);
+        return null;
+      }
+    };
+    const [before, after, returns] = await Promise.all([
+      quiet('margin before', () => api.officialMargin({ from: shift(from, -days), to: shift(from, -1) })),
+      quiet('margin', () => api.officialMargin({ from, to })),
+      quiet('return rate', () => api.storeReturnRate({ from, to })),
+    ]);
+    return { marginBefore: before?.marginPct ?? null, marginAfter: after?.marginPct ?? null, storeReturnsPct: returns?.returnRatePct ?? null };
   }
 
   /* ---------------------------------------------------------------- reports export */
