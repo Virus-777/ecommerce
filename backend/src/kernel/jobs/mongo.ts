@@ -135,17 +135,23 @@ export class MongoScheduler extends JobRegistry implements JobScheduler {
     await this.#jobs.updateOne({ _id: job._id }, { $set: { state: 'failed', finished_at: now, error }, $unset: { lease_until: '' } });
   }
 
-  /** One pass of a worker: lost runs, schedule ticks, due runs */
+  /**
+   * One pass of a worker: lost runs, schedule ticks, due runs. It runs every pollMs with every job declared, so it
+   * reads in bulk: all schedules in one query and the names of the jobs with a due run in another, then writes only
+   * for the ticks that are due and the runs there are to claim (not one read and one claim per job each pass).
+   */
   async #tick() {
     const now = this.clock.now();
     for (const lost of await this.#jobs.find({ state: 'active', lease_until: { $lt: now } }).lean()) {
       if (this.#running.has(lost.name)) continue;
       await this.#failed(lost, 'the instance running it stopped (lease expired)').catch((err) => this.log.error({ err, job: lost.name }, 'job queue: could not recover a lost run'));
     }
-    for (const job of this.jobs.values()) {
-      if (!job.run || job.parsed.kind === 'boot') continue;
-      const schedule = job.parsed;
-      const s = await this.#schedules.findOne({ _id: job.name }).lean();
+    const handled = [...this.jobs.values()].filter((job) => job.run);
+    const scheduled = handled.filter((job) => job.parsed.kind !== 'boot');
+    const schedules = new Map((await this.#schedules.find({ _id: { $in: scheduled.map((job) => job.name) } }).lean()).map((s) => [s._id, s]));
+    for (const job of scheduled) {
+      const schedule = job.parsed as Exclude<typeof job.parsed, { kind: 'boot' }>;
+      const s = schedules.get(job.name);
       if (!s || s.schedule !== job.schedule) {
         await this.#schedules.updateOne({ _id: job.name }, { $set: { schedule: job.schedule, next_run_at: nextOccurrence(schedule, now, this.#o.timeZone) } }, { upsert: true });
         continue;
@@ -155,8 +161,10 @@ export class MongoScheduler extends JobRegistry implements JobScheduler {
       const won = await this.#schedules.updateOne({ _id: job.name, next_run_at: s.next_run_at }, { $set: { next_run_at: nextOccurrence(schedule, now, this.#o.timeZone) } });
       if (won.modifiedCount) await this.#enqueue(job.name, false);
     }
-    for (const job of this.jobs.values()) {
-      if (!job.run || this.#running.has(job.name)) continue;
+    // read after the ticks above, so the runs they just enqueued are claimed in this pass
+    const due = new Set<string>(await this.#jobs.distinct('name', { state: 'queued', run_at: { $lte: this.clock.now() }, name: { $in: handled.map((job) => job.name) } }));
+    for (const job of handled) {
+      if (!due.has(job.name) || this.#running.has(job.name)) continue;
       const claimed = await this.#claim(job.name);
       if (claimed) void this.#run(claimed);
     }
