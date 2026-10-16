@@ -164,7 +164,11 @@ function caseFilter(f: CaseFilter): Filter {
 export class SupportRepository {
   readonly #cases: Table<Record<string, unknown>>;
 
-  constructor(private readonly store: ModuleStore) {
+  constructor(
+    private readonly store: ModuleStore,
+    /** Bound to a transaction: its session takes one operation at a time, so reads never run together */
+    readonly inTransaction = false,
+  ) {
     this.#cases = store.table<Record<string, unknown>>('cases');
   }
 
@@ -175,7 +179,15 @@ export class SupportRepository {
 
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: SupportRepository) => Promise<T>): Promise<T> {
-    return this.store.transaction((tx) => fn(new SupportRepository(tx)));
+    return this.store.transaction((tx) => fn(new SupportRepository(tx, true)));
+  }
+
+  /** Independent reads: together outside a transaction, one after another inside one */
+  async reads<T extends unknown[]>(...fns: { [K in keyof T]: () => Promise<T[K]> }): Promise<T> {
+    if (!this.inTransaction) return (await Promise.all(fns.map((f) => f()))) as T;
+    const out: unknown[] = [];
+    for (const f of fns) out.push(await f());
+    return out as T;
   }
 
   /** Claims an event key in the module inbox (inside a transaction: commits with its effects); false once claimed */

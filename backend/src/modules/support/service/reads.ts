@@ -256,11 +256,12 @@ export class Reads {
       this.core.repo.listCases({ statuses: OPEN, dueBefore: now }, 'next_deadline', { mode: 'page', page: 1, limit: 1 }),
       this.core.categories(),
     ]);
-    const replies = async (from: Date, to: Date) => {
-      const rows = await this.core.repo.find('cases', { first_replied_at: { op: '>=', value: from } });
-      return rows.filter((r) => r.first_replied_at! < to && r.handler_kind !== 'seller').map((r) => (r.first_replied_at!.getTime() - r.opened_at.getTime()) / 60_000);
-    };
-    const [current, previous] = await Promise.all([replies(new Date(now.getTime() - 30 * DAY), now), replies(new Date(now.getTime() - 60 * DAY), new Date(now.getTime() - 30 * DAY))]);
+    // first replies of the last 60 days, read once: the last 30 days against the 30 before
+    const monthAgo = new Date(now.getTime() - 30 * DAY);
+    const replied = await this.core.repo.find('cases', { first_replied_at: { op: '>=', value: new Date(now.getTime() - 60 * DAY) } });
+    const replies = (from: Date, to: Date) => replied.filter((r) => r.first_replied_at! >= from && r.first_replied_at! < to && r.handler_kind !== 'seller').map((r) => (r.first_replied_at!.getTime() - r.opened_at.getTime()) / 60_000);
+    const current = replies(monthAgo, now);
+    const previous = replies(new Date(now.getTime() - 60 * DAY), monthAgo);
     const med = median(current);
     const access = this.core.ctx.use('access');
     const recipients = await this.core.quiet('queue owner', () => access.resolveRecipients('customer_support_manager'));
@@ -294,12 +295,13 @@ export class Reads {
   async assignees(q: { team?: string; q?: string }): Promise<CaseAssignee[]> {
     const access = this.core.ctx.use('access');
     const handlers = (await this.core.quiet('case handlers', () => access.staffWithPermission('support.cases.handle'))) ?? [];
+    const teamRoles = (Object.keys(TEAM_ROLES) as Team[]).flatMap((team) => TEAM_ROLES[team].map((role) => ({ team, role })));
+    const members = await Promise.all(teamRoles.map(({ role }) => this.core.quiet('role members', () => access.membersOfRole(role))));
+    // the first team (in TEAM_ROLES order) a member holds a role of
     const teamOf = new Map<string, Team>();
-    for (const team of Object.keys(TEAM_ROLES) as Team[]) {
-      for (const role of TEAM_ROLES[team]) {
-        for (const m of (await this.core.quiet('role members', () => access.membersOfRole(role))) ?? []) if (!teamOf.has(m.accountId)) teamOf.set(m.accountId, team);
-      }
-    }
+    teamRoles.forEach(({ team }, n) => {
+      for (const m of members[n] ?? []) if (!teamOf.has(m.accountId)) teamOf.set(m.accountId, team);
+    });
     const out = new Map<string, CaseAssignee>();
     for (const m of handlers) {
       if (out.has(m.accountId)) continue;
@@ -335,7 +337,13 @@ export class Reads {
     const rows = await this.core.repo.find('cases', { order_id: orderId }, { orderBy: [['opened_at', 'desc']] });
     if (!rows.length) return [];
     const items = await this.core.repo.find('case_items', { case_id: rows.map((r) => r.id) });
-    return rows.map((r) => ({ caseId: r.id, ref: r.ref, status: r.status, orderItemIds: items.filter((i) => i.case_id === r.id).map((i) => i.order_item_id) }));
+    const itemsOf = new Map<string, string[]>();
+    for (const i of items) {
+      const list = itemsOf.get(i.case_id);
+      if (list) list.push(i.order_item_id);
+      else itemsOf.set(i.case_id, [i.order_item_id]);
+    }
+    return rows.map((r) => ({ caseId: r.id, ref: r.ref, status: r.status, orderItemIds: itemsOf.get(r.id) ?? [] }));
   }
 
   async sellerCaseStats(sellerId: string, range: common.DateRange): Promise<{ open: number; unresolved: number; decidedAgainstSeller: number; medianReplyMinutes: number }> {
@@ -426,12 +434,9 @@ export class Reads {
     const rows = await this.core.repo.find('cases', { order_id: orderId }, { orderBy: [['opened_at', 'desc']] });
     const recent = new Date(this.core.now().getTime() - 180 * DAY);
     const v = viewer.area === 'admin' ? { area: 'admin' as const } : viewer.area === 'seller' ? { area: 'seller' as const, sellerId: viewer.sellerId ?? '' } : { area: 'store' as const, customerId: viewer.customerId ?? null, guestSessionId: viewer.customerId ? null : (viewer.guestSessionId ?? null) };
-    const visible: CaseRec[] = [];
-    for (const c of rows) {
-      if (c.status === 'closed' && c.closed_at && c.closed_at < recent) continue;
-      if (viewer.area === 'seller' && !viewer.sellerId) continue;
-      if (await this.core.canSee(c, v)) visible.push(c);
-    }
+    const candidates = viewer.area === 'seller' && !viewer.sellerId ? [] : rows.filter((c) => !(c.status === 'closed' && c.closed_at && c.closed_at < recent));
+    const seen = await Promise.all(candidates.map((c) => this.core.canSee(c, v)));
+    const visible: CaseRec[] = candidates.filter((_, n) => seen[n]);
     const aggs = await this.core.loadMany(visible.map((c) => c.id));
     return visible.map((c) => aggs.get(c.id)!).filter(Boolean);
   }
@@ -492,10 +497,12 @@ export class Reads {
     const rows = await this.core.repo.find('cases', { return_id: ids }, { orderBy: [['opened_at', 'asc']] });
     const aggs = await this.core.loadMany(rows.map((r) => r.id));
     const v = viewer.area === 'admin' ? { area: 'admin' as const } : viewer.area === 'seller' ? { area: 'seller' as const, sellerId: viewer.sellerId ?? '' } : { area: 'store' as const, customerId: viewer.customerId ?? null, guestSessionId: viewer.guestSessionId ?? null };
-    const visible: Agg[] = [];
-    for (const r of rows) if (await this.core.canSee(r, v)) visible.push(aggs.get(r.id)!);
+    const seen = await Promise.all(rows.map((r) => this.core.canSee(r, v)));
+    const visible = rows.filter((_, n) => seen[n]).map((r) => aggs.get(r.id)!);
     const x = await this.views.prepare(visible);
-    for (const a of visible) out[a.c.return_id!] = viewer.area === 'admin' ? await this.views.adminDetail(a, x) : this.views.caseView(a, viewer.area, x);
+    const views = await Promise.all(visible.map((a) => (viewer.area === 'admin' ? this.views.adminDetail(a, x) : this.views.caseView(a, viewer.area, x))));
+    // oldest first: a later case of the same return replaces an earlier one
+    for (const [n, a] of visible.entries()) out[a.c.return_id!] = views[n]!;
     return out;
   }
 
