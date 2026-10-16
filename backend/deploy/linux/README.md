@@ -63,8 +63,14 @@ Put all of this on a USB stick.
    cd backend && npm run package -- --admin <path to admin-center/dist>
    ```
 
-   This makes `backend/release/marketly-<version>-<commit>.tar.gz` (about 15 MB). Without `--admin` the release
+   This makes `backend/release/marketly-<version>-<commit>.tar.gz` (about 30 MB). Without `--admin` the release
    shows a placeholder page instead of the Admin Center.
+
+   **The release is for Linux x64 only.** The image library (sharp, which resizes product photos) has native
+   binaries; the package step installs the Linux x64 ones (`@img/sharp-linux-x64`, `@img/sharp-libvips-linux-x64`)
+   into the release even on Windows. So the release can't be smoke-tested on the Windows build PC: test it on the
+   server (`sudo marketly check`), or run the project itself (`npm run dev`) on Windows, which uses the Windows
+   binaries from the project's own `node_modules`.
 
 The server itself needs nothing else: `openssl`, `curl`, `tar` and systemd are part of Ubuntu Server.
 

@@ -6,15 +6,20 @@
  *
  *   release/marketly-<version>-<commit>/        dist/ (server + production tools, compiled)
  *                                               package.json, package-lock.json
- *                                               node_modules/ (production dependencies only: npm ci --omit=dev)
+ *                                               node_modules/ (production dependencies only, for Linux x64)
  *                                               deploy/linux/ (install, certificate, backup and check scripts)
  *                                               .env.production.example
  *                                               admin/ (the built Admin Center, or a placeholder page)
  *                                               RELEASE (name, commit, date)
  *   release/marketly-<version>-<commit>.tar.gz  the same folder, to copy to the server
  *
- * The dependencies are plain JavaScript (no compiled add-ons), so node_modules installed here on Windows runs on
- * Linux. They are installed inside the release folder only; the project's own node_modules is not touched.
+ * The release is for Linux x64 (glibc) only. The dependencies are plain JavaScript except the image library sharp,
+ * whose native binaries come prebuilt as optional packages per platform (@img/sharp-linux-x64 and
+ * @img/sharp-libvips-linux-x64 for the server). npm ci installs the Linux x64 ones even on Windows (--os, --cpu,
+ * --libc), so the release can't be smoke-tested on the Windows build PC. package-lock.json lists every platform's
+ * optional sharp packages and must keep the Linux x64 ones (npm install sharp regenerates them; this script stops
+ * when they are missing). They are installed inside the release folder only; the project's own node_modules is
+ * not touched.
  */
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -79,9 +84,15 @@ for (const item of ['dist', 'package.json', 'package-lock.json', '.env.productio
   cpSync(join(backendDir, item), join(out, item), { recursive: true });
 }
 
-console.log('Installing the production dependencies into the release (npm ci --omit=dev) …');
-// --ignore-scripts: no install script of any dependency runs (none is needed: plain JavaScript)
-run('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], out);
+console.log('Installing the production dependencies for Linux x64 into the release (npm ci --omit=dev) …');
+// --ignore-scripts: no install script of any dependency runs (none is needed: sharp's binaries are prebuilt
+// packages). --os/--cpu/--libc: the optional packages of the server's platform, not of this PC.
+run('npm', ['ci', '--omit=dev', '--ignore-scripts', '--os=linux', '--cpu=x64', '--libc=glibc', '--no-audit', '--no-fund'], out);
+for (const native of ['@img/sharp-linux-x64', '@img/sharp-libvips-linux-x64']) {
+  if (!existsSync(join(out, 'node_modules', ...native.split('/'), 'package.json'))) {
+    throw new Error(`${native} is missing from the release: package-lock.json must list it (npm install sharp in backend adds it back)`);
+  }
+}
 
 if (adminDir) cpSync(adminDir, join(out, 'admin'), { recursive: true });
 else {
@@ -101,7 +112,7 @@ console.log('Packing …');
 run('tar', ['-czf', `${name}.tar.gz`, name], releases);
 
 console.log(`
-Release ${name}
+Release ${name} (Linux x64)
   folder   ${out} (${mb(sizeOf(out))})
   archive  ${out}.tar.gz (${mb(statSync(`${out}.tar.gz`).size)})
   Admin Center: ${adminDir ? `included from ${adminDir}` : 'NOT included (placeholder page); add it with --admin <admin-center/dist>'}

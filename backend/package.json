@@ -46,6 +46,7 @@
     "graphql": "^16.11.0",
     "mercurius": "^16.10.1",
     "mongoose": "^8.24.5",
+    "sharp": "^0.35.5",
     "zod": "^4.6.5"
   },
   "devDependencies": {
