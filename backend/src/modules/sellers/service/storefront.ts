@@ -539,9 +539,11 @@ export class StorefrontPart extends Part {
     for (const id of ids) profiles.set(id, await this.profileOf(id));
     const refs = await this.core.mediaRefs([...profiles.values()].map((p) => p.logo_media_id));
     const shipping = await this.core.optional('shipping', 'shipping', null, (s) => s.getSellerShippingSummaries(ids));
+    // ratings of every card in one call (cards show no on-time dispatch from reviews: skip shipping's figures there)
+    const ratings = await this.core.optional('reviews', 'rating', null, (r) => r.feedbackSummariesForSellers(ids, { dispatch: false }));
     const out: SellerSummary[] = [];
     for (const s of rows) {
-      const fb = await this.core.optional('reviews', 'rating', null, (r) => r.getSellerFeedbackSummary(s.id));
+      const fb = ratings?.get(s.id);
       const p = profiles.get(s.id)!;
       out.push({
         id: s.id,

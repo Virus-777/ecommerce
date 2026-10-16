@@ -37,7 +37,7 @@ import { launchReadinessReviewMachine, payoutReadinessMachine, sellerAccountStat
 import * as map from '../mappers.js';
 import type { ApplicationRec, SellerListFilter, SellerRec } from '../ports.js';
 import type { SellersRepository } from '../repository.js';
-import { invalid, mapLimit, notFound, Part, SYSTEM, type By } from './core.js';
+import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 const SELLING = ['approved', 'restricted', 'suspended'];
 const DATASET = 'sellers.admin.accounts';
@@ -751,13 +751,20 @@ export class AccountsPart extends Part {
   async sellerRows(rows: SellerRec[], viewer: { canSeeBalances: boolean }): Promise<SellerRow[]> {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
-    const [profileRows, dispatch, restrictions, warnings, appRows, categories] = await Promise.all([
+    const caseRange = { from: this.core.today(addDays(this.now(), -365)), to: this.core.today() };
+    // other modules' figures come in one batched call per module for all the rows; a module that is off or fails
+    // leaves its columns empty for every row (no feedback, 0 open cases, no balance), as before
+    const [profileRows, dispatch, restrictions, warnings, appRows, categories, feedbackOf, casesOf, balancesOf] = await Promise.all([
       this.repo.getProfiles(ids),
       this.parts.performance.dispatchPct(ids),
       this.repo.find('restrictions', { seller_id: ids, state: 'active' }),
       this.repo.find('warnings', { seller_id: ids, state: 'open' }, { orderBy: [['issued_at', 'desc']] }),
       this.repo.getMany('applications', rows.map((r) => r.application_id).filter((x): x is string => Boolean(x))),
       this.core.optional('catalog', 'categories', null, (c) => c.listCategories({ includeHidden: true })),
+      // the list shows its own on-time dispatch (dispatchPct): reviews need not ask shipping for each seller
+      this.core.optional('reviews', 'feedback', null, (r) => r.feedbackSummariesForSellers(ids, { dispatch: false })),
+      this.core.optional('support', 'cases', null, (x) => x.caseStatsForSellers(ids, caseRange)),
+      viewer.canSeeBalances ? this.core.optional('finance', 'balances', null, (f) => f.balancesForSellers(ids)) : undefined,
     ]);
     const profiles = new Map(profileRows.map((p) => [p.seller_id, p]));
     const refs = await this.core.mediaRefs(profileRows.map((p) => p.logo_media_id));
@@ -775,15 +782,11 @@ export class AccountsPart extends Part {
       }
     };
     walk((categories ?? []) as never);
-    const caseRange = { from: this.core.today(addDays(this.now(), -365)), to: this.core.today() };
-    // other modules answer per seller (no batch API): a few sellers at a time instead of one after another
-    return mapLimit(rows, 8, async (s): Promise<SellerRow> => {
+    return rows.map((s): SellerRow => {
       const p = profiles.get(s.id);
-      const [feedback, cases, bal] = await Promise.all([
-        this.core.optional('reviews', 'feedback', null, (r) => r.getSellerFeedbackSummary(s.id)),
-        this.core.optional('support', 'cases', null, (x) => x.sellerCaseStats(s.id, caseRange)),
-        viewer.canSeeBalances ? this.core.optional('finance', 'balances', null, (f) => f.getSellerBalances(s.id)) : undefined,
-      ]);
+      const feedback = feedbackOf?.get(s.id);
+      const cases = casesOf?.get(s.id);
+      const bal = balancesOf?.get(s.id);
       const rs = restrictionsOf.get(s.id) ?? [];
       const cat = ((apps.get(s.application_id ?? '')?.business ?? {}) as { categoryIds?: string[] }).categoryIds?.[0];
       return {

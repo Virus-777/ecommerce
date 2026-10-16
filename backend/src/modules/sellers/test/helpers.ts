@@ -42,7 +42,8 @@ export interface Kit {
   close(): Promise<void>;
 }
 
-export async function boot(): Promise<Kit> {
+/** `apiStubs`: more modules to answer (optional dependencies that are not booted, e.g. reviews, support, finance) */
+export async function boot(o: { apiStubs?: NonNullable<Parameters<typeof buildTestApp>[0]>['apiStubs'] } = {}): Promise<Kit> {
   const clock = fixedClock(new Date());
   const audits: audit.RecordInput[] = [];
   const work: Kit['work'] = [];
@@ -118,6 +119,7 @@ export async function boot(): Promise<Kit> {
         },
         resolveBySource: async () => 1,
       },
+      ...o.apiStubs,
     },
   });
   // the boot can take a while: the app's time must not stay behind the test tokens, signed at the real time
