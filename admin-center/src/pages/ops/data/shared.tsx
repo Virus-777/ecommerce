@@ -1,7 +1,6 @@
-import { useState, type ReactNode } from 'react';
-import { ApiError } from '@marketly/web-shared/api';
+import type { ReactNode } from 'react';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { Button, Dialog, Field, Icon, TextInput } from '@marketly/web-shared/ui';
+import { Icon } from '@marketly/web-shared/ui';
 
 /** Shared legend copy for row edges in the Operations tables. */
 export const EDGE_URGENT = 'Red edge = urgent: overdue or past target';
@@ -75,40 +74,5 @@ export function EmptyRow({ cols, children }: { cols: number; children: ReactNode
         {children}
       </td>
     </tr>
-  );
-}
-
-/** True when the API asks for a fresh 2-step code (403 STEP_UP_REQUIRED). */
-export const isStepUp = (e: unknown) => e instanceof ApiError && e.code === 'STEP_UP_REQUIRED';
-
-/**
- * Asks for the authenticator code when an action answers STEP_UP_REQUIRED; the caller retries the action
- * with it (X-Step-Up-Code). Development dev-key tokens accept 000000.
- */
-export function StepUpDialog({ open, onClose, onSubmit, busy, error }: { open: boolean; onClose: () => void; onSubmit: (code: string) => void; busy?: boolean; error?: ReactNode }) {
-  const [code, setCode] = useState('');
-  const valid = /^\d{6}$/.test(code);
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title="Confirm it’s you"
-      size="sm"
-      foot={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={() => valid && onSubmit(code)} disabled={!valid || busy}>
-            {busy ? 'Checking…' : 'Confirm'}
-          </Button>
-        </>
-      }
-    >
-      <p className="small sub">This action needs a fresh 2-step code. Enter the 6-digit code from your authenticator app.</p>
-      <Field label="Authenticator code" error={error}>
-        <TextInput id="step-up-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
-      </Field>
-    </Dialog>
   );
 }

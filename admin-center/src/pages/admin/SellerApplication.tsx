@@ -10,7 +10,6 @@ import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, KeyValue
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, shortDate } from '@/app/parts';
 import { MessageDialog } from './data/seller-message';
-import { isStepUpCancel, stepUpHeader, useStepUp } from './data/step-up';
 import { UUID_RE, cap, endOfDayIso, isoDay, type ApplicationAdmin, type ApplicationRow } from './data/seller';
 
 // Design: pages/admin/admin-seller-application.html
@@ -181,7 +180,6 @@ export default function SellerApplication() {
   const { api } = useApi();
   const qc = useQueryClient();
   const { can, accountId } = useStaffSession();
-  const stepUp = useStepUp();
   const [view, setView] = useView<'request-information' | 'reject'>();
   const [flash, setFlash] = useState<{ title: string; body: string } | null>(null);
   const [message, setMessage] = useState(false);
@@ -220,26 +218,23 @@ export default function SellerApplication() {
     void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
     void qc.invalidateQueries({ queryKey: ['notifications', 'summary', 'staff'] });
   };
-  const write = <T,>(fn: (code?: string) => Promise<T>) => stepUp.run(fn);
   const path = { id: id ?? '' };
 
   const startReview = useMutation({
-    mutationFn: () => write((code) => call(api.POST('/api/admin/sellers/applications/{id}/start-review', { params: { path, header: stepUpHeader(code) as never } }))),
+    mutationFn: () => call(api.POST('/api/admin/sellers/applications/{id}/start-review', { params: { path } })),
     onSuccess: () => (announce('Review started'), refresh()),
   });
   const assign = useMutation({
-    mutationFn: () => write((code) => call(api.POST('/api/admin/sellers/applications/{id}/assign', { params: { path, header: stepUpHeader(code) as never }, body: { reviewerId: accountId } }))),
+    mutationFn: () => call(api.POST('/api/admin/sellers/applications/{id}/assign', { params: { path }, body: { reviewerId: accountId } })),
     onSuccess: () => (announce('Assigned to you'), refresh()),
   });
   const requestInfo = useMutation({
     mutationFn: (items: Need[]) =>
-      write((code) =>
-        call(
-          api.POST('/api/admin/sellers/applications/{id}/request-information', {
-            params: { path, header: stepUpHeader(code) as never },
-            body: { items: items.map((n) => ({ title: n.title, detail: n.detail, neededFor: n.neededFor, documentKind: n.documentKind ?? null })), message: msg.trim(), dueAt: endOfDayIso(due), reminder },
-          }),
-        ),
+      call(
+        api.POST('/api/admin/sellers/applications/{id}/request-information', {
+          params: { path },
+          body: { items: items.map((n) => ({ title: n.title, detail: n.detail, neededFor: n.neededFor, documentKind: n.documentKind ?? null })), message: msg.trim(), dueAt: endOfDayIso(due), reminder },
+        }),
       ),
     onSuccess: (_r, items) => {
       setFlash({
@@ -251,10 +246,7 @@ export default function SellerApplication() {
     },
   });
   const reject = useMutation({
-    mutationFn: () =>
-      write((code) =>
-        call(api.POST('/api/admin/sellers/applications/{id}/reject', { params: { path, header: stepUpHeader(code) as never }, body: { reasonCode: reason as RejectCode, explanation: explain.trim(), reapply } })),
-      ),
+    mutationFn: () => call(api.POST('/api/admin/sellers/applications/{id}/reject', { params: { path }, body: { reasonCode: reason as RejectCode, explanation: explain.trim(), reapply } })),
     onSuccess: () => {
       setFlash({ title: 'Application rejected', body: `The applicant gets your explanation by email. Can reapply after: ${REAPPLY.find((r) => r.value === reapply)?.label.toLowerCase()}. Recorded in Action history.` });
       setView('');
@@ -262,7 +254,7 @@ export default function SellerApplication() {
     },
   });
   const approve = useMutation({
-    mutationFn: () => write((code) => call(api.POST('/api/admin/sellers/applications/{id}/approve', { params: { path, header: stepUpHeader(code) as never }, body: {} }))),
+    mutationFn: () => call(api.POST('/api/admin/sellers/applications/{id}/approve', { params: { path }, body: {} })),
     onSuccess: (res) => {
       const approved = res.application.state === 'approved';
       setFlash(
@@ -277,7 +269,7 @@ export default function SellerApplication() {
     mutationFn: () => call(api.POST('/api/admin/sellers/applications/{id}/notes', { params: { path }, body: { body: note.trim() } })),
     onSuccess: () => (setNote(''), announce('Note added'), void qc.invalidateQueries({ queryKey: ['sellers', 'applications', 'detail', id] })),
   });
-  const writeError = [startReview, assign, approve].find((m) => m.isError && !isStepUpCancel(m.error))?.error;
+  const writeError = [startReview, assign, approve].find((m) => m.isError)?.error;
 
   if (resolved.isSuccess && !resolved.data) return <Waiting refParam={ref} />;
   const notFound = detail.error instanceof ApiError && detail.error.status === 404;
@@ -462,7 +454,7 @@ export default function SellerApplication() {
         </>
       }
     >
-      {requestInfo.isError && !isStepUpCancel(requestInfo.error) && (
+      {requestInfo.isError && (
         <Alert tone="danger" title="We couldn’t send the request">
           {errorMessage(requestInfo.error)}
         </Alert>
@@ -509,7 +501,7 @@ export default function SellerApplication() {
         </>
       }
     >
-      {reject.isError && !isStepUpCancel(reject.error) && (
+      {reject.isError && (
         <Alert tone="danger" title="We couldn’t reject the application">
           {errorMessage(reject.error)}
         </Alert>
@@ -687,7 +679,6 @@ export default function SellerApplication() {
         </div>
       </div>
       <MessageDialog open={message} onClose={() => setMessage(false)} to={owner} target={{ applicationId: app.id }} onSent={(b) => setFlash({ title: 'Message sent', body: b })} />
-      {stepUp.dialog}
     </AdminLayout>
   );
 }

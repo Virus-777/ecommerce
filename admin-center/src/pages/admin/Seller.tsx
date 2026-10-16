@@ -12,7 +12,6 @@ import { Alert, Badge, Button, Card, Deadline, Dialog, EmptyState, Field, Icon, 
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone, monthYear, shortDate } from '@/app/parts';
 import { MessageDialog } from './data/seller-message';
-import { isStepUpCancel, stepUpHeader, useStepUp } from './data/step-up';
 import {
   CLOSED_GROUP, CLOSED_RETURN, UUID_RE, cap, initialsOf, isoDay, statusLabel, tintOf, withoutFormatted,
   type AdminSellerGql, type Obligations, type Owner, type Payouts, type Restriction, type SellerDetail,
@@ -145,7 +144,6 @@ export default function Seller() {
   const { api, gql } = useApi();
   const qc = useQueryClient();
   const { can, accountId } = useStaffSession();
-  const stepUp = useStepUp();
   const [view, setView] = useView<'suspend-seller'>();
   const [flash, setFlash] = useState<{ title: string; body: string } | null>(null);
   const [obTab, setObTab] = useState<ObKind>('orders');
@@ -196,14 +194,12 @@ export default function Seller() {
 
   const suspend = useMutation({
     mutationFn: (dr: SuspendDraft) =>
-      stepUp.run((code) =>
-        call(
+      call(
           api.POST('/api/admin/sellers/sellers/{id}/suspend', {
-            params: { path: { id: sellerId }, header: stepUpHeader(code) as never },
+            params: { path: { id: sellerId } },
             body: { reasonCode: dr.reason as ReasonCode, reason: dr.details.trim(), reviewDate: dr.date, openOrders: dr.orders, secondReviewerId: dr.reviewer },
           }),
         ),
-      ),
     onSuccess: (res, dr) => {
       const reviewer = reviewers.find((m) => m.account.id === dr.reviewer)?.account.displayName ?? 'The second reviewer';
       if (res.state === 'pending_approval') {
@@ -692,7 +688,7 @@ export default function Seller() {
         <Alert tone="danger" title="Suspension stops all new sales">
           Customers can no longer buy from {a.storeName}. Existing orders, returns and cases stay open and accessible to the seller and our teams until they are resolved.
         </Alert>
-        {suspend.isError && !isStepUpCancel(suspend.error) && (
+        {suspend.isError && (
           <Alert tone="danger" title="We couldn’t send the suspension">
             {errorMessage(suspend.error)}
           </Alert>
@@ -760,7 +756,6 @@ export default function Seller() {
 
       {editing && <EditRestriction r={editing} onClose={() => setEditing(null)} onDone={(t, b) => (setFlash({ title: t, body: b }), refresh())} />}
       <MessageDialog open={message} onClose={() => setMessage(false)} to={a.storeName} target={{ sellerId }} onSent={(b) => setFlash({ title: 'Message sent', body: b })} />
-      {stepUp.dialog}
     </AdminLayout>
   );
 }

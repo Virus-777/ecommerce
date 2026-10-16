@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation } from 'react-router';
 import { createContext, useCallback, useContext, useRef, useMemo, type ReactNode } from 'react';
 import { call, useApi, useSessionState, type SessionTokens } from '@marketly/web-shared/api';
 import { BackOfficeIdentityProvider, type BackOfficeIdentity, type NavCount } from '@marketly/web-shared/layouts';
@@ -141,17 +142,23 @@ function SignedIn({ accountId, children }: { accountId: string; children: ReactN
 export function StaffSessionProvider({ children }: { children: ReactNode }) {
   const { session } = useApi();
   const state = useSessionState();
-  useQuery({ queryKey: ['session', 'start'], queryFn: () => session.token().then(() => true), staleTime: Infinity, retry: false });
+  const { pathname } = useLocation();
+  const start = useQuery({ queryKey: ['session', 'start'], queryFn: () => session.token().then(() => true), staleTime: Infinity, retry: false });
   const accountId = state.kind === 'staff' ? (state.claims?.sub as string | undefined) : undefined;
   // After sign-out the session is idle again: that is signed out (sign-in), not starting (loading).
   const started = useRef(false);
   if (state.status === 'ready' || state.status === 'error') started.current = true;
+  // The invitation and reset pages are for people who can't sign in yet: no sign-in gate, no staff layout.
+  if (PUBLIC_PATHS.has(pathname)) return <>{children}</>;
   if (!state.claims && (state.status === 'starting' || (state.status === 'idle' && !started.current))) {
     return <div className="route-loading" role="status" aria-label="Loading" />;
   }
-  if (!accountId) return <SignIn />;
+  if (!accountId) return <SignIn startError={start.error} />;
   return <SignedIn accountId={accountId}>{children}</SignedIn>;
 }
+
+/** Public staff pages (links from `bootstrap-owner` / `staff-link`), served without signing in. */
+export const PUBLIC_PATHS = new Set(['/invitation', '/reset-password']);
 
 export function useStaffSession(): StaffSession {
   const s = useContext(Ctx);

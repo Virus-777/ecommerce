@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router';
 import { call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney, initials } from '@marketly/web-shared/lib/format';
+import { formatMoney, initials, isoInText } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import {
@@ -13,7 +13,6 @@ import {
 } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, dateTime, deadlineTone, monthYear } from '@/app/parts';
-import { isStepUpCancel, useStepUp } from './data/step-up';
 import {
   ADMIN_ORDER, CANCELLABLE, CANCEL_REASONS, FUNDED_BY, REFUND_REASONS, defaultFunding, parseMinor, sum, toInput, toTimeline, usd, withinLimit,
   type Amt, type HistoryRow, type MyLimit, type OrderAdmin, type OrderGroup, type OrderItem, type SellerLabel,
@@ -51,8 +50,8 @@ function History({ events }: { events: TimelineEvent[] }) {
           <span className="dot" aria-hidden="true" />
           <div className="stack gap-1">
             <span className="t">{e.t}</span>
-            {e.d && <span className="d">{e.d}</span>}
-            {e.body && <div className="small sub">{e.body}</div>}
+            {e.d && <span className="d">{typeof e.d === 'string' ? isoInText(e.d) : e.d}</span>}
+            {e.body && <div className="small sub">{typeof e.body === 'string' ? isoInText(e.body) : e.body}</div>}
           </div>
         </li>
       ))}
@@ -79,7 +78,6 @@ export default function Order() {
   const { api, gql } = useApi();
   const qc = useQueryClient();
   const { accountId, can } = useStaffSession();
-  const stepUp = useStepUp();
   const [view, setView] = useView<View>();
   const [mode, setMode] = useState<Mode>('refund');
   const [form, setForm] = useState<RefundForm>(EMPTY_FORM);
@@ -205,9 +203,7 @@ export default function Order() {
           destination: 'original_method' as const,
           note: form.note.trim(),
         };
-        const res = await stepUp.run((code) =>
-          call(api.POST('/api/admin/returns/refunds', { body, params: { header: { 'Idempotency-Key': keyFor(gid) } }, headers: code ? { 'X-Step-Up-Code': code } : undefined })),
-        );
+        const res = await call(api.POST('/api/admin/returns/refunds', { body, params: { header: { 'Idempotency-Key': keyFor(gid) } } }));
         results.push(res);
       }
       return results;
@@ -226,7 +222,7 @@ export default function Order() {
       refresh();
       close();
     },
-    onError: (e) => !isStepUpCancel(e) && setSubmitError(errorMessage(e)),
+    onError: (e) => setSubmitError(errorMessage(e)),
   });
 
   const submitCancel = useMutation({
@@ -703,7 +699,7 @@ export default function Order() {
                   <b>{n.author?.name ?? 'Staff'}</b>
                   <span className="muted">{dateTime(n.at)}</span>
                 </span>
-                <span>{n.text}</span>
+                <span>{isoInText(n.text)}</span>
               </div>
             ))}
             {canNote ? (
@@ -886,7 +882,6 @@ export default function Order() {
       </Dialog>
 
       <ContactDialog group={contact} orderId={o.id} orderRef={o.ref} onClose={() => setContact(null)} />
-      {stepUp.dialog}
     </AdminLayout>
   );
 }

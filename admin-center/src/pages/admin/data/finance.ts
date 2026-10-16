@@ -81,16 +81,8 @@ export function refundWhy(r: Refund): { why: string; detail: string } {
 
 export const reconEdge = (i: ReconItem): Edge => (i.ageDays >= 3 ? 'flagged' : i.ageDays >= 1 ? 'warn' : '');
 
-/* ---------------- Approvals and step-up (shared by the finance and support screens) ---------------- */
+/* ---------------- Approvals (shared by the finance and support screens) ---------------- */
 
-/** STEP_UP_REQUIRED: the action needs a fresh 2-step code (X-Step-Up-Code). */
-export const needsStepUp = (e: unknown): boolean => e instanceof ApiError && e.code === 'STEP_UP_REQUIRED';
 
 /** APPROVAL_REQUIRED: nothing was saved; an approval request was opened (details.approvalRequestId). */
 export const sentForApproval = (e: unknown): boolean => e instanceof ApiError && e.code === 'APPROVAL_REQUIRED';
-
-/** A step-up code header, or no header without a code. */
-export const stepUpHeader = (code: string) => (code.trim() ? { 'X-Step-Up-Code': code.trim() } : {});
-
-/** Step-up code hint: development dev-key tokens accept 000000; real sessions need the authenticator code. */
-export const STEP_UP_HINT = 'Enter the 6-digit code from your authenticator app. This action needs a fresh 2-step check.';

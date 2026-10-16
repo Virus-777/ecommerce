@@ -13,7 +13,7 @@ import {
 } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, dayKey, deadlineLabel, deadlineTone } from '@/app/parts';
-import { STEP_UP_HINT, needsStepUp, sentForApproval, stepUpHeader, type FeeRules } from './data/finance';
+import { sentForApproval, type FeeRules } from './data/finance';
 import { useDebounced } from './data/customers';
 import {
   CHARGED, ESCALATE_TO, OUTCOMES, OUTCOME_LABEL, PRIORITY_LABEL, REMEDY_LABEL, pacificEndOfDay, toMinor,
@@ -25,7 +25,7 @@ import {
 // GET /support/cases/{id} (case file), /payments/orders/{orderId}/refundable (refund cap), /finance/fee-rules
 // (earnings estimate; refundImpactPreview in the AdminCase query fails on Money.formatted, G37) and
 // POST /access/authority-checks (the decider's approval limit). Writes: messages, assign, escalate,
-// decision-draft, decide (Idempotency-Key, step-up code), resolve. "decision-recorded" follows the case's decision.
+// decision-draft, decide (Idempotency-Key), resolve. "decision-recorded" follows the case's decision.
 
 /* ---------------- Evidence ---------------- */
 
@@ -172,8 +172,6 @@ export default function Case() {
   const [reply, setReply] = useState('');
   const [replyErr, setReplyErr] = useState('');
   const [notice, setNotice] = useState<{ tone: 'success' | 'info' | 'danger'; title: string; body: string } | null>(null);
-  const [code, setCode] = useState('');
-  const [askCode, setAskCode] = useState(false);
   const decideKey = useRef(newIdempotencyKey());
   const [side, setSide] = useState<null | 'assign' | 'escalate'>(null);
   const [assignTo, setAssignTo] = useState('');
@@ -266,17 +264,16 @@ export default function Case() {
     onError: (e) => setNotice({ tone: 'danger', title: 'The draft wasn’t saved', body: errorMessage(e) }),
   });
   const decide = useMutation({
-    mutationFn: (v: { input: DecisionInput; code: string }) =>
+    mutationFn: (v: { input: DecisionInput }) =>
       call(
         api.POST('/api/admin/support/cases/{id}/decide', {
-          params: { path: { id: caseId! }, header: { 'Idempotency-Key': decideKey.current, ...stepUpHeader(v.code) } as { 'Idempotency-Key': string } },
+          params: { path: { id: caseId! }, header: { 'Idempotency-Key': decideKey.current } },
           body: v.input,
         }),
       ) as Promise<CaseDetail>,
     onSuccess: (r) => {
       qc.setQueryData(['support', 'case', caseId], r);
       refresh();
-      setAskCode(false);
       setView('decision-recorded');
       announce(r.pendingApproval ? 'Decision sent for approval' : 'Decision recorded');
       setNotice(
@@ -286,10 +283,7 @@ export default function Case() {
       );
     },
     onError: (e) => {
-      if (needsStepUp(e)) {
-        setAskCode(true);
-        decideKey.current = newIdempotencyKey();
-      } else if (sentForApproval(e)) {
+      if (sentForApproval(e)) {
         refresh();
         setNotice({ tone: 'info', title: 'Decision sent for approval', body: 'The remedy is above your limit. It was sent to an approver; nothing is published until it is approved.' });
       }
@@ -325,8 +319,7 @@ export default function Case() {
   const record = () => {
     setAttempted(true);
     if (Object.keys(validate(form, maxRefund)).length) return;
-    if (askCode && !/^\d{6}$/.test(code.trim())) return;
-    decide.mutate({ input: toInput(form, itemIds), code: code.trim() });
+    decide.mutate({ input: toInput(form, itemIds) });
   };
   const doSend = () => {
     if (!reply.trim()) {
@@ -740,7 +733,7 @@ export default function Case() {
                       {data.decisionDraft.savedBy.name ? ` by ${data.decisionDraft.savedBy.name}` : ''}
                     </p>
                   )}
-                  {decide.error && !needsStepUp(decide.error) && !sentForApproval(decide.error) && (
+                  {decide.error && !sentForApproval(decide.error) && (
                     <Alert tone="danger" title="The decision wasn’t recorded">
                       {errorMessage(decide.error)}
                     </Alert>
@@ -793,11 +786,6 @@ export default function Case() {
                     checked={form.notify}
                     onChange={(e) => set('notify', e.target.checked)}
                   />
-                  {askCode && (
-                    <Field label="2-step code" hint={STEP_UP_HINT} error={attempted && !/^\d{6}$/.test(code.trim()) ? 'Enter the 6-digit code.' : undefined}>
-                      <TextInput id="cd-code" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
-                    </Field>
-                  )}
                   {refundMinor > 0 && <p className="xs muted">Refund of {formatMoney({ amount: refundMinor, currency: 'USD' })} charged to {chargedText}.</p>}
                 </>
               )}

@@ -12,11 +12,11 @@ import {
   areaIcon, AUTHORITY_OPTIONS, effectiveInstant, GAP_STATUS, GAP_TONE, grantedKeys, limitDraft, limitValue, MEMBER_STATUS, sameLimit, todayKey,
   type AwayPeriod, type Coverage, type LimitChange, type LimitDraft, type Role, type RoleDetail, type StaffMember,
 } from './data/staff';
-import { isStepUpCancel, stepUpHeader, useStepUp } from './data/step-up';
+import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
 
 // Design: pages/admin/admin-staff.html · view "edit-role" = full-page role editor (?view=edit-role&role=<role id>;
 // without a role it opens the Finance Manager, the design's example).
-// Data: access roles, members, coverage, away periods, role detail; invitations and permission changes need a 2-step code.
+// Data: access roles, members, coverage, away periods, role detail; invitations and permission changes are confirmed with the password (reauth).
 
 type StaffFilter = 'all' | 'active' | 'invited';
 interface Invite { name: string; email: string; roleId: string; managerId: string; reason: string; requestLimits: boolean }
@@ -101,11 +101,10 @@ export default function Staff() {
 
   const inviteM = useMutation({
     mutationFn: (f: Invite) =>
-      stepUp.run((code) =>
+      stepUp.run((token) =>
         call(
           api.POST('/api/admin/access/staff-invitations', {
-            params: { header: stepUpHeader(code) },
-            body: { email: f.email.trim(), name: f.name.trim(), roleIds: [f.roleId], reportsToAccountId: f.managerId || null, reason: f.reason.trim(), requestLimitReview: f.requestLimits },
+            body: { email: f.email.trim(), name: f.name.trim(), roleIds: [f.roleId], reportsToAccountId: f.managerId || null, reason: f.reason.trim(), requestLimitReview: f.requestLimits, ...reauthField(token) },
           }),
         ),
       ),
@@ -116,9 +115,11 @@ export default function Staff() {
       const roleName = roles.find((r) => r.id === f.roleId)?.name ?? 'staff';
       const manager = members.find((x) => x.account.id === f.managerId)?.account.displayName;
       const pendingGrant = m.roles.length === 0;
+      // Offline server: no email arrives and the response never carries the pass code, so the server operator
+      // prints the person's link and pass code with staff-link.
       flash(
-        `Invitation sent to ${m.account.email}`,
-        `${m.account.displayName} is invited as ${roleName}${manager ? `, reporting to ${manager}` : ''}. The invitation expires after 7 days.` +
+        `${m.account.displayName} is invited`,
+        `Invited as ${roleName}${manager ? `, reporting to ${manager}` : ''}. Ask the server operator to run staff-link for ${m.account.email} to get their link and pass code; no email is sent from this server. The invitation expires after 7 days.` +
           (pendingGrant ? ' The role carries sensitive permissions, so a second reviewer approves it before it applies.' : '') +
           (f.requestLimits ? ` Approval limits were requested from ${ownerText}.` : ''),
       );
@@ -202,8 +203,8 @@ export default function Staff() {
       let permResult: RoleDetail | null = null;
       let limitResult: LimitChange | null = null;
       if (permsChanged) {
-        permResult = (await stepUp.run((code) =>
-          call(api.PUT('/api/admin/access/roles/{id}/permissions', { params: { path: { id }, header: stepUpHeader(code) }, body: { permissionKeys: [...perms], reason: reason.trim() } })),
+        permResult = (await stepUp.run((token) =>
+          call(api.PUT('/api/admin/access/roles/{id}/permissions', { params: { path: { id } }, body: { permissionKeys: [...perms], reason: reason.trim(), ...reauthField(token) } })),
         )) as RoleDetail;
       }
       if (changedLimits.length) {
@@ -566,7 +567,7 @@ export default function Staff() {
             flush
             titleAs="h3"
             title="Staff members"
-            sub="Every account uses 2-step sign-in"
+            sub="Staff sign in with email and password"
             actions={
               <SegmentedControl<StaffFilter>
                 items={[
@@ -591,14 +592,13 @@ export default function Staff() {
                           <th scope="col">Name</th>
                           <th scope="col">Roles</th>
                           <th scope="col">Last active</th>
-                          <th scope="col">Sign-in</th>
                           <th className="col-pin" scope="col">
                             Status
                           </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {membersQ.isPending && <SkeletonRows cols={5} />}
+                        {membersQ.isPending && <SkeletonRows cols={4} />}
                         {shownStaff.map((s) => {
                           const invited = s.status === 'invited';
                           const badges = s.roles.map((r) => (
@@ -621,15 +621,6 @@ export default function Staff() {
                               <td>
                                 <span className={invited ? 'small muted' : 'small'}>{lastActive(s)}</span>
                               </td>
-                              <td>
-                                {s.account.twoStepEnabled ? (
-                                  <Badge tone="success" icon="shield-check">
-                                    2-step on
-                                  </Badge>
-                                ) : (
-                                  <Badge>Not set up</Badge>
-                                )}
-                              </td>
                               <td className="col-pin">
                                 <span className="row gap-1 nowrap">
                                   <StatusBadge status={MEMBER_STATUS[s.status]} />
@@ -641,7 +632,7 @@ export default function Staff() {
                         })}
                         {!membersQ.isPending && !shownStaff.length && (
                           <tr>
-                            <td colSpan={5}>
+                            <td colSpan={4}>
                               <span className="small muted">{filter === 'invited' ? 'No open invitations.' : 'No staff members here.'}</span>
                             </td>
                           </tr>

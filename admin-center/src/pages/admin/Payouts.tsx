@@ -7,10 +7,11 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Button, Card, Checkbox, Dialog, Field, Icon, PageHeader, Pager, SearchInput, Stat, StatusBadge, TableWrap, TextInput, Textarea, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Button, Card, Checkbox, Dialog, Field, Icon, PageHeader, Pager, SearchInput, Stat, StatusBadge, TableWrap, Textarea, announce, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, longDate, shortDate, time } from '@/app/parts';
-import { STEP_UP_HINT, needsStepUp, sentForApproval } from './data/finance';
+import { sentForApproval } from './data/finance';
+import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
 import {
   CHECK_TONE, OPEN_RUN, PAYOUT_STATUS, RUN_CHECK_TONE, RUN_STATUS, STATUS_MEANING, approvalSteps, destState,
   type ApprovalStep, type DestState, type DestinationReview, type Payout, type PayoutRun, type RunPayoutRow,
@@ -19,8 +20,8 @@ import {
 // Design: pages/admin/admin-payouts.html · view "approve-run" = the approval dialog.
 // Data: GET /api/admin/finance/payout-runs (the newest open run, or ?run=<ref>), …/{id}/payouts (sellers),
 // /finance/payouts?status=failed, /finance/destination-reviews. Writes: submit, approve (Idempotency-Key,
-// step-up code above the approver's limit), send-back, payouts/{id}/retry, destination-reviews approve/reject
-// (X-Step-Up-Code), access approval-requests/{id}/remind. (AdminPayoutRun GraphQL fails on Money.formatted, G37.)
+// the password again above the approver's limit), send-back, payouts/{id}/retry, destination-reviews approve/reject
+// (always the password again: reauthToken, purpose payout-destination), access approval-requests/{id}/remind. (AdminPayoutRun GraphQL fails on Money.formatted, G37.)
 
 type View = 'approve-run';
 type CheckTone = 'ok' | 'info' | 'warn';
@@ -117,16 +118,14 @@ export default function Payouts() {
   const [notice, setNotice] = useState<{ tone: 'success' | 'info' | 'danger'; title: string; body: string } | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [note, setNote] = useState('');
-  const [code, setCode] = useState('');
-  const [askCode, setAskCode] = useState(false);
-  const [errors, setErrors] = useState<{ confirm?: string; note?: string; code?: string }>({});
+  const [errors, setErrors] = useState<{ confirm?: string; note?: string }>({});
+  const stepUp = useStepUp();
   const approveKey = useRef(newIdempotencyKey());
   const retryKeys = useRef<Record<string, string>>({});
   const [dest, setDest] = useState<DestDecision>(null);
   const [destReason, setDestReason] = useState('');
   const [destCallback, setDestCallback] = useState(false);
-  const [destCode, setDestCode] = useState('');
-  const [destErrors, setDestErrors] = useState<{ reason?: string; code?: string }>({});
+  const [destErrors, setDestErrors] = useState<{ reason?: string }>({});
 
   const canPrepare = can('finance.payouts.prepare');
   const canApproveRole = can('finance.payouts.approve');
@@ -170,8 +169,6 @@ export default function Payouts() {
   const openApproval = () => {
     setConfirm(false);
     setNote('');
-    setCode('');
-    setAskCode(false);
     setErrors({});
     approveKey.current = newIdempotencyKey();
     approve.reset();
@@ -180,13 +177,17 @@ export default function Payouts() {
   const close = () => setView('');
 
   const approve = useMutation({
-    mutationFn: (v: { note: string; code: string }) =>
-      call(
-        api.POST('/api/admin/finance/payout-runs/{id}/approve', {
-          params: { path: { id: runId! }, header: { 'Idempotency-Key': approveKey.current } },
-          body: { confirmedReview: true, note: v.note || null, stepUpCode: v.code || null },
-        }),
-      ) as Promise<PayoutRun>,
+    mutationFn: (v: { note: string }) =>
+      stepUp.run(
+        (token) =>
+          call(
+            api.POST('/api/admin/finance/payout-runs/{id}/approve', {
+              // The confirmed retry is a new request: a new key, so the refused first try isn't replayed.
+              params: { path: { id: runId! }, header: { 'Idempotency-Key': token ? newIdempotencyKey() : approveKey.current } },
+              body: { confirmedReview: true, note: v.note || null, ...reauthField(token) },
+            }),
+          ) as Promise<PayoutRun>,
+      ),
     onSuccess: (r) => {
       refreshRun();
       void qc.invalidateQueries({ queryKey: ['access', 'me'] });
@@ -198,11 +199,7 @@ export default function Payouts() {
       close();
     },
     onError: (e) => {
-      if (needsStepUp(e)) {
-        setAskCode(true);
-        approveKey.current = newIdempotencyKey();
-        setErrors((x) => ({ ...x, code: code ? 'That code didn’t work. Enter the current code from your authenticator app.' : undefined }));
-      } else if (sentForApproval(e)) {
+      if (sentForApproval(e)) {
         refreshRun();
         setNotice({ tone: 'info', title: 'Sent for approval', body: 'This run is above your payout limit. It was sent to a Finance reviewer with a higher limit.' });
         close();
@@ -247,12 +244,13 @@ export default function Payouts() {
     onError: (e, p) => setNotice({ tone: 'danger', title: `${p.ref} wasn’t retried`, body: errorMessage(e) }),
   });
   const decide = useMutation({
-    mutationFn: (v: { review: DestinationReview; approve: boolean; reason: string; callback: boolean; code: string }) => {
-      const opts = { params: { path: { id: v.review.id }, header: { 'X-Step-Up-Code': v.code } } };
-      return v.approve
-        ? call(api.POST('/api/admin/finance/destination-reviews/{id}/approve', { ...opts, body: { reason: v.reason, callbackConfirmed: v.callback } }))
-        : call(api.POST('/api/admin/finance/destination-reviews/{id}/reject', { ...opts, body: { reason: v.reason } }));
-    },
+    mutationFn: (v: { review: DestinationReview; approve: boolean; reason: string; callback: boolean }) =>
+      stepUp.run((token) => {
+        const opts = { params: { path: { id: v.review.id } } };
+        return v.approve
+          ? call(api.POST('/api/admin/finance/destination-reviews/{id}/approve', { ...opts, body: { reason: v.reason, callbackConfirmed: v.callback, ...reauthField(token) } }))
+          : call(api.POST('/api/admin/finance/destination-reviews/{id}/reject', { ...opts, body: { reason: v.reason, ...reauthField(token) } }));
+      }),
     onSuccess: (r, v) => {
       void qc.invalidateQueries({ queryKey: ['finance', 'destination-reviews'] });
       refreshRun();
@@ -261,8 +259,7 @@ export default function Payouts() {
       setDest(null);
     },
     onError: (e) => {
-      if (needsStepUp(e)) setDestErrors((x) => ({ ...x, code: 'Enter the current code from your authenticator app.' }));
-      else if (sentForApproval(e)) {
+      if (sentForApproval(e)) {
         setNotice({ tone: 'info', title: 'Sent for approval', body: 'This change needs a second reviewer. It was sent for approval.' });
         setDest(null);
       }
@@ -272,10 +269,9 @@ export default function Payouts() {
   const doApprove = () => {
     const errs: typeof errors = {};
     if (!confirm) errs.confirm = 'Confirm that you reviewed the held, failed and changed-destination payouts.';
-    if (askCode && !/^\d{6}$/.test(code.trim())) errs.code = 'Enter the 6-digit code.';
     setErrors(errs);
     if (Object.keys(errs).length) return;
-    approve.mutate({ note: note.trim(), code: code.trim() });
+    approve.mutate({ note: note.trim() });
   };
   const doSendBack = () => {
     if (!note.trim()) {
@@ -288,7 +284,6 @@ export default function Payouts() {
     setDest({ review, approve: approveIt });
     setDestReason('');
     setDestCallback(review.checks.some((c) => /callback/i.test(c.label) && c.result === 'passed'));
-    setDestCode('');
     setDestErrors({});
     decide.reset();
   };
@@ -296,10 +291,9 @@ export default function Payouts() {
     if (!dest) return;
     const errs: typeof destErrors = {};
     if (!destReason.trim()) errs.reason = 'Enter the reason for the record.';
-    if (!/^\d{6}$/.test(destCode.trim())) errs.code = 'Enter the 6-digit code.';
     setDestErrors(errs);
     if (Object.keys(errs).length) return;
-    decide.mutate({ review: dest.review, approve: dest.approve, reason: destReason.trim(), callback: destCallback, code: destCode.trim() });
+    decide.mutate({ review: dest.review, approve: dest.approve, reason: destReason.trim(), callback: destCallback });
   };
 
   const steps = run ? approvalSteps(run) : [];
@@ -537,9 +531,9 @@ export default function Payouts() {
                         <td>
                           {edge === 'flagged' && <span className="sr-only">Urgent: </span>}
                           {edge === 'warn' && <span className="sr-only">At risk: </span>}
-                          <a className="mono nowrap" href="#" title={f.ref}>
+                          <span className="mono nowrap" title={f.ref}>
                             {f.ref}
-                          </a>
+                          </span>
                         </td>
                         <td>{f.sellerName}</td>
                         <td className="r">
@@ -750,7 +744,7 @@ export default function Payouts() {
                 {canApproveRole ? 'It isn’t waiting for your approval, or you already approved it.' : 'Your role has no payout authority.'}
               </Alert>
             )}
-            {(approve.error || sendBack.error) && !needsStepUp(approve.error) && !sentForApproval(approve.error) && (
+            {(approve.error || sendBack.error) && !isStepUpCancel(approve.error) && !sentForApproval(approve.error) && (
               <Alert tone="danger" title="That didn’t work">
                 {errorMessage(approve.error ?? sendBack.error)}
               </Alert>
@@ -813,21 +807,6 @@ export default function Payouts() {
                 }}
               />
             </Field>
-            {askCode && (
-              <Field label="2-step code" hint={STEP_UP_HINT} error={errors.code}>
-                <TextInput
-                  id="po-code"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  value={code}
-                  error={!!errors.code}
-                  onChange={(e) => {
-                    setCode(e.target.value);
-                    setErrors((x) => ({ ...x, code: undefined }));
-                  }}
-                />
-              </Field>
-            )}
             <Alert tone="info" title="Approved is not paid">
               At release each payout moves to Processing. It shows Paid only when the bank confirms the deposit. Sellers see the same status.
             </Alert>
@@ -855,7 +834,7 @@ export default function Payouts() {
             <p className="small sub">
               {dest.review.fromLabel ?? 'No account'} → {dest.review.toLabel}
             </p>
-            {decide.error && !needsStepUp(decide.error) && !sentForApproval(decide.error) && (
+            {decide.error && !isStepUpCancel(decide.error) && !sentForApproval(decide.error) && (
               <Alert tone="danger" title="That didn’t work">
                 {errorMessage(decide.error)}
               </Alert>
@@ -864,12 +843,10 @@ export default function Payouts() {
               <Textarea id="po-dest-reason" value={destReason} onChange={(e) => setDestReason(e.target.value)} aria-required="true" />
             </Field>
             {dest.approve && <Checkbox id="po-dest-callback" label="Callback to the registered phone confirmed" checked={destCallback} onChange={(e) => setDestCallback(e.target.checked)} />}
-            <Field label="2-step code" hint={STEP_UP_HINT} error={destErrors.code}>
-              <TextInput id="po-dest-code" inputMode="numeric" autoComplete="one-time-code" value={destCode} error={!!destErrors.code} onChange={(e) => setDestCode(e.target.value)} />
-            </Field>
           </>
         )}
       </Dialog>
+      {stepUp.dialog}
     </AdminLayout>
   );
 }

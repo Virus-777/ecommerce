@@ -10,7 +10,6 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Card, Checkbox, Dialog, Field, Icon, KeyValue, LogoTile, PageHeader, Select, StatusBadge, Switch, TableWrap, Tabs, Textarea, TextInput, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date } from '@/app/parts';
-import { isStepUpCancel, stepUpHeader, useStepUp } from './data/step-up';
 import { isoDay, useDebounced } from './data/seller';
 import {
   NOTICE_AUDIENCE, NOTICE_DELAYS, NOTICE_PLACES, NOTICE_TYPES, STATUS_LABEL, ago, clock, dayRange, effectLabel, lb, parseArea, priceAt, whenLabel,
@@ -108,7 +107,6 @@ export default function Shipping() {
   const { api } = useApi();
   const qc = useQueryClient();
   const { can } = useStaffSession();
-  const stepUp = useStepUp();
   const [view, setView] = useView<'add-service-notice'>();
   const [section, setSection] = useState<Section>('carriers');
   const [flash, setFlash] = useState('');
@@ -146,9 +144,7 @@ export default function Shipping() {
 
   const toggle = useMutation({
     mutationFn: (v: { carrierId: string; serviceId: string; enabled: boolean }) =>
-      stepUp.run((code) =>
-        call(api.PATCH('/api/admin/shipping/carriers/{id}/services/{serviceId}', { params: { path: { id: v.carrierId, serviceId: v.serviceId }, header: stepUpHeader(code) as never }, body: { enabled: v.enabled } })),
-      ),
+      call(api.PATCH('/api/admin/shipping/carriers/{id}/services/{serviceId}', { params: { path: { id: v.carrierId, serviceId: v.serviceId } }, body: { enabled: v.enabled } })),
     onSuccess: (_r, v) => {
       announce(v.enabled ? 'Service enabled' : 'Service disabled');
       void qc.invalidateQueries({ queryKey: ['shipping', 'carriers'] });
@@ -158,10 +154,10 @@ export default function Shipping() {
   const save = useMutation({
     mutationFn: async (publish: boolean) => {
       const input = toInput(draft, carriers, zones);
-      const created = await stepUp.run((code) => call(api.POST('/api/admin/shipping/notices', { params: { header: stepUpHeader(code) as never }, body: input })));
+      const created = await call(api.POST('/api/admin/shipping/notices', { body: input }));
       if (!publish) return created;
       const mode = draft.from > isoDay(0) ? 'scheduled' : 'now';
-      return stepUp.run((code) => call(api.POST('/api/admin/shipping/notices/{id}/publish', { params: { path: { id: created.id }, header: stepUpHeader(code) as never }, body: { mode } })));
+      return call(api.POST('/api/admin/shipping/notices/{id}/publish', { params: { path: { id: created.id } }, body: { mode } }));
     },
     onSuccess: (n) => {
       setFlash(
@@ -266,7 +262,7 @@ export default function Shipping() {
           {flash}
         </Alert>
       )}
-      {toggle.isError && !isStepUpCancel(toggle.error) && (
+      {toggle.isError && (
         <Alert tone="danger" title="We couldn’t change the service">
           {errorMessage(toggle.error)}
         </Alert>
@@ -565,7 +561,7 @@ export default function Shipping() {
         }
       >
         <p className="small sub">Service notices adjust delivery estimates and show a short message to customers where they make delivery decisions.</p>
-        {save.isError && !isStepUpCancel(save.error) && (
+        {save.isError && (
           <Alert tone="danger" title="We couldn’t save the notice">
             {errorMessage(save.error)}
           </Alert>
@@ -635,7 +631,6 @@ export default function Shipping() {
           {preview.data?.dispatchChanges ? 'Dispatch deadlines change too.' : 'Dispatch deadlines do not change; only arrival estimates do.'}
         </span>
       </Dialog>
-      {stepUp.dialog}
     </AdminLayout>
   );
 }

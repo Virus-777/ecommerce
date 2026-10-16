@@ -4,13 +4,13 @@ import { Link } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, isoInText } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Badge, Button, Card, Checkbox, Deadline, Dialog, EmptyState, Field, Icon, IconButton, KeyValue, Select, Switch, TableWrap, Tabs, Textarea, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, dateTime, deadlineLabel, deadlineTone, iconOf, time } from '@/app/parts';
-import { isStepUpCancel, useStepUp } from './data/step-up';
+import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
 import { ALL_AREAS, API_VIEW, APPROVAL_STATUS, byDay, needsMe, noticeHref, noticeTone, routeText, type ApprovalRequest, type InboxSummary, type Notice, type Tab } from './data/inbox';
 
 // Design: pages/admin/admin-inbox.html · view "needs-my-action" = the tab filtered to notices that need me.
@@ -48,7 +48,7 @@ function MentionList({ items }: { items: Notice[] }) {
                 )}
               </span>
               <span className="xs muted">
-                {m.body} · {time(m.createdAt)}
+                {isoInText(m.body)} · {time(m.createdAt)}
               </span>
             </span>
           </li>
@@ -212,8 +212,8 @@ export default function Inbox() {
                             {n.resolvedAt && n.actionRequired && <Badge tone="success">Done</Badge>}
                             {isUnread && <span className="sr-only">Unread.</span>}
                           </span>
-                          <span className="small strong">{n.title}</span>
-                          <span className="xs sub">{n.body}</span>
+                          <span className="small strong">{isoInText(n.title)}</span>
+                          <span className="xs sub">{isoInText(n.body)}</span>
                           <span className="meta">
                             {route && (
                               <span>
@@ -415,7 +415,7 @@ function ApprovalDialog({ id, onClose, onDecided }: { id: string | null; onClose
     setErr('');
   };
   const approve = useMutation({
-    mutationFn: () => stepUp.run((code) => call(api.POST('/api/admin/access/approval-requests/{id}/approve', { params: { path: { id: id! } }, body: { note: note.trim() || null, stepUpCode: code ?? null } }))),
+    mutationFn: () => stepUp.run((token) => call(api.POST('/api/admin/access/approval-requests/{id}/approve', { params: { path: { id: id! } }, body: { note: note.trim() || null, ...reauthField(token) } }))),
     onSuccess: (r) => done(r as ApprovalRequest, r.status === 'partially_approved' ? 'First approval recorded. A second reviewer must approve.' : 'Approved'),
     onError: (e) => !isStepUpCancel(e) && setErr(errorMessage(e)),
   });

@@ -1,8 +1,9 @@
-import { StrictMode } from 'react';
+import { lazy, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
 import { ApiProvider } from '@marketly/web-shared/api';
 import { BackOfficeNotFound, createAppRouter } from '@marketly/web-shared/routes';
+import './fonts.css';
 import '@marketly/web-shared/styles/marketly.css';
 import '@marketly/web-shared/styles/app.css';
 import { StaffSessionProvider } from './app/session';
@@ -14,8 +15,16 @@ document.addEventListener('click', (e) => {
   if (a) e.preventDefault();
 });
 
+// Public staff pages opened from the links that bootstrap-owner / staff-link print (no design file).
+const Invitation = lazy(() => import('./app/Invitation'));
+const ResetPassword = lazy(() => import('./app/ResetPassword'));
+
 const router = createAppRouter({
   pages: PAGES,
+  extraRoutes: [
+    { path: '/invitation', element: <Invitation /> },
+    { path: '/reset-password', element: <ResetPassword /> },
+  ],
   notFound: () => <BackOfficeNotFound area="admin" />,
   wrap: (children) => <StaffSessionProvider>{children}</StaffSessionProvider>,
 });

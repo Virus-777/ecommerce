@@ -21,8 +21,7 @@
     "gen:icons": "node tools/gen-icons.mjs",
     "design:extract": "node tools/extract-design.mjs",
     "gen:api": "node tools/gen-api.mjs",
-    "seed": "node tools/seed/index.mjs",
-    "staff-code": "node tools/staff-code.mjs"
+    "seed": "node tools/seed/index.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.2",

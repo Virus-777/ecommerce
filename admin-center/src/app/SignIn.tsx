@@ -1,20 +1,22 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
+import { useNavigate } from 'react-router';
 import { ApiError, call, errorMessage, useApi, type SessionTokens } from '@marketly/web-shared/api';
 import { Logo } from '@marketly/web-shared/layouts';
 import { Alert, Button, Field, TextInput } from '@marketly/web-shared/ui';
 
-// Admin and Operations Center sign-in (designed in React; no design file). Staff accounts are invite-only and
-// always answer 2-step (authenticator code or a recovery code); staff sessions last at most 12 hours and are
-// never remembered. Development: `npm run staff-code -- olivia` in web-shared prints the current code for a
-// seeded staff account (password in web-shared/.seed/state.json).
+// Admin and Operations Center sign-in (designed in React; no design file). Staff accounts are invite-only and,
+// on the offline server, sign in with email and password only (no 2-step; sensitive actions ask for the password
+// again). A sign-in that answers password_reset_required continues on /reset-password with the token in memory.
+// No "Forgot password?" form: it would send an email, which never arrives offline.
 
 type Result = {
   status: 'signed_in' | 'second_factor_required' | 'password_reset_required' | 'seller_context_required';
   tokens?: SessionTokens | null;
-  challenge?: { id: string; methods: Array<'totp' | 'sms' | 'recovery_code'> } | null;
+  passwordResetToken?: string | null;
 };
 
-const device = () => {
+/** The device the session belongs to (the installation id the session layer keeps). */
+export const device = () => {
   let installationId: string | undefined;
   try {
     installationId = localStorage.getItem('marketly.installationId') ?? undefined;
@@ -24,66 +26,8 @@ const device = () => {
   return { kind: 'web' as const, ...(installationId ? { installationId } : {}) };
 };
 
-function message(e: unknown): string {
-  if (e instanceof ApiError) {
-    if (e.code === 'INVALID_CREDENTIALS') {
-      const left = e.details.attemptsLeft as number | undefined;
-      return `That email and password don't match a staff account.${left != null ? ` ${left} ${left === 1 ? 'try' : 'tries'} left before sign-in pauses.` : ''}`;
-    }
-    if (e.code === 'ACCOUNT_LOCKED') return 'Sign-in is paused for this account. Ask a Platform Administrator to unlock it.';
-    if (e.code === 'ACCOUNT_DISABLED') return 'This staff account is disabled. Ask a Platform Administrator.';
-    if (e.code === 'CODE_INVALID') return 'That code didn’t work. Check it and try again.';
-  }
-  return errorMessage(e);
-}
-
-export function SignIn() {
-  const { api, session } = useApi();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [challenge, setChallenge] = useState<Result['challenge']>(null);
-  const [code, setCode] = useState('');
-  const [method, setMethod] = useState<'totp' | 'recovery_code'>('totp');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  const run = async (fn: () => Promise<Result>) => {
-    setBusy(true);
-    setError('');
-    try {
-      const r = await fn();
-      if (r.status === 'second_factor_required' && r.challenge) {
-        setChallenge(r.challenge);
-        setMethod(r.challenge.methods.includes('totp') ? 'totp' : 'recovery_code');
-        setCode('');
-      } else if (r.status === 'password_reset_required') {
-        setError('Your password must be changed before you can sign in. Use the link in the email from Marketly, or ask a Platform Administrator.');
-      } else if (r.tokens) {
-        session.adopt(r.tokens);
-      } else {
-        setError('This account can’t sign in to the Admin Center.');
-      }
-    } catch (e) {
-      setError(message(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !password) return setError('Enter your work email and password.');
-    void run(() => call(api.POST('/api/public/identity/sessions', { body: { email: email.trim(), password, audience: 'admin', keepSignedIn: false, device: device() }, credentials: 'include' })) as Promise<Result>);
-  };
-
-  const verify = (e: FormEvent) => {
-    e.preventDefault();
-    if (!challenge) return;
-    const c = code.replace(/[\s-]/g, '');
-    if (!c) return setError(method === 'totp' ? 'Enter the 6-digit code from your authenticator app.' : 'Enter one of your recovery codes.');
-    void run(() => call(api.POST('/api/public/identity/sign-in-challenges/{id}/verify', { params: { path: { id: challenge.id } }, body: { method, code: c, rememberDevice: false, device: device() } as never, credentials: 'include' })) as Promise<Result>);
-  };
-
+/** The centred card the public staff pages share (sign-in, invitation, reset password). */
+export function AuthFrame({ title, children, foot }: { title: string; children: ReactNode; foot?: ReactNode }) {
   return (
     <div className="bo">
       {/* No sidebar here: span both columns of the back-office grid (from 1024px it reserves the sidebar column). */}
@@ -93,51 +37,89 @@ export function SignIn() {
             <Logo area="Admin Center" home="admin/dashboard" />
           </div>
           <section className="card">
-            {challenge ? (
-              <form className="card-body stack gap-4" onSubmit={verify} noValidate>
-                <div className="stack gap-1">
-                  <h1 className="h2">2-step verification</h1>
-                  <p className="small sub">{method === 'totp' ? 'Enter the 6-digit code from your authenticator app.' : 'Enter one of the recovery codes you saved when you set up 2-step.'}</p>
-                </div>
-                {error && <Alert tone="danger">{error}</Alert>}
-                <Field label={method === 'totp' ? 'Code' : 'Recovery code'}>
-                  <TextInput id="ac-code" value={code} onChange={(e) => setCode(e.target.value)} inputMode={method === 'totp' ? 'numeric' : 'text'} autoComplete="one-time-code" autoFocus />
-                </Field>
-                <Button type="submit" block disabled={busy}>
-                  {busy ? 'Checking…' : 'Verify and sign in'}
-                </Button>
-                {challenge.methods.includes('recovery_code') && challenge.methods.includes('totp') && (
-                  <Button variant="link" onClick={() => { setMethod(method === 'totp' ? 'recovery_code' : 'totp'); setCode(''); setError(''); }}>
-                    {method === 'totp' ? 'Use a recovery code instead' : 'Use the authenticator app'}
-                  </Button>
-                )}
-                <Button variant="ghost" size="sm" onClick={() => { setChallenge(null); setError(''); }}>
-                  Back
-                </Button>
-              </form>
-            ) : (
-              <form className="card-body stack gap-4" onSubmit={submit} noValidate>
-                <div className="stack gap-1">
-                  <h1 className="h2">Sign in to the Admin Center</h1>
-                  <p className="small sub">Staff only. Use the work account you were invited with; you’ll confirm with 2-step verification.</p>
-                </div>
-                {error && <Alert tone="danger">{error}</Alert>}
-                <Field label="Work email">
-                  <TextInput id="ac-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
-                </Field>
-                <Field label="Password">
-                  <TextInput id="ac-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
-                </Field>
-                <Button type="submit" block disabled={busy}>
-                  {busy ? 'Signing in…' : 'Sign in'}
-                </Button>
-                <p className="xs muted">Forgot your password or lost your authenticator? Ask a Platform Administrator to reset it.</p>
-                {import.meta.env.DEV && <p className="xs muted">Development: seeded staff passwords are in web-shared/.seed/state.json; run <code>npm run staff-code -- olivia</code> for the current code.</p>}
-              </form>
-            )}
+            <div className="card-body stack gap-4">
+              <h1 className="h2">{title}</h1>
+              {children}
+            </div>
           </section>
+          {foot}
         </div>
       </main>
     </div>
+  );
+}
+
+/** Starting the session failed: off the office network the server asks for an app proof this browser can't give. */
+const offNetwork = (e: unknown) => e instanceof ApiError && e.code === 'APP_PROOF_INVALID';
+
+function message(e: unknown): string {
+  if (e instanceof ApiError) {
+    if (e.code === 'INVALID_CREDENTIALS') {
+      const left = e.details.attemptsLeft as number | undefined;
+      return `That email and password don't match a staff account.${left != null ? ` ${left} ${left === 1 ? 'try' : 'tries'} left before sign-in pauses.` : ''}`;
+    }
+    if (e.code === 'ACCOUNT_LOCKED') return 'Sign-in is paused for this account. Ask a Platform Administrator to unlock it.';
+    if (e.code === 'ACCOUNT_DISABLED') return 'This staff account is disabled. Ask a Platform Administrator.';
+    if (offNetwork(e)) return 'Open the Admin Center from the office network.';
+  }
+  return errorMessage(e);
+}
+
+export function SignIn({ startError }: { startError?: unknown }) {
+  const { api, session } = useApi();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) return setError('Enter your work email and password.');
+    setBusy(true);
+    setError('');
+    try {
+      const r = (await call(
+        api.POST('/api/public/identity/sessions', { body: { email: email.trim(), password, audience: 'admin', keepSignedIn: false, device: device() }, credentials: 'include' }),
+      )) as Result;
+      if (r.status === 'password_reset_required' && r.passwordResetToken) {
+        // Continue on the reset page; the token travels in router state, never in the URL.
+        navigate('/reset-password', { state: { resetToken: r.passwordResetToken, email: email.trim() } });
+      } else if (r.tokens) {
+        session.adopt(r.tokens);
+      } else {
+        setError('This account can’t sign in to the Admin Center.');
+      }
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AuthFrame title="Sign in to the Admin Center">
+      {offNetwork(startError) ? (
+        <Alert tone="warning" title="Open the Admin Center from the office network">
+          This server only accepts staff browsers on the local network. Connect to the office network (or its VPN) and reload.
+        </Alert>
+      ) : (
+        <form className="stack gap-4" onSubmit={(e) => void submit(e)} noValidate>
+          <p className="small sub">Staff only. Use the work email you were invited with.</p>
+          {error && <Alert tone="danger">{error}</Alert>}
+          <Field label="Work email">
+            <TextInput id="ac-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </Field>
+          <Field label="Password">
+            <TextInput id="ac-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </Field>
+          <Button type="submit" block disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </Button>
+          <p className="xs muted">Forgot your password? Ask your administrator for a reset link.</p>
+          {import.meta.env.DEV && <p className="xs muted">Development: seeded staff passwords are in web-shared/.seed/state.json.</p>}
+        </form>
+      )}
+    </AuthFrame>
   );
 }
