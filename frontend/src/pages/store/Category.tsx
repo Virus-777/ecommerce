@@ -7,6 +7,7 @@ import { num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Breadcrumbs, Button, Dialog, EmptyState, Icon, IconButton } from '@marketly/web-shared/ui';
+import { adsFor, BannerAd, useAdDecision } from '@/api/ads';
 import { findCategory, useCategoryTree } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, SkLines } from '@/api/cards';
 import { ActiveFilters, Count, FacetFilters, SortRadios, SortSelect, useListingParams } from '@/api/listing';
@@ -15,7 +16,10 @@ import { readPage, readQuery, shownRange, toCardProduct, useFacets, useListing, 
 // Design: pages/store/store-category.html · view "filters-phone-sheet" = the phone filters & sort sheet.
 // Data: GET /api/store/catalog/categories/{slug} (header, 404), GET /api/store/search/facets and
 // GET /api/store/search/products with category={slug} plus the filters and sort in the URL (REST search
-// parameters), page on the website and cursor on the phone. The banner ad needs ad decisions (not wired).
+// parameters), page on the website and cursor on the phone. The banner ad comes from
+// POST /api/store/advertising/decisions (placement category_banner; nothing shows when no ad is live).
+// REST rather than the CategoryPage screen query: the query has no sponsored hits (they stay on REST),
+// selects images without thumbUrl and has no stock state or offer count on the cards.
 
 const PER_PAGE = 24;
 
@@ -64,6 +68,9 @@ export default function Category({ slug: fixedSlug }: { slug?: string } = {}) {
   const facets = useFacets(query, { enabled: found });
   const listing = useListing(query, page, { limit: PER_PAGE, enabled: found });
   const onOpen = useSearchClick(facets.data?.searchId);
+  const categoryId = cat.data?.category.id;
+  const ads = useAdDecision('category', ['category_banner'], { categoryId }, { enabled: !!categoryId });
+  const banner = adsFor(ads.data, 'category_banner')[0];
 
   if (cat.error instanceof ApiError && cat.error.status === 404) return <NotFound />;
 
@@ -120,6 +127,7 @@ export default function Category({ slug: fixedSlug }: { slug?: string } = {}) {
             ))}
           </div>
         )}
+        {banner && <BannerAd ad={banner} />}
         {error && !(error instanceof ApiError && error.status === 404) ? <LoadError error={error} onRetry={retry} title="We couldn’t load this category" /> : null}
         <ActiveFilters ctx={ctx} lp={lp} hide={['category']} />
         <div className="shop-listing">

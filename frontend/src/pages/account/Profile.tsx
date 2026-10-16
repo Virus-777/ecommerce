@@ -5,6 +5,7 @@ import { AccountLayout } from '@/layouts';
 import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Button, Card, Dialog, Field, Icon, Switch, Textarea, TextInput } from '@marketly/web-shared/ui';
+import { NO_PASSWORD_NOTE, isPasswordNotSet } from './data/password';
 import { dateLong } from './data/when';
 
 // Design: pages/store/account-profile.html (one view): personal details form, message preferences,
@@ -73,7 +74,8 @@ function ReauthField({ id, value, onChange, error }: { id: string; value: string
   );
 }
 
-const reauthError = (e: unknown) => (e instanceof ApiError && (e.code === 'CURRENT_PASSWORD_WRONG' || e.code === 'INVALID_CREDENTIALS') ? 'The password is incorrect.' : e ? errorMessage(e) : undefined);
+const reauthError = (e: unknown) =>
+  e instanceof ApiError && (e.code === 'CURRENT_PASSWORD_WRONG' || e.code === 'INVALID_CREDENTIALS') ? 'The password is incorrect.' : isPasswordNotSet(e) ? NO_PASSWORD_NOTE : e ? errorMessage(e) : undefined;
 
 export default function Profile() {
   const { api } = useApi();
@@ -220,6 +222,8 @@ export default function Profile() {
   };
 
   const pending = security.data?.email.pendingChangeTo;
+  /** No password on the account (G28): an email change and closing the account confirm with one, so both are off. */
+  const noPassword = security.data?.hasPassword === false;
   const pr = prefs.data;
   const latestExport = (requests.data ?? []).filter((r) => r.kind === 'export').sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))[0] as DataRequest | undefined;
   const exportOpen = latestExport && ['requested', 'processing'].includes(latestExport.state);
@@ -279,7 +283,12 @@ export default function Profile() {
               <label className="label" htmlFor="pf-email">
                 Email
               </label>
-              <TextInput id="pf-email" type="email" value={form.email} error={!!errors.email} aria-describedby={errors.email ? 'pf-email-err' : undefined} onChange={(e) => set('email', e.target.value)} autoComplete="email" />
+              <TextInput id="pf-email" type="email" value={form.email} error={!!errors.email} disabled={noPassword} aria-describedby={errors.email ? 'pf-email-err' : noPassword ? 'pf-email-nopw' : undefined} onChange={(e) => set('email', e.target.value)} autoComplete="email" />
+              {noPassword && (
+                <span className="xs muted" id="pf-email-nopw">
+                  Changing your email is confirmed with a password. {NO_PASSWORD_NOTE}
+                </span>
+              )}
               {errors.email ? (
                 <span className="error-text" id="pf-email-err">
                   <Icon name="circle-alert" className="ic-sm" />
@@ -375,13 +384,14 @@ export default function Profile() {
                 Keep my account
               </Button>
             ) : (
-              <Button variant="danger-soft" disabled={!closure.data?.eligible} onClick={() => (requestClosure.reset(), setClosing(true))}>
+              <Button variant="danger-soft" disabled={!closure.data?.eligible || noPassword} onClick={() => (requestClosure.reset(), setClosing(true))}>
                 Close account
               </Button>
             )
           }
         >
           {cancelRequest.isError && <Alert tone="danger" title="That didn't work">{errorMessage(cancelRequest.error)}</Alert>}
+          {noPassword && !openClosure && <span className="xs muted">Closing your account is confirmed with a password. {NO_PASSWORD_NOTE}</span>}
           <p className="small sub">
             {openClosure
               ? `Closure requested. Your account closes ${openClosure.scheduledFor ? `on ${dateLong(openClosure.scheduledFor)}` : 'after the cooling-off period'} unless you keep it.`

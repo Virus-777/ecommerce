@@ -15,8 +15,9 @@ import { UploadList } from './data/UploadList';
 // Route: /help/order-problem?order=<MK-ref>&item=<orderItemId> (item optional, preselected). The ref is resolved with GET /api/store/orders/orders?q=<ref>;
 // GET /api/store/support/orders/{orderId}/problem-context gives the packages and items, problem types, who
 // handles it first, when Marketly steps in, open cases and remedy choices. Photos upload with purpose
-// case_evidence; POST /api/store/support/cases (Idempotency-Key) { kind: order_problem, category,
-// orderId, orderItemIds, problemType, message, mediaIds, desiredRemedy } → the new case.
+// case_evidence; POST /api/store/support/cases (Idempotency-Key) { kind: order_problem, orderId,
+// orderItemIds, problemType, message, mediaIds, desiredRemedy } → the new case (the API derives the
+// case category from problemType).
 // Without ?order the page lists recent orders to pick from.
 
 type ProblemType = 'missing_item' | 'damaged' | 'wrong_item' | 'not_arrived' | 'other';
@@ -28,15 +29,6 @@ const TYPES: Record<ProblemType, { label: string; icon: IconName }> = {
   wrong_item: { label: 'Wrong item', icon: 'replace' },
   not_arrived: { label: "Hasn't arrived", icon: 'clock' },
   other: { label: 'Something else', icon: 'circle-help' },
-};
-
-/** Case category (support.CaseCategory.key) for each problem type. The API takes both and doesn't derive one. */
-const CATEGORY: Record<ProblemType, string> = {
-  missing_item: 'wrong_item',
-  damaged: 'item_damaged',
-  wrong_item: 'wrong_item',
-  not_arrived: 'delivery_not_arrived',
-  other: 'other_help',
 };
 
 const PHOTO_REQUIRED: ProblemType[] = ['damaged', 'wrong_item'];
@@ -111,7 +103,6 @@ export default function OrderProblem() {
     queryFn: () => call(api.GET('/api/store/support/orders/{orderId}/problem-context', { params: { path: { orderId } } })),
     enabled: Boolean(orderId),
   });
-  const topics = useQuery({ queryKey: ['support', 'contact-options'], queryFn: () => call(api.GET('/api/store/support/contact-options')), staleTime: 300_000 });
 
   const [selected, setSelected] = useState<string[]>([]);
   const [type, setType] = useState<ProblemType | ''>('');
@@ -154,26 +145,21 @@ export default function OrderProblem() {
   const nErrors = Object.keys(errors).length;
 
   const create = useMutation({
-    mutationFn: () => {
-      const t = type as ProblemType;
-      const known = topics.data?.topics.map((x) => x.key) ?? [];
-      const category = known.length && !known.includes(CATEGORY[t]) ? (known.includes('other_help') ? 'other_help' : known[0]) : CATEGORY[t];
-      return call(
+    mutationFn: () =>
+      call(
         api.POST('/api/store/support/cases', {
           params: { header: { 'Idempotency-Key': idem.current } },
           body: {
             kind: 'order_problem',
-            category,
             orderId,
             orderItemIds: selected,
-            problemType: t,
+            problemType: type as ProblemType,
             message: details.trim(),
             mediaIds: photos.assetIds.length ? photos.assetIds : undefined,
             desiredRemedy: activeRemedy || undefined,
           },
         }),
-      );
-    },
+      ),
     onSuccess: (cs) => {
       idem.current = newIdempotencyKey();
       navigate(href('help/case', '', { ref: cs.ref }));

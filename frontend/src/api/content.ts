@@ -40,3 +40,13 @@ export function useNavigation() {
     staleTime: 10 * 60_000,
   });
 }
+
+/** The Official Store profile: name, logo, banner, introduction, policy links and feedback (G8). */
+export function useOfficialStore() {
+  const { api } = useApi();
+  return useQuery({
+    queryKey: ['content', 'official-store'],
+    queryFn: () => call(api.GET('/api/store/content/official-store')),
+    staleTime: 10 * 60_000,
+  });
+}

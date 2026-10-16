@@ -5,18 +5,21 @@ import { call, useApi } from '@marketly/web-shared/api';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
 import { href } from '@marketly/web-shared/routes';
-import { Button, Icon, Img, StatusBadge } from '@marketly/web-shared/ui';
+import { Button, Icon, Img, StatusBadge, type IconName } from '@marketly/web-shared/ui';
 import { dateLong } from './data/format';
 import { ApiLink, appHref } from './data/links';
 import { iconFor, LoadError, SkLines, SkRows } from './data/states';
 
 // Design: pages/store/help-center.html
-// Data: GET /api/store/content/help (topics, popular articles and searches, contact cards, seller-first note);
-// search GET /api/store/content/help/articles?q|category; signed in: GET /api/store/orders/orders?limit=3,
-// GET /api/store/support/cases?state=open. A topic card filters the article list (?topic=<slug>): there is
-// no topic page. Live chat is hidden (no chat API, BACKEND-REQUESTS G7).
+// Data: GET /api/store/content/help (topics, popular articles and searches, seller-first note); contact cards
+// GET /api/store/support/contact-options (channels: label, detail, hours, action); search
+// GET /api/store/content/help/articles?q|category; signed in: GET /api/store/orders/orders?limit=3,
+// GET /api/store/support/cases?state=open. A topic card filters the article list (?topic=<slug>, also the
+// target of the API's topic breadcrumbs): there is no topic page.
 
-const useDebounced = (v: string, ms = 300) => {
+const CONTACT_ICON: Record<'email' | 'phone' | 'messages', IconName> = { email: 'mail', phone: 'phone', messages: 'message-circle' };
+
+const useDebounced =(v: string, ms = 300) => {
   const [d, setD] = useState(v);
   useEffect(() => {
     const t = setTimeout(() => setD(v), ms);
@@ -35,6 +38,7 @@ export default function Center() {
   const query = useDebounced(q.trim());
 
   const home = useQuery({ queryKey: ['content', 'help'], queryFn: () => call(api.GET('/api/store/content/help')) });
+  const options = useQuery({ queryKey: ['support', 'contact-options'], queryFn: () => call(api.GET('/api/store/support/contact-options')), staleTime: 300_000 });
   const search = useQuery({
     queryKey: ['content', 'help-search', query, topic],
     queryFn: () => call(api.GET('/api/store/content/help/articles', { params: { query: { q: query || undefined, category: topic || undefined, audience: 'customer', limit: 20 } } })),
@@ -67,8 +71,7 @@ export default function Center() {
       },
       { preventScrollReset: true },
     );
-  // No live chat (G7: the API sends phone, message and email only).
-  const contact = h?.contact ?? [];
+  const contact = options.data?.channels ?? [];
   const openCases = cases.data?.total ?? cases.data?.items.length ?? 0;
   const firstCase = cases.data?.items[0];
 
@@ -169,31 +172,37 @@ export default function Center() {
                 <div className="card pad small sub">{filtering ? 'No articles match that search. Try other words, or contact us below.' : 'No articles yet. Contact us below.'}</div>
               )}
             </section>
-            {contact.length > 0 && (
+            {(options.isPending || options.isError || contact.length > 0) && (
               <section className="stack gap-3">
                 <h2 className="h2">Contact us</h2>
-                <div className="buy-contact">
-                  {contact.map((c) => {
-                    const to = c.action ? appHref(c.action.url) : null;
-                    return (
-                      <div key={c.kind} className="card pad stack gap-2">
-                        <Icon name={c.kind === 'phone' ? 'phone' : 'mail'} />
-                        <span className="strong">{c.kind === 'phone' && c.detail ? `${c.label}: ${c.detail}` : c.label}</span>
-                        <span className="xs muted">{[c.hours, c.kind === 'phone' ? null : c.detail].filter(Boolean).join(' · ')}</span>
-                        {c.action &&
-                          (to !== null ? (
-                            <Button variant="secondary" size="sm" to={to}>
-                              {c.action.label}
-                            </Button>
-                          ) : (
-                            <a className="btn btn-secondary btn-sm" href={c.action.url}>
-                              <span>{c.action.label}</span>
-                            </a>
-                          ))}
-                      </div>
-                    );
-                  })}
-                </div>
+                {options.isPending ? (
+                  <SkLines n={3} />
+                ) : options.isError ? (
+                  <LoadError error={options.error} retry={() => void options.refetch()} title="We couldn’t load the ways to reach us" />
+                ) : (
+                  <div className="buy-contact">
+                    {contact.map((c) => {
+                      const to = c.action?.kind === 'help' ? appHref(c.action.url) : null;
+                      return (
+                        <div key={c.kind} className="card pad stack gap-2">
+                          <Icon name={CONTACT_ICON[c.kind]} />
+                          <span className="strong">{c.kind === 'phone' && c.detail ? `${c.label}: ${c.detail}` : c.label}</span>
+                          <span className="xs muted">{[c.hours, c.kind === 'phone' ? null : c.detail].filter(Boolean).join(' · ')}</span>
+                          {c.action &&
+                            (to !== null ? (
+                              <Button variant="secondary" size="sm" to={to}>
+                                {c.action.label}
+                              </Button>
+                            ) : (
+                              <a className="btn btn-secondary btn-sm" href={c.action.url}>
+                                <span>{c.action.label}</span>
+                              </a>
+                            ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 {h?.sellerFirstNote && <p className="xs muted">{h.sellerFirstNote}</p>}
               </section>
             )}

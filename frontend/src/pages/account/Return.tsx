@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
+import { QrCode } from '@/app/QrCode';
 import { useSession } from '@/app/session';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AccountLayout } from '@/layouts';
@@ -12,7 +13,8 @@ import { DetailSkeleton, LoadError, NotFoundCard, SellerLineApi } from './data/o
 
 // Design: pages/store/account-return.html · the three design views now follow the return's data:
 // approved and waiting for drop-off (QR code + label), refund sent (`refund.status` SENT), and the
-// replacement on its way (`replacement`). Data: the ReturnDetail screen query (return(ref)); "Email me
+// replacement on its way (`replacement`). Data: the ReturnDetail screen query (return(ref)) plus REST
+// returns/requests/{id} for the drop-off code (drawn as a QR) and the refund estimate; "Email me
 // the code" is POST returns/requests/{id}/label/email.
 
 const REFUND_STEPS = ['Requested', 'Under review', 'Approved', 'Processing', 'Sent'];
@@ -23,8 +25,6 @@ const trackDone = (t: TrackStep[]) => {
   return cur >= 0 ? cur + 1 : t.filter((s) => s.state === 'DONE').length;
 };
 
-/** The drop-off code at the end of the QR link ("…/returns/drop-off/QR-TTL1FVT8865Y" -> "QR-TTL1FVT8865Y"). */
-const dropOffCode = (url: string | null) => (url ? decodeURIComponent(url.split('/').pop() ?? '') : '');
 
 export default function Return() {
   const { ref = '' } = useParams();
@@ -66,7 +66,17 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
   const official = r.ownerType.toUpperCase() === 'OFFICIAL';
   const seller = { name: r.sellerName, official, verified: true };
   const itemTotal = { amount: r.items.reduce((s, i) => s + i.unitPrice.amount * i.quantity, 0), currency: r.items[0]?.unitPrice.currency ?? 'USD' };
-  const code = dropOffCode(sh?.qrCodeUrl ?? null);
+  // The ReturnDetail screen query doesn't select shipment.dropOffCode or refundEstimate yet (the schema has
+  // both): read them from REST GET returns/requests/{id} while they matter (waiting for drop-off, refund not decided).
+  const extra = useQuery({
+    queryKey: ['returns', 'request', r.id],
+    queryFn: () => call(api.GET('/api/store/returns/requests/{id}', { params: { path: { id: r.id } } })),
+    enabled: waiting || (!r.refund && r.open),
+  });
+  const code = extra.data?.shipment?.dropOffCode ?? null;
+  const estimate = extra.data?.refundEstimate ?? null;
+  /** The decided refund's breakdown, else the estimate before a decision (isEstimate). */
+  const bd = refund?.breakdown ?? estimate;
   const near = sh?.dropOffPoints[0];
   const rejected = r.decision?.kind.toUpperCase() === 'REJECTED';
 
@@ -144,10 +154,10 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
               <Card title={sh.dropOffBy ? `Send it back by ${fmtWeekday(sh.dropOffBy)}` : 'Send it back'} sub={sh.paidBy.toUpperCase() === 'CUSTOMER' ? `Return shipping${sh.cost ? ` of ${formatMoney(sh.cost)}` : ''} is deducted from your refund.` : 'Prepaid. No printer or box label needed.'}>
                 <div className="row gap-5 top">
                   {code && (
-                    // The API gives the drop-off link, not a QR image: the code is what staff scan or type.
-                    <div className="acct-qr stack gap-1 center" role="img" aria-label={`Drop-off code for ${r.ref}: ${code}`}>
-                      <span className="xs muted">Drop-off code</span>
-                      <span className="mono strong">{code}</span>
+                    // The API sends the code the carrier scans (dropOffCode); the app draws the QR (G26a).
+                    <div className="stack gap-1 center">
+                      <QrCode className="acct-qr" value={code} size={148} label={`Drop-off QR code for ${r.ref}`} />
+                      <span className="mono xs">{code}</span>
                     </div>
                   )}
                   <div className="stack gap-3 grow minw-220">
@@ -169,6 +179,11 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
                       {sh.labelUrl && (
                         <Button variant="ghost" size="sm" icon="printer" href={sh.labelUrl}>
                           Print label instead
+                        </Button>
+                      )}
+                      {sh.qrCodeUrl && (
+                        <Button variant="ghost" size="sm" icon="external-link" href={sh.qrCodeUrl}>
+                          Open drop-off link
                         </Button>
                       )}
                     </div>
@@ -336,18 +351,19 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
                 {refund?.explanation ?? "The refund starts when the item arrives and is inspected. Approved still means the money hasn't been sent. Sent means it left Marketly."}
               </span>
               <hr />
-              {refund?.breakdown ? (
+              {bd ? (
                 <>
-                  <SummaryRow k="Item" v={formatMoney(refund.breakdown.itemAmount)} />
-                  {refund.breakdown.discountShare.amount > 0 && <SummaryRow k="Discount share" v={`−${formatMoney(refund.breakdown.discountShare)}`} />}
-                  {refund.breakdown.shippingRefund.amount > 0 && <SummaryRow k="Shipping refund" v={formatMoney(refund.breakdown.shippingRefund)} />}
-                  <SummaryRow k="Return shipping" v={refund.breakdown.returnShippingDeduction.amount ? `−${formatMoney(refund.breakdown.returnShippingDeduction)}` : 'Free'} />
-                  {refund.breakdown.deductions.map((d, i) => (
+                  <SummaryRow k="Item" v={formatMoney(bd.itemAmount)} />
+                  {bd.discountShare.amount > 0 && <SummaryRow k="Discount share" v={`−${formatMoney(bd.discountShare)}`} />}
+                  {bd.shippingRefund.amount > 0 && <SummaryRow k="Shipping refund" v={formatMoney(bd.shippingRefund)} />}
+                  <SummaryRow k="Return shipping" v={bd.returnShippingDeduction.amount ? `−${formatMoney(bd.returnShippingDeduction)}` : 'Free'} />
+                  {bd.deductions.map((d, i) => (
                     <SummaryRow key={i} k={d.label} v={`−${formatMoney(d.amount)}`} />
                   ))}
                   <hr />
-                  <SummaryRow className="total" k={refundSent ? 'Refunded' : refund.breakdown.isEstimate ? 'Expected refund' : 'Refund'} v={formatMoney(refund.breakdown.total)} />
-                  <SummaryRow k="To" v={refund.breakdown.destination} />
+                  <SummaryRow className="total" k={refundSent ? 'Refunded' : bd.isEstimate ? 'Expected refund' : 'Refund'} v={formatMoney(bd.total)} />
+                  <SummaryRow k="To" v={bd.destination} />
+                  {!refund && bd.isEstimate && <span className="xs muted">An estimate until the item is inspected.</span>}
                 </>
               ) : (
                 <>
@@ -365,7 +381,7 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
                 Message {r.conversation?.counterparty.name ?? r.sellerName}
               </Button>
               {r.case ? (
-                <Button variant="ghost" block icon="life-buoy" to={caseHref(r.case.ref)}>
+                <Button variant="ghost" block icon="life-buoy" to={caseHref(r.case.ref)} className="btn-wrap">
                   View support case {r.case.ref}
                 </Button>
               ) : (

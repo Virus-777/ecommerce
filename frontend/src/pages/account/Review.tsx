@@ -116,12 +116,12 @@ export default function Review() {
   const maxPhotos = c?.maxPhotos ?? 6;
   const seller = feedbackOnly
     ? pkg
-      ? { id: pkg.sellerId, name: pkg.sellerName, official: pkg.ownerType === 'official' }
+      ? { id: pkg.sellerId, name: pkg.sellerName, official: pkg.ownerType === 'official', slug: null as string | null }
       : existingFeedback
-        ? { id: existingFeedback.feedback.sellerId, name: existingFeedback.feedback.sellerName, official: existingFeedback.feedback.sellerId === OFFICIAL_STORE_ID }
+        ? { id: existingFeedback.feedback.sellerId, name: existingFeedback.feedback.sellerName, official: existingFeedback.feedback.sellerId === OFFICIAL_STORE_ID, slug: null as string | null }
         : null
     : c
-      ? { id: c.seller.id, name: c.seller.name, official: c.seller.ownerType === 'official' }
+      ? { id: c.seller.id, name: c.seller.name, official: c.seller.ownerType === 'official', slug: c.seller.slug ?? null }
       : null;
   const orderId = feedbackOnly ? orderParam! : c?.orderId;
   const orderRef = feedbackOnly ? (pkg?.orderRef ?? existingFeedback?.feedback.orderRef ?? '') : (c?.orderRef ?? '');
@@ -332,7 +332,8 @@ export default function Review() {
   }
 
   const productTo = c ? href('store/product', '', { slug: slugify(c.product.title), id: c.product.id }) : '';
-  const sellerTo = seller.official ? href('store/official') : href('store/seller', '', { slug: slugify(seller.name.replace(/&/g, ' and ')) });
+  // The storefront link needs the seller's slug (ReviewContext.seller.slug); feedback-only mode has none, so the name isn't linked.
+  const sellerTo = seller.official ? href('store/official') : seller.slug ? href('store/seller', '', { slug: seller.slug }) : null;
   const deliveredAt = feedbackOnly ? pkg?.deliveredAt : c?.deliveredAt;
   const guidelines = c?.guidelines ?? ['Describe your own experience with this item.', 'No personal details, links, prices or order numbers.', 'No offers of payment or free items for reviews.', "We don't remove fair negative reviews."];
 
@@ -397,9 +398,13 @@ export default function Review() {
             )}
             <span className="seller-line">
               Sold by{' '}
-              <Link to={sellerTo}>
+              {sellerTo ? (
+                <Link to={sellerTo}>
+                  <b>{seller.name}</b>
+                </Link>
+              ) : (
                 <b>{seller.name}</b>
-              </Link>
+              )}
               <SellerBadge seller={{ official: seller.official }} compact />
             </span>
           </span>

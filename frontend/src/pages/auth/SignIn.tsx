@@ -105,6 +105,7 @@ function Credentials({
   const [password, setPassword] = useState('');
   const [keep, setKeep] = useState(true);
   const [attemptsLeft, setAttemptsLeft] = useState<number | null>(null);
+  const [lockoutMinutes, setLockoutMinutes] = useState<number | null>(null);
   const [lock, setLock] = useState<{ until: string | null; cause?: string } | null>(null);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
   const lockLeft = useSecondsUntil(lock?.until);
@@ -122,6 +123,7 @@ function Credentials({
       if (!(e instanceof ApiError)) return;
       if (e.code === 'INVALID_CREDENTIALS') {
         setAttemptsLeft(typeof e.details.attemptsLeft === 'number' ? e.details.attemptsLeft : null);
+        setLockoutMinutes(typeof e.details.lockoutMinutes === 'number' ? e.details.lockoutMinutes : null);
         setPassword('');
         setView('wrong-password', { replace: true });
         announce("That email and password don't match");
@@ -189,7 +191,7 @@ function Credentials({
             {attemptsLeft !== null && (
               <>
                 {' '}
-                You have <b>{attemptsLeft === 1 ? '1 attempt' : `${attemptsLeft} attempts`} left</b> before sign-in pauses for a while to protect your account.
+                You have <b>{attemptsLeft === 1 ? '1 attempt' : `${attemptsLeft} attempts`} left</b> before sign-in pauses {lockoutMinutes ? `for ${lockoutMinutes === 1 ? '1 minute' : `${lockoutMinutes} minutes`}` : 'for a while'} to protect your account.
               </>
             )}
           </Alert>

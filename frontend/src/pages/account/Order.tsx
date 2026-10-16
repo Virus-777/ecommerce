@@ -355,7 +355,7 @@ function PackageCard({ order, g, index }: { order: OrderDetail; g: OrderGroup; i
 }
 
 function ItemRow({ order, it }: { order: OrderDetail; it: OrderItem }) {
-  const product = productHref(it.productId, it.title);
+  const product = productHref(it.productId, it.title, it.productSlug);
   const returnRef = it.afterSales?.returnRef ?? it.returnEligibility?.latestReturn?.ref ?? null;
   return (
     <div className="acct-item">

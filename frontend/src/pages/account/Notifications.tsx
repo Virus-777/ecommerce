@@ -2,16 +2,19 @@ import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from
 import { Fragment, useState } from 'react';
 import { Link } from 'react-router';
 import { AccountLayout } from '@/layouts';
-import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { isoInText } from '@marketly/web-shared/lib/format';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href, SCREEN_BY_ID, type ScreenId } from '@marketly/web-shared/routes';
-import { Alert, announce, Button, Chip, ChipRow, Icon, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, Button, Chip, ChipRow, Icon, IconButton, iconFor, type IconName } from '@marketly/web-shared/ui';
 import { ageGroup, listTime } from './data/when';
 
 // Design: pages/store/account-notifications.html (one view). Chips filter by inbox group; opening an
-// item marks it read; "Mark all as read" clears the unread dots.
-// API: notifications inbox (GET /api/store/notifications/inbox, POST …/inbox/{id}/read, POST …/inbox/read-all).
+// item marks it read; "Mark all as read" clears the unread dots. Notices can be archived one by one or all
+// read ones at once ("Archive read"); "Archived" lists them (?archived=true). Open action notices can't be
+// archived until their work is done (409 NOTICE_ACTION_OPEN).
+// API: notifications inbox (GET /api/store/notifications/inbox, POST …/inbox/{id}/read, POST …/inbox/read-all,
+// POST …/inbox/{id}/archive, POST …/inbox/archive-all).
 
 type Notice = components['schemas']['notifications.Notice'];
 type Group = 'orders' | 'returns_refunds' | 'cases' | 'account' | 'promotions';
@@ -27,20 +30,7 @@ const FILTERS: Array<{ value: '' | Group; label: string; icon?: IconName }> = [
 ];
 const GROUP_LABEL: Record<string, string> = { orders: 'Orders', returns_refunds: 'Returns & refunds', cases: 'Cases', account: 'Account', promotions: 'Promotions' };
 
-/** Icon names the API sends that the design's icon set spells differently. */
-const ICON_ALIAS: Record<string, IconName> = { 'alert-triangle': 'triangle-alert', 'x-circle': 'circle-x', 'check-circle': 'circle-check', 'alert-circle': 'circle-alert', 'help-circle': 'circle-help', 'minus-circle': 'circle-minus' };
-/** Customer topic icons that exist in the design's icon set; anything else shows the bell. */
-const KNOWN_ICONS = new Set<IconName>([
-  'truck', 'shopping-bag', 'package', 'package-check', 'wallet', 'search', 'rotate-ccw', 'tag', 'clock', 'shield-check', 'life-buoy', 'message-square',
-  'circle-check', 'triangle-alert', 'circle-x', 'circle-alert', 'circle-help', 'credit-card', 'star', 'lock', 'mail', 'heart', 'percent', 'calendar',
-  'file-text', 'download', 'flag', 'smartphone', 'store', 'sparkles', 'send', 'paperclip', 'log-out', 'undo-2', 'trending-down', 'bell',
-]);
-function iconOf(n: Notice): IconName {
-  const name = (n.icon && (ICON_ALIAS[n.icon] ?? n.icon)) as IconName | null;
-  return name && KNOWN_ICONS.has(name) ? name : 'bell';
-}
-
-/** Where a list screen is the closest target when the record's own screen can't be built from the link. */
+/** Notices stored before notice links carried their refs (G27) can lack the ref: those open the list screen. */
 const FALLBACK: Partial<Record<string, ScreenId>> = {
   'account/order': 'account/orders',
   'account/tracking': 'account/orders',
@@ -50,30 +40,33 @@ const FALLBACK: Partial<Record<string, ScreenId>> = {
 };
 const REF_PREFIX: Partial<Record<string, string>> = { 'account/order': 'MK-', 'account/tracking': 'MK-', 'account/cancel': 'MK-', 'account/return': 'RT-', 'help/case': 'CS-' };
 
-/** App route for a NoticeLink: the record's screen with its ref, or the list screen when the link lacks the ref. */
+/** App route for a NoticeLink: the record's screen with its ref (a package's tracking also gets ?shipment=<id>). */
 function linkOf(n: Notice): string {
   const l = n.link;
   if (l.url) return l.url;
   const screen = l.screen as ScreenId;
   if (!SCREEN_BY_ID[screen]) return href('account/notifications');
-  const needsRef = SCREEN_BY_ID[screen].path.includes(':ref');
-  if (!needsRef) return href(screen);
+  if (!SCREEN_BY_ID[screen].path.includes(':ref')) return href(screen);
   const prefix = REF_PREFIX[screen];
-  if (l.ref && (!prefix || l.ref.startsWith(prefix))) return href(screen, '', { ref: l.ref });
-  return href(FALLBACK[screen] ?? 'account/overview');
+  if (!l.ref || (prefix && !l.ref.startsWith(prefix))) return href(FALLBACK[screen] ?? 'account/overview');
+  return href(screen, '', { ref: l.ref }, l.kind === 'shipment' && screen === 'account/tracking' ? { shipment: l.id } : undefined);
 }
+
+/** An action notice whose work is still open: the API refuses to archive it (NOTICE_ACTION_OPEN). */
+const actionOpen = (n: Notice) => n.actionRequired && n.state === 'open';
 
 export default function Notifications() {
   const { api } = useApi();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<'' | Group>('');
-  const key = ['notifications', 'inbox', filter || 'all'];
+  const [archived, setArchived] = useState(false);
+  const key = ['notifications', 'inbox', filter || 'all', archived ? 'archived' : 'inbox'];
 
   const inbox = useInfiniteQuery({
     queryKey: key,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) =>
-      call(api.GET('/api/store/notifications/inbox', { params: { query: { ...(filter ? { group: filter } : {}), limit: 50, ...(pageParam ? { cursor: pageParam } : {}) } } })),
+      call(api.GET('/api/store/notifications/inbox', { params: { query: { ...(filter ? { group: filter } : {}), ...(archived ? { archived: true } : {}), limit: 50, ...(pageParam ? { cursor: pageParam } : {}) } } })),
     getNextPageParam: (last) => last.nextCursor,
   });
 
@@ -94,6 +87,29 @@ export default function Notifications() {
     },
     onSettled: () => void qc.invalidateQueries({ queryKey: ['notifications'] }),
   });
+  const drop = (id: string) =>
+    qc.setQueriesData<InfiniteData<Page>>({ queryKey: ['notifications', 'inbox'] }, (d) => (d ? { ...d, pages: d.pages.map((p) => ({ ...p, items: p.items.filter((n) => n.id !== id) })) } : d));
+  const archive = useMutation({
+    mutationFn: (n: Notice) => call(api.POST('/api/store/notifications/inbox/{id}/archive', { params: { path: { id: n.id } } })),
+    onSuccess: (_r, n) => {
+      drop(n.id);
+      announce('Notification archived');
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+  const archiveRead = useMutation({
+    mutationFn: () => call(api.POST('/api/store/notifications/inbox/archive-all', { body: { ...(filter ? { group: filter } : {}), readOnly: true } })),
+    onSuccess: (r) => announce(r.updated ? `Archived ${r.updated} read notifications` : 'No read notifications to archive'),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+  const archiveError =
+    archive.error instanceof ApiError && archive.error.code === 'NOTICE_ACTION_OPEN'
+      ? 'This notification still needs your action. You can archive it once that’s done.'
+      : archive.error
+        ? errorMessage(archive.error)
+        : archiveRead.error
+          ? errorMessage(archiveRead.error)
+          : null;
 
   const notes = inbox.data?.pages.flatMap((p) => p.items) ?? [];
   const essential = notes.filter((n) => n.category === 'essential');
@@ -105,7 +121,7 @@ export default function Notifications() {
     const inner = (
       <>
         <span className={cx('acct-ic', n.tone && n.tone !== 'neutral' && `t-${n.tone}`)}>
-          <Icon name={iconOf(n)} className="ic-sm" />
+          <Icon name={iconFor(n.icon)} className="ic-sm" />
         </span>
         <span className="stack gap-1 grow">
           <span className="row between gap-2 top">
@@ -131,14 +147,28 @@ export default function Notifications() {
       </>
     );
     const onOpen = () => !n.readAt && markRead.mutate(n.id);
-    return /^https?:/.test(to) ? (
-      <a key={n.id} className="acct-row" href={to} onClick={onOpen}>
+    const open = /^https?:/.test(to) ? (
+      <a className="acct-row grow" href={to} onClick={onOpen}>
         {inner}
       </a>
     ) : (
-      <Link key={n.id} className="acct-row" to={to} onClick={onOpen}>
+      <Link className="acct-row grow" to={to} onClick={onOpen}>
         {inner}
       </Link>
+    );
+    return (
+      <div key={n.id} className="row nowrap gap-0">
+        {open}
+        {!archived && (
+          <IconButton
+            icon="x"
+            size="sm"
+            label={actionOpen(n) ? `${n.title}: needs your action before it can be archived` : `Archive: ${n.title}`}
+            disabled={actionOpen(n) || (archive.isPending && archive.variables?.id === n.id)}
+            onClick={() => archive.mutate(n)}
+          />
+        )}
+      </div>
     );
   };
 
@@ -150,8 +180,18 @@ export default function Notifications() {
           <p className="small sub">Updates about your orders, returns, cases and account. We also email the important ones.</p>
         </div>
         <div className="acts">
-          <Button variant="ghost" size="sm" icon="check" onClick={() => markAll.mutate()} disabled={unread === 0 || markAll.isPending}>
-            Mark all as read
+          {!archived && (
+            <>
+              <Button variant="ghost" size="sm" icon="check" onClick={() => markAll.mutate()} disabled={unread === 0 || markAll.isPending}>
+                Mark all as read
+              </Button>
+              <Button variant="ghost" size="sm" icon="x" onClick={() => archiveRead.mutate()} disabled={archiveRead.isPending || notes.every((n) => !n.readAt)}>
+                Archive read
+              </Button>
+            </>
+          )}
+          <Button variant="ghost" size="sm" icon={archived ? 'bell' : 'inbox'} onClick={() => setArchived((a) => !a)} aria-pressed={archived}>
+            {archived ? 'Back to inbox' : 'Archived'}
           </Button>
           <Button variant="secondary" size="sm" icon="settings" to={href('account/profile')}>
             Notification settings
@@ -166,6 +206,11 @@ export default function Notifications() {
         ))}
       </ChipRow>
       {markAll.isError && <Alert tone="danger" title="Couldn't mark them as read">{errorMessage(markAll.error)}</Alert>}
+      {archiveError && (
+        <Alert tone="warning" title="Couldn't archive">
+          {archiveError}
+        </Alert>
+      )}
       {inbox.isError ? (
         <Alert tone="danger" title="We couldn't load your notifications">
           {errorMessage(inbox.error)}{' '}
@@ -233,8 +278,8 @@ export default function Notifications() {
                 <span className="ring">
                   <Icon name="bell-off" />
                 </span>
-                <h2 className="h3">Nothing here yet</h2>
-                <p className="small muted measure-md">Notifications in this category will appear here.</p>
+                <h2 className="h3">{archived ? 'No archived notifications' : 'Nothing here yet'}</h2>
+                <p className="small muted measure-md">{archived ? 'Notifications you archive are kept here until they expire.' : 'Notifications in this category will appear here.'}</p>
               </div>
             </div>
           )}

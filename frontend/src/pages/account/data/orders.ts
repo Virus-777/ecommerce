@@ -8,15 +8,12 @@ import { call, useApi } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
 import type { Tone } from '@marketly/web-shared/ui';
 // The screen queries are copied from the backend docs into web-shared (no package export for them yet).
-import ACCOUNT_OVERVIEW_TEXT from '../../../../../web-shared/src/api/graphql/store/AccountOverview.graphql?raw';
+import ACCOUNT_OVERVIEW from '../../../../../web-shared/src/api/graphql/store/AccountOverview.graphql?raw';
 import ORDER_DETAIL from '../../../../../web-shared/src/api/graphql/store/OrderDetail.graphql?raw';
 import ORDER_LIST from '../../../../../web-shared/src/api/graphql/store/OrderList.graphql?raw';
 import RETURN_DETAIL from '../../../../../web-shared/src/api/graphql/store/ReturnDetail.graphql?raw';
 
-export { ORDER_DETAIL, ORDER_LIST, RETURN_DETAIL };
-
-/** AccountOverview without `me.wallet` (wallet module off at launch: gap G2, docs/BACKEND-REQUESTS.md). */
-export const ACCOUNT_OVERVIEW = ACCOUNT_OVERVIEW_TEXT.replace(/\r?\n {4}wallet \{[\s\S]*?\r?\n {4}\}(?=\r?\n)/, '');
+export { ACCOUNT_OVERVIEW, ORDER_DETAIL, ORDER_LIST, RETURN_DETAIL };
 
 /* ---------------- Shared GraphQL shapes ---------------- */
 
@@ -78,6 +75,8 @@ export type ItemAction = 'CANCEL' | 'RETURN' | 'TRACK' | 'VIEW_RETURN' | 'REVIEW
 export interface OrderItem {
   id: string;
   productId: string;
+  /** Selected once the OrderDetail screen query asks for it (the schema has it). */
+  productSlug?: string | null;
   variantId: string;
   offerId: string;
   title: string;
@@ -353,7 +352,8 @@ export function useReturnDetail(ref: string) {
 
 /**
  * Buy again: adds every item of the order that can be bought again (OrderDetail items carry the
- * offer) to the cart, then opens the cart. The order list has no offer ids, so it reads the order first.
+ * offer and whether it can be bought again) to the cart, then opens the cart. The OrderList screen query
+ * selects no items, so it reads the order first.
  */
 export function useBuyAgain() {
   const { api, gql } = useApi();
@@ -466,11 +466,12 @@ export function groupTone(status: string): 'success' | 'info' | 'warning' | 'dan
   return 'info';
 }
 
-/** "Halden Aurora ANC Wireless Headphones" -> "halden-aurora-anc-wireless-headphones" (product slugs are cosmetic: gap G1). */
+/** "Halden Aurora ANC Wireless Headphones" -> "halden-aurora-anc-wireless-headphones": the stand-in slug where a screen has no product slug (product routes resolve by id). */
 export const slugify = (s: string) =>
   s.toLowerCase().normalize('NFKD').replace(/[^\w\s-]/g, '').trim().replace(/[\s_-]+/g, '-').slice(0, 80) || 'product';
 
-export const productHref = (productId: string, title: string) => href('store/product', '', { slug: slugify(title), id: productId });
+/** Product page link: the API's product slug, else one made from the title (OrderDetail doesn't select OrderItem.productSlug yet). */
+export const productHref = (productId: string, title: string, slug?: string | null) => href('store/product', '', { slug: slug || slugify(title), id: productId });
 export const orderHref = (ref: string) => href('account/order', '', { ref });
 export const returnHref = (ref: string) => href('account/return', '', { ref });
 export const caseHref = (ref: string) => href('help/case', '', { ref });

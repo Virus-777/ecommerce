@@ -3,7 +3,7 @@ import { Link } from 'react-router';
 import { href } from '@marketly/web-shared/routes';
 
 // API content links (content.LinkRef: help breadcrumbs, article actions, policy links, banner CTAs) carry
-// site paths such as /help/articles/late-package or /policies/purchase_terms. These map them onto the
+// site paths such as /help?topic=delivery, /help/articles/late-package or /policies/purchase_terms. These map them onto the
 // store's routes (href ids), so links keep working if a route changes, and policy keys become ?view slugs.
 
 /** Policy key (content) → ?view slug of info/policy (design views). Other keys use ?key=. */
@@ -11,8 +11,7 @@ export const POLICY_VIEW: Record<string, string> = { returns: '', shipping: 'shi
 
 /** Link to a policy by its content key. */
 export function policyHref(key: string): string {
-  const k = key.replace(/-/g, '_');
-  return k in POLICY_VIEW ? href('info/policy', POLICY_VIEW[k]) : href('info/policy', '', undefined, { key: k });
+  return key in POLICY_VIEW ? href('info/policy', POLICY_VIEW[key]) : href('info/policy', '', undefined, { key });
 }
 
 /** Store route for an API path, or null when it is external (http(s) elsewhere, mailto:, tel:). */
@@ -39,7 +38,6 @@ export function appHref(url: string): string | null {
   if (p === '/') return href('store/home');
   if (seg[0] === 'help') {
     if (seg.length === 1) return withHash(href('help/center', '', undefined, q));
-    if (seg[1] === 'topics' && seg[2]) return href('help/center', '', undefined, { ...query, topic: seg[2] });
     if (seg[1] === 'articles' && seg[2]) return withHash(href('help/article', '', { slug: seg[2] }));
     if (seg[1] === 'contact') return href('help/contact', '', undefined, q);
     if (seg[1] === 'order-problem') return href('help/order-problem', '', undefined, q);

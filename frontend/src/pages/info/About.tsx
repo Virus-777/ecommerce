@@ -11,10 +11,10 @@ import { LoadError, Loading, SkLines } from '../help/data/states';
 // Design: pages/store/info-about.html
 // Data: GET /api/store/content/pages/about (eyebrow, title, intro, blocks: the hero sets the heading, text
 // blocks render as sections through the allowlist HTML renderer, a block titled "Contact" goes into the
-// contact card); GET /api/public/settings/app-config (company name and address, service region, support
-// phone and hours). The two "Official Store / Verified seller" cards are static marketing copy (no API
-// source). Not shown, no API source: founding year, headquarters, warehouse, live approved-seller count,
-// help/sellers/press email addresses and the labels table's "doesn't mean" column (BACKEND-REQUESTS gaps).
+// contact card; `about` has the company facts and the approved-seller count); GET /api/public/settings/app-config
+// (legal name, service region, support phone and hours; market.company until the page answers). The two
+// "Official Store / Verified seller" cards are static marketing copy (no API source). Not shown, no API
+// source: the warehouse and the labels table's "doesn't mean" column.
 
 export default function About() {
   const { api } = useApi();
@@ -29,7 +29,9 @@ export default function About() {
   const sections = blocks.filter((b) => b !== hero && b !== contactBlock && b.type !== 'banner' && b.type !== 'image' && b.type !== 'product_grid' && b.type !== 'product_section');
   const market = config.data?.market;
   const support = config.data?.support;
-  const address = market?.companyLine?.includes('·') ? market.companyLine.split('·').slice(1).join('·').trim() : market?.companyLine;
+  const company = pg?.about?.company ?? market?.company ?? null;
+  const sellerCount = pg?.about?.approvedSellerCount;
+  const opt = (k: string, v: string | number | null | undefined): Array<[string, string]> => (v == null || v === '' ? [] : [[k, String(v)]]);
   const heading = hero?.banner?.headline && hero.banner.headline !== pg?.title ? hero.banner.headline : (hero?.title ?? pg?.title ?? '');
 
   return (
@@ -113,8 +115,10 @@ export default function About() {
               <KeyValue
                 pairs={[
                   ['Company', market.legalName],
-                  ...(address ? ([['Address', address]] as Array<[string, string]>) : []),
+                  ...opt('Founded', company?.foundedYear),
+                  ...opt('Headquarters', company?.headquarters),
                   ['Service region', `${market.serviceRegionLabel}, prices in ${market.currency}`],
+                  ...opt('Approved sellers', sellerCount),
                 ]}
               />
             ) : config.isError ? (
@@ -130,6 +134,10 @@ export default function About() {
                 pairs={[
                   ['Customer support', support.phone],
                   ['Hours', support.hoursLabel],
+                  ...opt('Email', company?.helpEmail),
+                  ...opt('Mail', company?.postalAddress),
+                  ...opt('Sellers', company?.sellersEmail),
+                  ...opt('Press', company?.pressEmail),
                   ...(support.closedLabel ? ([['Closed', support.closedLabel.replace(/^Closed\s+/i, '')]] as Array<[string, string]>) : []),
                 ]}
               />

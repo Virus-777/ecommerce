@@ -273,7 +273,7 @@ export default function Cart() {
               <div className="buy-sum">
                 <SummaryRow k={`Subtotal (${plural(t.itemCount, 'item')})`} v={formatMoney(t.itemsSubtotal)} />
                 {t.discounts.map((d, i) => (
-                  <SummaryRow key={`${d.code ?? d.label}-${i}`} className="discount" k={`Discounts · ${d.code ?? d.label}`} v={`−${formatMoney(d.amount)}`} />
+                  <SummaryRow key={`${d.code ?? d.label}-${i}`} className="discount" k={`Discounts · ${d.label}`} v={`−${formatMoney(d.amount)}`} />
                 ))}
                 {t.shippingByPackage.map((s) => (
                   <SummaryRow key={s.packageKey} k={`Shipping · ${s.sellerName}`} v={s.free || s.amount.amount === 0 ? 'Free' : formatMoney(s.amount)} />
@@ -398,7 +398,7 @@ interface LineRowProps {
 }
 
 function LineRow({ l, qty, error, busy, onRemove, onAccept, onQty }: LineRowProps) {
-  const to = productHref(l.productId);
+  const to = productHref(l.productId, l.productSlug);
   const blocking = l.notices.find((n) => n.severity === 'blocking');
   const unavailable = l.state === 'unavailable' || !!blocking;
   const priceUp = l.notices.find((n) => n.kind === 'price_increased');
@@ -415,7 +415,7 @@ function LineRow({ l, qty, error, busy, onRemove, onAccept, onQty }: LineRowProp
     </button>
   );
   const offersLink = alt && (
-    <Link to={href('store/offers', '', { slug: 'item', id: alt.productId })} aria-label={`See other offers (${alt.count}${alt.lowestPrice ? ` from ${formatMoney(alt.lowestPrice)}` : ''}): ${l.title}`}>
+    <Link to={href('store/offers', '', { slug: (alt.productId === l.productId ? l.productSlug : null) || 'item', id: alt.productId })} aria-label={`See other offers (${alt.count}${alt.lowestPrice ? ` from ${formatMoney(alt.lowestPrice)}` : ''}): ${l.title}`}>
       <Icon name="store" className="ic-sm" />
       See other offers ({alt.count}
       {alt.lowestPrice ? ` from ${formatMoney(alt.lowestPrice)}` : ''})

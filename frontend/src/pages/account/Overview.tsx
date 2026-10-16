@@ -14,8 +14,10 @@ import { LoadError, SkeletonRows } from './data/order-parts';
 
 // Design: pages/store/account-overview.html. On the phone this is the Account tab: no app bar,
 // and the menu below the cards lists the app links (help, selling, policies, settings, sign out).
-// Data: the AccountOverview screen query without `me.wallet` (wallet is off at launch, gap G2), so
-// the store credit tile is hidden.
+// Data: the AccountOverview screen query. `me.wallet` is null while wallet is off (phase 3); the
+// store credit tile shows only when it answers. Delay alerts come from `delayedItems` (dates and
+// options), the other overview alerts (payment checking or failed, a return to send back, a case
+// waiting on you) from `overviewAlerts`.
 
 interface OverviewData {
   me: {
@@ -36,12 +38,35 @@ interface OverviewData {
       total: number;
       items: Array<{ id: string; ref: string; status: string; statusLabel: string; sellerName: string; items: Array<{ orderItemId: string; title: string; imageUrl: string | null }>; refund: { status: string; statusLabel: string } | null }>;
     };
+    overviewAlerts: OverviewAlert[];
+    wallet: { available: GMoney; nextExpiry: { expiresAt: string; amount: GMoney } | null } | null;
   };
   orders: {
     total: number;
     items: Array<{ id: string; ref: string; placedAt: string; status: string; statusLabel: string; packageCount: number; thumbnails: GImage[]; totals: { total: GMoney }; groups: Array<{ id: string; items: Array<{ id: string; state: string }> }> }>;
   };
   unreadNotificationCount: number;
+}
+
+interface OverviewAlert {
+  kind: 'ITEM_DELAYED' | 'PAYMENT_BEING_CHECKED' | 'RETURN_ACTION_NEEDED' | 'CASE_WAITING_ON_YOU' | 'PAYMENT_FAILED';
+  title: string;
+  body: string;
+  orderId: string | null;
+  orderRef: string | null;
+  caseRef: string | null;
+  returnRef: string | null;
+  actions: string[];
+}
+
+const ALERT_TONE: Record<OverviewAlert['kind'], 'info' | 'warning' | 'danger'> = { ITEM_DELAYED: 'warning', PAYMENT_BEING_CHECKED: 'info', RETURN_ACTION_NEEDED: 'warning', CASE_WAITING_ON_YOU: 'warning', PAYMENT_FAILED: 'danger' };
+
+/** The link an overview alert offers (actions view_return, view_case, view_order). */
+function alertLink(a: OverviewAlert): { to: string; label: string } | null {
+  if (a.actions.includes('view_return') && a.returnRef) return { to: returnHref(a.returnRef), label: 'View return' };
+  if (a.actions.includes('view_case') && a.caseRef) return { to: caseHref(a.caseRef), label: 'View case' };
+  if (a.orderRef) return { to: orderHref(a.orderRef), label: 'View order' };
+  return null;
 }
 
 type MenuLink = { id: ScreenId; view?: string; icon: IconName; label: string; sub?: string; count?: 'messages' | 'notifications' };
@@ -150,8 +175,12 @@ export default function Overview() {
         { id: 'account/orders', icon: 'package', n: String(me.orderCounts.inProgress), label: 'Orders in progress', sub: me.orderCounts.delayedPackages ? `${plural(me.orderCounts.delayedPackages, 'package')} delayed` : 'Nothing delayed' },
         { id: 'account/returns', icon: 'undo-2', n: String(me.returnsOverview.openReturns), label: 'Open returns', sub: me.returnsOverview.openNote ?? 'Nothing to send back' },
         { id: 'account/messages', icon: 'message-square', n: String(me.unreadMessages.messages), label: 'Unread messages', sub: me.unreadMessages.fromNames.length ? me.unreadMessages.fromNames.join(', ') : 'You’re all caught up' },
+        ...(me.wallet
+          ? [{ id: 'account/coupons' as ScreenId, icon: 'wallet' as IconName, n: formatMoney(me.wallet.available), label: 'Store credit', sub: me.wallet.nextExpiry ? `${formatMoney(me.wallet.nextExpiry.amount)} expires ${fmtDay(me.wallet.nextExpiry.expiresAt)}` : 'Use it at checkout' }]
+          : []),
       ]
     : [];
+  const alerts = (me?.overviewAlerts ?? []).filter((a) => a.kind !== 'ITEM_DELAYED');
 
   return (
     <AccountLayout active="overview">
@@ -239,7 +268,24 @@ export default function Overview() {
         </Alert>
       ))}
 
-      <Card title="Recent orders" actions={<Link className="small strong" to={href('account/orders')}>All orders</Link>} flush>
+      {alerts.map((a) => {
+        const link = alertLink(a);
+        return (
+          <Alert key={`${a.kind}-${a.orderRef ?? ''}-${a.returnRef ?? ''}-${a.caseRef ?? ''}`} tone={ALERT_TONE[a.kind]} title={a.title}>
+            {a.body}
+            {link && (
+              <>
+                {' '}
+                <Link to={link.to} className="link-inline">
+                  {link.label}
+                </Link>
+              </>
+            )}
+          </Alert>
+        );
+      })}
+
+      <Card title="Recent orders"actions={<Link className="small strong" to={href('account/orders')}>All orders</Link>} flush>
         <div>
           {!d && q.isPending && <SkeletonRows rows={3} />}
           {d && d.orders.items.length === 0 && (

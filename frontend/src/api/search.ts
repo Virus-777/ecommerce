@@ -41,6 +41,8 @@ export interface StoreCard {
   sponsored?: boolean;
   /** Position in a search result list (search click reporting). */
   position?: number;
+  /** Sponsored hits: the advertising token sent with the display and click events. */
+  impressionToken?: string | null;
   availability?: 'in_stock' | 'low_stock' | 'out_of_stock' | null;
 }
 
@@ -49,7 +51,7 @@ export const productHref = (p: { id: string; slug?: string | null }, view = '') 
 const cue = (s?: string | null) => (s ? s.replace(/^Arrives\s+/i, '') : null);
 
 /** A search product card (search results, /search/cards, similar products, empty-result popular items). */
-export function toCardProduct(c: SearchCard, hit?: Pick<SearchHit, 'kind' | 'position'>): StoreCard {
+export function toCardProduct(c: SearchCard, hit?: Pick<SearchHit, 'kind' | 'position' | 'sponsored'>): StoreCard {
   return {
     id: c.productId,
     slug: c.slug,
@@ -64,21 +66,22 @@ export function toCardProduct(c: SearchCard, hit?: Pick<SearchHit, 'kind' | 'pos
     ratingCount: c.ratingCount,
     delivery: cue(c.deliveryCue),
     free: c.freeDelivery,
-    seller: { name: c.sellerName, official: c.official },
+    seller: { name: c.sellerName, official: c.official, slug: c.sellerSlug },
     sponsored: hit?.kind === 'sponsored',
     position: hit?.position,
+    impressionToken: hit?.sponsored?.impressionToken ?? null,
     availability: c.availability,
   };
 }
 
 /**
- * A content product tile (homepage sections, collection pages). Tiles carry no slug or delivery cue:
- * pass the matching /search/cards card to fill them in (useProductCards).
+ * A content product tile (homepage sections, collection pages). Tiles carry no delivery cue or offer
+ * count: pass the matching /search/cards card to fill them in (useProductCards).
  */
 export function tileToCard(t: ProductTile, card?: SearchCard): StoreCard {
   return {
     id: t.productId,
-    slug: card?.slug ?? '',
+    slug: t.slug ?? card?.slug ?? '',
     title: t.title,
     image: t.image ?? card?.image ?? null,
     icon: 'package',
@@ -90,12 +93,16 @@ export function tileToCard(t: ProductTile, card?: SearchCard): StoreCard {
     ratingCount: t.ratingCount ?? card?.ratingCount ?? 0,
     delivery: cue(card?.deliveryCue),
     free: card?.freeDelivery ?? false,
-    seller: t.sellerName ? { name: t.sellerName, official: t.officialStore } : card ? { name: card.sellerName, official: card.official } : null,
+    seller: t.sellerName
+      ? { name: t.sellerName, official: t.officialStore, slug: card?.sellerName === t.sellerName ? card.sellerSlug : null }
+      : card
+        ? { name: card.sellerName, official: card.official, slug: card.sellerSlug }
+        : null,
     availability: t.availability ?? card?.availability ?? null,
   };
 }
 
-/** Product cards for a list of product ids (fills in slugs, ratings and delivery cues for tiles). */
+/** Product cards for a list of product ids (fills in delivery cues, offer counts and seller slugs for tiles and deals). */
 export function useProductCards(ids: string[]) {
   const { api } = useApi();
   const unique = [...new Set(ids)].sort();

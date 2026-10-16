@@ -8,11 +8,13 @@ import { dollars, money } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Badge, Button, Countdown, Dialog, EmptyState, Icon, Meter, Price, Tabs, announce } from '@marketly/web-shared/ui';
 import { ApiProductCard, CardGridSkeleton, LoadError, Pic, SkLines } from '@/api/cards';
+import { OFFICIAL_STORE_ID } from '@marketly/web-shared/config';
 import { productHref, useProductCards, type SearchCard, type StoreCard } from '@/api/search';
 
 // Design: pages/store/store-deals.html. Data: GET /api/store/promotions/deals?tab= (tabs with counts,
-// flash sales with live meters, coupons, clearance, upcoming events, rules); deal items are filled in with
-// GET /api/store/search/cards (slugs, ratings, delivery). Clip/unclip a coupon
+// flash sales with live meters, coupons, clearance, upcoming events, rules; deal items name their seller's
+// store slug); deal items are filled in with GET /api/store/search/cards (product slugs, ratings, delivery:
+// flash and clearance items carry no product slug). Clip/unclip a coupon
 // (POST/DELETE /api/store/promotions/coupons/{campaignId}/clip) and event reminders
 // (POST/DELETE /api/store/promotions/events/{campaignId}/reminder) need a signed-in customer; "Eligible items"
 // lists GET /api/store/promotions/campaigns/{id}/eligible-products.
@@ -26,7 +28,7 @@ const TAB_ORDER: DealTab[] = ['all', 'flash', 'clearance', 'coupons', 'events'];
 const dateLabel = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'America/Los_Angeles' });
 const timeLabel = (iso: string) => new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/Los_Angeles' });
 
-/** A clearance product as a store card (the deal gives price and seller; search cards give slug, rating, delivery). */
+/** A clearance product as a store card (the deal gives price and seller; search cards give product slug, rating, delivery). */
 function dealToCard(d: DealProduct, c: SearchCard | undefined): StoreCard {
   return {
     id: d.productId,
@@ -42,7 +44,7 @@ function dealToCard(d: DealProduct, c: SearchCard | undefined): StoreCard {
     ratingCount: c?.ratingCount ?? 0,
     delivery: c?.deliveryCue?.replace(/^Arrives\s+/i, '') ?? null,
     free: c?.freeDelivery ?? false,
-    seller: { name: d.sellerName, official: c?.official ?? false },
+    seller: { name: d.sellerName, official: c?.official ?? false, slug: d.sellerSlug },
   };
 }
 
@@ -334,6 +336,14 @@ export default function Deals() {
 function FlashCard({ d, slug }: { d: FlashItem; slug?: string }) {
   const to = productHref({ id: d.productId, slug });
   const sub = `${d.sellerName} · Limit ${d.purchaseLimit} per customer`;
+  const store = d.sellerSlug ? href('store/seller', '', { slug: d.sellerSlug }) : d.sellerId === OFFICIAL_STORE_ID ? href('store/official') : null;
+  const seller = store ? (
+    <Link className="link-plain" to={store}>
+      {d.sellerName}
+    </Link>
+  ) : (
+    d.sellerName
+  );
   const pct = Math.round(d.percentOffBps / 100);
   if (d.state === 'sold_out') {
     const r = d.regularOffer;
@@ -364,7 +374,7 @@ function FlashCard({ d, slug }: { d: FlashItem; slug?: string }) {
           <div className="regular">
             <span className="xs strong">Regular offer still available</span>
             <Price amount={dollars(r.price)} was={r.wasPrice ? dollars(r.wasPrice) : null} noOff />
-            <span className="xs muted">{d.sellerName} · not part of the flash sale</span>
+            <span className="xs muted">{seller} · not part of the flash sale</span>
             <Button variant="secondary" size="sm" to={to}>
               View regular offer
             </Button>
@@ -383,7 +393,9 @@ function FlashCard({ d, slug }: { d: FlashItem; slug?: string }) {
       <Link className="small clamp-2 link-plain" to={to}>
         {d.title}
       </Link>
-      <span className="xs muted">{sub}</span>
+      <span className="xs muted">
+        {seller} · Limit {d.purchaseLimit} per customer
+      </span>
       <div className="stack gap-1">
         <Meter pct={d.claimedPct} tone="deal" label={`${sub}: share claimed`} />
         <span className="xs muted">{d.claimedPct}% claimed</span>

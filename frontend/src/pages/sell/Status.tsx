@@ -17,9 +17,12 @@ import { contactLine, useSellerProgram } from './data/program';
 // Data: GET /api/store/sellers/applications/current (state, information request, decision, setup summary,
 // timeline). Information request: documents upload (purpose verification_document) and attach at once with
 // POST …/{id}/documents { mediaId, kind, infoRequestItemId } (DELETE …/documents/{documentId} removes one);
-// a return-address item saves with PATCH …/{id} { step: return_address }; "Send for review" →
+// a return-address item saves with PATCH …/{id} { step: return_address }; "Save draft" →
+// PUT …/{id}/response-draft { items: [{ itemId, documentIds?, note? }] } (read back as
+// informationRequest.items[].response with draft true, and informationRequest.draftSavedAt); "Send for review" →
 // POST …/{id}/respond { items: [{ itemId, documentIds?, note? }] }. Rejection appeal →
-// POST …/{id}/appeal { argument, evidenceIds }. Seller team contact: GET /api/store/sellers/program.
+// POST …/{id}/appeal { argument, evidenceIds }, read back as application.appeal (state, decideBy, decision).
+// Seller team contact: GET /api/store/sellers/program.
 
 type App = SellerApplication;
 type Item = NonNullable<App['informationRequest']>['items'][number];
@@ -36,7 +39,8 @@ const STATE_LABEL: Record<App['state'], string> = {
 };
 const NEEDED_FOR: Record<string, string> = { account: 'Account', business: 'Business details', verification: 'Verification', payout: 'Payout', return_address: 'Return address', agreement: 'Agreement', category: 'Category approval' };
 const PAYOUT_TONE: Record<string, 'success' | 'warning' | 'danger' | ''> = { verified: 'success', verification_pending: 'warning', change_under_review: 'warning', not_added: '', blocked: 'danger' };
-const STEP_ICON: Record<string, IconName> = { done: 'circle-check', action_needed: 'circle-alert', pending: 'clock', locked: 'lock', not_started: 'circle' };
+const APPEAL_OUTCOME: Record<'upheld' | 'overturned' | 'partly_overturned', string> = { upheld: 'decision upheld', overturned: 'decision overturned', partly_overturned: 'decision partly overturned' };
+const STEP_ICON:Record<string, IconName> = { done: 'circle-check', action_needed: 'circle-alert', pending: 'clock', locked: 'lock', not_started: 'circle' };
 
 function Head({ app, status, title, sub }: { app: App; status: string; title: string; sub: ReactNode }) {
   const legal = sections(app).business?.legalName ?? sections(app).account?.storeName;
@@ -178,6 +182,9 @@ function InfoRequired({ app }: { app: App }) {
   const addressOf = (id: string): AddressDraft => addresses[id] ?? { line1: '', city: '', state: ret?.address?.region ?? '', zip: '' };
   const requestedAt = req.requestedAt;
   const docsFor = (i: Item) => app.documents.filter((d) => d.kind === i.documentKind && d.uploadedAt > requestedAt).map((d) => d.id);
+  /** The answer typed here, else the saved draft answer. */
+  const noteOf = (i: Item) => notes[i.id] ?? (i.response?.draft ? (i.response.note ?? '') : '');
+  const answers = () => open.map((i) => ({ itemId: i.id, ...(i.documentKind ? { documentIds: docsFor(i) } : {}), ...(noteOf(i).trim() ? { note: noteOf(i).trim() } : {}) }));
 
   const errors: Record<string, string> = {};
   if (tried) {
@@ -191,7 +198,7 @@ function InfoRequired({ app }: { app: App }) {
         if (!a.city.trim()) errors[`${i.id}.city`] = 'Enter a city.';
         if (!a.state) errors[`${i.id}.state`] = 'Choose a state.';
         if (!/^\d{5}$/.test(a.zip.trim())) errors[`${i.id}.zip`] = 'Enter a 5-digit ZIP code, like 97202.';
-      } else if (!(notes[i.id] ?? '').trim()) errors[i.id] = 'Write a short answer.';
+      } else if (!noteOf(i).trim()) errors[i.id] = 'Write a short answer.';
     }
   }
   const n = Object.keys(errors).length;
@@ -213,21 +220,17 @@ function InfoRequired({ app }: { app: App }) {
     mutationFn: async () => {
       const item = open.find((i) => !i.documentKind && i.neededFor === 'return_address');
       if (item && addressOf(item.id).line1.trim()) await saveAddress();
+      return call(api.PUT('/api/store/sellers/applications/{id}/response-draft', { params: { path: { id: app.id } }, body: { items: answers() } }));
     },
-    onSuccess: () => {
+    onSuccess: (next) => {
       setSaved(true);
-      void qc.invalidateQueries({ queryKey: APPLICATION_KEY });
+      qc.setQueryData(APPLICATION_KEY, next);
     },
   });
   const respond = useMutation({
     mutationFn: async () => {
       await saveAddress();
-      return call(
-        api.POST('/api/store/sellers/applications/{id}/respond', {
-          params: { path: { id: app.id } },
-          body: { items: open.map((i) => ({ itemId: i.id, ...(i.documentKind ? { documentIds: docsFor(i) } : {}), ...(notes[i.id]?.trim() ? { note: notes[i.id].trim() } : {}) })) },
-        }),
-      );
+      return call(api.POST('/api/store/sellers/applications/{id}/respond', { params: { path: { id: app.id } }, body: { items: answers() } }));
     },
     onSuccess: (next) => qc.setQueryData(APPLICATION_KEY, next),
   });
@@ -235,7 +238,7 @@ function InfoRequired({ app }: { app: App }) {
     setTried(true);
     setSaved(false);
     // Recompute with tried = true.
-    const bad = open.some((i) => (i.documentKind ? !docsFor(i).length : i.neededFor === 'return_address' ? !/^\d{5}$/.test(addressOf(i.id).zip.trim()) || !addressOf(i.id).line1.trim() || !addressOf(i.id).city.trim() || !addressOf(i.id).state || /\bp\.?\s*o\.?\s*box\b/i.test(addressOf(i.id).line1) : !(notes[i.id] ?? '').trim()));
+    const bad = open.some((i) => (i.documentKind ? !docsFor(i).length : i.neededFor === 'return_address' ? !/^\d{5}$/.test(addressOf(i.id).zip.trim()) || !addressOf(i.id).line1.trim() || !addressOf(i.id).city.trim() || !addressOf(i.id).state || /\bp\.?\s*o\.?\s*box\b/i.test(addressOf(i.id).line1) : !noteOf(i).trim()));
     if (!bad) respond.mutate();
   };
   const left = daysUntil(req.dueAt);
@@ -258,9 +261,9 @@ function InfoRequired({ app }: { app: App }) {
           {respond.error instanceof ApiError && Object.keys(respond.error.fieldErrors).length ? Object.values(respond.error.fieldErrors).join(' ') : errorMessage(respond.error ?? draft.error)}
         </Alert>
       )}
-      {saved && n === 0 && (
-        <Alert tone="success" title="Draft saved">
-          Uploaded documents are kept with your application. Come back any time before {dayDateYear(req.dueAt)} to send it.
+      {(saved || req.draftSavedAt) && n === 0 && (
+        <Alert tone="success" title={req.draftSavedAt ? `Draft saved ${dayDate(req.draftSavedAt)}` : 'Draft saved'}>
+          Your answers and uploaded documents are kept with your application. Come back any time before {dayDateYear(req.dueAt)} to send them.
         </Alert>
       )}
       {items.map((i, idx) => (
@@ -269,7 +272,7 @@ function InfoRequired({ app }: { app: App }) {
           app={app}
           item={i}
           n={idx + 1}
-          note={notes[i.id] ?? ''}
+          note={noteOf(i)}
           setNote={(v) => setNotes((s) => ({ ...s, [i.id]: v }))}
           address={addressOf(i.id)}
           setAddress={(a) => setAddresses((s) => ({ ...s, [i.id]: a }))}
@@ -365,7 +368,9 @@ export default function Status() {
   const contact = contactLine(p?.contact ?? null);
   const d = app.decision;
   const decider = (d?.decidedBy as { name?: string | null } | undefined)?.name;
-  const status = app.appealId && app.state === 'rejected' ? 'Appealed' : STATE_LABEL[app.state];
+  const ap = app.appeal;
+  const appealPending = ap?.state === 'submitted' || ap?.state === 'under_review';
+  const status = appealPending && app.state === 'rejected' ? 'Appealed' : STATE_LABEL[app.state];
   const cats = (s.business?.categoryIds ?? []).map((id) => p?.launchCategories.find((c) => c.id === id)?.name ?? '').filter(Boolean);
 
   // Progress: what happened (API timeline), then what comes next.
@@ -489,12 +494,26 @@ export default function Status() {
       </>
     );
   } else if (app.state === 'rejected') {
-    const appealed = Boolean(app.appealId);
+    const appealed = Boolean(ap ?? app.appealId);
     const canAppeal = !appealed && d?.appealDeadline && new Date(d.appealDeadline).getTime() > Date.now();
     main = (
       <>
         <Head app={app} status={status} title="We couldn't approve your application" sub={`Reviewed${decider ? ` by ${decider}` : ''}${d?.decidedAt ? ` on ${dayDate(d.decidedAt)}` : ''}.`} />
-        {appealed && (
+        {ap &&
+          (ap.decision ? (
+            <Alert tone={ap.decision.outcome === 'upheld' ? 'warning' : 'success'} title={`Appeal ${ap.ref}: ${APPEAL_OUTCOME[ap.decision.outcome]}`}>
+              {ap.decision.explanation} Decided on {dayDate(ap.decision.decidedAt)}.
+            </Alert>
+          ) : ap.state === 'withdrawn' ? (
+            <Alert tone="info" title={`Appeal ${ap.ref} withdrawn`}>
+              Sent on {dayDate(ap.submittedAt)}.
+            </Alert>
+          ) : (
+            <Alert tone="success" title={ap.state === 'under_review' ? 'Appeal in review' : 'Appeal sent'}>
+              Appeal <span className="mono">{ap.ref}</span> sent on {dayDate(ap.submittedAt)}. A different reviewer checks your appeal and replies by email{ap.decideBy ? ` by ${dayDate(ap.decideBy.dueAt)}` : ''}.
+            </Alert>
+          ))}
+        {!ap && appealed && (
           <Alert tone="success" title="Appeal sent">
             A different reviewer checks your appeal and replies by email.
           </Alert>

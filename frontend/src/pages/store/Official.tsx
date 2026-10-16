@@ -5,14 +5,16 @@ import { StoreLayout } from '@/layouts';
 import { call, useApi } from '@marketly/web-shared/api';
 import { num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Badge, EmptyState, Icon, type IconName } from '@marketly/web-shared/ui';
+import { Badge, EmptyState, Icon, Img, type IconName } from '@marketly/web-shared/ui';
 import { categoryArt, findCategory, tintOf, useCategoryTree } from '@/api/catalog';
-import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, Pic } from '@/api/cards';
+import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, Pic, SkLines } from '@/api/cards';
+import { contentLinkTo, isExternal, useOfficialStore } from '@/api/content';
 import { SortSelect, useListingParams } from '@/api/listing';
 import { readPage, readQuery, toCardProduct, useFacets, useListing, useSearchClick } from '@/api/search';
 
-// Design: pages/store/store-official.html. The Official Store is not a seller record, so there is no
-// profile endpoint (gap G8): the hero and the promises are static copy. Data: featured collections
+// Design: pages/store/store-official.html. Data: the hero from GET /api/store/content/official-store
+// (introduction, banner, policy links, feedback summary); the promise strip stays the design's copy (the
+// profile has no delivery or warranty terms). Featured collections
 // GET /api/store/content/collections?collectionKind=official; categories and total from
 // GET /api/store/search/facets?seller=official (+ the category tree for images); the grid from
 // GET /api/store/search/products?seller=official&sort (page on the website, cursor on the phone).
@@ -30,6 +32,8 @@ export default function Official() {
   const { api } = useApi();
   const lp = useListingParams();
   const tree = useCategoryTree();
+  const profile = useOfficialStore();
+  const p = profile.data;
   const collections = useQuery({
     queryKey: ['content', 'collections', { collectionKind: 'official' }],
     queryFn: () => call(api.GET('/api/store/content/collections', { params: { query: { collectionKind: 'official', limit: 12 } } })),
@@ -61,19 +65,48 @@ export default function Official() {
             <h1 className="display d-xl u-c-on-brand" id="of-h">
               Sold and shipped by Marketly
             </h1>
-            <p style={{ maxWidth: '44ch' }} className="u-o-_9">
-              Our own stock, bought from brands and their authorized distributors, packed in our Reno, NV warehouse. We handle delivery, returns and warranty claims ourselves.
-            </p>
+            {profile.isPending ? (
+              <SkLines n={2} />
+            ) : (
+              p?.introduction && (
+                <p style={{ maxWidth: '44ch' }} className="u-o-_9">
+                  {p.introduction}
+                </p>
+              )
+            )}
+            {p?.feedback && p.feedback.count > 0 && <span className="small u-o-_9">Seller feedback: {p.feedback.label}</span>}
             <div className="row gap-2">
               <a className="btn btn-lg u-bg-on-brand u-c-brand-text-i" href="#of-all" onClick={toAll}>
                 Shop all Official Store items
               </a>
             </div>
+            {(p?.policies.length ?? 0) > 0 && (
+              <span className="row gap-3 small">
+                {p!.policies.map((l) => {
+                  const to = contentLinkTo(l.url);
+                  return isExternal(to) ? (
+                    <a key={l.url} className="link-inline u-c-on-brand" href={to}>
+                      {l.label}
+                    </a>
+                  ) : (
+                    <Link key={l.url} className="link-inline u-c-on-brand" to={to}>
+                      {l.label}
+                    </Link>
+                  );
+                })}
+              </span>
+            )}
           </div>
-          <div className="art" aria-hidden="true">
-            <Pic icon="headphones" tint="2" />
-            <Pic icon="cooking-pot" tint="3" />
-            <Pic icon="shirt" tint="4" />
+          <div className="art" aria-hidden="true" style={p?.bannerUrl ? { gridTemplateColumns: 'minmax(0, 1fr)' } : undefined}>
+            {p?.bannerUrl ? (
+              <Img icon="store" src={p.bannerUrl} />
+            ) : (
+              <>
+                <Pic icon="headphones" tint="2" />
+                <Pic icon="cooking-pot" tint="3" />
+                <Pic icon="shirt" tint="4" />
+              </>
+            )}
           </div>
         </section>
 

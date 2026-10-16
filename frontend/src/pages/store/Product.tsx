@@ -11,6 +11,7 @@ import {
   Price, SearchInput, SellerBadge, Stars, Stars5, announce, type IconName,
 } from '@marketly/web-shared/ui';
 import NotFound from './NotFound';
+import { AskSellerDialog } from './data/ask-seller';
 import { DeliverToDialog } from './data/deliver-to';
 import {
   STOCK_LABEL, STOCK_TONE, categoryTrail, fmtDate, fmtDateTime, orderWithin, productCrumbs, productHref, sellerHref, shipperName,
@@ -28,6 +29,9 @@ const sized = <M extends { url: string }>(m: M | null | undefined, size: 'detail
 // Design: pages/store/store-product.html
 //   view "seller-offer-selected" (+ &offer=<offerId>) = another seller's offer chosen in the buy box
 //   view "no-reviews-yet" follows the data: a product without reviews shows the no-reviews state
+// REST rather than the ProductPage screen query: the query has no purchase-box choice state (selectedBy,
+// featured offer, other-offers cue, unavailable and Official Store states), no viewerReported on reviews
+// and selects images without thumbUrl.
 
 const px = 'pdp';
 
@@ -143,6 +147,8 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
   const signIn = useSignInHref();
   const { signedIn, cartCount } = useSession();
   const [deliverOpen, setDeliverOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const askSeller = () => (signedIn ? setAskOpen(true) : navigate(signIn()));
   const offer = box?.selected ?? null;
   const featured = box?.featured ?? null;
   const isFeatured = box?.selectedBy === 'featured';
@@ -198,6 +204,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
     );
   };
   const report = (r: ApiReview) => {
+    if (r.viewerReported) return;
     const to = href('store/reviews', 'report-review', { slug, id }, { review: r.id });
     navigate(signedIn ? to : signIn(to));
   };
@@ -330,7 +337,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                   </div>
                 ) : (
                   <div className="row gap-2">
-                    {isNewListing(product.listedAt) && (
+                    {product.isNewListing && (
                       <Badge tone="info" icon="sparkles">
                         New listing
                       </Badge>
@@ -350,7 +357,16 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                     </a>
                   </div>
                 )}
-                {product.listedAt && <span className="xs muted">Listed on Marketly {fmtDate(product.listedAt)}</span>}
+                {(product.bestSellerRank || product.listedAt) && (
+                  <span className="row gap-2">
+                    {product.bestSellerRank && (
+                      <Badge tone="info" icon="award">
+                        {product.bestSellerRank.label}
+                      </Badge>
+                    )}
+                    {product.listedAt && <span className="xs muted">Listed on Marketly {fmtDate(product.listedAt)}</span>}
+                  </span>
+                )}
               </div>
               {box && box.variants.length > 1 && (
                 <div className="stack gap-2">
@@ -423,6 +439,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                         This seller stays with the item in your cart. We never switch sellers for you.
                       </Alert>
                     )}
+                    {box.officialStore && <OfficialStoreCue cue={box.officialStore} productId={id} variantId={box.variantId} />}
                     <OfferPrice offer={offer} />
                     <div className="row gap-2">
                       <Badge tone={STOCK_TONE[offer.availability.state]}>
@@ -442,7 +459,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                       <div className="shop-line">
                         <Icon name="truck" />
                         <span>
-                          <b>{offer.delivery.label}</b> to {box.deliverTo.label} ·{' '}
+                          <b>{offer.delivery.label}</b> to {offer.delivery.locationLabel ?? box.deliverTo.label} ·{' '}
                           <button type="button" className="btn-bare link-inline" onClick={() => setDeliverOpen(true)}>
                             Change
                           </button>
@@ -517,9 +534,14 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                         <span className="xs muted center">You’ll review totals, delivery and seller details before paying.</span>
                       )}
                     </div>
-                    <Link className="small strong" to={sellerHref(offer.seller)}>
-                      <Icon name="store" className="ic-sm" /> {offer.seller.official ? 'Visit the Official Store' : `Visit ${offer.seller.name}’s store`}
-                    </Link>
+                    <div className="row gap-4">
+                      <Link className="small strong" to={sellerHref(offer.seller)}>
+                        <Icon name="store" className="ic-sm" /> {offer.seller.official ? 'Visit the Official Store' : `Visit ${offer.seller.name}’s store`}
+                      </Link>
+                      <button type="button" className="btn-bare link-inline small strong" onClick={askSeller}>
+                        <Icon name="message-square" className="ic-sm" /> Ask the seller
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
@@ -664,8 +686,8 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                           <Button variant="ghost" size="sm" icon="thumbs-up" aria-pressed={v.voted} onClick={() => helpful(r)}>
                             Helpful ({v.count})
                           </Button>
-                          <Button variant="ghost" size="sm" icon="flag" onClick={() => report(r)}>
-                            Report
+                          <Button variant="ghost" size="sm" icon="flag" aria-disabled={r.viewerReported || undefined} onClick={() => report(r)}>
+                            {r.viewerReported ? 'Reported' : 'Report'}
                           </Button>
                         </div>
                       </article>
@@ -792,16 +814,15 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
 
         <Related id={id} leaf={leaf} />
       </div>
+      {offer && (
+        <AskSellerDialog open={askOpen} onClose={() => setAskOpen(false)} sellerName={offer.seller.name} offers={[{ offerId: offer.offerId, title: color ? `${product.title} (${color})` : product.title }]} />
+      )}
       <DeliverToDialog open={deliverOpen} onClose={() => setDeliverOpen(false)} signedIn={signedIn} current={box?.deliverTo} />
     </StoreLayout>
   );
 }
 
 /* ---------------- Pieces ---------------- */
-
-const DAY = 86_400_000;
-/** "New listing" for the first 60 days. */
-const isNewListing = (listedAt?: string | null) => !!listedAt && Date.now() - new Date(listedAt).getTime() < 60 * DAY;
 
 /** Spec table rows: the product's specs plus the model number when the specs don't name it. */
 function specPairs(p: CatalogProduct): Array<[string, string]> {
@@ -817,6 +838,30 @@ const deliveryNote = (o: OfferView) =>
 
 const sellerRatingLine = (o: OfferView) =>
   o.seller.ratingCount && o.seller.positivePct != null ? `${o.seller.positivePct}% positive · ${num(o.seller.ratingCount)} ratings` : 'No seller ratings yet';
+
+/**
+ * The Official Store has this variant but can't sell it here now while another seller's offer is in the
+ * buy box (G59): its state, restock estimate and price, with the details page (store/search-empty
+ * product-unavailable view).
+ */
+function OfficialStoreCue({ cue, productId, variantId }: { cue: NonNullable<PurchaseBox['officialStore']>; productId: string; variantId: string }) {
+  return (
+    <div className="shop-line">
+      <Icon name="badge-check" />
+      <span className="small">
+        <b>{cue.title}</b> · Official Store price {formatMoney(cue.price)}
+        <br />
+        <span className="xs muted">
+          {cue.message}
+          {cue.expectedRestockDate && ` Expected back around ${fmtDate(`${cue.expectedRestockDate}T12:00:00Z`)} (estimate).`}{' '}
+          <Link className="link-inline" to={href('store/search-empty', 'product-unavailable', undefined, { id: productId, variantId })}>
+            Details
+          </Link>
+        </span>
+      </span>
+    </div>
+  );
+}
 
 /** Price block of the buy box: sale and was-price notes, and the shipping total for a paid-shipping offer. */
 function OfferPrice({ offer }: { offer: OfferView }) {
@@ -975,8 +1020,8 @@ function RelatedCard({ p }: { p: SimilarProduct }) {
       <div className="meta">
         <span className="seller-line">
           Sold by{' '}
-          {p.official ? (
-            <Link to={href('store/official')}>
+          {p.official || p.sellerSlug ? (
+            <Link to={p.official ? href('store/official') : href('store/seller', '', { slug: p.sellerSlug! })}>
               <b>{p.sellerName}</b>
             </Link>
           ) : (

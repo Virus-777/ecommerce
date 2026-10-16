@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/app/session';
 import { CheckoutLayout } from '@/layouts';
 import { formatMoney } from '@marketly/web-shared/lib/format';
@@ -26,6 +26,7 @@ import {
   timePT,
   useAppConfig,
   useCheckoutSession,
+  useDevSettle,
   useIdempotencyKey,
   usePaymentIntent,
   type CheckoutView,
@@ -40,6 +41,8 @@ import {
 // re-read every nextCheckInSeconds while pending), GET …/checkout/sessions/{id} (order aside, hold time, methods);
 // Check now: POST …/intents/{id}/check; retry: POST …/sessions/{id}/retry-payment + Idempotency-Key; a bank check
 // (requires_action, dev token tok_3ds) is finished with POST …/sessions/{id}/complete-action + Idempotency-Key.
+// Development only: tok_pending keeps the payment being checked; "Settle (dev)" answers it with
+// POST /api/dev/payments/intents/{id}/settle (shown only in a dev build).
 
 export default function PaymentResult() {
   const [params] = useSearchParams();
@@ -263,10 +266,13 @@ function Checking({ c, p }: { c: CheckoutView; p: PaymentStatusView }) {
   const qc = useQueryClient();
   const { customer } = useSession();
   const support = useAppConfig().data?.support;
-  const order = useQuery({
-    queryKey: ['orders', 'order', p.orderId ?? ''],
-    queryFn: () => call(api.GET('/api/store/orders/orders/{id}', { params: { path: { id: p.orderId! } } })),
-    enabled: !!p.orderId,
+  const devSettle = useDevSettle();
+  const settle = useMutation({
+    mutationFn: (outcome: 'authorized' | 'declined') => devSettle(p.intentId, outcome),
+    onSuccess: (v) => {
+      qc.setQueryData(intentKey(p.intentId), v);
+      void qc.invalidateQueries({ queryKey: checkoutKey(c.id) });
+    },
   });
   const check = useMutation({
     mutationFn: () => call(api.POST('/api/store/payments/intents/{id}/check', { params: { path: { id: p.intentId } } })),
@@ -330,6 +336,18 @@ function Checking({ c, p }: { c: CheckoutView; p: PaymentStatusView }) {
                 {check.isPending ? 'Checking…' : 'Check now'}
               </Button>
             </div>
+            {import.meta.env.DEV && (
+              <div className="row gap-2 xs muted">
+                <span>Settle (dev):</span>
+                <Button variant="ghost" size="sm" onClick={() => settle.mutate('authorized')} disabled={settle.isPending}>
+                  Approve
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => settle.mutate('declined')} disabled={settle.isPending}>
+                  Decline
+                </Button>
+                {settle.isError && <span className="t-danger-text">{errorMessage(settle.error)}</span>}
+              </div>
+            )}
           </div>
           <Alert tone="warning" title="Please don't place this order again">
             {p.holdNote ?? `Your bank may show a temporary hold for ${amount}. Placing the order again could create a second hold.`} Your order reference stays the same whatever happens.
@@ -338,7 +356,7 @@ function Checking({ c, p }: { c: CheckoutView; p: PaymentStatusView }) {
             <h2 className="h3">What happens next</h2>
             <Timeline
               events={[
-                { t: 'Order received', d: order.data ? dateTimePT(order.data.placedAt) : undefined, state: 'done', body: 'Your items are reserved while we check the payment.' },
+                { t: 'Order received', d: p.placedAt ? dateTimePT(p.placedAt) : undefined, state: 'done', body: 'Your items are reserved while we check the payment.' },
                 { t: 'Bank confirms the payment', d: 'Usually within minutes, at most 24 hours', state: 'current', body: 'If accepted, the order is confirmed and you get a confirmation email. Sellers start preparing your packages.' },
                 { t: 'If the bank declines', body: 'The order is cancelled, nothing is charged and any hold is released by your bank within 3–5 business days. Your cart is restored so you can pay another way.' },
               ]}

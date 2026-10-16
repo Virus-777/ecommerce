@@ -17,8 +17,10 @@ import { productHref, readQuery, toCardProduct, useFacets } from '@/api/search';
 // (removable filters with result counts, clear all, nearby categories, tips, popular products).
 // Unavailable (?view=product-unavailable&id=<productId>[&variantId=<id>]): GET /api/store/catalog/products/{id},
 // GET /api/store/offers/products/{id}/purchase-box (unavailable reason, restock date, other offers,
-// variants), GET /api/store/reviews/products/{id}/rating-summary, GET /api/store/search/products/{id}/similar;
-// "Choose this offer" adds it to the cart. Back-in-stock email has no endpoint (gap G5): not shown.
+// variants; officialStore when only the Official Store is out of stock, not shipping here or paused while
+// other sellers have the variant, whose offers then come from GET /api/store/offers/products/{id}/offers),
+// GET /api/store/reviews/products/{id}/rating-summary, GET /api/store/search/products/{id}/similar;
+// "Choose this offer" adds it to the cart. Guest back-in-stock email is not built (G5): not shown.
 
 const searchQs = (qs: string) => `${href('store/search')}?${qs}`;
 
@@ -197,6 +199,12 @@ function Unavailable() {
     queryFn: () => call(api.GET('/api/store/reviews/products/{productId}/rating-summary', { params: { path: { productId: id } } })),
     enabled: !!id,
   });
+  const official = box.data?.officialStore ?? null;
+  const others = useQuery({
+    queryKey: ['offers', 'comparison', id, { variantId: box.data?.variantId, condition: 'all', sort: 'total_cost' }],
+    queryFn: () => call(api.GET('/api/store/offers/products/{productId}/offers', { params: { path: { productId: id }, query: { variantId: box.data!.variantId, condition: 'all', sort: 'total_cost' } } })),
+    enabled: !!official,
+  });
   const similar = useQuery({
     queryKey: ['search', 'similar', id],
     queryFn: () => call(api.GET('/api/store/search/products/{productId}/similar', { params: { path: { productId: id }, query: { limit: 5 } } })),
@@ -211,7 +219,12 @@ function Unavailable() {
   const title = p ? (variant?.label ? `${p.title}, ${variant.label}` : p.title) : 'Product';
   const image = p?.variants.find((v) => v.id === b?.variantId)?.images[0] ?? p?.images[0];
   const un = b?.unavailable;
-  const alternatives = un?.alternatives ?? [];
+  const alternatives = un
+    ? un.alternatives
+    : official
+      ? (others.data?.offers ?? []).filter((o) => !o.seller.official && o.availability.state !== 'out_of_stock')
+      : [];
+  const OFFICIAL_BADGE: Record<NonNullable<typeof official>['state'], string> = { out_of_stock: 'Out of stock', not_shippable: 'Doesn’t ship here', unavailable: 'Unavailable' };
   const notFound = !id || (product.error instanceof ApiError && product.error.status === 404);
 
   return (
@@ -247,9 +260,9 @@ function Unavailable() {
               <div className="grid md2 gap-6 u-items-start">
                 <div className="pcard-media">
                   {p ? <Pic image={image} icon="package" tint="5" /> : <span className="sk sk-img" />}
-                  {un && (
+                  {(un || official) && (
                     <span style={{ position: 'absolute', top: '12px', left: '12px' }}>
-                      <Badge tone="danger">{un.reason === 'out_of_stock' ? 'Out of stock' : 'Unavailable'}</Badge>
+                      <Badge tone="danger">{un ? (un.reason === 'out_of_stock' ? 'Out of stock' : 'Unavailable') : OFFICIAL_BADGE[official!.state]}</Badge>
                     </span>
                   )}
                 </div>
@@ -272,6 +285,12 @@ function Unavailable() {
                         <Alert tone="warning" title={un.title}>
                           {un.message}
                           {un.expectedRestockDate ? ` Expected back around ${restockLabel(un.expectedRestockDate)}. Dates from suppliers can change.` : ''}
+                        </Alert>
+                      ) : official ? (
+                        <Alert tone="warning" title={official.title}>
+                          {official.message}
+                          {official.expectedRestockDate ? ` Expected back around ${restockLabel(official.expectedRestockDate)}. Dates from suppliers can change.` : ''} Official Store price:{' '}
+                          {formatMoney(official.price)}.
                         </Alert>
                       ) : (
                         <Alert tone="success" title="This product is available">

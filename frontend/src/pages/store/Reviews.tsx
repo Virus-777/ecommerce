@@ -16,8 +16,9 @@ import {
   REPORT_REASONS, REVIEW_SORTS, useHelpfulVote, useReport, useReviewFeed, useReviewPage, useReviewPhotos,
   type ApiReview, type ReportReason, type ReviewFilters, type ReviewPhoto, type ReviewSort,
 } from './data/reviews';
+import { useDebounced } from './data/questions';
 import {
-  ListSkeleton, LoadError, matchesAll, Photo, ProductSummary, reviewMeta, ReviewActions, ReviewCard, ReviewSource, subpageCrumbs, SummaryActionBar, tokens,
+  ListSkeleton, LoadError, Photo, ProductSummary, reviewMeta, ReviewActions, ReviewCard, ReviewSource, subpageCrumbs, SummaryActionBar, tokens,
   useProductContext, type VoteState,
 } from './data/review-parts';
 import './Reviews.css';
@@ -27,15 +28,13 @@ import './Reviews.css';
 //   view ""              = all reviews: summary + live histogram, photos, filters, list
 //   view "photos"        = review photos viewer (&photo=<id> picks the photo)
 //   view "report-review" = Report review dialog (&review=<id> picks the review)
-// ?q=<words> starts the list with a keyword search (linked from Questions and answers).
-// The API has no keyword search and no AI summary (BACKEND-REQUESTS G6): a search filters the
-// first 100 reviews that match the other filters, and "Customers say" is hidden.
+// ?q=<words> starts the list with a keyword search (linked from Questions and answers). The search runs
+// on the server (q: headline, text, reviewer name); matches are highlighted here. There is no AI summary
+// (the server is offline), so "Customers say" is hidden.
 
 type View = 'photos' | 'report-review';
 
 const PAGE = 10;
-/** Reviews loaded for a keyword search (filtered here: the API can't search reviews). */
-const SEARCH_LIMIT = 100;
 
 export default function Reviews() {
   const { slug, id } = useProductParams();
@@ -57,24 +56,24 @@ export default function Reviews() {
   const [query, setQuery] = useState(() => params.get('q') ?? '');
   const [sort, setSort] = useState<ReviewSort>('helpful');
   const [page, setPage] = useState(1);
-  const [shown, setShown] = useState(PAGE);
   const listTop = useRef<HTMLHeadingElement>(null);
 
-  // Votes made on this page, and reports (the API doesn't say whether the viewer reported a review)
+  // Votes and reports made on this page (the server's viewerVotedHelpful / viewerReported otherwise)
   const vote = useHelpfulVote();
   const [votes, setVotes] = useState<Record<string, VoteState>>({});
   const [reported, setReported] = useState<Record<string, boolean>>({});
   const voteOf = (r: ApiReview): VoteState => votes[r.id] ?? { voted: !!r.viewerVotedHelpful, count: r.helpfulCount };
 
-  const toks = useMemo(() => tokens(query.trim()), [query]);
-  const searching = toks.length > 0;
-  const filters: ReviewFilters = { rating: star, verifiedOnly: verified, withPhotos, variantId: variant, sort };
+  const search = useDebounced(query.trim());
+  const toks = useMemo(() => tokens(search), [search]);
+  const searching = search.length > 0;
+  const filters: ReviewFilters = { rating: star, verifiedOnly: verified, withPhotos, variantId: variant, q: search, sort };
   const hasReviews = summary?.hasReviews ?? true;
 
-  // Website pages (and every keyword search) by page number; the phone app by cursor.
-  const paged = useReviewPage(id, filters, searching ? 1 : page, searching ? SEARCH_LIMIT : PAGE, hasReviews && (!isPhone || searching));
-  const feed = useReviewFeed(id, filters, PAGE, hasReviews && isPhone && !searching);
-  const list = isPhone && !searching ? feed : paged;
+  // Website pages by page number; the phone app by cursor.
+  const paged = useReviewPage(id, filters, page, PAGE, hasReviews && !isPhone);
+  const feed = useReviewFeed(id, filters, PAGE, hasReviews && isPhone);
+  const list = isPhone ? feed : paged;
 
   let visible: ApiReview[] = [];
   let total: number | null = null;
@@ -82,15 +81,7 @@ export default function Reviews() {
   let current = 1;
   let hasMore = false;
   let loadMore = () => undefined as unknown;
-  if (searching) {
-    const hits = (paged.data?.items ?? []).filter((r) => matchesAll(toks, r.headline, r.text));
-    total = hits.length;
-    pages = Math.max(1, Math.ceil(hits.length / PAGE));
-    current = Math.min(page, pages);
-    visible = isPhone ? hits.slice(0, shown) : hits.slice((current - 1) * PAGE, current * PAGE);
-    hasMore = isPhone && hits.length > shown;
-    loadMore = () => setShown((n) => n + PAGE);
-  } else if (isPhone) {
+  if (isPhone) {
     visible = feed.data?.pages.flatMap((p) => p.items) ?? [];
     hasMore = !!feed.hasNextPage;
     loadMore = () => feed.fetchNextPage();
@@ -107,10 +98,7 @@ export default function Reviews() {
   const to = from + visible.length - 1;
 
   // Any change to filters or sort starts the list again from the top.
-  const reset = () => {
-    setPage(1);
-    setShown(PAGE);
-  };
+  const reset = () => setPage(1);
   const apply =
     <T,>(set: (v: T) => void) =>
     (v: T) => {
@@ -155,6 +143,7 @@ export default function Reviews() {
   const reviewId = params.get('review');
   const reportTarget = reviewId ? ([...visible, ...(paged.data?.items ?? []), ...photos.map((p) => p.review)].find((r) => r.id === reviewId) ?? null) : null;
   const openReport = (r: ApiReview) => {
+    if (r.viewerReported) return;
     if (!signedIn) {
       const next = href('store/reviews', 'report-review', { slug, id }, { review: r.id });
       navigate(signIn(next));
@@ -395,7 +384,7 @@ export default function Reviews() {
                           {visible.length > 0 ? (
                             <div className="stack gap-0">
                               {visible.map((r) => (
-                                <ReviewCard key={r.id} r={r} toks={toks} vote={voteOf(r)} reported={!!reported[r.id]} onHelpful={() => helpful(r)} onReport={() => openReport(r)} onPhoto={openPhoto} />
+                                <ReviewCard key={r.id} r={r} toks={toks} vote={voteOf(r)} reported={!!reported[r.id] || !!r.viewerReported} onHelpful={() => helpful(r)} onReport={() => openReport(r)} onPhoto={openPhoto} />
                               ))}
                             </div>
                           ) : (
@@ -554,7 +543,7 @@ function PhotoViewer({ photos, open, index, onIndex, onClose, voteOf, reported, 
         <p className="xs muted">
           <Icon name="image" className="ic-sm" /> Photo {photo.n} of {r.media.length} in this review{photo.alt ? `: ${photo.alt}` : ''}
         </p>
-        <ReviewActions vote={voteOf(r)} reported={!!reported[r.id]} onHelpful={() => onHelpful(r)} onReport={() => onReport(r)} />
+        <ReviewActions vote={voteOf(r)} reported={!!reported[r.id] || !!r.viewerReported} onHelpful={() => onHelpful(r)} onReport={() => onReport(r)} />
       </div>
       <div className="hscroll gap-2 rv-film" role="group" aria-label="All review photos" ref={strip}>
         {photos.map((p, i) => (

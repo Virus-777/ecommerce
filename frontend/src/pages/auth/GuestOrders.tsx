@@ -40,6 +40,7 @@ function Lookup() {
   const [email, setEmail] = useState('');
   const [errors, setErrors] = useState<{ ref?: string; email?: string }>({});
   const [notFound, setNotFound] = useState(false);
+  const [signInRequired, setSignInRequired] = useState(false);
   const [linksSent, setLinksSent] = useState(false);
 
   const showFound = (orderRef: string, state: FoundState) => navigate(href('auth/guest-orders', 'found', undefined, { ref: orderRef }), { state });
@@ -52,17 +53,21 @@ function Lookup() {
     },
     onError: (e) => {
       if (e instanceof ApiError && e.code === 'GUEST_ORDER_NOT_FOUND') setNotFound(true);
+      // A registered customer's order opens only in their account (G29e); the answer never confirms the email.
+      if (e instanceof ApiError && e.code === 'GUEST_ORDER_SIGN_IN_REQUIRED') setSignInRequired(true);
     },
   });
 
-  // Emailed order link: redeem the token, then read the order's reference to open it.
+  // Emailed order link: redeem the token; the answer names the order (orderRef). Links issued before the
+  // reference was recorded have none: those read the order once. A signed-in customer gets no guest access
+  // (guestSession null): the order opens in their account.
   const redeem = useMutation({
     mutationFn: async (t: string) => {
       const r = await call(api.POST('/api/public/identity/order-links/redeem', { body: { token: t } }));
-      const order = await call(api.GET('/api/store/orders/orders/{id}', { params: { path: { id: r.orderId } } }));
-      return { ref: order.ref, emailMasked: r.emailMasked };
+      const ref = r.orderRef ?? (await call(api.GET('/api/store/orders/orders/{id}', { params: { path: { id: r.orderId } } }))).ref;
+      return { ref, emailMasked: r.emailMasked, inAccount: !r.guestSession };
     },
-    onSuccess: (r) => showFound(r.ref, { email: r.emailMasked }),
+    onSuccess: (r) => (r.inAccount ? navigate(href('account/order', '', { ref: r.ref }), { replace: true }) : showFound(r.ref, { email: r.emailMasked })),
   });
   const redeemed = useRef(false);
   useEffect(() => {
@@ -88,11 +93,12 @@ function Lookup() {
     if (!EMAIL_RE.test(email.trim())) next.email = 'Enter the email you used at checkout.';
     setErrors(next);
     setNotFound(false);
+    setSignInRequired(false);
     if (next.ref || next.email || lookup.isPending) return;
     lookup.mutate({ orderRef: r, email: email.trim() });
   };
 
-  const lookupError = lookup.error && !(lookup.error instanceof ApiError && lookup.error.code === 'GUEST_ORDER_NOT_FOUND') ? authError(lookup.error) : null;
+  const lookupError = lookup.error && !(lookup.error instanceof ApiError && ['GUEST_ORDER_NOT_FOUND', 'GUEST_ORDER_SIGN_IN_REQUIRED'].includes(lookup.error.code)) ? authError(lookup.error) : null;
 
   return (
     <AuthShell title="Guest order lookup" onSubmit={submit}>
@@ -116,6 +122,14 @@ function Lookup() {
       {notFound && (
         <Alert tone="danger" title="We couldn't find that order">
           Check the reference and use the same email you entered at checkout. Orders placed in the last few minutes can take a moment to appear.
+        </Alert>
+      )}
+      {signInRequired && (
+        <Alert tone="info" title="Sign in to see this order">
+          This order belongs to a Marketly account. Sign in to that account to track it, return items or get help.{' '}
+          <Link to={href('auth/sign-in', '', undefined, { next: href('account/order', '', { ref: ref.trim().toUpperCase() }) })} className="link-inline">
+            Sign in
+          </Link>
         </Alert>
       )}
       {lookupError && <Alert tone="danger" title="We couldn't look up that order">{lookupError}</Alert>}

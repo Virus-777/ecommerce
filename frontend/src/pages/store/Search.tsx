@@ -14,6 +14,8 @@ import { readPage, readQuery, toCardProduct, useFacets, useListing, useSearchCli
 // REST search parameters (q, filters, sort, page); GET /api/store/search/facets (total, correction,
 // applied filters, facets, sorts, store match) and GET /api/store/search/products (page on the website,
 // cursor on the phone). Zero results go to store/search-empty with the same parameters.
+// REST rather than the SearchResults screen query: the query leaves sponsored rows to REST, selects images
+// without thumbUrl and has no stock state or offer count on the cards.
 
 const PER_PAGE = 24;
 

@@ -162,7 +162,7 @@ export default function Confirmation() {
       <div className="card pad buy-sum">
         <SummaryRow k={`Items (${t.itemCount})`} v={formatMoney(t.items)} />
         {t.discounts.map((d, i) => (
-          <SummaryRow key={`${d.code ?? d.label}-${i}`} className="discount" k={d.code ?? d.label} v={`−${formatMoney(d.amount)}`} />
+          <SummaryRow key={`${d.code ?? d.label}-${i}`} className="discount" k={d.label} v={`−${formatMoney(d.amount)}`} />
         ))}
         {t.creditApplied.amount > 0 && <SummaryRow className="discount" k="Marketly credit" v={`−${formatMoney(t.creditApplied)}`} />}
         <SummaryRow k={`Shipping (${plural(o.packages.length, 'package')})`} v={t.shippingTotal.amount ? formatMoney(t.shippingTotal) : 'Free'} />

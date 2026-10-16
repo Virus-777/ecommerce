@@ -1,8 +1,11 @@
 import { useState, type MouseEvent } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { StoreLayout } from '@/layouts';
+import { useSession } from '@/app/session';
 import NotFound from './NotFound';
+import { AskSellerDialog } from './data/ask-seller';
+import { useSignInHref } from './data/product';
 import { ApiError, call, useApi } from '@marketly/web-shared/api';
 import { num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
@@ -16,8 +19,11 @@ import { readPage, readQuery, toCardProduct, useFacets, useListing, useSearchCli
 // highlights, verification, shipping and returns, promotion; closed store → 404), seller feedback
 // GET /api/store/reviews/sellers/{sellerId}/feedback-summary and …/feedback, the product grid
 // GET /api/store/search/products?seller={slug}&q&category&sort (+ /search/facets for the category chips).
-// Not shown: featured collections (REST gives offer ids only, no product cards) and messaging the
-// seller without an order (gap G4).
+// "Contact seller" starts a pre-sale conversation about one of the store's products
+// (POST /api/store/messaging/product-conversations; signed-in customers, a visitor goes to sign-in first).
+// Not shown: featured collections (REST gives offer ids only, no product cards).
+// REST rather than the SellerStorefront screen query: that query would reload the whole storefront for
+// every search keystroke, filter and page, and its product cards have no stock state or thumbUrl.
 
 const PER_PAGE = 12;
 
@@ -64,6 +70,10 @@ export default function Seller() {
   const lp = useListingParams();
   const [tab, setTab] = useState<Tab>('products');
   const [allFeedback, setAllFeedback] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const { signedIn } = useSession();
+  const navigate = useNavigate();
+  const signIn = useSignInHref();
 
   const store = useQuery({
     queryKey: ['sellers', 'store', slug],
@@ -103,6 +113,11 @@ export default function Seller() {
   const ratingCount = summary.data?.count ?? seller?.ratingCount ?? 0;
   const error = store.error ?? facets.error ?? listing.error;
 
+  // Products the customer can ask about: this store's offers in the loaded grid.
+  const askOffers = listing.hits
+    .filter((h) => h.product.sellerSlug === slug && h.product.offerId)
+    .map((h) => ({ offerId: h.product.offerId!, title: h.product.variantCue ? `${h.product.title} (${h.product.variantCue})` : h.product.title }));
+  const contactSeller = () => (signedIn ? setAskOpen(true) : navigate(signIn()));
   const openTab = (t: Tab) => {
     setTab(t);
     jump(TAB_TARGET[t]);
@@ -209,8 +224,13 @@ export default function Seller() {
               )}
             </div>
             <div className="row gap-2">
-              {/* Messaging needs an order (POST messaging/conversations requires orderId; gap G4). */}
-              <Button variant="secondary" icon="message-square" disabled title="Message a seller from one of your orders. Questions about a product go to its Questions and answers.">
+              <Button
+                variant="secondary"
+                icon="message-square"
+                disabled={!s || contact.canMessage === false || (signedIn && askOffers.length === 0)}
+                title={contact.canMessage === false ? 'This seller isn’t taking messages right now.' : undefined}
+                onClick={contactSeller}
+              >
                 Contact seller
               </Button>
               <CopyButton text={typeof window !== 'undefined' ? window.location.href : href('store/seller', '', { slug })} label="Share store" icon="share-2" />
@@ -435,6 +455,7 @@ export default function Seller() {
           </aside>
         </div>
       </div>
+      <AskSellerDialog open={askOpen} onClose={() => setAskOpen(false)} sellerName={name} offers={askOffers} />
     </StoreLayout>
   );
 }

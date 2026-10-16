@@ -1,7 +1,7 @@
 // API access for product reviews (store/reviews and the reviews block of store/product):
 // filtered and sorted review lists (page numbers on the website, cursor on the phone), review
-// photos, helpful votes and reports. The API has no keyword search and no AI summary
-// (BACKEND-REQUESTS G6): searching loads the first 100 matching reviews and filters them here.
+// photos, helpful votes and reports. `q` searches headline, text and reviewer name on the server.
+// There is no AI review summary (the server is offline).
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { call, useApi, type components } from '@marketly/web-shared/api';
 
@@ -41,6 +41,8 @@ export interface ReviewFilters {
   withPhotos?: boolean;
   critical?: boolean;
   variantId?: string | null;
+  /** Keyword search on the server (headline, text, reviewer name). */
+  q?: string | null;
   sort?: ReviewSort;
 }
 
@@ -50,6 +52,7 @@ const toQuery = (f: ReviewFilters) => ({
   withPhotos: f.withPhotos || undefined,
   critical: f.critical || undefined,
   variantId: f.variantId ?? undefined,
+  q: f.q || undefined,
   sort: API_SORT[f.sort ?? 'helpful'],
 });
 

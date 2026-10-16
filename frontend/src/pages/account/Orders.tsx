@@ -13,7 +13,7 @@ import { LoadError, SkeletonRows, useInView } from './data/order-parts';
 
 // Design: pages/store/account-orders.html · view "no-matches" = a search + date range with no results
 // (the view pre-fills that search; the result comes from the API). Data: the OrderList screen query
-// (orders + tab counts for the date range); website pages by number, the phone app loads more on scroll.
+// (orders + tab counts for the date range and search); website pages by number, the phone app loads more on scroll.
 
 const LIMIT = 10;
 const RANGES: Array<{ value: OrderRange; label: string }> = [
@@ -50,7 +50,7 @@ export default function Orders() {
   useEffect(() => setPage(1), [search, range, tab]);
 
   const run = async (paging: { page?: number; cursor?: string; limit: number }) =>
-    (await gql<OrderListResult>(ORDER_LIST, { filter, paging, countsRange: range }, 'OrderList')).data!;
+    (await gql<OrderListResult>(ORDER_LIST, { filter, paging, countsRange: range, countsQuery: search || undefined }, 'OrderList')).data!;
   const pageQ = useQuery({
     queryKey: ['orders', 'list', { ...filter, page }],
     queryFn: () => run({ page, limit: LIMIT }),
@@ -113,7 +113,7 @@ export default function Orders() {
         active={tab}
         onChange={setTab}
         items={[
-          { value: 'ALL', label: 'All', count: search && tab === 'ALL' && pageQ.data ? (pageQ.data.orders.total ?? undefined) : counts?.all },
+          { value: 'ALL', label: 'All', count: counts?.all },
           { value: 'IN_PROGRESS', label: 'In progress', count: counts?.inProgress },
           { value: 'DELIVERED', label: 'Delivered', count: counts?.delivered },
           { value: 'RETURNS', label: 'Returns', count: counts?.returns },

@@ -15,7 +15,7 @@ import { fmtDate, productHref, useProductParams, useSignInHref, type CatalogProd
 import { QA_ROLES, QA_SORTS, roleOf, useAskQuestion, useDebounced, useQuestionFeed, useQuestionPage, type ApiAnswer, type ApiQuestion, type QaRole, type QaSort } from './data/questions';
 import { useHelpfulVote, useReviewPage } from './data/reviews';
 import {
-  Highlight, ListSkeleton, LoadError, matchCount, matchesAll, Photo, ProductSummary, ReviewSource, subpageCrumbs, SummaryActionBar, tokens, useProductContext, type VoteState,
+  Highlight, ListSkeleton, LoadError, matchCount, Photo, ProductSummary, ReviewSource, subpageCrumbs, SummaryActionBar, tokens, useProductContext, type VoteState,
 } from './data/review-parts';
 import './Reviews.css';
 
@@ -24,17 +24,15 @@ import './Reviews.css';
 //   view ""         = all questions, with "Search questions and reviews" above "Ask a question"
 //   view "ask"      = Ask a question dialog (who gets it, expected answer time; posts as "Awaiting answer")
 //   view "no-match" = follows the data: a search no question matches shows matching reviews and "Ask this question"
-// ?q=<words> starts with a search. Questions are searched on the server; reviews can't be (BACKEND-REQUESTS
-// G6), so "From reviews" filters the first 100 reviews here. The API has no answered/awaiting filter: those
-// chips filter the first 100 questions here.
+// ?q=<words> starts with a search. Questions and reviews are searched on the server (questions q, reviews q);
+// the Answered / Awaiting answer chips are the server's state filter, counted by the rating summary
+// (answeredQuestions, awaitingQuestions). Helpful votes start from the server's viewerVotedHelpful.
 
 type View = 'ask' | 'no-match';
 type Filter = 'all' | 'answered' | 'awaiting';
 
 const PAGE = 8;
 const SHOW_ANSWERS = 2;
-/** Questions loaded when the Answered / Awaiting answer chips filter here. */
-const FILTER_LIMIT = 100;
 
 /** Answers ranked by helpful votes only: a seller's answer doesn't go first because of its role. */
 const byVotes = (a: ApiAnswer, b: ApiAnswer) => b.helpfulCount - a.helpfulCount;
@@ -56,17 +54,13 @@ export default function Questions() {
   const [filter, setFilter] = useState<Filter>('all');
   const [sort, setSort] = useState<QaSort>('helpful');
   const [page, setPage] = useState(1);
-  const [shown, setShown] = useState(PAGE);
   const [votes, setVotes] = useState<Record<string, VoteState>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [askDraft, setAskDraft] = useState('');
   const listTop = useRef<HTMLHeadingElement>(null);
   const vote = useHelpfulVote();
 
-  const reset = () => {
-    setPage(1);
-    setShown(PAGE);
-  };
+  const reset = () => setPage(1);
   const setQuery = (v: string) => {
     setQueryState(v);
     reset();
@@ -77,16 +71,16 @@ export default function Questions() {
   const search = useDebounced(query.trim());
   const searching = search.length > 0;
   const toks = useMemo(() => tokens(search), [search]);
-  const clientFilter = filter !== 'all';
+  const state = filter === 'all' ? undefined : filter;
 
-  const paged = useQuestionPage(id, search, sort, clientFilter ? 1 : page, clientFilter ? FILTER_LIMIT : PAGE, !isPhone || clientFilter);
-  const feed = useQuestionFeed(id, search, sort, PAGE, isPhone && !clientFilter);
-  const list = isPhone && !clientFilter ? feed : paged;
-  const allCount = useQuestionPage(id, '', 'helpful', 1, 1).data?.total;
+  const paged = useQuestionPage(id, search, sort, page, PAGE, !isPhone, state);
+  const feed = useQuestionFeed(id, search, sort, PAGE, isPhone, state);
+  const list = isPhone ? feed : paged;
   const answered = ctx.summary?.answeredQuestions ?? 0;
-  const awaiting = allCount != null ? Math.max(0, allCount - answered) : 0;
+  const awaiting = ctx.summary?.awaitingQuestions ?? 0;
+  const allCount = ctx.summary ? answered + awaiting : undefined;
 
-  const loaded = isPhone && !clientFilter ? (feed.data?.pages.flatMap((p) => p.items) ?? []) : (paged.data?.items ?? []);
+  const loaded = isPhone ? (feed.data?.pages.flatMap((p) => p.items) ?? []) : (paged.data?.items ?? []);
   const mineIds = new Set(mine.map((q) => q.id));
   const inGroup = (q: ApiQuestion) => filter === 'all' || (filter === 'answered' ? q.answers.length > 0 : q.answers.length === 0);
   // Your own new questions stay on top of the first page; the rest follow the chosen order.
@@ -99,14 +93,7 @@ export default function Questions() {
   let matchTotal: number | null = null;
   let hasMore = false;
   let loadMore = () => undefined as unknown;
-  if (clientFilter) {
-    matchTotal = server.length;
-    pages = Math.max(1, Math.ceil(server.length / PAGE));
-    current = Math.min(page, pages);
-    visible = isPhone ? server.slice(0, shown) : server.slice((current - 1) * PAGE, current * PAGE);
-    hasMore = isPhone && server.length > shown;
-    loadMore = () => setShown((n) => n + PAGE);
-  } else if (isPhone) {
+  if (isPhone) {
     visible = server;
     hasMore = !!feed.hasNextPage;
     loadMore = () => feed.fetchNextPage();
@@ -118,9 +105,10 @@ export default function Questions() {
   }
   const listed = [...ownOnTop, ...visible];
 
-  // The same words across reviews (filtered here: the API can't search reviews).
-  const reviewsQ = useReviewPage(id, { sort: 'helpful' }, 1, 100, searching && !!ctx.summary?.hasReviews);
-  const reviewHits = searching ? (reviewsQ.data?.items ?? []).filter((r) => matchesAll(toks, r.headline, r.text)) : [];
+  // The same words across reviews (server search).
+  const reviewsQ = useReviewPage(id, { sort: 'helpful', q: search }, 1, 3, searching && !!ctx.summary?.hasReviews);
+  const reviewHits = searching ? (reviewsQ.data?.items ?? []) : [];
+  const reviewTotal = reviewsQ.data?.total ?? reviewHits.length;
   const noMatch = searching && !!list.data && listed.length === 0 && filter === 'all';
 
   // Who gets a question: the sellers with an offer on this item (other customers can answer too).
@@ -135,7 +123,7 @@ export default function Questions() {
     setPage(p);
     listTop.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
-  const voteOf = (a: ApiAnswer): VoteState => votes[a.id] ?? { voted: false, count: a.helpfulCount };
+  const voteOf = (a: ApiAnswer): VoteState => votes[a.id] ?? { voted: !!a.viewerVotedHelpful, count: a.helpfulCount };
   const onVote = (a: ApiAnswer) => {
     if (!signedIn) {
       navigate(signIn());
@@ -330,7 +318,7 @@ export default function Questions() {
                           </div>
                         }
                       >
-                        {reviewHits.length > 0 ? `${reviewHits.length} review${reviewHits.length === 1 ? '' : 's'} mention it (below). ` : 'Try fewer or different words. '}
+                        {reviewTotal > 0 ? `${reviewTotal} review${reviewTotal === 1 ? '' : 's'} mention it (below). ` : 'Try fewer or different words. '}
                         Ask it, and we’ll send it to {routing}.{expected ? ` ${expected}` : ''}
                       </EmptyState>
                     </div>
@@ -368,7 +356,7 @@ export default function Questions() {
                   <section className="stack gap-3" aria-labelledby="qa-rev-h">
                     <div className="row between base">
                       <h2 className="h4" id="qa-rev-h">
-                        From reviews ({reviewHits.length})
+                        From reviews ({reviewTotal})
                       </h2>
                       {reviewHits.length > 0 && (
                         <Link className="small strong" to={href('store/reviews', '', { slug, id }, { q: search })}>
@@ -380,7 +368,7 @@ export default function Questions() {
                       <ListSkeleton rows={2} />
                     ) : reviewHits.length ? (
                       <div className="stack gap-2">
-                        {reviewHits.slice(0, 3).map((r) => (
+                        {reviewHits.map((r) => (
                           <article key={r.id} className="card pad stack gap-1">
                             <div className="row gap-2">
                               <Stars5 rating={r.rating} size="sm" />

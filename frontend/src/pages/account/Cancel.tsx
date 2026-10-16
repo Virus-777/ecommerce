@@ -340,7 +340,7 @@ function Requested({ order, crumbs, ids }: { order: OrderDetail; crumbs: ReactNo
             {shown.flatMap(({ c, g }) =>
               c.items.map((l) => {
                 const oi = orderItems.find((i) => i.id === l.itemId);
-                const to = oi ? productHref(oi.productId, oi.title) : null;
+                const to = oi ? productHref(oi.productId, oi.title, oi.productSlug) : null;
                 return (
                   <div key={`${c.id}-${l.itemId}`} className="row gap-3 nowrap top">
                     {to ? (

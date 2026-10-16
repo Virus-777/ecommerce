@@ -1,3 +1,5 @@
+import { QrCode } from '@/app/QrCode';
+import { NO_PASSWORD_NOTE } from './data/password';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router';
@@ -14,7 +16,7 @@ import { dateLong, dateTime, listTime } from './data/when';
 
 type Device = components['schemas']['identity.Device'];
 type Method = 'app' | 'sms';
-type SetupStep = { step: 'password' } | { step: 'code'; setupId: string; key?: string | null; phone?: string | null } | { step: 'codes'; codes: string[] };
+type SetupStep = { step: 'password' } | { step: 'code'; setupId: string; key?: string | null; uri?: string | null; phone?: string | null } | { step: 'codes'; codes: string[] };
 
 const pw0 = { cur: '', next: '', conf: '' };
 const RULE_COPY: Record<string, string> = {
@@ -31,6 +33,7 @@ function proofError(e: unknown): string | undefined {
   if (!e) return undefined;
   if (e instanceof ApiError) {
     if (e.code === 'CURRENT_PASSWORD_WRONG') return 'The password is incorrect.';
+    if (e.code === 'PASSWORD_NOT_SET') return NO_PASSWORD_NOTE;
     if (e.code === 'CODE_INVALID') return `That code is not right.${typeof e.details.attemptsLeft === 'number' ? ` ${e.details.attemptsLeft} tries left.` : ''}`;
     if (e.code === 'CODE_EXPIRED') return 'The code has expired. Start again.';
     if (e.code === 'METHOD_NOT_AVAILABLE') return "Text message codes aren't available yet. Use an authenticator app.";
@@ -51,6 +54,8 @@ export default function Security() {
   const policy = useQuery({ queryKey: ['identity', 'password-policy'], queryFn: () => call(api.GET('/api/public/identity/password-policy', { params: { query: { realm: 'member' } } })), staleTime: Infinity });
   const profile = useQuery({ queryKey: ['customers', 'profile'], queryFn: () => call(api.GET('/api/store/customers/profile')) });
   const minLen = policy.data?.minLength ?? 10;
+  /** SecurityOverview.hasPassword false: password change, 2-step setup and removal can't be confirmed (G28). */
+  const noPassword = sec.data?.hasPassword === false;
 
   // Password
   const [pw, setPw] = useState(pw0);
@@ -71,6 +76,7 @@ export default function Security() {
     else if (e.code === 'WEAK_PASSWORD') pwServer.next = `This password ${((e.details.failed as string[] | undefined) ?? []).map((r) => RULE_COPY[r] ?? r).join(', ') || 'breaks a rule'}.`;
     else if (e.code === 'PASSWORD_REUSED') pwServer.next = 'You used this password recently. Choose a new one.';
     else if (e.code === 'VALIDATION_FAILED') Object.assign(pwServer, { cur: e.fieldErrors.currentPassword, next: e.fieldErrors.newPassword });
+    else if (e.code === 'PASSWORD_NOT_SET') pwServer.cur = NO_PASSWORD_NOTE;
   }
   const pwLocal = pwTried
     ? {
@@ -105,7 +111,7 @@ export default function Security() {
     mutationFn: () => call(api.POST('/api/store/identity/two-step/setups', { body: { method: method === 'app' ? 'totp' : 'sms', currentPassword: setupPw, ...(method === 'sms' ? { phone: profile.data?.phone ?? null } : {}) } })),
     onSuccess: (s) => {
       setSetupPw('');
-      setSetup({ step: 'code', setupId: s.setupId, key: s.manualEntryKey, phone: s.phoneMasked });
+      setSetup({ step: 'code', setupId: s.setupId, key: s.manualEntryKey, uri: s.otpauthUri, phone: s.phoneMasked });
     },
   });
   const confirmSetup = useMutation({
@@ -195,23 +201,28 @@ export default function Security() {
       <div className="grid lg2 u-items-start">
         <Card
           title="Password"
-          sub={sec.data?.passwordChangedAt ? `Last changed ${dateLong(sec.data.passwordChangedAt)}` : 'Set when you created your account'}
+          sub={noPassword ? 'No password on this account' : sec.data?.passwordChangedAt ? `Last changed ${dateLong(sec.data.passwordChangedAt)}` : 'Set when you created your account'}
           foot={
-            <Button onClick={submitPw} disabled={changePw.isPending}>
+            <Button onClick={submitPw} disabled={changePw.isPending || noPassword}>
               {changePw.isPending ? 'Changing…' : 'Change password'}
             </Button>
           }
         >
           {changePw.isSuccess && <Alert tone="success" title="Password changed">Other devices stay signed in. Sign them out below if you don't recognize one.</Alert>}
           {pwOtherError && <Alert tone="danger" title="We couldn't change your password">{pwOtherError}</Alert>}
+          {noPassword && (
+            <Alert tone="info" title="No password on this account">
+              {NO_PASSWORD_NOTE}
+            </Alert>
+          )}
           <Field label="Current password" error={pwErr.cur}>
-            <TextInput id="sc-cur" type="password" value={pw.cur} error={!!pwErr.cur} autoComplete="current-password" onChange={(e) => editPw('cur', e.target.value)} />
+            <TextInput id="sc-cur" type="password" value={pw.cur} error={!!pwErr.cur} disabled={noPassword} autoComplete="current-password" onChange={(e) => editPw('cur', e.target.value)} />
           </Field>
           <Field label="New password" hint={`At least ${minLen} characters${policy.data?.requireNumber ? ', with a number' : ''}${policy.data?.requireUppercase ? ' and an uppercase letter' : ''}. Avoid passwords you use elsewhere.`} error={pwErr.next}>
-            <TextInput id="sc-new" type="password" value={pw.next} error={!!pwErr.next} autoComplete="new-password" onChange={(e) => editPw('next', e.target.value)} />
+            <TextInput id="sc-new" type="password" value={pw.next} error={!!pwErr.next} disabled={noPassword} autoComplete="new-password" onChange={(e) => editPw('next', e.target.value)} />
           </Field>
           <Field label="Confirm new password" error={pwErr.conf}>
-            <TextInput id="sc-conf" type="password" value={pw.conf} error={!!pwErr.conf} autoComplete="new-password" onChange={(e) => editPw('conf', e.target.value)} />
+            <TextInput id="sc-conf" type="password" value={pw.conf} error={!!pwErr.conf} disabled={noPassword} autoComplete="new-password" onChange={(e) => editPw('conf', e.target.value)} />
           </Field>
           <Link className="xs strong" to={href('auth/recover')}>
             Forgot your current password?
@@ -225,11 +236,11 @@ export default function Security() {
             actions={twoStep && <Badge tone={twoStep.enabled ? 'success' : 'warning'}>{twoStep.enabled ? 'On' : 'Off'}</Badge>}
             foot={
               twoStep?.enabled ? (
-                <Button variant="secondary" onClick={() => (removeTwoStep.reset(), setRemoving(true))}>
+                <Button variant="secondary" onClick={() => (removeTwoStep.reset(), setRemoving(true))} disabled={noPassword}>
                   Turn off 2-step verification
                 </Button>
               ) : (
-                <Button icon="shield-check" onClick={openSetup} disabled={!twoStep}>
+                <Button icon="shield-check" onClick={openSetup} disabled={!twoStep || noPassword}>
                   Turn on 2-step verification
                 </Button>
               )
@@ -259,6 +270,7 @@ export default function Security() {
                 body={smsPhone ? `Codes sent to ${smsPhone}.` : 'Add a mobile phone in your profile to use text messages.'}
               />
             </div>
+            {noPassword && <span className="xs muted">2-step verification is confirmed with your password, so it isn’t available for this account.</span>}
             {twoStep?.enabled && <span className="xs muted">{twoStep.recoveryCodesRemaining} recovery code{twoStep.recoveryCodesRemaining === 1 ? '' : 's'} left.</span>}
           </Card>
           <Card title="Email verification" titleAs="h3">
@@ -439,9 +451,10 @@ export default function Security() {
           <>
             <p className="small sub">
               {method === 'app'
-                ? 'Add Marketly in your authenticator app with this setup key, then enter the 6-digit code it shows.'
+                ? `${setup.uri ? 'Scan this QR code with your authenticator app, or add Marketly with the setup key' : 'Add Marketly in your authenticator app with this setup key'}, then enter the 6-digit code it shows.`
                 : `We sent a 6-digit code to ${setup.phone ?? smsPhone ?? 'your phone'}. It expires in 10 minutes.`}
             </p>
+            {method === 'app' && setup.uri && <QrCode value={setup.uri} size={168} label="QR code for your authenticator app" />}
             {method === 'app' && setup.key && <p className="mono strong">{groupKey(setup.key)}</p>}
             <Field label="6-digit code" error={codeErr ?? proofError(confirmSetup.error)}>
               <TextInput id="sc-code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} error={!!codeErr || confirmSetup.isError} onChange={(e) => (setCode(e.target.value), confirmSetup.reset())} />

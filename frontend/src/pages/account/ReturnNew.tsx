@@ -359,7 +359,7 @@ function Wizard({ order, crumbs }: { order: OrderDetail; crumbs: ReactNode }) {
           {chosen.map((l) => {
             const x = orderItems.find((o) => o.i.id === l.item.orderItemId);
             const n = Math.min(qty[l.item.orderItemId] ?? 1, l.quantityReturnable);
-            const to = productHref(l.item.productId, l.item.title);
+            const to = productHref(l.item.productId, l.item.title, x?.i.productSlug);
             return (
               <div key={l.item.orderItemId} className="row gap-3 nowrap top card pad">
                 <Link to={to} aria-label={l.item.title}>

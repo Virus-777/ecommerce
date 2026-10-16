@@ -786,7 +786,7 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
                     </a>
                   </div>
                   {(() => {
-                    const sub = [cp.label !== cp.code && cp.label !== `Coupon ${cp.code}` ? cp.label : null, cp.fundingNote].filter(Boolean).join('. ');
+                    const sub = [cp.label, cp.fundingNote].filter(Boolean).join('. ');
                     return sub ? <span className="xs sub">{sub}</span> : null;
                   })()}
                   {(cp.coverage.length > 0 || cp.notCovered.length > 0) && (
@@ -962,13 +962,15 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
             <div className="buy-sum">
               <SummaryRow k={`Items (${t.itemCount})`} v={formatMoney(t.items)} />
               {t.discounts.map((d, i) => (
-                <SummaryRow key={`${d.code ?? d.label}-${i}`} className="discount" k={d.code ?? d.label} v={`−${formatMoney(d.amount)}`} />
+                <SummaryRow key={`${d.code ?? d.label}-${i}`} className="discount" k={d.label} v={`−${formatMoney(d.amount)}`} />
               ))}
               {t.creditApplied.amount > 0 && <SummaryRow className="discount" k="Marketly credit" v={`−${formatMoney(t.creditApplied)}`} />}
-              {c.address ? (
-                t.shippingByPackage.map((s) => <SummaryRow key={s.packageKey} k={`Shipping · ${s.sellerName}`} v={s.free || s.amount.amount === 0 ? 'Free' : formatMoney(s.amount)} />)
+              {t.shippingByPackage.length > 0 && t.shippingByPackage.every((s) => s.pending) ? (
+                <SummaryRow k="Shipping" v={<span className="sub">Calculated at the next step</span>} />
               ) : (
-                <SummaryRow k="Shipping" v={<span className="sub">After you enter an address</span>} />
+                t.shippingByPackage.map((s) => (
+                  <SummaryRow key={s.packageKey} k={`Shipping · ${s.sellerName}`} v={s.pending ? <span className="sub">Calculated at the next step</span> : s.free || s.amount.amount === 0 ? 'Free' : formatMoney(s.amount)} />
+                ))
               )}
               {t.tax.length ? t.tax.map((x) => <SummaryRow key={x.jurisdiction} k={x.label} v={formatMoney(x.amount)} />) : <SummaryRow k="Tax" v={<span className="sub">{t.taxNote ?? formatMoney(t.taxTotal)}</span>} />}
               <SummaryRow className="total" k="Total" v={formatMoney(t.total)} />

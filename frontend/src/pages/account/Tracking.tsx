@@ -95,7 +95,8 @@ function TrackingView({ orderRef, placedAt, g, s, groups, items }: { orderRef: s
   const chosen = fd?.chosen ?? null;
   const chosenOption = chosen && fd?.options.find((o) => o.choice === chosen.choice);
   const delivered = !!s.deliveredAt;
-  const label = g.packageLabel;
+  // The seller package ("Package 2 of 3"); with several shipments in the package, also which one ("Shipment 1 of 2").
+  const label = g.shipments.length > 1 ? `${g.packageLabel} · ${s.packageLabel}` : g.packageLabel;
   const contents = s.contents.map((c) => ({ c, item: items.find((i) => i.id === c.orderItemId) }));
   const others = groups.filter((x) => x.id !== g.id);
   const events: TimelineEvent[] = [
@@ -242,7 +243,7 @@ function TrackingView({ orderRef, placedAt, g, s, groups, items }: { orderRef: s
             {contents.map(({ c, item }) => (
               <div key={c.orderItemId} className="row gap-3 nowrap top">
                 {item ? (
-                  <Link to={productHref(item.productId, item.title)} aria-label={c.title}>
+                  <Link to={productHref(item.productId, item.title, item.productSlug)} aria-label={c.title}>
                     <Img icon="package" tint="2" className="thumb" src={item.image?.url} alt="" />
                   </Link>
                 ) : (
@@ -250,7 +251,7 @@ function TrackingView({ orderRef, placedAt, g, s, groups, items }: { orderRef: s
                 )}
                 <div className="stack gap-1">
                   {item ? (
-                    <Link className="small strong link-plain" to={productHref(item.productId, item.title)}>
+                    <Link className="small strong link-plain" to={productHref(item.productId, item.title, item.productSlug)}>
                       {c.title}
                     </Link>
                   ) : (

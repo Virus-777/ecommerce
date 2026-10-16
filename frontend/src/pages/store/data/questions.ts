@@ -1,5 +1,5 @@
 // API access for product questions and answers (store/questions and the Q&A block of store/product):
-// questions with answers (server-side search and sort, page numbers or cursor), asking a question
+// questions with answers (server-side search, answered/awaiting filter and sort, page numbers or cursor), asking a question
 // and who answered (role labels).
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -38,11 +38,13 @@ export const QA_SORTS: Array<{ value: QaSort; label: string }> = [
   { value: 'recent', label: 'Most recent' },
 ];
 const API_SORT: Record<QaSort, 'most_helpful' | 'newest'> = { helpful: 'most_helpful', recent: 'newest' };
+/** Answered / awaiting an answer (server filter); undefined = all questions. */
+export type QaState = 'answered' | 'awaiting' | undefined;
 
 /** One website page of questions (page numbers). `q` searches questions and answers on the server. */
-export function useQuestionPage(productId: string, q: string, sort: QaSort, page: number, limit: number, enabled = true) {
+export function useQuestionPage(productId: string, q: string, sort: QaSort, page: number, limit: number, enabled = true, state?: QaState) {
   const { api } = useApi();
-  const query = { q: q || undefined, sort: API_SORT[sort] };
+  const query = { q: q || undefined, sort: API_SORT[sort], state };
   return useQuery({
     queryKey: ['reviews', 'questions', productId, query, { page, limit }],
     queryFn: () => call(api.GET('/api/store/reviews/products/{productId}/questions', { params: { path: { productId }, query: { ...query, page, limit } } })),
@@ -52,9 +54,9 @@ export function useQuestionPage(productId: string, q: string, sort: QaSort, page
 }
 
 /** Questions for the phone layout: "Load more" with the cursor. */
-export function useQuestionFeed(productId: string, q: string, sort: QaSort, limit: number, enabled = true) {
+export function useQuestionFeed(productId: string, q: string, sort: QaSort, limit: number, enabled = true, state?: QaState) {
   const { api } = useApi();
-  const query = { q: q || undefined, sort: API_SORT[sort] };
+  const query = { q: q || undefined, sort: API_SORT[sort], state };
   return useInfiniteQuery({
     queryKey: ['reviews', 'questions-feed', productId, query, { limit }],
     queryFn: ({ pageParam }) =>

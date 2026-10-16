@@ -147,6 +147,8 @@ export function authError(e: unknown): string {
       return 'This order link has expired. Look up your order below, or email yourself new links.';
     case 'GUEST_ORDER_NOT_FOUND':
       return "We couldn't find that order.";
+    case 'GUEST_ORDER_SIGN_IN_REQUIRED':
+      return 'Sign in to see this order. It belongs to a Marketly account.';
     case 'METHOD_NOT_AVAILABLE':
       return 'That verification method isn’t available yet. Use your authenticator app or a backup code.';
     case 'NOT_IMPLEMENTED':

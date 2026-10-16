@@ -20,10 +20,10 @@ import { contactLine, useSellerProgram } from './data/program';
 //   step 1  POST /api/store/sellers/applications (first time, with the invitation code: invite-only launch)
 //           or PATCH …/applications/{id} { step: account }
 //   step 2  PATCH { step: business }
-//   step 3  PATCH { step: verification } (when there is something new to save), then the documents:
+//   step 3  PATCH { step: verification } (taxId only when typed: the stored one is kept), then the documents:
 //           upload (purpose verification_document) → POST …/{id}/documents { mediaId, kind, ownerId? };
 //           DELETE …/{id}/documents/{documentId} removes one
-//   step 4–5 PATCH { step: payout } and PATCH { step: return_address }
+//   step 4–5 PATCH { step: payout } (only when the bank details changed) and PATCH { step: return_address }
 //   step 6  POST …/{id}/submit { acceptances: [{ key, versionLabel }], signedName } → sell/status
 // GET …/applications/current fills the form, progress, checklist and agreements. The applicant must be signed
 // in: the sellers API has no in-flow creation of a separate seller login, so "Create a new seller login" is
@@ -445,7 +445,7 @@ function AgreementStep({ f, set, e, app, agreements }: StepProps & { agreements:
                 <Icon name="file-text" className="ic-sm" /> Read · {a.isExample ? 'Example rates' : a.versionLabel}
               </ApiLink>
             ) : (
-              <span className="small muted nowrap">{a.versionLabel}</span>
+              <span className="small muted nowrap">Not published</span>
             )}
           </div>
         ))}
@@ -536,6 +536,7 @@ export default function Apply() {
       count: b?.plannedProductCount ?? '1_20',
       w9: v?.w9Method ?? 'online',
       bname: app?.payout?.accountHolderName ?? b?.legalName ?? '',
+      bkind: BKINDS.find((k) => k.value === app?.payout?.accountType)?.value ?? 'business_checking',
       rsame: r?.sameAsBusiness ?? true,
       rname: r?.contactName ?? a?.contactName ?? customer?.name ?? '',
       rphone: displayPhone(r?.phone ?? a?.contactPhone ?? ''),
@@ -553,6 +554,13 @@ export default function Apply() {
   const inviteNeeded = p ? !p.applicationsOpen : true;
   const s = sections(app);
   const ofKind = (k: string) => (app?.documents ?? []).filter((d) => d.kind === k);
+  /** The payout section is sent only when there is none on file or the applicant changed it (numbers typed, holder or type changed). */
+  const payoutChanged = () => {
+    const on = app?.payout;
+    if (!on) return true;
+    const kindOnFile = BKINDS.some((k) => k.value === on.accountType);
+    return [f.brout, f.bacct, f.bacct2].some((x) => x.trim()) || f.bname.trim() !== on.accountHolderName || (kindOnFile && f.bkind !== on.accountType);
+  };
 
   const validate = (st: number): Errors => {
     const e: Errors = {};
@@ -587,8 +595,7 @@ export default function Apply() {
       if (needTax && (f.stype === 'biz' ? !/^\d{2}-?\d{7}$/.test(f.ein.trim()) : !/^(\d{2}-?\d{7}|\d{3}-?\d{2}-?\d{4})$/.test(f.ein.trim()))) e.ein = f.stype === 'biz' ? 'Enter a 9-digit EIN, like 12-3456789.' : 'Enter a 9-digit EIN or SSN.';
     }
     if (st === 3) {
-      const newPayout = !app?.payout || [f.brout, f.bacct, f.bacct2].some((x) => x.trim());
-      if (newPayout) {
+      if (payoutChanged()) {
         req('bname', 'Enter the account holder name.');
         if (!/^\d{9}$/.test(f.brout.trim())) e.brout = 'Enter the 9-digit routing number.';
         if (!/^\d{4,17}$/.test(f.bacct.trim())) e.bacct = 'Enter the account number (4 to 17 digits).';
@@ -655,11 +662,10 @@ export default function Apply() {
       if (st === 2) {
         let cur: SellerApplication = app!;
         const v = sections(cur).verification;
-        if (!v?.taxIdLast4 || f.ein.trim()) {
-          const owners = v?.owners?.length ? v.owners.map((o) => ({ name: o.name, ownershipPct: o.ownershipPct, isPrimary: o.isPrimary, idDocumentIds: [] })) : [{ name: (s.account?.contactName ?? f.contact).trim(), ownershipPct: 100, isPrimary: true, idDocumentIds: [] }];
-          const taxId = f.ein.trim();
-          cur = await patch(id, { step: 'verification', verification: { owners, taxIdType: /^\d{3}-?\d{2}-?\d{4}$/.test(taxId) ? 'ssn' : 'ein', taxId, w9Method: f.w9 } });
-        }
+        const owners = v?.owners?.length ? v.owners.map((o) => ({ name: o.name, ownershipPct: o.ownershipPct, isPrimary: o.isPrimary, idDocumentIds: [] })) : [{ name: (s.account?.contactName ?? f.contact).trim(), ownershipPct: 100, isPrimary: true, idDocumentIds: [] }];
+        const taxId = f.ein.trim();
+        const taxIdType = taxId ? (/^\d{3}-?\d{2}-?\d{4}$/.test(taxId) ? 'ssn' : 'ein') : (v?.taxIdType ?? 'ein');
+        cur = await patch(id, { step: 'verification', verification: { owners, taxIdType, ...(taxId ? { taxId } : {}), w9Method: f.w9 } });
         const ownerId = (sections(cur).verification?.owners ?? []).find((o) => o.isPrimary)?.id ?? sections(cur).verification?.owners?.[0]?.id;
         const attach = async (items: UploadItem[], kind: 'owner_id' | 'business_registration' | 'tax_form') => {
           for (const it of items.filter((i) => i.status === 'ready')) {
@@ -675,7 +681,7 @@ export default function Apply() {
         return call(api.GET('/api/store/sellers/applications/current'));
       }
       if (st === 3) {
-        if (!app!.payout || [f.brout, f.bacct, f.bacct2].some((x) => x.trim())) {
+        if (payoutChanged()) {
           await patch(id, { step: 'payout', payout: { accountHolderName: f.bname.trim(), accountType: f.bkind, routingNumber: f.brout.trim(), accountNumber: f.bacct.trim(), confirmAccountNumber: f.bacct2.trim() } });
         }
         return patch(id, {

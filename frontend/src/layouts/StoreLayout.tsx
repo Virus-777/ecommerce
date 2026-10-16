@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { call, useApi } from '@marketly/web-shared/api';
+import { call, useApi, useAppConfig, useMarket } from '@marketly/web-shared/api';
 import { BRAND } from '@marketly/web-shared/config';
 import { useSession } from '@/app/session';
 import { contentLinkTo, isExternal, useNavigation } from '@/api/content';
@@ -22,12 +22,11 @@ const STORE_NAV: Array<{ key: StoreNavKey; label: string; icon?: IconName; to: s
   { key: 'brands', label: 'Brands', to: href('store/brand') },
 ];
 
-/** The market's default delivery location until the shopper sets one (MARKET_DEFAULT_*; not exposed by the API). */
-const DEFAULT_DELIVER_TO = 'Portland 97205';
-
-/** "Deliver to" label: the cart's delivery destination (set from the default address or a ZIP), else the market default. */
+/** "Deliver to" label: the cart's delivery destination (set from the default address or a ZIP), else the market's
+ * default delivery location (app-config market.defaultDeliveryLocation). */
 function useDeliverTo(): string {
   const { api } = useApi();
+  const { deliveryLocation } = useMarket();
   const cart = useQuery({
     queryKey: ['cart', 'destination'],
     queryFn: () => call(api.GET('/api/store/cart/cart')),
@@ -35,7 +34,7 @@ function useDeliverTo(): string {
     staleTime: 60_000,
   });
   const d = cart.data;
-  return d?.postalCode ? [d.city, d.postalCode].filter(Boolean).join(' ') : DEFAULT_DELIVER_TO;
+  return d?.postalCode ? [d.city, d.postalCode].filter(Boolean).join(' ') : (deliveryLocation?.label ?? '');
 }
 
 interface SearchBox {
@@ -171,8 +170,13 @@ export function Appbar({ title, back, actions }: AppbarOptions) {
   );
 }
 
-/** Website footer. The phone layout is the Android app: no footer; its links live in the Account tab. */
+/** Website footer. The phone layout is the Android app: no footer; its links live in the Account tab.
+ * Support line, help email, company and service region come from app-config (support, market.company). */
 function StoreFooter() {
+  const config = useAppConfig().data;
+  const support = config?.support;
+  const market = config?.market;
+  const company = market?.company;
   return (
     <footer className="store-footer no-phone">
       <div className="container">
@@ -180,12 +184,19 @@ function StoreFooter() {
           <div className="stack gap-3">
             <Logo />
             <p className="small muted measure-sm">One store for our own products and approved independent sellers. Every item shows who sells it, when it arrives and how returns work.</p>
-            <div className="stack gap-1 small">
-              <span>
-                <Icon name="headset" className="ic-sm" /> Support: 1-800-555-0136
-              </span>
-              <span className="muted">Mon–Sat, 8 AM–8 PM PT</span>
-            </div>
+            {support && (
+              <div className="stack gap-1 small">
+                <span>
+                  <Icon name="headset" className="ic-sm" /> Support: {support.phone}
+                </span>
+                <span className="muted">{support.hoursLabel}</span>
+                {company?.helpEmail && (
+                  <a className="muted" href={`mailto:${company.helpEmail}`}>
+                    {company.helpEmail}
+                  </a>
+                )}
+              </div>
+            )}
           </div>
           <div>
             <h4>Shop</h4>
@@ -229,7 +240,10 @@ function StoreFooter() {
           </div>
         </div>
         <div className="legal">
-          <span>© 2026 {BRAND}, Inc. Prices in USD. Service region: United States.</span>
+          <span>
+            © {new Date().getFullYear()} {market?.legalName ?? `${BRAND}, Inc.`}
+            {market ? ` Prices in ${market.currency}. Service region: ${market.serviceRegionLabel}.` : ''}
+          </span>
           <span>Policies show their effective date. Orders keep the terms accepted at purchase.</span>
         </div>
       </div>

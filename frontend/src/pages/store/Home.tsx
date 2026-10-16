@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Link } from 'react-router';
+import { useState, type ReactNode } from 'react';
+import { Link, useLocation } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { StoreLayout } from '@/layouts';
 import { call, useApi, type components } from '@marketly/web-shared/api';
@@ -7,25 +7,26 @@ import { dollars } from '@marketly/web-shared/lib/format';
 import { useIsPhone } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Badge, Button, Countdown, Icon, Meter, Price, SectionHeader } from '@marketly/web-shared/ui';
-import { categoryArt, findCategory, initialsOf, tintOf, useCategoryTree } from '@/api/catalog';
+import { adsFor, OpeningAd, OVERLAY_KEYS, SponsoredBrandAd, useAdDecision } from '@/api/ads';
+import { categoryArt, initialsOf, tintOf } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, LoadError, LogoPic, Pic } from '@/api/cards';
-import { contentIcon, contentLinkTo, isExternal } from '@/api/content';
+import { contentIcon, contentLinkTo, isExternal, useOfficialStore } from '@/api/content';
 import { productHref, tileToCard, useProductCards, type SearchCard } from '@/api/search';
 
 // Design: pages/store/store-home.html. Sections come from GET /api/store/content/home in the order the
-// content team set; product tiles are filled in with GET /api/store/search/cards (slugs, delivery),
-// category shortcuts with the category tree (slugs), brand tiles with the brand list (slugs), and
-// recently viewed from GET /api/store/customers/recently-viewed. Ad positions are not rendered yet.
+// content team set; tiles carry product, category, brand and store slugs. Product tiles and flash deals are
+// filled in with GET /api/store/search/cards (delivery cues, offer counts, flash-deal product slugs), recently
+// viewed comes from GET /api/store/customers/recently-viewed and the Official Store copy from
+// GET /api/store/content/official-store. Ad positions (ad_position sections: the opening full-screen ad and
+// the sponsored brand banner) ask POST /api/store/advertising/decisions and show nothing when no ad is live.
+// REST rather than the HomePage screen query: the query has no device (phone and desktop section sets),
+// selects images without thumbUrl and has no stock state on product cards.
 
 type Section = components['schemas']['content.HomeSection'];
 type LinkRef = components['schemas']['content.LinkRef'];
 type FlashSale = components['schemas']['promotions.FlashSaleBlock'];
 
-/** The deals of a DEALS section (typed `unknown` in the API spec). */
-const dealsOf = (s: Section): FlashSale[] => (Array.isArray(s.deals) ? (s.deals as FlashSale[]) : []);
-
-/** Official Store block copy: the API has no Official Store profile (gap G8). */
-const OFFICIAL_COPY = 'Our own stock, packed in our Reno warehouse. Free delivery over $35 and 30-day free returns.';
+const dealsOf = (s: Section): FlashSale[] => s.deals ?? [];
 
 function CtaLink({ link, className }: { link: LinkRef; className: string }) {
   const to = contentLinkTo(link.url);
@@ -50,14 +51,14 @@ export default function Home() {
     queryKey: ['content', 'home', device],
     queryFn: () => call(api.GET('/api/store/content/home', { params: { query: { device } } })),
   });
-  const tree = useCategoryTree();
   const sections = home.data?.sections ?? [];
-  const brands = useQuery({
-    queryKey: ['catalog', 'brands', 'all'],
-    queryFn: () => call(api.GET('/api/store/catalog/brands', { params: { query: { limit: 100 } } })),
-    enabled: sections.some((s) => s.brands.length > 0),
-    staleTime: 5 * 60_000,
-  });
+  const official = useOfficialStore();
+  // Ad positions of this layout; the design page /ads/opening shows its own sample ad over the home page.
+  const onHome = useLocation().pathname === href('store/home');
+  const adKeys = sections.filter((s) => s.kind === 'ad_position' && s.adPlacementKey).map((s) => s.adPlacementKey!);
+  const ads = useAdDecision('home', adKeys, {}, { enabled: home.isSuccess && onHome });
+  const [overlayClosed, setOverlayClosed] = useState(false);
+  const overlay = !overlayClosed && ads.data?.overlay?.placementKey === 'opening_fullscreen' ? ads.data.overlay : null;
   const recent = useQuery({
     queryKey: ['customers', 'recently-viewed'],
     queryFn: () => call(api.GET('/api/store/customers/recently-viewed', { params: { query: { limit: 12 } } })),
@@ -167,16 +168,15 @@ export default function Home() {
             <SectionHeader title={s.heading ?? 'Shop by category'} id={hid} link={link?.label ?? 'All categories'} to={link?.to ?? href('store/categories')} />
             <div className="home-cats">
               {s.categories.map((c) => {
-                const cat = findCategory(tree.data, { id: c.categoryId });
-                const art = categoryArt(cat?.slug);
+                const art = categoryArt(c.slug);
                 const tile = (
                   <>
-                    <Pic image={c.image ?? cat?.image} icon={art.icon} tint={art.tint} />
+                    <Pic image={c.image} icon={art.icon} tint={art.tint} />
                     <span>{c.name}</span>
                   </>
                 );
-                return cat ? (
-                  <Link key={c.categoryId} className="home-cat" to={href('store/category', '', { slug: cat.slug })}>
+                return c.slug ? (
+                  <Link key={c.categoryId} className="home-cat" to={href('store/category', '', { slug: c.slug })}>
                     {tile}
                   </Link>
                 ) : (
@@ -265,7 +265,7 @@ export default function Home() {
               <h2 className="display d-lg" id={hid}>
                 {s.heading ?? 'Sold and shipped by Marketly'}
               </h2>
-              <p className="small sub">{s.subheading ?? OFFICIAL_COPY}</p>
+              {(s.subheading ?? official.data?.introduction) && <p className="small sub">{s.subheading ?? official.data?.introduction}</p>}
               <div>
                 <Button to={href('store/official')} iconRight="arrow-right">
                   Visit the Official Store
@@ -311,11 +311,11 @@ export default function Home() {
           <section key={s.id} className="stack gap-4" aria-labelledby={hid}>
             <SectionHeader title={s.heading ?? 'Featured sellers'} id={hid} link="How sellers are checked" to={href('info/policy', 'seller-rules')} />
             <div className="home-sellers">
-              {s.sellers.map((x) => (
-                // Seller tiles carry the seller id but no storefront slug, so they can't link to /shop/:slug yet.
-                <div key={x.sellerId} className="card pad row gap-3 nowrap">
-                  <LogoPic logo={x.logo} initials={initialsOf(x.name)} tint={tintOf(x.name)} />
-                  <span className="stack gap-1">
+              {s.sellers.map((x) => {
+                const inner = (
+                  <>
+                    <LogoPic logo={x.logo} initials={initialsOf(x.name)} tint={tintOf(x.name)} />
+                    <span className="stack gap-1">
                     <span className="strong truncate">{x.name}</span>
                     <span className="row gap-2">
                       {x.verified && (
@@ -326,9 +326,19 @@ export default function Home() {
                       {x.positivePct != null && <span className="xs muted">{Math.round(x.positivePct)}% positive</span>}
                     </span>
                     <span className="xs muted">{[x.location, x.dispatchLabel?.split(' · ')[0]].filter(Boolean).join(' · ')}</span>
-                  </span>
-                </div>
-              ))}
+                    </span>
+                  </>
+                );
+                return x.sellerSlug ? (
+                  <Link key={x.sellerId} className="card pad row gap-3 nowrap link-plain" to={href('store/seller', '', { slug: x.sellerSlug })}>
+                    {inner}
+                  </Link>
+                ) : (
+                  <div key={x.sellerId} className="card pad row gap-3 nowrap">
+                    {inner}
+                  </div>
+                );
+              })}
             </div>
           </section>
         );
@@ -339,7 +349,7 @@ export default function Home() {
             <SectionHeader title={s.heading ?? 'Brand collections'} id={hid} link={link?.label} to={link?.to} />
             <div className="hscroll">
               {s.brands.map((b) => {
-                const slug = brands.data?.items.find((x) => x.id === b.brandId)?.slug;
+                const slug = b.slug;
                 const inner = (
                   <>
                     <LogoPic logo={b.logo} initials={initialsOf(b.name)} tint={tintOf(b.name)} className="lg" />
@@ -375,8 +385,14 @@ export default function Home() {
             ))}
           </section>
         );
+      case 'ad_position': {
+        // Overlay positions (the opening ad) show the decision's overlay below; inline ones their first ad.
+        const key = s.adPlacementKey ?? '';
+        const ad = OVERLAY_KEYS.includes(key) ? undefined : adsFor(ads.data, key)[0];
+        return ad ? <SponsoredBrandAd key={s.id} ad={ad} /> : null;
+      }
       default:
-        // recently_viewed renders the customer's list (above); ad_position slots need ad decisions (not wired yet).
+        // recently_viewed renders the customer's list (above).
         return null;
     }
   };
@@ -389,6 +405,12 @@ export default function Home() {
         {recentBlock}
         {sections.slice(recentIndex).map(render)}
       </div>
+      {overlay && (
+        <OpeningAd
+          ad={overlay}
+          onClose={() => setOverlayClosed(true)}
+        />
+      )}
     </StoreLayout>
   );
 }

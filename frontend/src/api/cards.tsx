@@ -4,6 +4,7 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { dollars } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Img, LazyLoad, Pager, ProductCard, type CardProduct, type IconName } from '@marketly/web-shared/ui';
+import { useAdTracking } from './ad-events';
 import type { MediaRef } from './catalog';
 import { productHref, type Listing, type StoreCard } from './search';
 
@@ -52,8 +53,9 @@ export function toCardData(c: StoreCard): CardProduct {
 
 /**
  * Product card from API data: the shared ProductCard (design .pcard) with the product route and its id,
- * the photo and the seller from the API, and no wishlist heart (wishlist is off at launch, gap G2).
- * `onOpen` reports search result clicks; the wrapper has display: contents so the grid is unchanged.
+ * the photo and the seller from the API, and no wishlist heart (wishlist is off at launch).
+ * `onOpen` reports search result clicks; sponsored cards also record their ad display and click with
+ * the impression token. The wrapper has display: contents so the grid is unchanged.
  */
 export function ApiProductCard({ c, compact, showSeller, from, extra, onOpen }: { c: StoreCard; compact?: boolean; showSeller?: boolean; from?: boolean; extra?: ReactNode; onOpen?: (c: StoreCard) => void }) {
   const card = (
@@ -77,10 +79,27 @@ export function ApiProductCard({ c, compact, showSeller, from, extra, onOpen }: 
       }
     />
   );
-  if (!onOpen) return card;
+  if (!onOpen && !c.impressionToken) return card;
   return (
-    <div style={{ display: 'contents' }} onClickCapture={(e) => (e.target as HTMLElement).closest('a') && onOpen(c)}>
+    <TrackedCard c={c} onOpen={onOpen}>
       {card}
+    </TrackedCard>
+  );
+}
+
+function TrackedCard({ c, onOpen, children }: { c: StoreCard; onOpen?: (c: StoreCard) => void; children: ReactNode }) {
+  const ad = useAdTracking<HTMLDivElement>(c.impressionToken);
+  return (
+    <div
+      ref={ad.ref}
+      style={{ display: 'contents' }}
+      onClickCapture={(e) => {
+        if (!(e.target as HTMLElement).closest('a')) return;
+        onOpen?.(c);
+        ad.click();
+      }}
+    >
+      {children}
     </div>
   );
 }

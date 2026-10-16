@@ -16,7 +16,7 @@ import { UploadList } from './data/UploadList';
 // (items + open cases of the chosen order). Send: attachments upload with purpose case_evidence, then
 // POST /api/store/support/cases (Idempotency-Key) { kind: customer_help, category, orderId?, orderItemIds?,
 // message, mediaIds, replyChannel, callbackPhone? } → the new case. ?order=<ref> and ?channel=<kind> preselect.
-// Chat is hidden as a reply channel: there is no live chat (BACKEND-REQUESTS G7).
+// Contact channels come only from support (no chat); email and phone are the reply channels (messages go to the seller).
 
 type Channel = 'email' | 'phone';
 const NO_ORDER = '';
@@ -260,7 +260,7 @@ export default function Contact() {
               {options.data ? (
                 <KeyValue
                   pairs={(options.data.channels ?? [])
-                    .map((c): [string, string] => [c.kind === 'phone' ? 'Phone' : c.kind === 'email' ? 'Email' : 'Messages', c.kind === 'phone' ? `${options.data!.phone}, ${c.hours}` : `${c.hours}, reply ${c.expectedResponse.replace(/^W/, 'w')}`])}
+                    .map((c): [string, string] => [c.kind === 'phone' ? 'Phone' : c.kind === 'email' ? 'Email' : 'Messages', c.kind === 'phone' ? `${c.detail || options.data!.phone}, ${c.hours}` : `${c.hours}, reply ${c.expectedResponse.replace(/^W/, 'w')}`])}
                 />
               ) : (
                 <SkLines n={3} />

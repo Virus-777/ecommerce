@@ -70,21 +70,14 @@ const writeAttrs = (a: Record<string, string[]>) =>
 /** Facet key → REST parameter. */
 const PARAM: Record<string, string> = { category: 'category', brand: 'brand', seller: 'seller', condition: 'condition', delivery: 'delivery', rating: 'rating', availability: 'availability' };
 
-/** Price presets (client-side, in cents); the API has no preset counts. */
-const PRESETS = [
-  { id: 'u50', label: 'Under $50', min: null, max: 5000 },
-  { id: '50-100', label: '$50 to $100', min: 5000, max: 10000 },
-  { id: '100-200', label: '$100 to $200', min: 10000, max: 20000 },
-  { id: '200', label: '$200 and up', min: 20000, max: null },
-] as const;
-
 const toCents = (s: string) => {
   const n = parseFloat(s.replace(/[$,\s]/g, ''));
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
 };
 const toDollars = (c: string | null) => (c ? String(Number(c) / 100) : '');
 
-function PriceGroup({ p, lp }: { p: string; lp: ListingParams }) {
+/** Price filter: min/max fields and the server's price presets with result counts (setting search.pricePresets). */
+function PriceGroup({ p, f, lp }: { p: string; f: Facet; lp: ListingParams }) {
   const minP = lp.params.get('priceMin');
   const maxP = lp.params.get('priceMax');
   const [min, setMin] = useState(toDollars(minP));
@@ -103,11 +96,11 @@ function PriceGroup({ p, lp }: { p: string; lp: ListingParams }) {
       else q.delete('priceMax');
     });
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && (e.preventDefault(), apply());
-  const preset = (r: (typeof PRESETS)[number]) =>
+  const preset = (v: Facet['values'][number]) =>
     lp.update((q) => {
-      if (r.min) q.set('priceMin', String(r.min));
+      if (v.priceMin) q.set('priceMin', String(v.priceMin));
       else q.delete('priceMin');
-      if (r.max) q.set('priceMax', String(r.max));
+      if (v.priceMax) q.set('priceMax', String(v.priceMax));
       else q.delete('priceMax');
     });
   return (
@@ -132,14 +125,18 @@ function PriceGroup({ p, lp }: { p: string; lp: ListingParams }) {
           </span>
         </div>
       </div>
-      {PRESETS.map((r, i) => (
+      {f.values.map((v, i) => (
         <Radio
-          key={r.id}
+          key={v.value}
           id={`${p}-pr${i}`}
           name={`${p}-pr`}
-          checked={(minP ?? null) === (r.min ? String(r.min) : null) && (maxP ?? null) === (r.max ? String(r.max) : null)}
-          onChange={() => preset(r)}
-          label={r.label}
+          checked={(minP ?? null) === (v.priceMin ? String(v.priceMin) : null) && (maxP ?? null) === (v.priceMax ? String(v.priceMax) : null)}
+          onChange={() => preset(v)}
+          label={
+            <>
+              {v.label} <Count n={v.count} />
+            </>
+          }
         />
       ))}
     </div>
@@ -271,7 +268,7 @@ export function FacetFilters({ p, facets, lp, category, hide = [] }: { p: string
         if (f.kind === 'category') {
           if (!category && !f.values.length) return null;
           body = category ? <div className="opts">{category}</div> : <SingleCheckGroup p={p} f={f} lp={lp} param="category" />;
-        } else if (f.kind === 'price') body = <PriceGroup p={p} lp={lp} />;
+        } else if (f.kind === 'price') body = <PriceGroup p={p} f={f} lp={lp} />;
         else if (f.kind === 'rating') body = <RatingGroup p={p} f={f} lp={lp} />;
         else if (f.kind === 'attribute') body = <AttributeGroup p={p} f={f} lp={lp} />;
         else if (f.kind === 'availability' || !f.multiSelect) body = <SingleCheckGroup p={p} f={f} lp={lp} param={param} />;

@@ -2,7 +2,7 @@
 // checkout page carries, Idempotency-Key handling and the development payment tokens (gap G9).
 import { useQuery } from '@tanstack/react-query';
 import { useRef } from 'react';
-import { call, newIdempotencyKey, useApi, type components } from '@marketly/web-shared/api';
+import { call, newIdempotencyKey, toApiError, useApi, type components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
 
 type S = components['schemas'];
@@ -128,7 +128,26 @@ export const DEV_CARDS: Array<{ value: string; label: string }> = [
   { value: 'tok_expired', label: 'Expired card (code 54)' },
   { value: 'tok_3ds', label: 'Bank asks for a security check (3-D Secure)' },
   { value: 'tok_timeout', label: 'Bank answers late (payment pending)' },
+  { value: 'tok_pending', label: 'Bank keeps checking (settle it on the payment page)' },
 ];
+
+/**
+ * Development only (gap G60): answers a payment the development processor holds (card token tok_pending)
+ * with POST /api/dev/payments/intents/{id}/settle. The dev routes are outside the API spec, so this is a
+ * plain fetch with the session token. Returns the PaymentStatusView.
+ */
+export function useDevSettle() {
+  const { session } = useApi();
+  return async (intentId: string, outcome: 'authorized' | 'declined'): Promise<PaymentStatusView> => {
+    const res = await fetch(`/api/dev/payments/intents/${encodeURIComponent(intentId)}/settle`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${await session.token()}`, 'Content-Type': 'application/json', 'X-Client': 'web' },
+      body: JSON.stringify({ outcome }),
+    });
+    if (!res.ok) throw await toApiError(res);
+    return (await res.json()) as PaymentStatusView;
+  };
+}
 
 /** Test wallet token for the first wallet kind the API offers. */
 export const devWalletToken = (kinds: string[]) => (kinds[0] === 'google_pay' ? 'tok_googlepay' : 'tok_applepay');

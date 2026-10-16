@@ -6,6 +6,7 @@ import caseDetailQuery from '@marketly/web-shared/api/graphql/store/CaseDetail.g
 import { AccountLayout } from '@/layouts';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Breadcrumbs, Button, Dialog, EmptyState, Field, Icon, Img, KeyValue, Select, StatusBadge, Textarea, Timeline, Track, type TimelineEvent } from '@marketly/web-shared/ui';
+import { isoInText } from '@marketly/web-shared/lib/format';
 import { dateLong, dateShort, dayDate, dayDateTime, dateTime, humanize } from './data/format';
 import { LoadError, Loading, SkLines } from './data/states';
 import { UploadList } from './data/UploadList';
@@ -27,6 +28,7 @@ interface MediaRef {
   url: string;
   alt?: string | null;
   bytes?: number | null;
+  fileName?: string | null;
 }
 interface CaseData {
   id: string;
@@ -80,23 +82,11 @@ const ESCALATE_REASONS: Array<{ value: string; label: string }> = [
 
 const lc = (s: string | null | undefined) => (s ?? '').toLowerCase();
 
-/** MediaRef has no file name; signed file links carry it in the content-disposition parameter. */
-function fileName(m: MediaRef, i: number): string {
-  try {
-    const cd = new URL(m.url).searchParams.get('cd') ?? '';
-    const n = /filename="?([^";]+)"?/.exec(cd)?.[1];
-    if (n) return decodeURIComponent(n);
-  } catch {
-    /* not a URL */
-  }
-  return m.alt || `Attachment ${i + 1}`;
-}
-
 function Attachment({ m, i, size }: { m: MediaRef; i: number; size?: boolean }) {
   return (
     <a className="buy-attach" href={m.url} target="_blank" rel="noopener noreferrer">
       <Icon name="paperclip" className="ic-sm" />
-      {fileName(m, i)}
+      {m.fileName || m.alt || `Attachment ${i + 1}`}
       {size && m.bytes ? ` · ${fileSize(m.bytes)}` : ''}
     </a>
   );
@@ -351,7 +341,7 @@ export default function Case() {
           <div>
             <span className="xs muted">Expected</span>
             <span className="small strong">{c.expectedReply}</span>
-            <span className="xs muted">{c.nextAction.note ?? (firstRemedy?.note || '')}</span>
+            <span className="xs muted">{isoInText(c.nextAction.note ?? (firstRemedy?.note || ''))}</span>
           </div>
         </div>
       ) : (
@@ -369,7 +359,7 @@ export default function Case() {
           <div>
             <span className="xs muted">Expected response</span>
             <span className="small strong">{c.expectedReply}</span>
-            <span className="xs muted">{c.nextAction.note ?? ''}</span>
+            <span className="xs muted">{isoInText(c.nextAction.note)}</span>
           </div>
         </div>
       )}
@@ -378,7 +368,7 @@ export default function Case() {
           {openOffers.map((o) => (
             <Alert key={o.id} tone="info" title={`${o.from.toLowerCase() === 'seller' ? 'The seller' : 'Marketly'} offers: ${humanize(lc(o.kind))}${o.amount ? ` of ${o.amount.formatted}` : ''}${o.shipBy ? ` by ${dateLong(o.shipBy)}` : ''}`}>
               <span className="stack gap-2">
-                {o.note && <span>{o.note}</span>}
+                {o.note && <span>{isoInText(o.note)}</span>}
                 {o.respondBy && <span className="xs">Respond by {dayDateTime(o.respondBy)}.</span>}
                 {c.can.respondToOffer && (
                   <span className="row gap-2">
@@ -407,7 +397,7 @@ export default function Case() {
               </div>
               <div className="card-body">
                 <p className="small sub">
-                  <b>Why:</b> {d.reason}
+                  <b>Why:</b> {isoInText(d.reason)}
                 </p>
                 {c.remedies.map((r) => (
                   <div key={r.id} className="stack gap-3">
@@ -422,7 +412,7 @@ export default function Case() {
                       <div className="stack gap-2">
                         <span className="small strong">{lc(r.kind).includes('refund') ? 'Refund progress' : 'Progress'}</span>
                         <Track labels={r.track} done={Math.min(r.track.length, (r.currentStep ?? 0) + (lc(r.status) === 'completed' ? 1 : 0))} tone={lc(r.status) === 'failed' ? 'danger' : undefined} />
-                        {r.note && <span className="xs muted">{r.note}</span>}
+                        {r.note && <span className="xs muted">{isoInText(r.note)}</span>}
                       </div>
                     )}
                   </div>
