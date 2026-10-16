@@ -9,8 +9,8 @@ import type { ModuleSpec } from '../../../tools/lib/spec.js';
 import { testMongo } from '../../testing/mongo.js';
 import { newId } from '../lib/ids.js';
 import type { CollectionDef } from '../spec/define.js';
-import { Schema } from 'mongoose';
-import { CASE_INSENSITIVE, contains, isDuplicateKey, likePattern, whereFilter, type ModuleSchemas, type MongoStore } from './index.js';
+import mongoose, { Schema } from 'mongoose';
+import { CASE_INSENSITIVE, contains, isDuplicateKey, likePattern, mongoStore, whereFilter, type ModuleSchemas, type MongoStore } from './index.js';
 import { migrateMongo } from './schema.js';
 import { collectionOptions, integer } from './schemas.js';
 
@@ -242,6 +242,47 @@ describe('transactions', () => {
     expect(order).toHaveLength(4);
     expect(order[1]).toBe(order[0]!.replace('start', 'end'));
     expect(order[3]).toBe(order[2]!.replace('start', 'end'));
+  });
+
+  describe('slow or retried transactions are logged', () => {
+    // a second store on the same database whose transactions report to a fake logger
+    const watched = (slowMs: number) => {
+      const warnings: object[] = [];
+      const s = mongoStore(store.connection, async () => {}, { log: { warn: (obj) => warnings.push(obj) }, slowMs });
+      return { mod: s.module('demo', defs, schemas), warnings };
+    };
+
+    it('a quick transaction run once logs nothing', async () => {
+      const { mod, warnings } = watched(10_000);
+      await mod.transaction((tx) => tx.table<Item>('items').insert(item()));
+      expect(warnings).toEqual([]);
+    });
+
+    it('a retried transaction logs one warning with its module and attempts', async () => {
+      const { mod, warnings } = watched(10_000);
+      let attempts = 0;
+      await mod.transaction(async (tx) => {
+        await tx.table<Item>('items').insert(item());
+        // what MongoDB reports on a write conflict: withTransaction runs fn again
+        if (++attempts === 1) {
+          const conflict = new mongoose.mongo.MongoError('forced write conflict');
+          conflict.addErrorLabel('TransientTransactionError');
+          throw conflict;
+        }
+      });
+      expect(warnings).toEqual([{ module: 'demo', ms: expect.any(Number), attempts: 2 }]);
+    });
+
+    it('a slow transaction logs one warning with its duration', async () => {
+      const { mod, warnings } = watched(20);
+      await mod.transaction(async (tx) => {
+        await tx.table<Item>('items').insert(item());
+        await new Promise((r) => setTimeout(r, 40));
+      });
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({ module: 'demo', attempts: 1 });
+      expect((warnings[0] as { ms: number }).ms).toBeGreaterThan(20);
+    });
   });
 });
 

@@ -34,8 +34,11 @@ export interface MongoStore {
   module(name: string, collections: Readonly<Record<string, CollectionDef>>, schemas: ModuleSchemas): ModuleStore;
   /** Kernel collections (kernel.*) */
   kernel(name: KernelCollection): Model<any>;
-  /** fn in a transaction, retried on transient errors; inside a transaction already, fn simply runs in it */
-  transaction<T>(fn: (session: ClientSession) => Promise<T>, session?: ClientSession): Promise<T>;
+  /**
+   * fn in a transaction, retried on transient errors; inside a transaction already, fn simply runs in it.
+   * `module` names the caller in the slow-or-retried warning (see TransactionWatch).
+   */
+  transaction<T>(fn: (session: ClientSession) => Promise<T>, session?: ClientSession, module?: string): Promise<T>;
   /** Next value of a named counter (identity columns, sequences); never rolled back: a number taken by an aborted transaction is skipped */
   nextValue(counter: string): Promise<number>;
   /** The next n values of a counter, in order, taken in one update (none for n = 0) */
@@ -45,7 +48,17 @@ export interface MongoStore {
 
 const TX: mongoose.mongo.TransactionOptions = { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' }, readPreference: 'primary' };
 
-export function mongoStore(connection: Connection, onClose: () => Promise<void> = () => connection.close()): MongoStore {
+/**
+ * Reports transactions that took longer than slowMs or ran fn more than once (a write conflict or failover made
+ * MongoDB retry it): one warning each, with the module, duration and attempts, so the owner can see which flows
+ * suffer (docs/MAINTAINING.md, "Slow or retried transactions"). Without it (tests, tools) nothing is logged.
+ */
+export interface TransactionWatch {
+  log: { warn(obj: object, msg: string): void };
+  slowMs: number;
+}
+
+export function mongoStore(connection: Connection, onClose: () => Promise<void> = () => connection.close(), watch?: TransactionWatch): MongoStore {
   const store: MongoStore = {
     connection,
     get db() {
@@ -54,17 +67,23 @@ export function mongoStore(connection: Connection, onClose: () => Promise<void> 
     model: (collection, schema) => connection.models[collection] ?? connection.model(collection, schema, collection),
     module: (name, collections, schemas) => new ModuleStore(store, name, collections, schemas),
     kernel: (name) => store.model(`kernel.${name}`, kernelSchemas[name]),
-    async transaction<T>(fn: (session: ClientSession) => Promise<T>, outer?: ClientSession): Promise<T> {
+    async transaction<T>(fn: (session: ClientSession) => Promise<T>, outer?: ClientSession, module?: string): Promise<T> {
       if (inTransaction(outer)) return fn(outer);
       const session = await connection.startSession();
+      const started = Date.now();
+      let attempts = 0;
       try {
         let result: T;
         await session.withTransaction(async (s) => {
+          attempts++;
           result = await fn(s);
         }, TX);
         return result!;
       } finally {
         await session.endSession();
+        // also when it failed: a slow transaction that ends in an error is still worth seeing
+        const ms = Date.now() - started;
+        if (watch && (ms > watch.slowMs || attempts > 1)) watch.log.warn({ module: module ?? 'kernel', ms, attempts }, 'slow or retried transaction');
       }
     },
     async nextValue(counter) {
@@ -91,6 +110,8 @@ export interface MongoOptions {
   dataDir?: string;
   /** Embedded replica set with dataDir: its port (default 27018) */
   port?: number;
+  /** Log slow or retried transactions (the server passes its logger and TX_SLOW_MS) */
+  watch?: TransactionWatch;
 }
 
 /** The embedded replica set's name when it keeps its data in a folder */
@@ -100,7 +121,7 @@ export const EMBEDDED_REPLICA_SET = 'rs0';
 export async function connectMongo(o: MongoOptions): Promise<MongoStore> {
   if (o.uri) {
     const connection = await mongoose.createConnection(o.uri, { appName: 'marketly', ...(o.dbName ? { dbName: o.dbName } : dbNameOf(o.uri) ? {} : { dbName: 'marketly' }) }).asPromise();
-    return mongoStore(connection);
+    return mongoStore(connection, undefined, o.watch);
   }
   useInstalledMongod();
   const { MongoMemoryReplSet } = await import('mongodb-memory-server');
@@ -118,10 +139,14 @@ export async function connectMongo(o: MongoOptions): Promise<MongoStore> {
     throw portTaken(port);
   }
   const connection = await mongoose.createConnection(set.getUri(), { appName: 'marketly', dbName: o.dbName ?? 'marketly' }).asPromise();
-  return mongoStore(connection, async () => {
-    await connection.close();
-    await set.stop({ doCleanup: !o.dataDir });
-  });
+  return mongoStore(
+    connection,
+    async () => {
+      await connection.close();
+      await set.stop({ doCleanup: !o.dataDir });
+    },
+    o.watch,
+  );
 }
 
 /** Whether nothing listens on 127.0.0.1:port */
@@ -181,7 +206,7 @@ export class ModuleStore {
   /** fn with a store bound to a transaction (this one's, when already in one) */
   transaction<T>(fn: (tx: ModuleStore) => Promise<T>): Promise<T> {
     if (this.inTransaction) return fn(this);
-    return this.root.transaction((session) => fn(new ModuleStore(this.root, this.module, this.collections, this.schemas, session)));
+    return this.root.transaction((session) => fn(new ModuleStore(this.root, this.module, this.collections, this.schemas, session)), undefined, this.module);
   }
 
   /**

@@ -124,6 +124,7 @@ Environment variables, read and checked at startup by `src/kernel/config/index.t
 | `LOG_LEVEL` | `info` (always `silent` in tests) | |
 | `MONGODB_URI` / `MONGO_DATA_DIR` | none: an embedded MongoDB replica set (mongodb-memory-server; an installed MongoDB is used when there is one), in memory or in `MONGO_DATA_DIR` | **required**: a MongoDB 6.0+ replica set. Every module keeps its data here, and so do the kernel's job queue, rate limits, idempotency keys, references and webhook records ([docs/04-mongodb-migration.md](../docs/04-mongodb-migration.md)) |
 | `MONGO_PORT` | `27018`: with `MONGO_DATA_DIR`, the embedded MongoDB listens on `127.0.0.1:MONGO_PORT` as replica set `rs0` (the folder remembers both, so they stay fixed between restarts). If the port is in use the server refuses to start; a `mongod` left running by an earlier dev server is the usual cause. A folder made before this setting existed holds another port: delete it once | not used (`MONGODB_URI`) |
+| `TX_SLOW_MS` | `200`: a transaction slower than this (ms), or retried after a write conflict, logs a `slow or retried transaction` warning with its module, duration and attempts ([docs/MAINTAINING.md §6](../docs/MAINTAINING.md#6-mongodb)) | |
 | `MIGRATE_ON_START` | on outside production: apply the MongoDB schema at startup | off: run `npm run migrate` |
 | `LAUNCH_PHASE` | `2` (1–4): endpoints of a later phase answer 501 | |
 | `MARKET_TIME_ZONE`, `MARKET_CURRENCY` | `America/Los_Angeles`, `USD` | |

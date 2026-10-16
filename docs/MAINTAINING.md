@@ -173,6 +173,15 @@ Ids are stored in `_id`. Money is in integer minor units (cents) or Decimal128. 
 when you can: the API keeps the audit trail, publishes events and keeps related collections in step; a hand
 edit does none of that.
 
+**Slow or retried transactions.** The log line `slow or retried transaction` with `{ module, ms, attempts }`
+means a module's transaction took longer than `TX_SLOW_MS` (default 200 ms) or ran more than once: MongoDB
+aborted it on a write conflict (another request changed the same document first) or a failover, and it was run
+again from the start. Now and then is normal. The same module showing up often under load means requests queue
+on one busy document (a counter, a stock or balance row). Then: keep that transaction short (read and decide
+before it, no waiting inside it), move the update of the busy document to the end of the transaction so the
+conflict window is small, or take it out of the transaction as one conditional update
+(`updateOne({ _id, stock: { $gte: n } }, { $inc: { stock: -n } })`), which needs no transaction at all.
+
 ## 7. Deploying
 
 Production is **one offline Ubuntu server** (owner decision 2026-10-15): MongoDB, the Marketly server (API,
