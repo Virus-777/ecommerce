@@ -61,6 +61,8 @@ export default defineModule({
         ctx.log.warn({ err }, 'sellers: template grants not applied');
       }
     });
+    // the Seller performance targets section of the settings page (G76)
+    ctx.afterBoot(() => service.registerSettingsSection());
 
     // Background jobs (spec jobs)
     ctx.jobs.handle("sellers.run-verification-checks", () => service.runVerificationChecks());

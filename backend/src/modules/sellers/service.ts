@@ -8,6 +8,7 @@ import { Core, type SellersServiceDeps } from './service/core.js';
 import { EnforcementPart } from './service/enforcement.js';
 import { MembersPart } from './service/members.js';
 import { PerformancePart } from './service/performance.js';
+import { registerSellersSettingsSection } from './service/settings-section.js';
 import { StorefrontPart } from './service/storefront.js';
 
 export type { SellersServiceDeps };
@@ -34,6 +35,11 @@ export class SellersService implements SellersPublicApi {
     this.enforcement = new EnforcementPart(this.core);
     this.performance = new PerformancePart(this.core);
     this.core.parts = { applications: this.applications, accounts: this.accounts, storefront: this.storefront, members: this.members, enforcement: this.enforcement, performance: this.performance };
+  }
+
+  /** After boot: the Seller performance targets section of the settings page (G76) */
+  registerSettingsSection(): Promise<void> {
+    return registerSellersSettingsSection(this.core.ctx.tryUse('settings'), this.performance, () => this.core.today());
   }
 
   /* ---------------- public API (in-process) */
