@@ -88,6 +88,8 @@ const col = (key: string, label: string, unit = 'text', align: 'left' | 'right' 
 /** commerce.gross_sales → gross_sales (series and column keys) */
 const suffix = (metricKey: string) => metricKey.slice(metricKey.indexOf('.') + 1);
 /** Average hours from a sum of minutes over n replies (0 without replies) */
+/** Columns of fact_service_daily the service reports sum */
+const SERVICE_COLS = ['dispatched', 'dispatched_on_time', 'overdue', 'valid_tracking', 'seller_cancellations', 'delivery_exceptions', 'messages_received', 'cases_opened'];
 const hoursOf = (minutes: number, n: number) => (n > 0 ? Math.round((minutes / n / 60) * 10) / 10 : 0);
 
 /** The company trading cost reports: the finance cost kinds each one shows (finance.companyCostsByDay) */
@@ -261,12 +263,10 @@ export class Queries {
     const out = new Map<string, string>();
     const catalog = this.core.api('catalog');
     if (!catalog) return out;
-    await Promise.all(
-      ids.slice(0, 100).map(async (id) => {
-        const p = await this.core.soft('catalog.getProduct', () => catalog.getProduct(id));
-        if (p) out.set(id, p.title);
-      }),
-    );
+    const wanted = ids.slice(0, 100).filter(Boolean);
+    if (!wanted.length) return out;
+    // one batch read (catalog.getProducts takes up to 200 ids) instead of one getProduct per row
+    for (const r of (await this.core.soft('catalog.getProducts', () => catalog.getProducts(wanted))) ?? []) out.set(r.product.id, r.product.title);
     return out;
   }
 
@@ -513,15 +513,19 @@ export class Queries {
       const { start, end } = instantsOf(range, rq.timeZone);
       return { start, end, timeZone: rq.timeZone, ...(f.ownerType ? { ownerType: f.ownerType } : {}), ...(f.sellerId ? { sellerId: f.sellerId } : {}) };
     };
-    const [refunds] = await this.core.repo.refundsAgg(rf(rq.range), 'none');
-    const prevRefunds = rq.compare ? (await this.core.repo.refundsAgg(rf(rq.compare), 'none'))[0] : undefined;
-    const [cancelled] = await this.core.repo.cancellationsAgg(f, 'none');
-    const prevCancelled = rq.compare ? (await this.core.repo.cancellationsAgg(this.salesFilter(rq, scope, rq.compare), 'none'))[0] : undefined;
+    const repo = this.core.repo;
+    // eight independent aggregations, side by side
+    const [[refunds], prevRefunds, [cancelled], prevCancelled, refundBuckets, cancelBuckets, reasons, by] = await Promise.all([
+      repo.refundsAgg(rf(rq.range), 'none'),
+      rq.compare ? repo.refundsAgg(rf(rq.compare), 'none').then((r) => r[0]) : undefined,
+      repo.cancellationsAgg(f, 'none'),
+      rq.compare ? repo.cancellationsAgg(this.salesFilter(rq, scope, rq.compare), 'none').then((r) => r[0]) : undefined,
+      repo.refundsAgg(rf(rq.range), 'bucket', rq.granularity),
+      repo.cancellationsAgg(f, 'bucket', rq.granularity),
+      repo.refundsAgg(rf(rq.range), 'reason'),
+      repo.cancellationsAgg(f, 'cancelled_by'),
+    ]);
     const buckets = bucketsOf(rq.range, rq.granularity);
-    const refundBuckets = await this.core.repo.refundsAgg(rf(rq.range), 'bucket', rq.granularity);
-    const cancelBuckets = await this.core.repo.cancellationsAgg(f, 'bucket', rq.granularity);
-    const reasons = await this.core.repo.refundsAgg(rf(rq.range), 'reason');
-    const by = await this.core.repo.cancellationsAgg(f, 'cancelled_by');
     const rAt = new Map(refundBuckets.map((b) => [b.key!, b]));
     const cAt = new Map(cancelBuckets.map((b) => [b.key!, b]));
     return {
@@ -640,11 +644,15 @@ export class Queries {
     const c = rq.currency;
     const COLS = ['views', 'cart_adds', 'purchases', 'stockout_minutes'];
     const f = (r: DayRange) => ({ from: r.from, to: r.to, ...(rq.productId ? { productId: rq.productId } : {}) });
-    const total = (await this.core.repo.dailySums('fact_discovery_daily', f(rq.range), COLS, 'none'))[0] ?? zeros(COLS);
-    const prev = rq.compare ? ((await this.core.repo.dailySums('fact_discovery_daily', f(rq.compare), COLS, 'none'))[0] ?? zeros(COLS)) : null;
+    const sums = (r: DayRange, group: 'none' | 'bucket' | 'product_id') => this.core.repo.dailySums('fact_discovery_daily', f(r), COLS, group, rq.granularity);
+    const [total, prev, byBucket, products] = await Promise.all([
+      sums(rq.range, 'none').then((r) => r[0] ?? zeros(COLS)),
+      rq.compare ? sums(rq.compare, 'none').then((r) => r[0] ?? zeros(COLS)) : null,
+      sums(rq.range, 'bucket'),
+      sums(rq.range, 'product_id'),
+    ]);
     const buckets = bucketsOf(rq.range, rq.granularity);
-    const byBucket = await this.core.repo.dailySums('fact_discovery_daily', f(rq.range), COLS, 'bucket', rq.granularity);
-    const byProduct = (await this.core.repo.dailySums('fact_discovery_daily', f(rq.range), COLS, 'product_id')).sort((a, b) => b.views! - a.views!).slice(0, 200);
+    const byProduct = products.sort((a, b) => b.views! - a.views!).slice(0, 200);
     const names = await this.productNames(byProduct.map((p) => p.key!));
     return {
       kpis: [
@@ -670,11 +678,15 @@ export class Queries {
 
   private async searchesReport(rq: ResolvedQuery, _cfg: Settings): Promise<Part> {
     const c = rq.currency;
-    const total = (await this.core.repo.dailySums('fact_search_misses_daily', rq.range, ['count'], 'none'))[0] ?? zeros(['count']);
-    const prev = rq.compare ? ((await this.core.repo.dailySums('fact_search_misses_daily', rq.compare, ['count'], 'none'))[0] ?? zeros(['count'])) : null;
+    const sums = (r: DayRange, group: 'none' | 'bucket' | 'query_norm') => this.core.repo.dailySums('fact_search_misses_daily', r, ['count'], group, rq.granularity);
+    const [total, prev, byBucket, queries] = await Promise.all([
+      sums(rq.range, 'none').then((r) => r[0] ?? zeros(['count'])),
+      rq.compare ? sums(rq.compare, 'none').then((r) => r[0] ?? zeros(['count'])) : null,
+      sums(rq.range, 'bucket'),
+      sums(rq.range, 'query_norm'),
+    ]);
     const buckets = bucketsOf(rq.range, rq.granularity);
-    const byBucket = await this.core.repo.dailySums('fact_search_misses_daily', rq.range, ['count'], 'bucket', rq.granularity);
-    const byQuery = (await this.core.repo.dailySums('fact_search_misses_daily', rq.range, ['count'], 'query_norm')).sort((a, b) => b.count! - a.count!).slice(0, 200);
+    const byQuery = queries.sort((a, b) => b.count! - a.count!).slice(0, 200);
     return {
       kpis: [this.kpi('discovery.unavailable_searches', total.count!, c, prev?.count ?? null, `${byQuery.length} different searches`)],
       series: [this.series('unavailable_searches', 'Unavailable searches', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.count!])))],
@@ -685,15 +697,24 @@ export class Queries {
     };
   }
 
+  /** The seller service sums of the range and comparison range, per bucket and (withSellers) per seller, side by side */
+  private async serviceSums(rq: ResolvedQuery, sellerId: string | undefined, withSellers: boolean) {
+    const f = (r: DayRange) => ({ from: r.from, to: r.to, ...(sellerId ? { sellerId } : {}) });
+    const sums = (r: DayRange, group: 'none' | 'bucket' | 'seller_id') => this.core.repo.dailySums('fact_service_daily', f(r), SERVICE_COLS, group, rq.granularity);
+    const [total, prev, byBucket, bySeller] = await Promise.all([
+      sums(rq.range, 'none').then((r) => r[0] ?? zeros(SERVICE_COLS)),
+      rq.compare ? sums(rq.compare, 'none').then((r) => r[0] ?? zeros(SERVICE_COLS)) : null,
+      sums(rq.range, 'bucket'),
+      withSellers ? sums(rq.range, 'seller_id') : [],
+    ]);
+    return { f, total, prev, byBucket, bySeller };
+  }
+
   private async serviceReport(rq: ResolvedQuery, scope: ReportScope, _cfg: Settings, staff: boolean): Promise<Part> {
     const c = rq.currency;
     const sellerId = this.sellerOf(rq, scope);
-    const COLS = ['dispatched', 'dispatched_on_time', 'overdue', 'valid_tracking', 'seller_cancellations', 'delivery_exceptions', 'messages_received', 'cases_opened'];
-    const f = (r: DayRange) => ({ from: r.from, to: r.to, ...(sellerId ? { sellerId } : {}) });
-    const total = (await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'none'))[0] ?? zeros(COLS);
-    const prev = rq.compare ? ((await this.core.repo.dailySums('fact_service_daily', f(rq.compare), COLS, 'none'))[0] ?? zeros(COLS)) : null;
+    const { f, total, prev, byBucket, bySeller } = await this.serviceSums(rq, sellerId, staff);
     const buckets = bucketsOf(rq.range, rq.granularity);
-    const byBucket = await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'bucket', rq.granularity);
     const onTime = (t: Record<string, number | null>) => pct(t.dispatched_on_time!, t.dispatched!);
     const tracking = (t: Record<string, number | null>) => pct(t.valid_tracking!, t.dispatched!);
     const kpis = [
@@ -732,7 +753,6 @@ export class Queries {
       } else part.unavailable.push('service.marketly_on_time_dispatch');
     }
     if (staff) {
-      const bySeller = await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'seller_id');
       const names = await this.sellerNames(bySeller.map((s) => s.key!));
       part.table = {
         columns: [col('seller', 'Seller'), col('dispatched', 'Dispatched', 'count'), col('onTimePct', 'On time', 'percent'), col('trackingPct', 'Valid tracking', 'percent'), col('overdue', 'Overdue', 'count'), col('sellerCancellations', 'Seller cancellations', 'count'), col('deliveryExceptions', 'Delivery issues', 'count'), col('casesOpened', 'Cases opened', 'count'), col('messages', 'Messages', 'count')],
@@ -746,13 +766,17 @@ export class Queries {
   private async returnsReport(rq: ResolvedQuery, scope: ReportScope, _cfg: Settings): Promise<Part> {
     const c = rq.currency;
     const f = (r: DayRange) => this.returnsFilter(rq, scope, r);
-    const [total] = await this.core.repo.returnsAgg(f(rq.range), 'none');
-    const prev = rq.compare ? (await this.core.repo.returnsAgg(f(rq.compare), 'none'))[0] : undefined;
-    const rate = await this.returnRate(rq, scope, rq.range);
-    const prevRate = rq.compare ? await this.returnRate(rq, scope, rq.compare) : null;
-    const reasons = await this.core.repo.returnsAgg(f(rq.range), 'reason');
-    const outcomes = await this.core.repo.returnsAgg(f(rq.range), 'outcome');
-    const products = (await this.core.repo.returnsAgg(f(rq.range), 'product_id')).slice(0, 100);
+    const repo = this.core.repo;
+    const [[total], prev, rate, prevRate, reasons, outcomes, allProducts] = await Promise.all([
+      repo.returnsAgg(f(rq.range), 'none'),
+      rq.compare ? repo.returnsAgg(f(rq.compare), 'none').then((r) => r[0]) : undefined,
+      this.returnRate(rq, scope, rq.range),
+      rq.compare ? this.returnRate(rq, scope, rq.compare) : null,
+      repo.returnsAgg(f(rq.range), 'reason'),
+      repo.returnsAgg(f(rq.range), 'outcome'),
+      repo.returnsAgg(f(rq.range), 'product_id'),
+    ]);
+    const products = allProducts.slice(0, 100);
     const names = await this.productNames(products.map((p) => p.key!));
     const requests = total?.requests ?? 0;
     return {
@@ -963,13 +987,8 @@ export class Queries {
   private async serviceFocusReport(key: string, rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
     const c = rq.currency;
     const sellerId = this.sellerOf(rq, scope);
-    const COLS = ['dispatched', 'dispatched_on_time', 'overdue', 'valid_tracking', 'seller_cancellations', 'delivery_exceptions', 'messages_received', 'cases_opened'];
-    const f = (r: DayRange) => ({ from: r.from, to: r.to, ...(sellerId ? { sellerId } : {}) });
-    const total = (await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'none'))[0] ?? zeros(COLS);
-    const prev = rq.compare ? ((await this.core.repo.dailySums('fact_service_daily', f(rq.compare), COLS, 'none'))[0] ?? zeros(COLS)) : null;
+    const { f, total, prev, byBucket, bySeller } = await this.serviceSums(rq, sellerId, true);
     const buckets = bucketsOf(rq.range, rq.granularity);
-    const byBucket = await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'bucket', rq.granularity);
-    const bySeller = await this.core.repo.dailySums('fact_service_daily', f(rq.range), COLS, 'seller_id');
     const names = await this.sellerNames(bySeller.map((s) => s.key!));
     const onTime = (t: Record<string, number | null>) => pct(t.dispatched_on_time!, t.dispatched!);
     const tracking = (t: Record<string, number | null>) => pct(t.valid_tracking!, t.dispatched!);

@@ -325,9 +325,16 @@ export class ReportsRepository {
     return this.#items.update(itemId, { ...(Object.keys(set).length ? { $set: set } : {}), ...(Object.keys(inc).length ? { $inc: inc } : {}) });
   }
 
+  /**
+   * The next order ids (ascending) after `after`: at most `limit`, read from the next limit × 20 fact rows in
+   * order_id order (the (order_id, group_id) index), so a page never groups the whole collection. A page may hold
+   * fewer ids when orders have many items; walking on from the last id still visits every order once.
+   */
   async orderIdsWithFacts(after: string | null, limit: number): Promise<string[]> {
     const rows = await this.#items.aggregate<{ _id: string }>([
       ...(after ? [{ $match: this.#items.filter({ order_id: { $gt: after } }) }] : []),
+      { $sort: { order_id: 1 } },
+      { $limit: limit * 20 },
       { $group: { _id: '$order_id' } },
       { $sort: { _id: 1 } },
       { $limit: limit },
