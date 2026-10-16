@@ -21,9 +21,25 @@ export function fixedClock(at: Date | string): Clock & { set(d: Date | string): 
   };
 }
 
+/**
+ * Formatters per time zone, built once: building one costs about ten times using it, and dates in the market zone
+ * are computed on every reference, date filter and schedule.
+ */
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+const wallClockFormats = new Map<string, Intl.DateTimeFormat>();
+
+function formatIn(cache: Map<string, Intl.DateTimeFormat>, timeZone: string, make: () => Intl.DateTimeFormat): Intl.DateTimeFormat {
+  let f = cache.get(timeZone);
+  if (!f) {
+    f = make();
+    cache.set(timeZone, f);
+  }
+  return f;
+}
+
 /** YYYY-MM-DD of an instant in a time zone (e.g. the market's America/Los_Angeles). */
 export function dateInZone(at: Date, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(at);
+  const parts = formatIn(dayFormats, timeZone, () => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })).formatToParts(at);
   const get = (t: string) => parts.find((p) => p.type === t)!.value;
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
@@ -54,16 +70,11 @@ export function zonedTimeToUtc(date: string, time: string, timeZone: string): Da
 
 /** How far a time zone's wall clock is ahead of UTC at an instant (negative west of Greenwich). */
 export function zoneOffsetMs(at: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-US', {
+  const parts = formatIn(
+    wallClockFormats,
     timeZone,
-    hourCycle: 'h23',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).formatToParts(at);
+    () => new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+  ).formatToParts(at);
   const n = (t: string) => Number(parts.find((p) => p.type === t)!.value);
   const asUtc = Date.UTC(n('year'), n('month') - 1, n('day'), n('hour'), n('minute'), n('second'));
   return asUtc - Math.floor(at.getTime() / 1000) * 1000;

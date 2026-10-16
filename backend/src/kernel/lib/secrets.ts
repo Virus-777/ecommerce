@@ -6,8 +6,17 @@
 import { hkdfSync } from 'node:crypto';
 import type { Config } from '../config/index.js';
 
+/** Derived keys by root secret and purpose: several modules ask for theirs on every request (purposes are fixed names) */
+const derived = new Map<string, string>();
+
 /** 32-byte key for one purpose, e.g. secretFor(ctx.config, 'notifications.unsubscribe'), hex encoded */
 export function secretFor(config: Pick<Config, 'appSecret'>, purpose: string): string {
   if (!config.appSecret) throw new Error('APP_SECRET is not configured');
-  return Buffer.from(hkdfSync('sha256', config.appSecret, 'marketly', purpose, 32)).toString('hex');
+  const id = `${config.appSecret}\u0000${purpose}`;
+  let key = derived.get(id);
+  if (!key) {
+    key = Buffer.from(hkdfSync('sha256', config.appSecret, 'marketly', purpose, 32)).toString('hex');
+    derived.set(id, key);
+  }
+  return key;
 }

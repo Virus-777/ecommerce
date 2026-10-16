@@ -55,6 +55,16 @@ export function allocate(m: Money, weights: number[]): Money[] {
   return parts.map((p) => money(p, m.currency));
 }
 
+/** One formatter per locale and currency: building one costs about 75 times a format call, and every Money shown is formatted */
+const formatters = new Map<string, Intl.NumberFormat>();
+
 /** Display in the market locale (en-US at launch), e.g. $189.00 */
-export const format = (m: Money, locale = 'en-US') =>
-  new Intl.NumberFormat(locale, { style: 'currency', currency: m.currency }).format(m.amount / 100);
+export function format(m: Money, locale = 'en-US'): string {
+  const key = `${locale}|${m.currency}`;
+  let f = formatters.get(key);
+  if (!f) {
+    f = new Intl.NumberFormat(locale, { style: 'currency', currency: m.currency });
+    formatters.set(key, f);
+  }
+  return f.format(m.amount / 100);
+}
