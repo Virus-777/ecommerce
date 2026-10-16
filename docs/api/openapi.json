@@ -14843,7 +14843,7 @@
           "Admin API · Catalog"
         ],
         "summary": "All products with filters",
-        "description": "Rows carry ref, contentScore, missing, duplicateSuspected and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. Tab counts come from GET /products/stats.\n\n**Permission:** `catalog.view`\n\n**Screens:** admin/catalog",
+        "description": "Rows carry ref, contentScore, missing, duplicateSuspected, imagesToRecrop and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. missingContent=true: a content score under 100 or images to re-crop. Tab counts come from GET /products/stats.\n\n**Permission:** `catalog.view`\n\n**Screens:** admin/catalog",
         "security": [
           {
             "bearer": []
@@ -53875,6 +53875,72 @@
         "x-phase": 1
       }
     },
+    "/api/store/media/image-specs": {
+      "get": {
+        "operationId": "media.getStoreImageSpecs",
+        "tags": [
+          "Store API · Media"
+        ],
+        "summary": "The product image spec (aspect ratio and the detail and thumbnail sizes)",
+        "description": "The value in force of the setting media.productImage, with the ratio and both sizes worked out (height = round(width × H ÷ W)). The store frames product cards and the gallery at this ratio. Product configuration with no permission; apps may cache it for 10 minutes.\n\n**Screens:** store/home, store/product, store/search",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/media.ImageSpecs"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "media",
+        "x-area": "store",
+        "x-auth": "visitor",
+        "x-screens": [
+          "store/home",
+          "store/product",
+          "store/search"
+        ],
+        "x-phase": 1
+      }
+    },
     "/api/seller/media/uploads": {
       "post": {
         "operationId": "media.createSellerUpload",
@@ -54901,6 +54967,71 @@
           "seller/return"
         ],
         "x-phase": 1
+      }
+    },
+    "/api/seller/media/image-specs": {
+      "get": {
+        "operationId": "media.getSellerImageSpecs",
+        "tags": [
+          "Seller API · Media"
+        ],
+        "summary": "The product image spec the Seller Center crops product photos to",
+        "description": "Same answer as the store's GET /image-specs. Product images uploaded here must have this aspect ratio (1% tolerance) and at least the detail size, or processing rejects them (rejectionReason says what to fix).\n\n**Seller context:** optional (works before a seller is chosen).\n\n**Screens:** seller/product-new",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/media.ImageSpecs"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "media",
+        "x-area": "seller",
+        "x-auth": "seller",
+        "x-screens": [
+          "seller/product-new"
+        ],
+        "x-phase": 1,
+        "x-seller-context": "optional"
       }
     },
     "/api/admin/media/uploads": {
@@ -56218,6 +56349,71 @@
           "admin/returns"
         ],
         "x-audited": true,
+        "x-phase": 1
+      }
+    },
+    "/api/admin/media/image-specs": {
+      "get": {
+        "operationId": "media.getAdminImageSpecs",
+        "tags": [
+          "Admin API · Media"
+        ],
+        "summary": "The product image spec in force",
+        "description": "Same answer as the store's GET /image-specs. Staff change it with the settings change flow (POST /api/admin/settings/changes, key media.productImage).\n\n**Screens:** admin/settings, admin/official",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/media.ImageSpecs"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "media",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-screens": [
+          "admin/settings",
+          "admin/official"
+        ],
         "x-phase": 1
       }
     },
@@ -149134,6 +149330,29 @@
               "null"
             ],
             "description": "File size in bytes (media sizeBytes), shown next to attachments and evidence files"
+          },
+          "fileName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The file's name as uploaded (media fileName), e.g. for attachments and evidence lists"
+          },
+          "thumbUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Product images only: the thumbnail rendition (cards, lists, cart, orders, gallery strip); null for other files"
+          },
+          "detailUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Product images only: the detail rendition (product page); null for other files. url is the size the response asked for (product pages: detail)"
           }
         },
         "required": [
@@ -157230,6 +157449,17 @@
               }
             ],
             "description": "The calling reviewer's unsent decision on the open submission (staff only)"
+          },
+          "imagesToRecrop": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Images of the product and its variants that no longer have the product image spec's aspect ratio (media.productImage changed): show \"Re-crop images\". Not blocking: the product stays live and the store shows them cover-cropped. Empty when none"
           }
         },
         "required": [
@@ -158030,7 +158260,7 @@
             "description": "Blocking fails the image_standard check; warning is advisory"
           },
           "check": {
-            "description": "Machine-checkable parameters passed to media.checkImage, e.g. { \"minWidth\": 1000 }"
+            "description": "Machine-checkable parameters passed to media.checkImage, e.g. { \"minWidth\": 1000 }. aspectRatios are ignored for product photos: the product image spec's ratio (media.productImage) applies to every category"
           }
         },
         "required": [
@@ -174077,10 +174307,12 @@
               "medium",
               "large",
               "zoom",
+              "detail",
               "poster",
               "video_720",
               "video_1080"
-            ]
+            ],
+            "description": "Product images: detail (product page) and thumb (cards, lists) at the product image spec; images processed before it may also keep small to zoom. Other images: thumb, small, medium, large, zoom by renditionWidths"
           },
           "url": {
             "type": "string",
@@ -174203,7 +174435,7 @@
               "null"
             ],
             "format": "uri",
-            "description": "Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint."
+            "description": "Public: permanent signed link to the medium rendition (images; the detail rendition for product images) or poster (video). Private files have no URL; use the download endpoint."
           },
           "renditions": {
             "type": "array",
@@ -174726,6 +174958,103 @@
         "required": [
           "reason",
           "showPlaceholder"
+        ]
+      },
+      "media.ImageSize": {
+        "type": "object",
+        "properties": {
+          "width": {
+            "type": "integer"
+          },
+          "height": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ]
+      },
+      "media.ProductImageSpec": {
+        "type": "object",
+        "properties": {
+          "aspectRatio": {
+            "type": "string",
+            "description": "W:H, e.g. 1:1 or 4:5 (setting media.productImage)"
+          },
+          "detailWidth": {
+            "type": "integer",
+            "description": "Product page image width in px"
+          },
+          "thumbnailWidth": {
+            "type": "integer",
+            "description": "Thumbnail width in px (cards, lists, cart, orders)"
+          },
+          "quality": {
+            "type": "integer",
+            "description": "WebP and JPEG quality, 50–95"
+          },
+          "ratio": {
+            "$ref": "#/components/schemas/media.ImageSize",
+            "description": "The ratio as two whole numbers"
+          },
+          "detail": {
+            "$ref": "#/components/schemas/media.ImageSize",
+            "description": "detailWidth × round(detailWidth × H ÷ W): the size product images are uploaded at, and their minimum"
+          },
+          "thumbnail": {
+            "$ref": "#/components/schemas/media.ImageSize",
+            "description": "thumbnailWidth × round(thumbnailWidth × H ÷ W)"
+          }
+        },
+        "required": [
+          "aspectRatio",
+          "detailWidth",
+          "thumbnailWidth",
+          "quality",
+          "ratio",
+          "detail",
+          "thumbnail"
+        ]
+      },
+      "media.ImageSpecs": {
+        "type": "object",
+        "properties": {
+          "productImage": {
+            "$ref": "#/components/schemas/media.ProductImageSpec"
+          }
+        },
+        "required": [
+          "productImage"
+        ]
+      },
+      "media.RecropItem": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/media.MediaOwner"
+          },
+          "recrop": {
+            "type": "boolean",
+            "description": "true: the image no longer has the spec's aspect ratio (re-crop it); false: it has it again"
+          },
+          "usages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/media.Usage"
+            },
+            "description": "Active usages of the image (catalog: product_image and variant_image with the product id)"
+          }
+        },
+        "required": [
+          "assetId",
+          "owner",
+          "recrop",
+          "usages"
         ]
       },
       "messaging.Subject": {
@@ -199584,7 +199913,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The product image in the thumbnail size (url = thumb; detailUrl for a larger view)"
           },
           "variantId": {
             "type": [

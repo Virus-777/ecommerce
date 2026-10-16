@@ -114,6 +114,12 @@ type MediaRef {
   height: Int
   "File size in bytes (media's sizeBytes), shown next to attachments and evidence files, e.g. 212 KB"
   bytes: Int
+  "The file's name as uploaded"
+  fileName: String
+  "Product images only: the thumbnail rendition (cards, lists, gallery strip); null for other files"
+  thumbUrl: URL
+  "Product images only: the detail rendition (product page); null for other files"
+  detailUrl: URL
 }
 
 enum ActorKind {
@@ -716,6 +722,8 @@ type Product {
   noGtin: Boolean @areas(in: [SELLER, ADMIN])
   "Brand the submitter asked to add because it was not listed; reviewed with the product. Seller area: null unless the caller submitted the product."
   requestedBrandName: String @areas(in: [SELLER, ADMIN])
+  "Images (ids) that no longer have the product image spec's aspect ratio: Re-crop images. Not blocking. Seller area: null unless the caller submitted the product."
+  imagesToRecrop: [UUID!] @areas(in: [SELLER, ADMIN])
   "The calling reviewer's unsent decision on the open submission (Save draft)"
   reviewDraft: ProductReviewDraft @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review")
   owner: ProductOwner @areas(in: [ADMIN])

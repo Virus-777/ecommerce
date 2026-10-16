@@ -114,6 +114,12 @@ type MediaRef {
   height: Int
   "File size in bytes (media's sizeBytes), shown next to attachments and evidence files, e.g. 212 KB"
   bytes: Int
+  "The file's name as uploaded"
+  fileName: String
+  "Product images only: the thumbnail rendition (cards, lists, gallery strip); null for other files"
+  thumbUrl: URL
+  "Product images only: the detail rendition (product page); null for other files"
+  detailUrl: URL
 }
 
 enum ActorKind {

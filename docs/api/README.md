@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1,316 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1,319 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -11,9 +11,9 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 
 
 | Area | Prefix | Who | Auth | Endpoints |
 |---|---|---|---|---|
-| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 263 |
-| Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 272 |
-| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 751 |
+| Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 264 |
+| Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 273 |
+| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 752 |
 | Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 21 |
 | Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider | 9 |
 
@@ -23,12 +23,12 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 
 | Area | Auth kind | Who | Endpoints |
 |---|---|---|---|
-| Store API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 48 |
+| Store API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 49 |
 | Store API | `shopper` | A store token that can hold a cart: visitor (guest) or customer | 103 |
 | Store API | `customer` | Signed-in customer | 101 |
 | Store API | `account` | Any signed-in account, any realm (self-service security endpoints) | 11 |
-| Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 272 |
-| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 751 |
+| Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 273 |
+| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 752 |
 | Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 18 |
 | Public API | `refresh` | Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body) | 2 |
 | Public API | `bootstrap` | No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions | 1 |
@@ -41,7 +41,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 | [access](modules/access.md) | 1 | What staff may do and how much they may approve: staff roles, the permission registry, role assignments, leads and backups per work area, approval limits per role, approval requests with a second reviewer, and cover while someone is away. Granting access never grants financial authority. | identity | 33 |
 | [audit](modules/audit.md) | 1 | The tamper-evident action history: who did what, in which role, to which record, why, what changed (before and after), which approvals applied and the request id. Every module writes to it through record(); staff read it with filters and authorized exports; retention is a governed setting. | - | 11 |
 | [identity](modules/identity.md) | 1 | Who someone is and how they prove it: accounts for customers, seller members and staff, credentials, email verification, sessions and refresh tokens for the website and the Android app, password recovery, 2-step verification, signed-in devices, guest sessions and the security activity log. | - | 46 |
-| [media](modules/media.md) | 1 | Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). | - | 29 |
+| [media](modules/media.md) | 1 | Every uploaded or generated file: images, video and documents. Uploads and signed download links, scanning and processing, renditions, alt text, ownership (seller, staff, customer, platform), image standard checks, where each file is used, and the rules for deleting, removing and retaining files (files in use or kept as evidence cannot be deleted). | - | 32 |
 | [notifications](modules/notifications.md) | 1 | Who is told what, on which channel: notification topics for customers, sellers and staff, routing from platform events to recipients (staff by role, with backups), templates with versions and preview, in-app inboxes for the store, Seller Center and Admin Center, email delivery with retries and suppression, seller and staff channel preferences, promotional broadcasts under consent, and Android push devices (phase 3). | identity | 52 |
 | [reports](modules/reports.md) | 1 | Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables. | - | 33 |
 | [settings](modules/settings.md) | 1 | Market-level platform settings: country and service region, currency, time zone, business hours, support contacts, guest checkout, Android app versions and feature flags, plus the effective-dated change process (impact preview, approval, schedule, apply) for every runtime setting a module declares. It also assembles the Admin Center settings page from sections owned by other modules. | access | 17 |
