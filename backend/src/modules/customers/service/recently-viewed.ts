@@ -5,6 +5,7 @@
 import type { Scope } from '../../../kernel/auth/scope.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import type * as catalog from '../../../spec/catalog.js';
 import type { RecentlyViewedItem } from '../../../spec/customers.js';
 import type * as identity from '../../../spec/identity.js';
 import * as map from '../mappers.js';
@@ -12,6 +13,18 @@ import type { CustomerRow, ViewOwner, ViewRow } from '../ports.js';
 import { type Core, DAY, GUEST_SESSION_DAYS, notFound } from './core.js';
 import type { Profiles } from './profiles.js';
 import type { Marketing } from './marketing.js';
+
+/** catalog.getProducts takes at most 200 ids per call */
+const PRODUCT_BATCH = 200;
+
+/** Products by id, read in batches of catalog.getProducts; products catalog does not know are left out */
+async function productsByIds(api: catalog.CatalogPublicApi, productIds: string[]): Promise<Map<string, catalog.Product>> {
+  const ids = [...new Set(productIds)];
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += PRODUCT_BATCH) batches.push(ids.slice(i, i + PRODUCT_BATCH));
+  const records = (await Promise.all(batches.map((b) => api.getProducts(b)))).flat();
+  return new Map(records.map((r) => [r.product.id, r.product]));
+}
 
 export class RecentlyViewed {
   constructor(
@@ -64,17 +77,19 @@ export class RecentlyViewed {
     const offers = this.core.ctx.tryUse('offers');
     const media = this.core.ctx.tryUse('media');
     const imageIds = [...new Set(rows.map((r) => r.image_media_id).filter((x): x is string => !!x))];
-    const [products, featured, refs] = await Promise.all([
-      this.core.soft('catalog products', catalog && (() => Promise.all(rows.map((r) => catalog.getProduct(r.product_id))))),
+    const [records, featured, refs] = await Promise.all([
+      // one getProducts call per 200 products instead of getProduct per row
+      this.core.soft('catalog products', catalog && (() => productsByIds(catalog, rows.map((r) => r.product_id)))),
       this.core.soft('featured offers', offers && (() => offers.getFeaturedOfferForProduct(rows.map((r) => ({ productId: r.product_id, ...(r.variant_id ? { variantId: r.variant_id } : {}) }))))),
       // cards: the thumbnail size (small answers thumb for product images too)
       this.core.soft('media refs', media && imageIds.length ? () => media.refs(imageIds, 'thumb') : undefined),
     ]);
     const images = new Map((refs ?? []).map((m) => [m.id, m]));
-    return rows.map((r, i) => {
-      const product = products?.[i];
+    return rows.map((r) => {
+      // catalog off or failing: undefined (unknown); a product catalog does not know: null (hidden)
+      const product = records && (records.get(r.product_id) ?? null);
       const offer = featured ? (featured[r.product_id] ?? null) : undefined;
-      const hidden = products !== undefined && product === null;
+      const hidden = product === null;
       const noOffer = offer === null;
       return {
         productId: r.product_id,

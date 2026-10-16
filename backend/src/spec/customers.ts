@@ -2377,14 +2377,9 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "addresses_customer_id_31158a",
+          "name": "addresses_customer_id_dc4488",
           "key": {
             "customer_id": 1
-          },
-          "partial": {
-            "deleted_at": {
-              "$type": "null"
-            }
           }
         },
         {
@@ -2669,6 +2664,12 @@ export const spec = defineModuleSpec({
             "owner_kind": 1,
             "owner_id": 1,
             "viewed_at": -1
+          }
+        },
+        {
+          "name": "recently_viewed_viewed_at_2583c8",
+          "key": {
+            "viewed_at": 1
           }
         }
       ],

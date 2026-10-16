@@ -66,7 +66,7 @@ const addresses = new Schema(
   },
   collectionOptions("customers.addresses"),
 );
-addresses.index({"customer_id":1}, {"name":"addresses_customer_id_31158a","partialFilterExpression":{"deleted_at":{"$type":"null"}}});
+addresses.index({"customer_id":1}, {"name":"addresses_customer_id_dc4488"});
 addresses.index({"customer_id":1}, {"name":"addresses_customer_id_375599","unique":true,"partialFilterExpression":{"is_default":true,"deleted_at":{"$type":"null"}}});
 
 const marketing_preferences = new Schema(
@@ -122,6 +122,7 @@ const recently_viewed = new Schema(
 );
 recently_viewed.index({"owner_kind":1,"owner_id":1,"product_id":1}, {"name":"recently_viewed_owner_kind_owner_id_product_id_501ab4","unique":true});
 recently_viewed.index({"owner_kind":1,"owner_id":1,"viewed_at":-1}, {"name":"recently_viewed_owner_kind_owner_id_viewed_at_666ace"});
+recently_viewed.index({"viewed_at":1}, {"name":"recently_viewed_viewed_at_2583c8"});
 
 const account_restrictions = new Schema(
   {

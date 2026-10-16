@@ -534,7 +534,7 @@ Indexes: `(account_status, id)`, `(email)`, `(created_at, id)`, `gin(to_tsvector
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(customer_id) where deleted_at is null`, `unique(customer_id) where is_default and deleted_at is null`
+Indexes: `(customer_id)`, `unique(customer_id) where is_default and deleted_at is null`
 
 **marketing_preferences**
 
@@ -578,7 +578,7 @@ Indexes: `(customer_id, at desc)`
 | image_media_id | uuid? |
 | viewed_at | timestamptz |
 
-Indexes: `unique(owner_kind, owner_id, product_id)`, `(owner_kind, owner_id, viewed_at desc)`
+Indexes: `unique(owner_kind, owner_id, product_id)`, `(owner_kind, owner_id, viewed_at desc)`, `(viewed_at)`
 
 **account_restrictions**
 

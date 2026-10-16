@@ -17,7 +17,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.1',
+  version: '2.0.2',
   schemas,
   register(ctx) {
     // Address validation provider: the deterministic dev adapter in development and tests; none is wired for production yet (format rules only)

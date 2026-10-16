@@ -225,9 +225,12 @@ export class CustomersRepository {
     return this.#t.views.find(owned(owner), { sort: { viewed_at: -1, id: -1 }, limit });
   }
 
+  /** Keeps the owner's `keep` newest views; usually there is nothing past them, and one read says so */
   async trimViews(owner: ViewOwner, keep: number): Promise<number> {
-    const keepIds = (await this.#t.views.find(owned(owner), { sort: { viewed_at: -1, id: -1 }, limit: keep })).map((v) => v.id);
-    return this.#t.views.deleteMany({ ...owned(owner), id: { $nin: keepIds } });
+    const [first] = await this.#t.views.find(owned(owner), { sort: { viewed_at: -1, id: -1 }, skip: keep, limit: 1 });
+    if (!first) return 0;
+    // the first view past the kept ones and every older one, in the same (viewed_at, id) order
+    return this.#t.views.deleteMany({ ...owned(owner), $or: [{ viewed_at: { $lt: first.viewed_at } }, { viewed_at: first.viewed_at, id: { $lte: first.id } }] });
   }
 
   deleteViews(owner: ViewOwner, productId?: string): Promise<number> {
