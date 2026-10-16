@@ -1675,25 +1675,16 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "ledger_refund_id_kind_4d7ffc",
+          "name": "ledger_refund_id_kind_000d92",
           "key": {
             "refund_id": 1,
             "kind": 1
           },
           "unique": true,
           "partial": {
-            "$and": [
-              {
-                "refund_id": {
-                  "$gte": ""
-                }
-              },
-              {
-                "refund_id": {
-                  "$gte": ""
-                }
-              }
-            ]
+            "refund_id": {
+              "$gte": ""
+            }
           }
         },
         {

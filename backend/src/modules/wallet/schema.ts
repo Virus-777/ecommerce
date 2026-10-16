@@ -67,7 +67,7 @@ const ledger = new Schema(
 );
 ledger.index({"customer_id":1,"at":1}, {"name":"ledger_customer_id_at_4e57ca"});
 ledger.index({"idempotency_key":1}, {"name":"ledger_idempotency_key_ef6453","unique":true,"partialFilterExpression":{"idempotency_key":{"$gte":""}}});
-ledger.index({"refund_id":1,"kind":1}, {"name":"ledger_refund_id_kind_4d7ffc","unique":true,"partialFilterExpression":{"$and":[{"refund_id":{"$gte":""}},{"refund_id":{"$gte":""}}]}});
+ledger.index({"refund_id":1,"kind":1}, {"name":"ledger_refund_id_kind_000d92","unique":true,"partialFilterExpression":{"refund_id":{"$gte":""}}});
 ledger.index({"order_id":1}, {"name":"ledger_order_id_36a929","partialFilterExpression":{"order_id":{"$gte":""}}});
 ledger.index({"hold_id":1}, {"name":"ledger_hold_id_e9c7c8","partialFilterExpression":{"hold_id":{"$gte":""}}});
 

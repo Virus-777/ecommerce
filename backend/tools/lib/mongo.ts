@@ -269,15 +269,17 @@ function indexOf(idx: string, table: string, columns: Map<string, Column>, probl
   // In the spec a unique key ignores rows with a null in it (several are allowed); MongoDB counts null as a value.
   // Same meaning: the index covers only rows whose nullable key columns all have a value.
   if (unique && !nullsEqual) {
+    const existing = partial ? ((partial.$and as Record<string, unknown>[] | undefined) ?? [partial]) : [];
     const conds: Record<string, unknown>[] = [];
     for (const k of Object.keys(key)) {
       const c = columns.get(k);
       if (!c?.nullable || coalesced.has(k)) continue;
       const p = present(c);
-      if (p) conds.push({ [k]: p });
+      // `where k is not null` already says it
+      if (p && !existing.some((x) => JSON.stringify(x[k]) === JSON.stringify(p))) conds.push({ [k]: p });
     }
     if (conds.length) {
-      const all = [...(partial ? ((partial.$and as Record<string, unknown>[] | undefined) ?? [partial]) : []), ...conds];
+      const all = [...existing, ...conds];
       const fields = all.flatMap((x) => Object.keys(x));
       partial = new Set(fields).size === fields.length ? Object.assign({}, ...all) : { $and: all };
     }

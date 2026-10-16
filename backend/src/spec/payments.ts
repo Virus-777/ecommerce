@@ -3421,42 +3421,33 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "refunds_origin_origin_id_c8d830",
+          "name": "refunds_origin_origin_id_4f73e4",
           "key": {
             "origin": 1,
             "origin_id": 1
           },
           "unique": true,
           "partial": {
-            "$and": [
-              {
-                "origin_id": {
-                  "$gte": ""
-                },
-                "origin": {
-                  "$in": [
-                    "return",
-                    "case",
-                    "exception",
-                    "correction",
-                    "orphan_payment"
-                  ]
-                },
-                "status": {
-                  "$in": [
-                    "requested",
-                    "processing",
-                    "sent",
-                    "failed"
-                  ]
-                }
-              },
-              {
-                "origin_id": {
-                  "$gte": ""
-                }
-              }
-            ]
+            "origin_id": {
+              "$gte": ""
+            },
+            "origin": {
+              "$in": [
+                "return",
+                "case",
+                "exception",
+                "correction",
+                "orphan_payment"
+              ]
+            },
+            "status": {
+              "$in": [
+                "requested",
+                "processing",
+                "sent",
+                "failed"
+              ]
+            }
           }
         },
         {

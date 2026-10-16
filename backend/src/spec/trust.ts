@@ -3827,25 +3827,16 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "appeals_source_external_appeal_id_b1062b",
+          "name": "appeals_source_external_appeal_id_c163a7",
           "key": {
             "source": 1,
             "external_appeal_id": 1
           },
           "unique": true,
           "partial": {
-            "$and": [
-              {
-                "external_appeal_id": {
-                  "$gte": ""
-                }
-              },
-              {
-                "external_appeal_id": {
-                  "$gte": ""
-                }
-              }
-            ]
+            "external_appeal_id": {
+              "$gte": ""
+            }
           }
         },
         {

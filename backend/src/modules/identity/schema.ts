@@ -155,7 +155,7 @@ const devices = new Schema(
   collectionOptions("identity.devices"),
 );
 devices.index({"account_id":1,"last_active_at":-1}, {"name":"devices_account_id_last_active_at_93cd7a"});
-devices.index({"account_id":1,"installation_id":1}, {"name":"devices_account_id_installation_id_b097ab","unique":true,"partialFilterExpression":{"$and":[{"installation_id":{"$gte":""}},{"installation_id":{"$gte":""}}]}});
+devices.index({"account_id":1,"installation_id":1}, {"name":"devices_account_id_installation_id_0c665c","unique":true,"partialFilterExpression":{"installation_id":{"$gte":""}}});
 
 /** One per sign-in. Refresh tokens rotate inside a session (family); reuse of a rotated token revokes the session. */
 const sessions = new Schema(

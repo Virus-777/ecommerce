@@ -3690,25 +3690,16 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "devices_account_id_installation_id_b097ab",
+          "name": "devices_account_id_installation_id_0c665c",
           "key": {
             "account_id": 1,
             "installation_id": 1
           },
           "unique": true,
           "partial": {
-            "$and": [
-              {
-                "installation_id": {
-                  "$gte": ""
-                }
-              },
-              {
-                "installation_id": {
-                  "$gte": ""
-                }
-              }
-            ]
+            "installation_id": {
+              "$gte": ""
+            }
           }
         }
       ],

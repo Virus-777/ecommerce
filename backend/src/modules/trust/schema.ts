@@ -210,7 +210,7 @@ const appeals = new Schema(
 appeals.index({"ref":1}, {"name":"appeals_ref_8cef23","unique":true});
 appeals.index({"state":1,"decide_by":1}, {"name":"appeals_state_decide_by_b1f298"});
 appeals.index({"enforcement_id":1}, {"name":"appeals_enforcement_id_594751"});
-appeals.index({"source":1,"external_appeal_id":1}, {"name":"appeals_source_external_appeal_id_b1062b","unique":true,"partialFilterExpression":{"$and":[{"external_appeal_id":{"$gte":""}},{"external_appeal_id":{"$gte":""}}]}});
+appeals.index({"source":1,"external_appeal_id":1}, {"name":"appeals_source_external_appeal_id_c163a7","unique":true,"partialFilterExpression":{"external_appeal_id":{"$gte":""}}});
 appeals.index({"appellant_kind":1,"appellant_id":1}, {"name":"appeals_appellant_kind_appellant_id_db5193"});
 
 const report_notes = new Schema(
