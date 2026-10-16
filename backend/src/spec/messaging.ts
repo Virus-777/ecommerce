@@ -623,7 +623,7 @@ export interface MessagingPublicApi {
   sellerResponseStats(sellerId: string, range: common.DateRange): Promise<ResponseStats>;
   /** Seller reply rounds in order and product conversations per market day and seller: customer messages waiting for a reply, replies, total reply minutes and replies within the target. Reports' Response time and case backlog. Used by: reports. */
   replyStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyReplyStats[]>;
-  /** Badge counts for the account and Seller Center Used by: notifications. */
+  /** Badge counts for the account and Seller Center Used by: notifications, customers. */
   unreadCount(participant: common.Actor): Promise<number>;
   /** Conversations about an order or its items that the participant takes part in (Order.conversations) Used by: graphql. */
   listForOrder(orderId: string, participant: common.Actor): Promise<ConversationSummary[]>;
@@ -631,11 +631,11 @@ export interface MessagingPublicApi {
   getForSubject(subject: { kind: 'return' | 'case' | 'order_item', id: string }, participant: common.Actor): Promise<Conversation | null>;
   /** Unread counts and who wrote, for the account overview tile and header badge Used by: graphql. */
   unreadSummary(participant: common.Actor): Promise<{ conversations: number, messages: number, fromNames: string[] }>;
-  /** Unanswered and overdue customer messages for the seller dashboard Used by: graphql. */
+  /** Unanswered and overdue customer messages for the seller dashboard Used by: graphql, reports. */
   sellerInboxSummary(sellerId: string): Promise<{ awaitingReply: number, overdue: number, oldestWaitingSince: string | null, unreadConversations: number, targetHours: number }>;
   /** Inbox of a customer or seller; the seller inbox lists overdue first Used by: graphql. */
   listInbox(participant: common.Actor, filter: { unreadOnly?: boolean, replyState?: string }, page: common.PageInput): Promise<common.Page<ConversationSummary>>;
-  /** Conversation header and messages for a participant Used by: graphql. */
+  /** Conversation header and messages for a participant Used by: graphql, trust. */
   getConversation(participant: common.Actor, conversationId: string): Promise<Conversation | null>;
   /** Counts, last message time and counterparties of each customer's conversations for the customer 360; never message content Used by: customers, graphql. */
   customerConversationSummaries(customerIds: string[]): Promise<Record<string, CustomerConversationSummary>>;

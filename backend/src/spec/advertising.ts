@@ -1678,7 +1678,7 @@ export interface AdvertisingPublicApi {
   isAdBlockedPage(page: 'home' | 'category' | 'search' | 'product' | 'campaign' | 'collection' | 'deals' | 'brand' | 'seller_store' | 'official_store' | 'cart' | 'checkout' | 'payment_result' | 'order_tracking' | 'returns' | 'account' | 'help'): Promise<boolean>;
   /** Displays, clicks, dismissals, attributed purchases and spend per campaign and day, from the daily_stats read model (days still open are marked partial). Used by: reports. */
   dailyPerformance(range: common.DateRange, filter?: { campaignId?: string, sellerId?: string }): Promise<CampaignDayPerformance[]>;
-  /** Read-only advertising summary for the Admin dashboard tile: live now (own and paid), starting in 7 days, ending soon, waiting approval, spend this month and short campaign lists. Records nothing; ad serving stays on POST /api/store/advertising/decisions. Used by: graphql, reports. */
+  /** Read-only advertising summary for the Admin dashboard tile: live now (own and paid), starting in 7 days, ending soon, waiting approval, spend this month and short campaign lists. Records nothing; ad serving stays on POST /api/store/advertising/decisions. Used by: graphql, reports, workqueues. */
   dashboardSummary(opts?: { listLimit?: number }): Promise<AdsDashboard>;
   /** Export rows for the reports dataset advertising.admin.campaigns (G72): the admin campaign list with its filters (q, source, placementKey, status, linkedPromotionId), staff only Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;

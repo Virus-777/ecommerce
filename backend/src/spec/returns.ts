@@ -2514,7 +2514,7 @@ export const ReturnsPolicyChangedEvent: z.ZodType<ReturnsPolicyChangedEvent> = z
 export interface ReturnsPublicApi {
   /** sellerId null or OFFICIAL_STORE_ID = Official Store (ownerType official): both resolve the Official Store terms (baseline and category exceptions), never a seller_terms lookup. Effective return terms for an offer: baseline, category exception and seller terms combined. Shown before purchase and frozen on the order item. Used by: offers, checkout, orders. */
   resolveTerms(sellerId: string | null, categoryId: string | null, condition: string | null): Promise<EffectiveTerms>;
-  /** After-sales column of the order detail (return and refund progress per item) Used by: orders, support. */
+  /** After-sales column of the order detail (return and refund progress per item) Used by: orders, support, messaging. */
   returnStateForItems(orderItemIds: string[]): Promise<{ orderItemId: string, returnId: string | null, ref: string | null, status: string | null, refundStatus: string | null }[]>;
   /** Creates a refund request in the Finance approval queue for remedies decided outside a return (dispute decisions). Approved does not mean sent. The items must belong to one seller group of the order (a request spanning groups is refused with VALIDATION_FAILED, details.groups; the caller makes one request per group). items gives refunded quantities (default: each item's full quantity) and is carried on returns.refund.approved. Not for goodwill: reasonCode customer_goodwill is refused with REMEDY_NOT_AVAILABLE (goodwill is store credit through wallet; when wallet is off support refuses the remedy, decision D-RT3). Used by: support. */
   requestRefund(input: { source: 'case' | 'exception', caseId?: string, orderId: string, orderItemIds: string[], items?: { orderItemId: string, quantity: number }[], breakdown: RefundBreakdown, fundedBy: string, reasonCode?: string, reason: string, proposedBy: common.Actor }): Promise<RefundRequest>;
@@ -2534,19 +2534,19 @@ export interface ReturnsPublicApi {
   listForCustomer(customerId: string, filter: { state?: 'open' | 'completed' | 'all' }, page: common.PageInput): Promise<common.Page<ReturnSummary>>;
   /** Open returns, refunds on the way and refunded this year for the account overview Used by: graphql. */
   customerOverview(customerId: string): Promise<CustomerReturnsOverview>;
-  /** A return of this seller with policy, payment, deadlines, shipment, inspection and earnings impact (GraphQL seller `sellerReturn`) Used by: graphql. */
+  /** A return of this seller with policy, payment, deadlines, shipment, inspection and earnings impact (GraphQL seller `sellerReturn`) Used by: graphql, support. */
   getReturnForSeller(sellerId: string, ref: string): Promise<ReturnCase | null>;
-  /** Any return with owner, exception record, refund request and action history (staff) Used by: graphql. */
+  /** Any return with owner, exception record, refund request and action history (staff) Used by: graphql, warehouse. */
   getReturnAdmin(ref: string): Promise<ReturnCase | null>;
-  /** Returns on one order, newest first. Seller viewer: only that seller's returns; store viewer: customer fields only. Batched per order (Order.returns). Used by: graphql. */
+  /** Returns on one order, newest first. Seller viewer: only that seller's returns; store viewer: customer fields only. Batched per order (Order.returns). Used by: graphql, support. */
   listForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin', customerId?: string, sellerId?: string }): Promise<ReturnCase[]>;
   /** Return eligibility now and the latest return per order item, batched (OrderItem.returnEligibility) Used by: graphql. */
   eligibilityForItems(orderItemIds: string[]): Promise<{ orderItemId: string, eligible: boolean, ineligibleReason: string | null, message: string, quantityPurchased: number, quantityReturnable: number, returnBy: string | null, latestReturn: { returnId: string, ref: string, status: string, statusLabel: string, refundStatus: string | null } | null }[]>;
-  /** Returns queue tiles for the seller dashboard: overdue, awaiting response, to inspect, disputes needing evidence Used by: graphql. */
+  /** Returns queue tiles for the seller dashboard: overdue, awaiting response, to inspect, disputes needing evidence Used by: graphql, reports, sellers. */
   sellerQueueCounts(sellerId: string): Promise<SellerReturnCounts>;
   /** Evidence the seller (or staff) attached to a return before escalation; support copies it into the case it opens for this return Used by: support. */
   listEvidence(returnId: string): Promise<ReturnEvidence[]>;
-  /** A seller's returns for the admin seller 360 Used by: graphql, search. */
+  /** A seller's returns for the admin seller 360 Used by: graphql, search, sellers. */
   listForSeller(sellerId: string, filter: { state?: 'open' | 'completed' | 'all', q?: string }, page: common.PageInput): Promise<common.Page<AdminReturnRow>>;
   /** Refund approval queue for Finance Used by: graphql. */
   listRefundRequests(filter: { status?: string, source?: string }, page: common.PageInput): Promise<common.Page<RefundRequest>>;
@@ -2554,13 +2554,13 @@ export interface ReturnsPublicApi {
   getRefundRequest(ref: string): Promise<RefundRequest | null>;
   /** Refund requests of an order from returns, case decisions and exceptions (admin order 360) Used by: graphql. */
   listRefundRequestsForOrder(orderId: string): Promise<RefundRequest[]>;
-  /** Refund requests created by a case decision, with Finance approval state (admin dispute view) Used by: graphql. */
+  /** Refund requests created by a case decision, with Finance approval state (admin dispute view) Used by: graphql, support. */
   listRefundRequestsForCase(caseId: string): Promise<RefundRequest[]>;
   /** Storefront returns section: the seller's standard terms for new items (resolveTerms with no category or condition). Category exceptions and per-offer terms show on the product page and are frozen on the order item. Used by: sellers, graphql. */
   sellerReturnTermsFor(sellerIds: string[]): Promise<Record<string, EffectiveTerms>>;
   /** Export rows for reports datasets returns.admin.requests, returns.admin.inspections and returns.seller.requests (seller rows scoped to the principal's seller) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;
-  /** Any return by id, staff view (same as getReturnAdmin by ref) Used by: warehouse. */
+  /** Any return by id, staff view (same as getReturnAdmin by ref) Used by: warehouse, support. */
   getReturn(returnId: string): Promise<ReturnCase | null>;
   /** When an appeal overturns a case decision: cancel the case's refund requests still requested, under review or declined. Approved, processing or sent ones are returned in notCancellable (money already moving). Each cancellation is recorded in the request history and the audit log as the actor (the staff member deciding the appeal) and publishes returns.refund.cancelled. Used by: support. */
   cancelRefundsForCase(caseId: string, reason: string, actor: common.Actor): Promise<{ cancelled: RefundRequest[], notCancellable: RefundRequest[] }>;

@@ -2071,7 +2071,7 @@ export const PromotionsBudgetThresholdReachedEvent: z.ZodType<PromotionsBudgetTh
 
 /** What other modules may call in-process: `ctx.use('promotions')` (or `ctx.tryUse` for an optional dependency). */
 export interface PromotionsPublicApi {
-  /** Current markdown or flash price, was price, badges, purchase limit and countdown per offer. Used for product cards, the purchase box and cart lines so prices match everywhere (plan ch. 15: consistent across product page, cart, checkout and confirmation). Used by: offers, search, cart, content, wishlist, graphql. */
+  /** Current markdown or flash price, was price, badges, purchase limit and countdown per offer. Used for product cards, the purchase box and cart lines so prices match everywhere (plan ch. 15: consistent across product page, cart, checkout and confirmation). Used by: offers, search, cart, content, wishlist, graphql, reports. */
   priceOffers(offerIds: string[], ctx: { customerId?: string, at?: string }): Promise<OfferPromotion[]>;
   /** Runs eligibility, stacking, limits and budgets for a cart or checkout quote. Returns per-line discounts with the funding split, free-shipping packages, applied codes with the items they cover and rejected codes with a reason the customer can read. Pure read: nothing is reserved. Used by: cart, checkout. */
   evaluateCart(input: CartEvaluationInput): Promise<CartEvaluation>;
@@ -2093,7 +2093,7 @@ export interface PromotionsPublicApi {
   liveDeals(opts: { limit: number, campaignId?: string }): Promise<FlashSaleBlock[]>;
   /** Honest 'was' price: delegates to offers.lowestPrice(offerId, offers.wasPriceLookbackDays (read with ctx.settings.read; offers owns the window, decision O5), campaignStart or now) and returns null when offers has no history for the window. No price history is kept in promotions. Used by: offers, wishlist. */
   referencePrice(offerId: string): Promise<common.Money | null>;
-  /** Deals page data in one call: tab counts, live flash sales, clippable coupons (clipped state for the customer), the first clearance batch, upcoming events with reminder state, the combination rules and serverTime for countdowns. Same data as GET /api/store/promotions/deals. Used by: graphql. */
+  /** Deals page data in one call: tab counts, live flash sales, clippable coupons (clipped state for the customer), the first clearance batch, upcoming events with reminder state, the combination rules and serverTime for countdowns. Same data as GET /api/store/promotions/deals. Used by: graphql, workqueues. */
   getDealsPage(ctx: { customerId?: string, at?: string }): Promise<DealsPage>;
   /** Clearance products page by page (GET /deals/clearance). Used by: graphql. */
   listClearance(paging: common.PageInput): Promise<common.Page<DealProduct>>;

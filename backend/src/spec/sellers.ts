@@ -3139,29 +3139,29 @@ export const SellersInvitationSentEvent: z.ZodType<SellersInvitationSentEvent> =
 
 /** What other modules may call in-process: `ctx.use('sellers')` (or `ctx.tryUse` for an optional dependency). */
 export interface SellersPublicApi {
-  /** Store name, slug, status, verified label and whether new sales are allowed (marketplace sellers only; the Official Store is ownerType official with sellerId null and has no seller record) Used by: offers, orders, catalog, search, finance, returns, support, reviews, promotions, advertising, trust, reports, graphql. */
+  /** Store name, slug, status, verified label and whether new sales are allowed (marketplace sellers only; the Official Store is ownerType official with sellerId null and has no seller record) Used by: offers, orders, catalog, search, finance, returns, support, reviews, promotions, advertising, trust, reports, graphql, messaging. */
   getSeller(sellerId: string): Promise<SellerSnapshot | null>;
-  /** Batch version for lists Used by: offers, search, orders, reports, wishlist, graphql. */
+  /** Batch version for lists Used by: offers, search, orders, reports, wishlist, graphql, advertising, catalog, content, finance, fulfillment-service, promotions, reviews, shipping, trust. */
   getSellers(sellerIds: string[]): Promise<SellerSnapshot[]>;
   /** Single answer to 'does any active restriction or suspension block this?'. Offers, catalog, promotions and advertising call it before accepting new work. Used by: offers, catalog, promotions, advertising. */
   canSell(sellerId: string, check: { activity: 'new_offers' | 'new_listings' | 'product_submissions' | 'offer_reactivation' | 'sales' | 'advertising' | 'promotions', categoryId?: string, condition?: string, offerId?: string }): Promise<{ allowed: boolean, restrictionId?: string, reason?: string, appealRoute?: string }>;
-  /** Seller-area permission check used by the kernel auth guard for every seller endpoint Used by: identity, access. */
+  /** Seller-area permission check used by the kernel auth guard for every seller endpoint Used by: identity, access, messaging, notifications. */
   getMemberAccess(sellerId: string, accountId: string): Promise<{ memberId: string, role: string, permissions: string[], isOwner: boolean } | null>;
-  /** Active members of the seller with their identity account id, role and whether they are the owner Used by: notifications. */
+  /** Active members of the seller with their identity account id, role and whether they are the owner Used by: notifications, messaging. */
   listMembers(sellerId: string): Promise<{ memberId: string, accountId: string, role: string, isOwner: boolean }[]>;
   /** The seller owner's identity account (null for an unknown seller) Used by: notifications. */
   ownerOf(sellerId: string): Promise<{ accountId: string, memberId: string } | null>;
-  /** Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards Used by: offers, reports, search. */
+  /** Latest metrics vs targets; offers uses it for main-offer eligibility, reports for seller dashboards Used by: offers, reports, search, support. */
   getPerformance(sellerId: string): Promise<PerformanceSummary>;
-  /** Name, logo, verified label, rating and slug for product pages and offer lists Used by: offers, search, content, orders, wishlist, graphql. */
+  /** Name, logo, verified label, rating and slug for product pages and offer lists Used by: offers, search, content, orders, wishlist, graphql, messaging. */
   getStorefrontCard(sellerIds: string[]): Promise<SellerSummary[]>;
   /** Used by trust when a Seller Manager accepts a restriction recommendation in the trust screen; follows the same approval rules as the admin endpoint Used by: trust. */
   requestRestriction(input: RestrictionInput & { sellerId: string, requestedBy: common.Actor }): Promise<Restriction>;
   /** The applicant behind a seller application (identity account id, contact name and work email), so staff → applicant conversations can add the applicant as a participant (messaging maps the account to its customer id). Null for an unknown application Used by: messaging, notifications. */
   getApplicationParticipant(applicationId: string): Promise<{ applicationId: string, ref: string, state: string, applicantAccountId: string, sellerId: string | null, name: string, email: string, storeName: string | null } | null>;
-  /** Public storefront by slug, same data as GET /api/store/sellers/stores/{slug}; null for unknown, unapproved or closed stores Used by: wishlist, graphql. */
+  /** Public storefront by slug, same data as GET /api/store/sellers/stores/{slug}; null for unknown, unapproved or closed stores Used by: wishlist, graphql, search. */
   getStorefrontBySlug(slug: string): Promise<Storefront | null>;
-  /** Admin seller list with the same filters as GET /api/admin/sellers/sellers Used by: graphql, search. */
+  /** Admin seller list with the same filters as GET /api/admin/sellers/sellers Used by: graphql, search, content, finance, fulfillment-service. */
   searchSellers(filter: { search?: string, statuses?: string[], verified?: boolean, dispatchBelowPct?: number, mainCategoryId?: string }, page: common.PageInput): Promise<common.Page<SellerSnapshot>>;
   /** Export rows for reports dataset sellers.admin.accounts (the filtered seller list) Used by: reports. */
   exportRows(dataset: string, filters: unknown, principal: identity.Principal, cursor?: string): Promise<{ rows: unknown[], nextCursor?: string }>;

@@ -2087,11 +2087,11 @@ export const FinanceReconciliationItemClosedEvent: z.ZodType<FinanceReconciliati
 export interface FinancePublicApi {
   /** Effect of a refund on seller earnings and fees, shown before deciding Used by: returns, support, orders. */
   previewRefundImpact(orderItemIds: string[], refund: common.Money, fundedBy: string): Promise<{ sellerEarningsChange: common.Money, feeReturned: common.Money, afterPayout: boolean, note: string }>;
-  /** All seller balances together for the sellers header (SellerStats.balances): total = pending + available + held across sellers, the held part, and how many sellers have a negative available balance Used by: sellers. */
+  /** All seller balances together for the sellers header (SellerStats.balances): total = pending + available + held across sellers, the held part, and how many sellers have a negative available balance Used by: sellers, reports. */
   sellerBalanceTotals(): Promise<{ total: common.Money, held: common.Money, negativeCount: number }>;
   /** What a sent refund changed on the seller ledger: the refund (or refund_after_payout) and fee_refund entries posted for it on these order items. Null until payments.refund.sent is booked (then a preview is all there is) Used by: returns. */
   bookedRefundImpact(paymentRefundId: string, orderItemIds: string[]): Promise<{ sellerEarningsChange: common.Money, feeReturned: common.Money, afterPayout: boolean, note: string } | null>;
-  /** Fee and seller earnings for a price under the active fee rules Used by: offers, promotions, sellers. */
+  /** Fee and seller earnings for a price under the active fee rules Used by: offers, promotions, sellers, orders. */
   calculateFee(input: FeeCalcInput): Promise<FeeCalculation>;
   /** Balances for dashboards and seller detail Used by: sellers, reports, graphql. */
   getSellerBalances(sellerId: string): Promise<SellerBalances>;
@@ -2127,7 +2127,7 @@ export interface FinancePublicApi {
   getPayoutRun(ref: string): Promise<PayoutRun & { sellers: common.Page<RunPayoutRow>, failedPayouts: Payout[], destinationReviews: DestinationReview[] } | null>;
   /** Payout runs, newest first Used by: graphql. */
   listPayoutRuns(filter: { status?: string }, page: common.PageInput): Promise<common.Page<PayoutRun>>;
-  /** Holds placed for a case, order or chargeback, batched (Case.holds in the dispute view) Used by: graphql. */
+  /** Holds placed for a case, order or chargeback, batched (Case.holds in the dispute view) Used by: graphql, support. */
   holdsForReference(references: { kind: string, id: string }[]): Promise<Hold[]>;
   /** Fee and earnings at a price on the seller's own offer form (calculateFee under the active rules, with the fee basis explained) Used by: offers, graphql. */
   previewOfferEarnings(items: { offerId: string, sellerId: string, categoryId: string | null, price: common.Money }[]): Promise<Record<string, EarningsPreview>>;

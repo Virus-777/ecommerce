@@ -509,13 +509,13 @@ Indexes: `(computed_at)`
 | addStaffParticipant | `(conversationId: uuid, staff: Actor, caseId: uuid) => Conversation`<br>Support joins an order conversation when a case is opened | support |
 | sellerResponseStats | `(sellerId: uuid, range: DateRange) => ResponseStats`<br>Response time for seller performance and reports | sellers, reports, graphql |
 | replyStatsByDay | `(range: DateRange, sellerId?: uuid) => DailyReplyStats[]`<br>Seller reply rounds in order and product conversations per market day and seller: customer messages waiting for a reply, replies, total reply minutes and replies within the target. Reports' Response time and case backlog. | reports |
-| unreadCount | `(participant: Actor) => int`<br>Badge counts for the account and Seller Center | notifications |
+| unreadCount | `(participant: Actor) => int`<br>Badge counts for the account and Seller Center | notifications, customers |
 | listForOrder | `(orderId: uuid, participant: Actor) => ConversationSummary[]`<br>Conversations about an order or its items that the participant takes part in (Order.conversations) | graphql |
 | getForSubject | `(subject: { kind: 'return' | 'case' | 'order_item', id: uuid }, participant: Actor) => Conversation | null`<br>The conversation linked to a return, case or item, batched (Return.conversation) | graphql |
 | unreadSummary | `(participant: Actor) => { conversations: int, messages: int, fromNames: string[] }`<br>Unread counts and who wrote, for the account overview tile and header badge | graphql |
-| sellerInboxSummary | `(sellerId: uuid) => { awaitingReply: int, overdue: int, oldestWaitingSince: datetime | null, unreadConversations: int, targetHours: int }`<br>Unanswered and overdue customer messages for the seller dashboard | graphql |
+| sellerInboxSummary | `(sellerId: uuid) => { awaitingReply: int, overdue: int, oldestWaitingSince: datetime | null, unreadConversations: int, targetHours: int }`<br>Unanswered and overdue customer messages for the seller dashboard | graphql, reports |
 | listInbox | `(participant: Actor, filter: { unreadOnly?: bool, replyState?: string }, page: PageInput) => Page<ConversationSummary>`<br>Inbox of a customer or seller; the seller inbox lists overdue first | graphql |
-| getConversation | `(participant: Actor, conversationId: uuid) => Conversation | null`<br>Conversation header and messages for a participant | graphql |
+| getConversation | `(participant: Actor, conversationId: uuid) => Conversation | null`<br>Conversation header and messages for a participant | graphql, trust |
 | customerConversationSummaries | `(customerIds: uuid[]) => map<CustomerConversationSummary>`<br>Counts, last message time and counterparties of each customer's conversations for the customer 360; never message content | customers, graphql |
 | exportCustomerData | `(input: { customerId: uuid, accountId: uuid }) => CustomerDataSection[]`<br>The customer's conversations and the messages they can see (no hidden messages, internal notes or other parties' contact details) for the personal data export. Export hook called by customers.build-data-exports | customers |
 

@@ -1362,7 +1362,7 @@ export interface SupportPublicApi {
   openCase(input: { kind: string, category: string, orderId?: string, orderItemIds?: string[], customerId?: string, sellerId?: string, returnId?: string, trustReportId?: string, subject: string, message: string, openedBy: common.Actor }): Promise<CaseView>;
   /** Customers-module ids with at least one case that is not resolved or closed. With ids only those ids are checked; without, every matching id is returned. The customer list filters hasOpenCases with it before paging, so pages are full and totals right. Used by: customers. */
   customerIdsWithOpenCases(filter: { ids?: string[] }): Promise<string[]>;
-  /** Open and recent cases per order item for the order page Used by: orders, returns. */
+  /** Open and recent cases per order item for the order page Used by: orders, returns, messaging, wallet. */
   casesForOrder(orderId: string): Promise<{ caseId: string, ref: string, status: string, orderItemIds: string[] }[]>;
   /** Unresolved cases for seller performance Used by: sellers, reports. */
   sellerCaseStats(sellerId: string, range: common.DateRange): Promise<{ open: number, unresolved: number, decidedAgainstSeller: number, medianReplyMinutes: number }>;
@@ -1382,7 +1382,7 @@ export interface SupportPublicApi {
   getCaseAdmin(ref: string): Promise<AdminCaseDetail | null>;
   /** Open and recent cases on one order with linked items, filtered to what the viewer may see: a customer their own cases, a guest session the cases it opened or of guest orders identity granted it, a seller the cases about its items. A store viewer with neither id sees none. Batched per order (Order.cases). Used by: graphql. */
   listCasesForOrder(orderId: string, viewer: { area: 'store' | 'seller' | 'admin', customerId?: string, guestSessionId?: string, sellerId?: string }): Promise<CaseView[]>;
-  /** Cases and disputes about a seller's orders (admin seller 360) Used by: graphql. */
+  /** Cases and disputes about a seller's orders (admin seller 360) Used by: graphql, sellers. */
   listCasesForSeller(sellerId: string, filter: { open?: boolean }, page: common.PageInput): Promise<common.Page<SellerCaseRow>>;
   /** The case opened about each return (escalation or report), as the viewer may see it Used by: returns, graphql. */
   getCasesForReturns(returnIds: string[], viewer: { area: 'store' | 'seller' | 'admin', customerId?: string, guestSessionId?: string, sellerId?: string }): Promise<Record<string, CaseView | AdminCaseDetail | null>>;

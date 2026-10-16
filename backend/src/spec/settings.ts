@@ -893,7 +893,7 @@ export interface SettingsPublicApi {
   get<T>(key: string, at?: string): Promise<T>;
   /** Country, region, currency, time zone, locale, business hours Used by: checkout, orders, shipping, finance, reports, promotions, advertising, support, workqueues. */
   market(): Promise<MarketSettings>;
-  /** Business-hour arithmetic in the market time zone for SLA deadlines. addBusinessDays counts whole days that have opening hours (closures and closed weekdays skipped) and keeps the local time of day, moved to closing time when that day closes earlier; from inside a closed day it counts from the next business day. Used by: support, workqueues, returns, sellers, catalog, shipping. */
+  /** Business-hour arithmetic in the market time zone for SLA deadlines. addBusinessDays counts whole days that have opening hours (closures and closed weekdays skipped) and keeps the local time of day, moved to closing time when that day closes earlier; from inside a closed day it counts from the next business day. Used by: support, workqueues, returns, sellers, catalog, shipping, notifications. */
   businessCalendar(): Promise<{ isOpen(at: string): boolean, isBusinessDay(day: string): boolean, addBusinessMinutes(from: string, minutes: number): string, addBusinessDays(from: string, days: number): string, nextOpen(after: string): string }>;
   /** Feature flag check Used by: *. */
   isEnabled(flagKey: string, subject?: { accountId?: string, realm?: string }): Promise<boolean>;
@@ -901,7 +901,7 @@ export interface SettingsPublicApi {
   registerSection(provider: { key: string, order: number, load: () => SettingsSection | Promise<SettingsSection> }): Promise<void>;
   /** Owning modules explain what a change of their declared settings does to existing commitments (open orders, sellers, content) Used by: checkout, orders, shipping, support, content, notifications. */
   registerImpactEstimator(keyPrefix: string, estimate: (change: { key: string, from: unknown, to: unknown, effectiveAt: string, applyScope: string }) => ImpactItem[]): Promise<void>;
-  /** Public market facts for any screen: support hours and open now, closures in the next 60 days, active maintenance notice, guest checkout and public feature flags (the web-facing subset of AppConfig) Used by: graphql. */
+  /** Public market facts for any screen: support hours and open now, closures in the next 60 days, active maintenance notice, guest checkout and public feature flags (the web-facing subset of AppConfig) Used by: graphql, content, support. */
   storeInfo(): Promise<{ market: PublicMarket, support: PublicSupport & { email?: string }, closures: Closure[], maintenance: MaintenanceNotice | null, guestCheckoutEnabled: boolean, features: { key: string, enabled: boolean }[], configVersion: string }>;
   /** Scheduled changes that affect sellers, soonest first (same as GET /api/seller/settings/upcoming-changes) Used by: graphql. */
   upcomingChangesForSellers(principal: identity.Principal): Promise<UpcomingChange[]>;
