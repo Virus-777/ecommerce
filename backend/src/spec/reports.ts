@@ -3268,6 +3268,13 @@ export const spec = defineModuleSpec({
             "state": 1,
             "created_at": 1
           }
+        },
+        {
+          "name": "export_jobs_state_expires_at_26fb45",
+          "key": {
+            "state": 1,
+            "expires_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -3584,6 +3591,12 @@ export const spec = defineModuleSpec({
             "order_id": 1,
             "group_id": 1
           }
+        },
+        {
+          "name": "fact_order_items_cancelled_at_524b9a",
+          "key": {
+            "cancelled_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -3808,6 +3821,12 @@ export const spec = defineModuleSpec({
             "product_id": 1,
             "requested_at": 1
           }
+        },
+        {
+          "name": "fact_returns_requested_at_0316fb",
+          "key": {
+            "requested_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -3950,6 +3969,12 @@ export const spec = defineModuleSpec({
             "day": 1
           },
           "unique": true
+        },
+        {
+          "name": "fact_marketplace_finance_daily_day_ac3205",
+          "key": {
+            "day": 1
+          }
         }
       ],
       "unenforced": []
@@ -4097,6 +4122,12 @@ export const spec = defineModuleSpec({
             "day": 1
           },
           "unique": true
+        },
+        {
+          "name": "fact_service_daily_day_ac3205",
+          "key": {
+            "day": 1
+          }
         }
       ],
       "unenforced": []
@@ -4185,6 +4216,12 @@ export const spec = defineModuleSpec({
             "day": 1
           },
           "unique": true
+        },
+        {
+          "name": "fact_marketly_fulfillment_daily_day_ac3205",
+          "key": {
+            "day": 1
+          }
         }
       ],
       "unenforced": []
@@ -4273,6 +4310,12 @@ export const spec = defineModuleSpec({
             "day": 1
           },
           "unique": true
+        },
+        {
+          "name": "fact_discovery_daily_day_ac3205",
+          "key": {
+            "day": 1
+          }
         }
       ],
       "unenforced": []
@@ -4544,6 +4587,12 @@ export const spec = defineModuleSpec({
             "day": 1
           },
           "unique": true
+        },
+        {
+          "name": "fact_campaigns_daily_day_ac3205",
+          "key": {
+            "day": 1
+          }
         }
       ],
       "unenforced": []

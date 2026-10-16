@@ -203,6 +203,7 @@ const export_jobs = new Schema(
 export_jobs.index({"ref":1}, {"name":"export_jobs_ref_8cef23","unique":true});
 export_jobs.index({"requested_by_id":1,"created_at":-1}, {"name":"export_jobs_requested_by_id_created_at_8ea94e"});
 export_jobs.index({"state":1,"created_at":1}, {"name":"export_jobs_state_created_at_b9168f"});
+export_jobs.index({"state":1,"expires_at":1}, {"name":"export_jobs_state_expires_at_26fb45"});
 
 /** One row per order item with the four date bases; the base of every sales metric */
 const fact_order_items = new Schema(
@@ -248,6 +249,7 @@ fact_order_items.index({"completed_at":1}, {"name":"fact_order_items_completed_a
 fact_order_items.index({"seller_id":1,"placed_at":1}, {"name":"fact_order_items_seller_id_placed_at_63d9e6"});
 fact_order_items.index({"product_id":1,"placed_at":1}, {"name":"fact_order_items_product_id_placed_at_0a3269"});
 fact_order_items.index({"order_id":1,"group_id":1}, {"name":"fact_order_items_order_id_group_id_686565"});
+fact_order_items.index({"cancelled_at":1}, {"name":"fact_order_items_cancelled_at_524b9a"});
 
 /** One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order */
 const fact_refunds = new Schema(
@@ -288,6 +290,7 @@ const fact_returns = new Schema(
 );
 fact_returns.index({"seller_id":1,"requested_at":1}, {"name":"fact_returns_seller_id_requested_at_02cad7"});
 fact_returns.index({"product_id":1,"requested_at":1}, {"name":"fact_returns_product_id_requested_at_ade020"});
+fact_returns.index({"requested_at":1}, {"name":"fact_returns_requested_at_0316fb"});
 
 /** Per seller and day: fee income, discount funding, amounts owed, holds, payouts */
 const fact_marketplace_finance_daily = new Schema(
@@ -310,6 +313,7 @@ const fact_marketplace_finance_daily = new Schema(
   collectionOptions("reports.fact_marketplace_finance_daily", { generatedId: true }),
 );
 fact_marketplace_finance_daily.index({"seller_id":1,"day":1}, {"name":"fact_marketplace_finance_daily_seller_id_day_385469","unique":true});
+fact_marketplace_finance_daily.index({"day":1}, {"name":"fact_marketplace_finance_daily_day_ac3205"});
 
 /** Per seller and day: dispatch, tracking, cancellations, response time, cases, delivery issues */
 const fact_service_daily = new Schema(
@@ -333,6 +337,7 @@ const fact_service_daily = new Schema(
   collectionOptions("reports.fact_service_daily", { generatedId: true }),
 );
 fact_service_daily.index({"seller_id":1,"day":1}, {"name":"fact_service_daily_seller_id_day_385469","unique":true});
+fact_service_daily.index({"day":1}, {"name":"fact_service_daily_day_ac3205"});
 
 /** Per seller of record and day: dispatches Marketly's warehouse made for Fulfilled by Marketly groups (kept out of fact_service_daily so seller dispatch metrics only count what the seller shipped) */
 const fact_marketly_fulfillment_daily = new Schema(
@@ -349,6 +354,7 @@ const fact_marketly_fulfillment_daily = new Schema(
   collectionOptions("reports.fact_marketly_fulfillment_daily", { generatedId: true }),
 );
 fact_marketly_fulfillment_daily.index({"seller_id":1,"day":1}, {"name":"fact_marketly_fulfillment_daily_seller_id_day_385469","unique":true});
+fact_marketly_fulfillment_daily.index({"day":1}, {"name":"fact_marketly_fulfillment_daily_day_ac3205"});
 
 /** Per product and day: views, cart additions, purchases, stockout minutes */
 const fact_discovery_daily = new Schema(
@@ -365,6 +371,7 @@ const fact_discovery_daily = new Schema(
   collectionOptions("reports.fact_discovery_daily", { generatedId: true }),
 );
 fact_discovery_daily.index({"product_id":1,"day":1}, {"name":"fact_discovery_daily_product_id_day_4e2c50","unique":true});
+fact_discovery_daily.index({"day":1}, {"name":"fact_discovery_daily_day_ac3205"});
 
 const fact_search_misses_daily = new Schema(
   {
@@ -413,6 +420,7 @@ const fact_campaigns_daily = new Schema(
   collectionOptions("reports.fact_campaigns_daily", { generatedId: true }),
 );
 fact_campaigns_daily.index({"campaign_kind":1,"campaign_id":1,"day":1}, {"name":"fact_campaigns_daily_campaign_kind_campaign_id_day_fd036d","unique":true});
+fact_campaigns_daily.index({"day":1}, {"name":"fact_campaigns_daily_day_ac3205"});
 
 /** Out-of-stock intervals still open per stock item (inventory.stock.changed); closing one adds its minutes to fact_discovery_daily */
 const open_stockouts = new Schema(

@@ -573,7 +573,7 @@ Indexes: `unique(metric_key, version)`
 | created_at | timestamptz |
 | finished_at | timestamptz? |
 
-Indexes: `(requested_by_id, created_at desc)`, `(state, created_at)`
+Indexes: `(requested_by_id, created_at desc)`, `(state, created_at)`, `(state, expires_at)`
 
 **fact_order_items**: One row per order item with the four date bases; the base of every sales metric
 
@@ -609,7 +609,7 @@ Indexes: `(requested_by_id, created_at desc)`, `(state, created_at)`
 | group_id | uuid? (seller group of the order; payments.payment.captured is matched on it) |
 | fulfilled_by | text? (official_warehouse|seller|marketly_service) (the group's PlacedGroup.fulfilledBy from orders.order.placed; null for rows recorded before it was kept) |
 
-Indexes: `(placed_at)`, `(paid_at)`, `(shipped_at)`, `(completed_at)`, `(seller_id, placed_at)`, `(product_id, placed_at)`, `(order_id, group_id)`
+Indexes: `(placed_at)`, `(paid_at)`, `(shipped_at)`, `(completed_at)`, `(seller_id, placed_at)`, `(product_id, placed_at)`, `(order_id, group_id)`, `(cancelled_at)`
 
 **fact_refunds**: One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order
 
@@ -641,7 +641,7 @@ Indexes: `pk (refund_id, seller_id)`, `(sent_at)`, `(seller_id, sent_at)`
 | outcome | text? |
 | stock_outcome | text? |
 
-Indexes: `(seller_id, requested_at)`, `(product_id, requested_at)`
+Indexes: `(seller_id, requested_at)`, `(product_id, requested_at)`, `(requested_at)`
 
 **fact_marketplace_finance_daily**: Per seller and day: fee income, discount funding, amounts owed, holds, payouts
 
@@ -660,7 +660,7 @@ Indexes: `(seller_id, requested_at)`, `(product_id, requested_at)`
 | ad_charges_minor | bigint |
 | service_fees_minor | bigint (Fulfilled by Marketly fees charged less reversals) |
 
-Indexes: `unique(seller_id, day)`
+Indexes: `unique(seller_id, day)`, `(day)`
 
 **fact_service_daily**: Per seller and day: dispatch, tracking, cancellations, response time, cases, delivery issues
 
@@ -680,7 +680,7 @@ Indexes: `unique(seller_id, day)`
 | cases_open_eod | int |
 | complaints_by_category | jsonb |
 
-Indexes: `unique(seller_id, day)`
+Indexes: `unique(seller_id, day)`, `(day)`
 
 **fact_marketly_fulfillment_daily**: Per seller of record and day: dispatches Marketly's warehouse made for Fulfilled by Marketly groups (kept out of fact_service_daily so seller dispatch metrics only count what the seller shipped)
 
@@ -693,7 +693,7 @@ Indexes: `unique(seller_id, day)`
 | overdue | int |
 | delivery_exceptions | int (shipping.shipment.exception on marketly_service packages) |
 
-Indexes: `unique(seller_id, day)`
+Indexes: `unique(seller_id, day)`, `(day)`
 
 **fact_discovery_daily**: Per product and day: views, cart additions, purchases, stockout minutes
 
@@ -706,7 +706,7 @@ Indexes: `unique(seller_id, day)`
 | purchases | int |
 | stockout_minutes | int |
 
-Indexes: `unique(product_id, day)`
+Indexes: `unique(product_id, day)`, `(day)`
 
 **fact_search_misses_daily**
 
@@ -746,7 +746,7 @@ Indexes: `unique(day, query_norm)`
 | spend_minor | bigint |
 | attributed_purchases | int |
 
-Indexes: `unique(campaign_kind, campaign_id, day)`
+Indexes: `unique(campaign_kind, campaign_id, day)`, `(day)`
 
 **open_stockouts**: Out-of-stock intervals still open per stock item (inventory.stock.changed); closing one adds its minutes to fact_discovery_daily
 
