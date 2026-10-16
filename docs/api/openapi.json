@@ -165380,7 +165380,8 @@
               "fulfillment_service",
               "statement",
               "seller",
-              "reconciliation"
+              "reconciliation",
+              "receipt"
             ]
           },
           "id": {
@@ -165391,7 +165392,7 @@
               "string",
               "null"
             ],
-            "description": "Human reference, e.g. MK-261005-17730, RT-…, PO-…"
+            "description": "Human reference, e.g. MK-261005-17730, RT-…, PO-…, REC-… (a purchasing receipt: the buying cost of the units received)"
           }
         },
         "required": [
@@ -167978,6 +167979,40 @@
           "feeRefunds",
           "netFeeIncome",
           "adIncome"
+        ]
+      },
+      "finance.DailyCompanyCost": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "buying_cost",
+              "discount",
+              "shipping_expense",
+              "return_loss",
+              "write_off",
+              "chargeback_loss",
+              "supplier_credit"
+            ]
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Money"
+          },
+          "entries": {
+            "type": "integer",
+            "description": "Trading entries summed into amount"
+          }
+        },
+        "required": [
+          "date",
+          "kind",
+          "amount",
+          "entries"
         ]
       },
       "finance.MarketplaceIncome": {
@@ -175478,6 +175513,48 @@
           "awaitingReply",
           "overdue",
           "period"
+        ]
+      },
+      "messaging.DailyReplyStats": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "Market day the customer's message that waits for a reply was sent"
+          },
+          "sellerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "OFFICIAL_STORE_ID for Official Store conversations"
+          },
+          "waiting": {
+            "type": "integer",
+            "description": "Customer messages that started a wait for the seller's reply (a reply round)"
+          },
+          "replied": {
+            "type": "integer"
+          },
+          "replyMinutesTotal": {
+            "type": "integer",
+            "description": "Minutes from the customer's message to the seller's reply, summed over replied (wall-clock time)"
+          },
+          "repliedWithinTarget": {
+            "type": "integer",
+            "description": "Replies within the reply target (targetHours)"
+          },
+          "targetHours": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "sellerId",
+          "waiting",
+          "replied",
+          "replyMinutesTotal",
+          "repliedWithinTarget",
+          "targetHours"
         ]
       },
       "messaging.ReplyTemplate": {
@@ -188483,19 +188560,22 @@
                 "type": [
                   "number",
                   "null"
-                ]
+                ],
+                "description": "Official Store gross margin % over the same number of days just before the range (reports.officialMargin); null when reports is off or nothing was costed"
               },
               "after": {
                 "type": [
                   "number",
                   "null"
-                ]
+                ],
+                "description": "Official Store gross margin % in the range"
               },
               "changePts": {
                 "type": [
                   "number",
                   "null"
-                ]
+                ],
+                "description": "after − before in points; without both, the change of official revenue over its cost basis on promoted orders"
               }
             }
           },
@@ -212039,6 +212119,75 @@
           "carriers",
           "labelPurchaseAvailable",
           "dispatchLabel"
+        ]
+      },
+      "support.DailyCaseStats": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date",
+            "description": "Market day the cases were opened"
+          },
+          "sellerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Seller the cases are about; null for cases about no seller (Official Store orders, account questions)"
+          },
+          "categoryKey": {
+            "type": "string"
+          },
+          "categoryLabel": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string"
+          },
+          "audience": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "seller"
+            ]
+          },
+          "opened": {
+            "type": "integer"
+          },
+          "firstReplied": {
+            "type": "integer",
+            "description": "Of the cases opened, those with a first reply (by Marketly support, or the seller when the seller handles the case)"
+          },
+          "firstReplyMinutesTotal": {
+            "type": "integer",
+            "description": "Minutes from opening to the first reply, summed over firstReplied (wall-clock time)"
+          },
+          "firstReplyWithinTarget": {
+            "type": "integer",
+            "description": "First replies on or before the case's first-response due time (targets count business hours)"
+          },
+          "sellerReplied": {
+            "type": "integer",
+            "description": "Customer cases about a seller where the seller replied"
+          },
+          "sellerReplyMinutesTotal": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "categoryKey",
+          "categoryLabel",
+          "group",
+          "audience",
+          "opened",
+          "firstReplied",
+          "firstReplyMinutesTotal",
+          "firstReplyWithinTarget",
+          "sellerReplied",
+          "sellerReplyMinutesTotal"
         ]
       },
       "support.CaseCategory": {
