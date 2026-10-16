@@ -3,7 +3,7 @@ import { isUuid } from '../../kernel/lib/ids.js';
 import { toPageRequest } from '../../kernel/lib/pagination.js';
 import type * as common from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
-import type { DailySellerIncome, DestinationReview, EarningsPreview, FeeCalcInput, FeeCalculation, FinancePublicApi, Hold, LedgerEntry, Payout, PayoutRun, ReconItem, Reference, RefundImpactPreview, RunPayoutRow, SellerBalances, SellerCredit, SellerFinanceDetail, Statement } from '../../spec/finance.js';
+import type { DailyCompanyCost, DailySellerIncome, DestinationReview, EarningsPreview, FeeCalcInput, FeeCalculation, FinancePublicApi, Hold, LedgerEntry, Payout, PayoutRun, ReconItem, Reference, RefundImpactPreview, RunPayoutRow, SellerBalances, SellerCredit, SellerFinanceDetail, Statement } from '../../spec/finance.js';
 import { Core, type FinanceServiceDeps } from './service/core.js';
 import { CREDIT_ACTION, CreditsPart } from './service/credits.js';
 import { DestinationsPart } from './service/destinations.js';
@@ -141,6 +141,11 @@ export class FinanceService implements FinancePublicApi {
   /** Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income. */
   marketplaceIncomeByDay(range: common.DateRange, sellerId?: string): Promise<DailySellerIncome[]> {
     return this.reports.incomeByDay(range, sellerId);
+  }
+
+  /** Official Store trading costs per market day and kind (reports' company trading reports) */
+  companyCostsByDay(range: common.DateRange): Promise<DailyCompanyCost[]> {
+    return this.reports.companyCostsByDay(range);
   }
 
   /** One seller's balances, ledger, payouts, statements, holds, amounts owed and adjustments (seller Finance page, admin seller 360) */

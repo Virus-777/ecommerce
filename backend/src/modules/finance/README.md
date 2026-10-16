@@ -707,6 +707,15 @@ Seller money and company money kept apart: the seller ledger (proceeds, pending,
 | netFeeIncome | `Money` |
 | adIncome | `Money` |
 
+### DailyCompanyCost
+
+| Field | Type |
+|---|---|
+| date | `date` |
+| kind | `enum(buying_cost|discount|shipping_expense|return_loss|write_off|chargeback_loss|supplier_credit)` |
+| amount | `Money` |
+| entries | `int` Trading entries summed into amount |
+
 ### MarketplaceIncome
 
 | Field | Type |
@@ -1521,6 +1530,7 @@ Indexes: `(at)`
 | recordCompanyCost | `(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: Money, reference: Reference, at: datetime }) => void`<br>Company trading costs for the Official Store margin | purchasing, inventory, shipping, warehouse |
 | hasPayoutBlock | `(sellerId: uuid) => { blocked: bool, reasons: string[] }`<br>Whether a seller can be paid (verified destination, no full hold) | sellers |
 | marketplaceIncomeByDay | `(range: DateRange, sellerId?: uuid) => DailySellerIncome[]`<br>Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income. | reports |
+| companyCostsByDay | `(range: DateRange) => DailyCompanyCost[]`<br>Official Store trading costs per market day and kind (buying cost, Official Store discounts, shipping expense, return losses, write-offs, chargeback losses, supplier credits), from what recordCompanyCost and the order and claim events record in trading_entries. Costs are positive; reversals are negative; supplier credits are positive amounts that lower cost. | reports |
 | getSellerAccount | `(sellerId: uuid) => SellerFinanceDetail`<br>One seller's balances, ledger, payouts, statements, holds, amounts owed and adjustments (seller Finance page, admin seller 360) | graphql |
 | getStatementForSeller | `(sellerId: uuid, ref: string) => Statement | null`<br>An itemised statement of this seller | graphql |
 | getStatement | `(ref: string) => Statement | null`<br>Any seller's statement as the seller sees it (staff) | graphql |

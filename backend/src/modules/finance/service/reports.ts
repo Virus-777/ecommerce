@@ -10,7 +10,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import { pageOf } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type * as identity from '../../../spec/identity.js';
-import type { DailySellerIncome, FinanceOverview, MarketplaceIncome, SellerFinanceDetail, SellerFinanceRow, TradingSummary, TradingTarget, TradingTargetInput } from '../../../spec/finance.js';
+import type { DailyCompanyCost, DailySellerIncome, FinanceOverview, MarketplaceIncome, SellerFinanceDetail, SellerFinanceRow, TradingSummary, TradingTarget, TradingTargetInput } from '../../../spec/finance.js';
 import type * as reports from '../../../spec/reports.js';
 import { addDays, dayStart, daysBetween, daysInMonth, encodeActor, isDate, isPeriod, marketDate, TYPE_LABELS, type EntryType } from '../domain/rules.js';
 import { toTarget } from '../mappers.js';
@@ -145,6 +145,27 @@ export class ReportsPart extends Part {
       out.set(key, v);
     }
     return [...out.values()];
+  }
+
+  /**
+   * Official Store trading costs per market day and kind (reports: Purchasing cost, Discounts and shipping expense,
+   * Returns cost). trading_entries keeps return losses as kind 'return'; the API calls them return_loss.
+   */
+  async companyCostsByDay(range: common.DateRange): Promise<DailyCompanyCost[]> {
+    const r = this.range(range.from, range.to);
+    const tz = this.core.tz();
+    const out = new Map<string, DailyCompanyCost>();
+    for (const row of await this.tradingRows(r.from, r.to)) {
+      if (row.kind === 'sale') continue;
+      const kind = (row.kind === 'return' ? 'return_loss' : row.kind) as DailyCompanyCost['kind'];
+      const date = marketDate(row.at, tz);
+      const key = `${date}|${kind}|${row.currency}`;
+      const v = out.get(key) ?? { date, kind, amount: { amount: 0, currency: row.currency }, entries: 0 };
+      v.amount = { amount: v.amount.amount + row.amount, currency: row.currency };
+      v.entries += 1;
+      out.set(key, v);
+    }
+    return [...out.values()].sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind));
   }
 
   /** Credits of ad charges (charge_credit on an ad campaign) in a range */

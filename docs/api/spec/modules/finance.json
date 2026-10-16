@@ -44,6 +44,7 @@
     { "name": "recordCompanyCost", "signature": "(input: { kind: 'buying_cost' | 'shipping_expense' | 'return_loss' | 'write_off' | 'supplier_credit', amount: Money, reference: Reference, at: datetime }) => void", "desc": "Company trading costs for the Official Store margin", "usedBy": ["purchasing", "inventory", "shipping", "warehouse"] },
     { "name": "hasPayoutBlock", "signature": "(sellerId: uuid) => { blocked: bool, reasons: string[] }", "desc": "Whether a seller can be paid (verified destination, no full hold)", "usedBy": ["sellers"] },
     { "name": "marketplaceIncomeByDay", "signature": "(range: DateRange, sellerId?: uuid) => DailySellerIncome[]", "desc": "Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income.", "usedBy": ["reports"] },
+    { "name": "companyCostsByDay", "signature": "(range: DateRange) => DailyCompanyCost[]", "desc": "Official Store trading costs per market day and kind (buying cost, Official Store discounts, shipping expense, return losses, write-offs, chargeback losses, supplier credits), from what recordCompanyCost and the order and claim events record in trading_entries. Costs are positive; reversals are negative; supplier credits are positive amounts that lower cost.", "usedBy": ["reports"] },
     { "name": "getSellerAccount", "signature": "(sellerId: uuid) => SellerFinanceDetail", "desc": "One seller's balances, ledger, payouts, statements, holds, amounts owed and adjustments (seller Finance page, admin seller 360)", "usedBy": ["graphql"] },
     { "name": "getStatementForSeller", "signature": "(sellerId: uuid, ref: string) => Statement | null", "desc": "An itemised statement of this seller", "usedBy": ["graphql"] },
     { "name": "getStatement", "signature": "(ref: string) => Statement | null", "desc": "Any seller's statement as the seller sees it (staff)", "usedBy": ["graphql"] },
@@ -444,6 +445,7 @@
       "daily": "TradingDay[]"
     },
     "DailySellerIncome": { "date": "date", "sellerId": "uuid", "feeIncome": "Money", "feeRefunds": "Money", "netFeeIncome": "Money", "adIncome": "Money" },
+    "DailyCompanyCost": { "date": "date", "kind": "enum(buying_cost|discount|shipping_expense|return_loss|write_off|chargeback_loss|supplier_credit)", "amount": "Money", "entries": { "type": "int", "desc": "Trading entries summed into amount" } },
     "MarketplaceIncome": {
       "range": "DateRange",
       "sellerSales": { "type": "Money", "desc": "Not company revenue" },

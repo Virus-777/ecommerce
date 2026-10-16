@@ -1425,6 +1425,23 @@ export const DailySellerIncome: z.ZodType<DailySellerIncome> = z.object({
   },
 }).register(common.apiTypes, { id: "finance.DailySellerIncome" });
 
+export interface DailyCompanyCost {
+  date: string;
+  kind: "buying_cost" | "discount" | "shipping_expense" | "return_loss" | "write_off" | "chargeback_loss" | "supplier_credit";
+  amount: common.Money;
+  /** Trading entries summed into amount */
+  entries: number;
+}
+
+export const DailyCompanyCost: z.ZodType<DailyCompanyCost> = z.object({
+  date: z.iso.date(),
+  kind: z.enum(["buying_cost", "discount", "shipping_expense", "return_loss", "write_off", "chargeback_loss", "supplier_credit"]),
+  get amount() {
+    return common.Money;
+  },
+  entries: z.number().int().describe("Trading entries summed into amount"),
+}).register(common.apiTypes, { id: "finance.DailyCompanyCost" });
+
 export interface MarketplaceIncome {
   range: common.DateRange;
   /** Not company revenue */
@@ -2098,6 +2115,8 @@ export interface FinancePublicApi {
   hasPayoutBlock(sellerId: string): Promise<{ blocked: boolean, reasons: string[] }>;
   /** Fee income per seller per market day (commission and fees charged, fee refunds, net, ad income), from fee_charges and ledger_entries. Company revenue only; seller sales are not income. Used by: reports. */
   marketplaceIncomeByDay(range: common.DateRange, sellerId?: string): Promise<DailySellerIncome[]>;
+  /** Official Store trading costs per market day and kind (buying cost, Official Store discounts, shipping expense, return losses, write-offs, chargeback losses, supplier credits), from what recordCompanyCost and the order and claim events record in trading_entries. Costs are positive; reversals are negative; supplier credits are positive amounts that lower cost. Used by: reports. */
+  companyCostsByDay(range: common.DateRange): Promise<DailyCompanyCost[]>;
   /** One seller's balances, ledger, payouts, statements, holds, amounts owed and adjustments (seller Finance page, admin seller 360) Used by: graphql. */
   getSellerAccount(sellerId: string): Promise<SellerFinanceDetail>;
   /** An itemised statement of this seller Used by: graphql. */
@@ -3678,7 +3697,7 @@ export const spec = defineModuleSpec({
   summary: "Seller money and company money kept apart: the seller ledger (proceeds, pending, available, held, negative and amounts owed), fee rules, holds, adjustments, payout runs and payouts, statements, payout-destination verification, daily reconciliation checks, and company trading margins separate from marketplace fee income.",
   dependsOn: ["orders","payments","sellers","access"],
   optionalDeps: ["returns","advertising","promotions","purchasing","inventory","shipping","support","wallet","workqueues","notifications","audit","identity","media","reports","settings","offers"],
-  publicApi: ["previewRefundImpact","sellerBalanceTotals","bookedRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
+  publicApi: ["previewRefundImpact","sellerBalanceTotals","bookedRefundImpact","calculateFee","getSellerBalances","recordAdCharge","recordServiceFee","creditSellerCharge","creditSeller","getSellerCredit","withdrawSellerCredit","recordExternalDifference","recordCompanyCost","hasPayoutBlock","marketplaceIncomeByDay","companyCostsByDay","getSellerAccount","getStatementForSeller","getStatement","getPayoutRun","listPayoutRuns","holdsForReference","previewOfferEarnings","getNextPayoutRun","previewRefundImpactForOrder","exportRows"],
   permissions: [
     {
       "key": "finance.ledger.view",
