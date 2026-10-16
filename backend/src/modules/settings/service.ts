@@ -99,8 +99,8 @@ interface Snapshot {
   loadedAt: number;
   /** Version in force (or last written) per key */
   values: Map<string, ValueRecord>;
-  /** Scheduled changes not yet applied: their values count from effectiveAt on */
-  scheduled: { key: string; value: unknown; effectiveAt: Date }[];
+  /** Scheduled changes not yet applied, per key: their values count from effectiveAt on */
+  scheduled: Map<string, { value: unknown; effectiveAt: Date }[]>;
   flags: Map<string, FlagRecord>;
 }
 
@@ -113,6 +113,9 @@ interface SectionProvider {
 type Estimator = (change: { key: string; from: unknown; to: unknown; effectiveAt: string; applyScope: string }) => ImpactItem[] | Promise<ImpactItem[]>;
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
+
+/** The settings module's own numeric settings */
+type OwnNumber = 'appConfigCacheSeconds' | 'defaultMinLeadDays' | 'sellerVisibleMinLeadDays';
 
 /**
  * Settings use cases. Depends only on its repository, the event bus, the clock and other modules' public APIs.
@@ -173,12 +176,17 @@ export class SettingsService implements SettingsPublicApi {
         const prev = byKey.get(v.key);
         if (!prev || v.version > prev.version) byKey.set(v.key, v);
       }
-      const snap: Snapshot = {
-        loadedAt: this.now().getTime(),
-        values: byKey,
-        scheduled: open.filter((c) => c.status === 'scheduled').flatMap((c) => c.items.map((i) => ({ key: i.key, value: i.to, effectiveAt: c.effectiveAt }))),
-        flags: new Map(flags.map((f) => [f.key, f])),
-      };
+      const scheduled = new Map<string, { value: unknown; effectiveAt: Date }[]>();
+      for (const c of open) {
+        if (c.status !== 'scheduled') continue;
+        for (const i of c.items) {
+          const s = { value: i.to, effectiveAt: c.effectiveAt };
+          const list = scheduled.get(i.key);
+          if (list) list.push(s);
+          else scheduled.set(i.key, [s]);
+        }
+      }
+      const snap: Snapshot = { loadedAt: this.now().getTime(), values: byKey, scheduled, flags: new Map(flags.map((f) => [f.key, f])) };
       if (generation === this.#generation) this.#snap = snap;
       return snap;
     })().finally(() => {
@@ -205,27 +213,36 @@ export class SettingsService implements SettingsPublicApi {
       const v = await this.repo.valueAt(key, t);
       return v ? { value: v.value } : undefined;
     }
-    const snap = await this.#snapshot();
+    return this.#resolveIn(await this.#snapshot(), key, t);
+  }
+
+  /** The stored version in force at t, or the latest scheduled change effective by then (the snapshot's view of #resolve) */
+  #resolveIn(snap: Snapshot, key: string, t: Date): { value: unknown } | undefined {
     const current = snap.values.get(key);
-    const base = current && current.effectiveFrom <= t ? current : undefined;
-    let pick: { value: unknown; from: number } | undefined = base ? { value: base.value, from: base.effectiveFrom.getTime() } : undefined;
-    for (const s of snap.scheduled) {
-      if (s.key !== key || s.effectiveAt > t) continue;
+    let pick: { value: unknown; from: number } | undefined = current && current.effectiveFrom <= t ? { value: current.value, from: current.effectiveFrom.getTime() } : undefined;
+    for (const s of snap.scheduled.get(key) ?? []) {
+      if (s.effectiveAt > t) continue;
       const from = s.effectiveAt.getTime();
       if (!pick || from >= pick.from) pick = { value: s.value, from };
     }
-    return pick ? { value: pick.value } : undefined;
+    return pick && { value: pick.value };
   }
 
   /** This module's own runtime settings (the kernel's ctx.settings never asks the settings module itself) */
-  async #own<K extends 'appConfigCacheSeconds' | 'defaultMinLeadDays' | 'sellerVisibleMinLeadDays'>(name: K): Promise<number> {
-    const r = await this.#resolve(`settings.${name}`);
-    const v = r?.value ?? this.ctx.spec.settings[name].default;
+  async #own(name: OwnNumber): Promise<number> {
+    return this.#ownIn(await this.#snapshot(), name, this.now());
+  }
+
+  #ownIn(snap: Snapshot, name: OwnNumber, now: Date): number {
+    const v = this.#resolveIn(snap, `settings.${name}`, now)?.value ?? this.ctx.spec.settings[name].default;
     return typeof v === 'number' ? v : Number(this.ctx.spec.settings[name].default);
   }
 
+  /** The catalogue of every enabled module's settings; rebuilt only when the lead-day settings it depends on change */
   async #defs(): Promise<Map<string, Definition>> {
-    const o = { defaultMinLeadDays: await this.#own('defaultMinLeadDays'), sellerVisibleMinLeadDays: await this.#own('sellerVisibleMinLeadDays') };
+    const snap = await this.#snapshot();
+    const now = this.now();
+    const o = { defaultMinLeadDays: this.#ownIn(snap, 'defaultMinLeadDays', now), sellerVisibleMinLeadDays: this.#ownIn(snap, 'sellerVisibleMinLeadDays', now) };
     const k = `${o.defaultMinLeadDays}/${o.sellerVisibleMinLeadDays}`;
     if (this.#catalogue?.k !== k) this.#catalogue = { k, map: buildCatalogue(allSpecs, this.#enabled, o) };
     return this.#catalogue.map;
@@ -247,7 +264,8 @@ export class SettingsService implements SettingsPublicApi {
   async get<T>(key: string, at?: string): Promise<T> {
     const def = typeof key === 'string' ? (await this.#defs()).get(key) : undefined;
     if (!def || !def.available) throw this.ctx.error('UNKNOWN_SETTING', `There is no setting ${String(key)}`, { key });
-    return this.#valueOf<T>(key, at);
+    const r = await this.#resolve(key, at);
+    return (r ? r.value : def.default) as T;
   }
 
   /** Value in force or the declared default, without the enabled-module check (this module's own screens and drafts) */
@@ -258,9 +276,23 @@ export class SettingsService implements SettingsPublicApi {
     return (def ? def.default : null) as T;
   }
 
+  /** Values in force now of several keys (each its declared default when none is stored), from one snapshot */
+  async #valuesNow<K extends string>(keys: readonly K[]): Promise<Record<K, unknown>> {
+    const snap = await this.#snapshot();
+    const defs = await this.#defs();
+    const now = this.now();
+    return Object.fromEntries(
+      keys.map((k) => {
+        const r = this.#resolveIn(snap, k, now);
+        const def = defs.get(k);
+        return [k, r ? r.value : def ? def.default : null];
+      }),
+    ) as Record<K, unknown>;
+  }
+
   /** Country, region, currency, time zone, locale, business hours */
   async market(): Promise<MarketSettings> {
-    const v = Object.fromEntries(await Promise.all(MARKET_KEYS.map(async (k) => [k, await this.#valueOf(k)] as const))) as Record<(typeof MARKET_KEYS)[number], unknown>;
+    const v = await this.#valuesNow(MARKET_KEYS);
     const timeZone = (v['market.timeZone'] as string) || this.ctx.config.market.timeZone;
     const hours = (v['support.businessHours'] as DayHours[] | null) ?? [];
     const closures = (v['support.closures'] as Closure[] | null) ?? [];
@@ -422,7 +454,7 @@ export class SettingsService implements SettingsPublicApi {
     const now = this.now();
     const [m, defs, flags] = await Promise.all([this.market(), this.#defs(), this.#flags()]);
     const keys = [...defs.values()].filter((d) => d.public && d.available).map((d) => d.key).sort();
-    const raw = Object.fromEntries(await Promise.all(keys.map(async (k) => [k, await this.#valueOf(k)] as const)));
+    const raw = await this.#valuesNow(keys);
     const cal = createCalendar(m.businessHours, m.closures, m.timeZone);
     const openNow = cal.isOpen(now);
     const next = openNow ? null : cal.nextOpen(now);
