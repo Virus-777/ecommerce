@@ -231,6 +231,27 @@ describe('estimates and quotes', () => {
     expect(setup.body).toMatchObject({ labelPurchaseAvailable: true, labelUnavailableReason: null, dispatchLabel: expect.stringContaining('Ships in 1 business day') });
     expect(setup.body.carriers.every((c: any) => c.contacts.length === 0)).toBe(true);
   });
+
+  it('estimates a list of offers of several sellers in one batch, each as its own quote would', async () => {
+    const a = await seller();
+    const b = await seller({ area: 'all_50' });
+    const oa = offer(h, { profileId: a.profileId, sellerId: a.sellerId });
+    const ob = offer(h, { profileId: b.profileId, sellerId: b.sellerId });
+    const dispatch = (o: typeof oa) => ({ businessDays: o.dispatch.businessDays, sameDayCutoff: o.dispatch.sameDayCutoff ?? null, shipsFrom: o.dispatch.shipsFrom });
+    // concurrent quotes share one read of the reference data; each still answers for its own profile
+    const [qa, qb] = await Promise.all([h.service.quote(a.profileId, '99501', { weightGrams: 1000 }, dispatch(oa), oa.price), h.service.quote(b.profileId, '99501', { weightGrams: 1000 }, dispatch(ob), ob.price)]);
+    const list = await h.service.estimateOffers([oa.id, ob.id], '99501');
+    expect(list).toEqual([
+      { offerId: oa.id, shipsToLocation: qa.shipsToLocation, reason: qa.reason ?? null, option: qa.default ?? null, otherOptions: Math.max(0, qa.options.length - 1) },
+      { offerId: ob.id, shipsToLocation: qb.shipsToLocation, reason: qb.reason ?? null, option: qb.default ?? null, otherOptions: Math.max(0, qb.options.length - 1) },
+    ]);
+    expect(list.map((e) => e.shipsToLocation)).toEqual([false, true]);
+    // a change made between two estimates is seen by the next one
+    const before = (await h.service.estimateOffers([ob.id], '97205'))[0]!.option!.dispatchBy;
+    const next = before.slice(0, 10);
+    await h.call('POST', `${SELLER}/closures`, b.token, { name: 'Stocktake', from: marketDate(h.clock.now()), to: next });
+    expect((await h.service.estimateOffers([ob.id], '97205'))[0]!.option!.dispatchBy > before).toBe(true);
+  });
 });
 
 describe('pass 3: profile owners, exact in-use counts, ships from, Official Store free shipping', () => {

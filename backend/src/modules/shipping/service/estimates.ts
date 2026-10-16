@@ -5,9 +5,11 @@
  * no-pickup and no-delivery days). Quotes use the profile version in force at quote time.
  */
 import { AppError } from '../../../kernel/errors/index.js';
+import { isUuid } from '../../../kernel/lib/ids.js';
 import { money } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
-import type { CoverageCheck, CustomerNotice, DeliveryOption, DeliveryQuote, DispatchInput, PackageQuote, PackageQuoteInput, Parcel, ProfileMethod } from '../../../spec/shipping.js';
+import type { Offer } from '../../../spec/offers.js';
+import type { CoverageCheck, CustomerNotice, DeliveryOption, DeliveryQuote, DispatchInput, OfferEstimate, PackageQuote, PackageQuoteInput, Parcel, ProfileMethod } from '../../../spec/shipping.js';
 import { addDays, arrivalRange, arrivesLabel, isTime, MON_FRI, planDispatch, shipsLabel, type DayRules } from '../domain/calendar.js';
 import { addressKindOf, CONTIGUOUS_48_DC, destinationOf, TERRITORIES, zoneMatches, type AddressKind, type Destination } from '../domain/geo.js';
 import { fitsWeight, freeOutcome, freeThreshold, methodPrice, ruleStatus } from '../domain/rates.js';
@@ -58,58 +60,136 @@ interface OptionDraft {
 
 const encodeOptionId = (o: { v: string[]; m: string; s: string[] }) => Buffer.from(JSON.stringify(o)).toString('base64url');
 
+/** What every estimate reads, whatever the time: carriers, services, methods, active zones, rules not inactive, live notices */
+interface Reference {
+  carriers: CarrierRec[];
+  services: ServiceRec[];
+  methods: MethodRec[];
+  zones: ZoneRec[];
+  rules: RuleRec[];
+  notices: NoticeRec[];
+}
+
+/** The owner of a profile version */
+export const ownerOfProfile = (p: ProfileRec): Owner => ({ ownerType: p.owner_type as Owner['ownerType'], sellerId: p.seller_id });
+
+/** One key per owner (batched settings and closures) */
+export const ownerKey = (o: Owner) => (o.ownerType === 'official' ? 'official' : `seller:${o.sellerId}`);
+
+const SETTINGS_IN_FORCE = ['active', 'scheduled', 'superseded'] as const;
+
 export class Estimates {
+  /** The reference read in flight, for the writes count it started at */
+  #reference: { writes: number; load: Promise<Reference> } | null = null;
+
   constructor(private readonly core: Core) {}
 
   /* ---------------------------------------------------------------- loading */
 
   async world(at: Date = this.core.now()): Promise<World> {
-    const repo = this.core.repo;
     await this.core.ensureSeeded();
     const cfg = await this.core.cfg();
-    const [carriers, services, methods, zones, rules, notices, marketClosed, targets] = await Promise.all([
-      repo.find('carriers', {}),
-      repo.find('carrier_services', {}),
-      repo.find('methods', {}, { orderBy: [['position', 'asc']] }),
-      repo.find('zones', { status: 'active' }),
-      repo.find('free_shipping_rules', { status: { op: '<>', value: 'inactive' } }),
-      repo.find('notices', { status: 'live' }),
-      this.core.marketClosedDays(),
-      this.core.targets(at, cfg),
-    ]);
+    const [{ carriers, services, methods, zones, rules, notices }, marketClosed, targets] = await Promise.all([this.reference(), this.core.marketClosedDays(), this.core.targets(at, cfg)]);
     const byId = new Map(carriers.map((c) => [c.id, c]));
+    const today = this.core.today(at);
     return {
       at,
-      today: this.core.today(at),
+      today,
       cfg,
       carriers,
       services: new Map(services.map((s) => [s.id, s])),
       carrierOfService: new Map(services.flatMap((s) => (byId.get(s.carrier_id) ? [[s.id, byId.get(s.carrier_id)!] as const] : []))),
       methods,
       zones,
-      rules: rules.map((r) => ({ ...r, status: ruleStatus(r, this.core.today(at)) })),
+      rules: rules.map((r) => ({ ...r, status: ruleStatus(r, today) })),
       notices,
       marketClosed,
       targets,
     };
   }
 
+  /**
+   * The reference data: one read shared by the estimates that run at the same time (an offers page quotes every
+   * offer at once). Nothing is kept once the read lands, and a write of this process starts a new read, so a
+   * caller never sees older data than a read of its own would. The rows are shared: callers never change them.
+   */
+  private reference(): Promise<Reference> {
+    const repo = this.core.repo;
+    const writes = repo.writes;
+    if (this.#reference?.writes === writes) return this.#reference.load;
+    const entry = {
+      writes,
+      load: Promise.all([
+        repo.find('carriers', {}),
+        repo.find('carrier_services', {}),
+        repo.find('methods', {}, { orderBy: [['position', 'asc']] }),
+        repo.find('zones', { status: 'active' }),
+        repo.find('free_shipping_rules', { status: { op: '<>', value: 'inactive' } }),
+        repo.find('notices', { status: 'live' }),
+      ]).then(([carriers, services, methods, zones, rules, notices]) => ({ carriers, services, methods, zones, rules, notices })),
+    };
+    this.#reference = entry;
+    const landed = () => {
+      if (this.#reference === entry) this.#reference = null;
+    };
+    entry.load.then(landed, landed);
+    return entry.load;
+  }
+
   /** The profile version in force at a time (archived or unknown: undefined) */
   async profileAt(profileId: string, at: Date = this.core.now()): Promise<ProfileRec | undefined> {
-    const versions = await this.core.repo.find('profiles', { lineage_id: profileId }, { orderBy: [['effective_from', 'desc'], ['version', 'desc']] });
-    if (!versions.length || versions.some((v) => v.status === 'archived')) return undefined;
-    return versions.find((v) => QUOTABLE.includes(v.status) && v.effective_from.getTime() <= at.getTime());
+    return (await this.profilesAt([profileId], at)).get(profileId);
+  }
+
+  /** profileAt for several profiles (lineage ids) in one read */
+  async profilesAt(profileIds: readonly string[], at: Date = this.core.now()): Promise<Map<string, ProfileRec | undefined>> {
+    const ids = [...new Set(profileIds)];
+    const versions = ids.length ? await this.core.repo.find('profiles', { lineage_id: ids }, { orderBy: [['effective_from', 'desc'], ['version', 'desc']] }) : [];
+    const byLineage = new Map<string, ProfileRec[]>();
+    for (const v of versions) {
+      const list = byLineage.get(v.lineage_id);
+      if (list) list.push(v);
+      else byLineage.set(v.lineage_id, [v]);
+    }
+    return new Map(
+      ids.map((id) => {
+        const own = byLineage.get(id) ?? [];
+        if (!own.length || own.some((v) => v.status === 'archived')) return [id, undefined];
+        return [id, own.find((v) => QUOTABLE.includes(v.status) && v.effective_from.getTime() <= at.getTime())];
+      }),
+    );
   }
 
   /** Seller (or Official Store) settings in force, else the defaults a seller gets before saving any */
   async settingsFor(owner: Owner, at: Date = this.core.now(), cfg?: Cfg): Promise<SettingsRec> {
     const rows = await this.core.repo.find(
       'seller_settings',
-      { owner_type: owner.ownerType, seller_id: owner.ownerType === 'official' ? null : owner.sellerId, status: ['active', 'scheduled', 'superseded'], effective_from: { op: '<=', value: at } },
+      { owner_type: owner.ownerType, seller_id: owner.ownerType === 'official' ? null : owner.sellerId, status: SETTINGS_IN_FORCE, effective_from: { op: '<=', value: at } },
       { orderBy: [['effective_from', 'desc']], limit: 1 },
     );
-    if (rows[0]) return rows[0];
-    const c = cfg ?? (await this.core.cfg());
+    return rows[0] ?? this.defaultSettings(owner, cfg ?? (await this.core.cfg()));
+  }
+
+  /** settingsFor for several owners (by ownerKey): the sellers in one read */
+  async settingsForOwners(owners: readonly Owner[], at: Date = this.core.now(), cfg?: Cfg): Promise<Map<string, SettingsRec>> {
+    const sellerIds = [...new Set(owners.flatMap((o) => (o.ownerType === 'seller' && o.sellerId ? [o.sellerId] : [])))];
+    const official: Owner = { ownerType: 'official', sellerId: null };
+    const [officialRow, sellerRows, c] = await Promise.all([
+      owners.some((o) => o.ownerType === 'official') ? this.settingsFor(official, at, cfg) : undefined,
+      sellerIds.length
+        ? this.core.repo.find('seller_settings', { owner_type: 'seller', seller_id: sellerIds, status: SETTINGS_IN_FORCE, effective_from: { op: '<=', value: at } }, { orderBy: [['effective_from', 'desc']] })
+        : [],
+      cfg ?? this.core.cfg(),
+    ]);
+    const out = new Map<string, SettingsRec>();
+    if (officialRow) out.set(ownerKey(official), officialRow);
+    // newest first: the first row of a seller is the one in force
+    for (const r of sellerRows) if (!out.has(`seller:${r.seller_id}`)) out.set(`seller:${r.seller_id}`, r);
+    for (const o of owners) if (!out.has(ownerKey(o))) out.set(ownerKey(o), this.defaultSettings(o, c));
+    return out;
+  }
+
+  private defaultSettings(owner: Owner, c: Cfg): SettingsRec {
     return {
       id: '00000000-0000-7000-8000-000000000000',
       owner_type: owner.ownerType,
@@ -130,6 +210,20 @@ export class Estimates {
 
   async closuresFor(owner: Owner): Promise<ClosureRec[]> {
     return this.core.repo.find('closures', { owner_type: owner.ownerType, seller_id: owner.ownerType === 'official' ? null : owner.sellerId }, { orderBy: [['from_date', 'asc']] });
+  }
+
+  /** closuresFor for several owners (by ownerKey): the sellers in one read */
+  async closuresForOwners(owners: readonly Owner[]): Promise<Map<string, ClosureRec[]>> {
+    const sellerIds = [...new Set(owners.flatMap((o) => (o.ownerType === 'seller' && o.sellerId ? [o.sellerId] : [])))];
+    const official: Owner = { ownerType: 'official', sellerId: null };
+    const [officialRows, sellerRows] = await Promise.all([
+      owners.some((o) => o.ownerType === 'official') ? this.closuresFor(official) : [],
+      sellerIds.length ? this.core.repo.find('closures', { owner_type: 'seller', seller_id: sellerIds }, { orderBy: [['from_date', 'asc']] }) : [],
+    ]);
+    const out = new Map<string, ClosureRec[]>(owners.map((o) => [ownerKey(o), []]));
+    if (out.has(ownerKey(official))) out.set(ownerKey(official), officialRows);
+    for (const c of sellerRows) out.get(`seller:${c.seller_id}`)?.push(c);
+    return out;
   }
 
   /* ---------------------------------------------------------------- rules */
@@ -331,8 +425,23 @@ export class Estimates {
     const world = w ?? (await this.world());
     const profile = await this.profileAt(profileId, world.at);
     if (!profile) throw notFound('Shipping profile');
-    const owner: Owner = { ownerType: profile.owner_type as Owner['ownerType'], sellerId: profile.seller_id };
-    const settings = await this.settingsFor(owner, world.at, world.cfg);
+    const owner = ownerOfProfile(profile);
+    const [settings, closures] = await Promise.all([this.settingsFor(owner, world.at, world.cfg), this.closuresFor(owner)]);
+    return this.quoteProfile(world, profile, { settings, closures }, postalCode, parcel, dispatch, orderValue);
+  }
+
+  /** quote with the profile version and its owner's schedule already read */
+  private async quoteProfile(
+    world: World,
+    profile: ProfileRec,
+    schedule: { settings: SettingsRec; closures: ClosureRec[] },
+    postalCode: string,
+    parcel: Parcel | null,
+    dispatch: DispatchInput,
+    orderValue?: common.Money | null,
+  ): Promise<DeliveryQuote> {
+    const owner = ownerOfProfile(profile);
+    const { settings, closures } = schedule;
     const dest = destinationOf({ postalCode });
     const weight = parcel?.weightGrams && parcel.weightGrams > 0 ? parcel.weightGrams : DEFAULT_WEIGHT_GRAMS;
     const cov = this.coverage(world, dest, settings, profile.methods, weight);
@@ -346,7 +455,7 @@ export class Estimates {
       subtotal: orderValue ?? null,
       dispatch: [{ businessDays: dispatch.businessDays, sameDayCutoff: dispatch.sameDayCutoff ?? null, shipsFrom: dispatch.shipsFrom }],
       settings,
-      closures: await this.closuresFor(owner),
+      closures,
     });
     if (!options.length) return { shipsToLocation: false, reason: 'No delivery method is available for this item at this location.', options: [], default: null, freeOver: null };
     const def = options.find((x) => x.isDefault) ?? null;
@@ -366,6 +475,51 @@ export class Estimates {
     return { shipsToLocation: true, reason: null, options, default: def, freeOver };
   }
 
+  /**
+   * Default option per offer, resolved through offers' effective Offer.shipping (a Fulfilled by Marketly offer is quoted
+   * with the service profile and dispatch, and that Official profile brings the Official schedule); without a postal
+   * code the market default location. One read per kind for the whole list (offers, profiles, settings, closures).
+   */
+  async estimateOffers(offerIds: string[], postalCode?: string): Promise<OfferEstimate[]> {
+    const ids = [...new Set(offerIds)].filter(isUuid).slice(0, 50);
+    if (!ids.length) return [];
+    const w = await this.world();
+    const zip = postalCode?.trim() || w.cfg.marketDefaultPostalCode;
+    const offers = (await this.core.soft('offers', 'getOffers', (o) => o.getOffers(ids))) ?? {};
+    // offers that predate Offer.shipping carry only their own profile and dispatch
+    const shippingOf = (offer: Offer) => {
+      const shipping = (offer as Partial<Offer>).shipping;
+      return { profileId: shipping?.profileId ?? offer.shippingProfileId, dispatch: shipping?.dispatch ?? offer.dispatch };
+    };
+    const live = ids.flatMap((id) => (offers[id] && offers[id].status !== 'removed' ? [offers[id]] : []));
+    const unavailable = (offerId: string): OfferEstimate => ({ offerId, shipsToLocation: false, reason: 'Delivery options are not available for this offer', option: null, otherOptions: 0 });
+    let read: { profiles: Map<string, ProfileRec | undefined>; settings: Map<string, SettingsRec>; closures: Map<string, ClosureRec[]> } | null = null;
+    try {
+      const profiles = await this.profilesAt(live.map((o) => shippingOf(o).profileId), w.at);
+      const owners = [...profiles.values()].flatMap((p) => (p ? [ownerOfProfile(p)] : []));
+      const [settings, closures] = await Promise.all([this.settingsForOwners(owners, w.at, w.cfg), this.closuresForOwners(owners)]);
+      read = { profiles, settings, closures };
+    } catch (err) {
+      this.core.ctx.log.warn({ err }, 'shipping: offer estimates not read');
+    }
+    return Promise.all(
+      ids.map(async (offerId): Promise<OfferEstimate> => {
+        const offer = offers[offerId];
+        if (!offer || offer.status === 'removed') return { offerId, shipsToLocation: false, reason: 'This offer is not available', option: null, otherOptions: 0 };
+        const { profileId, dispatch } = shippingOf(offer);
+        const profile = read?.profiles.get(profileId);
+        if (!read || !profile) return unavailable(offerId);
+        const key = ownerKey(ownerOfProfile(profile));
+        try {
+          const q = await this.quoteProfile(w, profile, { settings: read.settings.get(key)!, closures: read.closures.get(key)! }, zip, { weightGrams: 1000 }, { businessDays: dispatch.businessDays, sameDayCutoff: dispatch.sameDayCutoff ?? null, shipsFrom: dispatch.shipsFrom }, offer.price);
+          return { offerId, shipsToLocation: q.shipsToLocation, reason: q.reason ?? null, option: q.default ?? null, otherOptions: Math.max(0, q.options.length - 1) };
+        } catch {
+          return unavailable(offerId);
+        }
+      }),
+    );
+  }
+
   async quoteOptions(input: PackageQuoteInput): Promise<PackageQuote> {
     const at = input.at ? new Date(input.at) : this.core.now();
     const w = await this.world(Number.isNaN(at.getTime()) ? this.core.now() : at);
@@ -373,11 +527,13 @@ export class Estimates {
     // Fulfilled by Marketly: the Official schedule, closures, cutoff and profile-owner check (items carry the service
     // profile, an Official one), shipped from the service location
     const owner = scheduleOwner({ ownerType: input.ownerType, sellerId: input.ownerType === 'official' ? null : (input.sellerId ?? null) }, fulfilledBy);
-    const origin = byMarketly(fulfilledBy) ? ((await this.core.serviceLocation())?.shipsFrom ?? null) : null;
-    const settings = await this.settingsFor(owner, w.at, w.cfg);
+    const [origin, settings, versions, closures] = await Promise.all([
+      byMarketly(fulfilledBy) ? this.core.serviceLocation().then((l) => l?.shipsFrom ?? null) : null,
+      this.settingsFor(owner, w.at, w.cfg),
+      this.profilesAt(input.items.map((i) => i.profileId), w.at),
+      this.closuresFor(owner),
+    ]);
     const dest = destinationOf({ postalCode: input.destination.postalCode, region: input.destination.region ?? null, country: input.destination.country, address: input.destination.address ?? null });
-    const versions = new Map<string, ProfileRec | undefined>();
-    for (const id of new Set(input.items.map((i) => i.profileId))) versions.set(id, await this.profileAt(id, w.at));
     const notShippable: string[] = [];
     const ok: typeof input.items = [];
     let reason: string | null = null;
@@ -408,7 +564,7 @@ export class Estimates {
       subtotal,
       dispatch: ok.map((i) => ({ businessDays: i.dispatch.businessDays, sameDayCutoff: i.dispatch.sameDayCutoff ?? null, shipsFrom: origin ?? (i.dispatch.shipsFrom || input.shipsFrom) })),
       settings,
-      closures: await this.closuresFor(owner),
+      closures,
       fulfilledBy,
     });
     if (!options.length) {
@@ -420,18 +576,14 @@ export class Estimates {
   async checkCoverage(profileIds: string[], destination: common.Address): Promise<CoverageCheck[]> {
     const w = await this.world();
     const dest = destinationOf({ postalCode: destination.postalCode, address: destination });
-    const out: CoverageCheck[] = [];
-    for (const profileId of profileIds) {
-      const p = await this.profileAt(profileId, w.at);
-      if (!p) {
-        out.push({ profileId, shippable: false, reason: 'excluded_area', message: 'This item has no shipping options.' });
-        continue;
-      }
-      const settings = await this.settingsFor({ ownerType: p.owner_type as Owner['ownerType'], sellerId: p.seller_id }, w.at, w.cfg);
-      const c = this.coverage(w, dest, settings, p.methods, null);
-      out.push({ profileId, shippable: c.shippable, reason: c.reason ?? null, message: c.message });
-    }
-    return out;
+    const profiles = await this.profilesAt(profileIds, w.at);
+    const settings = await this.settingsForOwners([...profiles.values()].flatMap((p) => (p ? [ownerOfProfile(p)] : [])), w.at, w.cfg);
+    return profileIds.map((profileId) => {
+      const p = profiles.get(profileId);
+      if (!p) return { profileId, shippable: false, reason: 'excluded_area', message: 'This item has no shipping options.' };
+      const c = this.coverage(w, dest, settings.get(ownerKey(ownerOfProfile(p)))!, p.methods, null);
+      return { profileId, shippable: c.shippable, reason: c.reason ?? null, message: c.message };
+    });
   }
 
   /** Dispatch deadline from acceptance time, handling days, same-day cutoff, business days and closures */
@@ -442,9 +594,14 @@ export class Estimates {
     return (await this.plan(w, { ownerType, sellerId: ownerType === 'official' ? null : sellerId }, dispatch)).dueAt.toISOString();
   }
 
-  async plan(w: World, owner: Owner, dispatch: { businessDays?: number | null; sameDayCutoff?: string | null }) {
-    const settings = await this.settingsFor(owner, w.at, w.cfg);
-    const closures = await this.closuresFor(owner);
+  /** An owner's dispatch settings in force at the world's time and closures (plan reads them unless given) */
+  async schedule(w: World, owner: Owner): Promise<{ settings: SettingsRec; closures: ClosureRec[] }> {
+    const [settings, closures] = await Promise.all([this.settingsFor(owner, w.at, w.cfg), this.closuresFor(owner)]);
+    return { settings, closures };
+  }
+
+  async plan(w: World, owner: Owner, dispatch: { businessDays?: number | null; sameDayCutoff?: string | null }, schedule?: { settings: SettingsRec; closures: ClosureRec[] }) {
+    const { settings, closures } = schedule ?? (await this.schedule(w, owner));
     const notices = w.notices.filter((n) => n.effect.noDispatch && this.noticeApplies(n, { ownerType: owner.ownerType }) && !(n.regions.length || n.postal_prefixes.length || n.zone_ids.length));
     const rules = this.dispatchRules(w, owner, settings, closures, notices);
     const cutoff = dispatch.sameDayCutoff && isTime(dispatch.sameDayCutoff) ? dispatch.sameDayCutoff : owner.ownerType === 'official' ? w.targets.official.cutoff || w.cfg.officialCutoff : settings.same_day_cutoff;

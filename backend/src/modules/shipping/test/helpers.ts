@@ -119,6 +119,7 @@ export async function harness(): Promise<Harness> {
           return structuredClone(o);
         },
         getOffer: async (offerId) => h.offers.get(offerId) ?? null,
+        getOffers: async (offerIds) => Object.fromEntries(offerIds.map((id) => [id, h.offers.get(id) ?? null])),
         getOwnOffer: async (sellerId, offerId) => {
           const o = h.offers.get(offerId);
           return o && o.sellerId === sellerId ? o : null;

@@ -32,7 +32,7 @@ import { formatShort, methodIssues, priceLabel, ruleStatus } from '../domain/rat
 import { shippingProfileVersionMachine } from '../domain/state-machines.js';
 import type { ProfileRec } from '../ports.js';
 import { invalid, notFound, type By, type Core } from './core.js';
-import type { Estimates, Owner } from './estimates.js';
+import { ownerKey, type Estimates, type Owner } from './estimates.js';
 import type { Views } from './views.js';
 
 type Issue = { path: string; message: string };
@@ -575,9 +575,15 @@ export class Profiles {
     const ids = [...new Set(sellerIds)];
     if (!ids.length) return out;
     const w = await this.estimates.world();
-    const profiles = await this.repo.find('profiles', { owner_type: 'seller', seller_id: ids, status: 'active' });
+    const owners = ids.map((sellerId): Owner => ({ ownerType: 'seller', sellerId }));
     // ships from: each seller's own settings, one query for the whole batch (never recent shipments, which one busy seller crowds out)
-    const active = await this.repo.find('seller_settings', { owner_type: 'seller', seller_id: ids, status: 'active' });
+    const [profiles, active, settingsOf, closuresOf] = await Promise.all([
+      this.repo.find('profiles', { owner_type: 'seller', seller_id: ids, status: 'active' }),
+      this.repo.find('seller_settings', { owner_type: 'seller', seller_id: ids, status: 'active' }),
+      this.estimates.settingsForOwners(owners, w.at, w.cfg),
+      this.estimates.closuresForOwners(owners),
+    ]);
+    const until = this.estimates.addDays(w.today, 60);
     for (const sellerId of ids) {
       const own = profiles.filter((p) => p.seller_id === sellerId);
       const p = own.find((x) => x.is_default) ?? own.sort((a, b) => a.name.localeCompare(b.name))[0];
@@ -585,9 +591,9 @@ export class Profiles {
         out[sellerId] = null;
         continue;
       }
-      const owner: Owner = { ownerType: 'seller', sellerId };
-      const settings = await this.estimates.settingsFor(owner, w.at, w.cfg);
-      const closures = (await this.estimates.closuresFor(owner)).filter((c) => c.to_date >= w.today && c.from_date <= this.estimates.addDays(w.today, 60));
+      const key = ownerKey({ ownerType: 'seller', sellerId });
+      const settings = settingsOf.get(key)!;
+      const closures = closuresOf.get(key)!.filter((c) => c.to_date >= w.today && c.from_date <= until);
       const methods = p.methods.filter((m) => m.enabled);
       const carrierNames = new Set<string>();
       for (const m of methods) {

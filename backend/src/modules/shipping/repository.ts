@@ -27,8 +27,29 @@ const jsonColumns = (schema: Schema) => new Set(Object.entries(schema.paths).fil
 /** The shipping collections (MongoDB, docs/04-mongodb-migration.md): generic table access by table name. */
 export class ShippingRepository {
   readonly #json = new Map<string, Set<string>>();
+  /** Shared with the repositories of its transactions */
+  readonly #state: { writes: number };
 
-  constructor(private readonly store: ModuleStore) {}
+  constructor(
+    private readonly store: ModuleStore,
+    state = { writes: 0 },
+  ) {
+    this.#state = state;
+  }
+
+  /**
+   * Writes this process finished through the repository (a transaction counts at its end). A read shared by
+   * concurrent callers (Estimates' reference data) is not joined once this number has moved.
+   */
+  get writes(): number {
+    return this.#state.writes;
+  }
+
+  #wrote<T>(p: Promise<T>): Promise<T> {
+    return p.finally(() => {
+      this.#state.writes++;
+    });
+  }
 
   #t<T extends TableName>(table: T): Table<Recs[T]> {
     return this.store.table<Recs[T]>(table);
@@ -36,7 +57,7 @@ export class ShippingRepository {
 
   /** Runs fn in one transaction (nested calls join the outer one) */
   transaction<T>(fn: (tx: ShippingRepository) => Promise<T>): Promise<T> {
-    return this.store.transaction((tx) => fn(new ShippingRepository(tx)));
+    return this.#wrote(this.store.transaction((tx) => fn(new ShippingRepository(tx, this.#state))));
   }
 
   get<T extends TableName>(table: T, id: string, o?: { forUpdate?: boolean }): Promise<Recs[T] | undefined> {
@@ -53,22 +74,22 @@ export class ShippingRepository {
   }
 
   insert<T extends TableName>(table: T, row: Recs[T]): Promise<Recs[T]> {
-    return this.#t(table).insert(this.#encode(table, row));
+    return this.#wrote(this.#t(table).insert(this.#encode(table, row)));
   }
 
   async insertMany<T extends TableName>(table: T, rows: Recs[T][]): Promise<void> {
-    await this.#t(table).insertMany(rows.map((r) => this.#encode(table, r)));
+    await this.#wrote(this.#t(table).insertMany(rows.map((r) => this.#encode(table, r))));
   }
 
   /** Inserts unless the row conflicts with a unique key (on conflict do nothing); returns whether it was inserted */
   async insertIfAbsent<T extends TableName>(table: T, row: Recs[T]): Promise<boolean> {
-    return (await this.#t(table).insertIfAbsent(this.#encode(table, row))) !== undefined;
+    return (await this.#wrote(this.#t(table).insertIfAbsent(this.#encode(table, row)))) !== undefined;
   }
 
   /** Sets the defined fields of patch; the row after (an empty patch reads it) */
   async update<T extends TableName>(table: T, id: string, patch: Partial<Recs[T]>): Promise<Recs[T]> {
     const values = this.#encode(table, patch);
-    const row = Object.keys(values).length ? await this.#t(table).update(id, values) : await this.#t(table).get(id);
+    const row = Object.keys(values).length ? await this.#wrote(this.#t(table).update(id, values)) : await this.#t(table).get(id);
     return orThrow(row, `shipping: ${table} ${id}`);
   }
 
@@ -76,11 +97,11 @@ export class ShippingRepository {
   async updateWhere<T extends TableName>(table: T, where: Where<Recs[T]>, patch: Partial<Recs[T]>): Promise<number> {
     const values = this.#encode(table, patch);
     if (!Object.keys(values).length) return 0;
-    return this.#t(table).updateMany(whereFilter(where), values);
+    return this.#wrote(this.#t(table).updateMany(whereFilter(where), values));
   }
 
   async removeWhere<T extends TableName>(table: T, where: Where<Recs[T]>): Promise<void> {
-    await this.#t(table).deleteMany(whereFilter(where));
+    await this.#wrote(this.#t(table).deleteMany(whereFilter(where)));
   }
 
   page<T extends TableName>(table: T, where: Where<Recs[T]>, page: PageRequest, o: PageOptions<Recs[T]>): Promise<common.Page<Recs[T]>> {

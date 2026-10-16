@@ -527,9 +527,10 @@ export class Exceptions {
       // Official schedule for warehouse-shipped groups (Official Store and Fulfilled by Marketly)
       const w = await this.estimates.world(placedAt);
       const owner = scheduleOwner({ ownerType: g.ownerType, sellerId }, fulfilledBy);
+      const schedule = await this.estimates.schedule(w, owner);
       let handling: number | null = null;
       for (let h = 0; h <= 10; h++) {
-        if (this.core.today((await this.estimates.plan(w, owner, { businessDays: h })).dueAt) === this.core.today(due)) {
+        if (this.core.today((await this.estimates.plan(w, owner, { businessDays: h }, schedule)).dueAt) === this.core.today(due)) {
           handling = h;
           break;
         }
