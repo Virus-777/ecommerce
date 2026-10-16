@@ -7,13 +7,18 @@
  *   workqueues.exportRows / sellerTaskCounts → h.rows (pages of 2 rows);
  *   finance.marketplaceIncomeByDay / getSellerBalances, advertising.dailyPerformance (advertising is being
  *   built in parallel), search.zeroResultStats, offers.getOffer, inventory.getUnitCost, sellers.getPerformance;
- *   settings.get → h.settings overrides (e.g. reports.maxExportRows).
+ *   settings.get → h.settings overrides (e.g. reports.maxExportRows);
+ *   finance.companyCostsByDay, support.caseStatsByDay, messaging.replyStatsByDay → h.companyCosts, h.caseStats,
+ *   h.replyStats (h.responseApis.off makes support and messaging fail).
  * Events of other modules are published on the bus with payloads matching their spec.
  */
 import type { FastifyInstance } from 'fastify';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { Money } from '../../../spec/common.js';
 import type * as audit from '../../../spec/audit.js';
+import type * as finance from '../../../spec/finance.js';
+import type * as messaging from '../../../spec/messaging.js';
+import type * as support from '../../../spec/support.js';
 import type * as orders from '../../../spec/orders.js';
 import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../testing/app.js';
 import type { ReportsService } from '../service.js';
@@ -68,6 +73,13 @@ export async function harness() {
   const products = new Map<string, { title: string; imageUrl?: string }>();
   const unitCosts = new Map<string, number>();
   const exportRowsCalls: { dataset: string; filters: unknown; principal: unknown; cursor?: string }[] = [];
+  /** finance.companyCostsByDay, support.caseStatsByDay and messaging.replyStatsByDay answer these rows (by date and seller) */
+  const companyCosts: finance.DailyCompanyCost[] = [];
+  const caseStats: support.DailyCaseStats[] = [];
+  const replyStats: messaging.DailyReplyStats[] = [];
+  /** off: support and messaging fail (as when switched off or failing) */
+  const responseApis = { off: false };
+  const inRange = (date: string, range: { from: string; to: string }) => date >= range.from && date <= range.to;
 
   const app: FastifyInstance = await buildTestApp({
     only: ['reports', 'audit', 'media', 'access', 'settings', 'workqueues', 'orders', 'finance', 'advertising', 'search', 'inventory', 'sellers'],
@@ -111,6 +123,19 @@ export async function harness() {
       finance: {
         marketplaceIncomeByDay: async (range) => income.filter((r) => r.date >= range.from && r.date <= range.to).map((r) => ({ ...r, feeIncome: r.netFeeIncome, feeRefunds: usd(0), adIncome: usd(0) })),
         getSellerBalances: async (sellerId) => ({ sellerId, pending: usd(1000), available: usd(2500), held: usd(0), nextPayout: { scheduledFor: '2026-10-15', estimatedAmount: usd(2500), destination: { label: 'Bank •••• 6620', status: 'verified' } } }) as never,
+        companyCostsByDay: async (range) => companyCosts.filter((r) => inRange(r.date, range)),
+      },
+      support: {
+        caseStatsByDay: async (range, sellerId) => {
+          if (responseApis.off) throw new Error('support is off');
+          return caseStats.filter((r) => inRange(r.date, range) && (!sellerId || r.sellerId === sellerId));
+        },
+      },
+      messaging: {
+        replyStatsByDay: async (range, sellerId) => {
+          if (responseApis.off) throw new Error('messaging is off');
+          return replyStats.filter((r) => inRange(r.date, range) && (!sellerId || r.sellerId === sellerId));
+        },
       },
       advertising: {
         dailyPerformance: async (range) => adPerf.filter((r) => r.date >= range.from && r.date <= range.to).map((r) => ({ ...r, campaignRef: 'AD-1', sellerId: null, attributedSales: usd(0), spend: usd(0), partial: false })),
@@ -229,7 +254,7 @@ export async function harness() {
     visitor: () => callers.visitor(),
   };
 
-  return { app, service, clock, audits, files, staff, denied, ordersById, sellerCounts, rows, settings, income, adPerf, zeroResults, offerProducts, offerSkus, discountedOffers, products, unitCosts, exportRowsCalls, call, gql, person, order, placed, publish, drain, tokens };
+  return { app, service, clock, audits, files, staff, denied, ordersById, sellerCounts, rows, settings, income, adPerf, zeroResults, offerProducts, offerSkus, discountedOffers, products, unitCosts, exportRowsCalls, companyCosts, caseStats, replyStats, responseApis, call, gql, person, order, placed, publish, drain, tokens };
 }
 
 export type Harness = Awaited<ReturnType<typeof harness>>;

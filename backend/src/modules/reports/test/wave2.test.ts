@@ -67,8 +67,8 @@ describe('seller product sales (G47b, G48a)', () => {
 describe('report library (G74)', () => {
   const ADDED = ['commerce.orders', 'marketplace.discount_funding', 'marketplace.owed_to_sellers', 'marketplace.payouts', 'discovery.stockouts', 'service.dispatch', 'service.delivery_issues', 'service.cancellations', 'service.cases', 'ads.performance'];
 
-  it('lists 20 staff reports in the six areas', async () => {
-    expect(REPORTS.filter((r) => r.audience === 'staff')).toHaveLength(20);
+  it('lists the staff reports in the six areas (24 with wave 3)', async () => {
+    expect(REPORTS.filter((r) => r.audience === 'staff')).toHaveLength(24);
     const groups = await h.call('GET', '/api/admin/reports/catalogue', h.tokens.staff());
     expect(groups.status, JSON.stringify(groups.body)).toBe(200);
     const keys = JSON.stringify(groups.body);
@@ -106,9 +106,14 @@ describe('report library (G74)', () => {
     expect(kpi(r.body, 'marketplace.seller_balances').value).toBe(3500);
   });
 
-  it('the cases report says response times are not collected yet', async () => {
-    const r = await staffReport('service.cases', { preset: 'today' });
-    expect(r.body.unavailable).toContain('service.response_time');
-    expect(r.body.callouts.map((c: any) => c.title)).toContain('Response times are not collected yet');
+  it('the cases report lists response times as unavailable when support and messaging give none', async () => {
+    h.responseApis.off = true;
+    try {
+      const r = await staffReport('service.cases', { preset: 'today' });
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(r.body.unavailable).toEqual(expect.arrayContaining(['service.response_time', 'service.first_reply_on_time', 'service.message_reply_time']));
+    } finally {
+      h.responseApis.off = false;
+    }
   });
 });

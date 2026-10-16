@@ -7,6 +7,7 @@ import type { AdminDashboard, KpiValue, MetricDefinition, ReportQuery, ReportRes
 import { OFFICIAL_KEY, metricSeed } from '../domain/catalogue.js';
 import {
   addDays,
+  bucketOf,
   bucketsOf,
   daysBetween,
   dayLabel,
@@ -84,6 +85,27 @@ const MARKETPLACE_CALLOUT: Callout = {
 };
 
 const col = (key: string, label: string, unit = 'text', align: 'left' | 'right' = unit === 'text' ? 'left' : 'right'): TableColumn => ({ key, label, unit, align });
+/** commerce.gross_sales → gross_sales (series and column keys) */
+const suffix = (metricKey: string) => metricKey.slice(metricKey.indexOf('.') + 1);
+/** Average hours from a sum of minutes over n replies (0 without replies) */
+const hoursOf = (minutes: number, n: number) => (n > 0 ? Math.round((minutes / n / 60) * 10) / 10 : 0);
+
+/** The company trading cost reports: the finance cost kinds each one shows (finance.companyCostsByDay) */
+const COST_REPORTS: Record<string, { metric: string; kind: string; label: string }[]> = {
+  'trading.purchasing': [
+    { metric: 'trading.purchasing_booked', kind: 'buying_cost', label: 'Purchasing costs booked' },
+    { metric: 'trading.supplier_credits', kind: 'supplier_credit', label: 'Supplier credits' },
+  ],
+  'trading.discounts_shipping': [
+    { metric: 'trading.discounts', kind: 'discount', label: 'Official Store discounts' },
+    { metric: 'trading.shipping_expense', kind: 'shipping_expense', label: 'Shipping expense' },
+  ],
+  'trading.returns_cost': [
+    { metric: 'trading.return_losses', kind: 'return_loss', label: 'Return losses' },
+    { metric: 'trading.write_offs', kind: 'write_off', label: 'Write-offs' },
+    { metric: 'trading.chargeback_losses', kind: 'chargeback_loss', label: 'Chargeback losses' },
+  ],
+};
 
 export class Queries {
   constructor(
@@ -294,6 +316,12 @@ export class Queries {
         return this.serviceFocusReport(key, rq, scope);
       case 'ads.performance':
         return this.adsReport(rq);
+      case 'trading.purchasing':
+      case 'trading.discounts_shipping':
+      case 'trading.returns_cost':
+        return this.companyCostsReport(key, rq, cfg);
+      case 'service.complaints':
+        return this.complaintsReport(rq, scope);
       default:
         return { kpis: [], series: [], callouts: [{ kind: 'warning', title: 'No figures yet', body: 'This report has no figures in this version.' }], unavailable: [key], models: [] };
     }
@@ -965,26 +993,235 @@ export class Queries {
             totals: { sellerCancellations: total.seller_cancellations, dispatched: total.dispatched },
           },
         });
-      default:
+      default: {
+        // response times are read from support and messaging when the report runs
+        const now = await this.responseFigures(rq.range, sellerId);
+        const before = rq.compare ? await this.responseFigures(rq.compare, sellerId) : null;
+        const unavailable = [...(now.cases ? [] : ['service.response_time', 'service.first_reply_on_time']), ...(now.messages ? [] : ['service.message_reply_time'])];
+        const ids = [...new Set([...bySeller.map((s) => s.key!), ...now.bySeller.keys()])].filter(Boolean);
+        const allNames = await this.sellerNames(ids);
+        const sums = new Map(bySeller.map((s) => [s.key!, s]));
         return part({
           kpis: [
             this.kpi('service.cases_opened', total.cases_opened!, c, prev?.cases_opened ?? null),
             this.kpi('service.case_backlog', await this.core.repo.caseBacklog(rq.range.to, sellerId), c, rq.compare ? await this.core.repo.caseBacklog(rq.compare.to, sellerId) : null, `open at the end of ${dayLabel(rq.range.to)}`),
+            ...(now.cases
+              ? [
+                  this.kpi('service.response_time', hoursOf(now.cases.minutes, now.cases.replied), c, before?.cases ? hoursOf(before.cases.minutes, before.cases.replied) : null, `${now.cases.replied} of ${now.cases.opened} cases answered`),
+                  this.kpi('service.first_reply_on_time', pct(now.cases.onTime, now.cases.opened), c, before?.cases ? pct(before.cases.onTime, before.cases.opened) : null),
+                ]
+              : []),
             this.kpi('service.messages_received', total.messages_received!, c, prev?.messages_received ?? null),
+            ...(now.messages ? [this.kpi('service.message_reply_time', hoursOf(now.messages.minutes, now.messages.replied), c, before?.messages ? hoursOf(before.messages.minutes, before.messages.replied) : null, `${now.messages.replied} of ${now.messages.waiting} messages answered`)] : []),
           ],
           series: [
             this.series('cases_opened', 'Support cases opened', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.cases_opened!]))),
             this.series('messages_received', 'Customer messages', buckets, rq.granularity, new Map(byBucket.map((b) => [b.key!, b.messages_received!]))),
+            ...(now.cases ? [this.series('response_time', 'Average first reply on cases (hours)', buckets, rq.granularity, now.caseHoursByBucket(rq.granularity))] : []),
           ],
           table: {
-            columns: [col('seller', 'Seller'), col('casesOpened', 'Cases opened', 'count'), col('messages', 'Messages', 'count')],
-            rows: by('cases_opened').map((s) => ({ ...seller(s), casesOpened: s.cases_opened, messages: s.messages_received })),
-            totals: { casesOpened: total.cases_opened, messages: total.messages_received },
+            columns: [col('seller', 'Seller'), col('casesOpened', 'Cases opened', 'count'), col('firstReplyHours', 'First reply on cases', 'duration_hours'), col('messages', 'Messages', 'count'), col('messageReplyHours', 'Seller reply to messages', 'duration_hours')],
+            rows: ids
+              .map((id) => {
+                const s = sums.get(id);
+                const r = now.bySeller.get(id);
+                return {
+                  sellerId: id === OFFICIAL_KEY ? null : id,
+                  seller: allNames.get(id) ?? id,
+                  casesOpened: s?.cases_opened ?? 0,
+                  firstReplyHours: r?.caseReplied ? hoursOf(r.caseMinutes, r.caseReplied) : null,
+                  messages: s?.messages_received ?? 0,
+                  messageReplyHours: r?.messageReplied ? hoursOf(r.messageMinutes, r.messageReplied) : null,
+                };
+              })
+              .sort((a, b) => b.casesOpened - a.casesOpened || b.messages - a.messages),
+            totals: {
+              casesOpened: total.cases_opened,
+              firstReplyHours: now.cases ? hoursOf(now.cases.minutes, now.cases.replied) : null,
+              messages: total.messages_received,
+              messageReplyHours: now.messages ? hoursOf(now.messages.minutes, now.messages.replied) : null,
+            },
           },
-          callouts: [{ kind: 'info', title: 'Response times are not collected yet', body: 'First-response times for cases and messages need support and messaging to record them; this report shows volumes and the backlog.' }],
-          unavailable: ['service.response_time'],
+          callouts: [{ kind: 'info', title: 'How response times are counted', body: 'Reply times are wall-clock hours from the case opening or the customer message to the first reply, for those that were answered; the share within target uses the case targets, which count business hours only.' }],
+          unavailable,
         });
+      }
     }
+  }
+
+  /**
+   * First replies on support cases (support.caseStatsByDay) and seller replies to customer messages
+   * (messaging.replyStatsByDay) in a range, in total and per seller. null parts when the module is off.
+   */
+  private async responseFigures(range: DayRange, sellerId?: string) {
+    const support = this.core.api('support');
+    const messaging = this.core.api('messaging');
+    const caseRows = support ? await this.core.soft('support.caseStatsByDay', () => support.caseStatsByDay(range, sellerId)) : undefined;
+    const messageRows = messaging ? await this.core.soft('messaging.replyStatsByDay', () => messaging.replyStatsByDay(range, sellerId)) : undefined;
+    const bySeller = new Map<string, { caseReplied: number; caseMinutes: number; messageReplied: number; messageMinutes: number }>();
+    const of = (id: string | null | undefined) => {
+      const key = id ?? OFFICIAL_KEY;
+      const v = bySeller.get(key) ?? { caseReplied: 0, caseMinutes: 0, messageReplied: 0, messageMinutes: 0 };
+      bySeller.set(key, v);
+      return v;
+    };
+    for (const r of caseRows ?? []) {
+      const v = of(r.sellerId);
+      v.caseReplied += r.firstReplied;
+      v.caseMinutes += r.firstReplyMinutesTotal;
+    }
+    for (const r of messageRows ?? []) {
+      const v = of(r.sellerId);
+      v.messageReplied += r.replied;
+      v.messageMinutes += r.replyMinutesTotal;
+    }
+    const add = <T,>(rows: T[], f: (r: T) => number) => rows.reduce((n, r) => n + f(r), 0);
+    return {
+      cases: caseRows ? { opened: add(caseRows, (r) => r.opened), replied: add(caseRows, (r) => r.firstReplied), minutes: add(caseRows, (r) => r.firstReplyMinutesTotal), onTime: add(caseRows, (r) => r.firstReplyWithinTarget) } : null,
+      messages: messageRows ? { waiting: add(messageRows, (r) => r.waiting), replied: add(messageRows, (r) => r.replied), minutes: add(messageRows, (r) => r.replyMinutesTotal) } : null,
+      bySeller,
+      caseHoursByBucket: (g: Granularity) => {
+        const acc = new Map<string, { m: number; n: number }>();
+        for (const r of caseRows ?? []) {
+          const b = bucketOf(r.date, g);
+          const v = acc.get(b) ?? { m: 0, n: 0 };
+          v.m += r.firstReplyMinutesTotal;
+          v.n += r.firstReplied;
+          acc.set(b, v);
+        }
+        return new Map([...acc].map(([b, v]) => [b, hoursOf(v.m, v.n)]));
+      },
+    };
+  }
+
+  /** Official Store trading costs booked in finance (companyCostsByDay), read when the report runs */
+  private async companyCostsReport(key: string, rq: ResolvedQuery, cfg: Settings): Promise<Part> {
+    const c = rq.currency;
+    const kinds = COST_REPORTS[key]!;
+    const finance = this.core.api('finance');
+    const load = async (r: DayRange) => (finance ? ((await this.core.soft('finance.companyCostsByDay', () => finance.companyCostsByDay(r))) ?? null) : null);
+    const rows = await load(rq.range);
+    const prev = rq.compare ? await load(rq.compare) : null;
+    const sum = (rs: { kind: string; amount: Money }[], kind: string) => rs.filter((r) => r.kind === kind).reduce((n, r) => n + r.amount.amount, 0);
+    const buckets = bucketsOf(rq.range, rq.granularity);
+    const perBucket = (kind: string) => {
+      const out = new Map<string, number>();
+      for (const r of rows ?? []) if (r.kind === kind) out.set(bucketOf(r.date, rq.granularity), (out.get(bucketOf(r.date, rq.granularity)) ?? 0) + r.amount.amount);
+      return out;
+    };
+    const kpis: KpiValue[] = rows ? kinds.map((k) => this.kpi(k.metric, sum(rows, k.kind), c, prev ? sum(prev, k.kind) : null)) : [];
+    const series: Series[] = rows ? kinds.map((k) => this.series(suffix(k.metric), k.label, buckets, rq.granularity, perBucket(k.kind))) : [];
+    const columns = [col('period', 'Period'), ...kinds.map((k) => col(suffix(k.metric), k.label, 'money'))];
+    const extra: Record<string, number>[] = buckets.map(() => ({}));
+    const extraTotals: Record<string, number> = {};
+    const callouts: Callout[] = [];
+
+    // context from the order items read model: buying cost of the units sold / Official Store sales
+    const official = { ownerType: 'official' as const };
+    const scope: ReportScope = { kind: 'platform' };
+    if (key === 'trading.purchasing' || key === 'trading.discounts_shipping') {
+      const metric = key === 'trading.purchasing' ? 'trading.buying_cost' : 'trading.official_sales';
+      const value = (a: SalesAgg) => (key === 'trading.purchasing' ? a.cost : this.gross(a, cfg));
+      const total = await this.salesTotals(rq, scope, rq.range, official);
+      const before = rq.compare ? await this.salesTotals(rq, scope, rq.compare, official) : null;
+      const byBucket = new Map((await this.core.repo.salesAgg(this.salesFilter(rq, scope, rq.range, official), 'bucket', rq.granularity)).map((b) => [b.key!, value(b)]));
+      kpis.unshift(this.kpi(metric, value(total), c, before ? value(before) : null, key === 'trading.purchasing' ? 'units sold, from the order date' : null));
+      series.unshift(this.series(suffix(metric), metricSeed(metric)!.name, buckets, rq.granularity, byBucket));
+      columns.splice(1, 0, col(suffix(metric), metricSeed(metric)!.name, 'money'));
+      buckets.forEach((b, i) => (extra[i]![suffix(metric)] = byBucket.get(b) ?? 0));
+      extraTotals[suffix(metric)] = value(total);
+      if (key === 'trading.discounts_shipping' && rows) {
+        const spent = sum(rows, 'discount') + sum(rows, 'shipping_expense');
+        callouts.push({ kind: 'info', title: 'Share of Official Store sales', body: `Discounts and shipping expense come to ${pct(spent, value(total))}% of Official Store sales in the range.` });
+      }
+      if (key === 'trading.purchasing') callouts.push({ kind: 'info', title: 'Two views of buying cost', body: 'Buying cost of units sold follows the order date; purchasing costs and supplier credits follow the day finance booked them.' });
+    }
+    const perKind = new Map(kinds.map((k) => [k.kind, perBucket(k.kind)]));
+    return {
+      kpis,
+      series,
+      table: {
+        columns,
+        rows: buckets.map((b, i) => ({ period: dayLabel(b, rq.granularity), ...Object.fromEntries(Object.entries(extra[i]!).map(([k, v]) => [k, this.money(v, c)])), ...Object.fromEntries(kinds.map((k) => [suffix(k.metric), this.money(perKind.get(k.kind)!.get(b) ?? 0, c)])) })),
+        totals: { ...Object.fromEntries(Object.entries(extraTotals).map(([k, v]) => [k, this.money(v, c)])), ...Object.fromEntries(kinds.map((k) => [suffix(k.metric), this.money(rows ? sum(rows, k.kind) : 0, c)])) },
+      },
+      callouts,
+      unavailable: rows ? [] : kinds.map((k) => k.metric),
+      models: key === 'trading.returns_cost' ? [] : ['order_items'],
+    };
+  }
+
+  /** Customer cases by reason and seller (support.caseStatsByDay), read when the report runs */
+  private async complaintsReport(rq: ResolvedQuery, scope: ReportScope): Promise<Part> {
+    const c = rq.currency;
+    const sellerId = this.sellerOf(rq, scope);
+    const support = this.core.api('support');
+    const load = async (r: DayRange) => (support ? ((await this.core.soft('support.caseStatsByDay', () => support.caseStatsByDay(r, sellerId))) ?? null) : null);
+    const all = await load(rq.range);
+    if (!all) return { kpis: [], series: [], callouts: [], unavailable: ['service.complaints', 'service.response_time'], models: [] };
+    const rows = all.filter((r) => r.audience === 'customer');
+    const prev = rq.compare ? ((await load(rq.compare)) ?? []).filter((r) => r.audience === 'customer') : null;
+    const opened = (rs: typeof rows) => rs.reduce((n, r) => n + r.opened, 0);
+    const replyHours = (rs: typeof rows) => hoursOf(rs.reduce((n, r) => n + r.firstReplyMinutesTotal, 0), rs.reduce((n, r) => n + r.firstReplied, 0));
+    const total = opened(rows);
+
+    const byReason = new Map<string, { label: string; count: number; previous: number }>();
+    for (const r of rows) {
+      const v = byReason.get(r.categoryKey) ?? { label: r.categoryLabel, count: 0, previous: 0 };
+      v.count += r.opened;
+      byReason.set(r.categoryKey, v);
+    }
+    for (const r of prev ?? []) {
+      const v = byReason.get(r.categoryKey) ?? { label: r.categoryLabel, count: 0, previous: 0 };
+      v.previous += r.opened;
+      byReason.set(r.categoryKey, v);
+    }
+    const reasons = [...byReason.entries()].map(([key, v]) => ({ key, ...v })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    const top = reasons[0];
+
+    const bySeller = new Map<string, { count: number; reasons: Map<string, number> }>();
+    for (const r of rows) {
+      const key = r.sellerId ?? OFFICIAL_KEY;
+      const v = bySeller.get(key) ?? { count: 0, reasons: new Map<string, number>() };
+      v.count += r.opened;
+      v.reasons.set(r.categoryLabel, (v.reasons.get(r.categoryLabel) ?? 0) + r.opened);
+      bySeller.set(key, v);
+    }
+    const names = await this.sellerNames([...bySeller.keys()]);
+    const buckets = bucketsOf(rq.range, rq.granularity);
+    const perBucket = new Map<string, number>();
+    for (const r of rows) perBucket.set(bucketOf(r.date, rq.granularity), (perBucket.get(bucketOf(r.date, rq.granularity)) ?? 0) + r.opened);
+    const growing = prev ? reasons.filter((r) => r.count > r.previous).sort((a, b) => b.count - b.previous - (a.count - a.previous))[0] : undefined;
+    return {
+      kpis: [
+        this.kpi('service.complaints', total, c, prev ? opened(prev) : null, top ? `Most often: ${top.label} (${pct(top.count, total)}%)` : null),
+        this.kpi('service.response_time', replyHours(rows), c, prev ? replyHours(prev) : null),
+      ],
+      series: [this.series('complaints', 'Customer complaints', buckets, rq.granularity, perBucket)],
+      breakdowns: [
+        {
+          key: 'reason',
+          label: 'Complaints by reason',
+          rows: reasons.map((r) => ({ key: r.key, label: r.label, count: r.count, sharePct: pct(r.count, total), ...(prev ? { previous: r.previous, change: r.count - r.previous } : {}) })),
+        },
+      ],
+      table: {
+        columns: [col('seller', 'Seller'), col('complaints', 'Complaints', 'count'), col('share', 'Of all complaints', 'percent'), col('topReason', 'Most common reason')],
+        rows: [...bySeller.entries()]
+          .map(([id, v]) => ({
+            sellerId: id === OFFICIAL_KEY ? null : id,
+            seller: id === OFFICIAL_KEY ? 'Official Store or no seller' : (names.get(id) ?? id),
+            complaints: v.count,
+            share: pct(v.count, total),
+            topReason: [...v.reasons.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null,
+          }))
+          .sort((a, b) => b.complaints - a.complaints),
+        totals: { complaints: total, share: total ? 100 : 0 },
+      },
+      callouts: growing ? [{ kind: 'warning', title: `${growing.label} is growing`, body: `${growing.count} complaints against ${growing.previous} in the previous period.` }] : [],
+      unavailable: [],
+      models: [],
+    };
   }
 
   /** Ads per period and campaign (fact_campaigns_daily, kind ad; displays, clicks and dismissals pulled daily from advertising) */

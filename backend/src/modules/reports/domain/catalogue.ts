@@ -129,6 +129,56 @@ export const METRICS: MetricSeed[] = [
     includes: [], excludes: [],
     dateBasisOptions: SALES_BASES, defaultDateBasis: 'placement', relatedKeys: ['trading.gross_margin'],
   },
+  /* company costs finance books (finance.companyCostsByDay, read when the report runs; by booking day) */
+  {
+    key: 'trading.purchasing_booked', name: 'Purchasing costs booked', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
+    definition: 'Official Store buying costs booked as company costs in finance (stock bought from suppliers), by booking day.',
+    formula: 'Σ finance.companyCostsByDay.amount, kind buying_cost',
+    includes: [], excludes: ['Supplier credits (shown on their own)'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.buying_cost', 'trading.supplier_credits'],
+  },
+  {
+    key: 'trading.supplier_credits', name: 'Supplier credits', group: 'company_trading', unit: 'money', audience: 'staff',
+    definition: 'Money suppliers and carriers paid back to the company (credits and paid claims), by booking day.',
+    formula: 'Σ finance.companyCostsByDay.amount, kind supplier_credit',
+    includes: ['Paid carrier claims'], excludes: [],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.purchasing_booked'],
+  },
+  {
+    key: 'trading.discounts', name: 'Official Store discounts', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
+    definition: 'Customer discounts on Official Store items the company paid for, less discounts returned by cancellations.',
+    formula: 'Σ finance.companyCostsByDay.amount, kind discount',
+    includes: [], excludes: ['Discounts on marketplace seller items (see Discount funding)'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.shipping_expense', 'marketplace.discount_funding'],
+  },
+  {
+    key: 'trading.shipping_expense', name: 'Shipping expense', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
+    definition: 'Shipping the company paid for Official Store orders and returns (labels), less the shipping customers paid.',
+    formula: 'Σ finance.companyCostsByDay.amount, kind shipping_expense',
+    includes: ['Return labels the company pays for'], excludes: ['Seller shipping'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.discounts'],
+  },
+  {
+    key: 'trading.return_losses', name: 'Return losses', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
+    definition: 'Refunds sent for Official Store returns, booked as a company cost.',
+    formula: 'Σ finance.companyCostsByDay.amount, kind return_loss',
+    includes: [], excludes: ['Refunds on seller items'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.write_offs', 'commerce.refunds'],
+  },
+  {
+    key: 'trading.write_offs', name: 'Write-offs', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
+    definition: 'Stock written off (damaged, lost or returned unsellable) and balances written off, at cost.',
+    formula: 'Σ finance.companyCostsByDay.amount, kind write_off',
+    includes: [], excludes: [],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.return_losses'],
+  },
+  {
+    key: 'trading.chargeback_losses', name: 'Chargeback losses', group: 'company_trading', unit: 'money', audience: 'staff', higherIsBetter: false,
+    definition: 'Payment disputes on Official Store orders the company lost.',
+    formula: 'Σ finance.companyCostsByDay.amount, kind chargeback_loss',
+    includes: [], excludes: [],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['trading.return_losses'],
+  },
   /* ---------------------------------------------------------------- marketplace finance */
   {
     key: 'marketplace.seller_sales', name: 'Marketplace sales', group: 'marketplace_finance', unit: 'money', audience: 'staff',
@@ -307,6 +357,35 @@ export const METRICS: MetricSeed[] = [
     includes: [], excludes: [],
     dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: [],
   },
+  /* the figures below are read from support and messaging when the report runs (caseStatsByDay, replyStatsByDay) */
+  {
+    key: 'service.complaints', name: 'Customer complaints', group: 'service_sellers', unit: 'count', audience: 'staff', higherIsBetter: false,
+    definition: 'Support cases customers opened (help requests, order problems and disputes), by the reason they chose.',
+    formula: 'Σ support.caseStatsByDay.opened for customer categories, by opening day',
+    includes: ['Cases about Official Store and seller orders'], excludes: ['Seller requests to Marketly'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['service.cases_opened', 'service.return_requests'],
+  },
+  {
+    key: 'service.response_time', name: 'Average first reply on cases', group: 'service_sellers', unit: 'duration_hours', audience: 'staff', higherIsBetter: false,
+    definition: 'Average time from opening a support case to its first reply (by Marketly support, or the seller when the seller handles the case), for cases opened in the range that got a reply.',
+    formula: 'Σ support.caseStatsByDay.firstReplyMinutesTotal ÷ Σ firstReplied ÷ 60',
+    includes: [], excludes: ['Cases without a reply yet'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['service.first_reply_on_time', 'service.message_reply_time'],
+  },
+  {
+    key: 'service.first_reply_on_time', name: 'Cases answered within target', group: 'service_sellers', unit: 'percent', audience: 'staff',
+    definition: 'Share of the cases opened in the range whose first reply came by the first-response target (targets count business hours).',
+    formula: 'Σ support.caseStatsByDay.firstReplyWithinTarget ÷ Σ opened × 100',
+    includes: [], excludes: [],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['service.response_time'],
+  },
+  {
+    key: 'service.message_reply_time', name: 'Average seller reply to messages', group: 'service_sellers', unit: 'duration_hours', audience: 'staff', higherIsBetter: false,
+    definition: "Average time from a customer's message to the seller's reply, for customer messages sent in the range that got a reply.",
+    formula: 'Σ messaging.replyStatsByDay.replyMinutesTotal ÷ Σ replied ÷ 60',
+    includes: ['Order and product conversations'], excludes: ['Messages still waiting for a reply'],
+    dateBasisOptions: EVENT, defaultDateBasis: 'event', relatedKeys: ['service.messages_received', 'service.response_time'],
+  },
   /* ---------------------------------------------------------------- customers, marketing and ads */
   {
     key: 'customers.buyers', name: 'Buyers', group: 'customers_marketing_ads', unit: 'count', audience: 'staff',
@@ -467,10 +546,37 @@ export const REPORTS: ReportSeed[] = [
   },
   /*
    * G74: the design's report library (23 reports in six areas) beyond the ten above, from the same read models and
-   * public APIs. Not here yet because their figures are not collected: Purchasing cost, Discounts and shipping
-   * expense, Returns cost (finance's company costs per day), Complaint patterns (support case reasons per day) and
-   * response times (support and messaging).
+   * public APIs. The company trading costs (finance.companyCostsByDay), Complaint patterns and response times
+   * (support.caseStatsByDay, messaging.replyStatsByDay) are read from their modules when the report runs.
    */
+  {
+    key: 'trading.purchasing', title: 'Purchasing cost', group: 'company_trading', audience: 'staff', permission: 'reports.trading.view',
+    description: 'Buying cost of the Official Store units sold, next to the purchasing costs and supplier credits booked in finance.',
+    metrics: ['trading.buying_cost', 'trading.purchasing_booked', 'trading.supplier_credits'],
+    dimensions: ['day'], filters: [RANGE],
+    layout: ['kpis', 'series', 'table', 'definitions', 'callouts'],
+  },
+  {
+    key: 'trading.discounts_shipping', title: 'Discounts and shipping expense', group: 'company_trading', audience: 'staff', permission: 'reports.trading.view',
+    description: 'Customer discounts the Official Store paid for and the shipping it paid, per day, next to Official Store sales.',
+    metrics: ['trading.discounts', 'trading.shipping_expense', 'trading.official_sales'],
+    dimensions: ['day'], filters: [RANGE],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'trading.returns_cost', title: 'Returns cost', group: 'company_trading', audience: 'staff', permission: 'reports.trading.view',
+    description: 'What returns, write-offs and lost payment disputes cost the Official Store, per day.',
+    metrics: ['trading.return_losses', 'trading.write_offs', 'trading.chargeback_losses'],
+    dimensions: ['day'], filters: [RANGE],
+    layout: ['kpis', 'series', 'table', 'definitions'],
+  },
+  {
+    key: 'service.complaints', title: 'Complaint patterns', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
+    description: 'Support cases customers opened, by the reason they chose and by seller, with the reasons that grew most against the previous period.',
+    metrics: ['service.complaints', 'service.response_time'],
+    dimensions: ['day', 'reason', 'seller'], filters: [RANGE, SELLER],
+    layout: ['kpis', 'series', 'breakdown', 'table', 'definitions'],
+  },
   {
     key: 'commerce.orders', title: 'Orders and average order value', group: 'commerce', audience: 'staff', permission: 'reports.commerce.view',
     description: 'Orders, item sales and average order value per day, week or month.',
@@ -528,9 +634,9 @@ export const REPORTS: ReportSeed[] = [
     layout: ['kpis', 'series', 'table', 'definitions'],
   },
   {
-    key: 'service.cases', title: 'Case backlog and customer messages', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
-    description: 'Support cases opened, the open case backlog and customer messages to sellers, by seller. Response times are not collected yet.',
-    metrics: ['service.cases_opened', 'service.case_backlog', 'service.messages_received'],
+    key: 'service.cases', title: 'Response time and case backlog', group: 'service_sellers', audience: 'staff', permission: 'reports.service.view',
+    description: 'Support cases opened, the first reply on them, the open case backlog, customer messages to sellers and how fast sellers reply, by seller.',
+    metrics: ['service.cases_opened', 'service.case_backlog', 'service.response_time', 'service.first_reply_on_time', 'service.messages_received', 'service.message_reply_time'],
     dimensions: ['day', 'seller'], filters: [RANGE, SELLER],
     layout: ['kpis', 'series', 'table', 'definitions', 'callouts'],
   },
