@@ -31,6 +31,8 @@ export default defineModule({
     ctx.graphql.resolvers(resolvers(service));
     // carriers, methods, zones and the Official Store profile; the shipping.admin.exceptions export dataset
     ctx.afterBoot(() => service.boot());
+    // the Shipping defaults section of the settings page (G76)
+    ctx.afterBoot(() => service.registerSettingsSection());
 
     // Events this module reacts to (spec events.consumes)
     ctx.events.on("orders.order.accepted", (e) => service.onOrderAcceptedFromOrders(e.payload));

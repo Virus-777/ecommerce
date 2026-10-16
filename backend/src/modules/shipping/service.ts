@@ -32,6 +32,7 @@ import { Estimates } from './service/estimates.js';
 import { Exceptions } from './service/exceptions.js';
 import { Profiles } from './service/profiles.js';
 import { Setup } from './service/setup.js';
+import { registerShippingSettingsSection } from './service/settings-section.js';
 import { Shipments } from './service/shipments.js';
 import { Views } from './service/views.js';
 
@@ -313,5 +314,10 @@ export class ShippingService implements ShippingPublicApi {
   async boot(): Promise<void> {
     await this.core.ensureSeeded().catch((err) => this.core.ctx.log.warn({ err }, 'shipping: reference data not seeded at boot'));
     await this.exceptions.registerDataset();
+  }
+
+  /** After boot: the Shipping defaults section of the settings page (G76) */
+  registerSettingsSection(): Promise<void> {
+    return registerShippingSettingsSection(this.core.ctx.tryUse('settings'), this.core, this.setup);
   }
 }
