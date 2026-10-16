@@ -14,7 +14,10 @@ import { priceChangeMachine } from '../domain/state-machines.js';
 import { actorOf, iso, isoReq, money } from '../mappers.js';
 import type { OfferRec, PriceChangeRec } from '../ports.js';
 import type { OffersRepository } from '../repository.js';
-import { invalidField, notFound, Part, SYSTEM, type By } from './core.js';
+import { invalidField, notFound, Part, SYSTEM, type By, type ProductCache } from './core.js';
+
+/** Offers per batch of the was-price job */
+const VERIFY_BATCH = 500;
 
 export const APPROVAL_ACTION = 'offers.prices.change';
 const OPEN_STATES = ['scheduled', 'pending_approval'];
@@ -479,45 +482,55 @@ export class PricingPart extends Part {
     }
   }
 
-  /** offers.verify-compare-at: drop was-prices whose basis no longer holds and tell the owner (offers.offer.updated) */
+  /**
+   * offers.verify-compare-at: drop was-prices whose basis no longer holds and tell the owner (offers.offer.updated).
+   * Walks every live offer with a was-price by id, 500 at a time.
+   */
   async verifyCompareAtJob(): Promise<void> {
     const days = await this.core.lookbackDays();
     const now = this.now();
-    const rows = await this.repo.find('offers', { compare_at_amount: { op: 'is not', value: null }, status: { op: '<>', value: 'removed' } }, { limit: 5000 });
     const cache = new Map();
-    for (const row of rows) {
-      let holds = row.compare_at_verified;
-      if (holds && row.sale_ends_at && row.sale_ends_at <= now) holds = false;
-      if (holds && row.compare_at_basis === 'list_price') {
-        const product = await this.core.productAdmin(row.product_id, cache);
-        const list = listPriceOnFile(product?.product, row.variant_id, this.core.currency);
-        holds = list !== null && Number(row.compare_at_amount) <= list;
-      }
-      if (holds && row.compare_at_basis === 'lowest_30_days') {
-        const history = await this.history(row.id);
-        const start = this.saleStartOf(row, history);
-        const check = verifyLowestBasis(history, Number(row.compare_at_amount), start, days);
-        // a sale price in force longer than the look-back window has become the regular price
-        holds = check.verified && now.getTime() - start.getTime() <= days * 86_400_000;
-      }
-      if (holds) continue;
-      const after = await this.repo.transaction(async (tx) => {
-        const locked = await this.core.offerRow(row.id, { repo: tx, forUpdate: true });
-        if (locked.compare_at_amount === null) return null;
-        await tx.updateWhere('offer_price_history', { offer_id: row.id, valid_to: null }, { compare_at_amount: null });
-        return tx.update('offers', row.id, {
-          compare_at_amount: null,
-          compare_at_basis: null,
-          compare_at_verified: false,
-          sale_ends_at: null,
-          terms_version: locked.published_at ? locked.terms_version + 1 : locked.terms_version,
-          updated_at: now,
-        });
-      });
-      if (!after) continue;
-      if (after.published_at) this.core.publish('offers.offer.updated', { offerId: after.id, productId: after.product_id, termsVersion: after.terms_version, fields: ['compareAt'] });
-      await this.core.markDirty([after.variant_id]);
+    for (let after: string | null = null; ; ) {
+      const rows: OfferRec[] = await this.repo.find('offers', { compare_at_amount: { op: 'is not', value: null }, status: { op: '<>', value: 'removed' }, ...(after ? { id: { op: '>', value: after } } : {}) }, { orderBy: [['id', 'asc']], limit: VERIFY_BATCH });
+      for (const row of rows) await this.recheckCompareAt(row, days, now, cache);
+      if (rows.length < VERIFY_BATCH) return;
+      after = rows.at(-1)!.id;
     }
+  }
+
+  /** One offer of the was-price job: dropped when its basis no longer holds */
+  private async recheckCompareAt(row: OfferRec, days: number, now: Date, cache: ProductCache): Promise<void> {
+    let holds = row.compare_at_verified;
+    if (holds && row.sale_ends_at && row.sale_ends_at <= now) holds = false;
+    if (holds && row.compare_at_basis === 'list_price') {
+      const product = await this.core.productAdmin(row.product_id, cache);
+      const list = listPriceOnFile(product?.product, row.variant_id, this.core.currency);
+      holds = list !== null && Number(row.compare_at_amount) <= list;
+    }
+    if (holds && row.compare_at_basis === 'lowest_30_days') {
+      const history = await this.history(row.id);
+      const start = this.saleStartOf(row, history);
+      const check = verifyLowestBasis(history, Number(row.compare_at_amount), start, days);
+      // a sale price in force longer than the look-back window has become the regular price
+      holds = check.verified && now.getTime() - start.getTime() <= days * 86_400_000;
+    }
+    if (holds) return;
+    const after = await this.repo.transaction(async (tx) => {
+      const locked = await this.core.offerRow(row.id, { repo: tx, forUpdate: true });
+      if (locked.compare_at_amount === null) return null;
+      await tx.updateWhere('offer_price_history', { offer_id: row.id, valid_to: null }, { compare_at_amount: null });
+      return tx.update('offers', row.id, {
+        compare_at_amount: null,
+        compare_at_basis: null,
+        compare_at_verified: false,
+        sale_ends_at: null,
+        terms_version: locked.published_at ? locked.terms_version + 1 : locked.terms_version,
+        updated_at: now,
+      });
+    });
+    if (!after) return;
+    if (after.published_at) this.core.publish('offers.offer.updated', { offerId: after.id, productId: after.product_id, termsVersion: after.terms_version, fields: ['compareAt'] });
+    await this.core.markDirty([after.variant_id]);
   }
 
   /* ================================================================ views */
@@ -534,18 +547,16 @@ export class PricingPart extends Part {
   async toPriceChanges(rows: readonly PriceChangeRec[]): Promise<PriceChange[]> {
     if (!rows.length) return [];
     const offers = new Map((await this.repo.getMany('offers', rows.map((r) => r.offer_id))).map((o) => [o.id, o]));
-    const summaries = await this.parts.views.summaries([...offers.values()]);
-    const costs = new Map<string, common.Money | null>();
-    for (const o of offers.values()) {
-      if (o.owner_type !== 'official' || costs.has(o.stock_item_id)) continue;
-      costs.set(o.stock_item_id, (await this.core.soft('inventory.getUnitCost', () => this.ctx.use('inventory').getUnitCost(o.stock_item_id))) ?? null);
-    }
-    const approvals = new Map<string, common.ApprovalInfo>();
-    for (const r of rows) {
-      if (!r.approval_request_id || approvals.has(r.approval_request_id)) continue;
-      const info = await this.core.optional('access', 'approvalInfo', (a) => a.approvalInfo(r.approval_request_id!));
-      approvals.set(r.approval_request_id, info ?? { required: true, reason: null, approvalRequestId: r.approval_request_id, approvers: [] });
-    }
+    // inventory and access have no batch reads here: one call per stock item and per request, side by side
+    const stockIds = [...new Set([...offers.values()].flatMap((o) => (o.owner_type === 'official' ? [o.stock_item_id] : [])))];
+    const requestIds = [...new Set(rows.flatMap((r) => (r.approval_request_id ? [r.approval_request_id] : [])))];
+    const [summaries, costList, infoList] = await Promise.all([
+      this.parts.views.summaries([...offers.values()]),
+      Promise.all(stockIds.map((id) => this.core.soft('inventory.getUnitCost', () => this.ctx.use('inventory').getUnitCost(id)))),
+      Promise.all(requestIds.map((id) => this.core.optional('access', 'approvalInfo', (a) => a.approvalInfo(id)))),
+    ]);
+    const costs = new Map(stockIds.map((id, i) => [id, costList[i] ?? null]));
+    const approvals = new Map(requestIds.map((id, i): [string, common.ApprovalInfo] => [id, infoList[i] ?? { required: true, reason: null, approvalRequestId: id, approvers: [] }]));
     const margin = (price: number, cost: common.Money | null | undefined) => (cost && price > 0 ? Math.round(((price - cost.amount) / price) * 1000) / 10 : null);
     return rows.flatMap((r) => {
       const o = offers.get(r.offer_id);

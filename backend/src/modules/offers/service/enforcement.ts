@@ -93,12 +93,8 @@ export class EnforcementPart extends Part {
     return (await this.core.productAdmin(r.product_id, cache))?.product.categoryId ?? null;
   }
 
-  private async sourced(kind: string, id: string): Promise<OfferRec[]> {
-    const rows = await this.repo.find('offers', { status: 'ineligible' }, { limit: 10_000 });
-    return rows.filter((r) => {
-      const s = this.sourceOf(r);
-      return s.kind === kind && s.id === id;
-    });
+  private sourced(kind: string, id: string): Promise<OfferRec[]> {
+    return this.repo.heldBy(kind, id);
   }
 
   /* ================================================================ sellers */

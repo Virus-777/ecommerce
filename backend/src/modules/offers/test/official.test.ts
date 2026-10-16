@@ -51,6 +51,22 @@ describe('Official Store offers', () => {
     expect(list.json().items.some((r: { offer: { id: string } }) => r.offer.id === id)).toBe(true);
   });
 
+  it('searches the Official Store list (rows built for the page only) and exports admin rows page by page', async () => {
+    const a = await official({ sku: sku('FIND') });
+    await official();
+    const all = (await asStaff(h, 'GET', '/official/offers?page=1&limit=100')).json();
+    const found = await asStaff(h, 'GET', `/official/offers?page=1&q=${encodeURIComponent(a.body.offer.sellerSku)}`);
+    expect(found.statusCode, found.body).toBe(200);
+    expect(found.json()).toMatchObject({ total: 1, items: [{ offer: { id: a.id }, stock: { state: 'out_of_stock' } }] });
+    expect(found.json().items[0]).toEqual(all.items.find((r: { offer: { id: string } }) => r.offer.id === a.id));
+
+    const staff = { kind: 'staff' as const, accountId: newId() };
+    const page = await h.api.exportRows('offers.admin.offers', { ownerType: 'official' }, staff);
+    expect(page.rows.length).toBe(Math.min(all.total, 500));
+    expect(page.rows.find((r) => (r as { sellerSku: string }).sellerSku === a.body.offer.sellerSku)).toMatchObject({ seller: OFFICIAL_STORE_NAME, featuredEligible: expect.any(Boolean) });
+    expect(await h.api.exportRows('offers.admin.offers', { ownerType: 'official' }, staff, '50000')).toEqual({ rows: [] });
+  });
+
   it('refuses price edits on the offer itself; terms edits bump the terms version once published', async () => {
     const { id } = await official({ publish: true });
     expect((await asStaff(h, 'PATCH', `/official/offers/${id}`, { price: { amount: 100, currency: 'USD' } })).statusCode).toBe(400);

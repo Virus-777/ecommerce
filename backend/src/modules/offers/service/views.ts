@@ -23,13 +23,15 @@ import type {
 import type * as reports from '../../../spec/reports.js';
 import { CONDITIONS, dispatchLabel, reason } from '../domain/rules.js';
 import { compareAtOf, FULFILLMENT_NOTE, money, OFFICIAL_NAME, pricePoint, statusEntry, variantLabel } from '../mappers.js';
-import type { OfferListFilter, OfferRec } from '../ports.js';
+import type { EligibilityRec, OfferListFilter, OfferRec } from '../ports.js';
 import { invalidField, notFound, Part, type By, type ProductCache } from './core.js';
 
 export const SELLER_DATASET = 'offers.seller.offers';
 export const ADMIN_DATASET = 'offers.admin.offers';
 const EXPORT_PAGE = 500;
 const SCAN_LIMIT = 5000;
+/** Rows an admin offer export can hold */
+const ADMIN_EXPORT_MAX = 50_000;
 
 type StockMap = Map<string, StockCue>;
 
@@ -53,15 +55,15 @@ export class ViewsPart extends Part {
 
   /* ================================================================ building blocks */
 
-  async summaries(rows: readonly OfferRec[], cache: ProductCache = new Map()): Promise<Map<string, OfferSummary>> {
-    const [products, elig, featured, lookback, names] = await Promise.all([
+  /** `elig`: the rows' eligibility when the caller already read it */
+  async summaries(rows: readonly OfferRec[], cache: ProductCache = new Map(), elig?: Map<string, EligibilityRec>): Promise<Map<string, OfferSummary>> {
+    const [products, e, featured, lookback, names] = await Promise.all([
       this.core.products(rows.map((r) => r.product_id), cache),
-      this.repo.getEligibility(rows.map((r) => r.id)),
+      elig ?? this.parts.storefront.eligibility(rows),
       this.repo.featuredOfferIds(rows.map((r) => r.id)),
       this.core.lookbackDays(),
       this.core.sellerNames(rows),
     ]);
-    const e = new Map(elig.map((x) => [x.offer_id, x]));
     const out = new Map<string, OfferSummary>();
     for (const r of rows) {
       const p = products.get(r.product_id)?.product;
@@ -121,8 +123,9 @@ export class ViewsPart extends Part {
 
   /* ================================================================ seller area */
 
-  private async sellerRows(rows: readonly OfferRec[], sellerId: string, cache: ProductCache): Promise<SellerOfferRow[]> {
-    const [summaries, stock, products] = await Promise.all([this.summaries(rows, cache), this.stock(rows, sellerId), this.sellerProducts(sellerId, rows.map((r) => r.product_id), cache)]);
+  /** `known`: stock the caller already read for these rows */
+  private async sellerRows(rows: readonly OfferRec[], sellerId: string, cache: ProductCache, known?: StockMap): Promise<SellerOfferRow[]> {
+    const [summaries, stock, products] = await Promise.all([this.summaries(rows, cache), known ?? this.stock(rows, sellerId), this.sellerProducts(sellerId, rows.map((r) => r.product_id), cache)]);
     return rows.map((r) => {
       const p = products.get(r.product_id);
       const changes = p?.reviewState === 'changes_requested' ? [...(p.reviewLog ?? [])].reverse().find((l) => l.action === 'changes_requested') : undefined;
@@ -139,62 +142,79 @@ export class ViewsPart extends Part {
 
   /** The products as this seller may see them (their own submissions with review state) */
   private async sellerProducts(sellerId: string, ids: readonly string[], cache: ProductCache): Promise<Map<string, catalog.ProductAdmin>> {
-    const out = new Map<string, catalog.ProductAdmin>();
-    for (const id of new Set(ids)) {
-      const key = `seller:${sellerId}:${id}`;
-      let p = cache.get(key);
-      if (!p) {
-        p = this.core.soft('catalog.getProductForSeller', () => this.ctx.use('catalog').getProductForSeller(sellerId, id)).then((x) => x?.product ?? null);
-        cache.set(key, p);
-      }
-      const v = await p;
-      if (v) out.set(id, v);
-    }
-    return out;
+    // catalog has no batch read of a seller's view: the calls run side by side
+    const uniq = [...new Set(ids)];
+    const list = await Promise.all(
+      uniq.map((id) => {
+        const key = `seller:${sellerId}:${id}`;
+        let p = cache.get(key);
+        if (!p) cache.set(key, (p = this.core.soft('catalog.getProductForSeller', () => this.ctx.use('catalog').getProductForSeller(sellerId, id)).then((x) => x?.product ?? null)));
+        return p;
+      }),
+    );
+    return new Map(uniq.flatMap((id, i) => (list[i] ? [[id, list[i]] as const] : [])));
   }
 
   private needsScan(q: SellerListQuery) {
     return Boolean(q.q?.trim() || q.categoryId || q.stockState || q.productReviewState || q.productPublication || q.featured !== undefined || q.hiddenOrSuspended !== undefined);
   }
 
-  async listOwn(sellerId: string, q: SellerListQuery, page: PageRequest): Promise<common.Page<SellerOfferRow>> {
+  private ownFilter(sellerId: string, q: SellerListQuery): OfferListFilter {
     if (q.condition && !CONDITIONS.includes(q.condition as never) && !['used'].includes(q.condition)) throw invalidField('condition', `Condition is one of ${CONDITIONS.join(', ')}`);
-    const base: OfferListFilter = {
+    return {
       ownerType: 'seller',
       sellerId,
       ...(q.status ? { statuses: [q.status] } : {}),
       ...(q.condition ? { conditions: q.condition === 'used' ? ['used_like_new', 'used_good', 'used_acceptable'] : [q.condition] } : {}),
       ...(q.missingContent ? { contentGap: q.missingContent } : {}),
     };
-    const cache: ProductCache = new Map();
-    if (!this.needsScan(q)) {
-      const p = await this.repo.listOffers(base, page);
-      return { ...p, items: await this.sellerRows(p.items, sellerId, cache) };
-    }
-    const all = await this.repo.allOffers(base, SCAN_LIMIT);
-    const rows = await this.sellerRows(all, sellerId, cache);
-    const products = await this.sellerProducts(sellerId, all.map((r) => r.product_id), cache);
+  }
+
+  /**
+   * The seller's offers matching filters the database cannot apply (search text, catalog fields, stock state,
+   * featured), newest change first, at most SCAN_LIMIT scanned; with the stock read for the filter.
+   */
+  private async scanOwn(sellerId: string, q: SellerListQuery, cache: ProductCache): Promise<{ rows: OfferRec[]; stock: StockMap }> {
+    const all = await this.repo.allOffers(this.ownFilter(sellerId, q), SCAN_LIMIT);
+    const [stock, products, featured] = await Promise.all([
+      this.stock(all, sellerId),
+      this.sellerProducts(sellerId, all.map((r) => r.product_id), cache),
+      q.featured !== undefined ? this.repo.featuredOfferIds(all.map((r) => r.id)) : Promise.resolve(new Set<string>()),
+    ]);
     const term = q.q?.trim().toLowerCase();
-    const filtered = rows.filter((row, i) => {
-      const r = all[i]!;
+    const rows = all.filter((r) => {
       const p = products.get(r.product_id);
+      const publication = p?.publication ?? 'active';
       if (term) {
         const v = p?.product.variants.find((x) => x.id === r.variant_id);
         const hay = [r.seller_sku, p?.product.title, p?.product.modelNumber, v?.gtin, r.id].filter(Boolean).map((s) => String(s).toLowerCase());
         if (!hay.some((h) => h.includes(term))) return false;
       }
       if (q.categoryId && p?.product.categoryId !== q.categoryId) return false;
-      if (q.stockState && row.stock.state !== q.stockState) return false;
-      if (q.productReviewState && row.productReviewState !== q.productReviewState) return false;
-      if (q.productPublication && row.productPublication !== q.productPublication) return false;
-      if (q.featured !== undefined && row.offer.featured !== q.featured) return false;
+      if (q.stockState && (stock.get(r.id) ?? EMPTY_STOCK).state !== q.stockState) return false;
+      if (q.productReviewState && (p?.reviewState ?? 'approved') !== q.productReviewState) return false;
+      if (q.productPublication && publication !== q.productPublication) return false;
+      // OfferSummary.featured: featured in some zone and active
+      if (q.featured !== undefined && (featured.has(r.id) && r.status === 'active') !== q.featured) return false;
       if (q.hiddenOrSuspended !== undefined) {
-        const hidden = r.status === 'paused' || r.status === 'ineligible' || row.productPublication !== 'active';
+        const hidden = r.status === 'paused' || r.status === 'ineligible' || publication !== 'active';
         if (hidden !== q.hiddenOrSuspended) return false;
       }
       return true;
     });
-    return pageOf(filtered, page);
+    return { rows, stock };
+  }
+
+  async listOwn(sellerId: string, q: SellerListQuery, page: PageRequest): Promise<common.Page<SellerOfferRow>> {
+    const cache: ProductCache = new Map();
+    if (!this.needsScan(q)) {
+      const p = await this.repo.listOffers(this.ownFilter(sellerId, q), page);
+      return { ...p, items: await this.sellerRows(p.items, sellerId, cache) };
+    }
+    // rows are built for the page only
+    const { rows, stock } = await this.scanOwn(sellerId, q, cache);
+    const p = pageOf(rows, page);
+    return { ...p, items: await this.sellerRows(p.items, sellerId, cache, stock) };
   }
 
   async countOwn(sellerId: string) {
@@ -322,13 +342,8 @@ export class ViewsPart extends Part {
       },
       page,
     );
-    const [summaries, cues, snaps, elig] = await Promise.all([
-      this.summaries(p.items),
-      this.parts.storefront.sellerCues(p.items),
-      this.core.sellerSnapshots(p.items.map((r) => r.seller_id)),
-      this.repo.getEligibility(p.items.map((r) => r.id)),
-    ]);
-    const e = new Map(elig.map((x) => [x.offer_id, x]));
+    const e = await this.parts.storefront.eligibility(p.items);
+    const [summaries, cues, snaps] = await Promise.all([this.summaries(p.items, new Map(), e), this.parts.storefront.sellerCues(p.items, e), this.core.sellerSnapshots(p.items.map((r) => r.seller_id))]);
     return {
       ...p,
       items: p.items.map((r) => ({
@@ -372,23 +387,34 @@ export class ViewsPart extends Part {
       p = await this.repo.listOffers(base, page);
       rows = p.items;
     }
-    const [summaries, stock, products] = await Promise.all([this.summaries(rows, cache), this.stock(rows), this.core.products(rows.map((r) => r.product_id), cache)]);
-    const pendingRows = rows.length ? await this.repo.find('price_changes', { offer_id: rows.map((r) => r.id), state: ['scheduled', 'pending_approval'] }) : [];
-    const pendingViews = new Map((await this.parts.pricing.toPriceChanges(pendingRows)).map((c) => [c.offerId, c]));
-    const out: OfficialOfferRow[] = [];
+    const [stock, products] = await Promise.all([this.stock(rows), this.core.products(rows.map((r) => r.product_id), cache)]);
     const term = q.q?.trim().toLowerCase();
-    for (const r of rows) {
+    const shown = rows.filter((r) => {
       const prod = products.get(r.product_id);
-      const s = stock.get(r.id) ?? EMPTY_STOCK;
-      if (term && ![r.seller_sku, prod?.product.title].some((x) => x?.toLowerCase().includes(term))) continue;
-      if (q.stockState && s.state !== q.stockState) continue;
-      if (q.categoryId && prod?.product.categoryId !== q.categoryId) continue;
-      const cost = await this.core.soft('inventory.getUnitCost', () => this.ctx.use('inventory').getUnitCost(r.stock_item_id));
-      const margin = cost && r.price_amount > 0 ? Math.round(((r.price_amount - cost.amount) / r.price_amount) * 1000) / 10 : null;
-      const note = prod?.reviewState === 'changes_requested' ? 'Product changes requested' : s.incoming > 0 ? `Incoming ${s.incoming}` : null;
-      out.push({ offer: summaries.get(r.id)!, unitCost: cost ?? null, marginPct: margin, stock: s, note, pendingPriceChange: pendingViews.get(r.id) ?? null });
-    }
-    return p ? { ...p, items: out } : pageOf(out, page);
+      if (term && ![r.seller_sku, prod?.product.title].some((x) => x?.toLowerCase().includes(term))) return false;
+      if (q.stockState && (stock.get(r.id) ?? EMPTY_STOCK).state !== q.stockState) return false;
+      return !q.categoryId || prod?.product.categoryId === q.categoryId;
+    });
+    // summaries, costs and pending price changes only for the rows of the page
+    const pg = p ? { ...p, items: shown } : pageOf(shown, page);
+    const items = pg.items;
+    const [summaries, costs, pendingRows] = await Promise.all([
+      this.summaries(items, cache),
+      // inventory has no batch read of unit costs: one call per row, side by side
+      Promise.all(items.map((r) => this.core.soft('inventory.getUnitCost', () => this.ctx.use('inventory').getUnitCost(r.stock_item_id)))),
+      items.length ? this.repo.find('price_changes', { offer_id: items.map((r) => r.id), state: ['scheduled', 'pending_approval'] }) : Promise.resolve([]),
+    ]);
+    const pendingViews = new Map((await this.parts.pricing.toPriceChanges(pendingRows)).map((c) => [c.offerId, c]));
+    return {
+      ...pg,
+      items: items.map((r, i): OfficialOfferRow => {
+        const s = stock.get(r.id) ?? EMPTY_STOCK;
+        const cost = costs[i];
+        const margin = cost && r.price_amount > 0 ? Math.round(((r.price_amount - cost.amount) / r.price_amount) * 1000) / 10 : null;
+        const note = products.get(r.product_id)?.reviewState === 'changes_requested' ? 'Product changes requested' : s.incoming > 0 ? `Incoming ${s.incoming}` : null;
+        return { offer: summaries.get(r.id)!, unitCost: cost ?? null, marginPct: margin, stock: s, note, pendingPriceChange: pendingViews.get(r.id) ?? null };
+      }),
+    };
   }
 
   /* ================================================================ content gaps */
@@ -498,14 +524,15 @@ export class ViewsPart extends Part {
       const ids = Array.isArray(f.offerIds) ? (f.offerIds as string[]) : null;
       if (ids) all = await this.repo.find('offers', { id: ids, owner_type: 'seller', seller_id: sellerId });
       else {
-        const listed = (await this.listOwn(sellerId, this.exportFilters(filters), { mode: 'page', page: 1, limit: SCAN_LIMIT })).items.map((r) => r.offer.id);
-        const byId = new Map((await this.repo.getMany('offers', listed)).map((r) => [r.id, r]));
-        all = listed.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+        // the seller list's rows in its order (listOwn without building the rows)
+        const q = this.exportFilters(filters);
+        all = this.needsScan(q) ? (await this.scanOwn(sellerId, q, new Map())).rows : await this.repo.allOffers(this.ownFilter(sellerId, q), SCAN_LIMIT);
       }
     } else if (dataset === ADMIN_DATASET) {
       if (principal.kind !== 'staff') throw new AppError('FORBIDDEN', 'Staff only');
       const f = (filters ?? {}) as Record<string, unknown>;
-      all = await this.repo.allOffers(
+      // only this page (and one row to tell whether another follows) of the first ADMIN_EXPORT_MAX rows
+      const rows = await this.repo.offersSlice(
         {
           ...(typeof f.ownerType === 'string' ? { ownerType: f.ownerType as 'official' | 'seller' } : {}),
           ...(typeof f.sellerId === 'string' ? { sellerId: f.sellerId } : {}),
@@ -513,19 +540,25 @@ export class ViewsPart extends Part {
           ...(typeof f.status === 'string' ? { statuses: [f.status] } : {}),
           ...(typeof f.q === 'string' ? { q: f.q } : {}),
         },
-        50_000,
+        offset,
+        Math.min(EXPORT_PAGE + 1, ADMIN_EXPORT_MAX - offset),
       );
+      return this.exportPage(dataset, rows.slice(0, EXPORT_PAGE), undefined, rows.length > EXPORT_PAGE ? String(offset + EXPORT_PAGE) : undefined);
     } else throw invalidField('dataset', `Offers has no dataset ${dataset}`);
-    const slice = all.slice(offset, offset + EXPORT_PAGE);
+    return this.exportPage(dataset, all.slice(offset, offset + EXPORT_PAGE), sellerId, all.length > offset + EXPORT_PAGE ? String(offset + EXPORT_PAGE) : undefined);
+  }
+
+  private async exportPage(dataset: string, slice: OfferRec[], sellerId: string | undefined, nextCursor: string | undefined): Promise<{ rows: unknown[]; nextCursor?: string }> {
     const cache: ProductCache = new Map();
-    const [summaries, stock, products, names, elig] = await Promise.all([
+    const admin = dataset === ADMIN_DATASET;
+    const [summaries, stock, products, names, e] = await Promise.all([
       this.summaries(slice, cache),
       this.stock(slice, sellerId),
       this.core.products(slice.map((r) => r.product_id), cache),
-      this.core.sellerNames(slice),
-      this.repo.getEligibility(slice.map((r) => r.id)),
+      // the admin columns only
+      admin ? this.core.sellerNames(slice) : new Map<string, string>(),
+      admin ? this.parts.storefront.eligibility(slice) : new Map<string, EligibilityRec>(),
     ]);
-    const e = new Map(elig.map((x) => [x.offer_id, x]));
     return {
       rows: slice.map((r) => {
         const s = summaries.get(r.id)!;
@@ -542,10 +575,10 @@ export class ViewsPart extends Part {
           publication: p?.publication ?? null,
           status: r.status,
           updatedAt: r.updated_at.toISOString(),
-          ...(dataset === ADMIN_DATASET ? { seller: r.owner_type === 'official' ? OFFICIAL_NAME : (names.get(r.seller_id ?? '') ?? ''), featuredEligible: e.get(r.id)?.eligible ?? false } : {}),
+          ...(admin ? { seller: r.owner_type === 'official' ? OFFICIAL_NAME : (names.get(r.seller_id ?? '') ?? ''), featuredEligible: e.get(r.id)?.eligible ?? false } : {}),
         };
       }),
-      ...(all.length > offset + EXPORT_PAGE ? { nextCursor: String(offset + EXPORT_PAGE) } : {}),
+      ...(nextCursor ? { nextCursor } : {}),
     };
   }
 

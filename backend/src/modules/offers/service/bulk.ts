@@ -7,7 +7,7 @@ import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as identity from '../../../spec/identity.js';
-import type { BulkRowError, BulkUpdateJob, BulkUpdateTotals, FileLink } from '../../../spec/offers.js';
+import type { BulkRowError, BulkUpdateJob, BulkUpdateTotals, FileLink, StockCue } from '../../../spec/offers.js';
 import { changePct, formatMoney, parseCsv, parsePrice, toCsv } from '../domain/rules.js';
 import { bulkUpdateJobMachine } from '../domain/state-machines.js';
 import { actorFromText, actorText, bulkJob, bulkReasonOf, bulkRow, EMPTY_TOTALS, isoReq, money, totalsOf } from '../mappers.js';
@@ -116,9 +116,14 @@ export class BulkPart extends Part {
 
     const offers = await this.repo.allOffers({ ownerType: owner.ownerType, ...(owner.sellerId ? { sellerId: owner.sellerId } : {}) }, 50_000);
     const bySku = new Map(offers.map((o) => [o.seller_sku.toLowerCase(), o]));
-    const stock = owner.ownerType === 'seller' ? await this.parts.views.stock(offers.filter((o) => o.status !== 'removed'), owner.sellerId) : new Map();
-    const products = await this.core.products([...new Set(offers.map((o) => o.product_id))]);
-    const mins = ((await this.core.setting('minimumPriceByCategory')) ?? {}) as Record<string, number>;
+    // stock and categories only of the offers the file names (not of every offer the owner has)
+    const named = [...new Set(data.flatMap((cells) => bySku.get((cells[skuCol] ?? '').trim().toLowerCase()) ?? []))];
+    const [stock, products, minSetting] = await Promise.all([
+      owner.ownerType === 'seller' ? this.parts.views.stock(named.filter((o) => o.status !== 'removed'), owner.sellerId) : new Map<string, StockCue>(),
+      this.core.products(named.map((o) => o.product_id)),
+      this.core.setting('minimumPriceByCategory'),
+    ]);
+    const mins = (minSetting ?? {}) as Record<string, number>;
     const seen = new Set<string>();
     const rows: BulkRowRec[] = [];
     const totals: BulkUpdateTotals = { ...EMPTY_TOTALS, rows: data.length };
@@ -237,16 +242,20 @@ export class BulkPart extends Part {
       }
       if (qtyRows.length && owner.ownerType === 'seller') {
         const res = await this.ctx.use('inventory').applyBulkQuantities(owner.sellerId, qtyRows.map((q) => ({ stockItemId: q.stockItemId, newAvailable: q.newAvailable })), job.id, by.actor);
+        // the first answer per stock item
+        const answers = new Map<string, (typeof res)[number]>();
+        for (const x of res) if (!answers.has(x.stockItemId)) answers.set(x.stockItemId, x);
+        const applied: number[] = [];
         for (const q of qtyRows) {
-          const out = res.find((x) => x.stockItemId === q.stockItemId);
-          if (out?.ok) {
-            await this.repo.updateBulkRow(job.id, q.row.row_no, { result: 'applied' });
-            totals.applied++;
-          } else {
+          const out = answers.get(q.stockItemId);
+          if (out?.ok) applied.push(q.row.row_no);
+          else {
             await this.repo.updateBulkRow(job.id, q.row.row_no, { result: 'skipped', error_code: 'negative_quantity', error_message: out?.error ?? 'The quantity could not be set' });
             totals.skipped++;
           }
         }
+        await this.repo.markBulkRows(job.id, applied, { result: 'applied' });
+        totals.applied += applied.length;
       }
     } catch (err) {
       await this.repo.update('bulk_update_jobs', job.id, { state: bulkUpdateJobMachine.next('applying', 'fail'), failure: 'Applying stopped on an unexpected error; rows already applied stay applied', totals: { ...totals, ...(bulkReasonOf(job) ? { reason: bulkReasonOf(job) } : {}) } as never });

@@ -170,6 +170,17 @@ export class OffersRepository {
     return this.#t.offers.find(await this.#offerFilter(filter), { sort: { updated_at: -1, id: -1 }, limit });
   }
 
+  /** Ineligible offers held by one source (ineligible_source: a restriction, a product …) */
+  heldBy(kind: string, id: string): Promise<OfferRec[]> {
+    return this.#t.offers.find({ status: 'ineligible', 'ineligible_source.kind': kind, 'ineligible_source.id': id });
+  }
+
+  /** allOffers(filter, offset + limit).slice(offset), reading only that part */
+  async offersSlice(filter: OfferListFilter, offset: number, limit: number): Promise<OfferRec[]> {
+    if (limit <= 0) return [];
+    return this.#t.offers.find(await this.#offerFilter(filter), { sort: { updated_at: -1, id: -1 }, skip: offset, limit });
+  }
+
   async countByStatus(filter: OfferListFilter): Promise<Record<string, number>> {
     const rows = await this.#t.offers.aggregate<{ _id: string; n: number }>([{ $match: this.#t.offers.filter(await this.#offerFilter(filter)) }, { $group: { _id: '$status', n: { $sum: 1 } } }]);
     return Object.fromEntries(rows.map((r) => [r._id, r.n]));
@@ -251,6 +262,11 @@ export class OffersRepository {
 
   bulkRows(jobId: string, result: string | undefined, page: PageRequest): Promise<common.Page<BulkRowRec>> {
     return this.#t.bulkRows.page({ job_id: jobId, ...(result ? { result } : {}) }, page, { column: 'row_no', direction: 'asc', id: 'row_no' });
+  }
+
+  /** The same patch on many rows of a job, in one update */
+  async markBulkRows(jobId: string, rowNos: readonly number[], patch: Partial<BulkRowRec>): Promise<void> {
+    if (rowNos.length) await this.#t.bulkRows.updateMany({ job_id: jobId, row_no: oneOf(rowNos) }, definedOnly(patch));
   }
 
   async updateBulkRow(jobId: string, rowNo: number, patch: Partial<BulkRowRec>): Promise<void> {
