@@ -3566,6 +3566,24 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "cases_return_id_a479ef",
+          "key": {
+            "return_id": 1
+          }
+        },
+        {
+          "name": "cases_guest_session_id_a02466",
+          "key": {
+            "guest_session_id": 1
+          }
+        },
+        {
+          "name": "cases_first_replied_at_3b8bc2",
+          "key": {
+            "first_replied_at": 1
+          }
+        },
+        {
           "name": "cases_kind_status_425123",
           "key": {
             "kind": 1,

@@ -804,7 +804,7 @@ Reviewer must differ from the original decider (SAME_DECIDER).
 | approval_request_id | uuid? (access approval request of a decision waiting for support.remedies.approve) |
 | pending_decision | jsonb? ({ kind: decision|appeal, ref, decision | appeal, requestedBy, principal, requestedAt }: the decision published when the request is approved) |
 
-Indexes: `(status, next_response_due_at)`, `(owner_staff_id, status)`, `(customer_id, opened_at desc)`, `(seller_id, status)`, `(order_id)`, `(kind, status)`, `(approval_request_id) where approval_request_id is not null`, `(trust_report_id) where trust_report_id is not null`
+Indexes: `(status, next_response_due_at)`, `(owner_staff_id, status)`, `(customer_id, opened_at desc)`, `(seller_id, status)`, `(order_id)`, `(return_id)`, `(guest_session_id)`, `(first_replied_at)`, `(kind, status)`, `(approval_request_id) where approval_request_id is not null`, `(trust_report_id) where trust_report_id is not null`
 
 **case_items**
 

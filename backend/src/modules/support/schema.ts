@@ -106,6 +106,9 @@ cases.index({"owner_staff_id":1,"status":1}, {"name":"cases_owner_staff_id_statu
 cases.index({"customer_id":1,"opened_at":-1}, {"name":"cases_customer_id_opened_at_ff4884"});
 cases.index({"seller_id":1,"status":1}, {"name":"cases_seller_id_status_b608db"});
 cases.index({"order_id":1}, {"name":"cases_order_id_4c5e85"});
+cases.index({"return_id":1}, {"name":"cases_return_id_a479ef"});
+cases.index({"guest_session_id":1}, {"name":"cases_guest_session_id_a02466"});
+cases.index({"first_replied_at":1}, {"name":"cases_first_replied_at_3b8bc2"});
 cases.index({"kind":1,"status":1}, {"name":"cases_kind_status_425123"});
 cases.index({"approval_request_id":1}, {"name":"cases_approval_request_id_7e5ff9","partialFilterExpression":{"approval_request_id":{"$type":"string"}}});
 cases.index({"trust_report_id":1}, {"name":"cases_trust_report_id_f68c33","partialFilterExpression":{"trust_report_id":{"$type":"string"}}});
