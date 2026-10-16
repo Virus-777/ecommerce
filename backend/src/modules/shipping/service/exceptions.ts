@@ -623,7 +623,9 @@ export class Exceptions {
       ...(await this.repo.find('shipments', { kind: ['outbound', 'replacement'], tracking_state: 'pending', status: 'label_created', created_at: { op: '<=', value: labelCutoff } }, { limit: 200 })),
       ...(await this.repo.find('shipments', { kind: ['outbound', 'replacement'], tracking_state: 'pending', status: 'shipped', shipped_at: { op: '<=', value: shippedCutoff } }, { limit: 200 })),
     ];
+    const raised = await this.shipmentsWithException(candidates, 'missing_tracking');
     for (const s of candidates) {
+      if (raised.has(s.id)) continue;
       const situation =
         s.tracking_state === 'missing'
           ? 'Shipped without a tracking number'
@@ -632,9 +634,15 @@ export class Exceptions {
             : s.status === 'label_created'
               ? `Label created, no scan ${cfg.labelScanGraceHours} h`
               : `Shipped, no carrier scan ${cfg.validTrackingWithinHours} h`;
-      if ((await this.repo.count('exceptions', { shipment_id: s.id, kind: 'missing_tracking' })) > 0) continue;
       await this.openMissingTracking(s, situation, { actor: SYSTEM });
     }
+  }
+
+  /** Shipments among rows that already have an exception of the kind, in any status (one read) */
+  private async shipmentsWithException(rows: readonly ShipmentRec[], kind: ExceptionKind): Promise<Set<string>> {
+    if (!rows.length) return new Set();
+    const found = await this.repo.find('exceptions', { shipment_id: rows.map((s) => s.id), kind });
+    return new Set(found.map((e) => e.shipment_id!));
   }
 
   /** Job: packages with no carrier scan for stalledNoScanDays open a lost_or_damaged review */
@@ -643,9 +651,10 @@ export class Exceptions {
     const now = this.core.now();
     const cutoff = new Date(now.getTime() - cfg.stalledNoScanDays * DAY_MS);
     const moving = await this.repo.find('shipments', { status: ['shipped', 'in_transit', 'out_for_delivery'], shipped_at: { op: '<=', value: cutoff } }, { limit: 300 });
+    // one review per package: a resolved one is not reopened every day
+    const reviewed = await this.shipmentsWithException(moving, 'lost_or_damaged');
     for (const s of moving) {
-      // one review per package: a resolved one is not reopened every day
-      if ((await this.repo.count('exceptions', { shipment_id: s.id, kind: 'lost_or_damaged' })) > 0) continue;
+      if (reviewed.has(s.id)) continue;
       const last = (await this.repo.find('tracking_events', { shipment_id: s.id, source: ['carrier_webhook', 'carrier_poll'] }, { orderBy: [['at', 'desc']], limit: 1 }))[0];
       const since = last?.at ?? s.shipped_at!;
       if (since.getTime() > cutoff.getTime()) continue;

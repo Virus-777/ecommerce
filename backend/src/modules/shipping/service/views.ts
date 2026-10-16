@@ -30,11 +30,27 @@ import { iso, type Core } from './core.js';
 /** Who pays a label (labels.billed_to) */
 export type BilledTo = 'seller' | 'company' | 'platform' | 'customer';
 
+type LabelMeta = { carrierCode: string; carrierName: string; serviceName: string };
+
 /** The carrier and service a label was bought for (labels.carrier_service_id) */
-export async function labelCarrier(core: Core, l: Pick<LabelRec, 'carrier_service_id'>): Promise<{ carrierCode: string; carrierName: string; serviceName: string }> {
-  const service = await core.repo.get('carrier_services', l.carrier_service_id);
-  const carrier = service ? await core.repo.get('carriers', service.carrier_id) : undefined;
-  return { carrierCode: carrier?.code ?? 'other', carrierName: carrier?.name ?? 'Carrier', serviceName: service?.name ?? 'Carrier service' };
+export async function labelCarrier(core: Core, l: Pick<LabelRec, 'carrier_service_id'>): Promise<LabelMeta> {
+  return (await labelCarriers(core, [l])).get(l.carrier_service_id)!;
+}
+
+/** labelCarrier for several labels, by carrier service id: two reads in all */
+async function labelCarriers(core: Core, labels: readonly Pick<LabelRec, 'carrier_service_id'>[]): Promise<Map<string, LabelMeta>> {
+  const serviceIds = [...new Set(labels.map((l) => l.carrier_service_id))];
+  const services = serviceIds.length ? await core.repo.find('carrier_services', { id: serviceIds }) : [];
+  const carrierIds = [...new Set(services.map((s) => s.carrier_id))];
+  const carriers = new Map((carrierIds.length ? await core.repo.find('carriers', { id: carrierIds }) : []).map((c) => [c.id, c]));
+  const serviceOf = new Map(services.map((s) => [s.id, s]));
+  return new Map(
+    serviceIds.map((id) => {
+      const service = serviceOf.get(id);
+      const carrier = service ? carriers.get(service.carrier_id) : undefined;
+      return [id, { carrierCode: carrier?.code ?? 'other', carrierName: carrier?.name ?? 'Carrier', serviceName: service?.name ?? 'Carrier service' }];
+    }),
+  );
 }
 
 export interface ShipmentParts {
@@ -49,7 +65,11 @@ export interface ShipmentParts {
 
 const group = <T, K>(rows: readonly T[], key: (r: T) => K) => {
   const m = new Map<K, T[]>();
-  for (const r of rows) m.set(key(r), [...(m.get(key(r)) ?? []), r]);
+  for (const r of rows) {
+    const list = m.get(key(r));
+    if (list) list.push(r);
+    else m.set(key(r), [r]);
+  }
   return m;
 };
 
@@ -225,8 +245,8 @@ export class Views {
     };
   }
 
-  async label(l: LabelRec, principal?: Principal | null): Promise<Label> {
-    const meta = await labelCarrier(this.core, l);
+  async label(l: LabelRec, principal?: Principal | null, carriers?: Map<string, LabelMeta>): Promise<Label> {
+    const meta = carriers?.get(l.carrier_service_id) ?? (await labelCarrier(this.core, l));
     const fallback = `${this.core.ctx.config.publicUrls.seller.replace(/\/$/, '')}/shipping/labels/${l.id}.pdf`;
     const asset = l.storage_key;
     const link = asset ? await this.core.soft('media', 'label link', (m) => m.signedDownload(asset, principal ?? { kind: 'staff', accountId: null }, 'Shipping label')) : undefined;
@@ -251,7 +271,7 @@ export class Views {
     };
   }
 
-  async shipment(s: ShipmentRec, parts: ShipmentParts, principal?: Principal | null): Promise<Shipment> {
+  async shipment(s: ShipmentRec, parts: ShipmentParts, principal?: Principal | null, carriers?: Map<string, LabelMeta>): Promise<Shipment> {
     const label = parts.labels.get(s.id);
     return {
       id: s.id,
@@ -274,7 +294,7 @@ export class Views {
       statusLabel: statusLabel(s.status, s.tracking_state, s.kind),
       contents: this.contents(parts.lines.get(s.id) ?? []),
       shipFrom: s.ship_from,
-      label: label ? await this.label(label, principal) : null,
+      label: label ? await this.label(label, principal, carriers) : null,
       shippedAt: iso(s.shipped_at),
       dispatchedOnTime: s.dispatched_on_time,
       estimatedArrival: s.estimated_arrival,
@@ -290,7 +310,8 @@ export class Views {
 
   async shipments(rows: readonly ShipmentRec[], principal?: Principal | null): Promise<Shipment[]> {
     const parts = await this.parts(rows);
-    return Promise.all(rows.map((r) => this.shipment(r, parts, principal)));
+    const carriers = await labelCarriers(this.core, [...parts.labels.values()]);
+    return Promise.all(rows.map((r) => this.shipment(r, parts, principal, carriers)));
   }
 
   async summaries(rows: readonly ShipmentRec[]): Promise<ShipmentSummary[]> {
@@ -357,32 +378,33 @@ export class Views {
       this.core.soft('media', 'claim evidence', (m) => m.refs([...new Set(rows.flatMap((r) => r.evidence_ids))])),
     ]);
     const refs = new Map((evidence ?? []).map((r) => [r.id, r]));
-    const out: CarrierClaim[] = [];
-    for (const c of rows) {
-      const approval = c.approval_request_id ? ((await this.core.soft('access', 'approval info', (a) => a.approvalInfo(c.approval_request_id!))) ?? { required: true, reason: 'Finance approval requested', approvalRequestId: c.approval_request_id, approvers: ['Finance Manager'] }) : null;
-      out.push({
-        id: c.id,
-        claimNumber: c.claim_number,
-        carrierCode: c.carrier_code,
-        carrierName: carrierNameOf(c.carrier_code, carriers) ?? c.carrier_code,
-        orderId: c.order_id,
-        orderRef: shipments.find((s) => s.id === c.shipment_id)?.order_ref ?? '',
-        shipmentId: c.shipment_id,
-        exceptionId: c.exception_id,
-        amount: money(c.amount, c.currency),
-        filedBy: c.filed_by as CarrierClaim['filedBy'],
-        sellerId: c.seller_id,
-        filedAt: c.filed_at,
-        status: c.status as CarrierClaim['status'],
-        owner: c.owner,
-        evidence: c.evidence_ids.map((id) => refs.get(id)).filter((r): r is common.MediaRef => Boolean(r)),
-        approval,
-        paidAmount: c.paid_amount != null ? money(c.paid_amount, c.currency) : null,
-        decidedAt: iso(c.decided_at),
-        note: c.note,
-      });
-    }
-    return out;
+    const orderRefs = new Map(shipments.map((s) => [s.id, s.order_ref]));
+    return Promise.all(
+      rows.map(async (c): Promise<CarrierClaim> => {
+        const approval = c.approval_request_id ? ((await this.core.soft('access', 'approval info', (a) => a.approvalInfo(c.approval_request_id!))) ?? { required: true, reason: 'Finance approval requested', approvalRequestId: c.approval_request_id, approvers: ['Finance Manager'] }) : null;
+        return {
+          id: c.id,
+          claimNumber: c.claim_number,
+          carrierCode: c.carrier_code,
+          carrierName: carrierNameOf(c.carrier_code, carriers) ?? c.carrier_code,
+          orderId: c.order_id,
+          orderRef: orderRefs.get(c.shipment_id) ?? '',
+          shipmentId: c.shipment_id,
+          exceptionId: c.exception_id,
+          amount: money(c.amount, c.currency),
+          filedBy: c.filed_by as CarrierClaim['filedBy'],
+          sellerId: c.seller_id,
+          filedAt: c.filed_at,
+          status: c.status as CarrierClaim['status'],
+          owner: c.owner,
+          evidence: c.evidence_ids.map((id) => refs.get(id)).filter((r): r is common.MediaRef => Boolean(r)),
+          approval,
+          paidAmount: c.paid_amount != null ? money(c.paid_amount, c.currency) : null,
+          decidedAt: iso(c.decided_at),
+          note: c.note,
+        };
+      }),
+    );
   }
 
   estimateLabel = (r: common.DateRange | null | undefined) => (r ? rangeLabel(r) : null);
