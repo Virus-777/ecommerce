@@ -2371,6 +2371,12 @@ export const spec = defineModuleSpec({
           "key": {
             "order_id": 1
           }
+        },
+        {
+          "name": "fulfillments_seller_group_id_17f3a9",
+          "key": {
+            "seller_group_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -2939,6 +2945,12 @@ export const spec = defineModuleSpec({
               "$type": "string"
             }
           }
+        },
+        {
+          "name": "packages_shipment_id_048e7e",
+          "key": {
+            "shipment_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -3024,6 +3036,12 @@ export const spec = defineModuleSpec({
             "order_item_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "package_items_order_item_id_219b1b",
+          "key": {
+            "order_item_id": 1
+          }
         }
       ],
       "unenforced": []

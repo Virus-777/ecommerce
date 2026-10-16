@@ -523,7 +523,7 @@ Indexes: `pk (stock_item_id, bin_id)`, `unique (stock_item_id) where primary_bin
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(status, ship_by)`, `(wave_id)`, `(order_id)`
+Indexes: `(status, ship_by)`, `(wave_id)`, `(order_id)`, `(seller_group_id)`
 
 **fulfillment_lines**
 
@@ -611,7 +611,7 @@ Indexes: `(context, context_id, at)`
 | packed_at | timestamptz? |
 | station | text? |
 
-Indexes: `(fulfillment_id)`, `unique (tracking_number)`
+Indexes: `(fulfillment_id)`, `unique (tracking_number)`, `(shipment_id)`
 
 **package_items**
 
@@ -624,7 +624,7 @@ Indexes: `(fulfillment_id)`, `unique (tracking_number)`
 | scanned | int |
 | serial_numbers | text[] |
 
-Indexes: `pk (package_id, order_item_id)`
+Indexes: `pk (package_id, order_item_id)`, `(order_item_id)`
 
 **putaway_tasks**
 

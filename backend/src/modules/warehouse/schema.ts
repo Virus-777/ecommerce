@@ -73,6 +73,7 @@ fulfillments.index({"seller_group_id":1}, {"name":"fulfillments_seller_group_id_
 fulfillments.index({"status":1,"ship_by":1}, {"name":"fulfillments_status_ship_by_ec1549"});
 fulfillments.index({"wave_id":1}, {"name":"fulfillments_wave_id_b7710f"});
 fulfillments.index({"order_id":1}, {"name":"fulfillments_order_id_4c5e85"});
+fulfillments.index({"seller_group_id":1}, {"name":"fulfillments_seller_group_id_17f3a9"});
 
 const fulfillment_lines = new Schema(
   {
@@ -175,6 +176,7 @@ const packages = new Schema(
 );
 packages.index({"fulfillment_id":1}, {"name":"packages_fulfillment_id_26a36a"});
 packages.index({"tracking_number":1}, {"name":"packages_tracking_number_3d9cae","unique":true,"partialFilterExpression":{"tracking_number":{"$type":"string"}}});
+packages.index({"shipment_id":1}, {"name":"packages_shipment_id_048e7e"});
 
 const package_items = new Schema(
   {
@@ -190,6 +192,7 @@ const package_items = new Schema(
   collectionOptions("warehouse.package_items", { generatedId: true }),
 );
 package_items.index({"package_id":1,"order_item_id":1}, {"name":"package_items_package_id_order_item_id_230d00","unique":true});
+package_items.index({"order_item_id":1}, {"name":"package_items_order_item_id_219b1b"});
 
 const putaway_tasks = new Schema(
   {
