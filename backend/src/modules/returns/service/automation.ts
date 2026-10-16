@@ -18,6 +18,9 @@ import type { Views } from './views.js';
 const BATCH = 200;
 
 export class Automation {
+  /** Rows per read when inspectionDeadlines walks its candidates; tests lower it to walk several batches */
+  jobBatchSize = BATCH;
+
   constructor(
     private readonly core: Core,
     private readonly views: Views,
@@ -249,9 +252,18 @@ export class Automation {
 
   /** Received returns past the inspection target and remedies past the refund target go to the platform; stuck hand-overs are retried */
   async inspectionDeadlines(): Promise<void> {
+    // Every candidate is visited, batch by batch (BUILDING-MODULES §9): returns still inside their inspection or
+    // refund target are skipped and stay candidates, so a first page alone could fill up with them and never reach
+    // the late ones. Returns the job escalates leave the candidates (platform_handling) as it goes.
+    const candidates = this.repo.batches('returns', { status: ['received', 'awaiting_remedy'], owner_type: 'seller', platform_handling: false }, this.jobBatchSize);
+    for await (const batch of candidates) await this.inspectionBatch(batch.map((r) => r.id));
+    await this.refunds.retryHandOvers();
+  }
+
+  /** One batch of inspectionDeadlines: the returns past their inspection or refund target go to the platform */
+  private async inspectionBatch(returnIds: string[]): Promise<void> {
     const now = this.core.now();
-    const candidates = await this.repo.find('returns', { status: ['received', 'awaiting_remedy'], owner_type: 'seller', platform_handling: false }, { limit: BATCH });
-    const aggs = await this.core.loadMany(candidates.map((r) => r.id));
+    const aggs = await this.core.loadMany(returnIds);
     for (const agg of aggs.values()) {
       const r = agg.ret;
       let reason: 'seller_missed_inspection' | 'refund_late' | null = null;
@@ -267,7 +279,6 @@ export class Automation {
       if (!reason) continue;
       await this.escalate(agg, reason);
     }
-    await this.refunds.retryHandOvers();
   }
 
   private async escalate(agg: Agg, reason: 'seller_missed_inspection' | 'refund_late') {

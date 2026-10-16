@@ -1175,7 +1175,7 @@ Indexes: `(seller_id, effective_from desc)`
 | completed_at | timestamptz? |
 | updated_at | timestamptz |
 
-Indexes: `(seller_id, status, response_due_at)`, `(seller_id, requested_at desc)`, `(customer_id, requested_at desc)`, `(order_id)`, `(status, response_due_at)`, `(status, requested_at desc)`, `(owner_staff_id, status)`
+Indexes: `(seller_id, status, response_due_at)`, `(seller_id, requested_at desc)`, `(customer_id, requested_at desc)`, `(order_id)`, `(status, response_due_at)`, `(status, requested_at desc)`, `(owner_staff_id, status)`, `(status, id)`
 
 **return_items**
 

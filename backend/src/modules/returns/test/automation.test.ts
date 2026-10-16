@@ -91,6 +91,29 @@ describe('jobs', () => {
       restore();
     }
   });
+
+  it('walks every candidate: a late return behind returns still inside their inspection target is escalated', async () => {
+    // three returns requested first (lower ids) but received a week later, so their target is not reached yet
+    const waiting = [await sellerReturn(), await sellerReturn(), await sellerReturn()];
+    for (const w of waiting) await h.call('POST', `/api/seller/returns/requests/${w.ret.id}/approve`, w.seller(), { labelMethod: 'prepaid_qr' });
+    const late = await sellerReturn();
+    await h.call('POST', `/api/seller/returns/requests/${late.ret.id}/approve`, late.seller(), { labelMethod: 'prepaid_qr' });
+    const received = await h.call('POST', `/api/seller/returns/requests/${late.ret.id}/receive`, late.seller(), {});
+    const inspectBy = new Date(received.body.deadlines.inspectBy.dueAt).getTime();
+    try {
+      h.clock.set(new Date(base + 7 * 86_400_000));
+      for (const w of waiting) expect((await h.call('POST', `/api/seller/returns/requests/${w.ret.id}/receive`, w.seller(), {})).status).toBe(200);
+      h.clock.set(new Date(inspectBy + 3_600_000));
+      // batches of 2: the first batch holds only returns the job skips
+      h.service.automation.jobBatchSize = 2;
+      await job('returns.inspection-deadlines');
+      expect(h.named('returns.return.escalated').find((e) => e.returnId === late.ret.id)).toMatchObject({ reason: 'seller_missed_inspection' });
+      for (const w of waiting) expect(h.named('returns.return.escalated').find((e) => e.returnId === w.ret.id)).toBeUndefined();
+    } finally {
+      h.service.automation.jobBatchSize = 200;
+      restore();
+    }
+  });
 });
 
 describe('events from other modules', () => {

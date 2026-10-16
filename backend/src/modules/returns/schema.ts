@@ -131,6 +131,7 @@ returns.index({"order_id":1}, {"name":"returns_order_id_4c5e85"});
 returns.index({"status":1,"response_due_at":1}, {"name":"returns_status_response_due_at_746784"});
 returns.index({"status":1,"requested_at":-1}, {"name":"returns_status_requested_at_675832"});
 returns.index({"owner_staff_id":1,"status":1}, {"name":"returns_owner_staff_id_status_e7d1fe"});
+returns.index({"status":1,"_id":1}, {"name":"returns_status__id_1ab776"});
 
 const return_items = new Schema(
   {

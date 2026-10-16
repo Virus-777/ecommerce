@@ -5439,6 +5439,13 @@ export const spec = defineModuleSpec({
             "owner_staff_id": 1,
             "status": 1
           }
+        },
+        {
+          "name": "returns_status__id_1ab776",
+          "key": {
+            "status": 1,
+            "_id": 1
+          }
         }
       ],
       "unenforced": []
