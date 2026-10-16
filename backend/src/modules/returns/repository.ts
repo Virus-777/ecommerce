@@ -39,8 +39,11 @@ function groupBy<T, K>(rows: readonly T[], key: (r: T) => K): Map<K, T[]> {
   return out;
 }
 
-/** What queue figures need of a refund request (no items or history) */
-export type RefundFacts = Pick<RefundRec, 'owner_type' | 'return_id' | 'total'>;
+/** How many refund requests match and their summed total in minor units (queue figures) */
+export interface RefundTotals {
+  count: number;
+  total: number;
+}
 
 /**
  * returns.policy_versions, category_exceptions, seller_terms, returns, return_items, return_shipments,
@@ -186,9 +189,29 @@ export class ReturnsRepository {
     return { ...p, items: await this.#hydrate(p.items as unknown as Row[]) };
   }
 
-  /** Owner, return and total of up to limit refund requests in these statuses (queue figures: no items or history read) */
-  refundFacts(statuses: readonly string[], limit: number): Promise<RefundFacts[]> {
-    return this.#t('refund_requests').aggregate<RefundFacts>([{ $match: { status: { $in: [...statuses] } } }, { $limit: limit }, { $project: { _id: 0, owner_type: 1, return_id: 1, total: 1 } }]);
+  /**
+   * How many refund requests are in these statuses and their summed total (minor units), counted by the database
+   * over every matching row (queue tiles: no rows read into memory, no cap).
+   */
+  refundTotals(statuses: readonly string[]): Promise<RefundTotals> {
+    return this.#refundTotals([{ $match: { status: { $in: [...statuses] } } }]);
+  }
+
+  /**
+   * refundTotals of the refunds that sit with Finance at the Marketly returns dock: every Official Store refund, and
+   * the seller refunds of Fulfilled by Marketly returns (the return's fulfilled_by, joined by return_id).
+   */
+  dockRefundTotals(statuses: readonly string[]): Promise<RefundTotals> {
+    return this.#refundTotals([
+      { $match: { status: { $in: [...statuses] } } },
+      { $lookup: { from: this.#returns.name, localField: 'return_id', foreignField: '_id', pipeline: [{ $project: { _id: 0, fulfilled_by: 1 } }], as: 'ret' } },
+      { $match: { $or: [{ owner_type: 'official' }, { owner_type: 'seller', 'ret.fulfilled_by': 'marketly_service' }] } },
+    ]);
+  }
+
+  async #refundTotals(match: Filter[]): Promise<RefundTotals> {
+    const [row] = await this.#t('refund_requests').aggregate<RefundTotals>([...match, { $group: { _id: null, count: { $sum: 1 }, total: { $sum: '$total' } } }, { $project: { _id: 0, count: 1, total: 1 } }]);
+    return row ?? { count: 0, total: 0 };
   }
 
   /** Units per order item in returns that are not cancelled or rejected */

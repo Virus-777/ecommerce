@@ -275,7 +275,8 @@ export class Reads {
       tab('inspecting'),
       tab('refund_pending'),
     ]);
-    const [pending, recipients] = await Promise.all([repo.refundFacts(PENDING_REFUND, 5000), this.core.soft('access', 'queue owner', (a) => a.resolveRecipients('returns_manager'))]);
+    // counted and summed by the database over every pending refund (no rows read, no cap)
+    const [pending, recipients] = await Promise.all([repo.refundTotals(PENDING_REFUND), this.core.soft('access', 'queue owner', (a) => a.resolveRecipients('returns_manager'))]);
     const nameOf = async (id: string | null | undefined) => (id ? ((await this.core.soft('access', 'staff ref', (a) => a.getStaffRef(id)))?.name ?? null) : null);
     const [lead, backup] = await Promise.all([nameOf(recipients?.leadAccountId), nameOf(recipients?.viaBackup ? recipients.accountIds[0] : null)]);
     return {
@@ -285,11 +286,8 @@ export class Reads {
       pastDeadline,
       sellerRepliesOverdue,
       awaitingInspection,
-      refundsPending: money(
-        pending.reduce((s, r) => s + r.total, 0),
-        this.core.currency,
-      ),
-      refundsPendingCount: pending.length,
+      refundsPending: money(pending.total, this.core.currency),
+      refundsPendingCount: pending.count,
       exceptions,
       tabCounts: { allOpen, needsDecision, inTransit, inspecting, refundPending, exceptions },
       queueOwner: { lead: lead ?? null, backup: backup ?? null, escalation: recipients?.escalationRoleKey ? recipients.escalationRoleKey.replace(/_/g, ' ') : null },
@@ -315,35 +313,26 @@ export class Reads {
     const repo = this.core.repo;
     const now = this.core.now();
     const weekAgo = new Date(now.getTime() - 7 * DAY);
-    const [receivedPage, arriving, inspected, pendingRefunds] = await Promise.all([
+    const [receivedPage, arriving, inspected, withFinance] = await Promise.all([
       repo.listReturns(this.inspectionFilter('received'), { mode: 'cursor', cursor: null, limit: 500 }),
       repo.countReturns(this.inspectionFilter('arriving')),
       repo.find('inspections', { inspected_at: { op: '>=', value: weekAgo } }),
-      // refunds of dock returns with Finance: the Official Store's, and the seller-funded ones of Fulfilled by Marketly returns
-      repo.refundFacts(['requested', 'under_review'], 5000),
+      // refunds of dock returns with Finance: the Official Store's, and the seller-funded ones of Fulfilled by Marketly
+      // returns, counted and summed by the database (no rows read, no cap)
+      repo.dockRefundTotals(['requested', 'under_review']),
     ]);
     // oldest first (the list pages newest first)
     const received = receivedPage.items.sort((a, b) => a.requested_at.getTime() - b.requested_at.getTime());
     const decided = [...new Set(inspected.map((i) => i.return_id))];
-    const sellerReturnIds = [...new Set(pendingRefunds.filter((r) => r.owner_type === 'seller' && r.return_id).map((r) => r.return_id!))];
-    const [aggs, decidedOfficial, serviceRows] = await Promise.all([
-      this.core.loadMany(received.map((r) => r.id)),
-      decided.length ? repo.countReturns({ marketlyDock: true, ids: decided }) : 0,
-      sellerReturnIds.length ? repo.find('returns', { id: sellerReturnIds, fulfilled_by: 'marketly_service' }) : [],
-    ]);
+    const [aggs, decidedOfficial] = await Promise.all([this.core.loadMany(received.map((r) => r.id)), decided.length ? repo.countReturns({ marketlyDock: true, ids: decided }) : 0]);
     const overdue = [...aggs.values()].filter((a) => (this.views.inspectBy(a)?.getTime() ?? Infinity) < now.getTime());
-    const serviceReturns = new Set(serviceRows.map((r) => r.id));
-    const withFinance = pendingRefunds.filter((r) => r.owner_type === 'official' || (r.return_id && serviceReturns.has(r.return_id)));
     return {
       waiting: received.length,
       overdue: overdue.length,
       overdueRef: overdue[0]?.ret.ref ?? null,
       arrivingThisWeek: arriving,
-      refundsWithFinance: withFinance.length,
-      refundsWithFinanceAmount: money(
-        withFinance.reduce((s, r) => s + r.total, 0),
-        this.core.currency,
-      ),
+      refundsWithFinance: withFinance.count,
+      refundsWithFinanceAmount: money(withFinance.total, this.core.currency),
       tabCounts: { received: received.length, arriving, decidedThisWeek: decidedOfficial },
     };
   }

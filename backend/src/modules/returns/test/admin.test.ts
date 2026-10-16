@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
+import { PENDING_REFUND } from '../domain/rules.js';
 import { group, harness, idem, line, now, placeOrder, product, tokens, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -401,5 +402,44 @@ describe('staff reads and case refunds for support', () => {
     const rr = await h.service.requestRefund({ source: 'case', caseId: newId(), orderId: m.order.id, orderItemIds: [m.items[0]![0]!], breakdown: breakdown(2000, 9000), fundedBy: 'seller', reason: 'Late', proposedBy: { kind: 'staff', id: newId() } });
     expect((await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), {}, idem())).body.status).toBe('processing');
     expect(h.named('returns.refund.approved').find((e) => e.refundRequestId === rr.id)).toMatchObject({ customerId: null, contactEmail: 'gia@example.com', returnId: null });
+  });
+
+  it('queue refund figures are counted and summed by the database over every row, the same as a per-row count', async () => {
+    const repo = h.service.core.repo;
+    const plain = await sellerReturn();
+    const serviced = await sellerReturn();
+    await repo.update('returns', serviced.ret.id, { fulfilled_by: 'marketly_service' });
+    const rr = await h.service.requestRefund({ source: 'case', caseId: newId(), orderId: plain.order.id, orderItemIds: [plain.items[0]![0]!], breakdown: breakdown(1000), fundedBy: 'seller', reason: 'Figures', proposedBy: { kind: 'staff', id: newId() } });
+    const base = (await repo.get('refund_requests', rr.id))!;
+    // one refund per case the figures tell apart: owner, dock (Fulfilled by Marketly return) or not, status
+    const seeds = [
+      { owner_type: 'official', return_id: null, status: 'requested', total: 1234 },
+      { owner_type: 'official', return_id: null, status: 'under_review', total: 2345 },
+      { owner_type: 'seller', return_id: serviced.ret.id, status: 'requested', total: 3456 },
+      { owner_type: 'seller', return_id: plain.ret.id, status: 'under_review', total: 4567 },
+      { owner_type: 'seller', return_id: plain.ret.id, status: 'approved', total: 5678 },
+      { owner_type: 'official', return_id: null, status: 'declined', total: 9999 },
+    ] as const;
+    const seeded: string[] = [];
+    for (const s of seeds) {
+      const id = newId();
+      await repo.insert('refund_requests', { ...base, ...s, id, ref: `RR-FIG-${id.slice(-8)}`, idempotency_key: null, items: [], history: [] });
+      seeded.push(id);
+    }
+
+    // the same figures computed row by row
+    const pending = await repo.find('refund_requests', { status: PENDING_REFUND });
+    const waiting = await repo.find('refund_requests', { status: ['requested', 'under_review'] });
+    const serviceReturns = new Set((await repo.find('returns', { id: waiting.flatMap((r) => (r.return_id ? [r.return_id] : [])), fulfilled_by: 'marketly_service' })).map((r) => r.id));
+    const dock = waiting.filter((r) => r.owner_type === 'official' || (r.owner_type === 'seller' && r.return_id !== null && serviceReturns.has(r.return_id)));
+    const sum = (rows: { total: number }[]) => rows.reduce((s, r) => s + r.total, 0);
+    // the seeds land where they should: the Fulfilled by Marketly refund is with Finance, the plain seller one is not
+    expect(dock.map((r) => r.id)).toEqual(expect.arrayContaining([seeded[0], seeded[1], seeded[2]]));
+    expect(dock.map((r) => r.id)).not.toContain(seeded[3]);
+
+    const queue = (await h.call('GET', '/api/admin/returns/requests/stats', staff())).body;
+    expect(queue).toMatchObject({ refundsPendingCount: pending.length, refundsPending: { amount: sum(pending), currency: 'USD' } });
+    const inspection = (await h.call('GET', '/api/admin/returns/inspections/stats', staff())).body;
+    expect(inspection).toMatchObject({ refundsWithFinance: dock.length, refundsWithFinanceAmount: { amount: sum(dock), currency: 'USD' } });
   });
 });
