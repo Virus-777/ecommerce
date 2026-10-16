@@ -1,8 +1,10 @@
 /**
  * The admin seller list asks reviews, support and finance once per list for all its rows (their batch public API
- * functions), never once per seller; a module that cannot answer leaves its columns empty.
+ * functions), never once per seller; a module that cannot answer leaves its columns empty. New agreement versions
+ * reach every selling seller, however many there are (keyset batches of 500).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { newId } from '../../../kernel/lib/ids.js';
 import { ADMIN, approvedSeller, boot, staff, type Kit } from './helpers.js';
 
 const USD = (amount: number) => ({ amount, currency: 'USD' });
@@ -91,5 +93,28 @@ describe('admin seller list', () => {
     expect(list.body.items.every((r: any) => r.openCases === 0)).toBe(true);
     expect(list.body.items.find((r: any) => r.id === ids[0])).toMatchObject({ feedback: { positivePct: 99 }, balance: USD(900) });
     expect(perSeller).toEqual([]);
+  });
+});
+
+describe('content.policy.effective', () => {
+  it('reaches every selling seller past one batch of 500, once', async () => {
+    // 501 more selling sellers and a closed one, as stored rows (copies of a real seller)
+    const [first] = await kit.svc.core.repo.find('sellers', { status: 'approved' }, { limit: 1 });
+    const copy = (status: string, i: number) => kit.svc.core.repo.insert('sellers', { ...first!, id: newId(), ref: `SL-B${i}`, slug: `batch-${i}-${newId().slice(0, 8)}`, status });
+    await Promise.all(Array.from({ length: 501 }, (_, i) => copy(i % 2 ? 'restricted' : 'approved', i)));
+    const closed = await copy('closed', 999);
+    const selling = await kit.svc.core.repo.count('sellers', { status: ['approved', 'restricted', 'suspended'] });
+    expect(selling).toBe(504);
+
+    const policyVersionId = newId();
+    const told = async () => kit.svc.core.repo.find('account_events', { kind: 'agreement_pending', ref: policyVersionId });
+    await kit.emit('content', 'content.policy.effective', { policyVersionId, policyKey: 'seller_agreement', version: 'v2.0' });
+    const events = await told();
+    expect(events).toHaveLength(504);
+    expect(new Set(events.map((e) => e.seller_id)).size).toBe(504);
+    expect(events.some((e) => e.seller_id === closed.id)).toBe(false);
+    // a redelivered event tells nobody twice
+    await kit.emit('content', 'content.policy.effective', { policyVersionId, policyKey: 'seller_agreement', version: 'v2.0' });
+    expect(await told()).toHaveLength(504);
   });
 });

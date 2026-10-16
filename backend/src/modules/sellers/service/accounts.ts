@@ -565,11 +565,17 @@ export class AccountsPart extends Part {
   /** content.policy.effective: a new seller agreement version waits for every owner's acceptance */
   async onPolicyEffective(e: EventPayload<'content.policy.effective'>) {
     if (!(AGREEMENT_KEYS as readonly string[]).includes(e.policyKey)) return;
-    const sellers = await this.repo.find('sellers', { status: SELLING }, { limit: 10000 });
     const title = e.policyKey.replace(/_/g, ' ');
-    for (const s of sellers) {
-      if (await this.repo.findOne('account_events', { seller_id: s.id, kind: 'agreement_pending', ref: e.policyVersionId })) continue;
-      await this.core.timeline(this.repo, s.id, { kind: 'agreement_pending', title: `New ${title} ${e.version} waiting for the owner's acceptance`, ref: e.policyVersionId });
+    // every selling seller, 500 at a time (keyset on id); a seller already told (redelivered event) is skipped
+    for (let after: string | null = null; ; ) {
+      const sellers: SellerRec[] = await this.repo.find('sellers', { status: SELLING, ...(after ? { id: { op: '>', value: after } } : {}) }, { orderBy: [['id', 'asc']], limit: 500 });
+      if (!sellers.length) return;
+      after = sellers.at(-1)!.id;
+      const told = new Set((await this.repo.find('account_events', { seller_id: sellers.map((s) => s.id), kind: 'agreement_pending', ref: e.policyVersionId })).map((x) => x.seller_id));
+      for (const s of sellers) {
+        if (!told.has(s.id)) await this.core.timeline(this.repo, s.id, { kind: 'agreement_pending', title: `New ${title} ${e.version} waiting for the owner's acceptance`, ref: e.policyVersionId });
+      }
+      if (sellers.length < 500) return;
     }
   }
 
