@@ -16,8 +16,8 @@ if (!config.mongo.uri) {
   console.error('Set MONGODB_URI (a MongoDB replica set) to migrate a persistent database.');
   process.exit(1);
 }
-const defs = await loadDefinitions(config.modules ?? enabledModules, moduleLoaders);
-const mongo = await connectMongo({ uri: config.mongo.uri });
+// independent: the module imports and the connection (as buildApp does)
+const [defs, mongo] = await Promise.all([loadDefinitions(config.modules ?? enabledModules, moduleLoaders), connectMongo({ uri: config.mongo.uri })]);
 try {
   const applied = await migrateMongo(mongo, mongoUnits(defs), (m) => console.log(m));
   console.log(applied.length ? `MongoDB: applied ${applied.join(', ')}.` : 'MongoDB is up to date.');
