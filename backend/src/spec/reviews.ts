@@ -1380,6 +1380,8 @@ export interface ReviewsPublicApi {
   getRatingSummaries(productIds: string[]): Promise<RatingSummary[]>;
   /** Seller quality for offer comparison, featured-offer eligibility and storefronts (also the Official Store profile in content) Used by: offers, sellers, content, graphql. */
   getSellerFeedbackSummary(sellerId: string): Promise<SellerFeedbackSummary>;
+  /** Batched getSellerFeedbackSummary (the admin seller list, store seller cards): one answer per id asked for, the same as getSellerFeedbackSummary gives for it, from one read of the summaries. dispatch: false leaves onTimeDispatchPct null and skips shipping's dispatch figures (one shipping call per seller), for lists that do not show them. Used by: sellers. */
+  feedbackSummariesForSellers(sellerIds: string[], opts?: { dispatch?: boolean }): Promise<Map<string, SellerFeedbackSummary>>;
   /** Called during a duplicate merge Used by: catalog. */
   moveProductContent(fromProductId: string, toProductId: string): Promise<{ reviews: number, questions: number }>;
   /** Remove proven fake reviews named in an enforcement (same path as consuming trust.enforcement.recorded; publishes reviews.moderation.decided with trustEnforcementId) Used by: trust. */
@@ -2536,7 +2538,7 @@ export const spec = defineModuleSpec({
   summary: "Product reviews (Verified Purchase), seller feedback kept separate from product reviews, public seller responses under rules, product questions and answers labelled by who answered, reports of inappropriate content, moderation with outcomes visible to reporter and author, appeals, and rating summaries for products and sellers.",
   dependsOn: ["orders","catalog","sellers"],
   optionalDeps: ["media","offers","trust","notifications","access","audit","customers","search","shipping","workqueues"],
-  publicApi: ["getRatingSummaries","getSellerFeedbackSummary","moveProductContent","removeContentForEnforcement","exportCustomerData","listProductReviews","listProductQuestions","listSellerFeedback","reviewStatusForItems","getOfferSellerRatings"],
+  publicApi: ["getRatingSummaries","getSellerFeedbackSummary","feedbackSummariesForSellers","moveProductContent","removeContentForEnforcement","exportCustomerData","listProductReviews","listProductQuestions","listSellerFeedback","reviewStatusForItems","getOfferSellerRatings"],
   permissions: [
     {
       "key": "reviews.moderation.view",

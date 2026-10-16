@@ -53,6 +53,11 @@ export class ReviewsService implements ReviewsPublicApi {
     return this.feedback.summary(sellerId);
   }
 
+  /** Batched getSellerFeedbackSummary (admin seller list, store seller cards); dispatch: false skips shipping's figures */
+  async feedbackSummariesForSellers(sellerIds: string[], opts?: { dispatch?: boolean }): Promise<Map<string, SellerFeedbackSummary>> {
+    return this.feedback.summariesFor(sellerIds, opts ?? {});
+  }
+
   /** Called during a duplicate merge */
   async moveProductContent(fromProductId: string, toProductId: string): Promise<{ reviews: number; questions: number }> {
     return this.summaries.moveProductContent(fromProductId, toProductId);

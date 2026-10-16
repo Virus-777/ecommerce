@@ -67,6 +67,29 @@ describe('leaving feedback', () => {
     expect((await k.call('POST', `${STORE}/me/feedback`, tokens.customer(newId()), input(b.orderId, s))).status).toBe(404);
   });
 
+  it('feedbackSummariesForSellers answers every id as getSellerFeedbackSummary does, in one batch', async () => {
+    const good = seller(k);
+    const poor = seller(k);
+    const none = seller(k);
+    const g = delivered(good);
+    expect((await k.call('POST', `${STORE}/me/feedback`, g.token, input(g.orderId, good))).status).toBe(201);
+    const p = delivered(poor);
+    expect((await k.call('POST', `${STORE}/me/feedback`, p.token, input(p.orderId, poor, { asDescribed: false }))).status).toBe(201);
+    const ids = [good, poor, none, OFFICIAL_STORE_ID, 'not-a-seller', good];
+
+    const batch = await k.svc.feedbackSummariesForSellers(ids);
+    expect([...batch.keys()]).toEqual([good, poor, none, OFFICIAL_STORE_ID, 'not-a-seller']);
+    for (const id of ids) expect(batch.get(id)).toEqual(await k.svc.getSellerFeedbackSummary(id));
+    expect(batch.get(good)).toMatchObject({ count: 1, positivePct: 100 });
+    expect(batch.get(poor)).toMatchObject({ count: 1, negativePct: 100 });
+    expect(batch.get(none)).toMatchObject({ sellerId: none, count: 0, positivePct: null, label: 'No feedback yet' });
+
+    // dispatch: false: the same summaries without shipping's on-time dispatch
+    const quick = await k.svc.feedbackSummariesForSellers(ids, { dispatch: false });
+    for (const id of ids) expect(quick.get(id)).toEqual({ ...batch.get(id), onTimeDispatchPct: null });
+    expect(await k.svc.feedbackSummariesForSellers([])).toEqual(new Map());
+  });
+
   it('takes Official Store feedback under the Official Store id', async () => {
     const b = delivered(null);
     const res = await k.call('POST', `${STORE}/me/feedback`, b.token, input(b.orderId, OFFICIAL_STORE_ID));

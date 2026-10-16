@@ -292,6 +292,14 @@ export class FeedbackPart {
     return (await this.summaries([key])).get(key)!;
   }
 
+  /** summary() of every id asked for, keyed by that id, from one summaries() call (feedbackSummariesForSellers) */
+  async summariesFor(sellerIds: readonly string[], o: { dispatch?: boolean } = {}): Promise<Map<string, SellerFeedbackSummary>> {
+    // the same key summary() uses: an id that is not a seller id answers as the Official Store
+    const keyOf = (id: string) => (isSellerId(id) ? sellerKey(id) : OFFICIAL_STORE_ID);
+    const summaries = await this.summaries(sellerIds.map(keyOf), o);
+    return new Map(sellerIds.map((id) => [id, summaries.get(keyOf(id))!]));
+  }
+
   summaryOut(sellerId: string, r: SellerSummaryRec | undefined, average: number | undefined, months: number, onTime: number | null, targetPct: number): SellerFeedbackSummary {
     const count = r?.count ?? 0;
     const positivePct = r ? pct(r.positive, count) : null;
