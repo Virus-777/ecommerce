@@ -9,7 +9,7 @@
  *   - every API response: Cache-Control private, no-store (every request carries a token), nosniff, no referrer;
  *   - 401 for a bad token carries WWW-Authenticate, the only signal that a refresh can help.
  */
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { FILES_PREFIX } from '../auth/file-links.js';
 import type { Config } from '../config/index.js';
 import { escapeRegExp } from '../lib/text.js';
@@ -65,23 +65,24 @@ function areaOf(url: string): AppArea | undefined {
 /** Every app's browser origins (CORS_*_ORIGINS) */
 export const appOrigins = (config: Config) => [...config.cors.store, ...config.cors.seller, ...config.cors.admin];
 
-function allowedOrigin(config: Config, request: FastifyRequest, rule: CorsRule | undefined): string | undefined {
-  const origin = request.headers.origin;
-  if (!origin) return undefined;
-  const area = areaOf(request.url);
+function allowedOrigin(config: Config, everyApp: readonly string[], origin: string, url: string, rule: CorsRule | undefined): string | undefined {
+  const area = areaOf(url);
   // signed file links are opened by every app (no credentials: the link is the token)
-  const anyApp = rule?.anyApp || area === 'public' || request.url.startsWith(FILES_PREFIX);
-  const allowed = anyApp ? appOrigins(config) : area ? config.cors[area] : [];
+  const anyApp = rule?.anyApp || area === 'public' || url.startsWith(FILES_PREFIX);
+  const allowed = anyApp ? everyApp : area ? config.cors[area] : [];
   return allowed.includes(origin) ? origin : undefined;
 }
 
 export function installSecurity(app: FastifyInstance, config: Config) {
   const routes = new CorsRoutes();
   app.decorate('corsRoutes', routes);
+  const everyApp = appOrigins(config);
 
   app.addHook('onRequest', async (request, reply) => {
-    const rule = routes.ruleFor(request.url);
-    const origin = allowedOrigin(config, request, rule);
+    // only browsers send Origin: the Android app's requests skip the route rules
+    const requestOrigin = request.headers.origin;
+    const rule = requestOrigin ? routes.ruleFor(request.url) : undefined;
+    const origin = requestOrigin ? allowedOrigin(config, everyApp, requestOrigin, request.url, rule) : undefined;
     if (origin) {
       reply.header('access-control-allow-origin', origin).header('vary', 'Origin');
       if (rule?.credentials) reply.header('access-control-allow-credentials', 'true');
