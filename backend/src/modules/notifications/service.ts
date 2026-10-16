@@ -508,6 +508,11 @@ export class NotificationsService implements NotificationsPublicApi {
     await this.consumers.handle('catalog.product.rejected', event, eventId);
   }
 
+  /** catalog.images.recrop_needed: Seller: product images to re-crop after the product image aspect ratio changed */
+  async onImagesRecropNeededFromCatalog(event: EventPayload<'catalog.images.recrop_needed'>, eventId?: string): Promise<void> {
+    await this.consumers.handle('catalog.images.recrop_needed', event, eventId);
+  }
+
   /** inventory.stock.low: Seller: low stock (own offers); staff: stock shortage to Inventory Manager for the Official Store */
   async onStockLowFromInventory(event: EventPayload<'inventory.stock.low'>, eventId?: string): Promise<void> {
     await this.consumers.handle('inventory.stock.low', event, eventId);

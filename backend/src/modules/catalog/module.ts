@@ -16,7 +16,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
   register(ctx) {
     const service = new CatalogService({ repo: new CatalogRepository(ctx.mongo), ctx });
@@ -25,6 +25,7 @@ export default defineModule({
     ctx.graphql.resolvers(resolvers(service));
 
     // Events this module reacts to (spec events.consumes)
+    ctx.events.on("media.product_images.recrop_changed", (e) => service.onProductImagesRecropChangedFromMedia(e.payload));
     ctx.events.on("access.approval.decided", (e) => service.onApprovalDecidedFromAccess(e.payload, e.id));
     ctx.events.on("sellers.seller.restricted", (e) => service.onSellerRestrictedFromSellers(e.payload));
     ctx.events.on("sellers.seller.suspended", (e) => service.onSellerSuspendedFromSellers(e.payload));

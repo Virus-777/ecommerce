@@ -89,6 +89,8 @@ function pageDesc<T>(sorted: { value: number; id: string; item: T }[], req: Page
 const LISTING = 'catalog.listing_stats';
 /** Products customers can buy: approved, active, not merged */
 const LIVE: Filter = { review_state: 'approved', publication: 'active', merged_into_id: null };
+/** The Admin catalog's missing-content tab: a content score under 100, or images to re-crop */
+const MISSING_CONTENT: Filter = { $or: [{ content_score: { $lt: 100 } }, { 'recrop_media_ids.0': { $exists: true } }] };
 
 /** The catalog module's collections (catalog.*): one Table per spec table; joins run as two reads or a $lookup. */
 export class CatalogRepository {
@@ -159,8 +161,9 @@ export class CatalogRepository {
     if (f.ownerSellerId) conds.push({ owner_seller_id: f.ownerSellerId });
     if (f.reviewStates?.length) conds.push({ review_state: oneOf(f.reviewStates) });
     if (f.publication) conds.push({ publication: f.publication });
-    if (f.missingContent === true) conds.push({ content_score: { $lt: 100 } });
-    if (f.missingContent === false) conds.push({ content_score: { $gte: 100 } });
+    // missing content: a content score under 100, or images to re-crop after a product image ratio change
+    if (f.missingContent === true) conds.push(MISSING_CONTENT);
+    if (f.missingContent === false) conds.push({ $nor: [MISSING_CONTENT] });
     if (f.duplicateSuspected !== undefined) {
       const ids = await this.#duplicateSuspectedIds();
       conds.push({ id: f.duplicateSuspected ? oneOf(ids) : { $nin: ids } });
@@ -375,7 +378,7 @@ export class CatalogRepository {
       active: await products.count({ ...notMerged, publication: 'active', review_state: 'approved' }),
       hidden: await products.count({ ...notMerged, publication: 'hidden' }),
       suspended: await products.count({ ...notMerged, publication: 'suspended' }),
-      missingContent: await products.count({ ...notMerged, content_score: { $lt: 100 } }),
+      missingContent: await products.count({ ...notMerged, ...MISSING_CONTENT }),
       duplicatesSuspected: suspected.length ? await products.count({ ...notMerged, id: oneOf(suspected) }) : 0,
       inReview: await this.#t.submissions.count({ state: 'open', paused_at: null }),
       offers: await this.#t.offers.count({ status: { $nin: ['removed', null] } }),

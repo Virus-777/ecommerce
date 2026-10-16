@@ -236,6 +236,8 @@ export class CatalogProducts extends CatalogTaxonomy {
       created_at: existing?.created_at ?? now,
       updated_at: now,
       listed_at: existing?.listed_at ?? null,
+      // images still to re-crop: those the product keeps (a replaced image is gone from the list)
+      recrop_media_ids: keptRecrops(existing, [...imageIds, ...variants.flatMap((v) => strings(v.media_ids))]) as never,
     };
     row.content_score = (await this.completenessOf([row], variants, tax)).get(row.id)!.score;
 
@@ -595,7 +597,8 @@ export class CatalogProducts extends CatalogTaxonomy {
         [warning, 'warn'],
       ] as const) {
         if (!rules) continue;
-        const r = await this.media.checkImage(id, rules.rules);
+        // the product image spec's ratio (media.productImage) applies to every category: category ratios are ignored
+        const r = await this.media.checkImage(id, { ...rules.rules, aspectRatios: [] });
         const issues = r.issues.filter((x) => (severity === 'fail' ? x.severity === 'blocking' : true));
         if (!issues.length) continue;
         if (severity === 'fail' || result === 'pass') result = severity === 'fail' ? 'fail' : result === 'fail' ? 'fail' : 'warn';
@@ -720,6 +723,11 @@ function parcelColumns(v: VariantInput, current: VariantRow | undefined, path: s
 
 export function currentListPrice(v: VariantRow | undefined): common.Money | null {
   return v && v.list_price_amount !== null && v.list_price_currency ? { amount: Number(v.list_price_amount), currency: v.list_price_currency.trim() } : null;
+}
+
+/** The images still to re-crop: the product's flagged images that it (or a variant) still uses */
+function keptRecrops(existing: ProductRow | null, used: string[]): string[] {
+  return strings(existing?.recrop_media_ids).filter((id) => used.includes(id));
 }
 
 /** Staff list price: whole minor units above zero in the market currency; null clears it */

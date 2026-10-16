@@ -113,6 +113,7 @@ const products = new Schema(
     created_at: { type: Date, required: true },
     updated_at: { type: Date, required: true },
     listed_at: { type: Date, default: null },
+    recrop_media_ids: { type: Schema.Types.Mixed, default: null }, // images of the product and its variants flagged by media for re-crop after an aspect ratio change; dropped when replaced
     /** lock-by-write counter (kernel/mongo/table.ts) */
     _lock: Number,
   },

@@ -1013,6 +1013,19 @@ export const ROUTES: Routes = {
       p.ownerSellerId && { topic: 'seller.product.rejected', to: [seller(p.ownerSellerId)], link: L('product', p.productId, 'seller/product-new', 'View product'), context: { product: { reason: p.reason } }, sellerId: p.ownerSellerId, dedupe: `product:${p.productId}:rejected` },
     ],
   },
+  'catalog.images.recrop_needed': {
+    sends: (p) => [
+      {
+        topic: 'seller.product.recrop_needed',
+        to: [seller(p.sellerId)],
+        // one product: open it; several: the product list
+        link: p.productIds.length === 1 ? L('product', p.productIds[0]!, 'seller/product-new', 'Re-crop images') : L('products', p.sellerId, 'seller/products', 'Review products'),
+        context: { recrop: { products: p.productIds.length, images: p.imageCount, ratio: p.aspectRatio } },
+        sellerId: p.sellerId,
+        dedupe: `recrop:${p.sellerId}:${p.aspectRatio}:${[...p.productIds].sort()[0]}:${p.productIds.length}`,
+      },
+    ],
+  },
   'inventory.stock.low_digest': {
     sends: (p, f) => {
       const shown = p.items.slice(0, 5).map((i) => `${i.label} (${i.state === 'out_of_stock' ? 'out of stock' : `${i.available} left`})`);

@@ -384,6 +384,8 @@ export interface ProductAdmin {
   offerNote?: string | null;
   /** The calling reviewer's unsent decision on the open submission (staff only) */
   reviewDraft?: ReviewDraft | null;
+  /** Images of the product and its variants that no longer have the product image spec's aspect ratio (media.productImage changed): show "Re-crop images". Not blocking: the product stays live and the store shows them cover-cropped. Empty when none */
+  imagesToRecrop?: string[] | null;
 }
 
 export const ProductAdmin: z.ZodType<ProductAdmin> = z.object({
@@ -422,6 +424,7 @@ export const ProductAdmin: z.ZodType<ProductAdmin> = z.object({
   get reviewDraft() {
     return ReviewDraft.nullish();
   },
+  imagesToRecrop: z.array(z.uuid()).describe("Images of the product and its variants that no longer have the product image spec's aspect ratio (media.productImage changed): show \"Re-crop images\". Not blocking: the product stays live and the store shows them cover-cropped. Empty when none").nullish(),
 }).register(common.apiTypes, { id: "catalog.ProductAdmin" });
 
 export interface ReviewLogEntry {
@@ -757,14 +760,14 @@ export interface ImageRule {
   text: string;
   /** Blocking fails the image_standard check; warning is advisory */
   severity: "blocking" | "warning";
-  /** Machine-checkable parameters passed to media.checkImage, e.g. { "minWidth": 1000 } */
+  /** Machine-checkable parameters passed to media.checkImage, e.g. { "minWidth": 1000 }. aspectRatios are ignored for product photos: the product image spec's ratio (media.productImage) applies to every category */
   check?: unknown | null;
 }
 
 export const ImageRule: z.ZodType<ImageRule> = z.object({
   text: z.string().describe("e.g. Minimum 1000 × 1000 px, JPG or PNG, up to 10 MB"),
   severity: z.enum(["blocking", "warning"]).describe("Blocking fails the image_standard check; warning is advisory"),
-  check: z.unknown().describe("Machine-checkable parameters passed to media.checkImage, e.g. { \"minWidth\": 1000 }").nullish(),
+  check: z.unknown().describe("Machine-checkable parameters passed to media.checkImage, e.g. { \"minWidth\": 1000 }. aspectRatios are ignored for product photos: the product image spec's ratio (media.productImage) applies to every category").nullish(),
 }).register(common.apiTypes, { id: "catalog.ImageRule" });
 
 export interface AttributeAdmin {
@@ -1180,6 +1183,22 @@ export const CatalogProductPublicationChangedEvent: z.ZodType<CatalogProductPubl
   trustEnforcementId: z.uuid().describe("Set when trust.enforcement.recorded (suspend) or trust.enforcement.reversed (reactivate) caused the change, so trust can confirm the enforcement").nullish(),
 });
 
+/** catalog.images.recrop_needed: A change of the product image spec's aspect ratio left a seller's product images off the ratio (media.product_images.recrop_changed): one event per seller and batch, for the seller's notification */
+export interface CatalogImagesRecropNeededEvent {
+  sellerId: string;
+  productIds: string[];
+  imageCount: number;
+  /** The new ratio, W:H */
+  aspectRatio: string;
+}
+
+export const CatalogImagesRecropNeededEvent: z.ZodType<CatalogImagesRecropNeededEvent> = z.object({
+  sellerId: z.uuid(),
+  productIds: z.array(z.uuid()),
+  imageCount: z.number().int(),
+  aspectRatio: z.string().describe("The new ratio, W:H"),
+});
+
 /** catalog.product.updated: Shared content changes (including variant weight, dimensions and list price) */
 export interface CatalogProductUpdatedEvent {
   productId: string;
@@ -1401,6 +1420,8 @@ export interface CatalogDb {
     created_at: Date;
     updated_at: Date;
     listed_at: Date | null;
+    /** images of the product and its variants flagged by media for re-crop after an aspect ratio change; dropped when replaced */
+    recrop_media_ids: Json | null;
   };
   variants: {
     id: string;
@@ -1886,7 +1907,7 @@ export const endpoints = defineEndpoints({
     permission: "catalog.view",
     scope: "staff",
     summary: "All products with filters",
-    desc: "Rows carry ref, contentScore, missing, duplicateSuspected and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. Tab counts come from GET /products/stats.",
+    desc: "Rows carry ref, contentScore, missing, duplicateSuspected, imagesToRecrop and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. missingContent=true: a content score under 100 or images to re-crop. Tab counts come from GET /products/stats.",
     query: () =>
       z.object({
         q: z.string().optional(),
@@ -2712,6 +2733,7 @@ export const spec = defineModuleSpec({
       "catalog.product.changes_requested": { when: "A reviewer asks for changes", payload: () => CatalogProductChangesRequestedEvent },
       "catalog.product.rejected": { when: "A reviewer rejects", payload: () => CatalogProductRejectedEvent },
       "catalog.product.publication_changed": { when: "Active / Hidden / Suspended changes", payload: () => CatalogProductPublicationChangedEvent },
+      "catalog.images.recrop_needed": { when: "A change of the product image spec's aspect ratio left a seller's product images off the ratio (media.product_images.recrop_changed): one event per seller and batch, for the seller's notification", payload: () => CatalogImagesRecropNeededEvent },
       "catalog.product.updated": { when: "Shared content changes (including variant weight, dimensions and list price)", payload: () => CatalogProductUpdatedEvent },
       "catalog.product.merged": { when: "A duplicate or submission is merged (one event per merged record)", payload: () => CatalogProductMergedEvent },
       "catalog.correction.suggested": { when: "A seller suggests a correction", payload: () => CatalogCorrectionSuggestedEvent },
@@ -2721,6 +2743,7 @@ export const spec = defineModuleSpec({
       "catalog.brand.changed": { when: "A brand is created, edited, or its status or selling policy changes", payload: () => CatalogBrandChangedEvent },
     },
     consumes: {
+      "media.product_images.recrop_changed": "Products and variants using the images (usages product_image and variant_image): recrop true adds them to the product's images to re-crop (imagesToRecrop; the Admin catalog's missing-content tab lists the product) and publishes catalog.images.recrop_needed per seller; recrop false removes them. Products stay live",
       "access.approval.decided": "Finish a publication override that needed approval (approved: apply it; otherwise drop the pending override)",
       "sellers.seller.restricted": "When the restriction covers product submissions (optionally scoped to categories), block new drafts and submissions from that seller in scope and pause its open submissions in the review queue",
       "sellers.seller.suspended": "Pause the seller's open submissions in the review queue",
@@ -3214,7 +3237,8 @@ export const spec = defineModuleSpec({
         "merged_into_id",
         "created_at",
         "updated_at",
-        "listed_at"
+        "listed_at",
+        "recrop_media_ids"
       ],
       "nullable": [
         "brand_id",
@@ -3225,7 +3249,8 @@ export const spec = defineModuleSpec({
         "requested_brand",
         "owner_seller_id",
         "merged_into_id",
-        "listed_at"
+        "listed_at",
+        "recrop_media_ids"
       ],
       "decimal": [],
       "binary": [],
@@ -3368,7 +3393,8 @@ export const spec = defineModuleSpec({
                 "date",
                 "null"
               ]
-            }
+            },
+            "recrop_media_ids": {}
           },
           "additionalProperties": false
         }
@@ -4629,6 +4655,7 @@ declare module '../kernel/events/event-map.js' {
     "catalog.product.changes_requested": CatalogProductChangesRequestedEvent;
     "catalog.product.rejected": CatalogProductRejectedEvent;
     "catalog.product.publication_changed": CatalogProductPublicationChangedEvent;
+    "catalog.images.recrop_needed": CatalogImagesRecropNeededEvent;
     "catalog.product.updated": CatalogProductUpdatedEvent;
     "catalog.product.merged": CatalogProductMergedEvent;
     "catalog.correction.suggested": CatalogCorrectionSuggestedEvent;

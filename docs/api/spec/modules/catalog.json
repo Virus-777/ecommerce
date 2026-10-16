@@ -492,6 +492,10 @@
       "reviewDraft": {
         "type": "ReviewDraft?",
         "desc": "The calling reviewer's unsent decision on the open submission (staff only)"
+      },
+      "imagesToRecrop": {
+        "type": "uuid[]?",
+        "desc": "Images of the product and its variants that no longer have the product image spec's aspect ratio (media.productImage changed): show \"Re-crop images\". Not blocking: the product stays live and the store shows them cover-cropped. Empty when none"
       }
     },
     "ReviewLogEntry": {
@@ -710,7 +714,7 @@
       },
       "check": {
         "type": "json?",
-        "desc": "Machine-checkable parameters passed to media.checkImage, e.g. { \"minWidth\": 1000 }"
+        "desc": "Machine-checkable parameters passed to media.checkImage, e.g. { \"minWidth\": 1000 }. aspectRatios are ignored for product photos: the product image spec's ratio (media.productImage) applies to every category"
       }
     },
     "AttributeAdmin": {
@@ -1027,7 +1031,8 @@
         "search": "tsvector (generated)",
         "created_at": "timestamptz",
         "updated_at": "timestamptz",
-        "listed_at": "timestamptz?"
+        "listed_at": "timestamptz?",
+        "recrop_media_ids": "jsonb? (images of the product and its variants flagged by media for re-crop after an aspect ratio change; dropped when replaced)"
       },
       "indexes": [
         "(review_state, id)",
@@ -1711,7 +1716,7 @@
       "screens": [
         "admin/catalog"
       ],
-      "desc": "Rows carry ref, contentScore, missing, duplicateSuspected and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. Tab counts come from GET /products/stats."
+      "desc": "Rows carry ref, contentScore, missing, duplicateSuspected, imagesToRecrop and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. missingContent=true: a content score under 100 or images to re-crop. Tab counts come from GET /products/stats."
     },
     {
       "id": "productStats",
@@ -2445,6 +2450,16 @@
         }
       },
       {
+        "name": "catalog.images.recrop_needed",
+        "when": "A change of the product image spec's aspect ratio left a seller's product images off the ratio (media.product_images.recrop_changed): one event per seller and batch, for the seller's notification",
+        "payload": {
+          "sellerId": "uuid",
+          "productIds": "uuid[]",
+          "imageCount": "int",
+          "aspectRatio": { "type": "string", "desc": "The new ratio, W:H" }
+        }
+      },
+      {
         "name": "catalog.product.updated",
         "when": "Shared content changes (including variant weight, dimensions and list price)",
         "payload": {
@@ -2513,6 +2528,10 @@
       }
     ],
     "consumes": [
+      {
+        "name": "media.product_images.recrop_changed",
+        "does": "Products and variants using the images (usages product_image and variant_image): recrop true adds them to the product's images to re-crop (imagesToRecrop; the Admin catalog's missing-content tab lists the product) and publishes catalog.images.recrop_needed per seller; recrop false removes them. Products stay live"
+      },
       {
         "name": "access.approval.decided",
         "does": "Finish a publication override that needed approval (approved: apply it; otherwise drop the pending override)"

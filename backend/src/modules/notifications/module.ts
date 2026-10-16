@@ -22,7 +22,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
   async register(ctx) {
     // Providers: deterministic development adapters (no network); real adapters plug in behind the same ports
@@ -100,6 +100,7 @@ export default defineModule({
     ctx.events.on("catalog.product.changes_requested", (e) => service.onProductChangesRequestedFromCatalog(e.payload, e.id));
     ctx.events.on("catalog.product.approved", (e) => service.onProductApprovedFromCatalog(e.payload, e.id));
     ctx.events.on("catalog.product.rejected", (e) => service.onProductRejectedFromCatalog(e.payload, e.id));
+    ctx.events.on("catalog.images.recrop_needed", (e) => service.onImagesRecropNeededFromCatalog(e.payload, e.id));
     ctx.events.on("inventory.stock.low", (e) => service.onStockLowFromInventory(e.payload, e.id));
     ctx.events.on("finance.payout.paid", (e) => service.onPayoutPaidFromFinance(e.payload, e.id));
     ctx.events.on("finance.payout.failed", (e) => service.onPayoutFailedFromFinance(e.payload, e.id));

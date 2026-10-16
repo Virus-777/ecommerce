@@ -285,6 +285,42 @@ export class CatalogService extends CatalogAdmin implements CatalogPublicApi {
 
   /* ---------------------------------------------------------------- events consumed */
 
+  /**
+   * media.product_images.recrop_changed: images that no longer have (recrop true) or have again (false) the product
+   * image spec's ratio. Their products' images to re-crop follow; sellers whose products gained some are told
+   * (catalog.images.recrop_needed, one event per seller). Products stay live.
+   */
+  async onProductImagesRecropChangedFromMedia(event: EventPayload<'media.product_images.recrop_changed'>): Promise<void> {
+    const byProduct = new Map<string, { add: Set<string>; remove: Set<string> }>();
+    for (const item of event.items) {
+      for (const u of item.usages) {
+        if (u.module !== 'catalog' || (u.kind !== 'product_image' && u.kind !== 'variant_image') || !isUuid(u.refId)) continue;
+        const entry = byProduct.get(u.refId) ?? { add: new Set<string>(), remove: new Set<string>() };
+        (item.recrop ? entry.add : entry.remove).add(item.assetId);
+        byProduct.set(u.refId, entry);
+      }
+    }
+    if (!byProduct.size) return;
+    const flaggedBySeller = new Map<string, { productIds: string[]; images: number }>();
+    for (const row of await this.repo.getProducts([...byProduct.keys()])) {
+      const change = byProduct.get(row.id)!;
+      const before = strings(row.recrop_media_ids);
+      const added = [...change.add].filter((id) => !before.includes(id));
+      const after = [...before.filter((id) => !change.remove.has(id)), ...added];
+      if (after.length === before.length && !added.length) continue;
+      await this.repo.updateProduct(row.id, { recrop_media_ids: after as never });
+      if (added.length && row.owner_seller_id && !row.merged_into_id) {
+        const s = flaggedBySeller.get(row.owner_seller_id) ?? { productIds: [], images: 0 };
+        s.productIds.push(row.id);
+        s.images += added.length;
+        flaggedBySeller.set(row.owner_seller_id, s);
+      }
+    }
+    for (const [sellerId, s] of flaggedBySeller) {
+      this.ctx.events.publish('catalog.images.recrop_needed', { sellerId, productIds: s.productIds, imageCount: s.images, aspectRatio: event.aspectRatio }, { actor: SYSTEM_ACTOR });
+    }
+  }
+
   /** sellers.seller.restricted: a restriction on product submissions (optionally in some categories) pauses the seller's open submissions */
   async onSellerRestrictedFromSellers(event: EventPayload<'sellers.seller.restricted'>): Promise<void> {
     if (!event.affectedActivities.includes('product_submissions')) return;

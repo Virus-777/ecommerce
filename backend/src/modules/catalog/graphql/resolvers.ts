@@ -100,6 +100,7 @@ export function graphqlMappers(service: CatalogService) {
       submittedByMe: opts.owns,
       noGtin: own ? a.product.noGtin : null,
       requestedBrandName: own ? (a.requestedBrand?.name ?? null) : null,
+      imagesToRecrop: own ? (a.imagesToRecrop ?? []) : null,
       reviewDraft: a.reviewDraft ? { ...a.reviewDraft, decision: up(a.reviewDraft.decision), fields: pairs(a.reviewDraft.fields), savedBy: actorOut(a.reviewDraft.savedBy) } : null,
       owner: { type: up(a.owner), sellerId: a.ownerSellerId ?? null },
       duplicateCandidates: async () => (await Promise.all(a.duplicateCandidates.map((d) => productById(d.id)))).filter(Boolean),

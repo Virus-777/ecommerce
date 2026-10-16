@@ -128,8 +128,11 @@ export class CatalogBase {
     return this.ctx.use('media');
   }
 
-  /** MediaRefs by id (files that are not ready are left out) */
-  protected async refsMap(ids: (string | null | undefined)[], size: 'thumb' | 'small' | 'medium' | 'large' | 'zoom' = 'medium'): Promise<Map<string, common.MediaRef>> {
+  /**
+   * MediaRefs by id (files that are not ready are left out). Default detail: product images in their product-page
+   * size with thumbUrl for thumbnails; other images (brand logos, category images) answer medium.
+   */
+  protected async refsMap(ids: (string | null | undefined)[], size: 'thumb' | 'small' | 'medium' | 'large' | 'zoom' | 'detail' = 'detail'): Promise<Map<string, common.MediaRef>> {
     const unique = [...new Set(ids.filter((i): i is string => Boolean(i)))];
     if (!unique.length) return new Map();
     const refs = await this.media.refs(unique, size);
@@ -151,6 +154,8 @@ export class CatalogBase {
           await this.media.attach(it.assetId, { module: 'catalog', kind: it.kind, refId: usage.refId, refLabel: usage.refLabel }, owner);
         } catch (err) {
           if (isAppError(err) && err.code === 'NOT_FOUND') throw invalid(it.path, 'File not found; upload it again');
+          // a product photo off the product image spec (ratio or size): the form field says what to fix
+          if (isAppError(err) && err.code === 'VALIDATION_FAILED' && (err.details as { assetId?: string } | undefined)?.assetId === it.assetId) throw invalid(it.path, err.message, { assetId: it.assetId });
           throw err;
         }
         done.push({ assetId: it.assetId, kind: it.kind });

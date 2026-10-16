@@ -2561,6 +2561,7 @@ export const spec = defineModuleSpec({
       "catalog.product.changes_requested": "Seller: requested corrections with field comments and resubmit deadline",
       "catalog.product.approved": "Seller: product approved",
       "catalog.product.rejected": "Seller: product rejected with reason",
+      "catalog.images.recrop_needed": "Seller: product images to re-crop after the product image aspect ratio changed (topic seller.product.recrop_needed; products stay live)",
       "inventory.stock.low": "Seller: low stock (own offers), skipped when serviceManaged (fulfillment-service sends seller.fulfillment.stock_low); staff: stock shortage to Inventory Manager for the Official Store",
       "finance.payout.paid": "Seller owner: payout paid (after bank confirmation)",
       "finance.payout.failed": "Seller owner: payout failed and what to fix; staff: failed payout to Finance Manager",

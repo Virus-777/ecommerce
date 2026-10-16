@@ -253,6 +253,7 @@ export class CatalogViews extends CatalogBase {
         bestPrice: (l?.best_price as common.Money | null) ?? null,
         offerNote: l?.offer_note ?? null,
         reviewDraft: draft && viewer.kind === 'staff' ? toReviewDraft(draft, { kind: 'staff', id: draft.staff_id }) : null,
+        imagesToRecrop: strings(r.recrop_media_ids),
       };
     });
   }

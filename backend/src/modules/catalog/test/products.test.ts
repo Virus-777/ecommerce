@@ -135,7 +135,8 @@ describe('submission', () => {
   it('flags claims, small images, invalid GTINs and duplicates (advisory); a duplicate can be dismissed', async () => {
     const first = await sellerProduct(t, newId(), { brandId, categoryId: cat.id, model: 'ZX-900', approve: true });
     const sellerId = newId();
-    const small = await uploadImage(t, { sellerId }, { width: 600, height: 600 });
+    // above the product image spec (800 × 800, checked at upload) but under the category's 1000 × 1000
+    const small = await uploadImage(t, { sellerId }, { width: 900, height: 900 });
     const input = productInput({ brandId, categoryId: cat.id, imageIds: [small], model: 'zx 900', gtin: '4000000000001', extra: { description: 'FDA approved headphones that cure headaches, the best in the world for everyone.' } });
     const id = (await a.seller(sellerId, 'POST', '/products', input)).json().product.id;
     expect((await a.seller(sellerId, 'POST', `/products/${id}/submit`, {})).statusCode).toBe(200);

@@ -275,6 +275,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 | bestPrice | `Money?` Lowest eligible offer price |
 | offerNote | `string?` Offer-state note when some offers are not live, e.g. Gadget Grove offer paused · 3 other offers live |
 | reviewDraft | `ReviewDraft?` The calling reviewer's unsent decision on the open submission (staff only) |
+| imagesToRecrop | `uuid[]?` Images of the product and its variants that no longer have the product image spec's aspect ratio (media.productImage changed): show "Re-crop images". Not blocking: the product stays live and the store shows them cover-cropped. Empty when none |
 
 ### ReviewLogEntry
 
@@ -436,7 +437,7 @@ What a product is: categories, attributes, brands, products, variants, and the r
 |---|---|
 | text | `string` e.g. Minimum 1000 × 1000 px, JPG or PNG, up to 10 MB |
 | severity | `enum(blocking|warning)` Blocking fails the image_standard check; warning is advisory |
-| check | `json?` Machine-checkable parameters passed to media.checkImage, e.g. { "minWidth": 1000 } |
+| check | `json?` Machine-checkable parameters passed to media.checkImage, e.g. { "minWidth": 1000 }. aspectRatios are ignored for product photos: the product image spec's ratio (media.productImage) applies to every category |
 
 ### AttributeAdmin
 
@@ -747,6 +748,7 @@ Indexes: `(status, name)`
 | created_at | timestamptz |
 | updated_at | timestamptz |
 | listed_at | timestamptz? |
+| recrop_media_ids | jsonb? (images of the product and its variants flagged by media for re-crop after an aspect ratio change; dropped when replaced) |
 
 Indexes: `(review_state, id)`, `(category_id, id)`, `(owner_seller_id, id)`, `gin(search)`, `(publication, id)`, `(brand_id, id)`
 
@@ -938,6 +940,7 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 | `catalog.product.changes_requested` | A reviewer asks for changes | `{ productId: uuid, ownerSellerId: uuid?, reason: text, fields: map<string> }` | notifications, sellers, workqueues |
 | `catalog.product.rejected` | A reviewer rejects | `{ productId: uuid, ownerSellerId: uuid?, reason: text }` | notifications, sellers, workqueues |
 | `catalog.product.publication_changed` | Active / Hidden / Suspended changes | `{ productId: uuid, from: string, to: string, reason: text, trustReportId: uuid?, trustEnforcementId: uuid? }` | advertising, cart, content, offers, promotions, search, trust, wishlist |
+| `catalog.images.recrop_needed` | A change of the product image spec's aspect ratio left a seller's product images off the ratio (media.product_images.recrop_changed): one event per seller and batch, for the seller's notification | `{ sellerId: uuid, productIds: uuid[], imageCount: int, aspectRatio: string }` | notifications |
 | `catalog.product.updated` | Shared content changes (including variant weight, dimensions and list price) | `{ productId: uuid, version: int, title: string }` | offers, search |
 | `catalog.product.merged` | A duplicate or submission is merged (one event per merged record) | `{ keptProductId: uuid, duplicateProductId: uuid, newVariantId: uuid?, intoVariantId: uuid?, reason: text }` | advertising, content, customers, inventory, offers, promotions, reviews, search, wishlist |
 | `catalog.correction.suggested` | A seller suggests a correction | `{ suggestionId: uuid, productId: uuid }` | - |
@@ -948,6 +951,7 @@ Indexes: `pk (brand_id, category_id)`, `(category_id, product_count desc)`
 
 | Consumes | From | Does |
 |---|---|---|
+| `media.product_images.recrop_changed` | media | Products and variants using the images (usages product_image and variant_image): recrop true adds them to the product's images to re-crop (imagesToRecrop; the Admin catalog's missing-content tab lists the product) and publishes catalog.images.recrop_needed per seller; recrop false removes them. Products stay live |
 | `access.approval.decided` | access | Finish a publication override that needed approval (approved: apply it; otherwise drop the pending override) |
 | `sellers.seller.restricted` | sellers | When the restriction covers product submissions (optionally scoped to categories), block new drafts and submissions from that seller in scope and pause its open submissions in the review queue |
 | `sellers.seller.suspended` | sellers | Pause the seller's open submissions in the review queue |
@@ -1100,6 +1104,8 @@ type Product {
   noGtin: Boolean @areas(in: [SELLER, ADMIN])
   "Brand the submitter asked to add because it was not listed; reviewed with the product. Seller area: null unless the caller submitted the product."
   requestedBrandName: String @areas(in: [SELLER, ADMIN])
+  "Images (ids) that no longer have the product image spec's aspect ratio: Re-crop images. Not blocking. Seller area: null unless the caller submitted the product."
+  imagesToRecrop: [UUID!] @areas(in: [SELLER, ADMIN])
   "The calling reviewer's unsent decision on the open submission (Save draft)"
   reviewDraft: ProductReviewDraft @areas(in: [ADMIN]) @auth(requires: STAFF, permission: "catalog.products.review")
   owner: ProductOwner @areas(in: [ADMIN])
