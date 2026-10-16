@@ -2,7 +2,8 @@ import type { components } from '@marketly/web-shared/api';
 import type { MoneyValue } from '@marketly/web-shared/lib/format';
 
 // Seller reports (seller/reports): the report queries the screen runs and local types for the parts of
-// reports.ReportResult the OpenAPI types as `unknown` (meta, table, breakdowns, KPI delta).
+// reports.ReportResult the OpenAPI types as `unknown` (meta, table, breakdowns, KPI delta). The return-rate KPI is
+// the metric service.return_rate (on seller.product_sales, with its comparison).
 // API: POST /api/seller/reports/reports/{key}/query (docs/api/modules/reports.md, Seller API).
 
 export type Period = '7d' | '30d' | '90d';
@@ -45,21 +46,23 @@ export interface KpiDelta {
   good: boolean;
 }
 
+/** A seller.product_sales row: one per product, its SKUs joined (`sku`) and listed (`skus`). */
 export interface ProductSalesRow {
   productId: string;
   product: string;
+  image?: { url: string; thumbUrl?: string | null; alt?: string | null } | null;
+  sku?: string | null;
+  skus?: string[];
+  liveDiscount?: boolean;
   units: number;
   orders: number;
   gross: MoneyValue;
+  averagePrice?: MoneyValue | null;
+  returnedUnits: number;
+  /** Percent of units returned (0–100). */
+  returnRate: number;
   cancelled: MoneyValue;
   refunded: MoneyValue;
-}
-
-export interface ReturnsProductRow {
-  productId: string;
-  product: string;
-  requests: number;
-  units: number;
 }
 
 export interface Breakdown {

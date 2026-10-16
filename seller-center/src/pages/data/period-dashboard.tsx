@@ -180,6 +180,7 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
   const aov = kpiOf(trend.data, 'commerce.average_order_value');
   const units = kpiOf(products.data, 'commerce.units_sold');
   const returnReqs = kpiOf(returns.data, 'service.return_requests');
+  const returnRate = kpiOf(products.data, 'service.return_rate');
   const onTime = kpiOf(service.data, 'service.on_time_dispatch');
 
   const serviceSeries = (service.data?.series ?? []) as Series[];
@@ -376,7 +377,7 @@ export function PeriodPerformance({ part = 'summary', today: todaySales }: { par
         <KpiCard k={orders} label="Orders" loading={trend.isPending} />
         <KpiCard k={aov} label="Average order" loading={trend.isPending} />
         <KpiCard k={units} label="Units sold" loading={products.isPending} note={totals.orders ? `${(totals.units / totals.orders).toFixed(1)} per order` : undefined} />
-        <KpiCard k={returnReqs} label="Return requests" loading={returns.isPending} note={returnReqs?.note ?? undefined} />
+        <KpiCard k={returnRate} label="Return rate" loading={products.isPending} note={returnRate?.note ?? undefined} />
         <KpiCard k={onTime} label="On-time dispatch" loading={service.isPending} />
       </div>
       <div className="grid lg2 gap-5">

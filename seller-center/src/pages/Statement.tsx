@@ -1,20 +1,19 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { CSSProperties, ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
-import { call, errorMessage, useApi } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Button, Card, EmptyState, KeyValue, PageHeader, StatusBadge, SummaryRow, TableWrap } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
-import { amt, download, findStatementId, fmtDay, fmtPeriod, fmtTime, PAYOUT_STATUS, refHref, signed, type Statement as StatementData, type StatementLine } from './data/finance';
+import { amt, download, fmtDay, fmtPeriod, fmtTime, PAYOUT_STATUS, refHref, signed, type Statement as StatementData, type StatementLine } from './data/finance';
 
 // Design: pages/seller/seller-statement.html (no views). Route /finance/statements/:ref takes the
-// statement ref (ST-…) or the payout ref (PO-…) it settles; REST reads statements by id, so the ref is
-// looked up in GET finance/statements (or finance/payouts) first, then GET finance/statements/{id} gives
-// the sections, their totals and the reconciliation to the payout. Download: GET …/{id}/download
-// (PDF or CSV, issued statements only). The SellerStatement screen query fails on the running server
+// statement ref (ST-…); GET finance/statements/{ref} gives the sections (sales lines carry the SKU), their
+// totals and the reconciliation to the payout. Download: GET …/{ref}/download (PDF or CSV, issued
+// statements only). The SellerStatement screen query fails on the running server
 // (Money.formatted, BACKEND-REQUESTS G13).
 
 type Section = StatementData['sections'][number];
@@ -127,10 +126,14 @@ export default function Statement() {
 
   const statement = useQuery({
     queryKey: ['finance', 'statement', sellerId, ref],
+    // The statement routes take the ST- ref (or the id) directly; unknown refs answer 404.
     queryFn: async () => {
-      const id = await findStatementId(api, ref);
-      if (!id) return null;
-      return call(api.GET('/api/seller/finance/statements/{id}', { params: { path: { id } } }));
+      try {
+        return await call(api.GET('/api/seller/finance/statements/{id}', { params: { path: { id: ref } } }));
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
     },
     enabled: canView && !!ref,
   });
@@ -273,7 +276,7 @@ export default function Statement() {
                   <thead>
                     <tr>
                       <th scope="col">Product</th>
-                      <th scope="col">Order</th>
+                      <th scope="col">SKU</th>
                       <th className="r" scope="col">
                         Units
                       </th>
@@ -290,15 +293,23 @@ export default function Statement() {
                         <tr key={i}>
                           <td>
                             <span className={l.amount.amount > 0 && l.units !== 0 ? 'small strong' : 'small'}>{l.description}</span>
-                            {sub && (
+                            {(sub || l.reference?.ref) && (
                               <>
                                 <br />
-                                <span className="xs muted">{sub}</span>
+                                <span className="xs muted">
+                                  {l.reference?.ref && <RefLink line={l} />}
+                                  {l.reference?.ref && sub && ' · '}
+                                  {sub}
+                                </span>
                               </>
                             )}
                           </td>
                           <td>
-                            <RefLink line={l} />
+                            {l.sku && (
+                              <span className="mono nowrap" title={l.sku}>
+                                {l.sku}
+                              </span>
+                            )}
                           </td>
                           <td className="r">{l.units != null && <span className="num">{l.units}</span>}</td>
                           <td className="r">

@@ -10,7 +10,6 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, Meter, PageHeader, Price, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput, announce } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import {
-  CONSENT_TEXT_VERSION,
   DISCOUNT_TYPES,
   EMPTY_DISCOUNT,
   PARTICIPATION_TONE,
@@ -38,7 +37,8 @@ import {
 
 // Design: pages/seller/seller-marketing.html · views: platform-campaigns, sponsored-ads (tabs).
 // Data: promotions (GET/POST /api/seller/promotions/discounts, …/preview, …/{id}/schedule|pause|resume|end;
-// GET /api/seller/promotions/invitations, …/{id}/accept|decline|withdraw) and advertising (GET …/summary,
+// GET /api/seller/promotions/invitations, …/{id}/accept (with the invitation's consentTextVersion)|decline|withdraw
+// (reason optional)) and advertising (GET …/summary,
 // …/campaigns, POST …/campaigns/{id}/pause|resume). Advertising is a launch-phase-3 module: while it answers
 // 501 NOT_IMPLEMENTED the Sponsored ads tab says so and offers no actions.
 
@@ -372,7 +372,6 @@ function InvitationView({ inv }: { inv: Invitation }) {
   const [picked, setPicked] = useState<Record<string, boolean>>(() => Object.fromEntries(p.offers.map((o) => [o.offerId, o.included && o.eligible])));
   const [consent, setConsent] = useState(false);
   const [leaveReason, setLeaveReason] = useState('');
-  const [leaveTried, setLeaveTried] = useState(false);
   const chosen = p.offers.filter((o) => o.eligible && picked[o.offerId]);
   const nPicked = chosen.length;
   const sample = chosen[0] ?? p.offers.find((o) => o.eligible) ?? p.offers[0];
@@ -382,7 +381,7 @@ function InvitationView({ inv }: { inv: Invitation }) {
 
   const refresh = () => qc.invalidateQueries({ queryKey: ['promotions', 'invitations', sellerId] });
   const accept = useMutation({
-    mutationFn: () => call(api.POST('/api/seller/promotions/invitations/{id}/accept', { params: { path: { id: p.id } }, body: { offerIds: chosen.map((o) => o.offerId), consent: true, consentTextVersion: CONSENT_TEXT_VERSION } })),
+    mutationFn: () => call(api.POST('/api/seller/promotions/invitations/{id}/accept', { params: { path: { id: p.id } }, body: { offerIds: chosen.map((o) => o.offerId), consent: true, consentTextVersion: inv.consentTextVersion } })),
     onSuccess: async () => (announce(`Joined ${c.name}`), await refresh()),
   });
   const decline = useMutation({
@@ -390,7 +389,7 @@ function InvitationView({ inv }: { inv: Invitation }) {
     onSuccess: async () => (announce('Invitation declined'), await refresh()),
   });
   const withdraw = useMutation({
-    mutationFn: () => call(api.POST('/api/seller/promotions/invitations/{id}/withdraw', { params: { path: { id: p.id } }, body: { reason: leaveReason.trim() } })),
+    mutationFn: () => call(api.POST('/api/seller/promotions/invitations/{id}/withdraw', { params: { path: { id: p.id } }, body: leaveReason.trim() ? { reason: leaveReason.trim() } : {} })),
     onSuccess: async () => (announce(`You asked to leave ${c.name}`), await refresh()),
   });
   const err = accept.error ?? decline.error ?? withdraw.error;
@@ -558,7 +557,10 @@ function InvitationView({ inv }: { inv: Invitation }) {
             {open ? (
               <Checkbox
                 id="mk-consent"
-                label={`I agree to fund ${pct(c.funding.sellerFundsBps)} of the price on the ${nPicked} selected offer${nPicked === 1 ? '' : 's'} during ${c.period.display}, and not to raise their prices during the campaign. Marketly funds the other ${pct(c.funding.platformFundsBps)}.`}
+                label={
+                  inv.consentText ||
+                  `I agree to fund ${pct(c.funding.sellerFundsBps)} of the price on the ${nPicked} selected offer${nPicked === 1 ? '' : 's'} during ${c.period.display}, and not to raise their prices during the campaign. Marketly funds the other ${pct(c.funding.platformFundsBps)}.`
+                }
                 checked={consent}
                 disabled={!canJoin}
                 onChange={(e) => setConsent(e.target.checked)}
@@ -567,7 +569,7 @@ function InvitationView({ inv }: { inv: Invitation }) {
               p.consentText && <p className="xs sub">{`You agreed${p.consentedAt ? ` on ${weekdayPT(p.consentedAt)}` : ''}: ${p.consentText}`}</p>
             )}
             {state === 'accepted' && canJoin && (
-              <Field label="Reason for leaving" error={leaveTried && !leaveReason.trim() ? 'Tell Marketly why you want to leave.' : undefined}>
+              <Field label="Reason for leaving" optional>
                 <TextInput id="mk-leave" value={leaveReason} onChange={(e) => setLeaveReason(e.target.value)} />
               </Field>
             )}
@@ -577,7 +579,7 @@ function InvitationView({ inv }: { inv: Invitation }) {
             <div className="card-foot">
               {joined ? (
                 state === 'accepted' && (
-                  <Button variant="ghost" disabled={busy} onClick={() => (setLeaveTried(true), leaveReason.trim() && withdraw.mutate())}>
+                  <Button variant="ghost" disabled={busy} onClick={() => withdraw.mutate()}>
                     Leave campaign
                   </Button>
                 )

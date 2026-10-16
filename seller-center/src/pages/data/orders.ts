@@ -24,7 +24,15 @@ export type Carrier = S['shipping.Carrier'];
 export type ReturnTerms = S['returns.SellerReturnTerms'];
 export type Address = S['Address'];
 
-export const SELLER_ORDER_DETAIL = SELLER_ORDER_DETAIL_TEXT;
+/**
+ * The SellerOrderDetail screen query plus two fields the persisted operation doesn't select yet (reported to the
+ * backend): `onLabelQuantity` on items (units on a bought label that isn't handed over, G41) and the shipment's
+ * label link (`label { id labelUrl }`, G54c). Once the operation selects them, the text is used as it is.
+ * Development sends the query text; with persisted queries only, the extra fields need the operation updated.
+ */
+export const SELLER_ORDER_DETAIL = SELLER_ORDER_DETAIL_TEXT.includes('onLabelQuantity')
+  ? SELLER_ORDER_DETAIL_TEXT
+  : SELLER_ORDER_DETAIL_TEXT.replace(/\n([ \t]+)cancelledQuantity\r?\n/, (m, ind: string) => `${m}${ind}onLabelQuantity\n`).replace(/\n([ \t]+)recordedBy \{/, (m, ind: string) => `\n${ind}label {\n${ind}  id\n${ind}  labelUrl\n${ind}}${m}`);
 
 /* ------------------------------------------------------------------ Pacific time */
 
@@ -74,9 +82,6 @@ export function dueText(iso: string): string {
   const when = k === today ? `today, ${ptDate(iso)}` : k === addDays(today, 1) ? `tomorrow, ${ptDate(iso)}` : weekdayDay(k);
   return `${when}, ${ptTime(iso)} PT`;
 }
-
-/** Timeline details sometimes carry raw ISO instants ("Dispatch by 2026-10-15T00:00:00.000Z"): show them in PT. */
-export const isoToPt = (text?: string | null) => (text ?? '').replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g, (m) => `${ptDateTime(m)} PT`);
 
 /** "(208) 555-0117" from "+12085550117"; anything else as given. */
 export const phoneText = (p?: string | null) => {
@@ -221,16 +226,6 @@ export async function waitForExport(read: () => Promise<ExportJob>, first: Expor
   return job;
 }
 
-/** Client-side CSV of the selected rows (what the table shows). */
-export function downloadCsv(name: string, rows: OrderRow[], total: (r: OrderRow) => string) {
-  const csv = [['order', 'placed', 'buyer', 'items', 'total', 'status', 'dispatch'], ...rows.map((r) => [r.ref, ptDateTime(r.placedAt), r.buyerName, r.itemsSummary, total(r), r.statusLabel, r.deadlineLabel])]
-    .map((l) => l.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(','))
-    .join('\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  openDownload(url, name);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
 /* ------------------------------------------------------------------ SellerOrderDetail screen query */
 
 export interface GqlMoney {
@@ -255,6 +250,8 @@ export interface OrderItemG {
   quantity: number;
   shippedQuantity: number;
   cancelledQuantity: number;
+  /** Units on a bought label the carrier doesn't have yet: neither shippable nor cancellable until handed over or voided. */
+  onLabelQuantity?: number | null;
   unitPrice: GqlMoney;
   lineSubtotal: GqlMoney;
   state: string;
@@ -279,6 +276,8 @@ export interface ShipmentG {
   dispatchedOnTime?: boolean | null;
   contents: Array<{ orderItemId: string; title: string; variantLabel?: string | null; quantity: number }>;
   corrections: Array<{ at: string; from: string; to: string; reason: string; customerNotified: boolean; by?: Who | null }>;
+  /** The bought label, with its signed file link. */
+  label?: { id: string; labelUrl?: string | null } | null;
   recordedBy?: Who | null;
 }
 
@@ -369,5 +368,7 @@ export interface SellerOrderDetailResult {
 /** GraphQL enums arrive upper-case (PREPARING); REST sends lower-case. */
 export const lc = (s?: string | null) => (s ?? '').toLowerCase();
 
-/** Units still to ship on an item (not shipped, not cancelled). */
+/** Units not shipped and not cancelled (including units on a bought label not handed over yet). */
 export const openQty = (i: OrderItemG) => (lc(i.state) === 'cancelled' ? 0 : Math.max(0, i.quantity - i.shippedQuantity - i.cancelledQuantity));
+/** Units that can still go in a package or be cancelled: open units not on a bought label. */
+export const toShipQty = (i: OrderItemG) => Math.max(0, openQty(i) - (i.onLabelQuantity ?? 0));

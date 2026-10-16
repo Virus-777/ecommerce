@@ -9,13 +9,14 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Avatar, Badge, Button, Card, Checkbox, Dialog, Field, Icon, KeyValue, LogoTile, PageHeader, Select, StatusBadge, TableWrap, Tabs, TextInput } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { fmtDay, fmtTime } from './data/finance';
-import { CHANNELS, EMAIL_RE, LEVEL, levelOf, listed, MATRIX_AREAS, MEMBER_STATUS, NOTE_COLS, type Channel, type Level, type Member, type MemberPreference, type PermissionEntry, type StaffRole } from './data/staff';
+import { CHANNELS, EMAIL_RE, LEVEL, levelOf, MATRIX_AREAS, MEMBER_STATUS, NOTE_COLS, type Channel, type Level, type Member, type MemberPreference, type PermissionEntry, type StaffRole } from './data/staff';
 
 // Design: pages/seller/seller-staff.html · view "invite-staff" = the invite dialog.
-// Members: GET sellers/members; roles and the permission catalogue: GET sellers/roles; invite, resend,
+// Members: GET sellers/members (cancelled invitations and removed people are left out by default); roles and the permission catalogue: GET sellers/roles; invite, resend,
 // cancel, role change, suspend, reactivate and remove: sellers/invitations and sellers/members/{id}/*
 // (owner only: sellers.staff.manage). Notification preferences: GET notifications/preferences and
-// PUT …/preferences/members/{memberId}. Account status: GET sellers/account.
+// PUT …/preferences/members/{memberId} (invited people get preferences once they accept: 409 MEMBER_NOT_JOINED).
+// Account status: GET sellers/account.
 
 const TABS = [
   { label: 'Store profile', value: 'store', to: href('seller/store') },
@@ -107,7 +108,7 @@ export default function Staff() {
 
   const errors = tried ? validateInvite(draft, members, true) : {};
   const quickErrors = quickTried ? validateInvite(quick, members, false) : {};
-  const rows = members.filter(listed);
+  const rows = members;
   const activeN = rows.filter((m) => m.status === 'active').length;
   const invitedN = rows.filter((m) => m.status === 'invited' || m.status === 'expired').length;
   const matrixPeople = rows.filter((m) => m.status === 'active');
@@ -115,7 +116,7 @@ export default function Staff() {
   // Draft permissions start from the role template once the catalogue is loaded.
   const draftPerms = draft.perms.length || draft.role === 'custom' ? draft.perms : template(draft.role);
 
-  // One preferences row per person (dev seller tokens can add a second row for the token's member id).
+  // One preferences row per person (databases from before G49c can hold a second row a dev token added for its account id).
   const prefRows = useMemo(() => {
     const ids = new Set(members.map((m) => m.id));
     const byAccount = new Map<string, MemberPreference>();
@@ -126,6 +127,8 @@ export default function Staff() {
     return [...byAccount.values()];
   }, [prefsQ.data, members]);
   const groupInfo = (key: string) => prefsQ.data?.groups.find((g) => g.key === key);
+  // Invited people have no preferences until they accept; they are listed with a note.
+  const invitedPrefs = members.filter((m) => m.status === 'invited');
 
   const invite = useMutation({
     mutationFn: (i: Invite) =>
@@ -190,7 +193,12 @@ export default function Staff() {
       setNotice({ tone: 'success', title: 'Notification preferences saved', body: 'Changes apply to new notices from now on.' });
       void qc.invalidateQueries({ queryKey: ['notifications', 'preferences', sellerId] });
     },
-    onError: (e) => setNotice({ tone: 'danger', title: 'We couldn’t save the preferences', body: errorMessage(e) }),
+    onError: (e) =>
+      setNotice(
+        e instanceof ApiError && e.code === 'MEMBER_NOT_JOINED'
+          ? { tone: 'info', title: 'Not available yet', body: 'Notification settings are available after they accept the invite.' }
+          : { tone: 'danger', title: 'We couldn’t save the preferences', body: errorMessage(e) },
+      ),
   });
 
   const prefOf = (pr: MemberPreference) => prefEdits[pr.memberId] ?? { groups: pr.groups as Record<string, boolean>, channel: pr.channel };
@@ -478,7 +486,7 @@ export default function Staff() {
                       ? skRows(7)
                       : prefRows.map((pr, r) => {
                           const v = prefOf(pr);
-                          const meId = (acc?.me as { memberId?: string } | undefined)?.memberId;
+                          const meId = acc?.me?.memberId;
                           const editable = canPrefs || (!!meId && (pr.memberId === meId || pr.accountId === meId)) || (pr.isOwner && isOwner);
                           return (
                             <tr key={pr.memberId}>
@@ -515,6 +523,20 @@ export default function Staff() {
                             </tr>
                           );
                         })}
+                    {prefsQ.data &&
+                      invitedPrefs.map((m) => (
+                        <tr key={m.id}>
+                          <td>
+                            <span className="stack gap-0">
+                              <span className="small strong nowrap">{m.name}</span>
+                              <span className="xs muted">Invited</span>
+                            </span>
+                          </td>
+                          <td colSpan={NOTE_COLS.length + 1}>
+                            <span className="xs muted">Available after they accept</span>
+                          </td>
+                        </tr>
+                      ))}
                   </tbody>
                 </table>
               </TableWrap>

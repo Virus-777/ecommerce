@@ -10,7 +10,7 @@ import {
   Alert, Badge, Button, Card, Checkbox, Chip, EmptyState, Field, FileDrop, Icon, IconButton, ImageCropper, Img, KeyValue, Meter, PageHeader, Select, StatusLegend, Switch, TableWrap, Textarea, TextInput, Timeline, announce, type IconName, type ProcessedImage, type TimelineEvent,
 } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
-import { FormSkeleton, LoadError, fmtDay, fmtFull, fmtWhen, inputAmount, reviewLabel, toMinor } from './data/catalog-parts';
+import { FormSkeleton, LoadError, fmtDay, fmtFull, fmtWhen, inputAmount, reviewLabel, toMinor, useSellerSettings } from './data/catalog-parts';
 import { CATEGORIES, SELLER_PRODUCT, flattenCategories, offerHref, productHref, type CategoryAttribute, type CategoryNode, type SellerProduct } from './data/products';
 
 // Design: pages/seller/seller-product-new.html (a draft with missing fields) · view "changes-requested" = the
@@ -28,7 +28,6 @@ type ProductAdmin = components['schemas']['catalog.ProductAdmin'];
 type ImageRule = components['schemas']['catalog.ImageRule'];
 
 const NEW_BRAND = '__new';
-const MIN_DESCRIPTION = 40; // catalog setting minDescriptionLength (seller-visible; no seller settings read in this app)
 const MAX_FEATURES = 5;
 
 interface VarRow {
@@ -182,9 +181,10 @@ export default function ProductNew() {
     staleTime: 10 * 60_000,
   });
   const profiles = useQuery({ queryKey: ['shipping', 'profiles', sellerId], queryFn: () => call(api.GET('/api/seller/shipping/profiles')) });
+  const settings = useSellerSettings();
 
-  const failed = [product, categories, brands].find((q) => q.isError);
-  const loading = (!!id && product.data === undefined) || !categories.data || !brands.data;
+  const failed = [product, categories, brands, settings].find((q) => q.isError);
+  const loading = (!!id && product.data === undefined) || !categories.data || !brands.data || !settings.data;
   let body: ReactNode;
   if (failed) body = <LoadError error={failed.error} onRetry={() => void failed.refetch()} />;
   else if (loading) body = <FormSkeleton cards={4} />;
@@ -208,6 +208,7 @@ export default function ProductNew() {
         product={product.data ?? null}
         tree={categories.data!}
         brands={brands.data!.items}
+        minDescription={settings.num('catalog.minDescriptionLength') ?? 0}
         defaultProfileId={(profiles.data?.find((p) => p.isDefault && p.status !== 'archived') ?? profiles.data?.find((p) => p.status !== 'archived'))?.id}
         onSaved={async () => {
           await product.refetch();
@@ -228,12 +229,15 @@ function ProductForm({
   product,
   tree,
   brands,
+  minDescription: MIN_DESCRIPTION,
   defaultProfileId,
   onSaved,
 }: {
   product: SellerProduct | null;
   tree: CategoryNode[];
   brands: Array<components['schemas']['catalog.Brand']>;
+  /** Setting catalog.minDescriptionLength (characters required before submission). */
+  minDescription: number;
   defaultProfileId?: string;
   onSaved: () => Promise<void>;
 }) {
@@ -468,6 +472,36 @@ function ProductForm({
       setErrors(fe);
       setBanner({ tone: 'danger', title: 'We couldn’t save the product', text: e instanceof ApiError && e.code === 'BRAND_NOT_ACTIVE' ? 'This brand is under review or blocked. Choose another brand or request it.' : `${errorMessage(e)}${Object.keys(fe).length ? ` ${Object.values(fe).join(' ')}` : ''}` });
       announce('The product wasn’t saved');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+  });
+
+  // A product that was never listed: its open submission can be withdrawn (back to draft), and a draft (or a
+  // returned submission) can be deleted. Listed products change through corrections instead.
+  const neverListed = !!product && !(product.reviewLog ?? []).some((l) => l.action === 'approved');
+  const canWithdraw = neverListed && state === 'SUBMITTED' && canSubmit;
+  const canDelete = neverListed && editable && canSubmit;
+  const [confirmManage, setConfirmManage] = useState<'' | 'withdraw' | 'delete'>('');
+  const manage = useMutation({
+    mutationFn: (kind: 'withdraw' | 'delete') =>
+      kind === 'withdraw'
+        ? call(api.POST('/api/seller/catalog/products/{id}/withdraw', { params: { path: { id: product!.id } }, body: {} }))
+        : call(api.DELETE('/api/seller/catalog/products/{id}', { params: { path: { id: product!.id } } })),
+    onSuccess: async (_, kind) => {
+      setConfirmManage('');
+      void qc.invalidateQueries({ queryKey: ['offers'] });
+      void qc.invalidateQueries({ queryKey: ['catalog', 'products'] });
+      if (kind === 'delete') {
+        announce('Draft deleted');
+        navigate(href('seller/products'), { replace: true });
+        return;
+      }
+      announce('Submission withdrawn');
+      await onSaved();
+    },
+    onError: (e) => {
+      setConfirmManage('');
+      setBanner({ tone: 'danger', title: 'That didn’t work', text: errorMessage(e) });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     },
   });
@@ -978,10 +1012,34 @@ function ProductForm({
                     {save.isPending && save.variables?.submit ? 'Submitting…' : cr ? 'Resubmit for review' : 'Submit for review'}
                   </Button>
                 </>
+              ) : canWithdraw ? (
+                <Button variant="secondary" onClick={() => setConfirmManage('withdraw')} disabled={manage.isPending}>
+                  Withdraw submission
+                </Button>
               ) : (
                 <span className="xs muted">{!canSubmit ? 'Your role can’t submit products.' : 'This submission can’t be edited now.'}</span>
               )}
             </div>
+            {confirmManage && (
+              <div className="card-foot">
+                <p className="small card-foot-note">
+                  {confirmManage === 'withdraw' ? 'It leaves the review queue and goes back to draft. You can edit it and submit again.' : 'The product, its variations, draft offers and review history are removed. This can’t be undone.'}
+                </p>
+                <Button variant="ghost" onClick={() => setConfirmManage('')}>
+                  Keep it
+                </Button>
+                <Button variant={confirmManage === 'delete' ? 'danger' : 'primary'} onClick={() => manage.mutate(confirmManage)} disabled={manage.isPending}>
+                  {manage.isPending ? 'Working…' : confirmManage === 'withdraw' ? 'Withdraw submission' : 'Delete draft'}
+                </Button>
+              </div>
+            )}
+            {canDelete && !confirmManage && (
+              <div className="card-foot">
+                <Button variant="danger-soft" size="sm" icon="trash-2" onClick={() => setConfirmManage('delete')} disabled={manage.isPending || save.isPending}>
+                  Delete draft
+                </Button>
+              </div>
+            )}
           </section>
           {cr && blocking > 0 && (
             <p className="xs muted" id="pn-block">

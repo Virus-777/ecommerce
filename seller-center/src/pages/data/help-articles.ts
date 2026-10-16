@@ -1,13 +1,10 @@
-import { toApiError, type components } from '@marketly/web-shared/api';
+import { ApiError, call, type Api, type components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
-import type { IconName } from '@marketly/web-shared/ui';
-import { iconOf } from './home';
+import { iconFor, type IconName } from '@marketly/web-shared/ui';
 
-// Seller help content from the content module (audience seller): help home, search, articles and
-// "Was this helpful?". The help routes are store-area only (GET /api/store/content/help…), and the Seller
-// Center's seller token is refused there (WRONG_AUDIENCE). Until the API serves seller help in the seller
-// area, these calls use a store visitor session of their own: started with POST
-// /api/public/identity/app-sessions (no cookie, token kept in memory) and started again when it expires.
+// Seller help content from the content module, read in the seller area with the seller session: help home
+// (GET /api/seller/content/help), search (…/help/articles), articles (…/help/articles/{slug}) and
+// "Was this helpful?" (POST …/help/articles/{id}/feedback). Seller help serves seller articles only.
 
 export type HelpHome = components['schemas']['content.HelpHome'];
 export type HelpArticle = components['schemas']['content.HelpArticle'];
@@ -15,66 +12,25 @@ export type HelpArticleSummary = components['schemas']['content.HelpArticleSumma
 export type HelpCategory = components['schemas']['content.HelpCategory'];
 export type LinkRef = components['schemas']['content.LinkRef'];
 
-let visitor: { token: string; exp: number } | null = null;
-let starting: Promise<string> | null = null;
-
-async function startVisitor(): Promise<string> {
-  const res = await fetch('/api/public/identity/app-sessions', {
-    method: 'POST',
-    credentials: 'omit',
-    headers: { 'Content-Type': 'application/json', 'X-Client': 'web', 'X-App-Proof': 'dev' },
-    body: JSON.stringify({ audience: 'store', device: { kind: 'web' } }),
-  });
-  if (!res.ok) throw await toApiError(res);
-  const t = (await res.json()) as { accessToken: string; accessTokenExpiresAt: string };
-  visitor = { token: t.accessToken, exp: new Date(t.accessTokenExpiresAt).getTime() };
-  return t.accessToken;
-}
-
-async function visitorToken(fresh = false): Promise<string> {
-  if (!fresh && visitor && visitor.exp - Date.now() > 30_000) return visitor.token;
-  return starting ?? (starting = startVisitor().finally(() => (starting = null)));
-}
-
-async function helpFetch(path: string, init?: { method?: string; body?: unknown }): Promise<Response> {
-  const send = async (token: string) =>
-    fetch(path, {
-      method: init?.method ?? 'GET',
-      credentials: 'omit',
-      headers: { Authorization: `Bearer ${token}`, 'X-Client': 'web', ...(init?.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
-      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
-    });
-  let res = await send(await visitorToken());
-  if (res.status === 401) res = await send(await visitorToken(true));
-  return res;
-}
-
-async function helpGet<T>(path: string): Promise<T> {
-  const res = await helpFetch(path);
-  if (!res.ok) throw await toApiError(res);
-  return (await res.json()) as T;
-}
-
 /** Help home for sellers: topics with their top articles, popular articles and searches, the featured guide. */
-export const getHelpHome = () => helpGet<HelpHome>('/api/store/content/help?audience=seller');
+export const getHelpHome = (api: Api): Promise<HelpHome> => call(api.GET('/api/seller/content/help'));
 
 /** Seller help search (title, summary, topics and body). */
-export const searchHelp = (q: string, limit = 24) =>
-  helpGet<{ items: HelpArticleSummary[]; nextCursor: string | null }>(`/api/store/content/help/articles?${new URLSearchParams({ q, audience: 'seller', limit: String(limit) })}`);
+export const searchHelp = (api: Api, q: string, limit = 24) => call(api.GET('/api/seller/content/help/articles', { params: { query: { q, limit } } }));
 
-/** One article by slug; null when there is none, or when it is a customer-only article. */
-export async function getHelpArticle(slug: string): Promise<HelpArticle | null> {
-  const res = await helpFetch(`/api/store/content/help/articles/${encodeURIComponent(slug)}`);
-  if (res.status === 404) return null;
-  if (!res.ok) throw await toApiError(res);
-  const a = (await res.json()) as HelpArticle;
-  return a.category.audience === 'customer' ? null : a;
+/** One article by slug; null when there is none. */
+export async function getHelpArticle(api: Api, slug: string): Promise<HelpArticle | null> {
+  try {
+    return await call(api.GET('/api/seller/content/help/articles/{slug}', { params: { path: { slug } } }));
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return null;
+    throw e;
+  }
 }
 
 /** "Was this helpful?" */
-export async function rateHelpArticle(id: string, helpful: boolean, comment?: string): Promise<void> {
-  const res = await helpFetch(`/api/store/content/help/articles/${id}/feedback`, { method: 'POST', body: { helpful, ...(comment ? { comment } : {}) } });
-  if (!res.ok) throw await toApiError(res);
+export async function rateHelpArticle(api: Api, id: string, helpful: boolean, comment?: string): Promise<void> {
+  await call(api.POST('/api/seller/content/help/articles/{id}/feedback', { params: { path: { id } }, body: { helpful, ...(comment ? { comment } : {}) } }));
 }
 
 /** Query keys (module first). */
@@ -87,7 +43,7 @@ export const helpKeys = {
 export const articleHref = (slug: string) => href('seller/help-article', '', { slug });
 
 /** Topic icon from the API (design icon names), with a fallback for names outside the app's set. */
-export const topicIcon = (name?: string | null): IconName => iconOf(name, 'book-open');
+export const topicIcon = (name?: string | null): IconName => iconFor(name, 'book-open');
 
 /**
  * Seller support topic (support category key) for a help topic, so "Contact seller support" from an

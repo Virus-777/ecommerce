@@ -64,7 +64,4 @@ export const MEMBER_STATUS: Record<Member['status'], string> = {
   revoked: 'Revoked',
 };
 
-/** Members the staff table shows: removed people and cancelled invitations are history only. */
-export const listed = (m: Member) => m.status !== 'removed' && m.status !== 'revoked';
-
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;

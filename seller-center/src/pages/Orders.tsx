@@ -13,7 +13,6 @@ import {
   addDays,
   dayKey,
   deadlineTone,
-  downloadCsv,
   dueText,
   nextAction,
   openDownload,
@@ -31,7 +30,7 @@ import {
 // "cancellation-requests" are the other tabs.
 // Data: GET /api/seller/orders/orders (tab, q, placedFrom/To, sort; pages on the website, cursor on the phone),
 // …/orders/counts (tab counts, shared with the sidebar), POST …/bulk-start-preparing, …/packing-slips,
-// …/exports (+ GET …/exports/{id}); cancellation requests: GET …/orders/{id} per listed task, then
+// …/exports (+ GET …/exports/{id}; selected rows export by groupIds); cancellation requests: GET …/orders/{id} per listed task, then
 // POST …/cancellation-requests/{requestId}/accept (Idempotency-Key) or …/decline.
 
 type View = 'preparing' | 'shipped' | 'completed' | 'cancellation-requests';
@@ -99,7 +98,7 @@ interface Done {
 export default function Orders() {
   const { api } = useApi();
   const qc = useQueryClient();
-  const { sellerId, storeName, can } = useSellerSession();
+  const { sellerId, can } = useSellerSession();
   const isPhone = useIsPhone();
   const [view, setView] = useView<View>();
   const tab: Tab = view;
@@ -212,9 +211,10 @@ export default function Orders() {
         : show({ tone: 'danger', title: 'Could not create packing slips', body: errorMessage(e) }),
   });
 
+  // The whole list (current filters) or the selected rows (filters.groupIds, up to 500) as a server export.
   const exportAll = useMutation({
-    mutationFn: async () => {
-      const first = await call(api.POST('/api/seller/orders/exports', { body: { filters: filter, format: 'csv' } }));
+    mutationFn: async (groupIds?: string[]) => {
+      const first = await call(api.POST('/api/seller/orders/exports', { body: { filters: groupIds ? { groupIds } : filter, format: 'csv' } }));
       show({ tone: 'info', title: `Preparing export ${first.ref}`, body: 'Your file downloads when it is ready. You can keep working.' });
       return waitForExport(() => call(api.GET('/api/seller/orders/exports/{id}', { params: { path: { id: first.id } } })), first);
     },
@@ -226,10 +226,6 @@ export default function Orders() {
     },
     onError: (e) => show({ tone: 'danger', title: 'Could not export orders', body: errorMessage(e) }),
   });
-  const exportRows = (rs: OrderRow[]) => {
-    downloadCsv(`${(storeName || 'orders').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-orders-${tab || 'new'}.csv`, rs, (r) => (r.total.amount / 100).toFixed(2));
-    announce(`Exported ${plural(rs.length, 'order')}`);
-  };
 
   const keys = useRef<Record<string, string>>({});
   const respond = useMutation({
@@ -275,7 +271,7 @@ export default function Orders() {
             Packing slips
           </Button>
           {can('orders.fulfillment.export') && (
-            <Button variant="secondary" size="sm" icon="download" onClick={() => exportAll.mutate()} disabled={exportAll.isPending}>
+            <Button variant="secondary" size="sm" icon="download" onClick={() => exportAll.mutate(undefined)} disabled={exportAll.isPending}>
               Export
             </Button>
           )}
@@ -437,9 +433,11 @@ export default function Orders() {
                   Print packing slips
                 </Button>
               )}
-              <Button variant="ghost" size="sm" icon="download" onClick={() => exportRows(sel)}>
-                Export
-              </Button>
+              {can('orders.fulfillment.export') && (
+                <Button variant="ghost" size="sm" icon="download" onClick={() => exportAll.mutate(sel.slice(0, 500).map((r) => r.id))} disabled={exportAll.isPending}>
+                  Export
+                </Button>
+              )}
               <Button variant="ghost" size="sm" icon="x" onClick={() => setSelected(new Set())}>
                 Clear
               </Button>

@@ -15,8 +15,8 @@ import { date, dateTime, LoadError, monthYear, shortDate, SkeletonLines, time, w
 // purpose verification_document); "Appeal restriction" → POST …/restrictions/{id}/appeals. Both need
 // sellers.account-health.manage. The SellerPerformance screen query would answer the same in one call; REST is
 // used for its generated types (and to stay clear of G13).
-// Gaps: restriction scope has category ids only (no names: affectedSummary is shown); history events have no
-// state (an event naming an active restriction or open warning is marked at risk); actor names are missing.
+// Restriction scope categories come with names; uploaded documents carry their documentType; history events are
+// coloured by their state and name who recorded them when known.
 
 type Account = components['schemas']['sellers.SellerAccount'];
 type Summary = components['schemas']['sellers.PerformanceSummary'];
@@ -60,7 +60,14 @@ const ACTIVITY: Record<Restriction['affectedActivities'][number], string> = {
   payout_schedule: 'Your payout schedule',
 };
 
-const DOC_TYPES = ['Invoice from the brand or an approved distributor', 'Authorization letter from the brand', 'Other proof of authorization'];
+type DocType = NonNullable<components['schemas']['sellers.ResolutionEvidence']['documentType']>;
+const DOC_TYPES: Array<{ value: DocType; label: string }> = [
+  { value: 'invoice', label: 'Invoice from the brand or an approved distributor' },
+  { value: 'authorization_letter', label: 'Authorization letter from the brand' },
+  { value: 'other', label: 'Other proof of authorization' },
+];
+/** History event state → timeline dot. */
+const EV_CLASS: Record<string, string> = { warning: 'is-warn', danger: 'is-danger', info: 'is-current', success: 'is-done' };
 const OPEN_APPEAL: Appeal['state'][] = ['submitted', 'under_review'];
 const DOC_ACCEPT = /\.(pdf|png|jpe?g)$|^(application\/pdf|image\/(png|jpeg))$/i;
 
@@ -95,7 +102,7 @@ function RestrictionPanel({ r, onNotice }: { r: Restriction; onNotice: (n: { tit
 
   // Upload form
   const docs = useUploads('verification_document', { max: 5, accept: DOC_ACCEPT });
-  const [docType, setDocType] = useState(DOC_TYPES[0]);
+  const [docType, setDocType] = useState<DocType>(DOC_TYPES[0].value);
   const [uploadTried, setUploadTried] = useState(false);
   const uploadError = uploadTried && !docs.assetIds.length ? (docs.uploading ? 'Wait for the documents to finish uploading.' : 'Add at least one document (PDF, JPG or PNG).') : undefined;
 
@@ -112,7 +119,7 @@ function RestrictionPanel({ r, onNotice }: { r: Restriction; onNotice: (n: { tit
 
   const refresh = () => void qc.invalidateQueries({ queryKey: ['sellers'] });
   const evidence = useMutation({
-    mutationFn: () => call(api.POST('/api/seller/sellers/restrictions/{id}/evidence', { params: { path: { id: r.id } }, body: { evidenceIds: docs.assetIds, note: docType } })),
+    mutationFn: () => call(api.POST('/api/seller/sellers/restrictions/{id}/evidence', { params: { path: { id: r.id } }, body: { evidenceIds: docs.assetIds, documentType: docType } })),
     onSuccess: () => {
       onNotice({ title: 'Documents submitted', body: 'Marketly reviews them and lifts the restriction if they resolve it.' });
       setDlg('');
@@ -200,6 +207,7 @@ function RestrictionPanel({ r, onNotice }: { r: Restriction; onNotice: (n: { tit
             ))}
           </ul>
           {r.affectedSummary && <p className="xs sub">{r.affectedSummary}</p>}
+          {!!r.scope.categories?.length && <p className="xs sub">Categories: {r.scope.categories.map((c) => c.name).join(', ')}</p>}
         </div>
         <div className="stack gap-2">
           <span className="small strong">Still works</span>
@@ -259,7 +267,7 @@ function RestrictionPanel({ r, onNotice }: { r: Restriction; onNotice: (n: { tit
           Restriction <span className="mono">{r.ref}</span>. {r.toResolve}
         </p>
         <Field label="Document type">
-          <Select id={`rs-doc-type-${r.id}`} options={DOC_TYPES} value={docType} onChange={(e) => setDocType(e.target.value)} />
+          <Select id={`rs-doc-type-${r.id}`} options={DOC_TYPES} value={docType} onChange={(e) => setDocType(e.target.value as DocType)} />
         </Field>
         <FileDrop title="Drag documents here or browse" hint="PDF, JPG or PNG, up to 10 MB each" accept="application/pdf,image/jpeg,image/png" onFiles={docs.add} />
         {docs.items.length > 0 && (
@@ -333,10 +341,9 @@ export default function Performance() {
   const a = account.data as Account | undefined;
   const p = perf.data;
   const active = (restrictions.data?.items ?? []) as Restriction[];
-  const feedback = (p?.feedback ?? null) as { positivePct?: number | null; ratingCount?: number | null } | null;
+  const feedback = p?.feedback ?? null;
   const windowDays = p?.metrics[0]?.target.windowDays ?? 30;
   const openWarnings = (p?.warnings ?? []).filter((w) => w.state === 'open');
-  const atRisk = [...active.map((r) => r.title.toLowerCase()), ...openWarnings.map((w) => w.title.toLowerCase())];
   const payout = a ? PAYOUT[a.payoutReadiness.state] : undefined;
   const payoutHit = active.some((r) => r.affectedActivities.includes('payout_schedule'));
 
@@ -498,16 +505,17 @@ export default function Performance() {
           ) : (
             <ol className="timeline">
               {p.history.map((e, i) => {
-                const warn = atRisk.some((t) => e.label.toLowerCase().includes(t));
+                const warn = e.state === 'warning' || e.state === 'danger';
                 return (
-                  <li key={`${e.at}-${i}`} className={cx('ev', warn ? 'is-warn' : 'is-done')}>
-                    {warn && <span className="sr-only">At risk: </span>}
+                  <li key={`${e.at}-${i}`} className={cx('ev', EV_CLASS[e.state ?? ''] ?? 'is-done')}>
+                    {warn && <span className="sr-only">{e.state === 'danger' ? 'Urgent: ' : 'At risk: '}</span>}
                     <span className="dot" aria-hidden="true" />
                     <div className="stack gap-1">
                       <span className="t">{e.label.charAt(0).toUpperCase() + e.label.slice(1)}</span>
                       <span className="d">
                         {date(e.at)}
                         {e.detail && ` · ${e.detail}`}
+                        {e.actor?.name && ` · ${e.actor.name}`}
                       </span>
                     </div>
                   </li>

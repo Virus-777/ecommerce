@@ -1,4 +1,4 @@
-import { ApiError, errorMessage, type components } from '@marketly/web-shared/api';
+import { ApiError, errorMessage, mediaFileName, type components } from '@marketly/web-shared/api';
 
 // Types, labels and rules for the Store customers screen (messaging + reviews APIs).
 
@@ -82,8 +82,9 @@ export function subjectNoun(s: ConversationSummary['subject']): string {
   return s.kind === 'return' ? 'return' : s.kind === 'case' ? 'case' : s.kind === 'order_item' ? 'item' : 'order';
 }
 
-/** File name of an attachment: alt text, else the last path segment of its URL. */
+/** File name of an attachment: the uploaded file name, else alt text, else the last path segment of its URL. */
 export function attachmentName(a: Message['attachments'][number], i: number): string {
+  if (a.fileName) return mediaFileName(a);
   if (a.alt) return a.alt;
   try {
     const last = decodeURIComponent(new URL(a.url).pathname.split('/').pop() ?? '');

@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { ApiError, call, errorMessage, newIdempotencyKey, useApi } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, newIdempotencyKey, useApi, useSessionState } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, money } from '@marketly/web-shared/lib/format';
@@ -14,7 +14,8 @@ import { amt, download, fmtDay, fmtPeriod, fmtTime, isoDaysAgo, LEDGER_ICON, PAY
 // Design: pages/seller/seller-finance.html (no views). Balances, holds and the next payout come from
 // GET finance/balances; the ledger (segment = API `type`, numbered pages) from GET finance/ledger; payout
 // results from GET finance/payouts. "Change payout account" (owner only) re-authenticates with the
-// password (step-up: reauth, purpose payout-account) and calls POST sellers/payout-account/change; the
+// password (step-up: reauth, purpose payout-account; dev-key tokens in development may send the fixed proof
+// dev-reauth.payout-account instead) and calls POST sellers/payout-account/change; the
 // new account is verified with two test deposits (POST finance/payout-destination/confirm-deposits) and
 // reviewed by Marketly Finance. The SellerFinanceOverview screen query fails on the running server
 // (Money.formatted, BACKEND-REQUESTS G13), so the screen reads REST.
@@ -47,13 +48,16 @@ interface AccountForm {
 }
 type FormErrors = Partial<Record<keyof AccountForm, string>>;
 
-function validate(f: AccountForm) {
+/** Dev-key seller tokens (development only) may confirm with the fixed proof instead of a password (G50). */
+const DEV_REAUTH = 'dev-reauth.payout-account';
+
+function validate(f: AccountForm, devReauth = false) {
   const e: FormErrors = {};
   if (!f.holder.trim()) e.holder = 'Enter the account holder name. It must match your business name.';
   if (!/^\d{9}$/.test(f.routing.trim())) e.routing = 'Enter the 9-digit routing number.';
   if (!/^\d{4,17}$/.test(f.account.trim())) e.account = 'Enter an account number of 4 to 17 digits.';
   else if (f.confirm.trim() !== f.account.trim()) e.confirm = "Account numbers don't match.";
-  if (!f.password) e.password = 'Enter your password to confirm it’s you.';
+  if (!f.password && !devReauth) e.password = 'Enter your password to confirm it’s you.';
   return e;
 }
 
@@ -106,6 +110,8 @@ export default function Finance() {
   const { sellerId, isOwner, can } = useSellerSession();
   const canView = can('finance.balances.view');
   const canChange = isOwner && can('sellers.payout-account.manage');
+  const claims = useSessionState().claims;
+  const devReauth = import.meta.env.DEV && claims?.dev !== undefined;
   const isPhone = useIsPhone();
 
   const [filter, setFilter] = useState<TxFilter>('all');
@@ -165,7 +171,8 @@ export default function Finance() {
 
   const change = useMutation({
     mutationFn: async (f: AccountForm) => {
-      const { reauthToken } = await call(api.POST('/api/seller/identity/reauth', { body: { purpose: 'payout-account', password: f.password } }));
+      const reauthToken =
+        devReauth && !f.password ? DEV_REAUTH : (await call(api.POST('/api/seller/identity/reauth', { body: { purpose: 'payout-account', password: f.password } }))).reauthToken;
       return call(
         api.POST('/api/seller/sellers/payout-account/change', {
           body: { details: { accountHolderName: f.holder.trim(), accountType: f.type, routingNumber: f.routing.trim(), accountNumber: f.account.trim(), confirmAccountNumber: f.confirm.trim() }, reauthToken },
@@ -204,7 +211,7 @@ export default function Finance() {
     if (fe['details.accountNumber']) serverErrors.account = fe['details.accountNumber'];
     if (fe['details.confirmAccountNumber']) serverErrors.confirm = fe['details.confirmAccountNumber'];
   }
-  const errors: FormErrors = { ...(attempted ? validate(form) : {}), ...serverErrors };
+  const errors: FormErrors = { ...(attempted ? validate(form, devReauth) : {}), ...serverErrors };
   const set = <K extends keyof AccountForm>(k: K, v: AccountForm[K]) => {
     setForm((f) => ({ ...f, [k]: v }));
     if (change.isError) change.reset();
@@ -219,7 +226,7 @@ export default function Finance() {
   };
   const submit = () => {
     setAttempted(true);
-    if (Object.keys(validate(form)).length) return;
+    if (Object.keys(validate(form, devReauth)).length) return;
     change.mutate(form);
   };
 
@@ -681,7 +688,7 @@ export default function Finance() {
         <Field label="Confirm account number" error={errors.confirm}>
           <TextInput id="po-confirm" inputMode="numeric" value={form.confirm} error={!!errors.confirm} onChange={(e) => set('confirm', e.target.value)} />
         </Field>
-        <Field label="Your password" hint="We ask again before changing where your money goes." error={errors.password}>
+        <Field label="Your password" hint={devReauth ? 'Development sign-in: leave empty to confirm with the development proof.' : 'We ask again before changing where your money goes.'} error={errors.password}>
           <TextInput id="po-password" type="password" autoComplete="current-password" value={form.password} error={!!errors.password} onChange={(e) => set('password', e.target.value)} />
         </Field>
         <span className="xs muted">We verify the account with a test deposit. You get an email about every change.</span>

@@ -18,8 +18,6 @@ export type Money = S['Money'];
 
 export const MARKET_TZ = 'America/Los_Angeles';
 
-/** Consent wording version the seller agrees to (promotions CONSENT_TEXT_VERSION; the API doesn't expose it). */
-export const CONSENT_TEXT_VERSION = '2026-10';
 
 /* ------------------------------------------------------------------ errors */
 

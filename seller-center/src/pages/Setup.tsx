@@ -13,27 +13,11 @@ import { date, LoadError, screenHref, shortDate, SkeletonLines } from './data/ho
 // the launch readiness review and what goes live), POST /api/seller/sellers/setup/launch-review
 // (sellers.account.manage). An approved seller with every step done and the review passed sees the finished
 // checklist and a "store is live" alert instead of the "approval does not publish" note.
-// Gaps: goLivePreview titles are SKUs, not product names; accountManager is null for seeded sellers (hidden).
+// What goes live lists product titles, one row per product. accountManager is null for seeded sellers (hidden).
 
 type Checklist = components['schemas']['sellers.SetupChecklist'];
 type Step = components['schemas']['sellers.SetupStep'];
 type Payout = components['schemas']['sellers.PayoutReadiness'];
-
-/** SetupChecklist json fields (typed `unknown` in the API spec; shapes from sellers.md). */
-interface StepCta {
-  label: string;
-  screen: string;
-}
-interface GoLiveItem {
-  productId: string;
-  title: string;
-  reviewState: string;
-  outcome: 'will_go_live' | 'waits_for_approval' | 'stays_unpublished';
-}
-interface AccountManager {
-  name: string;
-  replyTarget?: string | null;
-}
 
 type Dot = 'done' | 'warn' | 'lock' | 'todo';
 const DOT: Record<Step['state'], Dot> = { done: 'done', action_needed: 'warn', pending: 'warn', locked: 'lock', not_started: 'todo' };
@@ -73,7 +57,7 @@ const PAYOUT: Record<Payout['state'], { label: string; tone: Tone }> = {
 };
 
 const REVIEW_STATE: Record<string, string> = { approved: 'Approved', in_review: 'Submitted', submitted: 'Submitted', changes_requested: 'Changes requested', rejected: 'Rejected', draft: 'Draft' };
-const OUTCOME: Record<GoLiveItem['outcome'], string> = { will_go_live: 'Will go live', waits_for_approval: 'Waits for approval', stays_unpublished: 'Stays unpublished' };
+const OUTCOME: Record<components['schemas']['sellers.GoLiveItem']['outcome'], string> = { will_go_live: 'Will go live', waits_for_approval: 'Waits for approval', stays_unpublished: 'Stays unpublished' };
 
 /** Help articles (seller/help-article slugs). Static: the seeded seller help has only these two of the design's four
  *  (image standards and dispatch deadlines have no article yet). */
@@ -82,10 +66,7 @@ const HELP: Array<{ icon: IconName; label: string; slug: string }> = [
   { icon: 'file-pen', label: 'Fixing a rejected or returned submission', slug: 'seller-launch-review' },
 ];
 
-const ctaOf = (s: Step): StepCta | null => {
-  const c = s.cta as Partial<StepCta> | null | undefined;
-  return c?.label && c.screen ? { label: c.label, screen: c.screen } : null;
-};
+const ctaOf = (s: Step) => (s.cta?.label && s.cta.screen ? s.cta : null);
 
 export default function Setup() {
   const { api } = useApi();
@@ -108,8 +89,8 @@ export default function Setup() {
   const pa = d?.productApproval;
   const submitted = pa ? pa.approved + pa.inReview + pa.changesRequested + pa.rejected : 0;
   const approvedPct = pa && submitted ? Math.round((pa.approved / submitted) * 100) : 0;
-  const goLive = (d?.goLivePreview ?? []) as GoLiveItem[];
-  const manager = (d?.accountManager ?? null) as AccountManager | null;
+  const goLive = d?.goLivePreview ?? [];
+  const manager = d?.accountManager ?? null;
   const acct = ACCOUNT_STATUS[status] ?? { tone: '' as Tone, body: '' };
   const payout = d ? PAYOUT[d.payoutReadiness.state] : undefined;
   const mayRequest = can('sellers.account.manage');
@@ -260,8 +241,8 @@ export default function Setup() {
               <SkeletonLines rows={3} />
             ) : goLive.length ? (
               <ul className="list pad">
-                {goLive.map((p, i) => (
-                  <li key={`${p.productId}-${p.title}-${i}`}>
+                {goLive.map((p) => (
+                  <li key={p.productId}>
                     <span className="grow stack gap-0">
                       <span className="small strong">{p.title}</span>
                       <span className="xs muted">{finished && p.outcome === 'will_go_live' ? 'Live' : OUTCOME[p.outcome] ?? p.outcome}</span>

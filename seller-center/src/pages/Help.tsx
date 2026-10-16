@@ -353,7 +353,8 @@ export default function Help() {
   const [debounced, setDebounced] = useState('');
   const [sent, setSent] = useState<CaseView | null>(null);
   const [params] = useSearchParams();
-  const home = useQuery({ queryKey: helpKeys.home, queryFn: getHelpHome });
+  const { api } = useApi();
+  const home = useQuery({ queryKey: helpKeys.home, queryFn: () => getHelpHome(api) });
   const options = useSupportOptions();
   const categories = useMemo(() => (options.data?.categories ?? []).filter((c) => c.active), [options.data]);
 
@@ -362,11 +363,11 @@ export default function Help() {
     return () => clearTimeout(t);
   }, [q]);
   const query = debounced;
-  const search = useQuery({ queryKey: helpKeys.search(query), queryFn: () => searchHelp(query), enabled: !!query });
+  const search = useQuery({ queryKey: helpKeys.search(query), queryFn: () => searchHelp(api, query), enabled: !!query });
 
   // Sent from a help article: preselect its topic and prefill the subject.
   const articleSlug = params.get('article') ?? '';
-  const fromArticle = useQuery({ queryKey: helpKeys.article(articleSlug), queryFn: () => getHelpArticle(articleSlug), enabled: view === 'contact-seller-support' && !!articleSlug });
+  const fromArticle = useQuery({ queryKey: helpKeys.article(articleSlug), queryFn: () => getHelpArticle(api, articleSlug), enabled: view === 'contact-seller-support' && !!articleSlug });
   const topicParam = params.get('topic') ?? '';
 
   useEffect(() => {

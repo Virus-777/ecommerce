@@ -1,5 +1,5 @@
-import type { Api, components } from '@marketly/web-shared/api';
-import { ApiError, call } from '@marketly/web-shared/api';
+import type { components } from '@marketly/web-shared/api';
+import { ApiError } from '@marketly/web-shared/api';
 import { money, type MoneyValue } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import type { IconName } from '@marketly/web-shared/ui';
@@ -131,22 +131,4 @@ export function download(url: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-}
-
-/** Finds a statement id by its human ref (ST-…), or by the payout (PO-…) it settles; REST resolves statements by id only. */
-export async function findStatementId(api: Api, ref: string): Promise<string | null> {
-  for (let page = 1; page <= 20; page++) {
-    if (ref.startsWith('PO-')) {
-      const res = await call(api.GET('/api/seller/finance/payouts', { params: { query: { page, limit: 100 } } }));
-      const hit = res.items.find((p) => p.ref === ref);
-      if (hit) return hit.statementId ?? null;
-      if (page >= (res.totalPages ?? 0)) return null;
-    } else {
-      const res = await call(api.GET('/api/seller/finance/statements', { params: { query: { page, limit: 100 } } }));
-      const hit = res.items.find((s) => s.ref === ref);
-      if (hit) return hit.id;
-      if (page >= (res.totalPages ?? 0)) return null;
-    }
-  }
-  return null;
 }

@@ -5,15 +5,15 @@ import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { formatMoney, money, num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, BarChart, Button, Card, Img, Legend, LineChart, Meter, PageHeader, SegmentedControl, Stat, StatusBadge, TableWrap, TextInput } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, BarChart, Button, Card, Img, Legend, LineChart, Meter, PageHeader, SegmentedControl, Stat, StatusBadge, TableWrap, TextInput } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { amt, download, fmtPeriod, fmtTime, waitForExport } from './data/finance';
-import { breakdownsOf, kpiOf, meterPct, metaOf, PERIODS, REPORT, SERVICE_KEYS, statDelta, tableOf, zoneLabel, type Period, type ProductSalesRow, type ReturnsProductRow } from './data/reports';
+import { breakdownsOf, kpiOf, meterPct, metaOf, PERIODS, REPORT, SERVICE_KEYS, statDelta, tableOf, zoneLabel, type Period, type ProductSalesRow } from './data/reports';
 
 // Design: pages/seller/seller-reports.html (no views). The 7/30/90-day segment runs the seller reports
 // for that preset (POST reports/reports/{key}/query, compared with the previous period): order trend
-// (gross sales and orders KPIs, orders chart), product sales (units, product table) and returns by
-// reason (return rate, reasons chart, returns per product). Service performance is the account-health
+// (gross sales and orders KPIs, orders chart), product sales (units and return-rate KPIs, product table
+// with SKUs, images, live discounts and returns per product) and returns by reason (reasons chart). Service performance is the account-health
 // summary (GET sellers/performance, last 30 days). Export CSV runs an async report export
 // (POST reports/exports → poll GET reports/exports/{id} → download link).
 
@@ -51,28 +51,25 @@ export default function Reports() {
     const ordersSeries = t?.series.find((s) => s.key === 'orders');
     const points = (ordersSeries?.points ?? []) as Array<{ x: string; y: number; label?: string }>;
     const productRows = [...(tableOf<ProductSalesRow>(products.data)?.rows ?? [])].sort((a, b) => b.gross.amount - a.gross.amount);
-    const returnRows = tableOf<ReturnsProductRow>(returns.data)?.rows ?? [];
-    const returnsBy = new Map(returnRows.map((r) => [r.productId, r.units]));
     const reasons = breakdownsOf(returns.data).find((b) => b.key === 'reason')?.rows ?? [];
     const ordersKpi = kpiOf(t, 'commerce.orders');
     const unitsKpi = kpiOf(products.data, 'commerce.units_sold');
-    const returnUnits = Number(tableOf<ReturnsProductRow>(returns.data)?.totals.units ?? 0);
     return {
       meta,
       labels: points.map((pt) => pt.label ?? pt.x),
       orderPoints: points.map((pt) => pt.y),
-      products: productRows.map((r) => ({ ...r, returns: returnsBy.get(r.productId) ?? 0 })),
+      products: productRows,
       reasons,
       reasonTotal: reasons.reduce((a, r) => a + r.requests, 0),
       orders: ordersKpi?.value ?? 0,
       units: unitsKpi?.value ?? 0,
-      returnUnits,
     };
   }, [trend.data, products.data, returns.data]);
 
   const gross = kpiOf(trend.data, 'commerce.gross_sales');
   const orders = kpiOf(trend.data, 'commerce.orders');
   const units = kpiOf(products.data, 'commerce.units_sold');
+  const returnRate = kpiOf(products.data, 'service.return_rate');
   const compare = view.meta?.compareRange ? `vs prior ${p.label}` : undefined;
   const meta = view.meta;
   const failed = [trend, products, returns].find((q) => q.isError);
@@ -135,7 +132,7 @@ export default function Reports() {
         <div className="card pad">{trend.data ? <Stat label="Gross sales" value={gross?.display ?? money(amt(gross?.money))} {...statDelta(gross)} note={statDelta(gross).delta ? compare : undefined} /> : sk}</div>
         <div className="card pad">{trend.data ? <Stat label="Orders" value={num(orders?.value ?? 0)} {...statDelta(orders)} /> : sk}</div>
         <div className="card pad">{products.data ? <Stat label="Units sold" value={num(units?.value ?? 0)} note={view.orders ? `${(view.units / view.orders).toFixed(1)} units per order` : undefined} {...statDelta(units)} /> : sk}</div>
-        <div className="card pad">{products.data && returns.data ? <Stat label="Return rate" value={pct(view.units ? (view.returnUnits / view.units) * 100 : 0)} note="returns ÷ units" /> : sk}</div>
+        <div className="card pad">{products.data ? <Stat label="Return rate" value={returnRate?.display ?? pct(returnRate?.value ?? 0)} {...statDelta(returnRate)} note={returnRate?.note ?? undefined} /> : sk}</div>
       </div>
       <div className="grid lg2 gap-5">
         <Card title={`Orders per ${meta?.granularity ?? 'day'}`} sub={meta ? `${num(view.orders)} orders · ${fmtPeriod(meta.range)}` : undefined}>
@@ -165,6 +162,7 @@ export default function Reports() {
             <thead>
               <tr>
                 <th scope="col">Product</th>
+                <th scope="col">SKU</th>
                 <th className="r" scope="col">
                   Units
                 </th>
@@ -186,14 +184,14 @@ export default function Reports() {
               {!products.data &&
                 [0, 1, 2].map((i) => (
                   <tr key={i}>
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <span className="sk sk-line" />
                     </td>
                   </tr>
                 ))}
               {products.data && view.products.length === 0 && (
                 <tr>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <span className="small muted">No sales in this period.</span>
                   </td>
                 </tr>
@@ -202,11 +200,23 @@ export default function Reports() {
                 <tr key={r.productId}>
                   <td>
                     <div className="cell-main minw-240">
-                      <Img icon="package" tint="2" className="tiny" />
+                      <Img icon="package" tint="2" className="tiny" src={r.image?.thumbUrl ?? r.image?.url ?? undefined} alt="" />
                       <span className="stack gap-0">
                         <span className="small strong">{r.product}</span>
+                        {r.liveDiscount && (
+                          <span>
+                            <Badge tone="deal-soft">Live discount</Badge>
+                          </span>
+                        )}
                       </span>
                     </div>
+                  </td>
+                  <td>
+                    {r.sku && (
+                      <span className="mono nowrap" title={r.skus?.join(', ') ?? r.sku}>
+                        {r.sku}
+                      </span>
+                    )}
                   </td>
                   <td className="r">
                     <span className="num">{num(r.units)}</span>
@@ -215,13 +225,13 @@ export default function Reports() {
                     <span className="num strong">{formatMoney(r.gross)}</span>
                   </td>
                   <td className="r">
-                    <span className="num">{money(r.units ? amt(r.gross) / r.units : 0)}</span>
+                    <span className="num">{r.averagePrice ? formatMoney(r.averagePrice) : money(r.units ? amt(r.gross) / r.units : 0)}</span>
                   </td>
                   <td className="r">
-                    <span className="num">{r.returns}</span>
+                    <span className="num">{num(r.returnedUnits)}</span>
                   </td>
                   <td className="r">
-                    <span className="num">{pct(r.units ? (r.returns / r.units) * 100 : 0)}</span>
+                    <span className="num">{pct(r.returnRate)}</span>
                   </td>
                 </tr>
               ))}

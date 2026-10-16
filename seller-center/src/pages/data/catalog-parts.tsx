@@ -1,12 +1,34 @@
 // Shared pieces of the Seller Center catalog, offer and inventory screens (Products, CatalogMatch,
 // ProductNew, Offer, Inventory, BulkUpdate): load/skeleton states, labels for API enums, money input
-// helpers, dates, CSV and export downloads.
+// helpers, dates, CSV and export downloads, the seller-visible settings.
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, errorMessage, type components } from '@marketly/web-shared/api';
+import { useQuery } from '@tanstack/react-query';
+import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { Alert, Button, type IconName } from '@marketly/web-shared/ui';
 
 export type Money = components['schemas']['Money'];
 export type ExportJob = components['schemas']['reports.ExportJob'];
+
+/* ---------------- seller-visible settings (GET /api/seller/settings/current) ---------------- */
+
+/** Setting keys these screens read. */
+export type SellerSettingKey = 'catalog.minDescriptionLength' | 'inventory.defaultLowStockThreshold' | 'offers.largeSellerPriceChangePct' | 'shipping.sellerHandlingRange';
+
+/** The values in force now; `num(key)` is undefined until they load (or when the module is off). */
+export function useSellerSettings() {
+  const { api } = useApi();
+  const q = useQuery({ queryKey: ['settings', 'current'], queryFn: () => call(api.GET('/api/seller/settings/current')), staleTime: 10 * 60_000 });
+  const value = (key: SellerSettingKey) => q.data?.find((s) => s.key === key)?.value;
+  const num = (key: SellerSettingKey) => {
+    const v = value(key);
+    return typeof v === 'number' ? v : undefined;
+  };
+  const range = (key: SellerSettingKey) => {
+    const v = value(key);
+    return Array.isArray(v) && v.length === 2 ? { min: Number(v[0]), max: Number(v[1]) } : undefined;
+  };
+  return { ...q, value, num, range };
+}
 
 /** A failed read: the error and a Try again button (API.md rule 4). */
 export function LoadError({ error, onRetry, title = 'We couldn’t load this' }: { error: unknown; onRetry: () => void; title?: string }) {
@@ -92,7 +114,8 @@ export type Review = 'Approved' | 'Draft' | 'Submitted' | 'Changes requested' | 
 export const REVIEW_LABEL: Record<string, Review> = { draft: 'Draft', submitted: 'Submitted', changes_requested: 'Changes requested', approved: 'Approved', rejected: 'Rejected' };
 export const reviewLabel = (s?: string | null): Review => REVIEW_LABEL[(s ?? '').toLowerCase()] ?? 'Draft';
 
-/** Seller stock adjustment reasons (inventory SellerAdjustmentRequest.reasonCode). */
+/** Seller stock adjustment reasons (inventory SellerAdjustmentRequest.reasonCode). The batch endpoint also takes
+ * `bulk_update`, which the bulk stock action on Products and offers sets. */
 export type AdjustReason = 'received_stock' | 'count_correction' | 'damaged_or_defective' | 'lost_or_missing' | 'returned_item_restocked' | 'moved_to_another_channel' | 'other';
 export const ADJUST_REASONS: Array<{ value: AdjustReason; label: string }> = [
   { value: 'received_stock', label: 'Received new stock' },

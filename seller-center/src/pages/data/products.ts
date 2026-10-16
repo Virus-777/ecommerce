@@ -16,6 +16,8 @@ export interface ProductRow {
   /** Offer id, or the product id for a product without an offer. */
   key: string;
   offerId?: string;
+  /** Stock item the offer sells from (bulk stock updates). */
+  stockItemId?: string;
   productId: string;
   offerStatus?: string;
   sku: string;
@@ -38,6 +40,8 @@ export interface ProductRow {
   link: string;
   missing?: Array<'images' | 'identifiers'>;
   action: { label: string; kind: 'link' | 'show' | 'button'; variant: 'ghost' | 'primary' | 'secondary'; to?: string; help?: boolean };
+  /** Product action for one of the seller's own products that was never listed: withdraw the open submission, or delete the draft. */
+  manage?: 'withdraw' | 'delete';
 }
 
 /** Offer form for an existing offer / a new offer on a product variant. */
@@ -67,6 +71,7 @@ export function rowFromOffer(r: SellerOfferRow): ProductRow {
   const row: ProductRow = {
     key: o.id,
     offerId: o.id,
+    stockItemId: o.stockItemId,
     productId: o.productId,
     offerStatus: o.status,
     sku: o.sellerSku,
@@ -89,12 +94,15 @@ export function rowFromOffer(r: SellerOfferRow): ProductRow {
   if (review === 'Changes requested') {
     row.reason = r.reviewNote ? { text: `Catalog team: ${r.reviewNote}` } : undefined;
     row.action = { label: 'Fix and resubmit', kind: 'link', variant: 'primary', to: productHref(o.productId, true) };
+    row.manage = 'delete';
   } else if (review === 'Submitted') {
     row.note = 'Submitted for review · your offer goes live when the product is approved';
     row.action = { label: 'View submission', kind: 'link', variant: 'ghost', to: productHref(o.productId) };
+    row.manage = 'withdraw';
   } else if (review === 'Draft') {
     row.note = gaps ?? 'Product draft · not submitted yet';
     row.action = { label: 'Continue draft', kind: 'link', variant: 'secondary', to: productHref(o.productId) };
+    row.manage = 'delete';
   } else if (review === 'Rejected') {
     row.reason = { text: r.reviewNote || 'The Catalog team rejected this product.', danger: true };
     row.action = { label: 'See options', kind: 'button', variant: 'ghost' };
@@ -147,14 +155,15 @@ export function rowFromProduct(p: ProductAdmin): ProductRow {
             : review === 'Rejected'
               ? { label: 'See options', kind: 'button', variant: 'ghost' }
               : { label: 'Continue draft', kind: 'link', variant: 'secondary', to: productHref(pr.id) },
+    manage: review === 'Submitted' ? 'withdraw' : review === 'Draft' || cr ? 'delete' : undefined,
   };
 }
 
 /* ---------------- GraphQL: product card + own offers (seller/offer, seller/product-new) ---------------- */
 
 /**
- * SellerProductDetail without `Money.formatted` (it answers null on the running server, G13) and with
- * only the fields these screens use. Development sends the query text.
+ * The product card fields these screens use (slug, variant list prices and images are not in the persisted
+ * SellerProductDetail operation). Development sends the query text.
  */
 export const SELLER_PRODUCT = /* GraphQL */ `
   query SellerProductCard($id: UUID!) {

@@ -9,7 +9,7 @@ import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Card, EmptyState, Icon, PageHeader, Pager, SegmentedControl, StatusLegend, Steps, TableWrap, announce, type IconName } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
-import { LoadError, SkeletonRows, fmtFull, fmtWhen, openDownload, type Money } from './data/catalog-parts';
+import { LoadError, SkeletonRows, fmtFull, fmtWhen, openDownload, useSellerSettings, type Money } from './data/catalog-parts';
 
 // Design: pages/seller/seller-bulk-update.html (step 3, preview of an uploaded CSV) · view "applied" = step 4
 // done, correction report and upload history. Data: offers bulk updates — GET …/template (prefilled CSV),
@@ -36,9 +36,17 @@ function Change({ from, to, money: isMoney }: { from: number | Money; to: number
   );
 }
 
+const pctText = (n: number) => `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 1 })}%`;
+
 function PriceCell({ r }: { r: Row }) {
   if (!r.priceFrom && !r.priceTo) return <span className="xs muted">No value</span>;
-  if (r.priceFrom && r.priceTo && r.priceFrom.amount !== r.priceTo.amount) return <Change from={r.priceFrom} to={r.priceTo} money />;
+  if (r.priceFrom && r.priceTo && r.priceFrom.amount !== r.priceTo.amount)
+    return (
+      <span className="stack gap-0">
+        <Change from={r.priceFrom} to={r.priceTo} money />
+        {r.largeChange && r.changePct != null && <span className="xs t-warning-text strong">Large change {pctText(r.changePct)}</span>}
+      </span>
+    );
   const v = r.priceTo ?? r.priceFrom;
   return <span className={cx('num', !r.priceTo || r.priceTo.amount === r.priceFrom?.amount ? 'muted' : '')}>{formatMoney(v!)}</span>;
 }
@@ -113,6 +121,26 @@ export default function BulkUpdate() {
     queryFn: () => call(api.GET('/api/seller/offers/bulk-updates/{id}/rows', { params: { path: { id: jobId }, query: { limit: 100, result: 'skipped' } } })),
     enabled: !!j && applied,
   });
+
+  // Rows that change a live offer's price by more than the large-change limit: applying them needs confirmLargeChanges,
+  // so they are listed for confirmation before the file is applied.
+  const largeRows = useQuery({
+    queryKey: ['offers', 'bulk-update', sellerId, jobId, 'rows', j?.state, 'large'],
+    queryFn: async () => {
+      const out: Row[] = [];
+      let cursor: string | undefined;
+      for (let i = 0; i < 60; i++) {
+        const p = await call(api.GET('/api/seller/offers/bulk-updates/{id}/rows', { params: { path: { id: jobId }, query: { limit: 100, result: 'ready', ...(cursor ? { cursor } : {}) } } }));
+        out.push(...p.items.filter((r) => r.largeChange));
+        if (!p.nextCursor) break;
+        cursor = p.nextCursor;
+      }
+      return out;
+    },
+    enabled: !!j && j.state === 'preview_ready' && j.totals.priceChanges > 0,
+  });
+  const large = largeRows.data ?? [];
+  const largePct = useSellerSettings().num('offers.largeSellerPriceChangePct');
 
   useEffect(() => setPage(1), [filter, jobId]);
   // The view follows the job: an applied file shows step 4.
@@ -375,7 +403,7 @@ export default function BulkUpdate() {
                           </a>
                         </td>
                         <td>{fmtWhen(h.uploadedAt)}</td>
-                        <td>{h.uploadedBy.name ?? (h.state === 'applied' ? (h.appliedBy?.name ?? '') : '')}</td>
+                        <td>{h.uploadedBy.name ?? (h.state === 'applied' ? h.appliedBy?.name : null) ?? (h.uploadedBy.kind === 'seller' ? 'Your team' : 'Marketly')}</td>
                         <td className="r">{h.state === 'applied' ? h.totals.applied : '—'}</td>
                         <td className="r">{h.state === 'applied' ? h.totals.skipped : h.state === 'preview_ready' ? 'Not applied' : h.state.replace('_', ' ')}</td>
                         <td>
@@ -415,7 +443,13 @@ export default function BulkUpdate() {
           )}
           {needsConfirm && (
             <Alert tone="warning" title="Some prices change a lot">
-              At least one row changes a price by more than the large-change limit. Check the preview, then confirm to apply.{' '}
+              {large.length
+                ? `${large.length} row${large.length === 1 ? ' changes a price' : 's change prices'} by more than ${largePct !== undefined ? `${largePct}%` : 'the large-change limit'}: ${large
+                    .slice(0, 5)
+                    .map((r) => `${r.sellerSku} ${r.priceFrom ? formatMoney(r.priceFrom) : ''} → ${r.priceTo ? formatMoney(r.priceTo) : ''}${r.changePct != null ? ` (${pctText(r.changePct)})` : ''}`)
+                    .join('; ')}${large.length > 5 ? `; and ${large.length - 5} more` : ''}.`
+                : `At least one row changes a price by more than ${largePct !== undefined ? `${largePct}%` : 'the large-change limit'}.`}{' '}
+              Check the preview, then confirm to apply.{' '}
               <Button size="sm" variant="secondary" onClick={() => apply.mutate(true)} disabled={apply.isPending}>
                 Confirm and apply
               </Button>
@@ -453,7 +487,7 @@ export default function BulkUpdate() {
                 <Button variant="secondary" size="sm" icon="upload" onClick={pick} disabled={busy}>
                   Upload a corrected file
                 </Button>
-                <Button size="sm" onClick={() => apply.mutate(false)} disabled={!t.ready || apply.isPending || j.state !== 'preview_ready'}>
+                <Button size="sm" onClick={() => (large.length && !needsConfirm ? setNeedsConfirm(true) : apply.mutate(needsConfirm))} disabled={!t.ready || apply.isPending || j.state !== 'preview_ready' || largeRows.isFetching}>
                   {apply.isPending || j.state === 'applying' ? 'Applying…' : `Apply ${t.ready} valid row${t.ready === 1 ? '' : 's'}`}
                 </Button>
               </>
@@ -522,7 +556,7 @@ export default function BulkUpdate() {
       ) : null}
       <p className="xs muted row gap-1 nowrap top">
         <Icon name="info" className="ic-sm" />
-        <span className="wrap">Price changes over 50% in one update and broad catalog edits need extra confirmation. Stock changes are recorded with the reason "Bulk update" and your name.</span>
+        <span className="wrap">Price changes over {largePct !== undefined ? `${largePct}%` : 'the large-change limit'} in one update and broad catalog edits need extra confirmation. Stock changes are recorded with the reason "Bulk update" and your name.</span>
       </p>
     </SellerLayout>
   );

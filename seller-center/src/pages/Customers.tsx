@@ -44,7 +44,8 @@ import {
 
 // Design: pages/seller/seller-customers.html (order messages) · views: product-questions, feedback (tabs).
 // API: messaging (seller conversations, messages, read, response-stats, templates, message reports) and
-// reviews (seller questions/answers, feedback, feedback-summary, responses, reports).
+// reviews (seller questions/answers and skip, feedback, feedback-summary with its target, responses, reports).
+// Messages carry viewerReported, so "Reported to Marketly" survives a reload.
 
 type Tab = '' | 'product-questions' | 'feedback';
 
@@ -494,7 +495,7 @@ function OrderMessages({ stats, statsError }: { stats?: ResponseStats; statsErro
                           {m.redactions.length > 0 && <span className="xs muted">Contact details or links in this message were masked.</span>}
                           {!m.fromMe && !m.hidden && (
                             <span>
-                              {reported[m.id] ? (
+                              {reported[m.id] || m.viewerReported ? (
                                 <span className="xs muted">Reported to Marketly</span>
                               ) : (
                                 <button type="button" className="btn-bare tight xs muted" onClick={() => (setReporting(m), report.reset())}>
@@ -680,6 +681,16 @@ function ProductQuestions() {
     },
     onError: (e, { row }) => setErrs((x) => ({ ...x, [row.question.id]: writeError(e, 'text') })),
   });
+  // Skip (POST …/questions/{id}/skip) hides a question from the open ones; DELETE brings it back.
+  const skip = useMutation({
+    mutationFn: ({ id, on }: { id: string; on: boolean }) =>
+      on ? call(api.POST('/api/seller/reviews/questions/{id}/skip', { params: { path: { id } } })) : call(api.DELETE('/api/seller/reviews/questions/{id}/skip', { params: { path: { id } } })),
+    onSuccess: (_r, { on }) => {
+      void qc.invalidateQueries({ queryKey: ['reviews', 'questions', sellerId] });
+      announce(on ? 'Question skipped' : 'Question back in your open questions');
+    },
+    onError: (e, { id }) => setErrs((x) => ({ ...x, [id]: errorMessage(e) })),
+  });
   const publish = (row: QuestionRow, current: string) => {
     const id = row.question.id;
     const text = current.trim();
@@ -706,8 +717,9 @@ function ProductQuestions() {
           const x = row.question;
           const own = ownAnswer(row, sellerId);
           const others = x.answers.filter((a) => a !== own).length;
-          const st = own ? ANSWER_STATUS[own.status] : { label: 'Open', tone: 'info' as const };
-          const formOpen = canAnswer && (!!editing[x.id] || !own || own.status === 'edit_requested' || own.status === 'removed');
+          const skipped = !own && row.skipped;
+          const st = own ? ANSWER_STATUS[own.status] : skipped ? { label: 'Skipped', tone: '' as const } : { label: 'Open', tone: 'info' as const };
+          const formOpen = canAnswer && (!!editing[x.id] || (!own && !skipped) || own?.status === 'edit_requested' || own?.status === 'removed');
           const value = drafts[x.id] ?? (own?.status === 'edit_requested' ? own.text : '');
           const err = errs[x.id];
           return (
@@ -748,6 +760,14 @@ function ProductQuestions() {
                 )}
                 {own?.status === 'edit_requested' && <Alert tone="warning">Marketly asked you to edit this answer. It is off the product page until you resubmit it.</Alert>}
                 {own?.status === 'removed' && <span className="xs muted">Marketly removed your earlier answer. You can write a new one.</span>}
+                {skipped && canAnswer && (
+                  <div className="row between gap-2">
+                    <span className="xs muted">You skipped this question. Customers and Marketly staff can still answer it.</span>
+                    <Button variant="ghost" size="sm" disabled={skip.isPending} onClick={() => skip.mutate({ id: x.id, on: false })}>
+                      Answer instead
+                    </Button>
+                  </div>
+                )}
                 {formOpen && (
                   <>
                     <Field label="Your public answer" hint={err ? undefined : `Shown on the product page as “Answer from the seller · ${storeName}”.`} error={err}>
@@ -763,6 +783,11 @@ function ProductQuestions() {
                       {editing[x.id] && (
                         <Button variant="ghost" size="sm" onClick={() => setEditing((e) => ({ ...e, [x.id]: false }))}>
                           Cancel
+                        </Button>
+                      )}
+                      {!own && !editing[x.id] && (
+                        <Button variant="ghost" size="sm" disabled={skip.isPending && skip.variables?.id === x.id} onClick={() => skip.mutate({ id: x.id, on: true })}>
+                          Skip
                         </Button>
                       )}
                       <Button size="sm" disabled={answer.isPending && answer.variables?.row.question.id === x.id} onClick={() => publish(row, value)}>
@@ -879,6 +904,11 @@ function Feedback() {
                       <span className="xs u-w-110px">{x.label}</span>
                       <div className="grow">
                         <Meter pct={x.pct} tone={x.tone} label={x.label} />
+                        {x.tone === 'danger' && s.target && !s.target.meets && (
+                          <span className="xs strong meter-note t-danger-text" title={s.target.label}>
+                            Below target
+                          </span>
+                        )}
                       </div>
                       <span className="xs num">{Math.round(x.pct)}%</span>
                     </div>

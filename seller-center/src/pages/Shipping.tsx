@@ -249,7 +249,7 @@ function ShippingForm({ settings: st, methods, carriers }: { settings: ShippingS
     },
     onError: (e) => {
       if (e instanceof ApiError && e.code === 'HANDLING_OUT_OF_RANGE') {
-        setHandlingErr(`Choose between ${handlingLabel(Number(e.details.min ?? 1)).toLowerCase()} and ${handlingLabel(Number(e.details.max ?? 3)).toLowerCase()}.`);
+        setHandlingErr(`Choose between ${handlingLabel(Number(e.details.min ?? st.allowedHandlingDays.min)).toLowerCase()} and ${handlingLabel(Number(e.details.max ?? st.allowedHandlingDays.max)).toLowerCase()}.`);
       }
       const fields = e instanceof ApiError ? Object.values(e.fieldErrors) : [];
       setNotice({ tone: 'danger', title: 'Your changes were not saved', body: fields.length ? fields.join(' ') : errorMessage(e) });
@@ -390,7 +390,9 @@ function ShippingForm({ settings: st, methods, carriers }: { settings: ShippingS
     setMethodOpen(false);
   };
 
-  const handlingOptions = [...new Set([0, 1, 2, 3, s.handlingDays])].sort((a, b) => a - b);
+  // The handling days the platform allows (setting sellerHandlingRange, 0 = same business day), plus the saved value.
+  const { min: hMin, max: hMax } = st.allowedHandlingDays;
+  const handlingOptions = [...new Set([...Array.from({ length: Math.max(0, hMax - hMin + 1) }, (_, i) => hMin + i), s.handlingDays])].sort((a, b) => a - b);
   const cutoffOptions = [...new Set(['10:00', '12:00', '14:00', s.cutoff])].sort();
   const preview = st.customerPreview;
   const history: TimelineEvent[] = [

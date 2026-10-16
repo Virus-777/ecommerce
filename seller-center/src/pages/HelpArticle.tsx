@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { errorMessage } from '@marketly/web-shared/api';
+import { errorMessage, useApi } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
@@ -17,7 +17,7 @@ import './HelpArticle.css';
 // Typography follows the store's help article (meta strip, .prose); blocks reuse Seller Center classes.
 // API (content help, audience seller): GET …/help/articles/{slug}, search GET …/help/articles?q=,
 // POST …/help/articles/{id}/feedback, and the help home for the not-found state's popular articles
-// (data/help-articles.ts: store-area routes read with a visitor session until a seller route exists).
+// (data/help-articles.ts: seller-area routes GET /api/seller/content/help…, with the seller session).
 
 type Feedback = '' | 'yes' | 'sent';
 
@@ -37,7 +37,8 @@ function useDebounced<T>(value: T, ms = 250): T {
 
 function HelpSearch({ q, setQ }: { q: string; setQ: (q: string) => void }) {
   const query = useDebounced(q.trim());
-  const search = useQuery({ queryKey: helpKeys.search(query), queryFn: () => searchHelp(query), enabled: !!query });
+  const { api } = useApi();
+  const search = useQuery({ queryKey: helpKeys.search(query), queryFn: () => searchHelp(api, query), enabled: !!query });
   const results = search.data?.items ?? [];
   return (
     <>
@@ -115,7 +116,8 @@ function FeedbackAndEscalation({ a }: { a: Article }) {
   const [comment, setComment] = useState('');
   const [tried, setTried] = useState(false);
   const reasonErr = tried && !reason ? 'Choose what went wrong.' : '';
-  const send = useMutation({ mutationFn: (v: { helpful: boolean; comment?: string }) => rateHelpArticle(a.id, v.helpful, v.comment) });
+  const { api } = useApi();
+  const send = useMutation({ mutationFn: (v: { helpful: boolean; comment?: string }) => rateHelpArticle(api, a.id, v.helpful, v.comment) });
 
   const yes = () =>
     send.mutate(
@@ -354,7 +356,8 @@ function ArticleView({ a }: { a: Article }) {
 
 function NotFound() {
   const [q, setQ] = useState('');
-  const home = useQuery({ queryKey: helpKeys.home, queryFn: getHelpHome });
+  const { api } = useApi();
+  const home = useQuery({ queryKey: helpKeys.home, queryFn: () => getHelpHome(api) });
   const popular = home.data?.popular ?? [];
   const count = home.data?.topics.reduce((s, t) => s + t.articleCount, 0);
   return (
@@ -416,7 +419,8 @@ function Loading() {
 
 export default function HelpArticle() {
   const { slug = '' } = useParams();
-  const article = useQuery({ queryKey: helpKeys.article(slug), queryFn: () => getHelpArticle(slug), enabled: !!slug });
+  const { api } = useApi();
+  const article = useQuery({ queryKey: helpKeys.article(slug), queryFn: () => getHelpArticle(api, slug), enabled: !!slug });
   if (slug && article.isPending) return <Loading />;
   if (article.isError) {
     return (

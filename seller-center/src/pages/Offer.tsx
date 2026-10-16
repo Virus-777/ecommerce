@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { SellerLayout } from '@marketly/web-shared/layouts';
@@ -9,15 +9,18 @@ import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, EmptyState, Field, Icon, Img, PageHeader, Select, Steps, SummaryRow, Textarea, TextInput, announce } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
-import { CONDITIONS, CONDITION_LABEL, FormSkeleton, LoadError, conditionLabel, iconFor, inputAmount, optionsLabel, toMinor, useDebounced, type Condition, type Money } from './data/catalog-parts';
+import SELLER_PRODUCT_DETAIL from '@marketly/web-shared/api/graphql/seller/SellerProductDetail.graphql?raw';
+import { CONDITIONS, CONDITION_LABEL, FormSkeleton, LoadError, conditionLabel, iconFor, inputAmount, optionsLabel, toMinor, useDebounced, useSellerSettings, type Condition, type Money } from './data/catalog-parts';
 import { SELLER_PRODUCT, offerHref, type SellerProduct } from './data/products';
 
 // Design: pages/seller/seller-offer.html (New condition) · view "used-condition" = the same form with a
 // used condition: missing-items alert, required condition notes, seller warranties.
 // URL: ?offer=<id> edits an offer; ?product=<id>[&variant=<id>] creates one. Data: product card and the
 // seller's offers on it from GraphQL myProduct; GET offers/offers/{id} (edit); GET shipping/profiles;
-// GET finance/fee-schedule (fee preview); POST offers/offers/preview (delivery, price context, return
-// baseline). Writes: POST offers/offers, PATCH offers/offers/{id}, POST …/{id}/publish,
+// fee preview: GraphQL SellerProductDetail Offer.earningsPreview(price) for an existing offer, GET
+// finance/fee-schedule for a new one (no offer to preview yet); POST offers/offers/preview (delivery, price
+// context, return baseline); GET settings/current (default low-stock alert, handling range, large-change %).
+// Writes: POST offers/offers, PATCH offers/offers/{id}, POST …/{id}/publish,
 // PATCH inventory/stock-items/{id} (low-stock alert).
 
 type View = 'used-condition';
@@ -39,12 +42,7 @@ const WARRANTY_USED: Array<{ key: string; label: string; input: WarrantyInput }>
   { key: 'seller-6', label: '6-month seller warranty', input: { kind: 'seller', months: 6 } },
   { key: 'none', label: 'No warranty', input: { kind: 'none' } },
 ];
-const DISPATCH = [
-  { value: '0', label: 'Same business day' },
-  { value: '1', label: '1 business day' },
-  { value: '2', label: '2 business days' },
-  { value: '3', label: '3 business days' },
-];
+const dispatchLabel = (n: number) => (n === 0 ? 'Same business day' : `${n} business day${n === 1 ? '' : 's'}`);
 const NOTES_MAX = 500;
 const EXTENDED_DAYS = 60;
 
@@ -121,9 +119,10 @@ export default function Offer() {
   });
   const profiles = useQuery({ queryKey: ['shipping', 'profiles', sellerId], queryFn: () => call(api.GET('/api/seller/shipping/profiles')) });
   const fees = useQuery({ queryKey: ['finance', 'fee-schedule', sellerId], queryFn: () => call(api.GET('/api/seller/finance/fee-schedule')), staleTime: 10 * 60_000 });
+  const settings = useSellerSettings();
 
-  const failed = [detail, product, profiles].find((q) => q.isError);
-  const loading = (!!offerId && !detail.data) || (!!productId && product.data === undefined) || !profiles.data;
+  const failed = [detail, product, profiles, settings].find((q) => q.isError);
+  const loading = (!!offerId && !detail.data) || (!!productId && product.data === undefined) || !profiles.data || !settings.data;
   const editing = !!offerId;
 
   let body: ReactNode;
@@ -148,7 +147,9 @@ export default function Offer() {
   } else if (loading || !product.data) {
     body = <FormSkeleton cards={4} />;
   } else {
-    return <OfferForm key={`${offerId}|${product.data.id}|${detail.data?.offer.updatedAt ?? ''}`} product={product.data} detail={detail.data} profiles={profiles.data!} fees={fees.data} />;
+    const range = settings.range('shipping.sellerHandlingRange');
+    const rules: Rules = { lowStock: settings.num('inventory.defaultLowStockThreshold'), handling: range ?? { min: 0, max: 3 }, largePct: settings.num('offers.largeSellerPriceChangePct') };
+    return <OfferForm key={`${offerId}|${product.data.id}|${detail.data?.offer.updatedAt ?? ''}`} product={product.data} detail={detail.data} profiles={profiles.data!} fees={fees.data} rules={rules} />;
   }
 
   return (
@@ -163,8 +164,27 @@ export default function Offer() {
     );
 }
 
-function OfferForm({ product, detail, profiles, fees }: { product: SellerProduct; detail?: Detail; profiles: Profile[]; fees?: FeeSchedule }) {
-  const { api } = useApi();
+/** Seller-visible settings the form uses (GET settings/current). */
+interface Rules {
+  /** inventory.defaultLowStockThreshold: prefills the low-stock alert of a new offer. */
+  lowStock?: number;
+  /** shipping.sellerHandlingRange: dispatch times the seller may choose (0 = same business day). */
+  handling: { min: number; max: number };
+  /** offers.largeSellerPriceChangePct */
+  largePct?: number;
+}
+
+interface EarningsPreview {
+  rateBps: number;
+  feeBasisNote: string;
+  ruleVersion: string;
+  price: Money;
+  fee: Money;
+  earnings: Money;
+}
+
+function OfferForm({ product, detail, profiles, fees, rules }: { product: SellerProduct; detail?: Detail; profiles: Profile[]; fees?: FeeSchedule; rules: Rules }) {
+  const { api, gql } = useApi();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
@@ -190,7 +210,7 @@ function OfferForm({ product, detail, profiles, fees }: { product: SellerProduct
         qty: String(detail!.stock.available),
         sku: o.sellerSku,
         low: detail!.stock.lowStockThreshold == null ? '' : String(detail!.stock.lowStockThreshold),
-        dispatch: String(Math.min(3, o.dispatch.businessDays)),
+        dispatch: String(o.dispatch.businessDays),
         profileId: o.shippingProfileId,
         ret: o.returnTerms.kind === 'baseline' ? 'base' : o.returnTerms.freeReturnShipping ? 'extfree' : 'ext',
         warranty: wk || (used ? WARRANTY_USED[0].key : WARRANTY_NEW[0].key),
@@ -207,8 +227,8 @@ function OfferForm({ product, detail, profiles, fees }: { product: SellerProduct
       was: '',
       qty: '',
       sku: '',
-      low: '3',
-      dispatch: '1',
+      low: rules.lowStock === undefined ? '' : String(rules.lowStock),
+      dispatch: String(Math.min(Math.max(1, rules.handling.min), rules.handling.max)),
       profileId: (activeProfiles.find((p) => p.isDefault) ?? activeProfiles[0])?.id ?? '',
       ret: 'base',
       warranty: used ? WARRANTY_USED[0].key : WARRANTY_NEW[0].key,
@@ -281,12 +301,33 @@ function OfferForm({ product, detail, profiles, fees }: { product: SellerProduct
   const lowestNew = pv?.lowestNewPrice ?? detail?.lowestNewPrice;
   const official = pv?.officialStorePrice ?? detail?.officialStorePrice;
 
-  // Fee preview from the published fee rules (category rate or the default rate; shipping excluded).
+  // Fee preview. An existing offer asks the server (Offer.earningsPreview at the typed price: the seller's rate,
+  // fee basis after discounts). A new offer has nothing to preview yet, so it estimates from the published fee
+  // rules (category rate or the default rate).
+  const earningsKey = useDebounced(priceMinor, 400);
+  const earningsQ = useQuery({
+    queryKey: ['offers', 'earnings', product.id, o?.id, earningsKey],
+    queryFn: async () => {
+      const r = await gql<{ myProduct: { myOffers: Array<{ id: string; earningsPreview: EarningsPreview | null }> } | null }>(SELLER_PRODUCT_DETAIL, { id: product.id, previewPrice: earningsKey }, 'SellerProductDetail');
+      return r.data?.myProduct?.myOffers.find((x) => x.id === o!.id)?.earningsPreview ?? null;
+    },
+    enabled: !!o && earningsKey > 0,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+  const ep = o && earningsKey > 0 ? earningsQ.data : undefined;
   const rule = fees?.current;
-  const rateBps = rule ? (rule.categoryRates.find((r) => r.categoryId === product.category?.id)?.rateBps ?? rule.defaultRateBps) : null;
-  const fee = rateBps === null ? 0 : Math.round((priceMinor * rateBps) / 10000);
+  const estimateBps = rule ? (rule.categoryRates.find((r) => r.categoryId === product.category?.id)?.rateBps ?? rule.defaultRateBps) : null;
+  const rateBps = ep ? ep.rateBps : estimateBps;
+  const fee = ep && ep.price.amount === priceMinor ? ep.fee.amount : rateBps === null ? 0 : Math.round((priceMinor * rateBps) / 10000);
   const money = (n: number) => formatMoney({ amount: n, currency });
   const ratePct = rateBps === null ? '' : `${(rateBps / 100).toLocaleString('en-US', { maximumFractionDigits: 2 })}%`;
+  const feeNote = ep
+    ? `${ep.feeBasisNote} Fee rules ${ep.ruleVersion}${rule ? `, seller agreement ${rule.agreementVersion}` : ''}. Earnings show as pending until delivery and the hold period end.`
+    : rule
+      ? `${rule.includeShipping ? 'Fee includes shipping.' : 'Shipping is not included in the fee.'} Fee rules ${rule.version}, seller agreement ${rule.agreementVersion}. Earnings show as pending until delivery and the hold period end.`
+      : 'Fee rules couldn’t be loaded. Final fees by category are in your seller agreement.';
+  const handlingDays = [...new Set([...Array.from({ length: Math.max(0, rules.handling.max - rules.handling.min + 1) }, (_, i) => rules.handling.min + i), Number(f.dispatch)])].sort((a, b) => a - b);
 
   const profile = activeProfiles.find((p) => p.id === f.profileId);
   const freeOver = profile?.freeShippingThreshold ?? profile?.methods.find((m) => m.enabled && m.freeOver)?.freeOver ?? null;
@@ -428,7 +469,7 @@ function OfferForm({ product, detail, profiles, fees }: { product: SellerProduct
       )}
       {confirmLarge && (
         <Alert tone="warning" title="That’s a large price change">
-          The new price differs from the current price by more than the large-change limit. Check the amount, then confirm.{' '}
+          The new price differs from the current price by more than {rules.largePct !== undefined ? `${rules.largePct}%` : 'the large-change limit'}. Check the amount, then confirm.{' '}
           <Button size="sm" variant="secondary" onClick={() => save.mutate({ publish: confirmLarge.publish, confirm: true })} disabled={save.isPending}>
             Confirm and save
           </Button>
@@ -550,7 +591,7 @@ function OfferForm({ product, detail, profiles, fees }: { product: SellerProduct
           <Card title="Delivery" titleAs="h3">
             <div className="grid md2">
               <Field label="Dispatch time" hint="Missing this deadline counts as a late dispatch.">
-                <Select id="of-disp" options={DISPATCH} value={f.dispatch} onChange={(e) => set('dispatch', e.target.value)} />
+                <Select id="of-disp" options={handlingDays.map((n) => ({ value: String(n), label: dispatchLabel(n) }))} value={f.dispatch} onChange={(e) => set('dispatch', e.target.value)} />
               </Field>
               <Field
                 label="Shipping profile"
@@ -632,15 +673,11 @@ function OfferForm({ product, detail, profiles, fees }: { product: SellerProduct
             <SummaryRow k="Sale price" v={money(priceMinor)} />
             <SummaryRow k={`Platform fee${ratePct ? ` (${ratePct})` : ''}`} v={rateBps === null ? '—' : `−${money(fee)}`} />
             <div className="divider" />
-            <SummaryRow className="total" k="Your earnings" v={rateBps === null ? '—' : money(priceMinor - fee)} />
+            <SummaryRow className="total" k="Your earnings" v={rateBps === null ? '—' : ep && ep.price.amount === priceMinor ? formatMoney(ep.earnings) : money(priceMinor - fee)} />
             <Badge tone="outline">Example</Badge>
             <p className="xs muted row gap-1 nowrap top">
               <Icon name="info" className="ic-sm" />
-              <span className="wrap">
-                {rule
-                  ? `${rule.includeShipping ? 'Fee includes shipping.' : 'Shipping is not included in the fee.'} Fee rules ${rule.version}, seller agreement ${rule.agreementVersion}. Earnings show as pending until delivery and the hold period end.`
-                  : 'Fee rules couldn’t be loaded. Final fees by category are in your seller agreement.'}
-              </span>
+              <span className="wrap">{feeNote}</span>
             </p>
           </Card>
           <Card

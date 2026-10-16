@@ -5,7 +5,7 @@ import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { initials } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Field, Icon, IconButton, Img, PageHeader, SegmentedControl, Select, Switch, Tabs, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, Field, Icon, IconButton, Img, PageHeader, SegmentedControl, Select, Stars, Switch, Tabs, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
 import { fmtDay } from './data/finance';
 
@@ -14,7 +14,9 @@ import { fmtDay } from './data/finance';
 // uploads (media purposes store_logo / store_banner, sent as logoId / bannerId), featured collections
 // (POST/PATCH/DELETE sellers/store-profile/collections), the brand-affiliation claim (POST
 // sellers/store-profile/claims with the brand and evidence, reviewed by staff) and the return policy
-// (GET/PUT returns/terms). Categories are derived from offers and restrictions (read only).
+// (GET/PUT returns/terms). Categories are derived from offers and restrictions (read only). Editing a
+// collection picks its offers (GET offers/offers) and an image (media purpose store_banner, sent as imageId).
+// The preview's ratings line is GET reviews/feedback-summary.
 
 type StoreProfile = components['schemas']['sellers.StoreProfile'];
 type StoreProfileInput = components['schemas']['sellers.StoreProfileInput'];
@@ -160,6 +162,7 @@ export default function Store() {
 
   const profileQ = useQuery({ queryKey: ['sellers', 'store-profile', sellerId], queryFn: () => call(api.GET('/api/seller/sellers/store-profile')) });
   const termsQ = useQuery({ queryKey: ['returns', 'terms', sellerId], queryFn: () => call(api.GET('/api/seller/returns/terms')) });
+  const ratingsQ = useQuery({ queryKey: ['reviews', 'feedback-summary', sellerId], queryFn: () => call(api.GET('/api/seller/reviews/feedback-summary')) });
   const brandsQ = useQuery({ queryKey: ['catalog', 'brands', 'all'], queryFn: () => call(api.GET('/api/seller/catalog/brands', { params: { query: { limit: 100 } } })), enabled: canManage });
 
   const profile = profileQ.data;
@@ -167,12 +170,19 @@ export default function Store() {
   const [p, setP] = useState<Profile | null>(null);
   const [attempted, setAttempted] = useState(false);
   const [notice, setNotice] = useState<'' | 'saved' | 'error'>('');
-  const [editing, setEditing] = useState<{ id: string; title: string } | null>(null);
+  const [editing, setEditing] = useState<{ id: string; title: string; offerIds: string[] } | null>(null);
   const [device, setDevice] = useState<'desktop' | 'phone'>('phone');
-  const [fileErr, setFileErr] = useState<Pick<Errors, 'logo' | 'banner'>>({});
+  const [fileErr, setFileErr] = useState<Pick<Errors, 'logo' | 'banner'> & { collection?: string }>({});
   const logo = useImageUpload('store_logo', (m) => setFileErr((f) => ({ ...f, logo: m || undefined })));
   const banner = useImageUpload('store_banner', (m) => setFileErr((f) => ({ ...f, banner: m || undefined })));
   const evidence = useUploads('verification_document', { max: 3, accept: /\.(pdf|png|jpe?g)$|^(application\/pdf|image\/(png|jpeg))$/i });
+  const colImage = useImageUpload('store_banner', (m) => setFileErr((f) => ({ ...f, collection: m || undefined })));
+  const colImageInput = useRef<HTMLInputElement>(null);
+  const offersQ = useQuery({
+    queryKey: ['offers', 'offers', sellerId, 'collection-picker'],
+    queryFn: () => call(api.GET('/api/seller/offers/offers', { params: { query: { limit: 100 } } })),
+    enabled: !!editing,
+  });
   const logoInput = useRef<HTMLInputElement>(null);
   const bannerInput = useRef<HTMLInputElement>(null);
   const evidenceInput = useRef<HTMLInputElement>(null);
@@ -221,17 +231,24 @@ export default function Store() {
   });
 
   const collectionMut = useMutation({
-    mutationFn: async (a: { kind: 'add' } | { kind: 'rename'; c: Collection; title: string } | { kind: 'remove'; c: Collection }) => {
+    mutationFn: async (a: { kind: 'add' } | { kind: 'save'; c: Collection; title: string; offerIds: string[]; imageId?: string | null } | { kind: 'remove'; c: Collection }) => {
       if (a.kind === 'add') {
         const n = (profile?.collections.length ?? 0) + 1;
         return call(api.POST('/api/seller/sellers/store-profile/collections', { body: { title: `New collection ${n}`, offerIds: [] } }));
       }
-      if (a.kind === 'rename') return call(api.PATCH('/api/seller/sellers/store-profile/collections/{id}', { params: { path: { id: a.c.id } }, body: { title: a.title, offerIds: a.c.offerIds, visible: a.c.visible } }));
+      if (a.kind === 'save')
+        return call(
+          api.PATCH('/api/seller/sellers/store-profile/collections/{id}', {
+            params: { path: { id: a.c.id } },
+            body: { title: a.title, offerIds: a.offerIds, visible: a.c.visible, ...(a.imageId ? { imageId: a.imageId } : {}) },
+          }),
+        );
       await call(api.DELETE('/api/seller/sellers/store-profile/collections/{id}', { params: { path: { id: a.c.id } } }));
       return null;
     },
     onSuccess: (c, a) => {
-      if (a.kind === 'add' && c) setEditing({ id: c.id, title: c.title });
+      colImage.reset();
+      if (a.kind === 'add' && c) setEditing({ id: c.id, title: c.title, offerIds: c.offerIds });
       if (a.kind !== 'add') setEditing(null);
       void qc.invalidateQueries({ queryKey: ['sellers', 'store-profile', sellerId] });
     },
@@ -273,6 +290,24 @@ export default function Store() {
   const logoSrc = logo.url ?? profile?.logo?.url ?? null;
   const bannerSrc = banner.url ?? profile?.banner?.url ?? null;
   const verified = profile?.verification.state === 'verified';
+  const ratings = ratingsQ.data;
+  const offerRows = (offersQ.data?.items ?? []).filter((r) => r.offer.status !== 'removed');
+  const startEdit = (c: Collection) => {
+    colImage.reset();
+    setEditing({ id: c.id, title: c.title, offerIds: c.offerIds });
+  };
+  const finishEdit = (c: Collection) => {
+    if (!editing) return;
+    const title = editing.title.trim();
+    if (!title) return;
+    const sameOffers = editing.offerIds.length === c.offerIds.length && editing.offerIds.every((id) => c.offerIds.includes(id));
+    if (title === c.title && sameOffers && !colImage.assetId) {
+      colImage.reset();
+      return setEditing(null);
+    }
+    collectionMut.mutate({ kind: 'save', c, title, offerIds: editing.offerIds, imageId: colImage.assetId });
+  };
+  const toggleOffer = (id: string, on: boolean) => setEditing((e) => (e ? { ...e, offerIds: on ? [...e.offerIds, id] : e.offerIds.filter((x) => x !== id) } : e));
   const busy = save.isPending || logo.uploading || banner.uploading || evidence.uploading;
   const chosenBrand = brands.find((b) => b.id === p?.brandId);
 
@@ -459,10 +494,11 @@ export default function Store() {
             <ul className="list">
               {collections.map((c, i) => {
                 const isEditing = editing?.id === c.id;
+                const offerCount = isEditing ? editing.offerIds.length : c.offerCount;
                 return (
                   <li key={c.id}>
                     <Icon name="grip-vertical" className="ic-sm" />
-                    <Img icon="package" tint={TINTS[i % TINTS.length]} src={c.image?.url} className="tiny" />
+                    <Img icon="package" tint={TINTS[i % TINTS.length]} src={(isEditing && colImage.url) || c.image?.url} className="tiny" />
                     <span className="grow stack gap-0">
                       {isEditing ? (
                         <TextInput
@@ -471,24 +507,55 @@ export default function Store() {
                           aria-label="Collection name"
                           value={editing.title}
                           autoFocus
-                          onChange={(e) => setEditing({ id: c.id, title: e.target.value })}
-                          onKeyDown={(e) => e.key === 'Enter' && editing.title.trim() && collectionMut.mutate({ kind: 'rename', c, title: editing.title.trim() })}
+                          onChange={(e) => setEditing({ ...editing, title: e.target.value })}
+                          onKeyDown={(e) => e.key === 'Enter' && finishEdit(c)}
                         />
                       ) : (
                         <span className="small strong">{c.title}</span>
                       )}
                       <span className="xs muted">
-                        {c.offerCount} offer{c.offerCount === 1 ? '' : 's'}
+                        {offerCount} offer{offerCount === 1 ? '' : 's'}
                         {c.visible ? '' : ' · hidden'}
                       </span>
+                      {isEditing && (
+                        <span className="stack gap-2 u-mt-sp-2">
+                          <span className="row gap-2">
+                            <input ref={colImageInput} type="file" hidden accept="image/png,image/jpeg,image/webp" aria-label="Collection image" onChange={colImage.pick} />
+                            <Button variant="secondary" size="sm" icon="upload" onClick={() => colImageInput.current?.click()} disabled={colImage.uploading}>
+                              {colImage.uploading ? 'Uploading…' : c.image || colImage.url ? 'Change image' : 'Add image'}
+                            </Button>
+                          </span>
+                          {fileErr.collection && <FileError msg={fileErr.collection} />}
+                          <span className="label">Offers in this collection</span>
+                          {offersQ.isPending ? (
+                            <span className="sk sk-line" />
+                          ) : offersQ.isError ? (
+                            <span className="xs muted">{errorMessage(offersQ.error)}</span>
+                          ) : offerRows.length === 0 ? (
+                            <span className="xs muted">You have no offers yet.</span>
+                          ) : (
+                            <span className="stack gap-1">
+                              {offerRows.map(({ offer: o }) => (
+                                <Checkbox
+                                  key={o.id}
+                                  id={`st-col-${c.id}-${o.id}`}
+                                  className="small"
+                                  label={o.variantLabel ? `${o.productTitle} · ${o.variantLabel}` : o.productTitle}
+                                  checked={editing.offerIds.includes(o.id)}
+                                  onChange={(e) => toggleOffer(o.id, e.target.checked)}
+                                />
+                              ))}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </span>
                     {canManage && (
                       <IconButton
                         icon={isEditing ? 'check' : 'pencil'}
                         label={`${isEditing ? 'Done editing' : 'Edit'} ${c.title}`}
-                        onClick={() =>
-                          isEditing ? (editing.title.trim() && editing.title.trim() !== c.title ? collectionMut.mutate({ kind: 'rename', c, title: editing.title.trim() }) : setEditing(null)) : setEditing({ id: c.id, title: c.title })
-                        }
+                        onClick={() => (isEditing ? finishEdit(c) : startEdit(c))}
+                        disabled={isEditing && (colImage.uploading || collectionMut.isPending)}
                       />
                     )}
                     {canManage && c.offerCount === 0 && <IconButton icon="trash-2" label={`Remove ${c.title}`} onClick={() => collectionMut.mutate({ kind: 'remove', c })} />}
@@ -631,6 +698,12 @@ export default function Store() {
                   </span>
                 </div>
               </div>
+              {ratings && ratings.count > 0 && (
+                <span className="row gap-2 xs sub">
+                  {ratings.average != null && <Stars rating={ratings.average} />}
+                  <span>{ratings.label}</span>
+                </span>
+              )}
               {profile.tagline && <span className="small strong">{profile.tagline}</span>}
               <p className="small sub">{p.intro}</p>
               {pending.map((label) => (

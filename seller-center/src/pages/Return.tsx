@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { ApiError, call, errorMessage, newIdempotencyKey, useApi, useUploads } from '@marketly/web-shared/api';
@@ -33,7 +33,6 @@ import {
   useSellerReturn,
   type Condition,
   type GEvent,
-  type GMessage,
   type GImage,
   type Grade,
   type NoReturnCode,
@@ -46,7 +45,10 @@ import {
 // (GraphQL SellerReturnDetail): a request waiting for a response shows the Respond cards; once the item is on its
 // way back (or received) the Inspect-and-refund cards. Actions: REST /api/seller/returns/requests/{id}/approve,
 // request-info, reject, approve-without-return (idempotent), receive, inspection, inspection-draft, remedy
-// (idempotent). Messages: the return's conversation (messaging) or, once a dispute exists, the support case.
+// (idempotent). Messages: the return's conversation (messaging; a new one starts with the returnId) or, once a
+// dispute exists, the support case. Evidence: before a case, return_evidence uploads to POST …/{id}/evidence; with a
+// case, case_evidence to the support case. A partial refund's earnings come from POST …/{id}/remedy/preview; the
+// label charge estimate before approval (labelChargeEstimated) from REST GET …/requests/{id}.
 
 type Decision = 'approve' | 'info' | 'reject';
 type LabelMethod = 'prepaid_qr' | 'prepaid_label' | 'customer_arranged';
@@ -380,38 +382,8 @@ function ReturnCase({ r, crumbs }: { r: SellerReturn; crumbs: ReactNode }) {
   const refundErr = confirm.error instanceof ApiError && confirm.error.code === 'REFUND_EXCEEDS_REFUNDABLE' ? `Enter ${money(maxRefundable)} or less.` : confirm.error ? errorMessage(confirm.error) : '';
 
   /* ---------------------------------------------------------------- messages and evidence */
-  // The return's own conversation (GraphQL) is null when the thread was started from the Seller Center or the
-  // order (the seller start route has no returnId), so fall back to the order's conversation about these items.
-  const canReadInbox = can('messaging.conversations.reply');
-  const orderConvs = useQuery({
-    queryKey: ['messaging', 'conversations', sellerId, { orderId: r.order?.id }],
-    queryFn: () => call(api.GET('/api/seller/messaging/conversations', { params: { query: { orderId: r.order!.id, limit: 20 } } })),
-    enabled: !r.conversation && !!r.order && canReadInbox,
-  });
-  const fallback = orderConvs.data?.items.find((c) => c.subject.returnId === r.id) ?? orderConvs.data?.items.find((c) => !c.subject.caseId && (!c.subject.orderItemId || r.items.some((i) => i.orderItemId === c.subject.orderItemId)));
-  const fbDetail = useQuery({
-    queryKey: ['messaging', 'conversation', fallback?.id],
-    queryFn: () => call(api.GET('/api/seller/messaging/conversations/{id}', { params: { path: { id: fallback!.id } } })),
-    enabled: !!fallback,
-  });
-  const fbMessages = useQuery({
-    queryKey: ['messaging', 'messages', fallback?.id],
-    queryFn: () => call(api.GET('/api/seller/messaging/conversations/{id}/messages', { params: { path: { id: fallback!.id }, query: { limit: 50 } } })),
-    enabled: !!fallback,
-  });
-  const conv: SellerReturn['conversation'] =
-    r.conversation ??
-    (fallback && fbDetail.data
-      ? {
-          id: fallback.id,
-          privacyNote: fbDetail.data.privacyNote ?? null,
-          rulesNote: fbDetail.data.rulesNote ?? null,
-          canSend: fbDetail.data.canSend,
-          replyDue: null,
-          participants: [],
-          messages: { nextCursor: fbMessages.data?.nextCursor ?? null, items: (fbMessages.data?.items ?? []) as unknown as GMessage[] },
-        }
-      : null);
+  // The return's own conversation; the first message starts it with the returnId (SellerStartInput.returnId).
+  const conv = r.conversation;
   const theCase = r.case;
   const [reply, setReply] = useState('');
   const [replyErr, setReplyErr] = useState('');
@@ -425,7 +397,7 @@ function ReturnCase({ r, crumbs }: { r: SellerReturn; crumbs: ReactNode }) {
       if (theCase) return call(api.POST('/api/seller/support/cases/{id}/messages', { params: { path: { id: theCase.id } }, body: { body, mediaIds } }));
       if (conv) return call(api.POST('/api/seller/messaging/conversations/{id}/messages', { params: { path: { id: conv.id } }, body: { body, mediaIds, clientMessageId: newIdempotencyKey() } }));
       if (!r.order) throw new Error('This return has no order to message about.');
-      return call(api.POST('/api/seller/messaging/conversations', { body: { orderId: r.order.id, orderItemId: r.items[0]?.orderItemId, body, mediaIds } }));
+      return call(api.POST('/api/seller/messaging/conversations', { body: { orderId: r.order.id, returnId: r.id, body, mediaIds, clientMessageId: newIdempotencyKey() } }));
     },
     onSuccess: async () => {
       setReply('');
@@ -440,17 +412,22 @@ function ReturnCase({ r, crumbs }: { r: SellerReturn; crumbs: ReactNode }) {
     setReplyErr('');
     send.mutate();
   };
-  // Dispute evidence goes to the support case. Before a case exists the API's return evidence route needs a
-  // return_evidence upload, a purpose the seller area may not upload (reported), so the dropzone shows once a case is open.
+  // Evidence: before a dispute case, return_evidence uploads go on the return (POST returns/requests/{id}/evidence);
+  // once a case is open, case_evidence uploads go to the support case.
   const [evidenceErr, setEvidenceErr] = useState('');
-  const evidence = useUploads('case_evidence', {
+  const canAddEvidence = theCase ? can('support.cases.respond') : allowed('evidence') && canRespond;
+  const evidence = useUploads(theCase ? 'case_evidence' : 'return_evidence', {
     accept: /\.(jpe?g|png|webp|pdf|mp4)$/i,
     maxBytes: 25 * 1024 * 1024,
     onReady: (item) => {
-      if (!theCase || !item.assetId) return;
-      call(api.POST('/api/seller/support/cases/{id}/evidence', { params: { path: { id: theCase.id } }, body: { kind: evidenceKind(item), mediaIds: [item.assetId] } })).then(
+      if (!item.assetId) return;
+      const body = { kind: evidenceKind(item), mediaIds: [item.assetId] };
+      (theCase
+        ? call(api.POST('/api/seller/support/cases/{id}/evidence', { params: { path: { id: theCase.id } }, body }))
+        : call(api.POST('/api/seller/returns/requests/{id}/evidence', { ...path, body }))
+      ).then(
         () => {
-          announce(`${item.name} added to the case`);
+          announce(`${item.name} added to ${theCase ? 'the case' : 'the return'}`);
           void qc.invalidateQueries({ queryKey: ['returns', 'detail', r.ref] });
         },
         (e) => setEvidenceErr(errorMessage(e)),
@@ -490,7 +467,33 @@ function ReturnCase({ r, crumbs }: { r: SellerReturn; crumbs: ReactNode }) {
   ];
 
   /* ---------------------------------------------------------------- earnings, deadlines, activity */
-  const ei = r.earningsImpact;
+  // Before approval the label charge is an estimate (labelChargeEstimated, REST only; the screen query doesn't select it).
+  const restReturn = useQuery({
+    queryKey: ['returns', 'rest', r.id],
+    queryFn: () => call(api.GET('/api/seller/returns/requests/{id}', path)),
+    enabled: !!r.earningsImpact?.labelCharge && !r.shipment,
+  });
+  const labelEstimate = restReturn.data?.earningsImpact?.labelChargeEstimated ? restReturn.data.earningsImpact.labelCharge : null;
+  // A partial refund being entered: the earnings card follows it (POST …/remedy/preview).
+  const [previewAmt, setPreviewAmt] = useState<number | null>(null);
+  const previewable = refundKind === 'part' && partValid && canRemedy && !r.refundRequest;
+  useEffect(() => {
+    const t = setTimeout(() => setPreviewAmt(previewable ? amt : null), 300);
+    return () => clearTimeout(t);
+  }, [previewable, amt]);
+  const remedyPreview = useQuery({
+    queryKey: ['returns', 'remedy-preview', r.id, previewAmt],
+    queryFn: () =>
+      call(
+        api.POST('/api/seller/returns/requests/{id}/remedy/preview', {
+          ...path,
+          body: { kind: 'partial_refund', amount: { amount: previewAmt!, currency }, deductions: [{ label: 'Deduction', amount: { amount: maxRefundable.amount - previewAmt!, currency }, reason: partWhy.trim() || 'Deduction' }] },
+        }),
+      ),
+    enabled: previewAmt !== null && previewable,
+    retry: false,
+  });
+  const ei = (previewable && previewAmt === amt ? remedyPreview.data?.earningsImpact : null) ?? r.earningsImpact;
   const inspectDue = r.deadlines?.refundBy ?? r.deadlines?.inspectBy;
   const deadlineEvent: Ev[] = r.open && r.nextDeadline ? [{ t: r.nextStep, d: `Due ${fmtDue(r.nextDeadline.dueAt)}`, state: deadlineTone(r.nextDeadline) === 'ok' ? 'current' : 'warn' }] : [];
   const activity: Ev[] = [...deadlineEvent, ...toEvents(r.activity)];
@@ -540,7 +543,7 @@ function ReturnCase({ r, crumbs }: { r: SellerReturn; crumbs: ReactNode }) {
                 id="rt-ship-qr"
                 name="rt-ship"
                 title={<span className="strong small">{fault ? 'You pay: prepaid QR drop-off code' : 'Prepaid QR drop-off code, customer pays'}</span>}
-                body={fault ? 'Deducted from your earnings at the carrier’s rate. The customer shows the code at a drop-off point.' : `${customerFee ? money(customerFee) : 'Return shipping'} is deducted from the customer’s refund.`}
+                body={fault ? `Deducted from your earnings at the carrier’s rate${labelEstimate ? ` (about ${money(labelEstimate)})` : ''}. The customer shows the code at a drop-off point.` : `${customerFee ? money(customerFee) : 'Return shipping'} is deducted from the customer’s refund.`}
                 checked={method === 'prepaid_qr'}
                 onChange={() => setMethod('prepaid_qr')}
                 disabled={noReturn}
@@ -549,7 +552,7 @@ function ReturnCase({ r, crumbs }: { r: SellerReturn; crumbs: ReactNode }) {
                 id="rt-ship-label"
                 name="rt-ship"
                 title={<span className="strong small">{fault ? 'You pay: printable prepaid label' : 'Printable prepaid label, customer pays'}</span>}
-                body={fault ? 'Deducted from your earnings at the carrier’s rate.' : `${customerFee ? money(customerFee) : 'Return shipping'} is deducted from the customer’s refund.`}
+                body={fault ? `Deducted from your earnings at the carrier’s rate${labelEstimate ? ` (about ${money(labelEstimate)})` : ''}.` : `${customerFee ? money(customerFee) : 'Return shipping'} is deducted from the customer’s refund.`}
                 checked={method === 'prepaid_label'}
                 onChange={() => setMethod('prepaid_label')}
                 disabled={noReturn}
@@ -998,8 +1001,8 @@ function ReturnCase({ r, crumbs }: { r: SellerReturn; crumbs: ReactNode }) {
               {attachments.error && <span className="xs muted">{attachments.error}</span>}
               <div className="stack gap-2">
                 <span className="label">Dispute evidence</span>
-                <span className="xs muted">If the customer disputes your decision, support reviews purchase terms, shipment records, photos and these messages. {theCase ? 'Add files so they are on record.' : 'You can add files here once a dispute case is open.'}</span>
-                {theCase && can('support.cases.respond') && <Drop title="Upload evidence" hint="Photos, test videos, invoices or carrier records · PDF, JPG, PNG, MP4 up to 25 MB" accept="application/pdf,image/jpeg,image/png,video/mp4" onFiles={evidence.add} />}
+                <span className="xs muted">If the customer disputes your decision, support reviews purchase terms, shipment records, photos and these messages. Add files now so they are on record.</span>
+                {canAddEvidence && <Drop title="Upload evidence" hint="Photos, test videos, invoices or carrier records · PDF, JPG, PNG, MP4 up to 25 MB" accept="application/pdf,image/jpeg,image/png,video/mp4" onFiles={evidence.add} />}
                 {(evidenceErr || evidence.error) && <span className="xs muted">{evidenceErr || evidence.error}</span>}
                 <FileList files={[...onRecord, ...uploadItems(evidence).filter((_, i) => evidence.items[i].status !== 'ready')]} />
               </div>
@@ -1065,7 +1068,7 @@ function ReturnCase({ r, crumbs }: { r: SellerReturn; crumbs: ReactNode }) {
                       <b>{money(ei.feeReturned)}</b>
                     </div>
                   </div>
-                  {ei.labelCharge && ei.labelCharge.amount !== 0 && <SummaryRow k={`Prepaid return label (${fault ? 'you pay' : 'customer pays'})`} v={<span className="sb-neg">{negMoney(ei.labelCharge)}</span>} />}
+                  {ei.labelCharge && ei.labelCharge.amount !== 0 && <SummaryRow k={`Prepaid return label (${fault ? 'you pay' : 'customer pays'}${labelEstimate ? ', estimated' : ''})`} v={<span className="sb-neg">{negMoney(ei.labelCharge)}</span>} />}
                   <SummaryRow className="strong" k="Total change to your balance" v={<b className={cx(ei.totalBalanceChange.amount < 0 && 'sb-neg')}>{ei.totalBalanceChange.amount < 0 ? negMoney(ei.totalBalanceChange) : money(ei.totalBalanceChange)}</b>} />
                   <span className="xs muted">
                     {ei.note}. {ei.afterPayout ? 'This order was already paid out, so the amount is deducted from your next payout.' : 'If this order is paid out before the refund, the amount is deducted from your next payout.'}

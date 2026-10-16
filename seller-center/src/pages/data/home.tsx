@@ -3,7 +3,7 @@
 // API's screen ids, and the icon names the API may send.
 import { errorMessage } from '@marketly/web-shared/api';
 import { href, SCREEN_BY_ID, type ScreenId } from '@marketly/web-shared/routes';
-import { Alert, Button, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Button } from '@marketly/web-shared/ui';
 
 /** Seller Center times are shown in Pacific Time (market time). */
 export const TZ = 'America/Los_Angeles';
@@ -107,29 +107,4 @@ export function SkeletonLines({ rows = 3 }: { rows?: number }) {
       ))}
     </div>
   );
-}
-
-/** Icon names the API sends that the design's icon set spells differently. */
-const ICON_ALIAS: Record<string, IconName> = {
-  'alert-triangle': 'triangle-alert',
-  'x-circle': 'circle-x',
-  'check-circle': 'circle-check',
-  'alert-circle': 'circle-alert',
-  'help-circle': 'circle-help',
-  'minus-circle': 'circle-minus',
-  edit: 'pencil',
-};
-
-/** Icons the API uses that exist in the app's icon set; anything else falls back. */
-const KNOWN_ICONS = new Set<IconName>([
-  'scale', 'package', 'clock', 'wallet', 'shield', 'rotate-ccw', 'megaphone', 'life-buoy', 'file-text', 'truck', 'shopping-bag', 'shield-check',
-  'package-check', 'message-square', 'lock', 'landmark', 'flag', 'download', 'calendar', 'store', 'star', 'search', 'percent', 'mail',
-  'file-check', 'credit-card', 'tag', 'sparkles', 'send', 'paperclip', 'heart', 'bell', 'circle-check', 'circle-x', 'triangle-alert',
-  'circle-alert', 'circle-help', 'gavel', 'gauge', 'book-open', 'undo-2', 'alarm-clock', 'badge-check', 'file-pen-line', 'ban', 'image',
-  'calendar-days', 'users', 'settings', 'banknote', 'boxes', 'warehouse', 'user-plus', 'inbox', 'link', 'trash-2', 'pencil', 'circle-minus',
-]);
-
-export function iconOf(name: string | null | undefined, fallback: IconName = 'bell'): IconName {
-  const n = (name && (ICON_ALIAS[name] ?? name)) as IconName | null;
-  return n && KNOWN_ICONS.has(n) ? n : fallback;
 }

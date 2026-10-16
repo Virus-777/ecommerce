@@ -5,7 +5,7 @@ import { ApiError, call, errorMessage, newIdempotencyKey, useApi } from '@market
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
-import { formatMoney } from '@marketly/web-shared/lib/format';
+import { formatMoney, isoInText } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Checkbox, Deadline, Dialog, EmptyState, Field, Icon, Img, KeyValue, OptionCard, PageHeader, Select, SummaryRow, Textarea, TextInput, Timeline, Track, announce, type TimelineEvent, type Tone } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
@@ -17,12 +17,12 @@ import {
   dayRange,
   deadlineTone,
   dueText,
-  isoToPt,
   lc,
   normTracking,
   openDownload,
   openQty,
   phoneText,
+  toShipQty,
   ptDateTime,
   ptInstant,
   ptLong,
@@ -43,13 +43,13 @@ import {
 // last package is recorded). Data: the SellerOrderDetail screen query (ref → the seller group, items, money,
 // ship-to, shipments, cancellations, exceptions, timeline, buyer conversation and the record-shipment setup).
 // Writes: POST /api/seller/shipping/shipments, …/labels/quotes, …/labels (Idempotency-Key),
-// …/shipments/{id}/hand-over, …/shipments/{id}/correct-tracking, GET …/shipments/{id} (label file),
+// …/shipments/{id}/hand-over, …/shipments/{id}/correct-tracking (the label file comes with the screen query),
 // POST /api/seller/orders/orders/{groupId}/cancel-items (Idempotency-Key), GET …/packing-slip,
 // POST /api/seller/messaging/conversations (first message) or …/conversations/{id}/messages.
 
 type View = 'shipped';
 
-// Only the carriers the setup lists: the API refuses carrierCode 'other' ("Choose one of the listed carriers").
+// The carriers the setup lists (Other and OnTrac included). Tracking is optional for 'other'.
 const NO_CARRIER: SetupCarrierG = { code: '', name: 'No carrier', services: [] };
 const GROUP_TONE: Record<string, Tone> = { new: 'brand', preparing: 'info', delayed: 'warning', partly_shipped: 'warning', shipped: 'info', partly_delivered: 'warning', delivered: 'success', partly_cancelled: '', cancelled: '' };
 const OPEN_EXCEPTION = new Set(['open', 'in_progress', 'escalated']);
@@ -156,11 +156,9 @@ function OrderScreen({ data }: { data: SellerOrderDetailResult }) {
   const codeForName = (name?: string | null) => carriers.find((c) => c.name === name)?.code ?? carriers[0].code;
 
   const items = g.items;
-  // Units in a bought label that isn't handed over yet still count as unshipped on the item, but can't go in another package.
-  const labelled: Record<string, number> = {};
-  for (const s of g.shipments) if (lc(s.status) === 'label_created') for (const c of s.contents) labelled[c.orderItemId] = (labelled[c.orderItemId] ?? 0) + c.quantity;
-  const toShip = (i: OrderItemG) => Math.max(0, openQty(i) - (labelled[i.id] ?? 0));
-  const awaitingHandover = Object.values(labelled).some(Boolean);
+  // Units on a bought label that isn't handed over yet (onLabelQuantity) can't go in another package or be cancelled.
+  const toShip = (i: OrderItemG) => toShipQty(i);
+  const awaitingHandover = items.some((i) => (i.onLabelQuantity ?? 0) > 0) || g.shipments.some((s) => lc(s.status) === 'label_created');
   const open = items.filter((i) => toShip(i) > 0);
   const remaining = open.reduce((a, i) => a + toShip(i), 0);
   const allCancelled = items.length > 0 && items.every((i) => lc(i.state) === 'cancelled');
@@ -259,7 +257,7 @@ function OrderScreen({ data }: { data: SellerOrderDetailResult }) {
     setTried(true);
     setServerTrackErr('');
     setItemsErr('');
-    if (!chosen.length || !shipDate || shipDate > dayKey() || (!ack && clientTrackErr) || !normTracking(tracking)) {
+    if (!chosen.length || !shipDate || shipDate > dayKey() || (!ack && clientTrackErr) || (!normTracking(tracking) && carrierCode !== 'other')) {
       announce('Check the shipment details');
       return;
     }
@@ -317,8 +315,19 @@ function OrderScreen({ data }: { data: SellerOrderDetailResult }) {
         setQuotes(null);
         setQuoteId('');
       }
-      // LABEL_FAILED is a 502 with a useful message (nothing was charged): show it instead of the generic server error.
-      setLabelErr(e instanceof ApiError && e.code === 'LABEL_FAILED' ? e.message : errorMessage(e));
+      if (e instanceof ApiError && e.code === 'LABEL_FAILED') {
+        // 422: the carrier refused (change the package or the service); 502: the carrier didn't answer (try again). Nothing was charged.
+        // Nothing was bought, so the next attempt is a new purchase. The quotes stay: choose another service, or Back to change the parcel.
+        labelKey.current = newIdempotencyKey();
+        const carrierMsg = typeof e.details.carrierMessage === 'string' && e.details.carrierMessage ? ` Carrier: ${e.details.carrierMessage}` : '';
+        setLabelErr(
+          e.details.carrierReached === false || e.status >= 500
+            ? `The carrier didn't answer, so no label was bought and nothing was charged. Try again in a few minutes.${carrierMsg}`
+            : `${e.message}${carrierMsg}`,
+        );
+        return;
+      }
+      setLabelErr(errorMessage(e));
     },
     onSettled: refresh,
   });
@@ -331,11 +340,7 @@ function OrderScreen({ data }: { data: SellerOrderDetailResult }) {
   };
 
   /* ---------------- packages: label file, hand-over, tracking corrections */
-  const printLabel = useMutation({
-    mutationFn: (id: string) => call(api.GET('/api/seller/shipping/shipments/{id}', { params: { path: { id } } })),
-    onSuccess: (s) => (s.label?.labelUrl ? openDownload(s.label.labelUrl) : tell({ tone: 'info', title: 'No label file', body: 'This package has no label to print.' })),
-    onError: (e) => tell({ tone: 'danger', title: 'Could not open the label', body: errorMessage(e) }),
-  });
+  const printLabel = (s: ShipmentG) => (s.label?.labelUrl ? openDownload(s.label.labelUrl) : tell({ tone: 'info', title: 'No label file', body: 'This package has no label to print.' }));
   const handOver = useMutation({
     mutationFn: (id: string) => call(api.POST('/api/seller/shipping/shipments/{id}/hand-over', { params: { path: { id } }, body: {} })),
     onSuccess: (s) => {
@@ -446,7 +451,7 @@ function OrderScreen({ data }: { data: SellerOrderDetailResult }) {
 
   const timeline: TimelineEvent[] = [
     ...((remaining > 0 || awaitingHandover) && due ? [{ t: 'Waiting for shipment', d: `Dispatch by ${dueText(due.dueAt)}`, state: 'current' as const }] : []),
-    ...[...g.timeline].reverse().map((e) => ({ t: e.label, d: [ptDateTime(e.at), e.actor?.name].filter(Boolean).join(' · '), state: 'done' as const, body: e.detail ? isoToPt(e.detail) : undefined })),
+    ...[...g.timeline].reverse().map((e) => ({ t: e.label, d: [ptDateTime(e.at), e.actor?.name].filter(Boolean).join(' · '), state: 'done' as const, body: e.detail ? isoInText(e.detail) : undefined })),
   ];
 
   return (
@@ -599,7 +604,7 @@ function OrderScreen({ data }: { data: SellerOrderDetailResult }) {
                   canShip &&
                   (labelOnly ? (
                     <div className="row gap-2">
-                      <Button variant="secondary" size="sm" icon="printer" onClick={() => printLabel.mutate(s.id)} disabled={printLabel.isPending}>
+                      <Button variant="secondary" size="sm" icon="printer" onClick={() => printLabel(s)}>
                         Print label
                       </Button>
                       <Button size="sm" icon="truck" onClick={() => handOver.mutate(s.id)} disabled={handOver.isPending}>
@@ -642,6 +647,7 @@ function OrderScreen({ data }: { data: SellerOrderDetailResult }) {
                   ]}
                 />
                 <Track labels={s.steps?.length ? s.steps : ['Shipped', 'In transit', 'Out for delivery', 'Delivered']} done={s.shippedAt ? (s.currentStep ?? 0) + 1 : 0} tone={['delivery_failed', 'lost', 'returning', 'returned_to_sender'].includes(lc(s.status)) ? 'danger' : undefined} />
+                {labelOnly && <p className="xs muted">Items in this package can’t be cancelled or shipped in another package until the carrier has it.</p>}
                 <div className="stack gap-2">
                   <span className="xs strong">Tracking changes</span>
                   <Timeline events={changes} />
@@ -665,7 +671,7 @@ function OrderScreen({ data }: { data: SellerOrderDetailResult }) {
                 <Field label="Carrier">
                   <Select id="od-carrier" options={carriers.map((c) => ({ value: c.code, label: c.name }))} value={carrierCode} onChange={(e) => changeCarrier(e.target.value)} />
                 </Field>
-                <Field label="Tracking number" hint="We check the format and show it to the buyer." error={errs.tracking}>
+                <Field label="Tracking number" optional={carrierCode === 'other'} hint={carrierCode === 'other' ? 'Optional for other carriers. Add it if your carrier gives one.' : 'We check the format and show it to the buyer.'} error={errs.tracking}>
                   <TextInput
                     id="od-track"
                     value={tracking}

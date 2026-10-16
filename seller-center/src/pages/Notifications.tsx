@@ -6,14 +6,17 @@ import { isoInText } from '@marketly/web-shared/lib/format';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href, type ScreenId } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Deadline, EmptyState, Icon, PageHeader, Switch } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Deadline, EmptyState, Icon, iconFor, PageHeader, Switch } from '@marketly/web-shared/ui';
 import { useSellerSession } from '@/app/session';
-import { dayKey, deadlineLabel, deadlineTone, iconOf, LoadError, screenHref, shortDate, SkeletonLines, time, weekdayDate, date } from './data/home';
+import { dayKey, deadlineLabel, deadlineTone, LoadError, screenHref, shortDate, SkeletonLines, time, weekdayDate, date } from './data/home';
 
 // Design: pages/seller/seller-notifications.html (no views).
 // API: GET /api/seller/notifications/inbox (group, unreadOnly, cursor: "Load older notices"),
 // GET …/inbox/summary (counts per group, needs action sorted by deadline), POST …/inbox/{id}/read,
 // POST …/inbox/read-all, GET …/preferences (the essential-notices note). Times in Pacific Time.
+// Archive (added after the design): "Archive read" = POST …/inbox/archive-all { readOnly: true, group? } (archiving
+// doesn't mark read, notices that still need action stay); the "Archived" switch lists them (?archived=true).
+// There is no per-row archive: the row is a link, and the design has no control for it.
 
 type Notice = components['schemas']['notifications.Notice'];
 type Group = 'orders' | 'returns_cases' | 'products' | 'account_finance';
@@ -44,7 +47,9 @@ const FALLBACK: Partial<Record<string, ScreenId>> = {
 };
 function noticeHref(n: Notice): string | undefined {
   const l = n.link;
-  return screenHref(l.screen, null, l.ref ? { ref: l.ref } : undefined) ?? (FALLBACK[l.screen] ? href(FALLBACK[l.screen]!) : undefined);
+  // Statement routes also take the statement id, so a statement notice without a ref opens the statement.
+  const ref = l.ref ?? (l.screen === 'seller/statement' ? l.id : null);
+  return screenHref(l.screen, null, ref ? { ref } : undefined) ?? (FALLBACK[l.screen] ? href(FALLBACK[l.screen]!) : undefined);
 }
 
 /** urgent = red edge + danger badge; action = amber edge + warning badge (open action notices only). */
@@ -91,13 +96,15 @@ export default function Notifications() {
   const [cat, setCat] = useState<Group | 'all'>('all');
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [allRead, setAllRead] = useState(false);
+  const [archived, setArchived] = useState(false);
+  const [archivedN, setArchivedN] = useState<number | null>(null);
 
   const summary = useQuery({ queryKey: ['notifications', 'summary', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/inbox/summary')), refetchInterval: 60_000 });
   const prefs = useQuery({ queryKey: ['notifications', 'preferences', sellerId], queryFn: () => call(api.GET('/api/seller/notifications/preferences')), staleTime: 5 * 60_000 });
   const inbox = useInfiniteQuery({
-    queryKey: ['notifications', 'inbox', sellerId, { group: cat, unreadOnly }],
+    queryKey: ['notifications', 'inbox', sellerId, { group: cat, unreadOnly, archived }],
     queryFn: ({ pageParam }) =>
-      call(api.GET('/api/seller/notifications/inbox', { params: { query: { group: cat === 'all' ? undefined : cat, unreadOnly: unreadOnly || undefined, cursor: pageParam, limit: 24 } } })),
+      call(api.GET('/api/seller/notifications/inbox', { params: { query: { group: cat === 'all' ? undefined : cat, unreadOnly: unreadOnly || undefined, archived: archived || undefined, cursor: pageParam, limit: 24 } } })),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
@@ -111,6 +118,13 @@ export default function Notifications() {
     mutationFn: () => call(api.POST('/api/seller/notifications/inbox/read-all', { body: {} })),
     onSuccess: () => {
       setAllRead(true);
+      void refresh();
+    },
+  });
+  const archiveRead = useMutation({
+    mutationFn: () => call(api.POST('/api/seller/notifications/inbox/archive-all', { body: { readOnly: true, ...(cat === 'all' ? {} : { group: cat }) } })),
+    onSuccess: (r) => {
+      setArchivedN(r.updated);
       void refresh();
     },
   });
@@ -130,14 +144,31 @@ export default function Notifications() {
         title="Notifications"
         sub={s ? `${s.unread} unread · ${s.actionRequired} need action. Times in Pacific Time.` : 'Times in Pacific Time.'}
         actions={
-          <Button variant="secondary" size="sm" icon="check-check" onClick={() => markAll.mutate()} disabled={!s?.unread || markAll.isPending}>
-            Mark all as read
-          </Button>
+          <>
+            <Button variant="secondary" size="sm" icon="check-check" onClick={() => markAll.mutate()} disabled={!s?.unread || markAll.isPending}>
+              Mark all as read
+            </Button>
+            {!archived && (
+              <Button variant="ghost" size="sm" icon="archive" onClick={() => archiveRead.mutate()} disabled={archiveRead.isPending}>
+                Archive read
+              </Button>
+            )}
+          </>
         }
       />
       <div className="sb-main">
         <div className="stack gap-3">
           {allRead && !s?.unread && <Alert tone="success" title="All notices marked as read" />}
+          {archivedN !== null && (
+            <Alert tone="success" title={archivedN ? `${archivedN} read notice${archivedN === 1 ? '' : 's'} archived` : 'No read notices to archive'}>
+              Notices that still need action stay in your inbox. Turn on Archived to see archived notices.
+            </Alert>
+          )}
+          {archiveRead.isError && (
+            <Alert tone="danger" title="We couldn’t archive the notices">
+              {errorMessage(archiveRead.error)}
+            </Alert>
+          )}
           {markAll.isError && (
             <Alert tone="danger" title="We couldn’t mark the notices as read">
               {errorMessage(markAll.error)}
@@ -164,7 +195,10 @@ export default function Notifications() {
                 );
               })}
             </div>
-            <Switch id="nt-unread" label="Unread only" checked={unreadOnly} aria-checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
+            <span className="row gap-3">
+              <Switch id="nt-unread" label="Unread only" checked={unreadOnly} aria-checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} />
+              <Switch id="nt-archived" label="Archived" checked={archived} aria-checked={archived} onChange={(e) => (setArchived(e.target.checked), setArchivedN(null))} />
+            </span>
           </div>
           <section className="card">
             {inbox.isPending ? (
@@ -177,8 +211,8 @@ export default function Notifications() {
               </div>
             ) : notes.length === 0 ? (
               <div className="card-body">
-                <EmptyState icon="bell" title={unreadOnly ? 'No unread notices' : 'No notices here'}>
-                  {unreadOnly ? 'You’re all caught up. Turn off Unread only to see earlier notices.' : 'Notices for this category will appear here.'}
+                <EmptyState icon="bell" title={archived ? 'No archived notices' : unreadOnly ? 'No unread notices' : 'No notices here'}>
+                  {archived ? 'Notices you archive appear here.' : unreadOnly ? 'You’re all caught up. Turn off Unread only to see earlier notices.' : 'Notices for this category will appear here.'}
                 </EmptyState>
               </div>
             ) : (
@@ -197,7 +231,7 @@ export default function Notifications() {
                         {kind === 'urgent' && <span className="sr-only">Urgent: </span>}
                         {kind === 'action' && <span className="sr-only">Needs action: </span>}
                         <span className="ic">
-                          <Icon name={iconOf(n.icon)} />
+                          <Icon name={iconFor(n.icon)} />
                         </span>
                         <span className="stack gap-1">
                           <span className="row gap-2">
