@@ -118,6 +118,35 @@ describe('Complaint patterns', () => {
   });
 });
 
+describe('figures for promotions (public API)', () => {
+  it('officialMargin gives the Official Store margin of a range; storeReturnRate the store-wide return rate', async () => {
+    const stockItemId = newId();
+    h.unitCosts.set(stockItemId, 6_000);
+    const o = h.order({ sellerId: null, items: [{ quantity: 2, unit: 10_000, stockItemId }] });
+    h.placed(o);
+    await h.drain();
+    const d = today();
+    const m = await h.service.officialMargin({ from: d, to: d });
+    expect(m.sales.amount).toBeGreaterThanOrEqual(20_000);
+    expect(m.costedSales.amount).toBeGreaterThan(0);
+    expect(m.marginPct).toEqual(expect.any(Number));
+    // a day with no Official Store sales has no margin
+    expect((await h.service.officialMargin({ from: shift(d, -40), to: shift(d, -39) })).marginPct).toBeNull();
+
+    const sellerId = newId();
+    const s = h.order({ sellerId, items: [{ quantity: 4, unit: 1_000 }] });
+    h.placed(s);
+    await h.drain();
+    h.publish('returns', 'returns.return.requested', { returnId: newId(), ref: 'RT-9', orderId: s.id, orderRef: s.ref, ownerType: 'seller', sellerId, fulfilledBy: 'seller', orderItemIds: [s.groups[0]!.items[0]!.id], reason: 'defective', responseDueAt: h.clock.now().toISOString() });
+    await h.drain();
+    const r = await h.service.storeReturnRate({ from: d, to: d });
+    expect(r.soldUnits).toBeGreaterThanOrEqual(6);
+    expect(r.returnedUnits).toBeGreaterThanOrEqual(4);
+    expect(r.returnRatePct).toEqual(expect.any(Number));
+    expect((await h.service.storeReturnRate({ from: shift(d, -40), to: shift(d, -39) })).returnRatePct).toBeNull();
+  });
+});
+
 describe('Response time and case backlog', () => {
   it('adds case first replies and seller message replies, in total and per seller', async () => {
     const d = today();

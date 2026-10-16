@@ -706,6 +706,10 @@ export interface ReportsPublicApi {
   recordSignal(signal: { kind: 'product_view' | 'search_no_result' | 'cart_add', productId?: string, offerId?: string, query?: string, sessionKey?: string, at: string }): Promise<void>;
   /** Published definition text for tooltips in other modules' screens Used by: sellers, finance, advertising, promotions. */
   metric(key: string): Promise<MetricDefinition | null>;
+  /** Official Store gross margin for a range of market days, by order placement date (the Official Store margin report's figures): sales, the sales with a known buying cost, that cost and the margin in percent of costed sales (null without costed sales). Promotions shows it before and during a campaign range. Used by: promotions. */
+  officialMargin(range: common.DateRange): Promise<{ sales: common.Money, costedSales: common.Money, cost: common.Money, marginPct: number | null }>;
+  /** Store-wide return rate for a range of market days: units asked to return in the range ÷ units sold (placed) in the range, in percent (null when nothing sold). The same figure as the Returns by reason report. Used by: promotions. */
+  storeReturnRate(range: common.DateRange): Promise<{ returnedUnits: number, soldUnits: number, returnRatePct: number | null }>;
   /** Admin dashboard figures with definitions (same as GET /api/admin/reports/dashboard) Used by: graphql. */
   getAdminDashboard(period: 'today' | 'last_7_days' | 'last_14_days' | 'last_30_days', principal: identity.Principal): Promise<AdminDashboard>;
   /** The seller's own dashboard figures and work tiles (same as GET /api/seller/reports/dashboard); sellerId always comes from the session Used by: graphql. */
@@ -1668,7 +1672,7 @@ export const spec = defineModuleSpec({
   summary: "Business reporting with stated meanings: metric definitions with a named owner and versions, a report catalogue grouped by business area, report queries with an explicit date basis, currency and time zone, the admin and seller dashboards, and authorized export jobs. All figures come from read models fed by other modules' events, never from their tables.",
   dependsOn: [],
   optionalDeps: ["access","settings","media","orders","finance","sellers","inventory","search","advertising","promotions","content","workqueues","returns","support","messaging","audit","notifications","cart","fulfillment-service","shipping","wishlist","catalog","offers","purchasing","customers","trust"],
-  publicApi: ["registerDataset","requestExport","recordSignal","metric","getAdminDashboard","getSellerDashboard","getExport","listExports"],
+  publicApi: ["registerDataset","requestExport","recordSignal","metric","officialMargin","storeReturnRate","getAdminDashboard","getSellerDashboard","getExport","listExports"],
   permissions: [
     {
       "key": "reports.library.view",

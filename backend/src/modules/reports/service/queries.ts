@@ -447,6 +447,24 @@ export class Queries {
     return { ...instantsOf(range, rq.timeZone), timeZone: rq.timeZone, ...(sellerId ? { sellerId } : {}), ...(rq.productId ? { productId: rq.productId } : {}) };
   }
 
+  /* ---------------------------------------------------------------- figures for other modules (public API) */
+
+  /** reports.officialMargin: Official Store sales, sales with a known cost, that cost and the margin % (order placement date) */
+  async officialMargin(range: DayRange): Promise<{ sales: Money; costedSales: Money; cost: Money; marginPct: number | null }> {
+    const cfg = await this.core.cfg();
+    const rq = await this.resolve({ preset: 'custom', range, dateBasis: 'placement' });
+    const a = await this.salesTotals(rq, { kind: 'platform' }, rq.range, { ownerType: 'official' });
+    const c = rq.currency;
+    return { sales: this.money(this.gross(a, cfg), c), costedSales: this.money(a.costedSales, c), cost: this.money(a.cost, c), marginPct: a.costedSales > 0 ? pct(a.costedSales - a.cost, a.costedSales) : null };
+  }
+
+  /** reports.storeReturnRate: the store-wide return rate (G48a's figure for every seller and the Official Store) */
+  async storeReturnRate(range: DayRange): Promise<{ returnedUnits: number; soldUnits: number; returnRatePct: number | null }> {
+    const rq = await this.resolve({ preset: 'custom', range });
+    const r = await this.returnRate(rq, { kind: 'platform' }, rq.range);
+    return { returnedUnits: r.returned, soldUnits: r.sold, returnRatePct: r.sold > 0 ? r.rate : null };
+  }
+
   /** G48a: units asked to return in the range ÷ units sold (placed) in the range, in percent */
   private async returnRate(rq: ResolvedQuery, scope: ReportScope, range: DayRange): Promise<{ rate: number; returned: number; sold: number }> {
     const [returned] = await this.core.repo.returnsAgg(this.returnsFilter(rq, scope, range), 'none');

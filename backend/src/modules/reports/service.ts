@@ -1,5 +1,6 @@
 import type { EventPayload } from '../../kernel/events/index.js';
 import { newId } from '../../kernel/lib/ids.js';
+import type * as common from '../../spec/common.js';
 import type { Actor } from '../../spec/common.js';
 import type * as identity from '../../spec/identity.js';
 import type { AdminDashboard, ExportDataset, ExportJob, MetricDefinition, ReportQuery, ReportResult, ReportsPublicApi, SellerDashboard } from '../../spec/reports.js';
@@ -87,6 +88,16 @@ export class ReportsService implements ReportsPublicApi {
   /** Published definition text for tooltips in other modules' screens */
   async metric(key: string): Promise<MetricDefinition | null> {
     return this.defs.metric(key);
+  }
+
+  /** Official Store gross margin for a range of market days, by order placement date (promotions: before and during a campaign range) */
+  async officialMargin(range: common.DateRange): Promise<{ sales: common.Money; costedSales: common.Money; cost: common.Money; marginPct: number | null }> {
+    return this.queries.officialMargin(range);
+  }
+
+  /** Store-wide return rate for a range of market days (units asked to return ÷ units sold, in percent) */
+  async storeReturnRate(range: common.DateRange): Promise<{ returnedUnits: number; soldUnits: number; returnRatePct: number | null }> {
+    return this.queries.storeReturnRate(range);
   }
 
   /** Admin dashboard figures with definitions (same as GET /api/admin/reports/dashboard) */
