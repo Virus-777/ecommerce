@@ -4,7 +4,7 @@ import { contains, startsWith, type Filter, type ModuleStore } from '../../kerne
 import type { AuditDb, AuditFilters } from '../../spec/audit.js';
 import type { Page, TimelineEvent } from '../../spec/common.js';
 import type { ChainRow, ChainTarget } from './domain/chain.js';
-import { PURGE_ACTION, type ApprovalProjection } from './domain/rules.js';
+import { PURGE_ACTION, RETENTION_TARGET, type ApprovalProjection } from './domain/rules.js';
 import { searchWords } from './text.js';
 
 /** Filters as the repository applies them (dates already resolved to instants). */
@@ -237,7 +237,12 @@ export class AuditRepository {
   async #relatedOf(ids: readonly string[]): Promise<Map<string, ChainTarget[]>> {
     const out = new Map<string, ChainTarget[]>();
     if (!ids.length) return out;
-    for (const r of await this.#t.targets.find({ entry_id: { $in: [...ids] } })) out.set(r.entry_id, [...(out.get(r.entry_id) ?? []), { type: r.target_type, id: r.target_id }]);
+    for (const r of await this.#t.targets.find({ entry_id: { $in: [...ids] } })) {
+      const t = { type: r.target_type, id: r.target_id };
+      const list = out.get(r.entry_id);
+      if (list) list.push(t);
+      else out.set(r.entry_id, [t]);
+    }
     return out;
   }
 
@@ -407,7 +412,8 @@ export class AuditRepository {
 
   /** Purge checkpoints recorded in purge entries (after.checkpoint) */
   async purgeCheckpoints(): Promise<{ seq: number; hash: string }[]> {
-    const rows = await this.#t.entries.find({ action: PURGE_ACTION, module: 'audit' }, { sort: { seq: 1 } });
+    // purge entries are written against the retention record: its target index finds them without a scan of every entry
+    const rows = await this.#t.entries.find({ target_type: RETENTION_TARGET.type, target_id: RETENTION_TARGET.id, action: PURGE_ACTION, module: 'audit' }, { sort: { seq: 1 } });
     return rows.flatMap((r) => {
       const cp = (r.after as { checkpoint?: { seq?: unknown; hash?: unknown } } | null)?.checkpoint;
       return cp && typeof cp.seq === 'number' && typeof cp.hash === 'string' ? [{ seq: cp.seq, hash: cp.hash }] : [];

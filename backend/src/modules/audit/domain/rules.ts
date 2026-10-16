@@ -11,6 +11,8 @@ export type Category = AuditEntry['category'];
 export const DATASET = 'audit.admin.entries';
 export const RETENTION_ACTION = 'audit.retention.change';
 export const PURGE_ACTION = 'audit.retention.purged';
+/** The record retention changes and purges are written against */
+export const RETENTION_TARGET = { type: 'setting', id: 'audit.retention', label: 'Action history retention', screen: 'admin/audit' };
 /** Retention values above this are typing mistakes */
 export const MAX_RETAIN_YEARS = 100;
 /** reports.maxExportRows default; audit cannot read another module's setting (spec gap) */

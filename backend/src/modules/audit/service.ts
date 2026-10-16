@@ -36,6 +36,7 @@ import {
   PURGE_ACTION,
   purgeCutoff,
   RETENTION_ACTION,
+  RETENTION_TARGET,
   retentionEventFor,
   roleLabel,
   toSellerEntry,
@@ -64,7 +65,6 @@ export interface Caller {
 type Prepared = Omit<NewChainRow, 'prevHash' | 'hash' | 'ip'> & { rawIp: string | null };
 
 const SYSTEM: common.Actor = { kind: 'system', id: null, name: 'Marketly' };
-const RETENTION_TARGET = { type: 'setting', id: 'audit.retention', label: 'Action history retention', screen: 'admin/audit' };
 const VERIFY_BATCH = 1000;
 const EXPORT_BATCH = 1000;
 const MAX_HISTORY = 100;
