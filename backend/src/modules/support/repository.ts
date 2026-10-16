@@ -320,4 +320,52 @@ export class SupportRepository {
     for (const r of rows) out.set(r._id, { open: r.open, overdue: r.overdue });
     return out;
   }
+
+  /**
+   * The figures behind sellerCaseStats for several sellers, three aggregations in all: open cases of `kinds`; cases of
+   * `kinds` opened in [from, to) (how many are not closed, and the milliseconds to the seller's first reply of each
+   * replied one); decisions customer_favored or shared made in [from, to). Sellers without such cases are left out.
+   */
+  async sellerCaseFigures(
+    sellerIds: readonly string[],
+    o: { from: Date; to: Date; kinds: string[]; open: string[]; closed: string[] },
+  ): Promise<Map<string, { open: number; unresolved: number; against: number; replyMs: number[] }>> {
+    const out = new Map<string, { open: number; unresolved: number; against: number; replyMs: number[] }>();
+    if (!sellerIds.length) return out;
+    const sellers = { $in: [...new Set(sellerIds)] };
+    const [open, opened, against] = await this.reads(
+      () => this.#cases.aggregate<{ _id: string; n: number }>([{ $match: { seller_id: sellers, kind: { $in: o.kinds }, status: { $in: o.open } } }, { $group: { _id: '$seller_id', n: { $sum: 1 } } }]),
+      () =>
+        this.#cases.aggregate<{ _id: string; unresolved: number; replyMs: (number | null)[] }>([
+          { $match: { seller_id: sellers, kind: { $in: o.kinds }, opened_at: { $gte: o.from, $lt: o.to } } },
+          {
+            $group: {
+              _id: '$seller_id',
+              unresolved: { $sum: { $cond: [{ $in: [{ $ifNull: ['$status', null] }, o.closed] }, 0, 1] } },
+              // null for a case the seller has not replied to (left out below)
+              replyMs: { $push: { $cond: [{ $eq: [{ $ifNull: ['$seller_replied_at', null] }, null] }, null, { $subtract: ['$seller_replied_at', '$opened_at'] }] } },
+            },
+          },
+        ]),
+      // decision is stored as JSON: decidedAt is an ISO string, so the string bounds compare as the instants do
+      () =>
+        this.#cases.aggregate<{ _id: string; n: number }>([
+          { $match: { seller_id: sellers, 'decision.outcome': { $in: ['customer_favored', 'shared'] }, 'decision.decidedAt': { $gte: o.from.toISOString(), $lt: o.to.toISOString() } } },
+          { $group: { _id: '$seller_id', n: { $sum: 1 } } },
+        ]),
+    );
+    const of = (id: string) => {
+      let v = out.get(id);
+      if (!v) out.set(id, (v = { open: 0, unresolved: 0, against: 0, replyMs: [] }));
+      return v;
+    };
+    for (const r of open) of(r._id).open = r.n;
+    for (const r of opened) {
+      const v = of(r._id);
+      v.unresolved = r.unresolved;
+      v.replyMs = r.replyMs.filter((ms): ms is number => ms !== null).map(Number);
+    }
+    for (const r of against) of(r._id).against = r.n;
+    return out;
+  }
 }

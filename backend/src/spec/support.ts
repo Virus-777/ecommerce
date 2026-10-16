@@ -1366,6 +1366,8 @@ export interface SupportPublicApi {
   casesForOrder(orderId: string): Promise<{ caseId: string, ref: string, status: string, orderItemIds: string[] }[]>;
   /** Unresolved cases for seller performance Used by: sellers, reports. */
   sellerCaseStats(sellerId: string, range: common.DateRange): Promise<{ open: number, unresolved: number, decidedAgainstSeller: number, medianReplyMinutes: number }>;
+  /** Batched sellerCaseStats (the admin seller list): one answer per id asked for, the same as sellerCaseStats gives for it (zeros for a seller without cases), from three aggregations for all of them. Used by: sellers. */
+  caseStatsForSellers(sellerIds: string[], range: common.DateRange): Promise<Map<string, { open: number, unresolved: number, decidedAgainstSeller: number, medianReplyMinutes: number }>>;
   /** Cases opened per market day, seller and category (the reason), with first-reply figures of those cases: how many got a first reply, the minutes it took in total and how many were within the first-response target; for customer cases also the seller's first reply. Reports' Complaint patterns and Response time and case backlog. Used by: reports. */
   caseStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyCaseStats[]>;
   /** Whether a promised refund or replacement is still open Used by: workqueues. */
@@ -2401,7 +2403,7 @@ export const spec = defineModuleSpec({
   summary: "Help cases and disputes: customer help and order-problem cases opened from the order with items pre-identified, seller support requests to Marketly, disputes between customer and seller with evidence, decision, remedy and appeal, plus categories, priority, owner, SLA deadlines, assignment, escalation and resolve/reopen rules.",
   dependsOn: ["orders","access"],
   optionalDeps: ["returns","payments","shipping","sellers","messaging","media","finance","trust","wallet","workqueues","notifications","settings","audit","content","customers","identity","promotions","reports","warehouse"],
-  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","caseStatsByDay","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts","exportCustomerData","contactChannels"],
+  publicApi: ["openCase","customerIdsWithOpenCases","casesForOrder","sellerCaseStats","caseStatsForSellers","caseStatsByDay","hasUnresolvedRemedy","listOpenCasesForCustomer","getCaseForCustomer","listCasesForCustomer","getCaseForSeller","getCaseAdmin","listCasesForOrder","listCasesForSeller","getCasesForReturns","exportRows","countOpenCasesForProducts","exportCustomerData","contactChannels"],
   permissions: [
     {
       "key": "support.cases.view",

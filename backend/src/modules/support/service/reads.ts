@@ -19,6 +19,9 @@ export const ADMIN_DATASET = 'support.admin.cases';
 const OPEN = OPEN_STATUSES as string[];
 const CLOSED = CLOSED_STATUSES as string[];
 
+/** sellerCaseStats' answer (public API) */
+export type SellerCaseStats = { open: number; unresolved: number; decidedAgainstSeller: number; medianReplyMinutes: number };
+
 export class Reads {
   #registered: Promise<void> | null = null;
 
@@ -346,16 +349,27 @@ export class Reads {
     return rows.map((r) => ({ caseId: r.id, ref: r.ref, status: r.status, orderItemIds: itemsOf.get(r.id) ?? [] }));
   }
 
-  async sellerCaseStats(sellerId: string, range: common.DateRange): Promise<{ open: number; unresolved: number; decidedAgainstSeller: number; medianReplyMinutes: number }> {
+  async sellerCaseStats(sellerId: string, range: common.DateRange): Promise<SellerCaseStats> {
+    return (await this.caseStatsForSellers([sellerId], range)).get(sellerId)!;
+  }
+
+  /**
+   * sellerCaseStats of several sellers (the admin seller list), one answer per id: open customer cases (help, order
+   * problem, dispute); of those opened in the range, how many are not resolved or closed and the median minutes to the
+   * seller's first reply; decisions against the seller (customer favoured or shared) made in the range. Market days.
+   */
+  async caseStatsForSellers(sellerIds: string[], range: common.DateRange): Promise<Map<string, SellerCaseStats>> {
+    const ids = [...new Set(sellerIds)];
+    const out = new Map<string, SellerCaseStats>();
+    if (!ids.length) return out;
     const from = zonedTimeToUtc(range.from, '00:00', this.core.tz);
     const to = new Date(zonedTimeToUtc(range.to, '00:00', this.core.tz).getTime() + DAY);
-    const kinds = ['customer_help', 'order_problem', 'dispute'];
-    const [open, rows] = await Promise.all([this.core.repo.countCases({ sellerId, kinds, statuses: OPEN }), this.core.repo.find('cases', { seller_id: sellerId, opened_at: { op: '>=', value: from } })]);
-    const inRange = rows.filter((r) => r.opened_at < to && kinds.includes(r.kind));
-    const decided = await this.core.repo.find('cases', { seller_id: sellerId, decision: { op: 'is not', value: null } });
-    const against = decided.filter((c) => c.decision && ['customer_favored', 'shared'].includes(c.decision.outcome) && c.decision.decidedAt >= from.toISOString() && c.decision.decidedAt < to.toISOString());
-    const replies = inRange.filter((r) => r.facts.sellerRepliedAt).map((r) => (new Date(r.facts.sellerRepliedAt!).getTime() - r.opened_at.getTime()) / 60_000);
-    return { open, unresolved: inRange.filter((r) => !CLOSED.includes(r.status)).length, decidedAgainstSeller: against.length, medianReplyMinutes: median(replies) };
+    const figures = await this.core.repo.sellerCaseFigures(ids, { from, to, kinds: ['customer_help', 'order_problem', 'dispute'], open: OPEN, closed: CLOSED });
+    for (const id of ids) {
+      const f = figures.get(id);
+      out.set(id, { open: f?.open ?? 0, unresolved: f?.unresolved ?? 0, decidedAgainstSeller: f?.against ?? 0, medianReplyMinutes: median((f?.replyMs ?? []).map((ms) => ms / 60_000)) });
+    }
+    return out;
   }
 
   /** Cases opened per market day, seller and category, with first-reply figures (reports: Complaint patterns, Response time) */

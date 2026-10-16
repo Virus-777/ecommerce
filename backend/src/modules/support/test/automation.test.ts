@@ -200,6 +200,34 @@ describe('consumers', () => {
 });
 
 describe('public API and GraphQL', () => {
+  it('caseStatsForSellers answers every seller as sellerCaseStats does, in one batch', async () => {
+    // seller A: a case the seller answered after 90 minutes and that was decided for the customer, and an unanswered one
+    const a = await sellerCase();
+    h.clock.advance(90 * 60_000);
+    expect((await h.call('POST', `/api/seller/support/cases/${a.caseId}/messages`, tokens.seller(a.sellerId), { body: 'Sorry, checking' })).status).toBe(200);
+    await h.call('POST', `/api/admin/support/cases/${a.caseId}/escalate`, tokens.staff(), { to: 'support_lead', reason: 'Review' });
+    const decided = await h.call('POST', `/api/admin/support/cases/${a.caseId}/decide`, tokens.staff(), { outcome: 'customer_favored', remedies: [{ kind: 'refund' }], reason: 'Damaged', notifyParties: true }, { 'idempotency-key': newId() });
+    expect(decided.status, JSON.stringify(decided.body)).toBe(200);
+    const a2 = await sellerOrder(h, { sellerId: a.sellerId });
+    expect((await reportProblem(h, { customerId: a2.customerId, orderId: a2.order.id, itemIds: [a2.itemId] })).status).toBe(201);
+    // seller B: one open case; a third seller without cases
+    const b = await sellerCase();
+    const none = newId();
+    const range = { from: marketDate(h.clock.now(), -30), to: marketDate(h.clock.now()) };
+
+    const batch = await h.service.caseStatsForSellers([a.sellerId, b.sellerId, none, a.sellerId], range);
+    expect([...batch.keys()]).toEqual([a.sellerId, b.sellerId, none]);
+    for (const id of [a.sellerId, b.sellerId, none]) expect(batch.get(id)).toEqual(await h.service.sellerCaseStats(id, range));
+    expect(batch.get(a.sellerId)).toMatchObject({ decidedAgainstSeller: 1, medianReplyMinutes: 90 });
+    expect(batch.get(a.sellerId)!.unresolved).toBeGreaterThanOrEqual(1);
+    expect(batch.get(b.sellerId)).toEqual({ open: 1, unresolved: 1, decidedAgainstSeller: 0, medianReplyMinutes: 0 });
+    expect(batch.get(none)).toEqual({ open: 0, unresolved: 0, decidedAgainstSeller: 0, medianReplyMinutes: 0 });
+    // a range before the cases: only the open count stays
+    const before = { from: marketDate(h.clock.now(), -60), to: marketDate(h.clock.now(), -31) };
+    expect((await h.service.caseStatsForSellers([b.sellerId], before)).get(b.sellerId)).toEqual({ open: 1, unresolved: 0, decidedAgainstSeller: 0, medianReplyMinutes: 0 });
+    expect(await h.service.caseStatsForSellers([], range)).toEqual(new Map());
+  });
+
   it('answers the in-process reads other modules use', async () => {
     const c = await sellerCase();
     const today = marketDate(h.clock.now());

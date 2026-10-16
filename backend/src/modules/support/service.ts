@@ -62,6 +62,11 @@ export class SupportService implements SupportPublicApi {
     return this.reads.sellerCaseStats(sellerId, range);
   }
 
+  /** Batched sellerCaseStats (the admin seller list): one answer per id, from three aggregations for all of them */
+  caseStatsForSellers(sellerIds: string[], range: common.DateRange): Promise<Map<string, { open: number; unresolved: number; decidedAgainstSeller: number; medianReplyMinutes: number }>> {
+    return this.reads.caseStatsForSellers(sellerIds, range);
+  }
+
   /** Cases opened per market day, seller and category with first-reply figures (reports) */
   caseStatsByDay(range: common.DateRange, sellerId?: string): Promise<DailyCaseStats[]> {
     return this.reads.caseStatsByDay(range, sellerId);
