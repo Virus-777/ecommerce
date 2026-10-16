@@ -2833,7 +2833,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "item_notes_item_id_at_ce4f0a",
+          "key": {
+            "item_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "saved_filters": {

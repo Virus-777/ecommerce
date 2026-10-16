@@ -134,6 +134,7 @@ const item_notes = new Schema(
   },
   collectionOptions("workqueues.item_notes"),
 );
+item_notes.index({"item_id":1,"at":1}, {"name":"item_notes_item_id_at_ce4f0a"});
 
 const saved_filters = new Schema(
   {

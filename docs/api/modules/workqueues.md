@@ -559,6 +559,8 @@ Indexes: `(item_id, at)`
 | author_name | text |
 | at | timestamptz |
 
+Indexes: `(item_id, at)`
+
 **saved_filters**
 
 | Column | Type |
