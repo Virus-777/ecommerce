@@ -252,7 +252,7 @@ export class ContentTiles extends ContentBase {
     if (!catalogApi) return ids.map((id) => this.missing(id));
     const offersApi = this.ctx.tryUse('offers');
     const featured = offersApi ? await this.soft('offers.getFeaturedOfferForProduct', () => offersApi.getFeaturedOfferForProduct(ids.map((productId) => ({ productId }))), null) : null;
-    return Promise.all(
+    const rows = await Promise.all(
       ids.map(async (id) => {
         const [product, purchasable] = await Promise.all([
           this.soft('catalog.getProduct', () => catalogApi.getProduct(id), null as catalog.Product | null),
@@ -286,6 +286,10 @@ export class ContentTiles extends ContentBase {
         return r;
       }),
     );
+    // tiles are cards: the image in the thumbnail size (catalog sends the product-page size)
+    const thumbs = await this.refsMap(rows.map((r) => r.tile.image?.id), 'thumb');
+    for (const r of rows) if (r.tile.image) r.tile.image = thumbs.get(r.tile.image.id) ?? r.tile.image;
+    return rows;
   }
 
   /** Admin drawers say why a product is hidden: a suspended or closed seller */

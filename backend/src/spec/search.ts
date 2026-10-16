@@ -134,6 +134,7 @@ export interface ProductCard {
   slug: string;
   title: string;
   brandName?: string | null;
+  /** The product image in the thumbnail size (url = thumb; detailUrl for a larger view) */
   image?: common.MediaRef | null;
   /** Variant matched by the filters (e.g. color), else the featured variant */
   variantId?: string | null;
@@ -1675,6 +1676,7 @@ export const spec = defineModuleSpec({
       "catalog.product.publication_changed": "Remove Hidden or Suspended products; re-add on Active",
       "catalog.product.updated": "Reindex title, brand, category, attributes and images",
       "catalog.product.merged": "Drop the duplicate; reindex the kept product",
+      "media.product_images.rebuilt": "Product images were rebuilt at a new product image spec: queue a full reindex (search.process-dirty runs it) so result cards carry the new thumbnails",
       "offers.offer.created": "Mark the product dirty",
       "offers.offer.price_changed": "Update offer row and the product's from/featured price",
       "offers.offer.status_changed": "Update offer row; drop the product from in-stock results when it has no active offer",

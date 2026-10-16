@@ -7,6 +7,8 @@ import { SYSTEM_ACTOR } from '../../../kernel/auth/index.js';
 import { isNotImplemented } from '../../../kernel/errors/index.js';
 import type { EventPayload } from '../../../kernel/events/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import type { Product } from '../../../spec/catalog.js';
+import type * as common from '../../../spec/common.js';
 import type * as offersSpec from '../../../spec/offers.js';
 import { aggregatesFromOffers, buildDocument, type SourceOffer } from '../domain/document.js';
 import { reindexJobMachine } from '../domain/state-machines.js';
@@ -52,7 +54,7 @@ export class SearchIndexer extends SearchBase {
     const now = this.now();
     const built = buildDocument(
       {
-        product,
+        product: await this.withThumbnails(product),
         categoryPath: path,
         offers: source?.offers ?? [],
         featuredOfferId: source?.featuredOfferId ?? null,
@@ -166,6 +168,38 @@ export class SearchIndexer extends SearchBase {
     if (!doc) return;
     const rows = await this.repo.offerRows([productId]);
     await this.repo.updateDocument(productId, aggregatesFromOffers(doc, rows), this.now());
+  }
+
+  /**
+   * Result cards show thumbnails: the product's and its variants' images in media's thumb size (catalog sends the
+   * product-page size). Without media, the thumbUrl catalog's refs carry.
+   */
+  protected async withThumbnails(product: Product): Promise<Product> {
+    const ids = [...new Set([...product.images, ...product.variants.flatMap((v) => v.images)].map((i) => i.id))];
+    const thumbs = ids.length ? await this.optional('media', 'thumbnails', (m) => m.refs(ids, 'thumb')) : undefined;
+    const byId = new Map((thumbs ?? []).map((r) => [r.id, r]));
+    const thumb = (r: common.MediaRef): common.MediaRef => byId.get(r.id) ?? (r.thumbUrl ? { ...r, url: r.thumbUrl } : r);
+    return { ...product, images: product.images.map(thumb), variants: product.variants.map((v) => ({ ...v, images: v.images.map(thumb) })) };
+  }
+
+  /* ---------------------------------------------------------------- consumers: media */
+
+  /** media.product_images.rebuilt: new thumbnails for every product, so a full reindex is queued (search.process-dirty runs it) */
+  async onProductImagesRebuiltFromMedia(e: EventPayload<'media.product_images.rebuilt'>) {
+    if (await this.repo.activeFullJob()) return;
+    await this.repo.insertJob({
+      id: newId(),
+      scope: 'all',
+      ids: [],
+      state: 'queued',
+      total: 0,
+      processed: 0,
+      requested_by: JSON.stringify({ kind: SYSTEM_ACTOR.kind, id: SYSTEM_ACTOR.id ?? null, name: 'Product images rebuilt' }),
+      reason: `Product images rebuilt at the product image spec (${e.aspectRatio}, ${e.rebuilt} images)`,
+      started_at: null,
+      finished_at: null,
+      error: null,
+    });
   }
 
   /* ---------------------------------------------------------------- consumers: catalog */

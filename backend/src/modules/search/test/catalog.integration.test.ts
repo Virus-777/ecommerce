@@ -121,6 +121,8 @@ describe('search with the real catalog', () => {
     expect(r.body.items.map((h: any) => h.product.productId)).toEqual([id]);
     expect(r.body.items[0].product).toMatchObject({ title: 'Aurora studio headphones', brandName: 'Aurora Sound', price: { amount: 21900 }, sellerName: 'Official Store', official: true });
     expect(r.body.items[0].product.image?.id).toBe(image);
+    // result cards carry the thumbnail (the product page uses detailUrl)
+    expect(r.body.items[0].product.image).toMatchObject({ url: expect.stringMatching(/\/thumb\.webp/), width: 320, height: 320, detailUrl: expect.stringMatching(/\/detail\.webp/) });
     // category path (parent included), brand facet, barcode
     expect((await call('GET', `/api/store/search/products?category=${parent.body.slug}`, undefined, visitor)).body.items).toHaveLength(1);
     const ctx = (await call('GET', `/api/store/search/facets?category=${cat.body.slug}`, undefined, visitor)).body;
@@ -131,5 +133,13 @@ describe('search with the real catalog', () => {
     const hidden = await call('POST', `/api/admin/catalog/products/${id}/publication`, { publication: 'hidden', reason: 'Checking a complaint' });
     expect(hidden.status, JSON.stringify(hidden.body)).toBe(200);
     expect((await call('GET', '/api/store/search/products?q=studio+headphones', undefined, visitor)).body.items).toEqual([]);
+  });
+
+  it('queues a full reindex when media rebuilt the product images (new thumbnails)', async () => {
+    app.kernel.events.publish('media', 'media.product_images.rebuilt', { aspectRatio: '1:1', settingsVersion: 2, rebuilt: 12, flagged: 0, cleared: 0 }, { actor: { kind: 'system' } });
+    await app.kernel.events.drain();
+    const again = await call('POST', '/api/admin/search/reindex-jobs', { scope: 'all', reason: 'Check' });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatchObject({ code: 'REINDEX_ALREADY_RUNNING' });
   });
 });

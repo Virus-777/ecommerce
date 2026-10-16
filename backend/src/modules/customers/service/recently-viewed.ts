@@ -67,7 +67,8 @@ export class RecentlyViewed {
     const [products, featured, refs] = await Promise.all([
       this.core.soft('catalog products', catalog && (() => Promise.all(rows.map((r) => catalog.getProduct(r.product_id))))),
       this.core.soft('featured offers', offers && (() => offers.getFeaturedOfferForProduct(rows.map((r) => ({ productId: r.product_id, ...(r.variant_id ? { variantId: r.variant_id } : {}) }))))),
-      this.core.soft('media refs', media && imageIds.length ? () => media.refs(imageIds, 'small') : undefined),
+      // cards: the thumbnail size (small answers thumb for product images too)
+      this.core.soft('media refs', media && imageIds.length ? () => media.refs(imageIds, 'thumb') : undefined),
     ]);
     const images = new Map((refs ?? []).map((m) => [m.id, m]));
     return rows.map((r, i) => {

@@ -133,7 +133,7 @@ Finding products: a product index built from catalog, offers, inventory and revi
 | slug | `string` |
 | title | `string` |
 | brandName | `string?` |
-| image | `MediaRef?` |
+| image | `MediaRef?` The product image in the thumbnail size (url = thumb; detailUrl for a larger view) |
 | variantId | `uuid?` Variant matched by the filters (e.g. color), else the featured variant |
 | variantCue | `string?` e.g. '3 colors' or 'Midnight black' |
 | rating | `number?` Null when there are no reviews (never shown as 0 stars) |
@@ -751,6 +751,7 @@ Indexes: `pk (product_id, day)`, `(day)`
 | `catalog.product.publication_changed` | catalog | Remove Hidden or Suspended products; re-add on Active |
 | `catalog.product.updated` | catalog | Reindex title, brand, category, attributes and images |
 | `catalog.product.merged` | catalog | Drop the duplicate; reindex the kept product |
+| `media.product_images.rebuilt` | media | Product images were rebuilt at a new product image spec: queue a full reindex (search.process-dirty runs it) so result cards carry the new thumbnails |
 | `offers.offer.created` | offers | Mark the product dirty |
 | `offers.offer.price_changed` | offers | Update offer row and the product's from/featured price |
 | `offers.offer.status_changed` | offers | Update offer row; drop the product from in-stock results when it has no active offer |

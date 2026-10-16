@@ -450,7 +450,7 @@ Indexes: `pk (owner_kind, owner_id, day)`
 | `media.asset.restored` | A removed file is restored | `{ assetId: uuid, usages: Usage[], by: Actor }` | - |
 | `media.asset.deleted` | A file is deleted | `{ assetId: uuid, owner: MediaOwner }` | - |
 | `media.product_images.recrop_changed` | media.rebuild-product-renditions found product images whose aspect ratio no longer matches the product image spec (recrop true: flagged wrong_aspect, not blocking), or matches it again (recrop false); one event per batch of up to 50 images | `{ aspectRatio: string, items: RecropItem[] }` | catalog |
-| `media.product_images.rebuilt` | media.rebuild-product-renditions finished a run that changed product images (their renditions are rebuilt at the spec in force): search re-indexes products | `{ aspectRatio: string, settingsVersion: int?, rebuilt: int, flagged: int, cleared: int }` | - |
+| `media.product_images.rebuilt` | media.rebuild-product-renditions finished a run that changed product images (their renditions are rebuilt at the spec in force): search re-indexes products | `{ aspectRatio: string, settingsVersion: int?, rebuilt: int, flagged: int, cleared: int }` | search |
 
 | Consumes | From | Does |
 |---|---|---|

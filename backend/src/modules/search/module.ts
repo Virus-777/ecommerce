@@ -16,7 +16,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.1.0',
   schemas,
   register(ctx) {
     // SEARCH_ENGINE: mongo (stemmed words and prefixes over the read model; development and tests) or opensearch (production)
@@ -34,6 +34,7 @@ export default defineModule({
     ctx.events.on("catalog.product.publication_changed", (e) => service.onProductPublicationChangedFromCatalog(e.payload));
     ctx.events.on("catalog.product.updated", (e) => service.onProductUpdatedFromCatalog(e.payload));
     ctx.events.on("catalog.product.merged", (e) => service.onProductMergedFromCatalog(e.payload));
+    ctx.events.on("media.product_images.rebuilt", (e) => service.onProductImagesRebuiltFromMedia(e.payload));
     ctx.events.on("offers.offer.created", (e) => service.onOfferCreatedFromOffers(e.payload));
     ctx.events.on("offers.offer.price_changed", (e) => service.onOfferPriceChangedFromOffers(e.payload));
     ctx.events.on("offers.offer.status_changed", (e) => service.onOfferStatusChangedFromOffers(e.payload));

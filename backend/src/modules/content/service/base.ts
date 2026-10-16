@@ -215,11 +215,11 @@ export class ContentBase {
     return this.ctx.use('media');
   }
 
-  /** MediaRefs by id (files that are not ready are left out) */
-  protected async refsMap(ids: (string | null | undefined)[]): Promise<Map<string, common.MediaRef>> {
+  /** MediaRefs by id (files that are not ready are left out): banners and covers large, product tiles thumb */
+  protected async refsMap(ids: (string | null | undefined)[], size: 'large' | 'thumb' = 'large'): Promise<Map<string, common.MediaRef>> {
     const list = unique(ids.filter((i): i is string => Boolean(i)));
     if (!list.length) return new Map();
-    const refs = await this.soft('media.refs', () => this.media.refs(list, 'large'), [] as common.MediaRef[]);
+    const refs = await this.soft('media.refs', () => this.media.refs(list, size), [] as common.MediaRef[]);
     return new Map(refs.map((r) => [r.id, r]));
   }
 
