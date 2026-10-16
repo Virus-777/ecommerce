@@ -1175,7 +1175,7 @@ Indexes: `(seller_id, effective_from desc)`
 | completed_at | timestamptz? |
 | updated_at | timestamptz |
 
-Indexes: `(seller_id, status, response_due_at)`, `(customer_id, requested_at desc)`, `(order_id)`, `(status, response_due_at)`, `(owner_staff_id, status)`
+Indexes: `(seller_id, status, response_due_at)`, `(seller_id, requested_at desc)`, `(customer_id, requested_at desc)`, `(order_id)`, `(status, response_due_at)`, `(status, requested_at desc)`, `(owner_staff_id, status)`
 
 **return_items**
 
@@ -1193,7 +1193,7 @@ Indexes: `(seller_id, status, response_due_at)`, `(customer_id, requested_at des
 | unit_price | bigint |
 | currency | text |
 
-Indexes: `(order_item_id)`
+Indexes: `(return_id)`, `(order_item_id)`, `(product_id)`
 
 **return_shipments**: Return parcels, separate from the original delivery
 
@@ -1220,7 +1220,7 @@ Indexes: `(order_item_id)`
 | created_at | timestamptz |
 | delivered_at | timestamptz? |
 
-Indexes: `(return_id)`, `(tracking_number)`, `(status, drop_off_by)`
+Indexes: `(return_id)`, `(tracking_number)`, `(shipping_shipment_id)`, `(status, drop_off_by)`
 
 **inspection_drafts**: One unsent inspection and remedy draft per return
 
@@ -1369,7 +1369,7 @@ Indexes: `(refund_request_id, at)`
 | shipped_at | timestamptz? |
 | delivered_at | timestamptz? |
 
-Indexes: `(return_id)`, `(case_id)`, `(order_id)`, `(status)`
+Indexes: `(return_id)`, `(case_id)`, `(order_id)`, `(shipping_shipment_id)`, `(status)`
 
 **return_events**: Timeline and action history per return (who, what, reason)
 

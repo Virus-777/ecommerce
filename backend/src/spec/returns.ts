@@ -5400,6 +5400,13 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "returns_seller_id_requested_at_162d0d",
+          "key": {
+            "seller_id": 1,
+            "requested_at": -1
+          }
+        },
+        {
           "name": "returns_customer_id_requested_at_d8469f",
           "key": {
             "customer_id": 1,
@@ -5417,6 +5424,13 @@ export const spec = defineModuleSpec({
           "key": {
             "status": 1,
             "response_due_at": 1
+          }
+        },
+        {
+          "name": "returns_status_requested_at_675832",
+          "key": {
+            "status": 1,
+            "requested_at": -1
           }
         },
         {
@@ -5525,9 +5539,21 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
+          "name": "return_items_return_id_a479ef",
+          "key": {
+            "return_id": 1
+          }
+        },
+        {
           "name": "return_items_order_item_id_219b1b",
           "key": {
             "order_item_id": 1
+          }
+        },
+        {
+          "name": "return_items_product_id_6c3e3e",
+          "key": {
+            "product_id": 1
           }
         }
       ],
@@ -5712,6 +5738,12 @@ export const spec = defineModuleSpec({
           "name": "return_shipments_tracking_number_da23e3",
           "key": {
             "tracking_number": 1
+          }
+        },
+        {
+          "name": "return_shipments_shipping_shipment_id_ab8566",
+          "key": {
+            "shipping_shipment_id": 1
           }
         },
         {
@@ -6762,6 +6794,12 @@ export const spec = defineModuleSpec({
           "name": "replacements_order_id_4c5e85",
           "key": {
             "order_id": 1
+          }
+        },
+        {
+          "name": "replacements_shipping_shipment_id_ab8566",
+          "key": {
+            "shipping_shipment_id": 1
           }
         },
         {

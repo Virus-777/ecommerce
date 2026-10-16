@@ -125,9 +125,11 @@ const returns = new Schema(
 );
 returns.index({"ref":1}, {"name":"returns_ref_8cef23","unique":true});
 returns.index({"seller_id":1,"status":1,"response_due_at":1}, {"name":"returns_seller_id_status_response_due_at_499c6c"});
+returns.index({"seller_id":1,"requested_at":-1}, {"name":"returns_seller_id_requested_at_162d0d"});
 returns.index({"customer_id":1,"requested_at":-1}, {"name":"returns_customer_id_requested_at_d8469f"});
 returns.index({"order_id":1}, {"name":"returns_order_id_4c5e85"});
 returns.index({"status":1,"response_due_at":1}, {"name":"returns_status_response_due_at_746784"});
+returns.index({"status":1,"requested_at":-1}, {"name":"returns_status_requested_at_675832"});
 returns.index({"owner_staff_id":1,"status":1}, {"name":"returns_owner_staff_id_status_e7d1fe"});
 
 const return_items = new Schema(
@@ -148,7 +150,9 @@ const return_items = new Schema(
   },
   collectionOptions("returns.return_items"),
 );
+return_items.index({"return_id":1}, {"name":"return_items_return_id_a479ef"});
 return_items.index({"order_item_id":1}, {"name":"return_items_order_item_id_219b1b"});
+return_items.index({"product_id":1}, {"name":"return_items_product_id_6c3e3e"});
 
 /** Return parcels, separate from the original delivery */
 const return_shipments = new Schema(
@@ -180,6 +184,7 @@ const return_shipments = new Schema(
 );
 return_shipments.index({"return_id":1}, {"name":"return_shipments_return_id_a479ef"});
 return_shipments.index({"tracking_number":1}, {"name":"return_shipments_tracking_number_da23e3"});
+return_shipments.index({"shipping_shipment_id":1}, {"name":"return_shipments_shipping_shipment_id_ab8566"});
 return_shipments.index({"status":1,"drop_off_by":1}, {"name":"return_shipments_status_drop_off_by_5874f9"});
 
 /** One unsent inspection and remedy draft per return */
@@ -361,6 +366,7 @@ replacements.index({"idempotency_key":1}, {"name":"replacements_idempotency_key_
 replacements.index({"return_id":1}, {"name":"replacements_return_id_a479ef"});
 replacements.index({"case_id":1}, {"name":"replacements_case_id_ddb8b4"});
 replacements.index({"order_id":1}, {"name":"replacements_order_id_4c5e85"});
+replacements.index({"shipping_shipment_id":1}, {"name":"replacements_shipping_shipment_id_ab8566"});
 replacements.index({"status":1}, {"name":"replacements_status_1a3d22"});
 
 /** Timeline and action history per return (who, what, reason) */
