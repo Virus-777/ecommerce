@@ -201,6 +201,21 @@ describe('labels, claims, wallet and previews', () => {
     expect(rows.rows.length).toBeGreaterThan(0);
     await expect(k.svc.exportRows('finance.admin.ledger', {}, { kind: 'seller', sellerId: S }, undefined)).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });
+
+  it('continues a ledger export after the cursor row, within the date range', async () => {
+    const staff = { kind: 'staff', accountId: newId() } as never;
+    const range = { from: today(), to: today() };
+    const all = (await k.svc.exportRows('finance.admin.ledger', range, staff, undefined)).rows as { description: string; amount: string }[];
+    expect(all.length).toBeGreaterThan(2);
+    // the cursor names the (at, id) of the last row written: the export goes on with the rows after it
+    const entries = await k.svc.core.repo.find('ledger_entries', {}, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    const mid = entries[1]!;
+    const rest = (await k.svc.exportRows('finance.admin.ledger', range, staff, `${mid.at.toISOString()}|${mid.id}`)).rows;
+    expect(rest).toEqual(all.slice(2));
+    // nothing after the range: no rows and no cursor
+    const later = await k.svc.exportRows('finance.admin.ledger', { from: '2099-01-01', to: '2099-01-02' }, staff, undefined);
+    expect(later).toEqual({ rows: [] });
+  });
 });
 
 describe('daily finance checks', () => {

@@ -14,7 +14,7 @@ import type { Correction, CorrectionInput, ReconChecklistItem, ReconDay, ReconIt
 import { addDays, dayStart, decodeActor, detId, encodeActor, fmt, isDate, SYSTEM } from '../domain/rules.js';
 import { reconciliationItemMachine } from '../domain/state-machines.js';
 import { reference } from '../mappers.js';
-import type { ReconDayRec, ReconItemRec } from '../ports.js';
+import type { AccountRec, ReconDayRec, ReconItemRec } from '../ports.js';
 import type { Where } from '../../../kernel/mongo/index.js';
 import { invalid, notFound, Part, type By } from './core.js';
 
@@ -320,26 +320,34 @@ export class ReconPart extends Part {
     // earlier seller mismatches still open: closed as matched once the seller's balance matches the ledger again
     const openSeller = new Map<string, ReconItemRec[]>();
     for (const r of await this.repo.find('recon_items', { check: 'seller_amounts', status: 'open' }, { limit: 5000 })) if (r.ref_id) openSeller.set(r.ref_id, [...(openSeller.get(r.ref_id) ?? []), r]);
-    // seller balances against the ledger
-    for (const a of await this.repo.find('seller_accounts', {}, { limit: 5000 })) {
-      const total = await this.repo.sum('ledger_entries', 'amount', { seller_id: a.seller_id });
-      const held = await this.repo.sum('ledger_entries', 'amount', { seller_id: a.seller_id, bucket: 'held' });
-      const pending = await this.repo.pendingFromLedger(a.seller_id);
-      const actual = a.pending + a.available + a.held;
-      const diff = actual - total || a.held - held || a.pending - pending;
-      if (diff === 0) {
-        for (const r of openSeller.get(a.seller_id) ?? []) {
-          const changed = await this.repo.updateWhere('recon_items', { id: r.id, status: 'open' }, { status: this.core.step(reconciliationItemMachine, 'open', 'autoMatch'), difference: 0, note: `The balance matches the ledger again (checked for ${date})` });
-          if (changed) this.closed(r, 'matched');
+    // seller balances against the ledger: every account, 500 at a time, with the ledger sums of a batch in two aggregations
+    for (let after: string | null = null; ; ) {
+      const accounts: AccountRec[] = await this.repo.find('seller_accounts', after ? { seller_id: { op: '>', value: after } } : {}, { orderBy: [['seller_id', 'asc']], limit: 500 });
+      if (!accounts.length) break;
+      after = accounts.at(-1)!.seller_id;
+      const ids = accounts.map((a) => a.seller_id);
+      const sums = await this.repo.ledgerTotalsBySeller(ids);
+      const pendings = await this.repo.pendingFromLedgerBySeller(ids);
+      for (const a of accounts) {
+        const { total, held } = sums.get(a.seller_id) ?? { total: 0, held: 0 };
+        const pending = pendings.get(a.seller_id) ?? 0;
+        const actual = a.pending + a.available + a.held;
+        const diff = actual - total || a.held - held || a.pending - pending;
+        if (diff === 0) {
+          for (const r of openSeller.get(a.seller_id) ?? []) {
+            const changed = await this.repo.updateWhere('recon_items', { id: r.id, status: 'open' }, { status: this.core.step(reconciliationItemMachine, 'open', 'autoMatch'), difference: 0, note: `The balance matches the ledger again (checked for ${date})` });
+            if (changed) this.closed(r, 'matched');
+          }
+        } else {
+          const name = await this.core.sellerName(a.seller_id);
+          await this.upsertItem({ id: detId(`seller_amounts:${date}:${a.seller_id}`), date, check: 'seller_amounts', ref_kind: 'seller', ref_id: a.seller_id, subject: name, description: `Balance ${fmt(actual, a.currency)} vs ledger ${fmt(total, a.currency)} (held ${fmt(a.held, a.currency)} vs ${fmt(held, a.currency)})`, expected: total, actual, difference: diff });
         }
-      } else {
-        const name = await this.core.sellerName(a.seller_id);
-        await this.upsertItem({ id: detId(`seller_amounts:${date}:${a.seller_id}`), date, check: 'seller_amounts', ref_kind: 'seller', ref_id: a.seller_id, subject: name, description: `Balance ${fmt(actual, a.currency)} vs ledger ${fmt(total, a.currency)} (held ${fmt(a.held, a.currency)} vs ${fmt(held, a.currency)})`, expected: total, actual, difference: diff });
       }
+      if (accounts.length < 500) break;
     }
     // the provider's deposit against the day's captures
     const tz = this.core.tz();
-    const captures = (await this.repo.find('captures', { captured_at: { op: '>=', value: dayStart(date, tz) } })).filter((c) => c.captured_at < dayStart(addDays(date, 1), tz));
+    const captures = await this.repo.findInRange('captures', 'captured_at', dayStart(date, tz), dayStart(addDays(date, 1), tz));
     const deposit = await this.core.provider.settlementReport(date, this.core.currency());
     if (deposit) {
       const expected = captures.reduce((s, c) => s + c.card_amount, 0);

@@ -13,7 +13,7 @@ import type * as identity from '../../../spec/identity.js';
 import type { DailyCompanyCost, DailySellerIncome, FinanceOverview, MarketplaceIncome, SellerFinanceDetail, SellerFinanceRow, TradingSummary, TradingTarget, TradingTargetInput } from '../../../spec/finance.js';
 import type * as reports from '../../../spec/reports.js';
 import { addDays, dayStart, daysBetween, daysInMonth, encodeActor, isDate, isPeriod, marketDate, TYPE_LABELS, type EntryType } from '../domain/rules.js';
-import { toTarget } from '../mappers.js';
+import { toOwed, toTarget } from '../mappers.js';
 import type { FundingRec, TargetRec, TradingRec } from '../ports.js';
 import type { Where } from '../../../kernel/mongo/index.js';
 import { invalid, notFound, Part, type By } from './core.js';
@@ -35,12 +35,12 @@ export class ReportsPart extends Part {
   }
 
   async tradingRows(from: Date, to: Date): Promise<TradingRec[]> {
-    return (await this.repo.find('trading_entries', { at: { op: '>=', value: from } })).filter((r) => r.at < to);
+    return this.repo.findInRange('trading_entries', 'at', from, to);
   }
 
   /** Coupon discount funding rows (platform and seller parts, reversals negative) in a range */
   async fundingRows(from: Date, to: Date): Promise<FundingRec[]> {
-    return (await this.repo.find('discount_funding', { at: { op: '>=', value: from } })).filter((r) => r.at < to);
+    return this.repo.findInRange('discount_funding', 'at', from, to);
   }
 
   /* ---------------------------------------------------------------- overview and marketplace income */
@@ -51,10 +51,10 @@ export class ReportsPart extends Part {
     const get = (t: EntryType) => sums.get(t) ?? 0;
     const official = await this.tradingRows(r.from, r.to); // trading_entries is Official Store trading only
     const sum = (rows: TradingRec[], kind: string, refKind?: string) => rows.filter((t) => t.kind === kind && (!refKind || t.ref_kind === refKind)).reduce((s, t) => s + t.amount, 0);
-    const inRange = (await this.repo.find('captures', { captured_at: { op: '>=', value: r.from } })).filter((c) => c.captured_at < r.to);
-    const accounts = await this.repo.find('seller_accounts', {});
-    const refunds = (await this.repo.find('refund_allocations', { applied_at: { op: '>=', value: r.from } })).filter((a) => a.applied_at! < r.to);
-    const paid = (await this.repo.find('payouts', { status: 'paid', paid_at: { op: '>=', value: r.from } })).filter((p) => p.paid_at! < r.to);
+    const inRange = await this.repo.findInRange('captures', 'captured_at', r.from, r.to);
+    const accounts = await this.repo.accountTotals();
+    const refunds = await this.repo.findInRange('refund_allocations', 'applied_at', r.from, r.to);
+    const paid = await this.repo.findInRange('payouts', 'paid_at', r.from, r.to, { status: 'paid' });
     const lastRun = await this.repo.findOne('payout_runs', { status: ['releasing', 'completed'] }, { orderBy: [['released_at', 'desc']] });
     const byRedemption = new Map<string, { platform: number; seller: number }>();
     for (const c of await this.fundingRows(r.from, r.to)) {
@@ -73,7 +73,6 @@ export class ReportsPart extends Part {
     const recon = await this.repo.find('recon_items', { status: ['open', 'correction_pending'] });
     const failed = await this.repo.find('payouts', { status: 'failed' });
     const retried = failed.length ? new Set((await this.repo.find('payouts', { retry_of: failed.map((f) => f.id) })).map((p) => p.retry_of)) : new Set<string | null>();
-    const held = accounts.reduce((s, a) => s + Math.max(0, a.held), 0);
     return {
       range: { from: q.from, to: q.to },
       basis: `counted by ${q.basis === 'order_date' ? 'order date' : 'payment date'}, ${this.core.currency()}, ${this.core.tz()}`,
@@ -84,15 +83,15 @@ export class ReportsPart extends Part {
       shippingCollected: this.money(get('shipping_charge') - sum(official, 'shipping_expense', 'order_item')),
       marketplaceFeeIncome: this.money(-(get('marketplace_fee') + get('fee_refund'))),
       sellerEarnings: this.money(get('sale') + get('shipping_charge') + get('seller_discount') + get('marketplace_fee') + get('cancellation') + get('fee_refund')),
-      owedToSellers: this.money(accounts.reduce((s, a) => s + Math.max(0, a.pending + a.available + a.held), 0)),
-      owedPending: this.money(accounts.reduce((s, a) => s + a.pending, 0)),
-      owedAvailable: this.money(accounts.reduce((s, a) => s + Math.max(0, a.available), 0)),
+      owedToSellers: this.money(accounts.owed),
+      owedPending: this.money(accounts.pending),
+      owedAvailable: this.money(accounts.positiveAvailable),
       refundsSent: this.money(refunds.reduce((s, a) => s + a.seller_share + a.platform_share, 0)),
       refundsSentCount: refunds.length,
       // refunds payments could not send (payments.refund.failed marks their funding split), not sent since
       refundsFailing: (await this.repo.find('refund_allocations', { applied_at: null })).filter((a) => (a.breakdown as { failure?: unknown } | null)?.failure).length,
-      holds: this.money(held),
-      holdSellers: accounts.filter((a) => a.held > 0).length,
+      holds: this.money(accounts.positiveHeld),
+      holdSellers: accounts.heldSellers,
       paidOut: this.money(paid.reduce((s, p) => s + p.amount, 0)),
       lastRunRef: lastRun?.ref ?? null,
       discountFunding: { platformCoupons: this.money(platformCoupons), sellerMarkdowns: this.money(sellerMarkdowns), sharedCampaigns: this.money(shared), total: this.money(platformCoupons + sellerMarkdowns + shared) },
@@ -105,8 +104,8 @@ export class ReportsPart extends Part {
     const sums = await this.repo.typeSums(r.from, r.to, ['sale', 'cancellation', 'marketplace_fee', 'fee_refund', 'ad_charge']);
     const get = (t: string) => sums.get(t) ?? 0;
     const platformFunding = (await this.fundingRows(r.from, r.to)).filter((f) => f.funded_by === 'platform');
-    const accounts = await this.repo.find('seller_accounts', {});
-    const paid = (await this.repo.find('payouts', { status: 'paid', paid_at: { op: '>=', value: r.from } })).filter((p) => p.paid_at! < r.to);
+    const accounts = await this.repo.accountTotals();
+    const paid = await this.repo.findInRange('payouts', 'paid_at', r.from, r.to, { status: 'paid' });
     const feeIncome = -get('marketplace_fee');
     const feeRefunds = get('fee_refund');
     return {
@@ -117,8 +116,8 @@ export class ReportsPart extends Part {
       netFeeIncome: this.money(feeIncome - feeRefunds),
       adIncome: this.money(-get('ad_charge') - (await this.adCredits(r.from, r.to)).reduce((s, e) => s + e.amount, 0)),
       platformDiscountCost: this.money(platformFunding.reduce((s, f) => s + f.amount, 0)),
-      owedToSellers: this.money(accounts.reduce((s, a) => s + Math.max(0, a.pending + a.available + a.held), 0)),
-      holds: this.money(accounts.reduce((s, a) => s + Math.max(0, a.held), 0)),
+      owedToSellers: this.money(accounts.owed),
+      holds: this.money(accounts.positiveHeld),
       payoutsCompleted: this.money(paid.reduce((s, p) => s + p.amount, 0)),
     };
   }
@@ -170,8 +169,7 @@ export class ReportsPart extends Part {
 
   /** Credits of ad charges (charge_credit on an ad campaign) in a range */
   async adCredits(from: Date, to: Date, sellerId?: string) {
-    const rows = await this.repo.find('ledger_entries', { type: 'charge_credit', ref_kind: 'ad_campaign', at: { op: '>=', value: from }, ...(sellerId ? { seller_id: sellerId } : {}) });
-    return rows.filter((e) => e.at < to);
+    return this.repo.findInRange('ledger_entries', 'at', from, to, { type: 'charge_credit', ref_kind: 'ad_campaign', ...(sellerId ? { seller_id: sellerId } : {}) });
   }
 
   /* ---------------------------------------------------------------- company trading */
@@ -276,34 +274,36 @@ export class ReportsPart extends Part {
       const ids = new Set((found?.items ?? []).map((s) => s.id));
       accounts = accounts.filter((a) => ids.has(a.seller_id) || a.seller_id === f.q!.trim());
     }
-    const owed = await this.repo.find('amounts_owed', { status: 'open' });
-    const dests = await this.core.destinationStatuses(accounts.map((a) => a.seller_id));
+    const owedBySeller = new Map<string, number>();
+    for (const o of await this.repo.find('amounts_owed', { status: 'open' })) owedBySeller.set(o.seller_id, (owedBySeller.get(o.seller_id) ?? 0) + o.remaining);
+    // destination statuses of every account only when the filter needs them, else of the page
+    let dests = f.filter === 'destination_issue' ? await this.core.destinationStatuses(accounts.map((a) => a.seller_id)) : undefined;
     if (f.filter === 'negative') accounts = accounts.filter((a) => a.available < 0);
     else if (f.filter === 'held') accounts = accounts.filter((a) => a.held > 0);
-    else if (f.filter === 'owed') accounts = accounts.filter((a) => owed.some((o) => o.seller_id === a.seller_id));
-    else if (f.filter === 'destination_issue') accounts = accounts.filter((a) => dests.get(a.seller_id)!.status !== 'verified');
+    else if (f.filter === 'owed') accounts = accounts.filter((a) => owedBySeller.has(a.seller_id));
+    else if (f.filter === 'destination_issue') accounts = accounts.filter((a) => dests!.get(a.seller_id)!.status !== 'verified');
     const paged = pageOf(accounts, page);
-    const names = await this.core.sellerInfo(paged.items.map((a) => a.seller_id));
-    const minimum = await this.core.num('minimumPayout', 2500);
-    const items: SellerFinanceRow[] = [];
-    for (const a of paged.items) {
-      const last = await this.repo.findOne('payouts', { seller_id: a.seller_id }, { orderBy: [['requested_on', 'desc']] });
-      const o = owed.filter((x) => x.seller_id === a.seller_id).reduce((s, x) => s + x.remaining, 0);
-      items.push({ sellerId: a.seller_id, sellerName: names.get(a.seller_id)?.name ?? 'Seller', pending: this.money(a.pending), available: this.money(a.available), held: this.money(a.held), negative: a.available < 0, owed: o ? this.money(o) : null, nextPayout: a.available >= minimum ? this.money(a.available) : null, destination: dests.get(a.seller_id)!, lastPayoutStatus: last?.status ?? null });
-    }
+    const ids = paged.items.map((a) => a.seller_id);
+    const [names, minimum, last] = await Promise.all([this.core.sellerInfo(ids), this.core.num('minimumPayout', 2500), this.repo.lastPayouts(ids)]);
+    dests ??= await this.core.destinationStatuses(ids);
+    const items = paged.items.map((a): SellerFinanceRow => {
+      const o = owedBySeller.get(a.seller_id) ?? 0;
+      return { sellerId: a.seller_id, sellerName: names.get(a.seller_id)?.name ?? 'Seller', pending: this.money(a.pending), available: this.money(a.available), held: this.money(a.held), negative: a.available < 0, owed: o ? this.money(o) : null, nextPayout: a.available >= minimum ? this.money(a.available) : null, destination: dests!.get(a.seller_id)!, lastPayoutStatus: last.get(a.seller_id)?.status ?? null };
+    });
     return { ...paged, items };
   }
 
   async sellerDetail(sellerId: string): Promise<SellerFinanceDetail> {
-    const balances = await this.parts.ledger.balances(sellerId);
-    const payouts = await this.repo.find('payouts', { seller_id: sellerId }, { orderBy: [['requested_on', 'desc']], limit: 5 });
-    const holds = await this.repo.find('holds', { seller_id: sellerId, status: 'active' }, { orderBy: [['review_date', 'asc']] });
-    const owed = await this.repo.find('amounts_owed', { seller_id: sellerId, status: 'open' });
-    const adjustments = await this.repo.find('adjustments', { seller_id: sellerId }, { orderBy: [['created_at', 'desc']], limit: 10 });
-    const acct = await this.repo.findOne('seller_accounts', { seller_id: sellerId });
+    const [balances, payouts, holds, owed, adjustments, acct] = await Promise.all([
+      this.parts.ledger.balances(sellerId),
+      this.repo.find('payouts', { seller_id: sellerId }, { orderBy: [['requested_on', 'desc']], limit: 5 }),
+      this.repo.find('holds', { seller_id: sellerId, status: 'active' }, { orderBy: [['review_date', 'asc']] }),
+      this.repo.find('amounts_owed', { seller_id: sellerId, status: 'open' }),
+      this.repo.find('adjustments', { seller_id: sellerId }, { orderBy: [['created_at', 'desc']], limit: 10 }),
+      this.repo.findOne('seller_accounts', { seller_id: sellerId }),
+    ]);
     const rule = await this.core.ruleAt(this.now(), acct?.fee_override_set_id);
     const name = balances.holds[0]?.sellerName ?? (await this.core.sellerName(sellerId));
-    const { toOwed } = await import('../mappers.js');
     const approvals = await this.core.approvalInfos(owed.map((o) => o.approval_request_id));
     return {
       balances,
@@ -374,14 +374,20 @@ export class ReportsPart extends Part {
         if (principal.kind !== 'seller' || !principal.sellerId) throw new AppError('FORBIDDEN', 'Seller ledger exports are for the seller');
         sellerId = principal.sellerId;
       } else if (principal.kind !== 'staff') throw new AppError('FORBIDDEN', 'Staff only');
-      const where: Where<import('../ports.js').EntryRec> = {};
-      if (sellerId) where.seller_id = sellerId;
-      if (f.from && isDate(f.from)) where.at = { op: '>=', value: dayStart(f.from, tz) };
-      let rows = await this.repo.find('ledger_entries', where, { orderBy: [['at', 'asc'], ['id', 'asc']], offset, limit: limit + 1 });
-      if (f.to && isDate(f.to)) rows = rows.filter((r) => r.at < dayStart(addDays(f.to!, 1), tz));
-      const names = dataset === 'finance.admin.ledger' ? await this.core.sellerInfo(rows.map((r) => r.seller_id)) : new Map();
-      const out = rows.slice(0, limit).map((r) => ({ ...(dataset === 'finance.admin.ledger' ? { seller: names.get(r.seller_id)?.name ?? r.seller_id } : {}), date: marketDate(r.at, tz), type: TYPE_LABELS[r.type as EntryType] ?? r.type, reference: r.ref_label ?? r.ref_id, description: r.description, amount: money(r.amount), balanceAfter: money(r.balance_after) }));
-      return { rows: out, ...(rows.length > limit ? { nextCursor: String(offset + limit) } : {}) };
+      // keyset cursor: the (at, id) of the last row written ("<iso>|<id>")
+      const [afterAt, afterId] = cursor?.split('|') ?? [];
+      const rows = await this.repo.ledgerBatch({
+        sellerId,
+        from: f.from && isDate(f.from) ? dayStart(f.from, tz) : undefined,
+        to: f.to && isDate(f.to) ? dayStart(addDays(f.to, 1), tz) : undefined,
+        after: afterAt && afterId ? { at: new Date(afterAt), id: afterId } : undefined,
+        limit: limit + 1,
+      });
+      const batch = rows.slice(0, limit);
+      const names = dataset === 'finance.admin.ledger' ? await this.core.sellerInfo(batch.map((r) => r.seller_id)) : new Map();
+      const out = batch.map((r) => ({ ...(dataset === 'finance.admin.ledger' ? { seller: names.get(r.seller_id)?.name ?? r.seller_id } : {}), date: marketDate(r.at, tz), type: TYPE_LABELS[r.type as EntryType] ?? r.type, reference: r.ref_label ?? r.ref_id, description: r.description, amount: money(r.amount), balanceAfter: money(r.balance_after) }));
+      const last = batch.at(-1);
+      return { rows: out, ...(rows.length > limit && last ? { nextCursor: `${last.at.toISOString()}|${last.id}` } : {}) };
     }
     if (principal.kind !== 'staff') throw new AppError('FORBIDDEN', 'Staff only');
     if (dataset === 'finance.admin.payout_run') {

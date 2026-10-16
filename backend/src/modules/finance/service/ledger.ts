@@ -12,9 +12,9 @@ import type { LedgerEntry, Reference, RefundImpactPreview, SellerBalances } from
 import type * as orders from '../../../spec/orders.js';
 import { addDays, calculate, DAY, dayStart, detId, fmt, nextSlot, prorate, scheduleLabel, shortDate, TYPE_GROUPS, TYPE_LABELS, type EntryType } from '../domain/rules.js';
 import { toEntry, toHold } from '../mappers.js';
-import type { FeeChargeRec, FundingRec, LiabilityRec, LotRec, PlatformCostRec, TradingRec } from '../ports.js';
+import type { AccountRec, FeeChargeRec, FundingRec, LiabilityRec, LotRec, PlatformCostRec, TradingRec } from '../ports.js';
 import type { FinanceRepository } from '../repository.js';
-import { invalid, notFound, Outbox, Part, type NewEntry } from './core.js';
+import { invalid, notFound, Outbox, Part, type Destination, type NewEntry } from './core.js';
 
 type Item = orders.OrderItem;
 
@@ -612,29 +612,36 @@ export class LedgerPart extends Part {
   /* ---------------------------------------------------------------- balances and the ledger */
 
   async balances(sellerId: string): Promise<SellerBalances> {
-    const acct = await this.repo.findOne('seller_accounts', { seller_id: sellerId });
+    const tz = this.core.tz();
+    const today = this.core.today();
+    // the seller's finance header reads independent records: side by side
+    const [acct, name, holds, owed, last, dest, scheduleSetting, releaseTime, minimum, days] = await Promise.all([
+      this.repo.findOne('seller_accounts', { seller_id: sellerId }),
+      this.core.sellerName(sellerId),
+      this.repo.find('holds', { seller_id: sellerId, status: 'active' }, { orderBy: [['review_date', 'asc']] }),
+      this.repo.find('amounts_owed', { seller_id: sellerId, status: 'open' }, { orderBy: [['since', 'asc']] }),
+      this.repo.findOne('statements', { seller_id: sellerId, status: 'issued' }, { orderBy: [['period_to', 'desc']] }),
+      this.core.destinationOf(sellerId),
+      this.core.setting('payoutSchedule'),
+      this.core.setting('payoutReleaseTime'),
+      this.core.num('minimumPayout', 2500),
+      this.core.num('availableAfterDeliveryDays', 7),
+    ]);
     const pending = acct?.pending ?? 0;
     const available = acct?.available ?? 0;
     const held = acct?.held ?? 0;
-    const tz = this.core.tz();
-    const name = await this.core.sellerName(sellerId);
-    const holds = await this.repo.find('holds', { seller_id: sellerId, status: 'active' }, { orderBy: [['review_date', 'asc']] });
-    const infos = await this.core.approvalInfos(holds.map((h) => h.approval_request_id));
-    const owed = await this.repo.find('amounts_owed', { seller_id: sellerId, status: 'open' }, { orderBy: [['since', 'asc']] });
-    const last = await this.repo.findOne('statements', { seller_id: sellerId, status: 'issued' }, { orderBy: [['period_to', 'desc']] });
-    const today = this.core.today();
     const periodFrom = last ? addDays(last.period_to, 1) : addDays(today, -6);
-    const own = await this.repo.find('ledger_entries', { seller_id: sellerId, type: ['sale', 'shipping_charge', 'seller_discount'], at: { op: '>=', value: dayStart(periodFrom <= today ? periodFrom : today, tz) } });
+    const [infos, own] = await Promise.all([
+      this.core.approvalInfos(holds.map((h) => h.approval_request_id)),
+      this.repo.find('ledger_entries', { seller_id: sellerId, type: ['sale', 'shipping_charge', 'seller_discount'], at: { op: '>=', value: dayStart(periodFrom <= today ? periodFrom : today, tz) } }),
+    ]);
     const proceeds = own.reduce((s, r) => s + r.amount, 0);
-    const dest = await this.core.destinationOf(sellerId);
-    const schedule = String(await this.core.setting('payoutSchedule'));
-    const slot = nextSlot(this.now(), schedule, String(await this.core.setting('payoutReleaseTime')), tz);
-    const minimum = await this.core.num('minimumPayout', 2500);
-    const days = await this.core.num('availableAfterDeliveryDays', 7);
+    const schedule = String(scheduleSetting);
+    const slot = nextSlot(this.now(), schedule, String(releaseTime), tz);
     const inNewSellerPeriod = Boolean(acct?.new_seller_until && acct.new_seller_extra_days && acct.new_seller_until >= today);
     const newSellerDays = inNewSellerPeriod ? acct!.new_seller_extra_days : null;
     const estimate = Math.max(0, available);
-    const blocked = await this.payoutBlock(sellerId);
+    const blocked = this.payoutBlockOf(acct, dest);
     return {
       sellerId,
       asOf: this.now().toISOString(),
@@ -673,9 +680,13 @@ export class LedgerPart extends Part {
 
   /** Whether a seller can be paid (verified destination, no restriction, holds not covering everything) */
   async payoutBlock(sellerId: string): Promise<{ blocked: boolean; reasons: string[] }> {
+    const [acct, dest] = await Promise.all([this.repo.findOne('seller_accounts', { seller_id: sellerId }), this.core.destinationOf(sellerId)]);
+    return this.payoutBlockOf(acct, dest);
+  }
+
+  /** payoutBlock from the seller account and destination already read */
+  payoutBlockOf(acct: AccountRec | undefined, dest: Destination): { blocked: boolean; reasons: string[] } {
     const reasons: string[] = [];
-    const acct = await this.repo.findOne('seller_accounts', { seller_id: sellerId });
-    const dest = await this.core.destinationOf(sellerId);
     if (!dest.active) reasons.push(dest.status.status === 'missing' ? 'No payout account' : 'The payout account is not verified');
     else if (dest.active.pause_until && dest.active.pause_until > this.now()) reasons.push(`New payout account: payouts start after ${dest.active.pause_until.toISOString().slice(0, 16).replace('T', ' ')} UTC`);
     if (acct?.payouts_blocked_reason) reasons.push(acct.payouts_blocked_reason);

@@ -63,17 +63,9 @@ export class FinanceService implements FinancePublicApi {
 
   /** All seller balances together (sellers header): pending + available + held, the held part, negative balances */
   async sellerBalanceTotals(): Promise<{ total: common.Money; held: common.Money; negativeCount: number }> {
-    const accounts = await this.core.repo.find('seller_accounts', {});
+    const t = await this.core.repo.accountTotals();
     const currency = this.core.currency();
-    let total = 0;
-    let held = 0;
-    let negativeCount = 0;
-    for (const a of accounts) {
-      total += a.pending + a.available + a.held;
-      held += a.held;
-      if (a.available < 0) negativeCount += 1;
-    }
-    return { total: { amount: total, currency }, held: { amount: held, currency }, negativeCount };
+    return { total: { amount: t.balance, currency }, held: { amount: t.held, currency }, negativeCount: t.negativeSellers };
   }
 
   /** What a sent refund changed on the seller ledger (refund and fee_refund entries); null until it is booked */

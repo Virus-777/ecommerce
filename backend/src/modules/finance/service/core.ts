@@ -182,9 +182,9 @@ export class Core {
   }
 
   async approvalInfos(ids: readonly (string | null | undefined)[]): Promise<Map<string, common.ApprovalInfo>> {
-    const out = new Map<string, common.ApprovalInfo>();
-    for (const id of new Set(ids.filter((x): x is string => Boolean(x)))) out.set(id, (await this.approvalInfo(id))!);
-    return out;
+    const unique = [...new Set(ids.filter((x): x is string => Boolean(x)))];
+    const infos = await Promise.all(unique.map((id) => this.approvalInfo(id)));
+    return new Map(unique.map((id, i) => [id, infos[i]!]));
   }
 
   /** access.check: the only source of "allowed" (granting access never grants financial authority) */
@@ -278,7 +278,7 @@ export class Core {
     for (const e of entries) {
       if (!Number.isSafeInteger(e.amount)) throw new AppError('VALIDATION_FAILED', 'Ledger amounts are whole minor units');
       if (e.amount === 0) continue;
-      if (await tx.findOne('ledger_entries', { source_event_id: e.key })) continue;
+      // an entry whose key was posted before is skipped by the upsert on source_event_id (one round trip, no read first)
       if (e.bucket === 'pending') pending += e.amount;
       else if (e.bucket === 'held') held += e.amount;
       else available += e.amount;
@@ -300,8 +300,8 @@ export class Core {
         recorded_by: encodeActor(e.recordedBy ?? null),
         source_event_id: e.key,
       };
-      if (!(await tx.insertIfAbsent('ledger_entries', row))) {
-        // a concurrent posting of the same fact won: undo the bucket change
+      if (!(await tx.insertIfAbsent('ledger_entries', row, ['source_event_id']))) {
+        // already posted (a redelivered event, or a concurrent posting of the same fact): undo the bucket change
         if (e.bucket === 'pending') pending -= e.amount;
         else if (e.bucket === 'held') held -= e.amount;
         else available -= e.amount;
@@ -351,11 +351,35 @@ export class Core {
 
   /* ---------------------------------------------------------------- payout destinations */
 
-  async destinationOf(sellerId: string, repo: FinanceRepository = this.repo): Promise<{ status: DestinationStatus; active?: DestinationRec; latest?: DestinationRec; review?: ReviewRec }> {
+  async destinationOf(sellerId: string, repo: FinanceRepository = this.repo): Promise<Destination> {
     const rows = await repo.find('payout_destinations', { seller_id: sellerId }, { orderBy: [['deposits_sent_at', 'desc']] });
-    const active = rows.find((r) => r.active && r.status === 'verified');
     const review = await repo.findOne('destination_reviews', { seller_id: sellerId, status: 'under_review' }, { orderBy: [['requested_at', 'desc']] });
+    return this.destinationFrom(rows, review, await this.num('depositConfirmAttempts', 3));
+  }
+
+  /** Destination statuses of several sellers: two reads for all of them */
+  async destinationStatuses(sellerIds: readonly string[]): Promise<Map<string, DestinationStatus>> {
+    const ids = [...new Set(sellerIds)];
+    const out = new Map<string, DestinationStatus>();
+    if (!ids.length) return out;
+    const rows = await this.repo.find('payout_destinations', { seller_id: ids }, { orderBy: [['deposits_sent_at', 'desc']] });
+    const reviews = await this.repo.find('destination_reviews', { seller_id: ids, status: 'under_review' }, { orderBy: [['requested_at', 'desc']] });
     const attempts = await this.num('depositConfirmAttempts', 3);
+    const rowsOf = new Map<string, DestinationRec[]>();
+    for (const r of rows) {
+      const list = rowsOf.get(r.seller_id);
+      if (list) list.push(r);
+      else rowsOf.set(r.seller_id, [r]);
+    }
+    const reviewOf = new Map<string, ReviewRec>();
+    for (const r of reviews) if (!reviewOf.has(r.seller_id)) reviewOf.set(r.seller_id, r);
+    for (const id of ids) out.set(id, this.destinationFrom(rowsOf.get(id) ?? [], reviewOf.get(id), attempts).status);
+    return out;
+  }
+
+  /** A seller's destination rows (newest deposits first) and open review as the status shown everywhere */
+  destinationFrom(rows: readonly DestinationRec[], review: ReviewRec | undefined, attempts: number): Destination {
+    const active = rows.find((r) => r.active && r.status === 'verified');
     if (active) {
       const status: DestinationStatus = {
         label: active.label,
@@ -385,12 +409,14 @@ export class Core {
       review: review ?? undefined,
     };
   }
+}
 
-  async destinationStatuses(sellerIds: readonly string[]): Promise<Map<string, DestinationStatus>> {
-    const out = new Map<string, DestinationStatus>();
-    for (const id of new Set(sellerIds)) out.set(id, (await this.destinationOf(id)).status);
-    return out;
-  }
+/** A seller's payout destination as finance shows it: the status, the active (verified) one, the latest and an open review */
+export interface Destination {
+  status: DestinationStatus;
+  active?: DestinationRec;
+  latest?: DestinationRec;
+  review?: ReviewRec;
 }
 
 /** Base class of the use-case parts */

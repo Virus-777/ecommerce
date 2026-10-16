@@ -79,6 +79,24 @@ export class FinanceRepository {
     return this.#t(table).count(whereFilter(where));
   }
 
+  /** Rows whose `column` is in [from, to) and that match `where` (both bounds in the query, so an index on the column serves it) */
+  findInRange<T extends Table>(table: T, column: keyof Db[T] & string, from: Date, to: Date, where: Where<Db[T]> = {}): Promise<Db[T][]> {
+    return this.#t(table).find({ ...whereFilter(where), [column]: { $gte: from, $lt: to } });
+  }
+
+  /**
+   * One batch of a seller's (or every seller's) ledger in [from, to), oldest first, after the (at, id) of the last
+   * row of the previous batch: a keyset walk, so a long export never re-reads the rows it already wrote.
+   */
+  ledgerBatch(o: { sellerId?: string; from?: Date; to?: Date; after?: { at: Date; id: string }; limit: number }): Promise<EntryRec[]> {
+    const conds: Filter[] = [];
+    if (o.sellerId) conds.push({ seller_id: o.sellerId });
+    if (o.from) conds.push({ at: { $gte: o.from } });
+    if (o.to) conds.push({ at: { $lt: o.to } });
+    if (o.after) conds.push({ $or: [{ at: { $gt: o.after.at } }, { at: o.after.at, id: { $gt: o.after.id } }] });
+    return this.#entries.find(conds.length ? { $and: conds } : {}, { sort: { at: 1, id: 1 }, limit: o.limit });
+  }
+
   /** Sum of a numeric column over the matching rows (coalesce(sum(column), 0)) */
   async sum<T extends Table>(table: T, column: keyof Db[T] & string, where: Where<Db[T]>): Promise<number> {
     const t = this.#t(table);
@@ -90,9 +108,9 @@ export class FinanceRepository {
     return this.#t(table).insert(this.#encode(table, row));
   }
 
-  /** Inserts unless a unique key is taken (on conflict do nothing): the stored row, or undefined */
-  insertIfAbsent<T extends Table>(table: T, row: Db[T]): Promise<Db[T] | undefined> {
-    return this.#t(table).insertIfAbsent(this.#encode(table, row));
+  /** Inserts unless a unique key is taken (on conflict do nothing): the stored row, or undefined. `key`: on conflict of that key only (one upsert) */
+  insertIfAbsent<T extends Table>(table: T, row: Db[T], key?: readonly (keyof Db[T] & string)[]): Promise<Db[T] | undefined> {
+    return this.#t(table).insertIfAbsent(this.#encode(table, row), key);
   }
 
   async update<T extends IdTable>(table: T, id: string, patch: Partial<Db[T]>): Promise<Db[T]> {
@@ -197,6 +215,68 @@ export class FinanceRepository {
       { $group: { _id: null, n: { $sum: '$amount' } } },
     ]);
     return Number(r?.n ?? 0);
+  }
+
+  /** Totals over every seller account, summed in the database (no account rows loaded) */
+  async accountTotals(): Promise<{ balance: number; owed: number; pending: number; positiveAvailable: number; positiveHeld: number; held: number; heldSellers: number; negativeSellers: number }> {
+    const positive = (f: unknown) => ({ $max: [0, f] });
+    const balance = { $add: ['$pending', '$available', '$held'] };
+    const [r] = await this.#t('seller_accounts').aggregate<Record<string, unknown>>([
+      {
+        $group: {
+          _id: null,
+          balance: { $sum: balance },
+          owed: { $sum: positive(balance) },
+          pending: { $sum: '$pending' },
+          positiveAvailable: { $sum: positive('$available') },
+          positiveHeld: { $sum: positive('$held') },
+          held: { $sum: '$held' },
+          heldSellers: { $sum: { $cond: [{ $gt: ['$held', 0] }, 1, 0] } },
+          negativeSellers: { $sum: { $cond: [{ $lt: ['$available', 0] }, 1, 0] } },
+        },
+      },
+    ]);
+    const n = (k: string) => Number(r?.[k] ?? 0);
+    return { balance: n('balance'), owed: n('owed'), pending: n('pending'), positiveAvailable: n('positiveAvailable'), positiveHeld: n('positiveHeld'), held: n('held'), heldSellers: n('heldSellers'), negativeSellers: n('negativeSellers') };
+  }
+
+  /** Per seller: the sum of all ledger entries and of the held bucket */
+  async ledgerTotalsBySeller(sellerIds: readonly string[]): Promise<Map<string, { total: number; held: number }>> {
+    const out = new Map<string, { total: number; held: number }>();
+    if (!sellerIds.length) return out;
+    const rows = await this.#entries.aggregate<{ _id: string; total: unknown; held: unknown }>([
+      { $match: { seller_id: { $in: [...new Set(sellerIds)] } } },
+      { $group: { _id: '$seller_id', total: { $sum: '$amount' }, held: { $sum: { $cond: [{ $eq: ['$bucket', 'held'] }, '$amount', 0] } } } },
+    ]);
+    for (const r of rows) out.set(r._id, { total: Number(r.total ?? 0), held: Number(r.held ?? 0) });
+    return out;
+  }
+
+  /** pendingFromLedger for several sellers in one aggregation */
+  async pendingFromLedgerBySeller(sellerIds: readonly string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (!sellerIds.length) return out;
+    const rows = await this.#entries.aggregate<{ _id: string; n: unknown }>([
+      { $match: { seller_id: { $in: [...new Set(sellerIds)] }, bucket: 'pending', lot_id: { $ne: null } } },
+      { $lookup: { from: this.#collection('earnings_lots'), localField: 'lot_id', foreignField: '_id', as: 'lot' } },
+      { $match: { 'lot.state': 'pending' } },
+      { $group: { _id: '$seller_id', n: { $sum: '$amount' } } },
+    ]);
+    for (const r of rows) out.set(r._id, Number(r.n ?? 0));
+    return out;
+  }
+
+  /** The latest payout (by requested_on) of each seller */
+  async lastPayouts(sellerIds: readonly string[]): Promise<Map<string, { status: string }>> {
+    const out = new Map<string, { status: string }>();
+    if (!sellerIds.length) return out;
+    const rows = await this.#t('payouts').aggregate<{ _id: string; status: string }>([
+      { $match: { seller_id: { $in: [...new Set(sellerIds)] } } },
+      { $sort: { seller_id: 1, requested_on: -1 } },
+      { $group: { _id: '$seller_id', status: { $first: '$status' } } },
+    ]);
+    for (const r of rows) out.set(r._id, { status: r.status });
+    return out;
   }
 
   /** Sellers with unassigned entries up to the cutoff, or a positive available balance */
