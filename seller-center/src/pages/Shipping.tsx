@@ -549,6 +549,7 @@ function ShippingForm({ settings: st, methods, carriers }: { settings: ShippingS
               <div className="sa-days" role="group" aria-label="Business days">
                 {DAYS.map((d) => (
                   <button key={d.key} type="button" className={cx('pill-opt', s.days[d.key] && 'is-selected')} aria-pressed={s.days[d.key]} data-toggle="" disabled={!canManage} onClick={() => set('days', { ...s.days, [d.key]: !s.days[d.key] })}>
+                    {s.days[d.key] && <Icon name="check" className="ic-sm" />}
                     {d.label}
                   </button>
                 ))}

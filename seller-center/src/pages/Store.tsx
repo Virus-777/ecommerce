@@ -437,19 +437,20 @@ export default function Store() {
 
           <Card title="Categories and featured collections" titleAs="h3">
             <div className="stack gap-2">
+              {/* Read-only: categories follow the active offers, so the chips are labels, not links. */}
               <span className="label">Categories you sell in</span>
               <div className="hscroll gap-2">
                 {categories.length === 0 && <span className="small muted">Categories appear when you have active offers.</span>}
                 {categories.map((c) =>
                   c.state === 'paused' ? (
-                    <a key={c.categoryId} className="chip" href="#" aria-disabled="true" onClick={(e) => e.preventDefault()}>
+                    <span key={c.categoryId} className="chip u-cursor-default">
                       <Icon name="ban" />
                       {c.name} · paused
-                    </a>
+                    </span>
                   ) : (
-                    <a key={c.categoryId} className="chip is-active" href="#" aria-current="true" onClick={(e) => e.preventDefault()}>
+                    <span key={c.categoryId} className="chip is-active u-cursor-default">
                       {c.name}
-                    </a>
+                    </span>
                   ),
                 )}
               </div>

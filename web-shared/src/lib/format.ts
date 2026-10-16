@@ -24,3 +24,15 @@ export const formatMoney = (m?: MoneyValue | null): string => (m ? money(m.amoun
 
 /** Dollars of an API money value (for arithmetic in the UI). */
 export const dollars = (m?: MoneyValue | null): number => (m ? m.amount / 100 : 0);
+
+const PT_INSTANT = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+
+/**
+ * Server sentences sometimes carry raw ISO instants ("Respond by 2026-10-15T16:58:28.953Z", "next pickup
+ * 2026-10-15T23:00:00.000Z"): shows them as market time, "Thu, Oct 15, 4:58 PM PT". Other text is unchanged.
+ */
+export const isoInText = (text?: string | null): string =>
+  (text ?? '').replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})/g, (m) => {
+    const d = new Date(m);
+    return Number.isNaN(d.getTime()) ? m : `${PT_INSTANT.format(d)} PT`;
+  });

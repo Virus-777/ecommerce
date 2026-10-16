@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { call, errorMessage, useApi, ApiError } from '@marketly/web-shared/api';
+import { isoInText } from '@marketly/web-shared/lib/format';
 import { OpsLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href } from '@marketly/web-shared/routes';
@@ -425,7 +426,7 @@ export default function Queues() {
                           <span className="stack gap-0 grow">
                             <span className="small strong">{c.title}</span>
                             <span className="xs muted">
-                              {c.summary}
+                              {isoInText(c.summary)}
                               {c.owner && staffName(c.owner, '') ? ` · owner ${staffName(c.owner)}` : ''}
                             </span>
                             {needNote.includes(c.key) && (

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { isoInText } from '@marketly/web-shared/lib/format';
 import { SellerLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href, type ScreenId } from '@marketly/web-shared/routes';
@@ -206,9 +207,9 @@ export default function Notifications() {
                                 <span className="sr-only">Unread.</span>
                               </>
                             )}
-                            <span className={unread ? 'small bold' : 'small strong'}>{n.title}</span>
+                            <span className={unread ? 'small bold' : 'small strong'}>{isoInText(n.title)}</span>
                           </span>
-                          <span className="xs sub">{n.body}</span>
+                          <span className="xs sub">{isoInText(n.body)}</span>
                           <span className="row gap-2">
                             {CAT_LABEL[n.group] && <Badge tone="outline">{CAT_LABEL[n.group]}</Badge>}
                             {kind && (
@@ -259,7 +260,7 @@ export default function Notifications() {
                             {n.title}
                           </Link>
                         ) : (
-                          <span className="small strong">{n.title}</span>
+                          <span className="small strong">{isoInText(n.title)}</span>
                         )}
                         <NoticeDeadline n={n} />
                       </span>

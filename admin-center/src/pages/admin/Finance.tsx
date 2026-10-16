@@ -75,10 +75,11 @@ const orderLink = (ref: string) => (
     {ref}
   </Link>
 );
+// Plain text: disputes, refunds and reconciliation items have no admin detail screen to open.
 const refLink = (ref: string) => (
-  <a className="mono nowrap" href="#" title={ref}>
+  <span className="mono nowrap" title={ref}>
     {ref}
-  </a>
+  </span>
 );
 
 const disputeEdge = (d: Dispute): Edge => (d.status === 'won' || d.status === 'lost' || d.evidence.submittedAt ? '' : d.evidenceDue?.state === 'overdue' ? 'flagged' : d.evidenceDue?.state === 'due_soon' ? 'warn' : '');

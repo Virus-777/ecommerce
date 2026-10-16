@@ -3,6 +3,7 @@ import { Fragment, useState } from 'react';
 import { Link } from 'react-router';
 import { AccountLayout } from '@/layouts';
 import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
+import { isoInText } from '@marketly/web-shared/lib/format';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href, SCREEN_BY_ID, type ScreenId } from '@marketly/web-shared/routes';
 import { Alert, announce, Button, Chip, ChipRow, Icon, type IconName } from '@marketly/web-shared/ui';
@@ -108,10 +109,10 @@ export default function Notifications() {
         </span>
         <span className="stack gap-1 grow">
           <span className="row between gap-2 top">
-            <span className={cx('small', !n.readAt && 'bold')}>{n.title}</span>
+            <span className={cx('small', !n.readAt && 'bold')}>{isoInText(n.title)}</span>
             <span className="xs muted nowrap">{listTime(n.createdAt)}</span>
           </span>
-          <span className="xs sub">{n.body}</span>
+          <span className="xs sub">{isoInText(n.body)}</span>
           <span className="xs muted">
             {GROUP_LABEL[n.group] ?? n.group}
             {n.link.ref && (

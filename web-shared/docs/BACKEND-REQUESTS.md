@@ -49,6 +49,10 @@ DELETE /api/dev/outbox
 
 **Proposal.** Pin the embedded instance's port when `MONGO_DATA_DIR` is set (e.g. `instanceOpts: [{ dbPath, port: Number(process.env.MONGO_PORT ?? 27018) }]`), or reconfigure the replica set to the current port on start. Until then the web team runs an external single-node replica set (`mongod --replSet rs0 --port 27018 --dbpath backend/.data/mongo-rs`, `replSetInitiate`) and sets `MONGODB_URI=mongodb://127.0.0.1:27018/marketly?replicaSet=rs0`.
 
+### R3. Product image crop and sizes (setting, read endpoint, detail/thumb renditions, checks) — requested 2026-10-16
+
+Staff set the product image aspect ratio and the product-page and thumbnail sizes in the Admin Center; sellers crop to that ratio before upload; the backend keeps exactly two sizes. Full guide: [BACKEND-PRODUCT-IMAGES.md](BACKEND-PRODUCT-IMAGES.md). The web apps are built against it and fall back to 1:1 / 800 × 800 / 320 × 320 until it ships. Note: the only image processor today is the development one, which does not resize at all.
+
 ## Gaps (worked around in the web apps)
 
 | # | Gap | Effect in the apps | Workaround |
@@ -156,3 +160,10 @@ Bugs and contract questions first, then missing data. Each is worked around in t
 | G75 | Shapes: return reason filter takes codes but rows carry labels; `AdminOrderRow`/shipping exceptions don't link to each other (no exception ids on rows, no item quantities on exceptions); purchasing receipt has no inventory inbound id; inspection drafts store photo ids without URLs; settings overview is display text only (one request per field to edit); help policy status `current` vs article `published`; OpenAPI `unknown` for `NoticePreview.estimates`, `AdminSeller` JSON fields, `HelpSummary.tabs`, customer `signIn` (G20) | Extra requests and client mapping | As described |
 | G76 | Seed/content: no overdue orders, failed payouts, disputes, failing refunds, unexplained amounts, open applications, active pick wave, purchase orders or received returns, so those flows were only typechecked; inventory unit costs null; seeded "Package dispatched" email preview cut mid-variable ("…Estimated arrival: {{de…"); 7 settings sections owned by other modules say "Not reported by its module yet" | Empty states only | Seed more states (see the design seed step) |
 | G77 | **Contract:** the Business Owner + Platform Administrator roles (Olivia) have mostly view permissions but not `catalog.*`, `offers.official.*` (Official Store offers answer 403), `sellers.applications.review`, return inspection or `content.*` — confirm the role design; dev staff tokens carry every permission, so the gap only shows in a real session | Those screens show "Not available for your role" for the seeded owner | Shared `LoadError` shows a role note for 403 instead of an error to retry |
+
+### Found in the three-app walkthrough (2026-10-16)
+
+| # | Gap | Effect in the apps | Workaround |
+|---|---|---|---|
+| G78 | **Bug:** seller return notices have an empty product name and a raw instant: "Return request … items from (). Respond by 2026-10-15T16:58:28.953Z." (notification template variables not filled; dates not formatted). Raw ISO instants also appear in other server text: the admin order timeline ("New dispatch estimate 2026-10-19T11:21:10.115Z") and the Operations routine summary ("next pickup 2026-10-15T23:00:00.000Z") | Sellers and staff read broken sentences | The apps rewrite ISO instants in server text to Pacific time (`isoInText`); the empty "()" needs the template fixed. Ask: format dates in the template with the market time zone, and fill the product name |
+| G79 | **Content:** a delivery-exception alert shown to the seller on the order page reads "Shipped, no carrier scan 24 h. Request valid tracking details; never imply delivery." — staff guidance ("never imply delivery") leaking into seller-facing text | Sellers see internal instructions | Shown as sent. Ask: separate seller-facing copy from staff guidance for delivery exceptions |

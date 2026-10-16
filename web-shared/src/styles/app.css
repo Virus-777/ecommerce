@@ -18,3 +18,53 @@
 
 /* Real photos inside the design's image tiles (API product images). */
 .app .imgph > img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: inherit; }
+
+/* Product image frames follow the configured aspect ratio (ProductImageRatio sets --product-ratio). */
+.app .pcard-media .imgph,
+.app .shop-gal .main .imgph { aspect-ratio: var(--product-ratio, 1 / 1); }
+
+/* Image cropper (ImageCropper; designed in React). */
+.crop-body { display: grid; gap: var(--sp-4); grid-template-columns: minmax(0, 1fr); }
+@container app (min-width: 768px) { .crop-body { grid-template-columns: minmax(0, 1fr) 200px; align-items: start; } }
+.crop-stage { position: relative; width: 100%; margin-inline: auto; overflow: hidden; border-radius: var(--r-md); background: var(--surface-3); touch-action: none; cursor: grab; display: flex; align-items: center; justify-content: center; }
+.crop-stage:active { cursor: grabbing; }
+.crop-stage:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.crop-stage > img, .crop-prev-frame > img { position: absolute; left: 0; top: 0; max-width: none; user-select: none; pointer-events: none; }
+.crop-grid { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.7);
+  background:
+    linear-gradient(to right, transparent calc(33.33% - 0.5px), rgb(255 255 255 / 0.55) calc(33.33% - 0.5px), rgb(255 255 255 / 0.55) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgb(255 255 255 / 0.55) calc(66.66% - 0.5px), rgb(255 255 255 / 0.55) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)),
+    linear-gradient(to bottom, transparent calc(33.33% - 0.5px), rgb(255 255 255 / 0.55) calc(33.33% - 0.5px), rgb(255 255 255 / 0.55) calc(33.33% + 0.5px), transparent calc(33.33% + 0.5px), transparent calc(66.66% - 0.5px), rgb(255 255 255 / 0.55) calc(66.66% - 0.5px), rgb(255 255 255 / 0.55) calc(66.66% + 0.5px), transparent calc(66.66% + 0.5px)); }
+.crop-range { width: 100%; accent-color: var(--brand); }
+.crop-prev { margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.crop-prev-frame { position: relative; overflow: hidden; border-radius: var(--r-sm); background: var(--surface-3); border: 1px solid var(--border); }
+
+/* Seller product images: the "Make main" and remove buttons sit on the image's top-right corner, so the
+   design's "Main" badge (bottom-left of the image) never overlaps them. */
+.app .sa-thumb .sa-thumb-acts { position: absolute; top: 4px; right: 4px; display: flex; gap: 2px; }
+.app .sa-thumb .sa-thumb-acts .icon-btn { background: rgb(255 255 255 / 0.92); box-shadow: 0 1px 2px rgb(0 0 0 / 0.18); }
+.app .sa-thumb .spinner { position: absolute; top: 50%; left: 50%; margin: -8px 0 0 -8px; }
+
+/* Admin Center settings: the sticky section list (40+ sections) scrolls on its own within the screen height. */
+@container app (min-width: 1024px) {
+  .app .ac-setnav { max-height: calc(100dvh - var(--header-h) - var(--sp-8)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding-right: var(--sp-1); }
+  .app .ac-setnav a { flex: none; }
+}
+
+/* Every search field (SearchInput, .search-in): the design styles it only inside .toolbar and a few heroes, so
+   elsewhere (card headers, inbox lists, storefront toolbars) it got the browser's bare input. :where() keeps this
+   base below the design's own contexts, which still win where they exist. */
+:where(.app) .search-in { display: flex; align-items: center; gap: var(--sp-2); max-width: 100%; height: var(--ctl-md); padding: 0 var(--sp-3); border: 1px solid var(--border-input); border-radius: var(--r-md); background: var(--surface); color: var(--text-3); min-width: 0; }
+:where(.app) .search-in input { flex: 1; border: 0; background: transparent; font: inherit; font-size: var(--fs-sm); color: var(--text); min-width: 0; }
+:where(.app) .search-in input:focus { outline: none; }
+:where(.app) .search-in:focus-within { border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.app .card-head .search-in { width: 220px; }
+
+/* On/off toggle pills (aria-pressed, e.g. Seller Center › Shipping › Business days): the design's selected state
+   (border + faint ring) is hard to tell apart, so a pressed toggle is filled with the brand colour and shows a check. */
+.app .pill-opt[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: var(--text-inverse); box-shadow: none; }
+.app .pill-opt[aria-pressed="true"]:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); }
+.app .pill-opt[aria-pressed="false"] { color: var(--text-2); font-weight: var(--fw-medium); }
+.app .pill-opt[aria-pressed]:disabled { cursor: default; opacity: 0.75; }
+
+/* Read-only chips (labels shown in chip style, e.g. Seller Center › Store › categories you sell in). */
+.app .u-cursor-default { cursor: default; }

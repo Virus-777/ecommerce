@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
-import { ApiError, errorMessage } from '@marketly/web-shared/api';
+import { ApiError, errorMessage, renditionUrl } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { dollars, formatMoney, num, percentOff } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
@@ -11,6 +11,7 @@ import {
   Price, SearchInput, SellerBadge, Stars, Stars5, announce, type IconName,
 } from '@marketly/web-shared/ui';
 import NotFound from './NotFound';
+import { DeliverToDialog } from './data/deliver-to';
 import {
   STOCK_LABEL, STOCK_TONE, categoryTrail, fmtDate, fmtDateTime, orderWithin, productCrumbs, productHref, sellerHref, shipperName,
   useBuyNow, useCartButton, useCatalogProduct, useCategories, useProductParams, usePurchaseBox, useRatingSummary, useRecordView,
@@ -20,6 +21,9 @@ import {
 import { useDebounced, useQuestionPage, type ApiAnswer } from './data/questions';
 import { useHelpfulVote, useReviewPage, type ApiReview, type ReviewFilters } from './data/reviews';
 import { LoadError, ListSkeleton, Photo, type VoteState } from './data/review-parts';
+
+/** A product image at one of its two sizes: 'detail' for the gallery, 'thumb' for thumbnails and cards (BACKEND-PRODUCT-IMAGES.md). */
+const sized = <M extends { url: string }>(m: M | null | undefined, size: 'detail' | 'thumb'): M | undefined => (m ? { ...m, url: renditionUrl(m, size) ?? m.url } : undefined);
 
 // Design: pages/store/store-product.html
 //   view "seller-offer-selected" (+ &offer=<offerId>) = another seller's offer chosen in the buy box
@@ -138,6 +142,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
   const navigate = useNavigate();
   const signIn = useSignInHref();
   const { signedIn, cartCount } = useSession();
+  const [deliverOpen, setDeliverOpen] = useState(false);
   const offer = box?.selected ?? null;
   const featured = box?.featured ?? null;
   const isFeatured = box?.selectedBy === 'featured';
@@ -262,7 +267,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                     <video src={thumb.media.url} controls style={{ width: '100%', height: '100%' }} aria-label="Product video" />
                   </div>
                 ) : (
-                  <Photo media={thumb?.media} />
+                  <Photo media={sized(thumb?.media, 'detail')} />
                 )}
                 {thumbs.length > 0 && (
                   <span className="cnt">
@@ -290,7 +295,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                           </span>
                         </>
                       ) : (
-                        <Photo media={t.media} className="thumb" />
+                        <Photo media={sized(t.media, 'thumb')} className="thumb" />
                       )}
                     </button>
                   ))}
@@ -358,7 +363,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                       const cv = product.variants.find((x) => x.id === v.variantId);
                       return (
                         <button key={v.variantId} type="button" className={cx(on && 'is-selected')} aria-pressed={on} onClick={() => !on && onVariant(v.variantId)}>
-                          <Photo media={cv?.images?.[0] ?? product.images[0]} />
+                          <Photo media={sized(cv?.images?.[0] ?? product.images[0], 'thumb')} />
                           <span className="vn">{v.label}</span>
                           <span className="sub">{v.summary}</span>
                         </button>
@@ -438,9 +443,9 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                         <Icon name="truck" />
                         <span>
                           <b>{offer.delivery.label}</b> to {box.deliverTo.label} ·{' '}
-                          <a href="#" className="link-inline">
+                          <button type="button" className="btn-bare link-inline" onClick={() => setDeliverOpen(true)}>
                             Change
-                          </a>
+                          </button>
                           {deliveryNote(offer) && (
                             <>
                               <br />
@@ -787,6 +792,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
 
         <Related id={id} leaf={leaf} />
       </div>
+      <DeliverToDialog open={deliverOpen} onClose={() => setDeliverOpen(false)} signedIn={signedIn} current={box?.deliverTo} />
     </StoreLayout>
   );
 }
@@ -943,7 +949,7 @@ function RelatedCard({ p }: { p: SimilarProduct }) {
     <article className="pcard">
       <div className="pcard-media">
         <Link to={to} aria-label={p.title}>
-          <Photo media={p.image} />
+          <Photo media={sized(p.image, 'thumb')} />
         </Link>
         <div className="tags">
           {off > 0 && <Badge tone="deal">−{off}%</Badge>}

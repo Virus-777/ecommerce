@@ -56,9 +56,18 @@ export function useCatalogProduct(id: string) {
 /** The buy box for a variant (default: the server's choice) and an offer the shopper picked (default: featured). */
 export function usePurchaseBox(id: string, variantId?: string, offerId?: string) {
   const { api } = useApi();
+  // Delivery estimates follow the cart's destination (a saved address or a ZIP chosen with "Change"); the buy box
+  // doesn't read the cart itself, so its ZIP is passed along (same query as the header's "Deliver to").
+  const destination = useQuery({
+    queryKey: ['cart', 'destination'],
+    queryFn: () => call(api.GET('/api/store/cart/cart')),
+    select: (c) => c.destination,
+    staleTime: 60_000,
+  });
+  const postalCode = destination.data?.postalCode ?? undefined;
   return useQuery({
-    queryKey: ['offers', 'purchase-box', id, variantId ?? null, offerId ?? null],
-    queryFn: () => call(api.GET('/api/store/offers/products/{productId}/purchase-box', { params: { path: { productId: id }, query: { variantId, offerId } } })),
+    queryKey: ['offers', 'purchase-box', id, variantId ?? null, offerId ?? null, postalCode ?? null],
+    queryFn: () => call(api.GET('/api/store/offers/products/{productId}/purchase-box', { params: { path: { productId: id }, query: { variantId, offerId, postalCode } } })),
     enabled: !!id,
     placeholderData: (prev) => (prev && prev.product.id === id ? prev : undefined),
   });

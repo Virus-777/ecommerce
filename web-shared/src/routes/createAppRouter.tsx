@@ -1,11 +1,16 @@
 import { lazy, Suspense, useEffect, type ComponentType, type LazyExoticComponent, type ReactNode } from 'react';
-import { createBrowserRouter, Outlet, ScrollRestoration, useRouteError, type RouteObject } from 'react-router';
+import { createBrowserRouter, isRouteErrorResponse, Outlet, ScrollRestoration, useRouteError, type RouteObject } from 'react-router';
+import { Button, EmptyState } from '../ui';
 import { APP_NAMES, CURRENT_APP } from './apps';
 import { SCREENS, type ScreenId } from './catalogue';
 import DesignIndex from './DesignIndex';
 import type { DesignCheckOptions } from './designSamples';
 
 const DesignCheck = lazy(() => import('./DesignCheck'));
+
+/** A lazy page's code failed to load: usually stale after a deploy or a dev-server restart. */
+const isChunkError = (e: unknown) => /dynamically imported module|Importing a module script failed|Failed to fetch|ChunkLoadError|error loading dynamically/i.test(String((e as Error | undefined)?.message ?? e));
+const RELOADED = 'marketly.chunk-reload';
 
 type PageMap = Partial<Record<ScreenId, LazyExoticComponent<ComponentType>>>;
 
@@ -46,6 +51,14 @@ interface AppRouterOptions {
  */
 export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, extraRoutes = [], designCheck }: AppRouterOptions) {
   function Root() {
+    // A page rendered: the one-time reload for stale page code (RouteError) may happen again later.
+    useEffect(() => {
+      try {
+        sessionStorage.removeItem(RELOADED);
+      } catch {
+        /* storage blocked */
+      }
+    }, []);
     return wrap(
       <>
         <Suspense fallback={<div className="route-loading" role="status" aria-label="Loading" />}>
@@ -57,13 +70,44 @@ export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, ex
     );
   }
 
+  /**
+   * Route errors: stale page code reloads the page once (it was fetched under an old address); a 404 shows the
+   * app's not-found page; anything else says something went wrong, with a reload, instead of claiming the page
+   * doesn't exist.
+   */
   function RouteError() {
     const err = useRouteError();
     if (import.meta.env.DEV) console.error(err);
-    return wrap(
-      <Suspense fallback={null}>
-        <NotFound />
-      </Suspense>,
+    const chunk = isChunkError(err);
+    useEffect(() => {
+      if (!chunk) return;
+      let again = false;
+      try {
+        again = sessionStorage.getItem(RELOADED) === location.pathname;
+        sessionStorage.setItem(RELOADED, location.pathname);
+      } catch {
+        /* storage blocked: reload anyway, once per render */
+      }
+      if (!again) location.reload();
+    }, [chunk]);
+    if (isRouteErrorResponse(err) && err.status === 404) {
+      return wrap(
+        <Suspense fallback={null}>
+          <NotFound />
+        </Suspense>,
+      );
+    }
+    return (
+      <main className="container page" id="main">
+        <EmptyState
+          icon="triangle-alert"
+          as="h1"
+          title={chunk ? 'This page was updated' : 'Something went wrong'}
+          action={<Button onClick={() => location.reload()}>Reload the page</Button>}
+        >
+          {chunk ? 'A newer version is available. Reload to continue.' : 'The page hit an error. Reload to try again; if it keeps happening, tell the Marketly team what you were doing.'}
+        </EmptyState>
+      </main>
     );
   }
 
