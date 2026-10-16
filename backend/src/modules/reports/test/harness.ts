@@ -24,6 +24,8 @@ import { auth, buildTestApp, callers, movingClock, tokenClock } from '../../../t
 import type { ReportsService } from '../service.js';
 
 export const usd = (amount: number): Money => ({ amount, currency: 'USD' });
+/** The balances finance's stub answers for every seller */
+const balanceOf = (sellerId: string) => ({ sellerId, pending: usd(1000), available: usd(2500), held: usd(0), nextPayout: { scheduledFor: '2026-10-15', estimatedAmount: usd(2500), destination: { label: 'Bank •••• 6620', status: 'verified' } } }) as never;
 
 export interface ItemSpec {
   id?: string;
@@ -122,7 +124,8 @@ export async function harness() {
       },
       finance: {
         marketplaceIncomeByDay: async (range) => income.filter((r) => r.date >= range.from && r.date <= range.to).map((r) => ({ ...r, feeIncome: r.netFeeIncome, feeRefunds: usd(0), adIncome: usd(0) })),
-        getSellerBalances: async (sellerId) => ({ sellerId, pending: usd(1000), available: usd(2500), held: usd(0), nextPayout: { scheduledFor: '2026-10-15', estimatedAmount: usd(2500), destination: { label: 'Bank •••• 6620', status: 'verified' } } }) as never,
+        getSellerBalances: async (sellerId) => balanceOf(sellerId),
+        balancesForSellers: async (sellerIds) => new Map(sellerIds.map((id) => [id, balanceOf(id)])),
         companyCostsByDay: async (range) => companyCosts.filter((r) => inRange(r.date, range)),
       },
       support: {

@@ -902,7 +902,11 @@ export class Queries {
           ]),
         ].filter((id) => id && id !== OFFICIAL_KEY).slice(0, 100);
     const names = await this.sellerNames(active);
-    const balances = (await Promise.all(active.map(async (id) => ({ id, b: await this.core.soft('finance.getSellerBalances', () => finance.getSellerBalances(id)) })))).filter((x) => x.b);
+    const byId = active.length ? await this.core.soft('finance.balancesForSellers', () => finance.balancesForSellers(active)) : undefined;
+    const balances = active.flatMap((id) => {
+      const b = byId?.get(id);
+      return b ? [{ id, b }] : [];
+    });
     const amount = (m: Money | null | undefined) => m?.amount ?? 0;
     const rows = balances
       .map(({ id, b }) => ({ sellerId: id, seller: names.get(id) ?? id, pending: this.money(amount(b!.pending), c), available: this.money(amount(b!.available), c), held: this.money(amount(b!.held), c), total: this.money(amount(b!.pending) + amount(b!.available) + amount(b!.held), c), negative: Boolean(b!.negative), amountOwed: this.money(amount(b!.amountOwed), c) }))
