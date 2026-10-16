@@ -3883,14 +3883,9 @@ export const spec = defineModuleSpec({
           }
         },
         {
-          "name": "orders_contact_email_35ac7e",
+          "name": "orders_contact_email_a08b81",
           "key": {
             "contact_email": 1
-          },
-          "partial": {
-            "customer_id": {
-              "$type": "null"
-            }
           },
           "collation": {
             "locale": "en",
@@ -3926,6 +3921,12 @@ export const spec = defineModuleSpec({
           "name": "orders_flag_kinds_3aee24",
           "key": {
             "flag_kinds": 1
+          }
+        },
+        {
+          "name": "orders_ref_51f02f",
+          "key": {
+            "ref": 1
           }
         }
       ],
@@ -4539,6 +4540,12 @@ export const spec = defineModuleSpec({
           "key": {
             "split_from_item_id": 1
           }
+        },
+        {
+          "name": "order_items_return_id_a479ef",
+          "key": {
+            "return_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -4631,6 +4638,13 @@ export const spec = defineModuleSpec({
           "name": "item_state_log_item_id_at_ce4f0a",
           "key": {
             "item_id": 1,
+            "at": 1
+          }
+        },
+        {
+          "name": "item_state_log_to_state_at_c15fc5",
+          "key": {
+            "to_state": 1,
             "at": 1
           }
         }
@@ -4794,6 +4808,12 @@ export const spec = defineModuleSpec({
             "idempotency_key": {
               "$type": "string"
             }
+          }
+        },
+        {
+          "name": "cancellations_order_id_4c5e85",
+          "key": {
+            "order_id": 1
           }
         }
       ],
@@ -5117,7 +5137,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "notes_order_id_at_4f2fea",
+          "key": {
+            "order_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "documents": {
@@ -5192,6 +5220,12 @@ export const spec = defineModuleSpec({
             "number": 1
           },
           "unique": true
+        },
+        {
+          "name": "documents_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
         }
       ],
       "unenforced": []

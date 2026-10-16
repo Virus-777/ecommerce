@@ -1013,7 +1013,7 @@ Customer requests start as requested; the seller confirms by respondBy (end of t
 | accepted_at | timestamptz? |
 | completed_at | timestamptz? |
 
-Indexes: `unique (checkout_session_id, attempt_no)`, `(customer_id, placed_at desc)`, `(lower(contact_email)) where customer_id is null`, `(display_status, placed_at desc)`, `(lifecycle)`, `gin(contact_name gin_trgm_ops)`, `gin(contact_email gin_trgm_ops)`, `gin(flag_kinds)`
+Indexes: `unique (checkout_session_id, attempt_no)`, `(customer_id, placed_at desc)`, `(lower(contact_email))`, `(display_status, placed_at desc)`, `(lifecycle)`, `gin(contact_name gin_trgm_ops)`, `gin(contact_email gin_trgm_ops)`, `gin(flag_kinds)`, `(ref)`
 
 **order_facts**: Event-fed facts about an order, one row per source record: payment captures, chargebacks, support cases, refunds sent, approved return refunds not sent yet, delivery exceptions, seller restrictions and resent confirmations. The flags, alerts, expected refunds and case references are derived from them
 
@@ -1097,7 +1097,7 @@ Indexes: `(seller_id, status, dispatch_by)`, `(order_id)`, `(status, dispatch_by
 | replacement_of_item_id | uuid? → order_items |
 | checkout_line_id | text? |
 
-Indexes: `(order_id)`, `(group_id, state)`, `(offer_id)`, `(product_id)`, `(split_from_item_id)`
+Indexes: `(order_id)`, `(group_id, state)`, `(offer_id)`, `(product_id)`, `(split_from_item_id)`, `(return_id)`
 
 **item_state_log**: Every item state change
 
@@ -1113,7 +1113,7 @@ Indexes: `(order_id)`, `(group_id, state)`, `(offer_id)`, `(product_id)`, `(spli
 | actor_id | text? |
 | at | timestamptz |
 
-Indexes: `(item_id, at)`
+Indexes: `(item_id, at)`, `(to_state, at)`
 
 **cancellations**: Cancellation requests and direct cancellations
 
@@ -1137,7 +1137,7 @@ Indexes: `(item_id, at)`
 | idempotency_key | text? |
 | created_at | timestamptz |
 
-Indexes: `(group_id, status)`, `(status, respond_by)`, `unique (order_id, idempotency_key)`
+Indexes: `(group_id, status)`, `(status, respond_by)`, `unique (order_id, idempotency_key)`, `(order_id)`
 
 **shipment_refs**: Projection of shipping events for display, search by tracking number and flags
 
@@ -1190,6 +1190,8 @@ Indexes: `(order_id, at desc)`
 | author_name | text |
 | at | timestamptz |
 
+Indexes: `(order_id, at)`
+
 **documents**: Issued receipt and invoice numbers; PDFs render from the frozen order on request
 
 | Column | Type |
@@ -1200,6 +1202,8 @@ Indexes: `(order_id, at desc)`
 | kind | text |
 | number | text unique |
 | issued_at | timestamptz |
+
+Indexes: `(order_id)`
 
 **saved_filters**
 

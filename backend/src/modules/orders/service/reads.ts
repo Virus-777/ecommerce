@@ -9,7 +9,7 @@ import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type { AdminOrderDetail, AdminOrderRow, DelayedItemAlert, ItemPaidAmount, OrderDetail, OrderSummary, SellerOrderCounts, SellerOrderDetail, SellerOrderRow } from '../../../spec/orders.js';
 import { DAY, dayStart, endOfMarketDay, isMarketlyService, rangeStart } from '../domain/rules.js';
-import type { AdminOrderFilter, GroupRec, OrderRec, SellerGroupFilter } from '../ports.js';
+import type { AdminOrderFilter, GroupRec, NoteRec, OrderRec, SellerGroupFilter, TimelineRec } from '../ports.js';
 import { notFound, type Agg, type Cfg, type Core } from './core.js';
 import type { Fees, Views } from './views.js';
 
@@ -33,6 +33,10 @@ const toPageRequest = (p: common.PageInput | undefined): PageRequest => {
   const limit = Math.min(Math.max(p?.limit ?? 24, 1), 100);
   return p?.page ? { mode: 'page', page: p.page, limit } : { mode: 'cursor', cursor: p?.cursor ?? null, limit };
 };
+
+/** Timeline entries each area may see */
+const CUSTOMER = ['customer'];
+const SELLER = ['customer', 'seller'];
 
 export class Reads {
   constructor(
@@ -58,8 +62,9 @@ export class Reads {
     return agg;
   }
 
-  async storeDetail(agg: Agg, cfg?: Cfg): Promise<OrderDetail> {
-    return this.views.detail(agg, await this.core.timelineOf(agg.order.id, ['customer']), 'store', cfg ?? (await this.core.cfg()));
+  /** timeline: the order's customer-visible entries when the caller read them already (lists read them in one go) */
+  async storeDetail(agg: Agg, cfg?: Cfg, timeline?: readonly TimelineRec[]): Promise<OrderDetail> {
+    return this.views.detail(agg, timeline ?? (await this.core.timelineOf(agg.order.id, CUSTOMER)), 'store', cfg ?? (await this.core.cfg()));
   }
 
   customerFilter(customerId: string, filter: { q?: string; range?: string; from?: string; to?: string; tab?: string }) {
@@ -90,10 +95,9 @@ export class Reads {
   async listOrdersForCustomer(customerId: string, filter: { q?: string; range?: string; from?: string; to?: string; tab?: string }, page: common.PageInput): Promise<common.Page<OrderDetail>> {
     const { f } = this.customerFilter(customerId, filter ?? {});
     const rows = await this.core.repo.customerOrders(customerId, f, toPageRequest(page));
-    const aggs = await this.core.loadMany(rows.items.map((r) => r.id));
-    const cfg = await this.core.cfg();
-    const items: OrderDetail[] = [];
-    for (const r of rows.items) items.push(await this.storeDetail(aggs.get(r.id)!, cfg));
+    const ids = rows.items.map((r) => r.id);
+    const [aggs, timelines, cfg] = await Promise.all([this.core.loadMany(ids), this.core.timelinesOf(ids, CUSTOMER), this.core.cfg()]);
+    const items = await Promise.all(rows.items.map((r) => this.storeDetail(aggs.get(r.id)!, cfg, timelines.get(r.id))));
     return { ...rows, items };
   }
 
@@ -107,9 +111,10 @@ export class Reads {
     let cursor: string | null = null;
     for (let round = 0; round < 1000; round++) {
       const rows: common.Page<OrderRec> = await this.core.repo.customerOrders(customerId, {}, { mode: 'cursor', cursor, limit: 100 });
-      const aggs = await this.core.loadMany(rows.items.map((r) => r.id));
+      const ids = rows.items.map((r) => r.id);
+      const [aggs, timelines] = await Promise.all([this.core.loadMany(ids), this.core.timelinesOf(ids, CUSTOMER)]);
       for (const r of rows.items) {
-        const { canCancelSomething: _c, paymentIntentId: _p, documents, ...order } = await this.storeDetail(aggs.get(r.id)!, cfg);
+        const { canCancelSomething: _c, paymentIntentId: _p, documents, ...order } = await this.storeDetail(aggs.get(r.id)!, cfg, timelines.get(r.id));
         records.push({ ...order, documents: documents.map((d) => ({ kind: d.kind, label: d.label, number: d.number, issuedAt: d.issuedAt })) });
       }
       cursor = rows.nextCursor ?? null;
@@ -121,9 +126,11 @@ export class Reads {
   /** Tab counts; q narrows them like the order list search (ref, product title, seller name) */
   async countByTab(customerId: string | null, range?: string, q?: string) {
     if (!customerId) return { all: 0, inProgress: 0, delivered: 0, returns: 0, cancelled: 0, delayedPackages: 0 };
-    const counts = await this.core.repo.customerTabCounts(customerId, rangeStart(range, this.core.now(), this.core.tz), q);
-    const delayedPackages = (await this.core.repo.delayedGroupsOfCustomer(customerId, this.core.now())).length;
-    return { ...counts, delayedPackages };
+    const [counts, delayed] = await Promise.all([
+      this.core.repo.customerTabCounts(customerId, rangeStart(range, this.core.now(), this.core.tz), q),
+      this.core.repo.delayedGroupsOfCustomer(customerId, this.core.now()),
+    ]);
+    return { ...counts, delayedPackages: delayed.length };
   }
 
   async delayedItems(customerId: string): Promise<DelayedItemAlert[]> {
@@ -164,28 +171,27 @@ export class Reads {
 
   /* ---------------------------------------------------------------- seller */
 
+  /** Fee estimates of the groups, asked of finance at the same time (Official Store groups have none) */
   async fees(agg: Agg, groups: readonly GroupRec[]): Promise<Fees> {
-    const out: Fees = new Map();
-    for (const g of groups) {
-      if (g.owner_type === 'official') {
-        out.set(g.id, null);
-        continue;
-      }
-      const items = agg.items.filter((i) => i.group_id === g.id);
-      const f = this.views.funding(items, agg.order.currency);
-      const c = agg.order.currency;
-      const calc = await this.core.soft('finance', 'fee estimate', (fin) =>
-        fin.calculateFee({
-          categoryId: items[0]?.category_id ?? items[0]?.product_snapshot.categoryId ?? null,
-          itemPrice: money(g.items_total, c),
-          sellerDiscount: money(f.seller, c),
-          platformDiscount: money(f.platform, c),
-          shippingCharged: money(g.shipping_total, c),
-        }),
-      );
-      out.set(g.id, calc ? { fee: calc.fee, earnings: calc.sellerEarnings } : null);
-    }
-    return out;
+    const c = agg.order.currency;
+    const estimates = await Promise.all(
+      groups.map(async (g) => {
+        if (g.owner_type === 'official') return null;
+        const items = agg.items.filter((i) => i.group_id === g.id);
+        const f = this.views.funding(items, c);
+        const calc = await this.core.soft('finance', 'fee estimate', (fin) =>
+          fin.calculateFee({
+            categoryId: items[0]?.category_id ?? items[0]?.product_snapshot.categoryId ?? null,
+            itemPrice: money(g.items_total, c),
+            sellerDiscount: money(f.seller, c),
+            platformDiscount: money(f.platform, c),
+            shippingCharged: money(g.shipping_total, c),
+          }),
+        );
+        return calc ? { fee: calc.fee, earnings: calc.sellerEarnings } : null;
+      }),
+    );
+    return new Map(groups.map((g, i) => [g.id, estimates[i] ?? null]));
   }
 
   /** The seller's own group, or NOT_FOUND */
@@ -198,7 +204,7 @@ export class Reads {
 
   async sellerDetail(sellerId: string, groupId: string): Promise<SellerOrderDetail> {
     const { agg, group } = await this.sellerGroup(sellerId, groupId);
-    const [timeline, cfg, fees] = await Promise.all([this.core.timelineOf(agg.order.id, ['customer', 'seller']), this.core.cfg(), this.fees(agg, [group])]);
+    const [timeline, cfg, fees] = await Promise.all([this.core.timelineOf(agg.order.id, SELLER), this.core.cfg(), this.fees(agg, [group])]);
     return this.views.sellerDetail(agg, group, timeline, cfg, fees);
   }
 
@@ -225,11 +231,12 @@ export class Reads {
     return { ...rows, items: rows.items.map((g) => this.views.sellerRow(aggs.get(g.order_id)!, aggs.get(g.order_id)!.groups.find((x) => x.id === g.id)!, cfg, stages)) };
   }
 
-  async sellerOrder(agg: Agg, sellerId: string, cfg: Cfg) {
+  /** timeline: the order's customer and seller entries when the caller read them already */
+  async sellerOrder(agg: Agg, sellerId: string, cfg: Cfg, timeline?: readonly TimelineRec[]) {
     const own = agg.groups.filter((g) => g.seller_id === sellerId);
     if (!own.length) return null;
-    const [timeline, fees] = await Promise.all([this.core.timelineOf(agg.order.id, ['customer', 'seller']), this.fees(agg, own)]);
-    return this.views.sellerOrder(agg, sellerId, timeline, cfg, fees);
+    const [entries, fees] = await Promise.all([timeline ?? this.core.timelineOf(agg.order.id, SELLER), this.fees(agg, own)]);
+    return this.views.sellerOrder(agg, sellerId, entries, cfg, fees);
   }
 
   async getOrderForSeller(sellerId: string, ref: string): Promise<{ order: OrderDetail; groups: SellerOrderDetail[] } | null> {
@@ -241,17 +248,11 @@ export class Reads {
 
   async listOrdersForSeller(sellerId: string, q: SellerListQuery, page: common.PageInput) {
     const rows = await this.core.repo.sellerGroups(sellerId, this.sellerFilter(q ?? {}), toPageRequest(page), this.core.now());
-    const aggs = await this.core.loadMany(rows.items.map((g) => g.order_id));
-    const cfg = await this.core.cfg();
-    const seen = new Set<string>();
-    const items: { order: OrderDetail; groups: SellerOrderDetail[] }[] = [];
-    for (const g of rows.items) {
-      if (seen.has(g.order_id)) continue;
-      seen.add(g.order_id);
-      const v = await this.sellerOrder(aggs.get(g.order_id)!, sellerId, cfg);
-      if (v) items.push(v);
-    }
-    return { ...rows, items };
+    // one entry per order, in the order of its first group on the page
+    const orderIds = [...new Set(rows.items.map((g) => g.order_id))];
+    const [aggs, timelines, cfg] = await Promise.all([this.core.loadMany(orderIds), this.core.timelinesOf(orderIds, SELLER), this.core.cfg()]);
+    const views = await Promise.all(orderIds.map((id) => this.sellerOrder(aggs.get(id)!, sellerId, cfg, timelines.get(id))));
+    return { ...rows, items: views.filter((v) => v !== null) };
   }
 
   async sellerCounts(sellerId: string): Promise<SellerOrderCounts> {
@@ -300,13 +301,14 @@ export class Reads {
     return { ...rows, items: rows.items.map((r) => this.views.adminRow(aggs.get(r.id)!, exceptions)) };
   }
 
-  async adminDetail(agg: Agg, canViewContact: boolean, cfg?: Cfg): Promise<AdminOrderDetail> {
+  /** pre: what the caller read already (lists read timelines and notes in one go) */
+  async adminDetail(agg: Agg, canViewContact: boolean, cfg?: Cfg, pre: { timeline?: readonly TimelineRec[]; notes?: NoteRec[]; fees?: Fees } = {}): Promise<AdminOrderDetail> {
     const [timeline, notes, c, fees, orderCount] = await Promise.all([
-      this.core.timelineOf(agg.order.id),
-      this.core.repo.find('notes', { order_id: agg.order.id }, { orderBy: [['at', 'desc']] }),
-      cfg ? Promise.resolve(cfg) : this.core.cfg(),
-      this.fees(agg, agg.groups),
-      agg.order.customer_id ? this.core.repo.count('orders', { customer_id: agg.order.customer_id }) : Promise.resolve(null),
+      pre.timeline ?? this.core.timelineOf(agg.order.id),
+      pre.notes ?? this.core.repo.find('notes', { order_id: agg.order.id }, { orderBy: [['at', 'desc']] }),
+      cfg ?? this.core.cfg(),
+      pre.fees ?? this.fees(agg, agg.groups),
+      agg.order.customer_id ? this.core.repo.count('orders', { customer_id: agg.order.customer_id }) : null,
     ]);
     return this.views.adminDetail(agg, timeline, notes, c, { canViewContact, fees, orderCount });
   }
@@ -325,11 +327,22 @@ export class Reads {
 
   async listOrdersAdmin(q: AdminListQuery, page: common.PageInput, canViewContact = false): Promise<common.Page<AdminOrderDetail>> {
     const rows = await this.core.repo.adminOrders(await this.adminFilter(q ?? {}, null), toPageRequest(page), this.core.now());
-    const aggs = await this.core.loadMany(rows.items.map((r) => r.id));
-    const cfg = await this.core.cfg();
-    const items: AdminOrderDetail[] = [];
-    for (const r of rows.items) items.push(await this.adminDetail(aggs.get(r.id)!, canViewContact, cfg));
+    const ids = rows.items.map((r) => r.id);
+    const [aggs, timelines, notes, cfg] = await Promise.all([this.core.loadMany(ids), this.core.timelinesOf(ids), this.notesOf(ids), this.core.cfg()]);
+    const items = await Promise.all(rows.items.map((r) => this.adminDetail(aggs.get(r.id)!, canViewContact, cfg, { timeline: timelines.get(r.id)!, notes: notes.get(r.id) ?? [] })));
     return { ...rows, items };
+  }
+
+  /** Staff notes of several orders in one read, newest first */
+  async notesOf(orderIds: string[]): Promise<Map<string, NoteRec[]>> {
+    const out = new Map<string, NoteRec[]>();
+    if (!orderIds.length) return out;
+    for (const n of await this.core.repo.find('notes', { order_id: orderIds }, { orderBy: [['at', 'desc']] })) {
+      const list = out.get(n.order_id);
+      if (list) list.push(n);
+      else out.set(n.order_id, [n]);
+    }
+    return out;
   }
 
   async getOrdersByIds(
@@ -337,16 +350,24 @@ export class Reads {
     orderIds: string[],
     canViewContact = false,
   ): Promise<Record<string, OrderDetail | { order: OrderDetail; groups: SellerOrderDetail[] } | AdminOrderDetail | null>> {
-    const aggs = await this.core.loadMany(orderIds.filter(isUuid));
-    const cfg = await this.core.cfg();
+    const ids = orderIds.filter(isUuid);
+    // the timelines (and staff notes) of every order in one read each, with what the area may see
+    const visibility = viewer.area === 'store' ? CUSTOMER : viewer.area === 'seller' ? SELLER : undefined;
+    const [aggs, timelines, notes, cfg] = await Promise.all([
+      this.core.loadMany(ids),
+      this.core.timelinesOf(ids, visibility),
+      viewer.area === 'admin' ? this.notesOf(ids) : new Map<string, NoteRec[]>(),
+      this.core.cfg(),
+    ]);
     const out: Record<string, OrderDetail | { order: OrderDetail; groups: SellerOrderDetail[] } | AdminOrderDetail | null> = {};
     for (const id of orderIds) {
       const agg = aggs.get(id);
       out[id] = null;
       if (!agg) continue;
-      if (viewer.area === 'store') out[id] = (await this.visibleToShopper(agg, viewer)) ? await this.storeDetail(agg, cfg) : null;
-      else if (viewer.area === 'seller') out[id] = viewer.sellerId ? await this.sellerOrder(agg, viewer.sellerId, cfg) : null;
-      else out[id] = await this.adminDetail(agg, canViewContact, cfg);
+      const timeline = timelines.get(id)!;
+      if (viewer.area === 'store') out[id] = (await this.visibleToShopper(agg, viewer)) ? await this.storeDetail(agg, cfg, timeline) : null;
+      else if (viewer.area === 'seller') out[id] = viewer.sellerId ? await this.sellerOrder(agg, viewer.sellerId, cfg, timeline) : null;
+      else out[id] = await this.adminDetail(agg, canViewContact, cfg, { timeline, notes: notes.get(id) ?? [] });
     }
     return out;
   }

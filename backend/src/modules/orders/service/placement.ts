@@ -104,24 +104,32 @@ export class Placement {
     const ctx = this.core.ctx;
     const accepted = input.paymentState === 'accepted';
 
-    // frozen purchase snapshots, read before the transaction
+    // frozen purchase snapshots, read before the transaction (independent reads, asked at the same time)
     const lines = input.groups.flatMap((g) => g.items);
-    const offerSnaps = new Map<string, offers.OfferSnapshot>();
-    for (const offerId of new Set(lines.map((l) => l.offerId))) offerSnaps.set(offerId, await ctx.use('offers').snapshotForOrder(offerId));
-    const productSnaps = new Map<string, StoredProduct>();
-    for (const variantId of new Set(lines.map((l) => l.variantId))) productSnaps.set(variantId, await ctx.use('catalog').snapshotForOrder(variantId));
-    // the category at purchase comes with the snapshot; older catalog snapshots without it fall back to the product
-    for (const p of productSnaps.values()) {
-      if (p.categoryId) continue;
-      const product = await ctx
-        .use('catalog')
-        .getProduct(p.productId)
-        .catch(() => null);
-      p.categoryId = product?.categoryId ?? null;
-    }
-    const skus = await this.core.soft('inventory', 'seller SKUs', (inv) => inv.getStockForOffers([...offerSnaps.keys()], {}));
+    const offerIds = [...new Set(lines.map((l) => l.offerId))];
+    const variantIds = [...new Set(lines.map((l) => l.variantId))];
     const sellerIds = [...new Set(input.groups.map((g) => g.sellerId).filter((x): x is string => Boolean(x)))];
-    const sellers = new Map((await this.core.soft('sellers', 'seller labels', (s) => s.getSellers(sellerIds)))?.map((s) => [s.id, s]) ?? []);
+    const [offerList, productList, skus, sellerList] = await Promise.all([
+      Promise.all(offerIds.map((id) => ctx.use('offers').snapshotForOrder(id))),
+      Promise.all(variantIds.map((id) => ctx.use('catalog').snapshotForOrder(id))),
+      this.core.soft('inventory', 'seller SKUs', (inv) => inv.getStockForOffers(offerIds, {})),
+      this.core.soft('sellers', 'seller labels', (s) => s.getSellers(sellerIds)),
+    ]);
+    const offerSnaps = new Map<string, offers.OfferSnapshot>(offerIds.map((id, i) => [id, offerList[i]!]));
+    const productSnaps = new Map<string, StoredProduct>(variantIds.map((id, i) => [id, productList[i]!]));
+    // the category at purchase comes with the snapshot; older catalog snapshots without it fall back to the product
+    await Promise.all(
+      [...productSnaps.values()]
+        .filter((p) => !p.categoryId)
+        .map(async (p) => {
+          const product = await ctx
+            .use('catalog')
+            .getProduct(p.productId)
+            .catch(() => null);
+          p.categoryId = product?.categoryId ?? null;
+        }),
+    );
+    const sellers = new Map(sellerList?.map((s) => [s.id, s]) ?? []);
 
     const issues: { path: string; message: string }[] = [];
     input.groups.forEach((g, gi) =>
@@ -320,17 +328,19 @@ export class Placement {
       const id = i.product_snapshot.imageId ?? i.product_snapshot.image?.id ?? null;
       if (id) assetIds.add(id);
     }
-    for (const assetId of assetIds) {
-      try {
-        // the image belongs to whoever uploaded it to the catalog (the platform, the selling seller, or another seller
-        // of a shared product); the id comes from the catalog snapshot, not from the caller, so attach under its owner
-        const asset = await media.getAsset(assetId);
-        if (!asset) continue;
-        await media.attach(assetId, { module: 'orders', kind: 'order_evidence', refId: orderId, refLabel: ref }, asset.owner);
-      } catch (err) {
-        this.core.ctx.log.warn({ err, orderId, assetId }, 'orders: could not keep the snapshot image');
-      }
-    }
+    await Promise.all(
+      [...assetIds].map(async (assetId) => {
+        try {
+          // the image belongs to whoever uploaded it to the catalog (the platform, the selling seller, or another seller
+          // of a shared product); the id comes from the catalog snapshot, not from the caller, so attach under its owner
+          const asset = await media.getAsset(assetId);
+          if (!asset) return;
+          await media.attach(assetId, { module: 'orders', kind: 'order_evidence', refId: orderId, refLabel: ref }, asset.owner);
+        } catch (err) {
+          this.core.ctx.log.warn({ err, orderId, assetId }, 'orders: could not keep the snapshot image');
+        }
+      }),
+    );
   }
 
   /** payment_pending → open when the payment result arrives. Idempotent. */

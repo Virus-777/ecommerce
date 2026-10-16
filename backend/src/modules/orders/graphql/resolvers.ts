@@ -5,7 +5,8 @@ import { format as formatMoney } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { AdminOrderDetail, CancellationRequest, OrderDetail, OrderItem, OrderSummary, SellerGroup, SellerOrderDetail } from '../../../spec/orders.js';
 import { SHIPPED_OR_LATER, is } from '../domain/rules.js';
-import type { Agg } from '../service/core.js';
+import type { NoteRec, TimelineRec } from '../ports.js';
+import type { Agg, Cfg } from '../service/core.js';
 import type { StoreViewer } from '../service/reads.js';
 import type { OrdersService } from '../service.js';
 
@@ -255,16 +256,18 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
   const canContact = (ctx: GraphQLContext) => ctx.can('orders.customers.view-contact');
   const cancellationsOf = (agg: Agg, groupIds?: Set<string>) => agg.cancellations.filter((c) => !groupIds || groupIds.has(c.group_id)).map((c) => views.cancellation(agg, c));
 
-  async function storeOrder(agg: Agg) {
-    const detail = await reads.storeDetail(agg);
+  /** timeline: the order's customer-visible entries when a list read them already */
+  async function storeOrder(agg: Agg, timeline?: readonly TimelineRec[], cfg?: Cfg) {
+    const detail = await reads.storeDetail(agg, cfg, timeline);
     return order(detail, { summary: views.summary(agg), cancellations: cancellationsOf(agg) });
   }
 
-  async function sellerOrder(agg: Agg, sellerId: string) {
-    const v = await reads.sellerOrder(agg, sellerId, await core.cfg());
+  /** timeline: the order's customer and seller entries when a list read them already */
+  async function sellerOrder(agg: Agg, sellerId: string, timeline?: readonly TimelineRec[], config?: Cfg) {
+    const cfg = config ?? (await core.cfg());
+    const v = await reads.sellerOrder(agg, sellerId, cfg, timeline);
     if (!v) return null;
     const ids = new Set(v.groups.map((g) => g.id));
-    const cfg = await core.cfg();
     const rows = new Map(agg.groups.filter((g) => ids.has(g.id)).map((g) => [g.id, views.sellerRow(agg, g, cfg)]));
     const groups = v.groups.map((g) => ({ ...g, deadlineLabel: rows.get(g.id)?.deadlineLabel, itemsSummary: rows.get(g.id)?.itemsSummary, nextAction: rows.get(g.id)?.nextAction }));
     return order(v.order, { seller: groups, cancellations: cancellationsOf(agg, ids), buyerName: v.groups[0]?.buyerName });
@@ -279,11 +282,11 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
     return ids ? { [orderId]: ids } : undefined;
   };
 
-  async function adminOrder(agg: Agg, ctx: GraphQLContext) {
-    const cfg = await core.cfg();
-    const a = await reads.adminDetail(agg, await canContact(ctx), cfg);
-    const timelineRows = await core.timelineOf(agg.order.id);
-    const fees = await reads.fees(agg, agg.groups);
+  /** pre: the order's timeline and staff notes when a list read them already */
+  async function adminOrder(agg: Agg, ctx: GraphQLContext, pre: { timeline?: readonly TimelineRec[]; notes?: NoteRec[]; cfg?: Cfg } = {}) {
+    // the timeline and fee estimates are read once, for the admin detail and the seller parts alike
+    const [cfg, timelineRows, fees, contact] = await Promise.all([pre.cfg ?? core.cfg(), pre.timeline ?? core.timelineOf(agg.order.id), reads.fees(agg, agg.groups), canContact(ctx)]);
+    const a = await reads.adminDetail(agg, contact, cfg, { timeline: timelineRows, notes: pre.notes, fees });
     const groups = agg.groups.map((g) => {
       const d = views.sellerDetail(agg, g, timelineRows, { ...cfg, sellerAddressVisibleDays: 100_000 }, fees);
       const row = views.sellerRow(agg, g, cfg);
@@ -330,9 +333,9 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
         const filter = { ...(f.q ? { q: f.q } : {}), ...(f.range ? { range: lower(f.range) } : {}), ...(f.from ? { from: f.from } : {}), ...(f.to ? { to: f.to } : {}), ...(f.tab ? { tab: lower(f.tab) } : {}) };
         const { f: rf } = reads.customerFilter(id, filter);
         const rows = await core.repo.customerOrders(id, rf, reads.page(pageInput(args.paging)));
-        const aggs = await core.loadMany(rows.items.map((r) => r.id));
-        const items = [];
-        for (const r of rows.items) items.push(await storeOrder(aggs.get(r.id)!));
+        const ids = rows.items.map((r) => r.id);
+        const [aggs, timelines, cfg] = await Promise.all([core.loadMany(ids), core.timelinesOf(ids, ['customer']), core.cfg()]);
+        const items = await Promise.all(rows.items.map((r) => storeOrder(aggs.get(r.id)!, timelines.get(r.id), cfg)));
         return { ...rows, items };
       },
       sellerOrder: async (_root, args: { ref: string }, ctx) => {
@@ -352,16 +355,11 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
           ...(f.sort ? { sort: lower(f.sort) } : {}),
         };
         const rows = await core.repo.sellerGroups(sellerId, reads.sellerFilter(q), reads.page(pageInput(args.paging)), core.now());
-        const aggs = await core.loadMany(rows.items.map((g) => g.order_id));
-        const seen = new Set<string>();
-        const items = [];
-        for (const g of rows.items) {
-          if (seen.has(g.order_id)) continue;
-          seen.add(g.order_id);
-          const o = await sellerOrder(aggs.get(g.order_id)!, sellerId);
-          if (o) items.push(o);
-        }
-        return { ...rows, items };
+        // one entry per order, in the order of its first group on the page
+        const orderIds = [...new Set(rows.items.map((g) => g.order_id))];
+        const [aggs, timelines, cfg] = await Promise.all([core.loadMany(orderIds), core.timelinesOf(orderIds, ['customer', 'seller']), core.cfg()]);
+        const items = await Promise.all(orderIds.map((oid) => sellerOrder(aggs.get(oid)!, sellerId, timelines.get(oid), cfg)));
+        return { ...rows, items: items.filter((o) => o !== null) };
       },
       sellerOrderCounts: async (_root, _args, ctx) => reads.sellerCounts(sellerIdOf(ctx)),
       orderAdmin: async (_root, args: { ref: string }, ctx) => {
@@ -377,9 +375,9 @@ export const resolvers = (service: OrdersService): ModuleResolvers => {
         );
         const staffId = ctx.principal?.accountId ?? null;
         const rows = await core.repo.adminOrders(await reads.adminFilter(q, staffId), reads.page(pageInput(args.paging)), core.now());
-        const aggs = await core.loadMany(rows.items.map((r) => r.id));
-        const items = [];
-        for (const r of rows.items) items.push(await adminOrder(aggs.get(r.id)!, ctx));
+        const ids = rows.items.map((r) => r.id);
+        const [aggs, timelines, notes, cfg] = await Promise.all([core.loadMany(ids), core.timelinesOf(ids), reads.notesOf(ids), core.cfg()]);
+        const items = await Promise.all(rows.items.map((r) => adminOrder(aggs.get(r.id)!, ctx, { timeline: timelines.get(r.id), notes: notes.get(r.id) ?? [], cfg })));
         return { ...rows, items };
       },
     },

@@ -233,8 +233,8 @@ export class OrdersRepository {
   }
 
   async sellerCounts(sellerId: string, now: Date, endOfDay: Date): Promise<SellerCounts> {
-    const own = await this.#groups.distinct<string>('id', { seller_id: sellerId });
-    const pending = own.length ? await this.#cancellations.distinct<string>('group_id', { group_id: { $in: own }, status: 'requested' }) : [];
+    // groups with an open request, any seller (few at a time): the $group below only counts this seller's own
+    const pending = await this.#cancellations.distinct<string>('group_id', { status: 'requested', group_id: { $ne: null } });
     const notMarketly = { $ne: ['$fulfilled_by', MARKETLY] };
     const open = { $in: ['$status', OPEN] };
     const [r] = await this.#groups.aggregate<Record<string, number>>([

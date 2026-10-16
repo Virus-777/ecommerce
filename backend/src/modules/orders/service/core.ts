@@ -52,6 +52,14 @@ export interface Agg {
 
 const iso = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 
+/** Runs reads at the same time, or one after another (inside a transaction); the results in order */
+async function runAll<T extends readonly (() => Promise<unknown>)[]>(reads: T, parallel: boolean): Promise<{ -readonly [K in keyof T]: Awaited<ReturnType<T[K]>> }> {
+  if (parallel) return (await Promise.all(reads.map((read) => read()))) as never;
+  const out: unknown[] = [];
+  for (const read of reads) out.push(await read());
+  return out as never;
+}
+
 /** The views' reading of an order's facts (orders.order_facts) */
 export function factsOf(rows: readonly FactRec[]): FlagData {
   const f: FlagData = {};
@@ -204,14 +212,18 @@ export class Core {
     const ids = [...new Set(orderIds)];
     const out = new Map<string, Agg>();
     if (!ids.length) return out;
-    // one read after another: inside a transaction (lockAndLoad) the session runs one operation at a time
-    const orders = await repo.find('orders', { id: ids });
-    const groups = await repo.find('seller_groups', { order_id: ids }, { orderBy: [['position', 'asc']] });
-    const items = await repo.find('order_items', { order_id: ids }, { orderBy: [['id', 'asc']] });
-    const cancellations = await repo.find('cancellations', { order_id: ids }, { orderBy: [['created_at', 'asc']] });
-    const shipments = await repo.find('shipment_refs', { order_id: ids }, { orderBy: [['shipment_id', 'asc']] });
-    const documents = await repo.find('documents', { order_id: ids }, { orderBy: [['issued_at', 'asc']] });
-    const facts = await repo.find('order_facts', { order_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    const reads = [
+      () => repo.find('orders', { id: ids }),
+      () => repo.find('seller_groups', { order_id: ids }, { orderBy: [['position', 'asc']] }),
+      () => repo.find('order_items', { order_id: ids }, { orderBy: [['id', 'asc']] }),
+      () => repo.find('cancellations', { order_id: ids }, { orderBy: [['created_at', 'asc']] }),
+      () => repo.find('shipment_refs', { order_id: ids }, { orderBy: [['shipment_id', 'asc']] }),
+      () => repo.find('documents', { order_id: ids }, { orderBy: [['issued_at', 'asc']] }),
+      () => repo.find('order_facts', { order_id: ids }, { orderBy: [['at', 'asc'], ['id', 'asc']] }),
+    ] as const;
+    // outside a transaction the seven reads run at the same time; inside one (lockAndLoad, refreshDerived) one after
+    // another, since the session runs one operation at a time
+    const [orders, groups, items, cancellations, shipments, documents, facts] = await runAll(reads, repo === this.repo);
     for (const o of orders) out.set(o.id, { order: o, groups: [], items: [], cancellations: [], shipments: [], documents: [], factRows: [], facts: {} });
     for (const g of groups) out.get(g.order_id)?.groups.push(g);
     for (const i of items) out.get(i.order_id)?.items.push(i);
@@ -235,7 +247,17 @@ export class Core {
   }
 
   async timelineOf(orderId: string, visibility?: string[]): Promise<TimelineRec[]> {
-    return this.repo.find('timeline', { order_id: orderId, ...(visibility ? { visibility: visibility as TimelineRec['visibility'][] } : {}) }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    return (await this.timelinesOf([orderId], visibility)).get(orderId)!;
+  }
+
+  /** The timelines of several orders in one read (lists build one detail per order), each oldest first */
+  async timelinesOf(orderIds: readonly string[], visibility?: string[]): Promise<Map<string, TimelineRec[]>> {
+    const ids = [...new Set(orderIds)];
+    const out = new Map(ids.map((id) => [id, [] as TimelineRec[]]));
+    if (!ids.length) return out;
+    const rows = await this.repo.find('timeline', { order_id: ids, ...(visibility ? { visibility: visibility as TimelineRec['visibility'][] } : {}) }, { orderBy: [['at', 'asc'], ['id', 'asc']] });
+    for (const r of rows) out.get(r.order_id)?.push(r);
+    return out;
   }
 
   /** The latest Marketly warehouse stage label per Fulfilled by Marketly group of the orders (seller timeline entries) */

@@ -52,12 +52,13 @@ const orders = new Schema(
 orders.index({"ref":1}, {"name":"orders_ref_8cef23","unique":true});
 orders.index({"checkout_session_id":1,"attempt_no":1}, {"name":"orders_checkout_session_id_attempt_no_04cd9d","unique":true});
 orders.index({"customer_id":1,"placed_at":-1}, {"name":"orders_customer_id_placed_at_38c4a9"});
-orders.index({"contact_email":1}, {"name":"orders_contact_email_35ac7e","partialFilterExpression":{"customer_id":{"$type":"null"}},"collation":{"locale":"en","strength":2}});
+orders.index({"contact_email":1}, {"name":"orders_contact_email_a08b81","collation":{"locale":"en","strength":2}});
 orders.index({"display_status":1,"placed_at":-1}, {"name":"orders_display_status_placed_at_4f0b41"});
 orders.index({"lifecycle":1}, {"name":"orders_lifecycle_deef5a"});
 orders.index({"contact_name":1}, {"name":"orders_contact_name_65950b"});
 orders.index({"contact_email":1}, {"name":"orders_contact_email_4f8241"});
 orders.index({"flag_kinds":1}, {"name":"orders_flag_kinds_3aee24"});
+orders.index({"ref":1}, {"name":"orders_ref_51f02f"});
 
 /** Event-fed facts about an order, one row per source record: payment captures, chargebacks, support cases, refunds sent, approved return refunds not sent yet, delivery exceptions, seller restrictions and resent confirmations. The flags, alerts, expected refunds and case references are derived from them */
 const order_facts = new Schema(
@@ -158,6 +159,7 @@ order_items.index({"group_id":1,"state":1}, {"name":"order_items_group_id_state_
 order_items.index({"offer_id":1}, {"name":"order_items_offer_id_959ceb"});
 order_items.index({"product_id":1}, {"name":"order_items_product_id_6c3e3e"});
 order_items.index({"split_from_item_id":1}, {"name":"order_items_split_from_item_id_fd92a8"});
+order_items.index({"return_id":1}, {"name":"order_items_return_id_a479ef"});
 
 /** Every item state change */
 const item_state_log = new Schema(
@@ -177,6 +179,7 @@ const item_state_log = new Schema(
   collectionOptions("orders.item_state_log"),
 );
 item_state_log.index({"item_id":1,"at":1}, {"name":"item_state_log_item_id_at_ce4f0a"});
+item_state_log.index({"to_state":1,"at":1}, {"name":"item_state_log_to_state_at_c15fc5"});
 
 /** Cancellation requests and direct cancellations */
 const cancellations = new Schema(
@@ -206,6 +209,7 @@ const cancellations = new Schema(
 cancellations.index({"group_id":1,"status":1}, {"name":"cancellations_group_id_status_e331f0"});
 cancellations.index({"status":1,"respond_by":1}, {"name":"cancellations_status_respond_by_d4d721"});
 cancellations.index({"order_id":1,"idempotency_key":1}, {"name":"cancellations_order_id_idempotency_key_7c78b9","unique":true,"partialFilterExpression":{"idempotency_key":{"$type":"string"}}});
+cancellations.index({"order_id":1}, {"name":"cancellations_order_id_4c5e85"});
 
 /** Projection of shipping events for display, search by tracking number and flags */
 const shipment_refs = new Schema(
@@ -268,6 +272,7 @@ const notes = new Schema(
   },
   collectionOptions("orders.notes"),
 );
+notes.index({"order_id":1,"at":1}, {"name":"notes_order_id_at_4f2fea"});
 
 /** Issued receipt and invoice numbers; PDFs render from the frozen order on request */
 const documents = new Schema(
@@ -284,6 +289,7 @@ const documents = new Schema(
   collectionOptions("orders.documents"),
 );
 documents.index({"number":1}, {"name":"documents_number_86a411","unique":true});
+documents.index({"order_id":1}, {"name":"documents_order_id_4c5e85"});
 
 const saved_filters = new Schema(
   {
