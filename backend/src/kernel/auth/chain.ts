@@ -110,27 +110,44 @@ export function refreshCookieOf(request: FastifyRequest): { audience: RefreshCoo
   return token ? { audience: audience as RefreshCookieAudience, token } : undefined;
 }
 
-/** Small TTL cache for answers from access, sellers and customers */
+/**
+ * Small TTL cache for answers from access, sellers and customers. Requests that miss the same key at the same time
+ * (an app opening a screen sends several at once) share one load instead of each asking the module.
+ */
 class TtlCache<V> {
   readonly #m = new Map<string, { v: V; at: number }>();
+  readonly #loading = new Map<string, Promise<V>>();
+  #generation = 0;
   /** keepMissing: false = a null answer isn't remembered (a record created a moment later must be found) */
   constructor(
     private readonly clock: Clock,
     private readonly keepMissing = true,
     private readonly ttlMs = CACHE_MS,
   ) {}
-  async get(key: string, load: () => Promise<V>): Promise<V> {
+  get(key: string, load: () => Promise<V>): Promise<V> {
     const now = this.clock.now().getTime();
     const hit = this.#m.get(key);
-    if (hit && now - hit.at < this.ttlMs) return hit.v;
-    const v = await load();
-    if (v === null && !this.keepMissing) return v;
-    if (this.#m.size > 50_000) this.#m.clear();
-    this.#m.set(key, { v, at: now });
-    return v;
+    if (hit && now - hit.at < this.ttlMs) return Promise.resolve(hit.v);
+    const pending = this.#loading.get(key);
+    if (pending) return pending;
+    const generation = this.#generation;
+    const loading = (async () => {
+      const v = await load();
+      // an answer loaded before clear() may be the one the change made stale: used once, not kept
+      if ((v === null && !this.keepMissing) || generation !== this.#generation) return v;
+      if (this.#m.size > 50_000) this.#m.clear();
+      this.#m.set(key, { v, at: now });
+      return v;
+    })().finally(() => {
+      if (this.#loading.get(key) === loading) this.#loading.delete(key);
+    });
+    this.#loading.set(key, loading);
+    return loading;
   }
   clear() {
+    this.#generation++;
     this.#m.clear();
+    this.#loading.clear();
   }
 }
 
