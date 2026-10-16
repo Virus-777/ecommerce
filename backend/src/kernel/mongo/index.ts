@@ -38,6 +38,8 @@ export interface MongoStore {
   transaction<T>(fn: (session: ClientSession) => Promise<T>, session?: ClientSession): Promise<T>;
   /** Next value of a named counter (identity columns, sequences); never rolled back: a number taken by an aborted transaction is skipped */
   nextValue(counter: string): Promise<number>;
+  /** The next n values of a counter, in order, taken in one update (none for n = 0) */
+  nextValues(counter: string, n: number): Promise<number[]>;
   close(): Promise<void>;
 }
 
@@ -66,8 +68,14 @@ export function mongoStore(connection: Connection, onClose: () => Promise<void> 
       }
     },
     async nextValue(counter) {
-      const r = await store.kernel('counters').findOneAndUpdate({ _id: counter }, { $inc: { value: 1 } }, { upsert: true, new: true, lean: true });
-      return (r as unknown as { value: number }).value;
+      const [value] = await store.nextValues(counter, 1);
+      return value!;
+    },
+    async nextValues(counter, n) {
+      if (n <= 0) return [];
+      const r = await store.kernel('counters').findOneAndUpdate({ _id: counter }, { $inc: { value: n } }, { upsert: true, new: true, lean: true });
+      const last = (r as unknown as { value: number }).value;
+      return Array.from({ length: n }, (_, i) => last - n + 1 + i);
     },
     close: onClose,
   };
@@ -204,6 +212,11 @@ export class ModuleStore {
   /** Next value of this module's counter (sequences) */
   nextValue(counter: string): Promise<number> {
     return this.root.nextValue(`${this.module}.${counter}`);
+  }
+
+  /** The next n values of this module's counter, in order, in one round trip (numbering a batch of rows) */
+  nextValues(counter: string, n: number): Promise<number[]> {
+    return this.root.nextValues(`${this.module}.${counter}`, n);
   }
 }
 

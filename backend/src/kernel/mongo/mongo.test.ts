@@ -36,6 +36,7 @@ const demo = {
     },
     { name: 'links', columns: { item_id: 'uuid → items', tag: 'text', note: 'text?' }, indexes: ['pk (item_id, tag)'] },
     { name: 'counters', columns: { owner: 'text', day: 'text', count: 'int', bytes: 'int', note: 'text?' }, indexes: ['pk (owner, day)'] },
+    { name: 'entries', columns: { seq: 'bigserial pk', label: 'text' } },
   ],
 } as unknown as ModuleSpec;
 
@@ -73,10 +74,11 @@ function demoSchemas(d: Record<string, CollectionDef>): ModuleSchemas {
     },
     collectionOptions('demo.counters', { generatedId: true }),
   );
-  for (const [table, schema] of [['items', items], ['links', links], ['counters', counters]] as const) {
+  const entries = new Schema({ _id: { type: Number, required: true, validate: integer }, label: { type: String, required: true }, _lock: Number }, collectionOptions('demo.entries'));
+  for (const [table, schema] of [['items', items], ['links', links], ['counters', counters], ['entries', entries]] as const) {
     for (const i of d[table]!.indexes) schema.index(i.key, { name: i.name, ...(i.unique ? { unique: true } : {}), ...(i.partial ? { partialFilterExpression: i.partial } : {}), ...(i.collation ? { collation: i.collation } : {}) });
   }
-  return { items, links, counters };
+  return { items, links, counters, entries };
 }
 beforeAll(async () => {
   const problems: string[] = [];
@@ -164,6 +166,20 @@ describe('rows and documents', () => {
     expect(await links.insertManyIfAbsent([{ item_id: id, tag: 't' }, { item_id: id, tag: 'u' }])).toBe(1);
     expect(await links.upsert({ item_id: id, tag: 't', note: 'set' })).toMatchObject({ note: 'set' });
     expect(await links.count({ item_id: id })).toBe(2);
+  });
+
+  it('numbers identity columns in row order, a batch from one counter update; given numbers are kept', async () => {
+    expect(defs.entries!.identity).toBe('seq');
+    const mod = store.module('demo', defs, schemas);
+    const entries = mod.table<{ seq: number; label: string }>('entries');
+    const first = await entries.insert({ label: 'a' });
+    await entries.insertMany([{ label: 'b' }, { seq: 1000, label: 'given' }, { label: 'c' }]);
+    await entries.upsertMany([{ label: 'd' }], { key: ['label'] });
+    const rows = await entries.find({}, { sort: { seq: 1 } });
+    expect(rows.map((r) => [r.seq - first.seq, r.label])).toEqual([[0, 'a'], [1, 'b'], [2, 'c'], [3, 'd'], [1000 - first.seq, 'given']]);
+    expect(await mod.nextValues('things', 3)).toEqual([1, 2, 3]);
+    expect(await mod.nextValue('things')).toBe(4);
+    expect(await mod.nextValues('things', 0)).toEqual([]);
   });
 });
 

@@ -167,10 +167,20 @@ export class Table<R extends object> {
 
   /** A full row for insert: nullable columns the row leaves out are stored as null; the identity column is numbered */
   async #insertDoc(row: Record<string, unknown>): Promise<Document> {
-    const full: Record<string, unknown> = { ...row };
-    for (const c of this.def.nullable) if (full[c] === undefined) full[c] = null;
-    if (this.def.identity && full[this.def.identity] == null) full[this.def.identity] = await this.store.nextValue(`${this.name}.${this.def.identity}`);
-    return this.toDoc(full);
+    return (await this.#insertDocs([row]))[0]!;
+  }
+
+  /** #insertDoc for several rows, in order: the identity numbers they need are taken in one counter update */
+  async #insertDocs(rows: readonly Record<string, unknown>[]): Promise<Document[]> {
+    const identity = this.def.identity;
+    const numbers = identity ? await this.store.nextValues(`${this.name}.${identity}`, rows.filter((r) => r[identity] == null).length) : [];
+    let taken = 0;
+    return rows.map((row) => {
+      const full: Record<string, unknown> = { ...row };
+      for (const c of this.def.nullable) if (full[c] === undefined) full[c] = null;
+      if (identity && full[identity] == null) full[identity] = numbers[taken++];
+      return this.toDoc(full);
+    });
   }
 
   #keyFilter(values: Record<string, unknown>, key: readonly string[]): Filter {
@@ -351,8 +361,7 @@ export class Table<R extends object> {
 
   async insertMany(rows: readonly (Partial<R> | Record<string, unknown>)[]): Promise<void> {
     if (!rows.length) return;
-    const docs: Document[] = [];
-    for (const r of rows) docs.push(await this.#insertDoc(r as Record<string, unknown>));
+    const docs = await this.#insertDocs(rows as readonly Record<string, unknown>[]);
     await this.model.insertMany(docs, { session: this.session, ordered: true });
   }
 
@@ -391,11 +400,9 @@ export class Table<R extends object> {
       return inserted;
     }
     // one key: one round trip of upserts
-    const ops = [];
-    for (const row of rows) {
-      const values = row as Record<string, unknown>;
-      ops.push({ updateOne: { filter: this.#keyFilter(values, key), update: { $setOnInsert: await this.#insertDoc(values) }, upsert: true } });
-    }
+    const values = rows as readonly Record<string, unknown>[];
+    const docs = await this.#insertDocs(values);
+    const ops = values.map((row, i) => ({ updateOne: { filter: this.#keyFilter(row, key), update: { $setOnInsert: docs[i] }, upsert: true } }));
     return (await this.model.bulkWrite(ops as never, { session: this.session, ordered: true })).upsertedCount;
   }
 
@@ -455,7 +462,7 @@ export class Table<R extends object> {
   async upsert(row: Partial<R> | Record<string, unknown>, o: { key?: readonly string[]; update?: Record<string, unknown> } = {}): Promise<R> {
     const key = o.key ?? this.#defaultKey();
     const values = row as Record<string, unknown>;
-    const doc = await this.model.findOneAndUpdate(this.#keyFilter(values, key), await this.#upsertUpdate(values, key, o.update), {
+    const doc = await this.model.findOneAndUpdate(this.#keyFilter(values, key), this.#upsertUpdate(values, key, await this.#insertDoc(values), o.update), {
       session: this.#session,
       upsert: true,
       new: true,
@@ -472,19 +479,17 @@ export class Table<R extends object> {
   async upsertMany(rows: readonly (Partial<R> | Record<string, unknown>)[], o: { key?: readonly string[]; update?: (row: Record<string, unknown>) => Record<string, unknown> } = {}): Promise<void> {
     if (!rows.length) return;
     const key = o.key ?? this.#defaultKey();
-    const ops = [];
-    for (const row of rows) {
-      const values = row as Record<string, unknown>;
-      ops.push({ updateOne: { filter: this.#keyFilter(values, key), update: await this.#upsertUpdate(values, key, o.update?.(values)), upsert: true } });
-    }
+    const values = rows as readonly Record<string, unknown>[];
+    const docs = await this.#insertDocs(values);
+    const ops = values.map((row, i) => ({ updateOne: { filter: this.#keyFilter(row, key), update: this.#upsertUpdate(row, key, docs[i]!, o.update?.(row)), upsert: true } }));
     await this.model.bulkWrite(ops as never, { session: this.session, ordered: true });
   }
 
-  /** $set for an existing document, $setOnInsert (the full row, nulls included) for a new one */
-  async #upsertUpdate(values: Record<string, unknown>, key: readonly string[], update?: Record<string, unknown>): Promise<Document> {
+  /** $set for an existing document, $setOnInsert (the full row `insertDoc`, nulls included) for a new one */
+  #upsertUpdate(values: Record<string, unknown>, key: readonly string[], insertDoc: Document, update?: Record<string, unknown>): Document {
     const setDoc = this.toDoc(update ?? Object.fromEntries(Object.entries(values).filter(([k, v]) => !key.includes(k) && v !== undefined)));
     // a field set on update must not also be in $setOnInsert
-    const onInsert = Object.fromEntries(Object.entries(await this.#insertDoc(values)).filter(([k]) => !(k in setDoc)));
+    const onInsert = Object.fromEntries(Object.entries(insertDoc).filter(([k]) => !(k in setDoc)));
     return { ...(Object.keys(setDoc).length ? { $set: setDoc } : {}), $setOnInsert: onInsert };
   }
 

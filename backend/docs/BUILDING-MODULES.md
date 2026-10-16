@@ -168,7 +168,7 @@ export class ThingRepository {
   | "This row must exist" (a bug if not: 500, not 404) | `` orThrow(row, `orders: order ${id}`) `` (`kernel/lib/or-throw.ts`) |
 
   `t.page` already runs its count and read one after another inside a transaction.
-- **Inbox, locks, counters:** `store.claim(key)` inside the transaction of the effects (true the first time); `store.lock(name)` serialises transactions on a name; `store.nextValue(name)` for sequences and identity columns.
+- **Inbox, locks, counters:** `store.claim(key)` inside the transaction of the effects (true the first time); `store.lock(name)` serialises transactions on a name; `store.nextValue(name)` for sequences and identity columns, `store.nextValues(name, n)` to number a batch in one round trip (`t.insertMany` does this for identity columns).
 - **Seed data** lives in code (`domain/seed.ts`), applied on boot. A schema change is a spec change (`npm run gen`; the kernel syncs validators and indexes); data changes after launch (backfills, renames) are `mongoMigrations: [{ id, up(db) }]` in the manifest, each run once.
 - **Tests** read a module's collections the way its repository does: `app.kernel.mongo.module(name, spec.collections, schemas).table(t)`.
 
