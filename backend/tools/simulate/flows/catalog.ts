@@ -63,7 +63,7 @@ async function sellerDrafts(sim: Sim, s: SellerWorld, storeIndex: number): Promi
   const drafts: Draft[] = [];
   for (const p of store.products) {
     const brandId = await ensureBrand(sim, p.brand);
-    const imageId = await sim.upload(s.session, 'seller', { purpose: 'product_image', fileName: `${p.model.toLowerCase()}-front.png`, contentType: 'image/png', body: sim.png(1200, 1200, colour(p.option.values[0]!)) });
+    const imageId = await sim.upload(s.session, 'seller', { purpose: 'product_image', fileName: `${p.model.toLowerCase()}-front.png`, contentType: 'image/png', body: await sim.productPhoto(s.session, 'seller', colour(p.option.values[0]!)) });
     const draft = await api.call(s.session, 'POST', '/api/seller/catalog/products', productInput(sim, p, brandId, [imageId]));
     const productId = draft.product.id as string;
     sim.run.check(`${p.title}: nothing missing`, (draft.missing ?? []).length === 0, draft.missing);
@@ -149,7 +149,7 @@ export async function officialStoreFlow(sim: Sim): Promise<void> {
   const products: { seed: ProductSeed; productId: string; variants: { id: string; value: string }[] }[] = [];
   for (const p of OFFICIAL_PRODUCTS) {
     const brandId = await ensureBrand(sim, p.brand);
-    const imageId = await sim.upload(cm, 'admin', { purpose: 'product_image', fileName: `${p.model.toLowerCase()}.png`, contentType: 'image/png', body: sim.png(1200, 1200, colour(p.option.values[0]!)) });
+    const imageId = await sim.upload(cm, 'admin', { purpose: 'product_image', fileName: `${p.model.toLowerCase()}.png`, contentType: 'image/png', body: await sim.productPhoto(cm, 'admin', colour(p.option.values[0]!)) });
     const input = productInput(sim, p, brandId, [imageId]);
     const draft = await api.call(ops, 'POST', '/api/admin/catalog/products', { ...input, title: `${p.title} ${sim.runId.toUpperCase()}`, variants: input.variants.map((v) => ({ ...v, listPrice: usd(p.price) })) });
     await api.call(ops, 'POST', `/api/admin/catalog/products/${draft.product.id}/submit`);

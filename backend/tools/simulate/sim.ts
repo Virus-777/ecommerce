@@ -3,8 +3,8 @@
  * and the world the flows build up (staff, sellers, products, orders …). Flows read what earlier flows made from
  * `sim.world`.
  */
-import { deflateSync } from 'node:zlib';
 import type { FastifyInstance } from 'fastify';
+import sharp from 'sharp';
 import { devClaims } from '../../src/kernel/auth/dev.js';
 import { signAccessToken } from '../../src/kernel/auth/tokens.js';
 import { FIRST_NAMES, LAST_NAMES, PORTLAND_ADDRESSES, UNITS } from './data.js';
@@ -174,30 +174,20 @@ export class Sim {
   }
 
   /**
-   * A real PNG (signature, IHDR, zlib-compressed IDAT, IEND, with CRCs): a product photo stand-in of the given size
-   * in one colour with a darker band, small enough to upload quickly.
+   * A product photo as the Seller Center sends it: a real image (made by sharp) already cropped to the product
+   * image spec and at its detail size (GET /media/image-specs of the area), in one colour with a darker band.
+   * The server decodes it with sharp, so it must be a real image of the spec size.
    */
-  png(width: number, height: number, rgb: [number, number, number]): Buffer {
-    // one scanline per shade (filter byte 0, then RGB per pixel); the image repeats them
-    const line = (shade: number) => {
-      const row = Buffer.alloc(1 + width * 3);
-      for (let x = 0; x < width; x++) for (let c = 0; c < 3; c++) row[1 + x * 3 + c] = Math.round(rgb[c]! * shade);
-      return row;
-    };
-    const plain = line(1);
-    const band = line(0.7);
-    const rows = Array.from({ length: height }, (_, y) => (y > height * 0.4 && y < height * 0.6 ? band : plain));
-    const u32 = (n: number) => {
-      const b = Buffer.alloc(4);
-      b.writeUInt32BE(n >>> 0);
-      return b;
-    };
-    const chunk = (type: string, data: Buffer) => {
-      const t = Buffer.from(type, 'latin1');
-      return Buffer.concat([u32(data.length), t, data, u32(crc32(Buffer.concat([t, data])))]);
-    };
-    const ihdr = Buffer.concat([u32(width), u32(height), Buffer.from([8, 2, 0, 0, 0])]);
-    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0))]);
+  async productPhoto(s: Session, area: 'seller' | 'admin', rgb: [number, number, number]): Promise<Buffer> {
+    const spec = (await this.api.call(s, 'GET', `/api/${area}/media/image-specs`)).productImage as { detail: { width: number; height: number } };
+    const { width, height } = spec.detail;
+    const shade = (k: number) => ({ r: Math.round(rgb[0] * k), g: Math.round(rgb[1] * k), b: Math.round(rgb[2] * k) });
+    const bandHeight = Math.max(1, Math.round(height * 0.2));
+    const band = await sharp({ create: { width, height: bandHeight, channels: 3, background: shade(0.7) } }).png().toBuffer();
+    return sharp({ create: { width, height, channels: 3, background: shade(1) } })
+      .composite([{ input: band, top: Math.round(height * 0.4), left: 0 }])
+      .png()
+      .toBuffer();
   }
 
   /** A one-page PDF (seller verification documents) */
@@ -244,20 +234,4 @@ export class Sim {
     await this.app.kernel.jobs.runNow(name);
     await this.app.kernel.events.drain();
   }
-}
-
-/** CRC-32 of PNG chunks */
-const CRC_TABLE = (() => {
-  const t = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    t[n] = c >>> 0;
-  }
-  return t;
-})();
-function crc32(b: Buffer): number {
-  let c = 0xffffffff;
-  for (const byte of b) c = CRC_TABLE[(c ^ byte) & 0xff]! ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
 }
