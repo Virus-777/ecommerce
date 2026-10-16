@@ -611,7 +611,7 @@ Indexes: `(requested_by_id, created_at desc)`, `(state, created_at)`, `(state, e
 | group_id | uuid? (seller group of the order; payments.payment.captured is matched on it) |
 | fulfilled_by | text? (official_warehouse|seller|marketly_service) (the group's PlacedGroup.fulfilledBy from orders.order.placed; null for rows recorded before it was kept) |
 
-Indexes: `(placed_at)`, `(paid_at)`, `(shipped_at)`, `(completed_at)`, `(seller_id, placed_at)`, `(product_id, placed_at)`, `(order_id, group_id)`, `(cancelled_at)`
+Indexes: `(placed_at)`, `(paid_at)`, `(shipped_at)`, `(completed_at)`, `(seller_id, placed_at)`, `(product_id, placed_at)`, `(order_id, group_id)`, `(cancelled_at)`, `(customer_key, order_id)`
 
 **fact_refunds**: One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order
 

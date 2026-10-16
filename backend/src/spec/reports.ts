@@ -3597,6 +3597,13 @@ export const spec = defineModuleSpec({
           "key": {
             "cancelled_at": 1
           }
+        },
+        {
+          "name": "fact_order_items_customer_key_order_id_c191b7",
+          "key": {
+            "customer_key": 1,
+            "order_id": 1
+          }
         }
       ],
       "unenforced": []

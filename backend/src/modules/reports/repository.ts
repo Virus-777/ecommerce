@@ -491,22 +491,54 @@ export class ReportsRepository {
     await this.#customers.update(key, { $inc: { net_spend_minor: delta } });
   }
 
-  async rebuildCustomers(): Promise<number> {
-    await this.#customers.deleteMany({});
-    const rows = await this.#items.aggregate<{ _id: string; first_order_at: Date; last_order_at: Date; orders: number; net_spend_minor: number }>([
-      {
-        $group: {
-          _id: { k: '$customer_key', o: '$order_id' },
-          first_order_at: { $min: '$placed_at' },
-          last_order_at: { $max: '$placed_at' },
-          net: { $sum: { $subtract: [{ $add: ['$item_minor', '$shipping_minor', '$tax_minor'] }, { $add: ['$cancelled_minor', '$refunded_minor'] }] } },
+  /**
+   * Recomputes fact_customers from the order item facts, a batch of customers at a time (keyset by customer key, index
+   * fact_order_items (customer_key, order_id)), so only one batch is ever held in memory:
+   *
+   * 1. the customer keys of the next `batch` item facts after the last key done (at most `batch` customers);
+   * 2. those customers' totals from all their item facts (orders counted once each);
+   * 3. one upsertMany of the batch, and the removal of rows in the batch's key range that no longer have item facts.
+   *
+   * Rows are replaced in place instead of the table being emptied first, so reports read whole buyer rows during a
+   * rebuild, and a buyer's first order arriving meanwhile (upsertCustomer) cannot clash with an insert here.
+   * How many customers were written.
+   */
+  async rebuildCustomers(batch = 500): Promise<number> {
+    let after: string | null = null;
+    let written = 0;
+    for (;;) {
+      const keys: string[] = (
+        await this.#items.aggregate<{ _id: string }>([
+          { $match: after === null ? {} : { customer_key: { $gt: after } } },
+          { $sort: { customer_key: 1 } },
+          { $limit: batch },
+          { $group: { _id: '$customer_key' } },
+          { $sort: { _id: 1 } }, // the database's string order, which the $gt above follows
+        ])
+      ).map((r) => r._id);
+      if (!keys.length) break;
+      const rows = await this.#items.aggregate<{ _id: string; first_order_at: Date; last_order_at: Date; orders: number; net_spend_minor: number }>([
+        { $match: { customer_key: { $in: keys } } },
+        {
+          $group: {
+            _id: { k: '$customer_key', o: '$order_id' },
+            first_order_at: { $min: '$placed_at' },
+            last_order_at: { $max: '$placed_at' },
+            net: { $sum: { $subtract: [{ $add: ['$item_minor', '$shipping_minor', '$tax_minor'] }, { $add: ['$cancelled_minor', '$refunded_minor'] }] } },
+          },
         },
-      },
-      { $group: { _id: '$_id.k', first_order_at: { $min: '$first_order_at' }, last_order_at: { $max: '$last_order_at' }, orders: { $sum: 1 }, net_spend_minor: { $sum: '$net' } } },
-    ]);
-    const out = rows.map((r) => ({ customer_key: r._id, first_order_at: r.first_order_at, last_order_at: r.last_order_at, orders: r.orders, net_spend_minor: r.net_spend_minor }));
-    for (let i = 0; i < out.length; i += 500) await this.#customers.insertMany(out.slice(i, i + 500));
-    return out.length;
+        { $group: { _id: '$_id.k', first_order_at: { $min: '$first_order_at' }, last_order_at: { $max: '$last_order_at' }, orders: { $sum: 1 }, net_spend_minor: { $sum: '$net' } } },
+      ]);
+      await this.#customers.upsertMany(rows.map((r) => ({ customer_key: r._id, first_order_at: r.first_order_at, last_order_at: r.last_order_at, orders: r.orders, net_spend_minor: r.net_spend_minor })));
+      const last: string = keys.at(-1)!;
+      // buyers in this key range without item facts any more (none of `keys`) are dropped
+      await this.#customers.deleteMany({ customer_key: { ...(after === null ? {} : { $gt: after }), $lte: last, $nin: keys } });
+      written += rows.length;
+      after = last;
+    }
+    // and those after the last key that has item facts (every row when there are no item facts)
+    await this.#customers.deleteMany(after === null ? {} : { customer_key: { $gt: after } });
+    return written;
   }
 
   async customersAgg(f: { start: Date; end: Date }): Promise<{ buyers: number; newBuyers: number; returning: number; repeat: number }> {

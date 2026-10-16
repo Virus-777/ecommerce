@@ -250,6 +250,7 @@ fact_order_items.index({"seller_id":1,"placed_at":1}, {"name":"fact_order_items_
 fact_order_items.index({"product_id":1,"placed_at":1}, {"name":"fact_order_items_product_id_placed_at_0a3269"});
 fact_order_items.index({"order_id":1,"group_id":1}, {"name":"fact_order_items_order_id_group_id_686565"});
 fact_order_items.index({"cancelled_at":1}, {"name":"fact_order_items_cancelled_at_524b9a"});
+fact_order_items.index({"customer_key":1,"order_id":1}, {"name":"fact_order_items_customer_key_order_id_c191b7"});
 
 /** One row per refund and seller share (decision D5): a refund over several sellers' items is split by the items it names (payments.refund.sent items), the rest (shipping, unnamed amounts) proportionally to each seller's item amounts on the order */
 const fact_refunds = new Schema(
