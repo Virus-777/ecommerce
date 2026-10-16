@@ -245,9 +245,8 @@ export class PayoutsPart extends Part {
     const retries = await this.repo.find('payouts', { seller_id: sellerId, status: 'pending', run_id: null, retry_of: { op: 'is not', value: null } });
     const prepared = await this.parts.statements.prepare(sellerId, cutoff, { final: retries.length > 0 });
     if (!prepared && !retries.length) return;
-    const acct = await this.repo.findOne('seller_accounts', { seller_id: sellerId });
-    const block = await this.parts.ledger.payoutBlock(sellerId);
-    const dest = await this.core.destinationOf(sellerId);
+    const [acct, dest] = await Promise.all([this.repo.findOne('seller_accounts', { seller_id: sellerId }), this.core.destinationOf(sellerId)]);
+    const block = this.parts.ledger.payoutBlockOf(acct, dest);
     const destination = dest.active ?? dest.latest;
     const unposted = (await this.repo.find('payouts', { seller_id: sellerId, status: ['pending', 'on_hold'], run_id: { op: 'is not', value: null } })).filter((p) => p.run_id !== runId).reduce((s, p) => s + p.amount, 0);
     const retrySum = retries.reduce((s, p) => s + p.amount, 0);
@@ -285,7 +284,7 @@ export class PayoutsPart extends Part {
           idempotency_key: null,
         });
         const lots = await tx.find('earnings_lots', { seller_id: sellerId, state: 'available', available_at: { op: '<=', value: cutoff } }, { forUpdate: true });
-        for (const l of lots) await this.core.moveLot(tx, l, 'addToPayout', out, { payout_id: payoutId });
+        await this.core.moveLots(tx, lots, 'addToPayout', out, { payout_id: payoutId });
       }
       for (const r of retries) await tx.update('payouts', r.id, { run_id: runId, statement_id: statementId });
       if (prepared) await this.parts.statements.write(tx, prepared, { payoutId: payoutId ?? retries[0]?.id ?? null, payout: (pays ? regular : 0) + retrySum, unposted });
@@ -313,10 +312,9 @@ export class PayoutsPart extends Part {
     const run = await this.run(id);
     this.core.step(payoutRunMachine, run.status, 'recalculate');
     for (const p of await this.repo.find('payouts', { run_id: id, status: ['pending', 'on_hold'] })) {
-      const block = await this.parts.ledger.payoutBlock(p.seller_id);
-      const acct = await this.repo.findOne('seller_accounts', { seller_id: p.seller_id });
+      const [acct, dest] = await Promise.all([this.repo.findOne('seller_accounts', { seller_id: p.seller_id }), this.core.destinationOf(p.seller_id)]);
+      const block = this.parts.ledger.payoutBlockOf(acct, dest);
       const status = block.blocked ? (p.status === 'pending' ? this.core.step(payoutMachine, p.status, 'hold') : p.status) : p.status === 'on_hold' ? this.core.step(payoutMachine, p.status, 'unhold') : p.status;
-      const dest = await this.core.destinationOf(p.seller_id);
       await this.repo.update('payouts', p.id, { status, holds_withheld: Math.max(0, acct?.held ?? 0), destination_id: (dest.active ?? dest.latest)?.id ?? p.destination_id });
     }
     const retries = await this.repo.find('payouts', { status: 'pending', run_id: null, retry_of: { op: 'is not', value: null } });
@@ -469,7 +467,7 @@ export class PayoutsPart extends Part {
       const p = await tx.get('payouts', id, { forUpdate: true });
       if (!p || (p.status !== 'pending' && p.status !== 'on_hold')) return;
       await tx.update('payouts', id, { status: this.core.step(payoutMachine, p.status, 'cancel'), failure_reason: reason });
-      for (const l of await tx.find('earnings_lots', { payout_id: id, state: 'in_payout' }, { forUpdate: true })) await this.core.moveLot(tx, l, 'returnToAvailable', out, { payout_id: null });
+      await this.core.moveLots(tx, await tx.find('earnings_lots', { payout_id: id, state: 'in_payout' }, { forUpdate: true }), 'returnToAvailable', out, { payout_id: null });
     });
     this.core.flush(out);
   }
@@ -518,14 +516,14 @@ export class PayoutsPart extends Part {
       if (r.status === 'paid') {
         if (p.status !== 'processing') return null;
         await tx.update('payouts', id, { status: this.core.step(payoutMachine, p.status, 'confirmPaid'), paid_at: at, bank_reference: r.bankReference ?? p.bank_reference });
-        for (const l of await tx.find('earnings_lots', { payout_id: id, state: 'in_payout' }, { forUpdate: true })) await this.core.moveLot(tx, l, 'markPaid', out);
+        await this.core.moveLots(tx, await tx.find('earnings_lots', { payout_id: id, state: 'in_payout' }, { forUpdate: true }), 'markPaid', out);
         return { p, kind: 'paid' as const, at };
       }
       if (p.status !== 'processing' && p.status !== 'paid') return null;
       const event = p.status === 'paid' ? 'bankReturn' : 'fail';
       await tx.update('payouts', id, { status: this.core.step(payoutMachine, p.status, event), failed_at: at, failure_code: r.failureCode ?? null, failure_reason: r.failureReason ?? (r.status === 'returned' ? 'Returned by the bank' : 'Rejected by the bank') });
       await this.core.post(tx, p.seller_id, [{ key: `payout_returned:${p.id}`, type: 'payout_returned', amount: p.amount, bucket: 'available', ref: { kind: 'payout', id: p.id, label: p.ref }, description: `${p.ref} returned by the bank${r.failureCode ? ` (${r.failureCode})` : ''}: ${r.failureReason ?? 'payout failed'}. Funds kept in your balance` }], out);
-      for (const l of await tx.find('earnings_lots', { payout_id: id, state: 'in_payout' }, { forUpdate: true })) await this.core.moveLot(tx, l, 'returnToAvailable', out, { payout_id: null });
+      await this.core.moveLots(tx, await tx.find('earnings_lots', { payout_id: id, state: 'in_payout' }, { forUpdate: true }), 'returnToAvailable', out, { payout_id: null });
       return { p, kind: 'failed' as const, at };
     });
     this.core.flush(out);

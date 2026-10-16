@@ -349,6 +349,20 @@ export class Core {
     return tx.update('earnings_lots', lot.id, { state, ...patch });
   }
 
+  /**
+   * moveLot for many lots: pending lots one by one (their net moves between balances), the others with one update
+   * per state they leave (every transition is still checked against the lot machine)
+   */
+  async moveLots(tx: FinanceRepository, lots: readonly LotRec[], event: Parameters<Core['moveLot']>[2], out: Outbox, patch: Partial<LotRec> = {}): Promise<void> {
+    const byState = new Map<string, string[]>();
+    for (const l of lots) {
+      if (l.state === 'pending') await this.moveLot(tx, l, event, out, patch);
+      else if (byState.has(l.state)) byState.get(l.state)!.push(l.id);
+      else byState.set(l.state, [l.id]);
+    }
+    for (const [from, ids] of byState) await tx.updateWhere('earnings_lots', { id: ids }, { state: this.step(earningsLotMachine, from, event), ...patch });
+  }
+
   /* ---------------------------------------------------------------- payout destinations */
 
   async destinationOf(sellerId: string, repo: FinanceRepository = this.repo): Promise<Destination> {
