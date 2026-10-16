@@ -38,8 +38,13 @@ const conversations = new Schema(
   collectionOptions("messaging.conversations"),
 );
 conversations.index({"customer_id":1,"last_message_at":-1}, {"name":"conversations_customer_id_last_message_at_65ae82"});
+conversations.index({"guest_session_id":1}, {"name":"conversations_guest_session_id_a02466"});
 conversations.index({"seller_id":1,"reply_state":1,"reply_due_at":1}, {"name":"conversations_seller_id_reply_state_reply_due_at_880d57"});
+conversations.index({"reply_state":1,"reply_due_at":1}, {"name":"conversations_reply_state_reply_due_at_d332ef"});
+conversations.index({"status":1,"archive_after":1}, {"name":"conversations_status_archive_after_4ff0ba"});
 conversations.index({"order_id":1}, {"name":"conversations_order_id_4c5e85"});
+conversations.index({"order_item_id":1}, {"name":"conversations_order_item_id_219b1b"});
+conversations.index({"return_id":1}, {"name":"conversations_return_id_a479ef"});
 conversations.index({"case_id":1}, {"name":"conversations_case_id_ddb8b4"});
 conversations.index({"kind":1,"customer_id":1,"seller_id":1,"application_id":1,"order_id":1,"order_item_id":1,"return_id":1,"product_id":1}, {"name":"conversations_kind_customer_id_seller_id_application_i_313b7a","unique":true,"partialFilterExpression":{"kind":{"$in":["order","staff_seller"]}}});
 conversations.index({"kind":1,"customer_id":1,"order_id":1,"case_id":1}, {"name":"conversations_kind_customer_id_order_id_case_id_6fa7e5","unique":true,"partialFilterExpression":{"kind":"support"}});
@@ -107,6 +112,8 @@ const message_reports = new Schema(
   collectionOptions("messaging.message_reports"),
 );
 message_reports.index({"status":1,"created_at":1}, {"name":"message_reports_status_created_at_de0a8c"});
+message_reports.index({"message_id":1}, {"name":"message_reports_message_id_28ac3b"});
+message_reports.index({"conversation_id":1}, {"name":"message_reports_conversation_id_a1467d"});
 
 const reply_templates = new Schema(
   {

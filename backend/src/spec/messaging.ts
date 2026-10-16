@@ -1768,6 +1768,12 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "conversations_guest_session_id_a02466",
+          "key": {
+            "guest_session_id": 1
+          }
+        },
+        {
           "name": "conversations_seller_id_reply_state_reply_due_at_880d57",
           "key": {
             "seller_id": 1,
@@ -1776,9 +1782,35 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "conversations_reply_state_reply_due_at_d332ef",
+          "key": {
+            "reply_state": 1,
+            "reply_due_at": 1
+          }
+        },
+        {
+          "name": "conversations_status_archive_after_4ff0ba",
+          "key": {
+            "status": 1,
+            "archive_after": 1
+          }
+        },
+        {
           "name": "conversations_order_id_4c5e85",
           "key": {
             "order_id": 1
+          }
+        },
+        {
+          "name": "conversations_order_item_id_219b1b",
+          "key": {
+            "order_item_id": 1
+          }
+        },
+        {
+          "name": "conversations_return_id_a479ef",
+          "key": {
+            "return_id": 1
           }
         },
         {
@@ -2185,6 +2217,18 @@ export const spec = defineModuleSpec({
           "key": {
             "status": 1,
             "created_at": 1
+          }
+        },
+        {
+          "name": "message_reports_message_id_28ac3b",
+          "key": {
+            "message_id": 1
+          }
+        },
+        {
+          "name": "message_reports_conversation_id_a1467d",
+          "key": {
+            "conversation_id": 1
           }
         }
       ],

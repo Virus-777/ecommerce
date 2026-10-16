@@ -371,7 +371,7 @@ Actioning hides the message or locks the conversation; serious cases are referre
 | last_message_at | timestamptz |
 | archive_after | timestamptz? |
 
-Indexes: `(customer_id, last_message_at desc)`, `(seller_id, reply_state, reply_due_at)`, `(order_id)`, `(case_id)`, `unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id, product_id) where kind <> 'support'`, `unique nulls not distinct (kind, customer_id, order_id, case_id) where kind = 'support'`
+Indexes: `(customer_id, last_message_at desc)`, `(guest_session_id)`, `(seller_id, reply_state, reply_due_at)`, `(reply_state, reply_due_at)`, `(status, archive_after)`, `(order_id)`, `(order_item_id)`, `(return_id)`, `(case_id)`, `unique nulls not distinct (kind, customer_id, seller_id, application_id, order_id, order_item_id, return_id, product_id) where kind <> 'support'`, `unique nulls not distinct (kind, customer_id, order_id, case_id) where kind = 'support'`
 
 **participants**
 
@@ -427,7 +427,7 @@ Indexes: `(conversation_id, at desc)`, `(conversation_id, author_id, client_mess
 | decided_at | timestamptz? |
 | created_at | timestamptz |
 
-Indexes: `(status, created_at)`
+Indexes: `(status, created_at)`, `(message_id)`, `(conversation_id)`
 
 **reply_templates**
 
