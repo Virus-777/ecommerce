@@ -1366,7 +1366,7 @@ Indexes: `(status, from_date)`
 | recorded_by | jsonb |
 | created_at | timestamptz |
 
-Indexes: `(order_id)`, `(group_id)`, `(carrier_code, tracking_number)`, `(seller_id, status)`, `(status, shipped_at)`
+Indexes: `(order_id)`, `(group_id)`, `(return_id)`, `(carrier_code, tracking_number)`, `(seller_id, status)`, `(status, shipped_at)`
 
 **shipment_lines**
 
@@ -1378,7 +1378,7 @@ Indexes: `(order_id)`, `(group_id)`, `(carrier_code, tracking_number)`, `(seller
 | variant_label | text |
 | quantity | int |
 
-Indexes: `(order_item_id)`
+Indexes: `(shipment_id)`, `(order_item_id)`
 
 **tracking_events**
 
@@ -1409,6 +1409,8 @@ Indexes: `(shipment_id, at)`, `unique (shipment_id, carrier_event_id)`
 | customer_notified | bool |
 | at | timestamptz |
 
+Indexes: `(shipment_id, at)`
+
 **labels**
 
 | Column | Type |
@@ -1432,6 +1434,8 @@ Indexes: `(shipment_id, at)`, `unique (shipment_id, carrier_event_id)`
 | purchased_by | jsonb |
 | purchased_at | timestamptz |
 | voided_at | timestamptz? |
+
+Indexes: `(shipment_id)`
 
 **label_quotes**
 
@@ -1494,7 +1498,7 @@ Indexes: `(due_at) where overdue_since is null`
 | opened_by | jsonb |
 | opened_at | timestamptz |
 
-Indexes: `(kind, status, due_at)`, `(seller_id, status)`, `(group_id)`, `unique nulls not distinct (group_id, kind, shipment_id) where status in ('open','in_progress','escalated')`
+Indexes: `(kind, status, due_at)`, `(seller_id, status)`, `(group_id)`, `(order_id)`, `(shipment_id)`, `unique nulls not distinct (group_id, kind, shipment_id) where status in ('open','in_progress','escalated')`
 
 **exception_log**
 
@@ -1506,6 +1510,8 @@ Indexes: `(kind, status, due_at)`, `(seller_id, status)`, `(group_id)`, `unique 
 | detail | text? |
 | actor | jsonb |
 | at | timestamptz |
+
+Indexes: `(exception_id, at)`
 
 **claims**
 
@@ -1544,7 +1550,7 @@ Indexes: `(status)`, `(order_id)`
 | processed_at | timestamptz? |
 | error | text? |
 
-Indexes: `unique (carrier_code, external_id)`
+Indexes: `unique (carrier_code, external_id)`, `(processed_at, received_at)`
 
 ## Events
 

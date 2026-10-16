@@ -5828,6 +5828,12 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "shipments_return_id_a479ef",
+          "key": {
+            "return_id": 1
+          }
+        },
+        {
           "name": "shipments_carrier_code_tracking_number_3537b2",
           "key": {
             "carrier_code": 1,
@@ -5910,6 +5916,12 @@ export const spec = defineModuleSpec({
         }
       },
       "indexes": [
+        {
+          "name": "shipment_lines_shipment_id_048e7e",
+          "key": {
+            "shipment_id": 1
+          }
+        },
         {
           "name": "shipment_lines_order_item_id_219b1b",
           "key": {
@@ -6098,7 +6110,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "tracking_corrections_shipment_id_at_eaf00c",
+          "key": {
+            "shipment_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "labels": {
@@ -6268,6 +6288,12 @@ export const spec = defineModuleSpec({
             "idempotency_key": 1
           },
           "unique": true
+        },
+        {
+          "name": "labels_shipment_id_048e7e",
+          "key": {
+            "shipment_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -6671,6 +6697,18 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "exceptions_order_id_4c5e85",
+          "key": {
+            "order_id": 1
+          }
+        },
+        {
+          "name": "exceptions_shipment_id_048e7e",
+          "key": {
+            "shipment_id": 1
+          }
+        },
+        {
           "name": "exceptions_group_id_kind_shipment_id_87cfa8",
           "key": {
             "group_id": 1,
@@ -6754,7 +6792,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "exception_log_exception_id_at_69d834",
+          "key": {
+            "exception_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "claims": {
@@ -7004,6 +7050,13 @@ export const spec = defineModuleSpec({
             "external_id": 1
           },
           "unique": true
+        },
+        {
+          "name": "webhook_events_processed_at_received_at_1c9334",
+          "key": {
+            "processed_at": 1,
+            "received_at": 1
+          }
         }
       ],
       "unenforced": []

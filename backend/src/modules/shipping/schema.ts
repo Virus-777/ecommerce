@@ -237,6 +237,7 @@ const shipments = new Schema(
 );
 shipments.index({"order_id":1}, {"name":"shipments_order_id_4c5e85"});
 shipments.index({"group_id":1}, {"name":"shipments_group_id_f643ce"});
+shipments.index({"return_id":1}, {"name":"shipments_return_id_a479ef"});
 shipments.index({"carrier_code":1,"tracking_number":1}, {"name":"shipments_carrier_code_tracking_number_3537b2"});
 shipments.index({"seller_id":1,"status":1}, {"name":"shipments_seller_id_status_b608db"});
 shipments.index({"status":1,"shipped_at":1}, {"name":"shipments_status_shipped_at_2796e0"});
@@ -253,6 +254,7 @@ const shipment_lines = new Schema(
   },
   collectionOptions("shipping.shipment_lines", { generatedId: true }),
 );
+shipment_lines.index({"shipment_id":1}, {"name":"shipment_lines_shipment_id_048e7e"});
 shipment_lines.index({"order_item_id":1}, {"name":"shipment_lines_order_item_id_219b1b"});
 
 const tracking_events = new Schema(
@@ -289,6 +291,7 @@ const tracking_corrections = new Schema(
   },
   collectionOptions("shipping.tracking_corrections"),
 );
+tracking_corrections.index({"shipment_id":1,"at":1}, {"name":"tracking_corrections_shipment_id_at_eaf00c"});
 
 const labels = new Schema(
   {
@@ -317,6 +320,7 @@ const labels = new Schema(
   collectionOptions("shipping.labels"),
 );
 labels.index({"idempotency_key":1}, {"name":"labels_idempotency_key_b82ef6","unique":true});
+labels.index({"shipment_id":1}, {"name":"labels_shipment_id_048e7e"});
 
 const label_quotes = new Schema(
   {
@@ -390,6 +394,8 @@ const exceptions = new Schema(
 exceptions.index({"kind":1,"status":1,"due_at":1}, {"name":"exceptions_kind_status_due_at_922169"});
 exceptions.index({"seller_id":1,"status":1}, {"name":"exceptions_seller_id_status_b608db"});
 exceptions.index({"group_id":1}, {"name":"exceptions_group_id_f643ce"});
+exceptions.index({"order_id":1}, {"name":"exceptions_order_id_4c5e85"});
+exceptions.index({"shipment_id":1}, {"name":"exceptions_shipment_id_048e7e"});
 exceptions.index({"group_id":1,"kind":1,"shipment_id":1}, {"name":"exceptions_group_id_kind_shipment_id_87cfa8","unique":true,"partialFilterExpression":{"status":{"$in":["open","in_progress","escalated"]}}});
 
 const exception_log = new Schema(
@@ -405,6 +411,7 @@ const exception_log = new Schema(
   },
   collectionOptions("shipping.exception_log"),
 );
+exception_log.index({"exception_id":1,"at":1}, {"name":"exception_log_exception_id_at_69d834"});
 
 const claims = new Schema(
   {
@@ -450,6 +457,7 @@ const webhook_events = new Schema(
   collectionOptions("shipping.webhook_events"),
 );
 webhook_events.index({"carrier_code":1,"external_id":1}, {"name":"webhook_events_carrier_code_external_id_7dde52","unique":true});
+webhook_events.index({"processed_at":1,"received_at":1}, {"name":"webhook_events_processed_at_received_at_1c9334"});
 
 /** Table name → schema */
 export const schemas = {
