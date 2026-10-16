@@ -31,7 +31,7 @@ export class Reports {
       const here = new Set((await this.core.repo.levelTotals({ ownerType: 'official', locationId })).map((l) => l.stock_item_id));
       rows = rows.filter((r) => here.has(r.id));
     }
-    const scoped = await this.core.itemsApi(rows, { locationId });
+    const scoped = await this.core.itemsApi(rows, { locationId, images: false });
     const groups = GROUPS.map((g) => {
       const units = scoped.reduce((n, i) => n + i.quantities[FIELD[g]], 0);
       const value = scoped.reduce((n, i) => n + (i.unitCost ? i.unitCost.amount * i.quantities[FIELD[g]] : 0), 0);
@@ -61,7 +61,7 @@ export class Reports {
       if (principal.kind !== 'seller' || !principal.sellerId) throw new AppError('FORBIDDEN', 'Seller stock exports are for the seller only');
       const filter = await this.sellerStock.sellerListFilter(principal.sellerId, { q: f.q as string | undefined, state: f.state as ItemListFilter['state'], categoryId: f.categoryId as string | undefined });
       const pageIds = await this.core.repo.itemIds({ ...filter, ...(ids ? { ids } : {}) }, EXPORT_PAGE + 1, offset);
-      const items = await this.core.itemsApi(await this.core.rowsInOrder(pageIds.slice(0, EXPORT_PAGE)));
+      const items = await this.core.itemsApi(await this.core.rowsInOrder(pageIds.slice(0, EXPORT_PAGE)), { images: false });
       return {
         rows: items.map((i) => {
           const { productTitle, variantLabel } = splitLabel(i.label);
@@ -74,7 +74,7 @@ export class Reports {
       if (principal.kind !== 'staff') throw new AppError('FORBIDDEN', 'Company stock exports are for staff');
       const filter = this.companyStock.adminListFilter({ q: f.q as string, ownerType: f.ownerType as 'official' | 'seller', sellerId: f.sellerId as string, filter: f.filter as string, locationId: f.locationId as string, zone: f.zone as string }, await this.core.defaultThreshold());
       const pageIds = await this.core.repo.itemIds({ ...filter, ...(ids ? { ids } : {}) }, EXPORT_PAGE + 1, offset);
-      const items = await this.core.itemsApi(await this.core.rowsInOrder(pageIds.slice(0, EXPORT_PAGE)), { locationId: filter.locationId });
+      const items = await this.core.itemsApi(await this.core.rowsInOrder(pageIds.slice(0, EXPORT_PAGE)), { locationId: filter.locationId, images: false });
       return {
         rows: items.map((i) => ({
           sku: i.sku,
@@ -203,7 +203,7 @@ export class Reports {
     for (let offset = 0; ; offset += BATCH) {
       const ids = await this.core.repo.itemIds({ filter: 'low_or_out', defaultThreshold: def }, BATCH, offset);
       const rows = await this.core.rowsInOrder(ids);
-      const items = await this.core.itemsApi(rows);
+      const items = await this.core.itemsApi(rows, { images: false });
       for (const [i, row] of rows.entries()) {
         if (row.archived) continue;
         const api = items[i]!;

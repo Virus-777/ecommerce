@@ -56,6 +56,21 @@ describe('stock items through the public API', () => {
     expect(await h.api.findBySku('seller', [item.sku], other)).toEqual([]);
     expect(await h.api.getUnitCost(item.id)).toBeNull();
   });
+
+  it('answers availability for many items as the stock item detail reads them, holds listed in order', async () => {
+    const items = [await sellerItem(h, avery, 0), await sellerItem(h, avery, 2, { lowStockThreshold: 3 }), await sellerItem(h, avery, 9)];
+    const first = await h.api.hold(`chk-${newId()}`, [{ stockItemId: items[2]!.id, quantity: 1 }]);
+    const second = await h.api.hold(`chk-${newId()}`, [{ stockItemId: items[2]!.id, quantity: 2 }]);
+    const a = await h.api.getAvailability(items.map((i) => i.id));
+    for (const i of items) {
+      const detail = (await seller(h, avery, 'GET', `/stock-items/${i.id}`)).json();
+      expect(a[i.id]).toEqual({ available: detail.item.quantities.available, state: detail.item.state, lowStockThreshold: detail.item.lowStockThreshold, nextIncoming: detail.item.nextIncoming ?? null });
+    }
+    expect(a[items[2]!.id]).toMatchObject({ available: 6, state: 'in_stock' });
+    const detail = (await seller(h, avery, 'GET', `/stock-items/${items[2]!.id}`)).json();
+    expect(detail.reservations.map((r: { id: string }) => r.id)).toEqual([first.id, second.id]);
+    expect(detail.reservations[1].lines).toEqual([expect.objectContaining({ stockItemId: items[2]!.id, quantity: 2, state: 'held' })]);
+  });
 });
 
 describe('seller stock (own items only)', () => {

@@ -45,7 +45,7 @@ export class SellerStock {
 
   /** In stock, low, out of stock and reserved totals for the seller dashboard */
   async getSellerStockSummary(sellerId: string): Promise<SellerStockSummary> {
-    const items = await this.core.itemsApi(await this.core.repo.items({ ownerType: 'seller', sellerId }));
+    const items = await this.core.itemsApi(await this.core.repo.items({ ownerType: 'seller', sellerId }), { images: false });
     const out = items.filter((i) => i.state === 'out_of_stock');
     return {
       inStockSkus: items.filter((i) => i.state === 'in_stock').length,
@@ -67,12 +67,10 @@ export class SellerStock {
   async #productsInCategory(productIds: string[], categoryId: string): Promise<string[] | undefined> {
     const catalog = this.core.ctx.tryUse('catalog');
     if (!catalog) return undefined;
-    const out: string[] = [];
-    for (const id of [...new Set(productIds)]) {
-      const p = await catalog.getProduct(id);
-      if (p?.categoryId === categoryId) out.push(id);
-    }
-    return out;
+    const ids = [...new Set(productIds)];
+    // side by side (were one after another)
+    const products = await Promise.all(ids.map((id) => catalog.getProduct(id)));
+    return ids.filter((_, i) => products[i]?.categoryId === categoryId);
   }
 
   /** GraphQL StockItem.lastChange */

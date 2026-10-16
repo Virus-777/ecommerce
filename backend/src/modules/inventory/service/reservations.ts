@@ -55,6 +55,7 @@ export class Reservations {
       }
       if (short.length) throw inventoryError('INSUFFICIENT_STOCK', short.length === 1 ? 'Not enough stock for one item' : `Not enough stock for ${short.length} items`, { lines: short });
       const ref: MovementRef = { kind: 'reservation', id, label: 'Checkout hold' };
+      const lines: Row<'reservation_lines'>[] = [];
       for (const [itemId, qty] of wanted) {
         let left = qty;
         for (const level of st.sellableLevels(itemId)) {
@@ -66,10 +67,11 @@ export class Reservations {
             actor: SYSTEM_ACTOR,
             insufficient: (have) => inventoryError('INSUFFICIENT_STOCK', 'Not enough stock for one item', { lines: [{ stockItemId: itemId, requested: qty, available: have }] }),
           });
-          await st.tx.insert('reservation_lines', { id: newId(), reservation_id: id, stock_item_id: itemId, location_id: level.location_id, order_item_id: null, quantity: take, fulfilled_qty: 0, released_qty: 0, state: 'held' });
+          lines.push({ id: newId(), reservation_id: id, stock_item_id: itemId, location_id: level.location_id, order_item_id: null, quantity: take, fulfilled_qty: 0, released_qty: 0, state: 'held' });
           left -= take;
         }
       }
+      await st.tx.insertLines(lines);
       return true;
     });
     if (!created) return this.#existingHold((await this.core.repo.reservationByKey('checkout', key))!);
@@ -201,16 +203,18 @@ export class Reservations {
           if (available < qty) short.push({ stockItemId: itemId, requested: qty, available });
         }
         if (short.length) throw inventoryError('INSUFFICIENT_STOCK', short.length === 1 ? 'Not enough stock for one item' : `Not enough stock for ${short.length} items`, { lines: short });
+        const lines: Row<'reservation_lines'>[] = [];
         for (const l of input.lines) {
           let left = l.quantity;
           for (const level of st.sellableLevels(l.stockItemId)) {
             if (left <= 0) break;
             const take = Math.min(left, level.available);
             await st.move(l.stockItemId, level.location_id, 'available', 'reserved', take, { reason: 'allocated_for_order', note: input.source.ref ?? null, ref, actor: input.actor });
-            await st.tx.insert('reservation_lines', { id: newId(), reservation_id: id, stock_item_id: l.stockItemId, location_id: level.location_id, order_item_id: l.orderItemId ?? null, quantity: take, fulfilled_qty: 0, released_qty: 0, state: 'allocated' });
+            lines.push({ id: newId(), reservation_id: id, stock_item_id: l.stockItemId, location_id: level.location_id, order_item_id: l.orderItemId ?? null, quantity: take, fulfilled_qty: 0, released_qty: 0, state: 'allocated' });
             left -= take;
           }
         }
+        await st.tx.insertLines(lines);
         return true;
       },
       { actor: input.actor },
@@ -426,11 +430,12 @@ export class Reservations {
             if (left <= 0) break;
             const take = Math.min(left, level.available);
             await st.move(l.stock_item_id, level.location_id, 'available', 'reserved', take, { reason: 'checkout_hold', ref: { kind: 'order', id: event.orderId, label: `Order ${event.ref}` }, actor: SYSTEM_ACTOR });
-            out.push((await st.tx.insert('reservation_lines', { id: newId(), reservation_id: id, stock_item_id: l.stock_item_id, location_id: level.location_id, order_item_id: l.order_item_id, quantity: take, fulfilled_qty: 0, released_qty: 0, state: 'allocated' }))!);
+            out.push({ id: newId(), reservation_id: id, stock_item_id: l.stock_item_id, location_id: level.location_id, order_item_id: l.order_item_id, quantity: take, fulfilled_qty: 0, released_qty: 0, state: 'allocated' });
             left -= take;
           }
           if (left > 0) throw inventoryError('INSUFFICIENT_STOCK', 'Not enough stock to allocate the order', { lines: [{ stockItemId: l.stock_item_id, requested: l.quantity, available: l.quantity - left }] });
         }
+        await st.tx.insertLines(out);
         await this.#mapToOrderItems(st.tx, out, event.items);
         return out.length ? st.tx.lines([id]) : out;
       });
@@ -488,9 +493,7 @@ export class Reservations {
     const note = `Cancellation ${event.cancellationId}`;
     const lines = (await this.core.repo.linesWhere({ orderItemIds: [event.itemId] })).filter((l) => l.state === 'held' || l.state === 'allocated');
     if (!lines.length) return;
-    const byReservation = new Map<string, Row<'reservation_lines'>[]>();
-    for (const l of lines) byReservation.set(l.reservation_id, [...(byReservation.get(l.reservation_id) ?? []), l]);
-    for (const [rid] of byReservation) {
+    for (const rid of new Set(lines.map((l) => l.reservation_id))) {
       const result = await this.core.stock('order_cancelled', async (st) => {
         // one claim per cancellation, item and reservation (kernel inbox), committed with the release
         if (!(await st.tx.claimEvent(`item-cancelled:${event.cancellationId}:${event.itemId}:${rid}`))) return null;
@@ -537,12 +540,15 @@ export class Reservations {
       if (!(await st.tx.claimEvent(claim))) return;
       // lock order: reservations, their lines, then stock levels (as every reservation path does)
       const reservationIds = [...new Set([...lines, ...free].map((x) => x.reservation_id))].sort();
-      for (const rid of reservationIds) await st.tx.get('reservations', rid, { forUpdate: true });
+      const orderRefs = new Map<string, string | null>();
+      for (const rid of reservationIds) orderRefs.set(rid, (await st.tx.get('reservations', rid, { forUpdate: true }))?.order_ref ?? null);
       const locked = await st.tx.lines(reservationIds, { forUpdate: true });
       await st.lock([...lines, ...free].map((l) => l.stock_item_id));
       const touched = new Set<string>();
-      const own = locked.filter((x) => lines.some((l) => l.id === x.id));
-      const spare = locked.filter((x) => free.some((l) => l.id === x.id));
+      const ownIds = new Set(lines.map((l) => l.id));
+      const spareIds = new Set(free.map((l) => l.id));
+      const own = locked.filter((x) => ownIds.has(x.id));
+      const spare = locked.filter((x) => spareIds.has(x.id));
       const plan: { l: Row<'reservation_lines'>; itemId: string | null }[] = [...own.map((l) => ({ l, itemId: l.order_item_id })), ...spare.map((l) => ({ l, itemId: null }))];
       for (const p of plan) {
         const l = p.l;
@@ -552,8 +558,8 @@ export class Reservations {
         const n = Math.min(open, wanted.get(itemId) ?? 0);
         if (n <= 0) continue;
         wanted.set(itemId, wanted.get(itemId)! - n);
-        const r = await st.tx.get('reservations', l.reservation_id);
-        await st.move(l.stock_item_id, l.location_id, 'reserved', 'outside', n, { reason: 'dispatched', note, ref: { kind: 'order', id: event.orderId, label: `Order ${r?.order_ref ?? ''}`.trim() }, actor: SYSTEM_ACTOR });
+        // the order ref of the reservation locked above (nothing in this loop changes it)
+        await st.move(l.stock_item_id, l.location_id, 'reserved', 'outside', n, { reason: 'dispatched', note, ref: { kind: 'order', id: event.orderId, label: `Order ${orderRefs.get(l.reservation_id) ?? ''}`.trim() }, actor: SYSTEM_ACTOR });
         const fulfilled = l.fulfilled_qty + n;
         // a hold dispatched before acceptance was recorded is treated as allocated
         await st.tx.update('reservation_lines', l.id, { fulfilled_qty: fulfilled, state: lineStateAfter({ quantity: l.quantity, fulfilled, released: l.released_qty, state: 'allocated' }) });
@@ -567,8 +573,8 @@ export class Reservations {
     });
   }
 
-  async #reservationKeys(ids: string[]): Promise<Row<'reservations'>[]> {
-    return (await Promise.all(ids.map((id) => this.core.repo.get('reservations', id)))).filter((r): r is Row<'reservations'> => Boolean(r));
+  #reservationKeys(ids: string[]): Promise<Row<'reservations'>[]> {
+    return this.core.repo.reservations(ids);
   }
 
   /** Job inventory.expire-holds (every 1 min): Expire held reservations past expiresAt (Reserved → Available); publish inventory.reservation.released with reason expired */

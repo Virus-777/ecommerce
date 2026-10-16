@@ -37,6 +37,18 @@ export function actorOf(text: string | null | undefined): Actor | null {
   return { kind: 'system', id: null, name: text };
 }
 
+/** Rows by key, in their order (Map.groupBy, which the ES2023 lib does not type yet) */
+export function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const r of rows) {
+    const k = key(r);
+    const list = out.get(k);
+    if (list) list.push(r);
+    else out.set(k, [r]);
+  }
+  return out;
+}
+
 export const iso = (d: Date) => d.toISOString();
 export const isoOrNull = (d: Date | null | undefined) => (d ? d.toISOString() : null);
 

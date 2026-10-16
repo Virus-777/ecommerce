@@ -135,9 +135,9 @@ export class InventoryRepository {
 
   /* ---------------------------------------------------------------- locations */
 
-  locations(f: { ownerType?: 'official' | 'seller'; sellerId?: string; ids?: string[] }): Promise<Row<'locations'>[]> {
+  locations(f: { ownerType?: 'official' | 'seller'; sellerId?: string; sellerIds?: string[]; ids?: string[] }): Promise<Row<'locations'>[]> {
     return this.#t.locations.find(
-      { ...(f.ownerType ? { owner_type: f.ownerType } : {}), ...(f.sellerId ? { seller_id: f.sellerId } : {}), ...(f.ids ? { id: oneOf(f.ids) } : {}) },
+      { ...(f.ownerType ? { owner_type: f.ownerType } : {}), ...(f.sellerId ? { seller_id: f.sellerId } : {}), ...(f.sellerIds ? { seller_id: oneOf(f.sellerIds) } : {}), ...(f.ids ? { id: oneOf(f.ids) } : {}) },
       { sort: { is_default: -1, code: 1 } },
     );
   }
@@ -340,6 +340,12 @@ export class InventoryRepository {
     return docs.map((d) => this.#t.movements.fromDoc(d));
   }
 
+  /** Ledger rows by id */
+  async movements(ids: string[]): Promise<Row<'stock_movements'>[]> {
+    if (!ids.length) return [];
+    return this.#t.movements.getMany([...new Set(ids)]);
+  }
+
   async movementsByRef(refKind: string, refIds: string[]): Promise<Row<'stock_movements'>[]> {
     if (!refIds.length) return [];
     return this.#t.movements.find({ ref_kind: refKind, ref_id: oneOf(refIds) }, { sort: { at: 1, id: 1 } });
@@ -396,8 +402,19 @@ export class InventoryRepository {
     return this.#t.reservations.findOne({ source, key });
   }
 
+  /** Reservations by id (unknown ids left out) */
+  async reservations(ids: string[]): Promise<Row<'reservations'>[]> {
+    if (!ids.length) return [];
+    return this.#t.reservations.getMany([...new Set(ids)]);
+  }
+
   reservationsByOrder(orderId: string, lock?: Lock): Promise<Row<'reservations'>[]> {
     return this.#t.reservations.find({ order_id: orderId }, { sort: { created_at: 1, id: 1 }, forUpdate: lock?.forUpdate });
+  }
+
+  /** New reservation lines in one round trip */
+  async insertLines(rows: Row<'reservation_lines'>[]): Promise<void> {
+    if (rows.length) await this.#t.lines.insertMany(rows);
   }
 
   async lines(ids: string[], lock?: Lock): Promise<Row<'reservation_lines'>[]> {

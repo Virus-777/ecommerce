@@ -24,6 +24,7 @@ import type * as workqueues from '../../../spec/workqueues.js';
 import { applyMove, reasonLabel, type GroupOrOutside } from '../domain/rules.js';
 import {
   actorOf,
+  groupBy,
   incomingCue,
   iso,
   photoIdsOf,
@@ -116,22 +117,28 @@ export class Core {
     return { actor: by.actor, ...(by.requestId ? { requestId: by.requestId } : {}) };
   }
 
-  async itemsApi(rows: Row<'stock_items'>[], opts: { locationId?: string } = {}): Promise<StockItem[]> {
+  /** `images: false` when the caller does not show StockItem.image (summaries, digests, exports): no catalog call */
+  async itemsApi(rows: Row<'stock_items'>[], opts: { locationId?: string; images?: boolean } = {}): Promise<StockItem[]> {
     if (!rows.length) return [];
-    const ids = rows.map((r) => r.id);
-    const [levels, expectations, def] = await Promise.all([this.repo.levels(ids), this.repo.expectations({ itemIds: ids, openOnly: true }), this.defaultThreshold()]);
-    const locations = new Map((await this.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
-    const images = await this.images(rows);
+    const [stock, images] = await Promise.all([this.stockOf(rows), opts.images === false ? new Map<string, common.MediaRef>() : this.images(rows)]);
     return rows.map((item) =>
       toStockItem(item, {
-        levels: levels.filter((l) => l.stock_item_id === item.id),
-        locations,
-        expectations: expectations.filter((e) => e.stock_item_id === item.id),
-        defaultThreshold: def,
+        levels: stock.levels.get(item.id) ?? [],
+        locations: stock.locations,
+        expectations: stock.expectations.get(item.id) ?? [],
+        defaultThreshold: stock.defaultThreshold,
         locationId: opts.locationId,
         image: images.get(item.id) ?? null,
       }),
     );
+  }
+
+  /** What toStockItem needs besides the item: levels and open expectations per item, their locations, the default threshold */
+  async stockOf(rows: Row<'stock_items'>[]): Promise<{ levels: Map<string, Row<'stock_levels'>[]>; expectations: Map<string, Row<'incoming_expectations'>[]>; locations: Map<string, Row<'locations'>>; defaultThreshold: number }> {
+    const ids = rows.map((r) => r.id);
+    const [levels, expectations, defaultThreshold] = await Promise.all([this.repo.levels(ids), this.repo.expectations({ itemIds: ids, openOnly: true }), this.defaultThreshold()]);
+    const locations = new Map((await this.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
+    return { levels: groupBy(levels, (l) => l.stock_item_id), expectations: groupBy(expectations, (e) => e.stock_item_id), locations, defaultThreshold };
   }
 
   /** StockItem.image: the variant's first image, else the product's (catalog, batched; none while catalog is off) */
@@ -171,12 +178,8 @@ export class Core {
   async reservationsApi(rows: Row<'reservations'>[], onlyItem?: string): Promise<Reservation[]> {
     const lines = (await this.repo.lines(rows.map((r) => r.id))).filter((l) => !onlyItem || l.stock_item_id === onlyItem);
     const items = await this.skus(lines.map((l) => l.stock_item_id));
-    return rows.map((r) =>
-      toReservation(
-        r,
-        lines.filter((l) => l.reservation_id === r.id).map((l) => toReservationLine(l, items.get(l.stock_item_id)?.sku ?? '')),
-      ),
-    );
+    const byReservation = groupBy(lines, (l) => l.reservation_id);
+    return rows.map((r) => toReservation(r, (byReservation.get(r.id) ?? []).map((l) => toReservationLine(l, items.get(l.stock_item_id)?.sku ?? ''))));
   }
 
   async reservationApi(id: string): Promise<Reservation> {
@@ -187,13 +190,14 @@ export class Core {
 
   async adjustmentsApi(rows: Row<'adjustments'>[]): Promise<Adjustment[]> {
     if (!rows.length) return [];
-    const items = await this.skus(rows.map((a) => a.stock_item_id));
-    const levels = await this.repo.levels([...new Set(rows.map((a) => a.stock_item_id))]);
+    const itemIds = [...new Set(rows.map((a) => a.stock_item_id))];
+    const [items, levels, movementRows] = await Promise.all([this.skus(itemIds), this.repo.levels(itemIds), this.repo.movements(rows.flatMap((a) => (a.movement_id ? [a.movement_id] : [])))]);
+    const movements = new Map(movementRows.map((m) => [m.id, m]));
     const access = this.ctx.tryUse('access');
     return Promise.all(
       rows.map(async (a) => {
         const item = items.get(a.stock_item_id);
-        const movement = a.movement_id ? await this.repo.get('stock_movements', a.movement_id) : undefined;
+        const movement = a.movement_id ? movements.get(a.movement_id) : undefined;
         const from = a.from_group as GroupOrOutside;
         const to = a.to_group as GroupOrOutside;
         let before: StockQuantities;
@@ -262,13 +266,16 @@ export class Core {
   async inboundsApi(rows: Row<'inbound_receipts'>[]): Promise<InboundReceipt[]> {
     const lines = await this.repo.inboundLines(rows.map((r) => r.id));
     const itemIds = [...new Set(lines.map((l) => l.stock_item_id))];
-    const items = await this.skus(itemIds);
-    const levels = await this.repo.levels(itemIds);
+    const [items, levels, shortages] = await Promise.all([
+      this.skus(itemIds),
+      this.repo.levels(itemIds),
+      // no backorders at launch: open pick shortages on these SKUs are shown so they can be reallocated first
+      this.repo.discrepanciesWhere({ itemIds, states: ['open'], kinds: ['pick_shortage'] }),
+    ]);
     const locations = new Map((await this.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
-    // no backorders at launch: open pick shortages on these SKUs are shown so they can be reallocated first
-    const shortages = await this.repo.discrepanciesWhere({ itemIds, states: ['open'], kinds: ['pick_shortage'] });
+    const byReceipt = groupBy(lines, (l) => l.inbound_id);
     return rows.map((r) => {
-      const own = lines.filter((l) => l.inbound_id === r.id);
+      const own = byReceipt.get(r.id) ?? [];
       const ownItems = new Set(own.map((l) => l.stock_item_id));
       return toInbound(
         r,
@@ -321,20 +328,35 @@ export class Core {
   }
 
   async detail(row: Row<'stock_items'>): Promise<StockItemDetail> {
-    const [item] = await this.itemsApi([row]);
-    const levels = await this.repo.levels([row.id]);
-    const locations = new Map((await this.repo.locations({ ids: levels.map((l) => l.location_id) })).map((l) => [l.id, l]));
-    const openLines = await this.repo.linesWhere({ itemIds: [row.id], states: ['held', 'allocated'] });
-    const reservations = await Promise.all([...new Set(openLines.map((l) => l.reservation_id))].map((rid) => this.repo.get('reservations', rid)));
-    const expectations = await this.repo.expectations({ itemIds: [row.id], openOnly: true });
+    // independent reads, side by side; the item's levels, locations and expectations are read once for all parts
+    const [stock, images, openLines, adjustments, discrepancies, movements] = await Promise.all([
+      this.stockOf([row]),
+      this.images([row]),
+      this.repo.linesWhere({ itemIds: [row.id], states: ['held', 'allocated'] }),
+      this.repo.adjustmentsWhere({ itemIds: [row.id], states: ['requested', 'pending_review'] }),
+      this.repo.discrepanciesWhere({ itemIds: [row.id], states: ['open'] }),
+      this.repo.recentMovements([row.id], 20),
+    ]);
+    const levels = stock.levels.get(row.id) ?? [];
+    const expectations = stock.expectations.get(row.id) ?? [];
+    // in the order their lines come
+    const rids = [...new Set(openLines.map((l) => l.reservation_id))];
+    const byId = new Map((await this.repo.reservations(rids)).map((r) => [r.id, r]));
+    const reservations = rids.flatMap((id) => byId.get(id) ?? []);
+    const [reservationsApi, pendingAdjustments, openDiscrepancies, recentMovements] = await Promise.all([
+      this.reservationsApi(reservations, row.id),
+      this.adjustmentsApi(adjustments),
+      this.discrepanciesApi(discrepancies),
+      this.movementsApi(movements),
+    ]);
     return {
-      item: item!,
-      levels: levels.map((l) => ({ locationId: l.location_id, locationName: locations.get(l.location_id)?.name ?? '', binCode: row.primary_bin_code, quantities: levelQty(l) })),
-      reservations: await this.reservationsApi(reservations.filter((r): r is Row<'reservations'> => !!r), row.id),
+      item: toStockItem(row, { levels, locations: stock.locations, expectations, defaultThreshold: stock.defaultThreshold, image: images.get(row.id) ?? null }),
+      levels: levels.map((l) => ({ locationId: l.location_id, locationName: stock.locations.get(l.location_id)?.name ?? '', binCode: row.primary_bin_code, quantities: levelQty(l) })),
+      reservations: reservationsApi,
       incoming: expectations.map(incomingCue),
-      pendingAdjustments: await this.adjustmentsApi(await this.repo.adjustmentsWhere({ itemIds: [row.id], states: ['requested', 'pending_review'] })),
-      openDiscrepancies: await this.discrepanciesApi(await this.repo.discrepanciesWhere({ itemIds: [row.id], states: ['open'] })),
-      recentMovements: await this.movementsApi(await this.repo.recentMovements([row.id], 20)),
+      pendingAdjustments,
+      openDiscrepancies,
+      recentMovements,
     };
   }
 

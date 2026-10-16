@@ -8,8 +8,8 @@ import type { EventPayload } from '../../../kernel/events/index.js';
 import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import type * as common from '../../../spec/common.js';
 import type { IncomingCue, MovementRef, StockItem, StockItemRef, StockQuantities } from '../../../spec/inventory.js';
-import { addDays, availabilityLabel, GROUPS, FIELD, onHand, weightedAverage, zeroQty } from '../domain/rules.js';
-import { isServiceItem, sellableAvailable, SYSTEM_ACTOR, unitCostOf } from '../mappers.js';
+import { addDays, availabilityLabel, GROUPS, FIELD, onHand, stockState, weightedAverage, zeroQty } from '../domain/rules.js';
+import { effectiveThreshold, groupBy, incomingCue, isServiceItem, sellableAvailable, SYSTEM_ACTOR, unitCostOf } from '../mappers.js';
 import type { Row } from '../ports.js';
 import { DuplicateKeyError } from '../repository.js';
 import { levelQty } from '../stock-tx.js';
@@ -86,15 +86,19 @@ export class Items {
 
   /** Sellable quantity summed over sellable locations */
   async getAvailability(stockItemIds: string[]): Promise<Record<string, { available: number; state: string; lowStockThreshold: number | null; nextIncoming: IncomingCue | null }>> {
+    // every storefront quote asks this: levels, locations and expectations are read once and nothing else (no catalog)
     const rows = await this.core.repo.items({ ids: [...new Set(stockItemIds)], includeArchived: true });
-    const api = await this.core.itemsApi(rows);
-    const levels = await this.core.repo.levels(rows.map((r) => r.id));
-    const locations = new Map((await this.core.repo.locations({ ids: [...new Set(levels.map((l) => l.location_id))] })).map((l) => [l.id, l]));
+    if (!rows.length) return {};
+    const stock = await this.core.stockOf(rows);
     const out: Record<string, { available: number; state: string; lowStockThreshold: number | null; nextIncoming: IncomingCue | null }> = {};
-    rows.forEach((row, i) => {
-      const available = row.archived ? 0 : sellableAvailable(row, levels, locations);
-      out[row.id] = { available, state: api[i]!.state, lowStockThreshold: api[i]!.lowStockThreshold ?? null, nextIncoming: api[i]!.nextIncoming ?? null };
-    });
+    for (const row of rows) {
+      const levels = stock.levels.get(row.id) ?? [];
+      const sellable = sellableAvailable(row, levels, stock.locations);
+      const threshold = effectiveThreshold(row, stock.defaultThreshold);
+      const next = stock.expectations.get(row.id)?.find((e) => e.quantity_open > 0);
+      // StockItem.state, lowStockThreshold and nextIncoming as toStockItem gives them
+      out[row.id] = { available: row.archived ? 0 : sellable, state: row.archived ? 'out_of_stock' : stockState(sellable, threshold), lowStockThreshold: threshold, nextIncoming: next ? incomingCue(next) : null };
+    }
     return out;
   }
 
@@ -290,13 +294,16 @@ export class Items {
     const levels = await this.core.repo.levels(rows.map((r) => r.id));
     const sellerIds = [...new Set(rows.map((r) => (r.owner_type === 'seller' ? r.seller_id : null)).filter((x): x is string => Boolean(x)))];
     const serviceIds = rows.flatMap((r) => (isServiceItem(r) ? [r.service_location_id!] : []));
-    const locations = new Map((await this.core.repo.locations({ ids: [...new Set([...levels.map((l) => l.location_id), ...serviceIds])] })).map((l) => [l.id, l]));
+    const [locationRows, sellerLocationRows, fallback] = await Promise.all([
+      this.core.repo.locations({ ids: [...new Set([...levels.map((l) => l.location_id), ...serviceIds])] }),
+      sellerIds.length ? this.core.repo.locations({ ownerType: 'seller', sellerIds }) : Promise.resolve([]),
+      rows.some((r) => r.owner_type === 'official') ? this.core.officialDefault() : Promise.resolve(undefined),
+    ]);
+    const locations = new Map(locationRows.map((l) => [l.id, l]));
+    // each seller's first location in the repository's order (default first, then code)
     const sellerLocation = new Map<string, Row<'locations'>>();
-    for (const sellerId of sellerIds) {
-      const own = (await this.core.repo.locations({ ownerType: 'seller', sellerId }))[0];
-      if (own) sellerLocation.set(sellerId, own);
-    }
-    const fallback = rows.some((r) => r.owner_type === 'official') ? await this.core.officialDefault() : undefined;
+    for (const l of sellerLocationRows) if (l.seller_id && !sellerLocation.has(l.seller_id)) sellerLocation.set(l.seller_id, l);
+    const levelsOf = groupBy(levels, (l) => l.stock_item_id);
     // variant GTINs for warehouse scans (null when catalog is off or the variant has none)
     const gtins = new Map<string, string | null>();
     const catalog = this.core.ctx.tryUse('catalog');
@@ -311,11 +318,11 @@ export class Items {
     const mainOf = (r: Row<'stock_items'>): Row<'locations'> | undefined => {
       if (r.owner_type === 'seller') {
         if (isServiceItem(r) && locations.has(r.service_location_id!)) return locations.get(r.service_location_id!);
-        const held = levels.filter((l) => l.stock_item_id === r.id).map((l) => locations.get(l.location_id)).find((l) => l?.kind === 'seller_virtual');
+        const held = (levelsOf.get(r.id) ?? []).map((l) => locations.get(l.location_id)).find((l) => l?.kind === 'seller_virtual');
         return (r.seller_id ? sellerLocation.get(r.seller_id) : undefined) ?? held;
       }
-      const best = levels
-        .filter((l) => l.stock_item_id === r.id && units(l) > 0 && locations.get(l.location_id)?.owner_type === 'official')
+      const best = (levelsOf.get(r.id) ?? [])
+        .filter((l) => units(l) > 0 && locations.get(l.location_id)?.owner_type === 'official')
         .sort((a, b) => Number(locations.get(b.location_id)!.sellable) - Number(locations.get(a.location_id)!.sellable) || units(b) - units(a) || (a.location_id < b.location_id ? -1 : 1))[0];
       return best ? locations.get(best.location_id) : fallback;
     };
