@@ -18,7 +18,7 @@ import type { Views } from './views.js';
 const BATCH = 200;
 
 export class Automation {
-  /** Rows per read when inspectionDeadlines walks its candidates; tests lower it to walk several batches */
+  /** Rows per read when a job walks its candidates (repo.batches); tests lower it to walk several batches */
   jobBatchSize = BATCH;
 
   constructor(
@@ -298,10 +298,12 @@ export class Automation {
 
   /** Information requests not answered in time cancel the return */
   async infoExpiry(): Promise<void> {
-    const now = this.core.now();
-    const rows = await this.repo.find('returns', { status: 'info_requested' }, { limit: BATCH * 5 });
-    for (const r of rows.filter((x) => x.info_request && new Date(x.info_request.replyDueAt).getTime() < now.getTime()).slice(0, BATCH)) {
-      await this.requests.cancel(r.id, 'expire', 'No reply to the question in time', { actor: SYSTEM }).catch((err) => this.core.ctx.log.warn({ err, returnId: r.id }, 'returns: info expiry failed'));
+    // The reply-by time is in the query, so every row read is due; the walk goes on until none is left (BUILDING-MODULES
+    // §9). Cancelled returns leave the query as it goes; one that fails to cancel is logged and passed over.
+    for await (const batch of this.repo.infoRequestsDue(this.core.now(), this.jobBatchSize)) {
+      for (const r of batch) {
+        await this.requests.cancel(r.id, 'expire', 'No reply to the question in time', { actor: SYSTEM }).catch((err) => this.core.ctx.log.warn({ err, returnId: r.id }, 'returns: info expiry failed'));
+      }
     }
   }
 

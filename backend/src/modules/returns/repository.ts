@@ -112,6 +112,14 @@ export class ReturnsRepository {
     yield* this.#batches('returns', await this.#returnFilter(f), size);
   }
 
+  /**
+   * batches of the returns waiting for an answer to a question whose reply-by time has passed. replyDueAt is kept
+   * as an ISO-8601 UTC string (toISOString), so comparing the strings compares the instants.
+   */
+  infoRequestsDue(now: Date, size: number): AsyncGenerator<ReturnRec[]> {
+    return this.#batches('returns', { status: 'info_requested', 'info_request.replyDueAt': { $lt: now.toISOString() } }, size);
+  }
+
   async *#batches<T extends TableName>(table: T, filter: Filter, size: number): AsyncGenerator<Recs[T][]> {
     let afterId: string | null = null;
     for (;;) {

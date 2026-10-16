@@ -78,6 +78,31 @@ describe('jobs', () => {
     }
   });
 
+  it('expires an unanswered question behind 1000 questions not due yet', async () => {
+    const m = await sellerReturn();
+    const asked = await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/request-info`, m.seller(), { question: 'Which plug?' });
+    const repo = h.service.core.repo;
+    const base = (await repo.get('returns', m.ret.id))!;
+    // 1000 open questions due next year, placed first in every order the query could read them in: lower ids, a
+    // later request time, no response deadline. The old job read 1000 rows and then filtered by the due time.
+    const old = h.clock.now().getTime() - 30 * 86_400_000;
+    const farOff = new Date(h.clock.now().getTime() + 365 * 86_400_000).toISOString();
+    const clones = Array.from({ length: 1000 }, (_, i) => ({ ...base, id: newId(old + i), ref: `RT-INFO-${i}-${newId().slice(-6)}`, requested_at: new Date(h.clock.now().getTime() + 86_400_000), response_due_at: null, info_request: { ...base.info_request!, replyDueAt: farOff } }));
+    await repo.insertMany('returns', clones);
+    // the real return stored again after them, so it is also last where the rows tie (stored order)
+    await h.app.kernel.mongo.db.collection('returns.returns').deleteOne({ _id: m.ret.id as never });
+    await repo.insert('returns', base);
+    try {
+      h.clock.set(new Date(new Date(asked.body.detail.infoRequest.replyDueAt).getTime() + 3_600_000));
+      await job('returns.info-expiry');
+      expect((await detail(m.ret.id, m.sellerId)).detail.status).toBe('cancelled');
+      expect(await repo.count('returns', { id: clones.map((c) => c.id), status: 'info_requested' })).toBe(1000);
+    } finally {
+      restore();
+      await h.app.kernel.mongo.db.collection('returns.returns').deleteMany({ _id: { $in: clones.map((c) => c.id) } as never });
+    }
+  });
+
   it('escalates received returns the seller does not inspect in time', async () => {
     const m = await sellerReturn();
     await h.call('POST', `/api/seller/returns/requests/${m.ret.id}/approve`, m.seller(), { labelMethod: 'prepaid_qr' });
