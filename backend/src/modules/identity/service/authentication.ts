@@ -112,7 +112,10 @@ export class Authentication {
         await this.core.securityEvent(repo, a.id, 'sign_in_blocked', 'blocked', { client: caller.client, audience: body.audience, detail: { cause: 'locked' } });
         return { error: this.lockedError(a) };
       }
-      if (!ok) {
+      // the password was checked against the account read before this transaction; if it changed in between, check it
+      // again against the current one (the old password must neither sign in nor be written back by a rehash)
+      const passwordOk = ok && a.password_hash === found.password_hash ? true : ok && (await this.core.checkPassword(a, body.password));
+      if (!passwordOk) {
         const f = await this.countFailure(repo, a, s, now, { client: caller.client, audience: body.audience, reason: 'password' });
         after = f.after;
         return { error: f.locked ? this.lockedError(f.account) : new AppError('INVALID_CREDENTIALS', "Email and password don't match", { attemptsLeft: f.attemptsLeft, lockoutMinutes: s.lockoutMinutes }) };

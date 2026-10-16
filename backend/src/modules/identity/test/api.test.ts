@@ -8,6 +8,7 @@ import type { GraphQLContext } from '../../../kernel/graphql/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
 import type { IdentityPublicApi } from '../../../spec/identity.js';
 import { resolvers } from '../graphql/resolvers.js';
+import { hashPassword } from '../domain/crypto.js';
 import type { IdentityService } from '../service.js';
 import { android, boot, customer, identityTable, PUBLIC, SELLER, signIn, STORE, STRONG, uniqueEmail, visitor, web, type TestKit } from './helpers.js';
 
@@ -157,6 +158,27 @@ describe('seller-member invitations', () => {
     const ok = await kit.call('POST', `${PUBLIC}/invitations/accept`, { token: v.accessToken, body: { token, currentPassword: c.password, device: android() } });
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.account.id).toBe(c.accountId);
+  });
+});
+
+describe('sign-in while the password changes', () => {
+  it('refuses the old password when the account changed between the first read and the transaction', async () => {
+    const c = await customer(kit);
+    const service = kit.app.kernel.boot.apis.get('identity') as IdentityService;
+    const repo = service.core.repo;
+    const stale = (await repo.findAccount('member', c.email))!;
+    // the password changes after sign-in read the account, before its transaction
+    await repo.updateAccount(c.accountId, { password_hash: await hashPassword('Brand-New-Pass-77') });
+    const findAccount = repo.findAccount;
+    repo.findAccount = async () => stale;
+    try {
+      const old = await signIn(kit, { email: c.email, password: c.password });
+      expect(old.status, JSON.stringify(old.body)).toBe(401);
+      expect(old.body.error.code).toBe('INVALID_CREDENTIALS');
+    } finally {
+      repo.findAccount = findAccount;
+    }
+    expect((await signIn(kit, { email: c.email, password: 'Brand-New-Pass-77' })).status).toBe(200);
   });
 });
 
