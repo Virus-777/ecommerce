@@ -830,7 +830,7 @@ Indexes: `(state, created_at)`, `(stock_item_id)`, `(approval_request_id)`
 | source_ref | text? |
 | released_at | timestamptz? |
 
-Indexes: `(review_date) where released_at is null`
+Indexes: `(review_date) where released_at is null`, `(stock_item_id, location_id)`
 
 **inbound_receipts**: Counted receipts from purchasing and from the fulfillment service waiting for confirmation
 
@@ -855,7 +855,7 @@ Indexes: `(review_date) where released_at is null`
 | confirmed_at | timestamptz? |
 | note | text? |
 
-Indexes: `(state, received_at)`
+Indexes: `(state, received_at)`, `(source_kind, source_id)`
 
 **inbound_lines**
 

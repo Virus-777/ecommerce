@@ -217,6 +217,7 @@ const held_stock = new Schema(
   collectionOptions("inventory.held_stock"),
 );
 held_stock.index({"review_date":1}, {"name":"held_stock_review_date_b2ef9d","partialFilterExpression":{"released_at":{"$type":"null"}}});
+held_stock.index({"stock_item_id":1,"location_id":1}, {"name":"held_stock_stock_item_id_location_id_b33c25"});
 
 /** Counted receipts from purchasing and from the fulfillment service waiting for confirmation */
 const inbound_receipts = new Schema(
@@ -246,6 +247,7 @@ const inbound_receipts = new Schema(
 );
 inbound_receipts.index({"receipt_id":1}, {"name":"inbound_receipts_receipt_id_866218","unique":true});
 inbound_receipts.index({"state":1,"received_at":1}, {"name":"inbound_receipts_state_received_at_5836ba"});
+inbound_receipts.index({"source_kind":1,"source_id":1}, {"name":"inbound_receipts_source_kind_source_id_cefd49"});
 
 const inbound_lines = new Schema(
   {

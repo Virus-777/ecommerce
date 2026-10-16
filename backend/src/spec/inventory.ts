@@ -3981,6 +3981,13 @@ export const spec = defineModuleSpec({
               "$type": "null"
             }
           }
+        },
+        {
+          "name": "held_stock_stock_item_id_location_id_b33c25",
+          "key": {
+            "stock_item_id": 1,
+            "location_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -4153,6 +4160,13 @@ export const spec = defineModuleSpec({
           "key": {
             "state": 1,
             "received_at": 1
+          }
+        },
+        {
+          "name": "inbound_receipts_source_kind_source_id_cefd49",
+          "key": {
+            "source_kind": 1,
+            "source_id": 1
           }
         }
       ],
