@@ -4928,7 +4928,16 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "content_log_entity_entity_id_at_248a22",
+          "key": {
+            "entity": 1,
+            "entity_id": 1,
+            "at": -1
+          }
+        }
+      ],
       "unenforced": []
     }
   },

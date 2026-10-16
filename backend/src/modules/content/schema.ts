@@ -253,6 +253,7 @@ const content_log = new Schema(
   },
   collectionOptions("content.content_log"),
 );
+content_log.index({"entity":1,"entity_id":1,"at":-1}, {"name":"content_log_entity_entity_id_at_248a22"});
 
 /** Table name → schema */
 export const schemas = {

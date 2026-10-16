@@ -1075,6 +1075,8 @@ Indexes: `unique (policy_id, version)`, `(policy_id, state, effective_at)`
 | actor_id | text? |
 | at | timestamptz |
 
+Indexes: `(entity, entity_id, at desc)`
+
 ## Events
 
 | Publishes | When | Payload | Consumed by |
