@@ -143,6 +143,7 @@ const place_requests = new Schema(
   collectionOptions("checkout.place_requests"),
 );
 place_requests.index({"session_id":1,"idempotency_key":1}, {"name":"place_requests_session_id_idempotency_key_0172eb","unique":true});
+place_requests.index({"created_at":1}, {"name":"place_requests_created_at_f6b874"});
 
 const session_log = new Schema(
   {
@@ -156,6 +157,7 @@ const session_log = new Schema(
   },
   collectionOptions("checkout.session_log"),
 );
+session_log.index({"session_id":1,"at":1}, {"name":"session_log_session_id_at_86b763"});
 
 /** Table name → schema */
 export const schemas = {

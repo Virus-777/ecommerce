@@ -89,7 +89,7 @@ export class Quoter {
   async facts(items: { offerId: string }[]): Promise<Map<string, OfferFacts>> {
     const offersApi = this.ctx.use('offers');
     const ids = [...new Set(items.map((i) => i.offerId))];
-    const found = await Promise.all(ids.map((id) => offersApi.getOffer(id)));
+    const found = ids.length ? await offersApi.getOffers(ids) : {};
     const out = new Map<string, OfferFacts>();
     const variants = new Map<string, Promise<offers.OfferComparison | null>>();
     const compare = (o: offers.Offer) => {
@@ -106,14 +106,14 @@ export class Quoter {
       return variants.get(key)!;
     };
     const returnsApi = this.ctx.tryUse('returns');
+    const catalogApi = this.ctx.tryUse('catalog');
     await Promise.all(
-      ids.map(async (id, i) => {
-        const offer = found[i] ?? null;
+      ids.map(async (id) => {
+        const offer = found[id] ?? null;
         if (!offer) return out.set(id, { offer: null, info: null, variantOffers: [] });
         const cmp = await compare(offer);
         const view = cmp?.offers.find((v) => v.offerId === offer.id) ?? null;
         // decision D-C1: catalog (optional) fills the category when the offer comparison has none
-        const catalogApi = this.ctx.tryUse('catalog');
         const categoryId = cmp?.product.categoryId ?? (catalogApi ? ((await this.core.optional('catalog.getProduct', () => catalogApi.getProduct(offer.productId)))?.categoryId ?? null) : null);
         const terms = returnsApi ? await this.core.optional('returns.resolveTerms', () => returnsApi.resolveTerms(offer.ownerType === 'official' ? null : (offer.sellerId ?? null), categoryId, offer.condition)) : undefined;
         const seller =
@@ -202,63 +202,70 @@ export class Quoter {
   /** shipping.quoteOptions per package of included lines; the customer's choice is kept while it is offered */
   async shipping(d: Draft): Promise<void> {
     const groups = new Map<string, LineRow[]>();
-    for (const l of d.lines.filter(included)) groups.set(l.package_key, [...(groups.get(l.package_key) ?? []), l]);
-    const next = new Map<string, PackageRow>();
-    const api = this.ctx.use('shipping');
-    for (const [key, lines] of groups) {
-      const first = lines[0]!;
-      const info = d.quote.lineInfo[first.id];
-      const prev = d.packages.get(key);
-      const shipsFrom = info?.dispatch.shipsFrom ?? prev?.ships_from ?? key.split(':').slice(3).join(':');
-      const row: PackageRow = {
-        session_id: d.session.id,
-        package_key: key,
-        owner_type: first.owner_type,
-        seller_id: first.seller_id,
-        fulfilled_by: first.fulfilled_by,
-        ships_from: shipsFrom,
-        options: [],
-        selected_option_id: null,
-        selected_option: null,
-        return_terms: [...new Set(lines.map((l) => d.quote.lineInfo[l.id]?.returnTerms.summary).filter(Boolean))].join(' ') || 'Returns follow the Marketly return policy.',
-      };
-      if (d.address) {
-        const q: shipping.PackageQuote = await api.quoteOptions({
-          ownerType: first.owner_type as 'official' | 'seller',
-          sellerId: first.seller_id,
-          // marketly_service: Official settings, closures and cutoffs; origin the service location
-          fulfilledBy: first.fulfilled_by,
-          shipsFrom,
-          items: lines.map((l) => {
-            const i = d.quote.lineInfo[l.id];
-            return {
-              lineId: l.id,
-              profileId: l.profile_id,
-              parcel: { weightGrams: UNIT_WEIGHT_GRAMS },
-              quantity: l.quantity,
-              value: m(l.unit_price * l.quantity, d.session.currency),
-              dispatch: { businessDays: i?.dispatch.businessDays ?? 1, sameDayCutoff: i?.dispatch.sameDayCutoff ?? null, shipsFrom },
-            };
-          }),
-          destination: { postalCode: d.address.postalCode, country: d.address.country, region: d.address.region, address: d.address },
-          at: this.core.now().toISOString(),
-        });
-        const notShippable = new Set(q.shipsToLocation ? q.notShippableLineIds : lines.map((l) => l.id));
-        for (const l of lines) {
-          if (!notShippable.has(l.id)) continue;
-          l.status = 'not_shippable';
-          d.quote.shippability[l.id] = { shippable: false, reason: d.quote.shippability[l.id]?.reason ?? 'outside_seller_coverage', message: q.reason ?? d.quote.shippability[l.id]?.message ?? "The seller doesn't ship this item to your address." };
-        }
-        if (lines.every((l) => notShippable.has(l.id))) continue;
-        row.options = q.options as never;
-        const keep = prev?.selected_option_id ? q.options.find((o) => o.id === prev.selected_option_id) : undefined;
-        const chosen = keep ?? q.default ?? q.options.find((o) => o.isDefault) ?? q.options[0] ?? null;
-        row.selected_option_id = chosen?.id ?? null;
-        row.selected_option = (chosen ?? null) as never;
-      }
-      next.set(key, row);
+    for (const l of d.lines.filter(included)) {
+      const group = groups.get(l.package_key);
+      if (group) group.push(l);
+      else groups.set(l.package_key, [l]);
     }
-    d.packages = next;
+    const api = this.ctx.use('shipping');
+    // packages are quoted at the same time (each touches only its own lines); kept in their first line's order
+    const rows = await Promise.all([...groups].map(([key, lines]) => this.quotePackage(d, api, key, lines)));
+    d.packages = new Map(rows.filter((r): r is PackageRow => r !== null).map((r) => [r.package_key, r]));
+  }
+
+  /** One package's row with its delivery options; null when none of its lines ships to the address */
+  private async quotePackage(d: Draft, api: shipping.ShippingPublicApi, key: string, lines: LineRow[]): Promise<PackageRow | null> {
+    const first = lines[0]!;
+    const info = d.quote.lineInfo[first.id];
+    const prev = d.packages.get(key);
+    const shipsFrom = info?.dispatch.shipsFrom ?? prev?.ships_from ?? key.split(':').slice(3).join(':');
+    const row: PackageRow = {
+      session_id: d.session.id,
+      package_key: key,
+      owner_type: first.owner_type,
+      seller_id: first.seller_id,
+      fulfilled_by: first.fulfilled_by,
+      ships_from: shipsFrom,
+      options: [],
+      selected_option_id: null,
+      selected_option: null,
+      return_terms: [...new Set(lines.map((l) => d.quote.lineInfo[l.id]?.returnTerms.summary).filter(Boolean))].join(' ') || 'Returns follow the Marketly return policy.',
+    };
+    if (d.address) {
+      const q: shipping.PackageQuote = await api.quoteOptions({
+        ownerType: first.owner_type as 'official' | 'seller',
+        sellerId: first.seller_id,
+        // marketly_service: Official settings, closures and cutoffs; origin the service location
+        fulfilledBy: first.fulfilled_by,
+        shipsFrom,
+        items: lines.map((l) => {
+          const i = d.quote.lineInfo[l.id];
+          return {
+            lineId: l.id,
+            profileId: l.profile_id,
+            parcel: { weightGrams: UNIT_WEIGHT_GRAMS },
+            quantity: l.quantity,
+            value: m(l.unit_price * l.quantity, d.session.currency),
+            dispatch: { businessDays: i?.dispatch.businessDays ?? 1, sameDayCutoff: i?.dispatch.sameDayCutoff ?? null, shipsFrom },
+          };
+        }),
+        destination: { postalCode: d.address.postalCode, country: d.address.country, region: d.address.region, address: d.address },
+        at: this.core.now().toISOString(),
+      });
+      const notShippable = new Set(q.shipsToLocation ? q.notShippableLineIds : lines.map((l) => l.id));
+      for (const l of lines) {
+        if (!notShippable.has(l.id)) continue;
+        l.status = 'not_shippable';
+        d.quote.shippability[l.id] = { shippable: false, reason: d.quote.shippability[l.id]?.reason ?? 'outside_seller_coverage', message: q.reason ?? d.quote.shippability[l.id]?.message ?? "The seller doesn't ship this item to your address." };
+      }
+      if (lines.every((l) => notShippable.has(l.id))) return null;
+      row.options = q.options as never;
+      const keep = prev?.selected_option_id ? q.options.find((o) => o.id === prev.selected_option_id) : undefined;
+      const chosen = keep ?? q.default ?? q.options.find((o) => o.isDefault) ?? q.options[0] ?? null;
+      row.selected_option_id = chosen?.id ?? null;
+      row.selected_option = (chosen ?? null) as never;
+    }
+    return row;
   }
 
   /** Keeps package rows in line with the included lines without asking shipping again */
@@ -317,9 +324,9 @@ export class Quoter {
 
     const allocations: Record<string, promotions.DiscountAllocation[]> = {};
     const lineDiscount = new Map<string, number>();
+    const evaluatedLines = new Map(ev?.lines.map((x) => [x.lineId, x]));
     for (const l of lines) {
-      const ld = ev?.lines.find((x) => x.lineId === l.id);
-      const allocs = (ld?.allocations ?? []).filter((a) => a.amount.amount > 0);
+      const allocs = (evaluatedLines.get(l.id)?.allocations ?? []).filter((a) => a.amount.amount > 0);
       allocations[l.id] = allocs;
       const total = Math.min(l.unit_price * l.quantity, allocs.reduce((s, a) => s + a.amount.amount, 0));
       lineDiscount.set(l.id, total);

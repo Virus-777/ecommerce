@@ -2769,6 +2769,12 @@ export const spec = defineModuleSpec({
             "idempotency_key": 1
           },
           "unique": true
+        },
+        {
+          "name": "place_requests_created_at_f6b874",
+          "key": {
+            "created_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -2833,7 +2839,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "session_log_session_id_at_86b763",
+          "key": {
+            "session_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     }
   },

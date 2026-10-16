@@ -82,8 +82,9 @@ export class Revalidator {
     const stored = await this.quoter.draftOf(session);
     const fresh = cloneDraft(stored);
     const lines = stored.lines.filter(included);
-    const facts = await this.quoter.facts(lines.map((l) => ({ offerId: l.offer_id })));
-    const [availability, offerCheck, purchased] = await Promise.all([
+    // offer facts, stock and the offers' own check are independent reads: asked at the same time
+    const [facts, availability, offerCheck] = await Promise.all([
+      this.quoter.facts(lines.map((l) => ({ offerId: l.offer_id }))),
       lines.length ? this.ctx.use('inventory').getAvailability([...new Set(lines.map((l) => l.stock_item_id))]) : Promise.resolve({} as Record<string, { available: number }>),
       lines.length
         ? this.ctx.use('offers').revalidate(
@@ -91,8 +92,8 @@ export class Revalidator {
             stored.address?.postalCode ?? '',
           )
         : Promise.resolve({ ok: true, changes: [] as offers.OfferChange[] }),
-      this.purchasedCounts(session, lines, facts),
     ]);
+    const purchased = await this.purchasedCounts(session, lines, facts);
 
     const items: StoredChange[] = [];
     const add = (kind: Change['kind'], line: LineRow | null, o: Partial<Change> & { previous: string; current: string }, apply: StoredChange['apply'] = {}, extra: { alternatives?: AlternativeOffer[]; otherOptions?: boolean } = {}) => {

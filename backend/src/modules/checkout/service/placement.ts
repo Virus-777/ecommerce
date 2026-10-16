@@ -62,8 +62,9 @@ export class Placement {
   /** The result a session's status stands for (replays, a second Place order, polling) */
   async currentResult(session: SessionRow): Promise<PlaceOrderResult> {
     const base = { orderId: session.order_id, orderRef: session.order_ref };
-    const payment = await this.views.lastPayment(session);
     const checkout = await this.view(session);
+    // the view already asked payments for the last payment of this same row
+    const payment = checkout.lastPayment;
     switch (session.status) {
       case 'completed':
         return { outcome: 'accepted', next: 'confirmation', ...base, payment, changeSet: null, retryUntil: null, checkout };
@@ -286,7 +287,8 @@ export class Placement {
       }
       session = await this.reval.refresh(det, ['placing']);
       const quote = this.core.quote(session);
-      const lines = (await this.core.repo.listLines(id)).filter(included).sort(byLineOrder);
+      // the lines refresh() just saved
+      const lines = det.fresh.lines.filter(included).sort(byLineOrder);
 
       // 2. stock (all or nothing), kept from a declined attempt within the retry window
       if (!session.stock_reservation_id) {
@@ -772,7 +774,9 @@ export class Placement {
 
   async onOrderCancelled(e: EventPayload<'orders.order.cancelled'>) {
     if (e.reason !== 'payment_declined') return;
-    const s = (await this.core.repo.findSessionByOrder(e.orderId)) ?? (await this.core.repo.getSession(e.checkoutSessionId));
+    // the order's own checkout first (a key lookup); order_id is unique, so a match is the session findSessionByOrder finds
+    const own = await this.core.repo.getSession(e.checkoutSessionId);
+    const s = own?.order_id === e.orderId ? own : await this.core.repo.findSessionByOrder(e.orderId);
     if (!s || s.status !== 'payment_pending' || s.order_id !== e.orderId) return;
     await this.declinedAfterPending(s, { code: '', category: 'card_declined', message: 'Your bank declined the payment, so the order was cancelled. Nothing was charged.', advice: 'Pay again with another card or a digital wallet.', retryable: true });
   }

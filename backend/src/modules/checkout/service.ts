@@ -46,6 +46,8 @@ export interface CheckoutServiceDeps {
 type Status = Parameters<typeof checkoutSessionMachine.next>[0];
 
 const EDITABLE_INFO = ['open', 'changes_pending', 'payment_failed'];
+/** Sessions per batch of the pending-holds job */
+const JOB_BATCH = 200;
 
 /**
  * Checkout use cases. Depends only on its repository, the tax provider, the event bus, the clock and other modules' public APIs.
@@ -138,9 +140,9 @@ export class CheckoutService implements CheckoutPublicApi {
         lines.push(line);
         lineInfo[line.id] = f.info;
       }
-      const offersApi = this.ctx.use('offers');
+      const excludedOffers = snap.excluded.length ? await this.ctx.use('offers').getOffers([...new Set(snap.excluded.map((i) => i.offerId))]) : {};
       for (const i of snap.excluded) {
-        const o = await offersApi.getOffer(i.offerId);
+        const o = excludedOffers[i.offerId];
         excluded.push({
           id: `cart:${i.id}`,
           cartItemId: i.id,
@@ -649,26 +651,34 @@ export class CheckoutService implements CheckoutPublicApi {
   /** Job checkout.extend-pending-holds (every 10 min): Keep stock holds alive for payment_pending sessions (inventory.extendHold) up to pendingHoldHours */
   async extendPendingHolds(): Promise<void> {
     const hours = Number(await this.ctx.settings.get('pendingHoldHours')) || 24;
-    const pending = await this.repo.listByStatus(['payment_pending'], 500);
-    for (const s of pending) {
-      try {
-        await this.placement.reconcilePending(s);
-        const fresh = await this.repo.getSession(s.id);
-        if (fresh?.status !== 'payment_pending' || !fresh.stock_reservation_id) continue;
-        const placed = (await this.repo.latestPlaceRequest(s.id))?.created_at ?? s.updated_at;
-        const until = new Date(placed.getTime() + hours * 3600_000);
-        if (until.getTime() <= this.now().getTime()) continue;
-        await this.ctx.use('inventory').extendHold(fresh.stock_reservation_id, until.toISOString());
-        // the store credit hold too, so a long pending check does not end in INSUFFICIENT_CREDIT
-        const wallet = this.ctx.tryUse('wallet');
-        if (wallet && fresh.credit_hold_id) {
-          const holdId = fresh.credit_hold_id;
-          await this.core.optional('wallet.extendHold', () => wallet.extendHold(holdId, until.toISOString()));
-        }
-      } catch (err) {
-        if (isAppError(err) && err.status < 500) this.ctx.log.info({ err, sessionId: s.id }, 'checkout: pending hold could not be extended');
-        else this.ctx.log.error({ err, sessionId: s.id }, 'checkout: pending hold could not be extended');
+    // every pending session, in bounded batches by id (a fixed first page would leave the rest unextended)
+    let afterId: string | null = null;
+    for (;;) {
+      const batch = await this.repo.listByStatusAfter(['payment_pending'], afterId, JOB_BATCH);
+      for (const s of batch) await this.extendPendingHold(s, hours);
+      if (batch.length < JOB_BATCH) return;
+      afterId = batch.at(-1)!.id;
+    }
+  }
+
+  private async extendPendingHold(s: SessionRow, hours: number): Promise<void> {
+    try {
+      await this.placement.reconcilePending(s);
+      const fresh = await this.repo.getSession(s.id);
+      if (fresh?.status !== 'payment_pending' || !fresh.stock_reservation_id) return;
+      const placed = (await this.repo.latestPlaceRequest(s.id))?.created_at ?? s.updated_at;
+      const until = new Date(placed.getTime() + hours * 3600_000);
+      if (until.getTime() <= this.now().getTime()) return;
+      await this.ctx.use('inventory').extendHold(fresh.stock_reservation_id, until.toISOString());
+      // the store credit hold too, so a long pending check does not end in INSUFFICIENT_CREDIT
+      const wallet = this.ctx.tryUse('wallet');
+      if (wallet && fresh.credit_hold_id) {
+        const holdId = fresh.credit_hold_id;
+        await this.core.optional('wallet.extendHold', () => wallet.extendHold(holdId, until.toISOString()));
       }
+    } catch (err) {
+      if (isAppError(err) && err.status < 500) this.ctx.log.info({ err, sessionId: s.id }, 'checkout: pending hold could not be extended');
+      else this.ctx.log.error({ err, sessionId: s.id }, 'checkout: pending hold could not be extended');
     }
   }
 

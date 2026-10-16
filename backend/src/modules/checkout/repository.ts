@@ -68,9 +68,10 @@ export class CheckoutRepository {
     );
   }
 
-  async listByStatus(statuses: string[], limit: number): Promise<SessionRow[]> {
+  /** Sessions in these statuses after a session id (a keyset walk for jobs) */
+  async listByStatusAfter(statuses: string[], afterId: string | null, limit: number): Promise<SessionRow[]> {
     if (!statuses.length) return [];
-    return this.#t.sessions.find({ status: { $in: statuses } }, { sort: { updated_at: 1 }, limit });
+    return this.#t.sessions.find({ status: { $in: statuses }, ...(afterId ? { id: { $gt: afterId } } : {}) }, { sort: { id: 1 }, limit });
   }
 
   listSessionsAdmin(filter: AdminSessionFilter, page: PageRequest): Promise<Page<SessionRow>> {

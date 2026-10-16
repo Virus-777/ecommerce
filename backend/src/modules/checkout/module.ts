@@ -16,7 +16,7 @@ import { schemas } from './schema.js';
  */
 export default defineModule({
   spec,
-  version: '2.0.0',
+  version: '2.0.1',
   schemas,
   register(ctx) {
     // sales tax: the launch rate table behind the TaxProvider port; a tax service adapter plugs in here later

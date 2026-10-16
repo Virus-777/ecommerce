@@ -677,7 +677,7 @@ Indexes: `(session_id, created_at desc)`
 | created_at | timestamptz |
 | completed_at | timestamptz? |
 
-Indexes: `unique (session_id, idempotency_key)`
+Indexes: `unique (session_id, idempotency_key)`, `(created_at)`
 
 **session_log**
 
@@ -688,6 +688,8 @@ Indexes: `unique (session_id, idempotency_key)`
 | label | text |
 | detail | text? |
 | at | timestamptz |
+
+Indexes: `(session_id, at)`
 
 ## Events
 
