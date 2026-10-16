@@ -112,6 +112,8 @@ export const resolvers = (service: SellersService): ModuleResolvers => {
   function seller(s: SellerRec, ctx: GraphQLContext, card?: SellerSummary) {
     const cardP = lazy(() => (card ? Promise.resolve(card) : storefront.cards([s]).then((c) => c[0]!)));
     const profile = lazy(() => storefront.profileOf(s.id));
+    // the admin list row, built once for the fields below that come from it
+    const row = lazy(() => accounts.sellerRows([s], { canSeeBalances: false }).then((r) => r[0]));
     const staff = ctx.principal?.kind === 'staff';
     return {
       id: s.id,
@@ -174,9 +176,9 @@ export const resolvers = (service: SellersService): ModuleResolvers => {
         const c = (s.contact ?? {}) as { name?: string; email?: string; phone?: string; supportHours?: string };
         return { name: o?.name ?? c.name ?? '', email: o?.email ?? c.email ?? null, phone: c.phone ?? null, supportHours: c.supportHours ?? null };
       },
-      mainCategory: async () => (await accounts.sellerRows([s], { canSeeBalances: false }))[0]?.mainCategory ?? null,
-      restrictionSummary: async () => (await accounts.sellerRows([s], { canSeeBalances: false }))[0]?.restrictionSummary ?? null,
-      warningNote: async () => (await accounts.sellerRows([s], { canSeeBalances: false }))[0]?.warningNote ?? null,
+      mainCategory: async () => (await row())?.mainCategory ?? null,
+      restrictionSummary: async () => (await row())?.restrictionSummary ?? null,
+      warningNote: async () => (await row())?.warningNote ?? null,
       notes: async () => (await core.repo.find('seller_notes', { seller_id: s.id }, { orderBy: [['created_at', 'desc']] })).map(map.note).map((n) => ({ ...n, author: actor(n.author) })),
       history: async () => (await perf.history(s.id, true)).map(timeline),
     };
