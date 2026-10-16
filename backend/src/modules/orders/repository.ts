@@ -182,6 +182,11 @@ export class OrdersRepository {
     return { all: r?.all ?? 0, inProgress: r?.inProgress ?? 0, delivered: r?.delivered ?? 0, returns: r?.returns ?? 0, cancelled: r?.cancelled ?? 0 };
   }
 
+  /** The customer's orders in progress (the In progress tab without a search): one indexed count */
+  countInProgress(customerId: string): Promise<number> {
+    return this.#orders.count({ customer_id: customerId, display_status: { $in: IN_PROGRESS } });
+  }
+
   /** Packages (groups) of the customer's open orders that are delayed or past their dispatch deadline */
   async delayedGroupsOfCustomer(customerId: string, now: Date): Promise<GroupRec[]> {
     const open = await this.#orders.find({ customer_id: customerId, lifecycle: 'open' });

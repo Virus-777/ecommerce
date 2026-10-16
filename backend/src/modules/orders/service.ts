@@ -111,9 +111,10 @@ export class OrdersService implements OrdersPublicApi {
     return (await this.core.repo.guestOrdersByEmail(email)).map((o) => ({ orderId: o.id, ref: o.ref, placedAt: o.placed_at.toISOString() }));
   }
 
+  /** The account overview tile: a count and the delayed packages, without the other tabs' aggregation */
   async countInProgress(customerId: string): Promise<{ inProgress: number; delayedPackages: number }> {
-    const c = await this.reads.countByTab(customerId);
-    return { inProgress: c.inProgress, delayedPackages: c.delayedPackages };
+    const [inProgress, delayed] = await Promise.all([this.core.repo.countInProgress(customerId), this.core.repo.delayedGroupsOfCustomer(customerId, this.core.now())]);
+    return { inProgress, delayedPackages: delayed.length };
   }
 
   listRecentForCustomer(customerId: string, limit: number): Promise<OrderSummary[]> {
