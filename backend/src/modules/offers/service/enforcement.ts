@@ -351,7 +351,8 @@ export class EnforcementPart extends Part {
     const targets = (e.targets ?? []) as { type?: string; id?: string }[];
     const ids = targets.filter((t) => t?.type === 'offer' && isUuid(t.id)).map((t) => t.id!);
     if (!ids.length) return;
-    if (!(await this.repo.transaction((tx) => tx.claim(eventId ?? `enforcement-reversed:${e.enforcementId}`)))) return;
+    // one atomic upsert: no transaction needed
+    if (!(await this.repo.claim(eventId ?? `enforcement-reversed:${e.enforcementId}`))) return;
     const by: By = { actor: actor ?? e.reversedBy ?? { kind: 'system', id: null, name: 'Trust and Risk' } };
     const text = `Enforcement ${e.ref} reversed${e.appealId ? ' after an appeal' : ''}: ${e.reason}`;
     for (const r of await this.repo.getMany('offers', ids)) {
