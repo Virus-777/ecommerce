@@ -464,7 +464,7 @@ export class Ledger {
         const left = daysLeft(lot.expires_at!, now);
         const day = dueReminder(left, days);
         if (day === null) continue;
-        const claimed = await this.repo.transaction((tx) => tx.claim(`credit-expiring:${lot.id}:${day}`));
+        const claimed = await this.repo.claim(`credit-expiring:${lot.id}:${day}`); // one atomic upsert: no transaction needed
         if (!claimed) continue;
         if (!currencies.has(lot.customer_id)) currencies.set(lot.customer_id, (await this.repo.getAccount(lot.customer_id))?.currency ?? this.core.currency);
         this.core.ctx.events.publish('wallet.credit.expiring', {
