@@ -2910,6 +2910,12 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "reports_merged_into_id_62e0a0",
+          "key": {
+            "merged_into_id": 1
+          }
+        },
+        {
           "name": "reports_dedupe_key_2ab325",
           "key": {
             "dedupe_key": 1
@@ -3207,6 +3213,12 @@ export const spec = defineModuleSpec({
         }
       },
       "indexes": [
+        {
+          "name": "evidence_requests_report_id_e9fd72",
+          "key": {
+            "report_id": 1
+          }
+        },
         {
           "name": "evidence_requests_to_type_to_id_state_5aab70",
           "key": {
@@ -3571,6 +3583,12 @@ export const spec = defineModuleSpec({
           "unique": true
         },
         {
+          "name": "enforcements_report_id_e9fd72",
+          "key": {
+            "report_id": 1
+          }
+        },
+        {
           "name": "enforcements_execution_state_b5a075",
           "key": {
             "execution_state": 1
@@ -3803,6 +3821,12 @@ export const spec = defineModuleSpec({
           }
         },
         {
+          "name": "appeals_enforcement_id_594751",
+          "key": {
+            "enforcement_id": 1
+          }
+        },
+        {
           "name": "appeals_source_external_appeal_id_d96e81",
           "key": {
             "source": 1,
@@ -3895,7 +3919,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "report_notes_report_id_at_378c2a",
+          "key": {
+            "report_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "report_events": {

@@ -45,6 +45,7 @@ reports.index({"ref":1}, {"name":"reports_ref_8cef23","unique":true});
 reports.index({"status":1,"risk_score":-1}, {"name":"reports_status_risk_score_1b594d"});
 reports.index({"type":1,"status":1}, {"name":"reports_type_status_1f6d43"});
 reports.index({"assignee_staff_id":1,"status":1}, {"name":"reports_assignee_staff_id_status_c5c7a6"});
+reports.index({"merged_into_id":1}, {"name":"reports_merged_into_id_62e0a0"});
 reports.index({"dedupe_key":1}, {"name":"reports_dedupe_key_2ab325","unique":true,"partialFilterExpression":{"status":{"$in":["open","under_review","escalated"]},"dedupe_key":{"$type":"string"}}});
 reports.index({"reporter_kind":1,"reporter_id":1,"created_at":-1}, {"name":"reports_reporter_kind_reporter_id_created_at_d2e805"});
 
@@ -100,6 +101,7 @@ const evidence_requests = new Schema(
   },
   collectionOptions("trust.evidence_requests"),
 );
+evidence_requests.index({"report_id":1}, {"name":"evidence_requests_report_id_e9fd72"});
 evidence_requests.index({"to_type":1,"to_id":1,"state":1}, {"name":"evidence_requests_to_type_to_id_state_5aab70"});
 evidence_requests.index({"state":1,"due_at":1}, {"name":"evidence_requests_state_due_at_c06642"});
 
@@ -162,6 +164,7 @@ const enforcements = new Schema(
   collectionOptions("trust.enforcements"),
 );
 enforcements.index({"ref":1}, {"name":"enforcements_ref_8cef23","unique":true});
+enforcements.index({"report_id":1}, {"name":"enforcements_report_id_e9fd72"});
 enforcements.index({"execution_state":1}, {"name":"enforcements_execution_state_b5a075"});
 enforcements.index({"owner_team":1,"recorded_at":-1}, {"name":"enforcements_owner_team_recorded_at_fd9e1a"});
 enforcements.index({"reversal_request_id":1}, {"name":"enforcements_reversal_request_id_cf0374","partialFilterExpression":{"reversal_request_id":{"$type":"string"}}});
@@ -206,6 +209,7 @@ const appeals = new Schema(
 );
 appeals.index({"ref":1}, {"name":"appeals_ref_8cef23","unique":true});
 appeals.index({"state":1,"decide_by":1}, {"name":"appeals_state_decide_by_b1f298"});
+appeals.index({"enforcement_id":1}, {"name":"appeals_enforcement_id_594751"});
 appeals.index({"source":1,"external_appeal_id":1}, {"name":"appeals_source_external_appeal_id_d96e81","unique":true,"partialFilterExpression":{"$and":[{"external_appeal_id":{"$type":"string"}},{"external_appeal_id":{"$type":"string"}}]}});
 appeals.index({"appellant_kind":1,"appellant_id":1}, {"name":"appeals_appellant_kind_appellant_id_db5193"});
 
@@ -222,6 +226,7 @@ const report_notes = new Schema(
   },
   collectionOptions("trust.report_notes"),
 );
+report_notes.index({"report_id":1,"at":1}, {"name":"report_notes_report_id_at_378c2a"});
 
 /** Timeline: created, merged, assigned, escalated, evidence added, recommendation routed and decided, enforcement applied, resolved */
 const report_events = new Schema(

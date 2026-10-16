@@ -583,7 +583,7 @@ The reviewer must differ from the person who recommended and the person who acce
 | created_at | timestamptz |
 | updated_at | timestamptz |
 
-Indexes: `(status, risk_score desc)`, `(type, status)`, `(assignee_staff_id, status)`, `unique(dedupe_key) where status in ('open','under_review','escalated')`, `(reporter_kind, reporter_id, created_at desc)`
+Indexes: `(status, risk_score desc)`, `(type, status)`, `(assignee_staff_id, status)`, `(merged_into_id)`, `unique(dedupe_key) where status in ('open','under_review','escalated')`, `(reporter_kind, reporter_id, created_at desc)`
 
 **report_subjects**
 
@@ -630,7 +630,7 @@ Indexes: `(report_id, added_at)`
 | answer_media_ids | jsonb |
 | answered_at | timestamptz? |
 
-Indexes: `(to_type, to_id, state)`, `(state, due_at)`
+Indexes: `(report_id)`, `(to_type, to_id, state)`, `(state, due_at)`
 
 **recommendations**
 
@@ -684,7 +684,7 @@ Indexes: `(owner_team, state)`, `(report_id)`, `(approval_request_id) where appr
 | reversal_reason | text? |
 | reversal_request_id | uuid? (pending access approval to reverse it) |
 
-Indexes: `(execution_state)`, `(owner_team, recorded_at desc)`, `(reversal_request_id) where reversal_request_id is not null`
+Indexes: `(report_id)`, `(execution_state)`, `(owner_team, recorded_at desc)`, `(reversal_request_id) where reversal_request_id is not null`
 
 **enforcement_targets**: Lookup of active enforcement by target
 
@@ -719,7 +719,7 @@ Indexes: `(target_type, target_id)`
 | decision | jsonb? |
 | filed_at | timestamptz |
 
-Indexes: `(state, decide_by)`, `unique(source, external_appeal_id) where external_appeal_id is not null`, `(appellant_kind, appellant_id)`
+Indexes: `(state, decide_by)`, `(enforcement_id)`, `unique(source, external_appeal_id) where external_appeal_id is not null`, `(appellant_kind, appellant_id)`
 
 **report_notes**
 
@@ -731,6 +731,8 @@ Indexes: `(state, decide_by)`, `unique(source, external_appeal_id) where externa
 | author_id | text |
 | author_name | text |
 | at | timestamptz |
+
+Indexes: `(report_id, at)`
 
 **report_events**: Timeline: created, merged, assigned, escalated, evidence added, recommendation routed and decided, enforcement applied, resolved
 
