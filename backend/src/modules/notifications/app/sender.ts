@@ -12,7 +12,7 @@ import { backoffMs, effectiveGroups, hashAddress, maskAddress, memberEmails, mem
 import { deliveryMachine } from '../domain/state-machines.js';
 import { redact, render } from '../domain/templates.js';
 import type { DeliveryRow, NoticeRow, ProviderResult, ProviderSyncEvent, RecipientRow, TemplateData } from '../ports.js';
-import { actorText, Core, SYSTEM } from './core.js';
+import { actorText, Core, groupBy, SYSTEM } from './core.js';
 
 import type { RecipientKind, RecipientReason, Target } from '../domain/routing.js';
 
@@ -360,6 +360,8 @@ export class Sender {
     const emailLive = await core.live(t, 'email');
     const pushLive = await core.live(t, 'push');
     const accounts = emailLive ? await core.accounts(members.map((m) => m.account_id)) : new Map();
+    // every member's push devices in one read (the loop below picks each member's)
+    const devices = pushLive ? groupBy(await core.repo.pushDevices({ accountIds: members.map((m) => m.account_id), audience: 'seller', sellerId, activeOnly: true }), (d) => d.account_id) : new Map<string, never[]>();
     const deliveries: DeliveryPlan[] = [];
     for (const m of members) {
       const acc = await core.memberAccess(sellerId, m.account_id);
@@ -379,7 +381,7 @@ export class Sender {
         );
       }
       if (pushLive && receives) {
-        for (const d of await core.repo.pushDevices({ accountIds: [m.account_id], audience: 'seller', sellerId, activeOnly: true })) {
+        for (const d of devices.get(m.account_id) ?? []) {
           const token = core.decryptToken(d.token_encrypted);
           if (token) deliveries.push({ channel: 'push', recipientKind: 'seller_member', accountId: m.account_id, address: token, name, deferUntil: quiet });
         }

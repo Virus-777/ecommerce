@@ -741,7 +741,7 @@ Indexes: `unique (template_id, version)`, `(template_id) where status = 'draft'`
 | created_at | timestamptz |
 | expires_at | timestamptz |
 
-Indexes: `(address_kind, address_id, created_at desc)`, `(dedupe_key)`, `(expires_at)`
+Indexes: `(address_kind, address_id, created_at desc)`, `(dedupe_key)`, `(expires_at)`, `gin(link jsonb_path_ops)`
 
 **notice_recipients**: Fan-out with per-person read state (seller members, staff lead/backup)
 
@@ -798,7 +798,7 @@ Indexes: `(status, send_at)`, `(dedupe_key)`
 | delivered_at | timestamptz? |
 | next_attempt_at | timestamptz? |
 
-Indexes: `(status, next_attempt_at)`, `(provider_message_id)`, `(account_id, created_at desc)`, `(address_hash, created_at desc)`, `(topic_key, created_at desc)`, `(linked_ref)`
+Indexes: `(status, next_attempt_at)`, `(provider_message_id)`, `(account_id, created_at desc)`, `(address_hash, created_at desc)`, `(topic_key, created_at desc)`, `(linked_ref)`, `(dedupe_key)`
 
 **delivery_events**
 

@@ -14,6 +14,21 @@ const subjectPath = (k: SubjectKey) => {
   return `link.subjects.${k}`;
 };
 
+/** Rows deleted per round by the purge job (an id list per round, never every old row at once) */
+const PURGE_BATCH = 1000;
+
+/** Deletes the rows matching `filter` a batch of ids at a time (`remove` deletes one batch and says how many went) */
+async function purgeInBatches<R extends { id: string }>(table: { find(f: Filter, o: { limit: number }): Promise<R[]> }, filter: Filter, remove: (ids: string[]) => Promise<number>): Promise<number> {
+  let removed = 0;
+  for (;;) {
+    const ids = (await table.find(filter, { limit: PURGE_BATCH })).map((r) => r.id);
+    if (!ids.length) return removed;
+    const n = await remove(ids);
+    removed += n;
+    if (ids.length < PURGE_BATCH || !n) return removed;
+  }
+}
+
 /** An open action notice: needs action, neither resolved nor expired */
 const OPEN_ACTION: Filter = { action_required: true, resolved_at: null, expired_at: null };
 
@@ -286,12 +301,13 @@ export class NotificationsRepository {
     );
   }
 
+  /** Notices past their retention, with their read rows (deliveries keep their row without the notice), in bounded batches */
   async purgeNotices(before: Date): Promise<number> {
-    const old = await this.#t.notices.distinct<string>('id', { expires_at: { $lt: before } });
-    if (!old.length) return 0;
-    await this.#t.deliveries.updateMany({ notice_id: oneOf(old) }, { notice_id: null });
-    await this.#t.recipients.deleteMany({ notice_id: oneOf(old) });
-    return this.#t.notices.deleteMany({ id: oneOf(old) });
+    return purgeInBatches(this.#t.notices, { expires_at: { $lt: before } }, async (old) => {
+      await this.#t.deliveries.updateMany({ notice_id: oneOf(old) }, { notice_id: null });
+      await this.#t.recipients.deleteMany({ notice_id: oneOf(old) });
+      return this.#t.notices.deleteMany({ id: oneOf(old) });
+    });
   }
 
   /** Open action notices whose deadline is before `cutoff`, or that have no deadline and were created before it, become expired */
@@ -415,11 +431,12 @@ export class NotificationsRepository {
     return this.#t.deliveries.count({ status: oneOf(q.statuses), ...(q.from ? { created_at: { $gte: q.from } } : {}) });
   }
 
+  /** Delivery rows past the log retention, with their events, in bounded batches */
   async purgeDeliveries(before: Date): Promise<number> {
-    const old = await this.#t.deliveries.distinct<string>('id', { created_at: { $lt: before } });
-    if (!old.length) return 0;
-    await this.#t.deliveryEvents.deleteMany({ delivery_id: oneOf(old) });
-    return this.#t.deliveries.deleteMany({ id: oneOf(old) });
+    return purgeInBatches(this.#t.deliveries, { created_at: { $lt: before } }, async (old) => {
+      await this.#t.deliveryEvents.deleteMany({ delivery_id: oneOf(old) });
+      return this.#t.deliveries.deleteMany({ id: oneOf(old) });
+    });
   }
 
   /* ---------------------------------------------------------------- suppressions */

@@ -10,7 +10,7 @@ import type { InboxSummary, Notice, NoticeLink, RoutingInfo, RoutingRow, StaffIn
 import { roleName, TOPICS, topicDef, type Category } from '../domain/catalog.js';
 import { deadlineOf, defaultGroups, defaultMemberChannel, effectiveGroups, formatDate, memberReceives, type MemberAccessLike } from '../domain/rules.js';
 import type { InboxFilter, InboxOwner, InboxRow } from '../ports.js';
-import { actorText, Core } from './core.js';
+import { actorText, Core, groupBy } from './core.js';
 
 export interface InboxQuery {
   group?: string;
@@ -194,6 +194,7 @@ export class Inbox {
     const routed = staff ? rows.filter((n) => n.address_kind === 'role') : [];
     const recipients = routed.length ? await this.core.repo.recipientsOf(routed.map((n) => n.id)) : [];
     const names = recipients.length ? await this.core.accounts(recipients.map((x) => x.account_id)) : new Map<string, identity.AccountSummary>();
+    const recipientsOf = groupBy(recipients, (x) => x.notice_id);
     return rows.map((n) => {
       const t = topicDef(n.topic_key);
       let routedTo: RoutingInfo | null = null;
@@ -203,9 +204,7 @@ export class Inbox {
           roleName: roleName(n.address_id),
           reason: (n.reason ?? 'member') as RoutingInfo['reason'],
           coveringFor: n.covering_for,
-          recipients: recipients
-            .filter((x) => x.notice_id === n.id)
-            .map((x) => ({ staffId: x.account_id, name: names.get(x.account_id)?.displayName ?? 'Staff member', as: (x.reason === 'lead' || x.reason === 'backup' ? x.reason : 'member') as 'lead' | 'backup' | 'member' })),
+          recipients: (recipientsOf.get(n.id) ?? []).map((x) => ({ staffId: x.account_id, name: names.get(x.account_id)?.displayName ?? 'Staff member', as: (x.reason === 'lead' || x.reason === 'backup' ? x.reason : 'member') as 'lead' | 'backup' | 'member' })),
         };
       }
       return {

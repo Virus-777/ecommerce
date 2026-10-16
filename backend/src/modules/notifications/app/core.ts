@@ -30,7 +30,19 @@ const canonical = (v: unknown): unknown =>
   Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined).map((k) => [k, canonical((v as Record<string, unknown>)[k])])) : v;
 const sameContent = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 
-export const actorText =(a: Actor) => JSON.stringify({ kind: a.kind, ...(a.id ? { id: a.id } : {}), ...(a.name ? { name: a.name } : {}) });
+/** Items by key, in their order */
+export function groupBy<T, K>(items: Iterable<T>, key: (t: T) => K): Map<K, T[]> {
+  const out = new Map<K, T[]>();
+  for (const x of items) {
+    const k = key(x);
+    const list = out.get(k);
+    if (list) list.push(x);
+    else out.set(k, [x]);
+  }
+  return out;
+}
+
+export const actorText = (a: Actor) => JSON.stringify({ kind: a.kind, ...(a.id ? { id: a.id } : {}), ...(a.name ? { name: a.name } : {}) });
 export function actorOfText(s: string | null | undefined): Actor {
   if (!s) return SYSTEM;
   try {
@@ -343,11 +355,13 @@ export class Core {
     const api = this.customers;
     if (!api) return null;
     const prefs = await api.getMarketingConsent(customerId);
-    this.#consent.set(customerId, { at: Date.now(), prefs });
+    this.rememberConsent(customerId, prefs);
     return prefs;
   }
 
+  /** Caches a customer's consent; the oldest entry goes past 50,000 (a broadcast reads every customer's) */
   rememberConsent(customerId: string, prefs: customers.MarketingPreferences) {
+    this.#consent.delete(customerId); // re-inserted last: the eviction order follows the latest read
     this.#consent.set(customerId, { at: Date.now(), prefs });
     if (this.#consent.size > 50_000) this.#consent.delete(this.#consent.keys().next().value!);
   }

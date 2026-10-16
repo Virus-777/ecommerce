@@ -517,11 +517,15 @@ export class Admin {
     let cursor: string | undefined;
     for (let i = 0; i < 100; i++) {
       const page = await api.searchCustomers({ statuses: ['active'] }, { limit: 100, ...(cursor ? { cursor } : {}) });
-      for (const c of page.items) {
-        const consent = await core.consent(c.id);
-        const ok = channel === 'email' ? consent?.emailPromotions : channel === 'sms' ? consent?.smsPromotions && consent.smsNumber : consent?.pushPromotions;
-        if (!ok) continue;
-        if (channel === 'email' && (await core.repo.activeSuppression('email', hashAddress('email', c.email)))) continue;
+      const consents = await Promise.all(page.items.map((c) => core.consent(c.id)));
+      const consenting = page.items.filter((_, i) => {
+        const consent = consents[i];
+        return channel === 'email' ? consent?.emailPromotions : channel === 'sms' ? consent?.smsPromotions && consent.smsNumber : consent?.pushPromotions;
+      });
+      // suppressed email addresses of the page in one read
+      const suppressed = channel === 'email' ? new Set((await core.repo.activeSuppressions('email', consenting.map((c) => hashAddress('email', c.email)))).map((s) => s.address_hash)) : new Set<string>();
+      for (const c of consenting) {
+        if (channel === 'email' && suppressed.has(hashAddress('email', c.email))) continue;
         out.push({ kind: 'customer', accountId: c.userId, customerId: c.id });
       }
       if (!page.nextCursor || !page.items.length) break;

@@ -3291,6 +3291,12 @@ export const spec = defineModuleSpec({
           "key": {
             "expires_at": 1
           }
+        },
+        {
+          "name": "notices_link_fac212",
+          "key": {
+            "link.$**": 1
+          }
         }
       ],
       "unenforced": []
@@ -3710,6 +3716,12 @@ export const spec = defineModuleSpec({
           "name": "deliveries_linked_ref_483a0b",
           "key": {
             "linked_ref": 1
+          }
+        },
+        {
+          "name": "deliveries_dedupe_key_46c1f9",
+          "key": {
+            "dedupe_key": 1
           }
         }
       ],

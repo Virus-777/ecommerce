@@ -102,6 +102,7 @@ const notices = new Schema(
 notices.index({"address_kind":1,"address_id":1,"created_at":-1}, {"name":"notices_address_kind_address_id_created_at_8b8398"});
 notices.index({"dedupe_key":1}, {"name":"notices_dedupe_key_46c1f9"});
 notices.index({"expires_at":1}, {"name":"notices_expires_at_ce8dd0"});
+notices.index({"link.$**":1}, {"name":"notices_link_fac212"});
 
 /** Fan-out with per-person read state (seller members, staff lead/backup) */
 const notice_recipients = new Schema(
@@ -173,6 +174,7 @@ deliveries.index({"account_id":1,"created_at":-1}, {"name":"deliveries_account_i
 deliveries.index({"address_hash":1,"created_at":-1}, {"name":"deliveries_address_hash_created_at_d7c486"});
 deliveries.index({"topic_key":1,"created_at":-1}, {"name":"deliveries_topic_key_created_at_682dfc"});
 deliveries.index({"linked_ref":1}, {"name":"deliveries_linked_ref_483a0b"});
+deliveries.index({"dedupe_key":1}, {"name":"deliveries_dedupe_key_46c1f9"});
 
 const delivery_events = new Schema(
   {
