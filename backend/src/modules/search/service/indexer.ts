@@ -87,7 +87,8 @@ export class SearchIndexer extends SearchBase {
         : {};
       const doc = { ...built.doc, ...kept } as typeof built.doc;
       Object.assign(doc, aggregatesFromOffers({ ...(existing ?? ({} as DocRow)), ...doc } as DocRow, rows));
-      await this.repo.transaction((tx) => tx.upsertDocument(doc, null, now));
+      // without offer rows upsertDocument is one atomic upsert: no transaction needed (the index feed passes it on right away)
+      await this.repo.upsertDocument(doc, null, now);
     }
     // only active brands are suggested or offered as a facet: their brand suggestion term is the marker
     if (product.brand) {
