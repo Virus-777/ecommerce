@@ -125,6 +125,7 @@ products.index({"category_id":1,"_id":1}, {"name":"products_category_id__id_4ee2
 products.index({"owner_seller_id":1,"_id":1}, {"name":"products_owner_seller_id__id_0c9474"});
 products.index({"publication":1,"_id":1}, {"name":"products_publication__id_e42336"});
 products.index({"brand_id":1,"_id":1}, {"name":"products_brand_id__id_a31711"});
+products.index({"updated_at":1,"_id":1}, {"name":"products_updated_at__id_337bc7"});
 
 const variants = new Schema(
   {
@@ -146,6 +147,7 @@ const variants = new Schema(
   collectionOptions("catalog.variants"),
 );
 variants.index({"gtin":1}, {"name":"variants_gtin_745cc2","unique":true,"partialFilterExpression":{"gtin":{"$type":"string"}}});
+variants.index({"product_id":1,"position":1}, {"name":"variants_product_id_position_6a100c"});
 
 /** Every submission, decision, publication change and merge */
 const review_log = new Schema(
@@ -163,6 +165,7 @@ const review_log = new Schema(
   },
   collectionOptions("catalog.review_log"),
 );
+review_log.index({"product_id":1,"at":1}, {"name":"review_log_product_id_at_d25cf0"});
 
 const correction_suggestions = new Schema(
   {

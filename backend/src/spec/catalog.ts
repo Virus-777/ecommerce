@@ -3441,6 +3441,13 @@ export const spec = defineModuleSpec({
             "brand_id": 1,
             "_id": 1
           }
+        },
+        {
+          "name": "products_updated_at__id_337bc7",
+          "key": {
+            "updated_at": 1,
+            "_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -3580,6 +3587,13 @@ export const spec = defineModuleSpec({
               "$type": "string"
             }
           }
+        },
+        {
+          "name": "variants_product_id_position_6a100c",
+          "key": {
+            "product_id": 1,
+            "position": 1
+          }
         }
       ],
       "unenforced": []
@@ -3660,7 +3674,15 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "review_log_product_id_at_d25cf0",
+          "key": {
+            "product_id": 1,
+            "at": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "correction_suggestions": {

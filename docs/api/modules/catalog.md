@@ -748,7 +748,7 @@ Indexes: `(status, name)`
 | listed_at | timestamptz? |
 | recrop_media_ids | jsonb? (images of the product and its variants flagged by media for re-crop after an aspect ratio change; dropped when replaced) |
 
-Indexes: `(review_state, id)`, `(category_id, id)`, `(owner_seller_id, id)`, `gin(search)`, `(publication, id)`, `(brand_id, id)`
+Indexes: `(review_state, id)`, `(category_id, id)`, `(owner_seller_id, id)`, `gin(search)`, `(publication, id)`, `(brand_id, id)`, `(updated_at, id)`
 
 **variants**
 
@@ -767,6 +767,8 @@ Indexes: `(review_state, id)`, `(category_id, id)`, `(owner_seller_id, id)`, `gi
 | list_price_amount | bigint? |
 | list_price_currency | char(3)? |
 
+Indexes: `(product_id, position)`
+
 **review_log**: Every submission, decision, publication change and merge
 
 | Column | Type |
@@ -779,6 +781,8 @@ Indexes: `(review_state, id)`, `(category_id, id)`, `(owner_seller_id, id)`, `gi
 | actor_kind | text |
 | actor_id | text? |
 | at | timestamptz |
+
+Indexes: `(product_id, at)`
 
 **correction_suggestions**
 

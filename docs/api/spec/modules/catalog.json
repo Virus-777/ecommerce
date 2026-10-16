@@ -1040,7 +1040,8 @@
         "(owner_seller_id, id)",
         "gin(search)",
         "(publication, id)",
-        "(brand_id, id)"
+        "(brand_id, id)",
+        "(updated_at, id)"
       ]
     },
     {
@@ -1058,7 +1059,8 @@
         "height_cm": "int?",
         "list_price_amount": "bigint?",
         "list_price_currency": "char(3)?"
-      }
+      },
+      "indexes": ["(product_id, position)"]
     },
     {
       "name": "review_log",
@@ -1072,7 +1074,8 @@
         "actor_kind": "text",
         "actor_id": "text?",
         "at": "timestamptz"
-      }
+      },
+      "indexes": ["(product_id, at)"]
     },
     {
       "name": "correction_suggestions",
