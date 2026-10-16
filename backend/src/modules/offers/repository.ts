@@ -201,14 +201,21 @@ export class OffersRepository {
     return this.#t.eligibility.find({ offer_id: oneOf(offerIds) });
   }
 
-  async upsertEligibility(row: EligibilityRec): Promise<void> {
-    await this.#t.eligibility.upsert(definedOnly(row));
+  /** One round trip for all the rows (insert or replace by offer id) */
+  async upsertEligibility(rows: readonly EligibilityRec[]): Promise<void> {
+    await this.#t.eligibility.upsertMany(rows.map(definedOnly));
   }
 
   /* ---------------------------------------------------------------- featured decisions */
 
   getFeatured(variantId: string, group: string, zoneKey: string): Promise<FeaturedRec | undefined> {
     return this.#t.featured.findOne({ variant_id: variantId, condition_group: group, zone_key: zoneKey });
+  }
+
+  /** The cached decisions of these variants in one condition group and zone */
+  async featuredFor(variantIds: readonly string[], group: string, zoneKey: string): Promise<FeaturedRec[]> {
+    if (!variantIds.length) return [];
+    return this.#t.featured.find({ variant_id: oneOf(variantIds), condition_group: group, zone_key: zoneKey });
   }
 
   async upsertFeatured(row: FeaturedRec): Promise<void> {

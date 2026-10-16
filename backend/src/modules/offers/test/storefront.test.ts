@@ -151,6 +151,28 @@ describe('carts and orders', () => {
     const boxOffer = await h.api.getPurchaseBoxOffer([{ productId: m.p.id, offerId: m.oa.id }]);
     expect(boxOffer[m.p.id]?.id).toBe(m.oa.id);
   });
+
+  it('answers product cards for many products at once (featured decisions batched)', async () => {
+    const m1 = await market();
+    const m2 = await market();
+    const empty = addProduct(h);
+    const unknown = newId();
+    const cards = await h.api.getFeaturedOfferForProduct([{ productId: m1.p.id }, { productId: m2.p.id, variantId: m2.v }, { productId: empty.id }, { productId: unknown }], '97205');
+    expect(Object.keys(cards).sort()).toEqual([m1.p.id, m2.p.id, empty.id, unknown].sort());
+    expect(cards[m1.p.id]?.id).toBe(m1.ob.id);
+    expect(cards[m2.p.id]?.id).toBe(m2.ob.id);
+    expect(cards[empty.id]).toBeNull();
+    expect(cards[unknown]).toBeNull();
+    // the same answers one product at a time
+    expect((await h.api.getFeaturedOfferForProduct([{ productId: m2.p.id }], '97205'))[m2.p.id]?.id).toBe(m2.ob.id);
+
+    // a chosen offer that no longer sells falls back to the featured one; another product's offer is ignored
+    await asSeller(h, m1.a, 'POST', `/offers/${m1.oa.id}/pause`, {});
+    const boxes = await h.api.getPurchaseBoxOffer([{ productId: m1.p.id, offerId: m1.oa.id }, { productId: m2.p.id, offerId: m1.ob.id }], '97205');
+    expect(boxes[m1.p.id]?.id).toBe(m1.ob.id);
+    expect(boxes[m2.p.id]?.id).toBe(m2.ob.id);
+    expect((await h.api.getPurchaseBoxOffer([{ productId: m2.p.id, offerId: m2.oa.id }]))[m2.p.id]?.id).toBe(m2.oa.id);
+  });
 });
 
 describe('GraphQL', () => {

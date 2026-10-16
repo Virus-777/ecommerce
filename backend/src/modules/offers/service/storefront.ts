@@ -23,7 +23,7 @@ import type {
   VariantAvailability,
 } from '../../../spec/offers.js';
 import { CONDITION_LABEL, conditionGroup, discountPct, dispatchLabel, formatMoney, TAX_NOTE, type ConditionGroup } from '../domain/rules.js';
-import { compareAtOf, FULFILLED_BY_MARKETLY_LABEL, isoReq, money, OFFICIAL_NAME, returnTermsOf, SERVICE_INELIGIBLE, serviceHeld, shownStatus, strings, variantLabel, warrantyOf, type Fulfilment } from '../mappers.js';
+import { compareAtOf, FULFILLED_BY_MARKETLY_LABEL, groupBy, isoReq, money, OFFICIAL_NAME, returnTermsOf, SERVICE_INELIGIBLE, serviceHeld, shownStatus, strings, variantLabel, warrantyOf, type Fulfilment } from '../mappers.js';
 import type { EligibilityRec, OfferRec } from '../ports.js';
 import { notFound, Part } from './core.js';
 import { DEFAULT_PARCEL } from './manage.js';
@@ -154,12 +154,13 @@ export class StorefrontPart extends Part {
     };
   }
 
-  async sellerCues(rows: readonly OfferRec[]): Promise<Map<string, SellerCue>> {
+  /** `elig`: the rows' eligibility when the caller already read it */
+  async sellerCues(rows: readonly OfferRec[], elig?: Map<string, EligibilityRec>): Promise<Map<string, SellerCue>> {
     const ids = [...new Set(rows.map((r) => r.seller_id).filter((x): x is string => Boolean(x)))];
     const cards = ids.length ? ((await this.core.soft('sellers.getStorefrontCard', () => this.ctx.use('sellers').getStorefrontCard(ids))) ?? []) : [];
     const byId = new Map(cards.map((c) => [c.id, c]));
     const names = ids.length && cards.length < ids.length ? await this.core.sellerNames(rows) : new Map<string, string>();
-    const elig = new Map((await this.repo.getEligibility(rows.map((r) => r.id))).map((e) => [e.offer_id, e]));
+    elig ??= await this.eligibility(rows);
     // the Official Store's ratings come from reviews (sellers has no storefront card for it)
     const official = rows.some((r) => r.owner_type === 'official') ? await this.core.optional('reviews', 'Official Store feedback', (rv) => rv.getSellerFeedbackSummary(OFFICIAL_STORE_ID)) : undefined;
     const out = new Map<string, SellerCue>();
@@ -185,16 +186,20 @@ export class StorefrontPart extends Part {
     return out;
   }
 
+  /** Eligibility rows by offer id */
+  async eligibility(rows: readonly OfferRec[]): Promise<Map<string, EligibilityRec>> {
+    return new Map((await this.repo.getEligibility(rows.map((r) => r.id))).map((e) => [e.offer_id, e]));
+  }
+
   /** Customer views of offers at a location; featured ids per variant come from the default decision */
   async views(rows: readonly OfferRec[], deliverTo: DeliverTo, quantity: number, o: { facts?: Map<string, Facts>; featured?: Map<string, string | null> } = {}): Promise<OfferView[]> {
     if (!rows.length) return [];
     const facts = o.facts ?? (await this.facts(rows, deliverTo, quantity));
-    const [cues, eligRows, lookback] = await Promise.all([this.sellerCues(rows), this.repo.getEligibility(rows.map((r) => r.id)), this.core.lookbackDays()]);
-    const elig = new Map(eligRows.map((e) => [e.offer_id, e]));
+    const elig = await this.eligibility(rows);
+    const [cues, lookback] = await Promise.all([this.sellerCues(rows, elig), this.core.lookbackDays()]);
     const featured = new Map(o.featured ?? []);
-    for (const v of new Set(rows.map((r) => r.variant_id))) {
-      if (!featured.has(v)) featured.set(v, (await this.parts.featured.decision(v, 'new', deliverTo)).winnerOfferId ?? null);
-    }
+    const undecided = rows.filter((r) => !featured.has(r.variant_id)).map((r) => ({ variantId: r.variant_id }));
+    for (const [v, d] of await this.parts.featured.decisions(undecided, 'new', deliverTo)) featured.set(v, d.winnerOfferId ?? null);
     return rows.map((r) => this.view(r, facts.get(r.id)!, cues.get(r.id)!, elig.get(r.id), featured.get(r.variant_id) === r.id, lookback));
   }
 
@@ -287,9 +292,9 @@ export class StorefrontPart extends Part {
     for (const r of listed) counts[conditionGroup(r.condition)]++;
     const filter = opts.condition && opts.condition !== 'all' ? (opts.condition as ConditionGroup) : null;
     const rows = filter ? listed.filter((r) => conditionGroup(r.condition) === filter) : listed;
-    const facts = await this.facts(rows, deliverTo, 1);
-    const decision = await this.parts.featured.decision(variant.id, filter && filter !== 'new' ? filter : 'new', deliverTo, { facts, productId });
-    const featuredDefault = filter && filter !== 'new' ? (await this.parts.featured.decision(variant.id, 'new', deliverTo, { productId })).winnerOfferId ?? null : (decision.winnerOfferId ?? null);
+    const [facts, rule] = await Promise.all([this.facts(rows, deliverTo, 1), this.parts.featured.currentRule()]);
+    const decision = await this.parts.featured.decision(variant.id, filter && filter !== 'new' ? filter : 'new', deliverTo, { facts, productId, rule });
+    const featuredDefault = filter && filter !== 'new' ? (await this.parts.featured.decision(variant.id, 'new', deliverTo, { productId, rule })).winnerOfferId ?? null : (decision.winnerOfferId ?? null);
     const views = await this.views(rows, deliverTo, 1, { facts, featured: new Map([[variant.id, featuredDefault]]) });
     const rank = (v: OfferView) => (v.status === 'active' && v.delivery.shipsToLocation ? 0 : 1);
     views.sort((a, b) => {
@@ -301,7 +306,6 @@ export class StorefrontPart extends Part {
       }
       return a.total.amount - b.total.amount;
     });
-    const rule = await this.parts.featured.currentRule();
     return {
       product: this.summaryOf(product),
       variant,
@@ -413,9 +417,10 @@ export class StorefrontPart extends Part {
     const ids = variants.map((v) => v.id).filter(isUuid);
     const rows = ids.length ? await this.repo.allOffers({ variantIds: ids, statuses: ['active', 'out_of_stock'] }, 2000) : [];
     const fulfilment = await this.core.fulfilment(rows);
+    const byVariant = groupBy(rows, (r) => r.variant_id);
     const out: Record<string, VariantAvailability> = {};
     for (const v of variants) {
-      const mine = rows.filter((r) => r.variant_id === v.id);
+      const mine = byVariant.get(v.id) ?? [];
       const active = mine.filter((r) => r.status === 'active' && !serviceHeld(r, fulfilment.get(r.id)));
       const lowest = active.length ? active.reduce((m, r) => (r.price_amount < m.price_amount ? r : m)) : null;
       const lowestPrice = lowest ? money(lowest.price_amount, lowest.currency) : null;
@@ -441,26 +446,29 @@ export class StorefrontPart extends Part {
     return new Map([...products].flatMap(([id, p]) => (p.product.variants[0] ? [[id, p.product.variants[0].id] as [string, string]] : [])));
   }
 
+  /** Product cards: one featured decision per item (batched), one read of the winners, one toOffers */
   async getFeaturedOfferForProduct(items: { productId: string; variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>> {
     const deliverTo = this.deliverTo(postalCode);
     const defaults = await this.defaultVariants(items.filter((i) => !i.variantId).map((i) => i.productId));
+    const wanted = items.map((i) => ({ productId: i.productId, variantId: i.variantId ?? defaults.get(i.productId) }));
+    const decided = wanted.flatMap((w) => (w.variantId && isUuid(w.variantId) ? [{ productId: w.productId, variantId: w.variantId }] : []));
+    const decisions = await this.parts.featured.decisions(decided, 'new', deliverTo);
+    const winners = new Map((await this.repo.getMany('offers', [...decisions.values()].flatMap((d) => (d.winnerOfferId ? [d.winnerOfferId] : [])))).map((r) => [r.id, r]));
+    const winnerOf = (w: (typeof wanted)[number]) => {
+      const id = w.variantId && isUuid(w.variantId) ? decisions.get(w.variantId)?.winnerOfferId : null;
+      const row = id ? winners.get(id) : undefined;
+      return row && row.status === 'active' && row.product_id === w.productId ? row : undefined;
+    };
+    const offers = await this.activeOffers(wanted.flatMap((w) => winnerOf(w) ?? []));
     const out: Record<string, Offer | null> = {};
-    for (const i of items) {
-      const variantId = i.variantId ?? defaults.get(i.productId);
-      out[i.productId] = null;
-      if (!variantId || !isUuid(variantId)) continue;
-      const d = await this.parts.featured.decision(variantId, 'new', deliverTo, { productId: i.productId });
-      if (!d.winnerOfferId) continue;
-      const row = await this.repo.get('offers', d.winnerOfferId);
-      if (row && row.status === 'active' && row.product_id === i.productId) out[i.productId] = await this.activeOffer(row);
-    }
+    for (const w of wanted) out[w.productId] = offers.get(winnerOf(w)?.id ?? '') ?? null;
     return out;
   }
 
-  /** The offer while it sells (a Marketly-fulfilled offer the service holds is shown Ineligible), else null */
-  private async activeOffer(row: OfferRec): Promise<Offer | null> {
-    const o = await this.core.toOffer(row);
-    return o.status === 'active' ? o : null;
+  /** The offers while they sell (a Marketly-fulfilled offer the service holds is shown Ineligible and left out), by id */
+  private async activeOffers(rows: readonly OfferRec[]): Promise<Map<string, Offer>> {
+    const unique = [...new Map(rows.map((r) => [r.id, r])).values()];
+    return new Map((await this.core.toOffers(unique)).filter((o) => o.status === 'active').map((o) => [o.id, o]));
   }
 
   async getPurchaseBoxOffer(items: { productId: string; offerId?: string; variantId?: string }[], postalCode?: string): Promise<Record<string, Offer | null>> {
@@ -468,11 +476,16 @@ export class StorefrontPart extends Part {
     const fallback: { productId: string; variantId?: string }[] = [];
     const requested = await this.repo.getMany('offers', items.map((i) => i.offerId).filter((x): x is string => isUuid(x)));
     const byId = new Map(requested.map((r) => [r.id, r]));
-    for (const i of items) {
+    const chosenOf = (i: (typeof items)[number]) => {
       const r = i.offerId ? byId.get(i.offerId) : undefined;
-      const offer = r && r.product_id === i.productId && r.status === 'active' ? await this.activeOffer(r) : null;
+      return r && r.product_id === i.productId ? r : undefined;
+    };
+    const offers = await this.activeOffers(items.flatMap((i) => (chosenOf(i)?.status === 'active' ? [chosenOf(i)!] : [])));
+    for (const i of items) {
+      const r = chosenOf(i);
+      const offer = r ? offers.get(r.id) : undefined;
       if (offer) out[i.productId] = offer;
-      else fallback.push({ productId: i.productId, ...(i.variantId ? { variantId: i.variantId } : r && r.product_id === i.productId ? { variantId: r.variant_id } : {}) });
+      else fallback.push({ productId: i.productId, ...(i.variantId ? { variantId: i.variantId } : r ? { variantId: r.variant_id } : {}) });
     }
     if (fallback.length) Object.assign(out, await this.getFeaturedOfferForProduct(fallback, postalCode));
     return out;
@@ -482,11 +495,11 @@ export class StorefrontPart extends Part {
     const ids = [...new Set(productIds.filter(isUuid))];
     const rows = ids.length ? await this.repo.allOffers({ productIds: ids, statuses: ['active'] }, 5000) : [];
     const cond = opts?.condition && opts.condition !== 'all' ? opts.condition : null;
-    const elig = new Map((await this.repo.getEligibility(rows.map((r) => r.id))).map((e) => [e.offer_id, e]));
-    const names = await this.core.sellerNames(rows);
+    const [elig, names] = await Promise.all([this.eligibility(rows), this.core.sellerNames(rows)]);
+    const byProduct = groupBy(cond ? rows.filter((r) => conditionGroup(r.condition) === cond) : rows, (r) => r.product_id);
     const out: Record<string, { count: number; lowest: common.Money; highest: common.Money; lowestOfferId: string; lowestSellerName: string } | null> = {};
     for (const id of productIds) {
-      const mine = rows.filter((r) => r.product_id === id && (!cond || conditionGroup(r.condition) === cond));
+      const mine = byProduct.get(id) ?? [];
       if (!mine.length) {
         out[id] = null;
         continue;

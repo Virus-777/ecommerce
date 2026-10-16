@@ -6,8 +6,8 @@ import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import type { DeliverTo, FeaturedCandidate, FeaturedDecision, FeaturedRule, FeaturedRuleInput, FeaturedRuleParameters } from '../../../spec/offers.js';
 import { CONDITIONS, conditionGroup, DEFAULT_RULE, rankCandidates, reason, RULE_NOTES, TIE_BREAKERS, zoneKey, type ConditionGroup } from '../domain/rules.js';
 import { actorText, featuredRule, iso, isoReq, money, SERVICE_INELIGIBLE, serviceHeld } from '../mappers.js';
-import type { OfferRec, RuleRec } from '../ports.js';
-import { invalid, invalidField, Part, SYSTEM, type By, type ProductCache } from './core.js';
+import type { FeaturedRec, OfferRec, RuleRec } from '../ports.js';
+import { invalid, invalidField, Part, SYSTEM, type By, type ProductCache, type Standing } from './core.js';
 import type { Facts } from './storefront.js';
 
 interface Cached {
@@ -15,8 +15,25 @@ interface Cached {
   items: FeaturedCandidate[];
 }
 
+interface DecisionOptions {
+  productId?: string;
+  /** Location facts the caller already has (offers missing from it are quoted) */
+  facts?: Map<string, Facts>;
+  rows?: OfferRec[];
+  /** Recompute even when the cached decision is fresh */
+  refresh?: boolean;
+  /** The current rule, when the caller already read it */
+  rule?: FeaturedRule;
+}
+
 /** Statuses that take part in a featured decision (as candidates; only active ones can win) */
 const CANDIDATE_STATUSES: OfferRec['status'][] = ['active', 'out_of_stock', 'ineligible', 'paused'];
+
+/** Offers per batch of the eligibility job */
+const REEVALUATE_BATCH = 500;
+
+/** The version in force at `now` (rows by version): the latest that took effect, else the first */
+const currentOf = (rows: RuleRec[], now: Date): FeaturedRule => featuredRule((rows.filter((r) => r.effective_from <= now).at(-1) ?? rows[0])!);
 
 export class FeaturedPart extends Part {
   #defaultEnsured = false;
@@ -44,16 +61,13 @@ export class FeaturedPart extends Part {
   }
 
   async currentRule(): Promise<FeaturedRule> {
-    const now = this.now();
-    const rows = await this.rules();
-    const current = rows.filter((r) => r.effective_from <= now).at(-1) ?? rows[0];
-    return featuredRule(current!);
+    return currentOf(await this.rules(), this.now());
   }
 
   async ruleAdmin(): Promise<{ current: FeaturedRule; scheduled: FeaturedRule | null; history: FeaturedRule[] }> {
     const now = this.now();
     const rows = await this.rules();
-    const current = await this.currentRule();
+    const current = currentOf(rows, now);
     const scheduled = rows.find((r) => r.effective_from > now);
     return { current, scheduled: scheduled ? featuredRule(scheduled) : null, history: rows.filter((r) => r.version !== current.version && r.effective_from <= now).map(featuredRule).reverse() };
   }
@@ -110,11 +124,32 @@ export class FeaturedPart extends Part {
    * (the rule's competing conditions); 'used' and 'refurbished' compete within their filter.
    * Served from featured_offers while it is clean and on the current rule version.
    */
-  async decision(variantId: string, group: ConditionGroup, deliverTo: DeliverTo, o: { productId?: string; facts?: Map<string, Facts>; rows?: OfferRec[]; refresh?: boolean } = {}): Promise<FeaturedDecision> {
-    const rule = await this.currentRule();
-    const granularity = String((await this.core.setting('featuredZoneGranularity')) ?? 'postal3');
-    const zone = zoneKey(deliverTo.postalCode, granularity);
-    const cached = await this.repo.getFeatured(variantId, group, zone);
+  async decision(variantId: string, group: ConditionGroup, deliverTo: DeliverTo, o: DecisionOptions = {}): Promise<FeaturedDecision> {
+    const [rule, zone] = await Promise.all([o.rule ?? this.currentRule(), this.zoneOf(deliverTo)]);
+    return this.decide(variantId, group, deliverTo, rule, zone, await this.repo.getFeatured(variantId, group, zone), o);
+  }
+
+  /**
+   * decision() for many variants at one location (product cards, cart lines): the rule, the zone and the cached
+   * decisions are read once; only missing or stale decisions are computed. Keyed by variant id.
+   */
+  async decisions(items: readonly { variantId: string; productId?: string }[], group: ConditionGroup, deliverTo: DeliverTo): Promise<Map<string, FeaturedDecision>> {
+    const out = new Map<string, FeaturedDecision>();
+    const variantIds = [...new Set(items.map((i) => i.variantId))];
+    if (!variantIds.length) return out;
+    const [rule, zone] = await Promise.all([this.currentRule(), this.zoneOf(deliverTo)]);
+    const cached = new Map((await this.repo.featuredFor(variantIds, group, zone)).map((r) => [r.variant_id, r]));
+    for (const i of items) {
+      if (!out.has(i.variantId)) out.set(i.variantId, await this.decide(i.variantId, group, deliverTo, rule, zone, cached.get(i.variantId), { productId: i.productId }));
+    }
+    return out;
+  }
+
+  private async zoneOf(deliverTo: DeliverTo): Promise<string> {
+    return zoneKey(deliverTo.postalCode, String((await this.core.setting('featuredZoneGranularity')) ?? 'postal3'));
+  }
+
+  private async decide(variantId: string, group: ConditionGroup, deliverTo: DeliverTo, rule: FeaturedRule, zone: string, cached: FeaturedRec | undefined, o: DecisionOptions): Promise<FeaturedDecision> {
     if (cached && !cached.dirty && cached.rule_version === rule.version && !o.refresh) {
       const c = cached.candidates as unknown as Cached;
       return { productId: cached.product_id, variantId, deliverTo, ruleVersion: cached.rule_version, winnerOfferId: cached.offer_id, candidates: c?.items ?? [], computedAt: isoReq(cached.computed_at) };
@@ -140,7 +175,7 @@ export class FeaturedPart extends Part {
     return { ...computed, productId: productId ?? computed.productId };
   }
 
-  private async compute(variantId: string, group: ConditionGroup, deliverTo: DeliverTo, rule: FeaturedRule, o: { productId?: string; facts?: Map<string, Facts>; rows?: OfferRec[] }): Promise<FeaturedDecision> {
+  private async compute(variantId: string, group: ConditionGroup, deliverTo: DeliverTo, rule: FeaturedRule, o: DecisionOptions): Promise<FeaturedDecision> {
     const all = o.rows ?? (await this.repo.find('offers', { variant_id: variantId, status: CANDIDATE_STATUSES }, { limit: 200 }));
     const competing = rule.parameters.competingConditions;
     const rows = all.filter((r) => CANDIDATE_STATUSES.includes(r.status) && (group === 'new' ? true : conditionGroup(r.condition) === group));
@@ -148,10 +183,8 @@ export class FeaturedPart extends Part {
     const now = isoReq(this.now());
     if (!rows.length) return { productId, variantId, deliverTo, ruleVersion: rule.version, winnerOfferId: null, candidates: [], computedAt: now };
     const missing = rows.filter((r) => !o.facts?.has(r.id));
-    const facts = new Map(o.facts ?? []);
-    if (missing.length) for (const [k, v] of await this.parts.storefront.facts(missing, deliverTo, 1)) facts.set(k, v);
-    const elig = new Map((await this.repo.getEligibility(rows.map((r) => r.id))).map((e) => [e.offer_id, e]));
-    const names = await this.core.sellerNames(rows);
+    const [quoted, elig, names] = await Promise.all([this.parts.storefront.facts(missing, deliverTo, 1), this.parts.storefront.eligibility(rows), this.core.sellerNames(rows)]);
+    const facts = new Map([...(o.facts ?? []), ...quoted]);
     const cands = rows.map((r) => {
       const f = facts.get(r.id)!;
       const e = elig.get(r.id);
@@ -236,7 +269,7 @@ export class FeaturedPart extends Part {
         const c = row.candidates as unknown as Cached | null;
         const deliverTo = c?.deliverTo ?? this.parts.storefront.deliverTo(undefined);
         try {
-          await this.decision(row.variant_id, row.condition_group, deliverTo, { productId: row.product_id, refresh: true });
+          await this.decision(row.variant_id, row.condition_group, deliverTo, { productId: row.product_id, refresh: true, rule });
         } catch (err) {
           if (isAppError(err) && err.status < 500) {
             await this.repo.upsertFeatured({ ...row, dirty: false, computed_at: this.now() });
@@ -250,23 +283,24 @@ export class FeaturedPart extends Part {
     }
   }
 
-  /** offers.reevaluate-eligibility: seller standing from sellers into offer_eligibility */
+  /**
+   * offers.reevaluate-eligibility: seller standing from sellers into offer_eligibility. Walks every live offer by id in
+   * bounded batches; each seller's standing is read once per run (50 sellers per call).
+   */
   async reevaluate(): Promise<void> {
     const rule = await this.currentRule();
-    const rows = await this.repo.allOffers({ excludeStatuses: ['removed'] }, 10_000);
-    const bySeller = new Map<string, OfferRec[]>();
-    const official: OfferRec[] = [];
-    for (const r of rows) {
-      if (!r.seller_id) official.push(r);
-      else bySeller.set(r.seller_id, [...(bySeller.get(r.seller_id) ?? []), r]);
+    const standing = new Map<string, Standing>();
+    for (let after: string | null = null; ; ) {
+      const rows: OfferRec[] = await this.repo.find('offers', { status: { op: '<>', value: 'removed' }, ...(after ? { id: { op: '>', value: after } } : {}) }, { orderBy: [['id', 'asc']], limit: REEVALUATE_BATCH });
+      const unseen = [...new Set(rows.flatMap((r) => (r.seller_id && !standing.has(r.seller_id) ? [r.seller_id] : [])))];
+      for (let i = 0; i < unseen.length; i += 50) {
+        for (const [id, s] of await this.core.sellerStanding(unseen.slice(i, i + 50), rule.parameters.minOnTimeDispatchPct)) standing.set(id, s);
+      }
+      // Official Store rows have no seller standing: their seller reasons are carried over
+      await this.core.refreshEligibility(rows, standing);
+      if (rows.length < REEVALUATE_BATCH) break;
+      after = rows.at(-1)!.id;
     }
-    const sellerIds = [...bySeller.keys()];
-    for (let i = 0; i < sellerIds.length; i += 50) {
-      const chunk = sellerIds.slice(i, i + 50);
-      const standing = await this.core.sellerStanding(chunk, rule.parameters.minOnTimeDispatchPct);
-      for (const id of chunk) await this.core.refreshEligibility(bySeller.get(id)!, standing);
-    }
-    await this.core.refreshEligibility(official);
     await this.refreshOfficialShipsFrom();
     await this.backfillTitles();
     await this.backfillReturnTerms();

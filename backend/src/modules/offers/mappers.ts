@@ -34,6 +34,18 @@ export const isoReq = (d: Date | string): string => iso(d)!;
 
 export const money = (amount: number, currency: string): common.Money => ({ amount: Number(amount), currency });
 
+/** Rows by key, in their order (Map.groupBy, which the ES2023 lib does not type yet) */
+export function groupBy<T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>();
+  for (const r of rows) {
+    const k = key(r);
+    const list = out.get(k);
+    if (list) list.push(r);
+    else out.set(k, [r]);
+  }
+  return out;
+}
+
 /** Actors are stored as kind + id (history tables) or as JSON text (job and rule columns) */
 export const actorOf = (kind: string | null | undefined, id: string | null | undefined): common.Actor => ({ kind: (kind ?? 'system') as common.Actor['kind'], id: id ?? null });
 

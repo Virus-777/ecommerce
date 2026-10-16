@@ -90,6 +90,16 @@ export interface Transitioned {
 /** Per-call cache of catalog products */
 export type ProductCache = Map<string, Promise<catalog.ProductAdmin | null>>;
 
+/** A seller's standing for featured eligibility (sellerStanding) */
+export interface Standing {
+  onTimePct: number | null;
+  reasons: IneligibilityReason[];
+  restrictionRef: string | null;
+}
+
+/** Eligibility reasons that come from the seller's standing (carried over when no fresh standing is given) */
+const SELLER_CODES: IneligibilityCode[] = ['seller_restricted', 'seller_suspended', 'delivery_performance_under_review', 'on_time_dispatch_below_standard'];
+
 export class Core {
   readonly repo: OffersRepository;
   readonly ctx: ModuleContext<'offers'>;
@@ -406,11 +416,12 @@ export class Core {
    * on-time dispatch, delivery review) comes from `standing` when given (hourly job, create), else it is
    * carried over from the last evaluation. Publishes offers.offer.eligibility_changed on a change.
    */
-  async refreshEligibility(rows: readonly OfferRec[], standing?: Map<string, { onTimePct: number | null; reasons: IneligibilityReason[]; restrictionRef: string | null }>) {
+  async refreshEligibility(rows: readonly OfferRec[], standing?: Map<string, Standing>) {
     if (!rows.length) return;
     const existing = new Map((await this.repo.getEligibility(rows.map((r) => r.id))).map((e) => [e.offer_id, e]));
     const now = this.now();
-    const SELLER_CODES: IneligibilityCode[] = ['seller_restricted', 'seller_suspended', 'delivery_performance_under_review', 'on_time_dispatch_below_standard'];
+    const evaluated: EligibilityRec[] = [];
+    const changed: { r: OfferRec; eligible: boolean; codes: string[] }[] = [];
     for (const r of rows) {
       const prev = existing.get(r.id);
       const prevReasons = (Array.isArray(prev?.reasons) ? prev!.reasons : []) as unknown as IneligibilityReason[];
@@ -426,16 +437,15 @@ export class Core {
         seller_restriction_ref: s ? s.restrictionRef : (prev?.seller_restriction_ref ?? null),
         evaluated_at: now,
       };
-      await this.repo.upsertEligibility(row);
+      evaluated.push(row);
       const codes = reasons.map((x) => x.code).sort();
       const before = prevReasons.map((x) => x.code).sort();
       // a new draft changes nothing for anyone yet
-      const changed = prev ? prev.eligible !== row.eligible || codes.join() !== before.join() : r.status !== 'draft';
-      if (changed) {
-        this.publish('offers.offer.eligibility_changed', { offerId: r.id, sellerId: r.seller_id, eligible: row.eligible, reasons: codes });
-        await this.markDirty([r.variant_id]);
-      }
+      if (prev ? prev.eligible !== row.eligible || codes.join() !== before.join() : r.status !== 'draft') changed.push({ r, eligible: row.eligible, codes });
     }
+    await this.repo.upsertEligibility(evaluated);
+    for (const { r, eligible, codes } of changed) this.publish('offers.offer.eligibility_changed', { offerId: r.id, sellerId: r.seller_id, eligible, reasons: codes });
+    await this.markDirty([...new Set(changed.map((c) => c.r.variant_id))]);
   }
 
   /** Featured decisions for these variants need recomputing */
@@ -444,17 +454,18 @@ export class Core {
   }
 
   /** Seller standing for featured eligibility: open restriction, suspension, on-time dispatch, delivery review */
-  async sellerStanding(sellerIds: readonly string[], minOnTimePct: number): Promise<Map<string, { onTimePct: number | null; reasons: IneligibilityReason[]; restrictionRef: string | null }>> {
-    const out = new Map<string, { onTimePct: number | null; reasons: IneligibilityReason[]; restrictionRef: string | null }>();
+  async sellerStanding(sellerIds: readonly string[], minOnTimePct: number): Promise<Map<string, Standing>> {
+    const out = new Map<string, Standing>();
     const ids = [...new Set(sellerIds.filter(isUuid))];
     if (!ids.length) return out;
-    const snaps = await this.sellerSnapshots(ids);
-    for (const id of ids) {
+    // sellers has no batch read of performance: one call per seller, side by side
+    const [snaps, perfs] = await Promise.all([this.sellerSnapshots(ids), Promise.all(ids.map((id) => this.soft('sellers.getPerformance', () => this.ctx.use('sellers').getPerformance(id))))]);
+    for (const [i, id] of ids.entries()) {
       const snap = snaps.get(id);
       const reasons: IneligibilityReason[] = [];
       if (snap?.status === 'suspended') reasons.push(reason('seller_suspended'));
       if (snap && (snap.status === 'restricted' || snap.activeRestrictionIds.length)) reasons.push(reason('seller_restricted'));
-      const perf = await this.soft('sellers.getPerformance', () => this.ctx.use('sellers').getPerformance(id));
+      const perf = perfs[i];
       let onTime: number | null = null;
       if (perf && perf.orderCount > 0) {
         const dispatch = perf.metrics.find((m) => m.key === 'dispatch_reliability');
