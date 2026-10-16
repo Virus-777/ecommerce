@@ -472,7 +472,7 @@ export class DataRequests {
   /** customers.closure.delayed, once per new set of blockers (the set of blocker kinds, claimed in the inbox per request) */
   private async closureDelayed(c: CustomerRow, r: DataRequestRow, blockers: ClosureBlocker[]) {
     const kinds = [...new Set(blockers.map((b) => b.kind))].sort().join(',');
-    const fresh = await this.core.repo.transaction((repo) => repo.claim(`closure-delayed:${r.id}:${kinds}`));
+    const fresh = await this.core.repo.claim(`closure-delayed:${r.id}:${kinds}`); // one atomic upsert: no transaction needed
     if (!fresh) return;
     this.core.ctx.events.publish(
       'customers.closure.delayed',

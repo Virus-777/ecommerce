@@ -266,7 +266,7 @@ export class AccountActions {
     }
     if (event.outcome !== 'approved' || !customerAccountStatusMachine.can(map.status(c), 'close')) {
       if (event.outcome === 'approved') this.core.ctx.log.info({ customerId: c.id, status: c.account_status, approvalRequestId: event.requestId }, 'customers: approved closure no longer applies');
-      await this.core.repo.transaction((repo) => repo.claim(key));
+      await this.core.repo.claim(key); // one atomic upsert: no transaction needed
       return;
     }
     const request = await this.core.ctx
