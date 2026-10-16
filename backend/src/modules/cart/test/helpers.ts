@@ -143,6 +143,11 @@ export async function boot(opts: BuildOptions & { only?: string[] } = {}): Promi
       catalog: {
         getProduct: async (id) => world.products.get(id) ?? null,
         isPurchasable: async (id) => world.purchasable.get(id) ?? true,
+        getProducts: async (ids) =>
+          ids.flatMap((id) => {
+            const product = world.products.get(id);
+            return product ? [{ product, reviewState: 'approved' as const, publication: 'active' as const, purchasable: world.purchasable.get(id) ?? true }] : [];
+          }),
         ...(opts.apiStubs?.catalog ?? {}),
       },
       inventory: {

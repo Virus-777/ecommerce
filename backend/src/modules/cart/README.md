@@ -433,7 +433,7 @@ Derived on every read from open notices. needs_attention lines are included in c
 | updated_at | timestamptz |
 | expires_at | timestamptz |
 
-Indexes: `unique (customer_id) where status = 'active'`, `unique (guest_session_id) where status = 'active'`, `(status, expires_at)`
+Indexes: `unique (customer_id) where status = 'active'`, `unique (guest_session_id) where status = 'active'`, `(status, expires_at)`, `(customer_id, status)`, `(guest_session_id, status)`
 
 **cart_items**: Lines bound to an offer; one line per offer per cart
 
@@ -460,7 +460,7 @@ Indexes: `unique (customer_id) where status = 'active'`, `unique (guest_session_
 | updated_at | timestamptz |
 | last_checked_at | timestamptz? |
 
-Indexes: `unique (cart_id, offer_id)`, `(offer_id)`, `(seller_id)`
+Indexes: `unique (cart_id, offer_id)`, `(offer_id)`, `(seller_id)`, `(stock_item_id)`, `(product_id)`
 
 **cart_item_notices**: Detected changes per line; kept until accepted, resolved or the line is removed
 
@@ -476,7 +476,7 @@ Indexes: `unique (cart_id, offer_id)`, `(offer_id)`, `(seller_id)`
 | accepted_at | timestamptz? |
 | resolved_at | timestamptz? |
 
-Indexes: `(item_id) where resolved_at is null`
+Indexes: `(item_id)`
 
 **saved_items**: Save for later (phase 3)
 
@@ -491,7 +491,7 @@ Indexes: `(item_id) where resolved_at is null`
 | variant_id | uuid |
 | saved_at | timestamptz |
 
-Indexes: `unique (customer_id, offer_id)`, `unique (guest_session_id, offer_id)`, `(guest_session_id)`
+Indexes: `unique (customer_id, offer_id)`, `unique (guest_session_id, offer_id)`, `(guest_session_id)`, `(customer_id, saved_at)`
 
 **cart_merges**: Guest-to-customer merges with their report
 
@@ -503,6 +503,8 @@ Indexes: `unique (customer_id, offer_id)`, `unique (guest_session_id, offer_id)`
 | report | jsonb |
 | at | timestamptz |
 
+Indexes: `(from_cart_id)`, `(into_cart_id)`
+
 **recheck_queue**: Lines touched by offer, stock or seller events; the recheck job refreshes their notices
 
 | Column | Type |
@@ -510,6 +512,8 @@ Indexes: `unique (customer_id, offer_id)`, `unique (guest_session_id, offer_id)`
 | item_id | uuid pk → cart_items |
 | reason | text |
 | queued_at | timestamptz |
+
+Indexes: `(queued_at)`
 
 ## Events
 

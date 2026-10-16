@@ -26,6 +26,7 @@ import { couponNotCovered } from './domain/coupons.js';
 import {
   addDays,
   desired,
+  groupBy,
   lineState,
   noticeActions,
   noticeMessage,
@@ -44,6 +45,8 @@ import type { CartRepository } from './repository.js';
 
 /** Shipping has no parcel weight per offer yet: every unit is quoted at this weight */
 export const DEFAULT_UNIT_WEIGHT_GRAMS = 1000;
+/** catalog.getProducts takes at most 200 ids per call */
+const PRODUCT_BATCH = 200;
 
 export interface CheckOptions {
   /** Deliver-to override for this read only */
@@ -138,7 +141,6 @@ export class CartChecker {
     const stockIds = [...new Set(offerIds.map(stockOf))];
 
     const promoApi = this.ctx.tryUse('promotions');
-    const catalogApi = this.ctx.tryUse('catalog');
     const live = offerIds.filter((id) => byId.get(id));
     const [availability, quotes, promos, revalidation, products] = await Promise.all([
       this.ctx.use('inventory').getAvailability(stockIds),
@@ -161,16 +163,7 @@ export class CartChecker {
             postalCode || this.ctx.config.market.defaultLocation.postalCode,
           )
         : Promise.resolve({ ok: true, changes: [] as offers.OfferChange[] }),
-      Promise.all(
-        productIds.map(async (id) => {
-          if (!catalogApi) return EMPTY_PRODUCT;
-          const [product, purchasable] = await Promise.all([
-            this.optional('catalog.getProduct', () => catalogApi.getProduct(id)),
-            this.optional('catalog.isPurchasable', () => catalogApi.isPurchasable(id)),
-          ]);
-          return { product: product ?? null, purchasable: purchasable ?? null } satisfies ProductFacts;
-        }),
-      ),
+      this.productFacts(productIds),
     ]);
     const promoBy = new Map((promos ?? []).map((p) => [p.offerId, p]));
     offerIds.forEach((id, i) => {
@@ -185,8 +178,31 @@ export class CartChecker {
         changes: (revalidation?.changes ?? []).filter((c) => c.offerId === id),
       });
     });
-    productIds.forEach((id, i) => result.products.set(id, products[i]!));
+    result.products = products;
     return result;
+  }
+
+  /**
+   * Product content and purchasability in batches of catalog.getProducts (one call per 200 products instead of
+   * getProduct and isPurchasable per product). A product catalog does not know is not purchasable; when catalog is
+   * off or fails, both stay unknown.
+   */
+  private async productFacts(productIds: string[]): Promise<Map<string, ProductFacts>> {
+    const catalogApi = this.ctx.tryUse('catalog');
+    const records = catalogApi
+      ? await this.optional('catalog.getProducts', async () => {
+          const chunks: string[][] = [];
+          for (let i = 0; i < productIds.length; i += PRODUCT_BATCH) chunks.push(productIds.slice(i, i + PRODUCT_BATCH));
+          return (await Promise.all(chunks.map((ids) => catalogApi.getProducts(ids)))).flat();
+        })
+      : undefined;
+    const byId = new Map(records?.map((r) => [r.product.id, r]));
+    return new Map(
+      productIds.map((id) => {
+        const r = byId.get(id);
+        return [id, records ? { product: r?.product ?? null, purchasable: r?.purchasable ?? false } : EMPTY_PRODUCT];
+      }),
+    );
   }
 
   /* ================================================================ shipping */
@@ -308,8 +324,7 @@ export class CartChecker {
     const evals = items.map((i) => evaluateLine(i, facts.offers.get(i.offer_id) ?? EMPTY_FACTS, facts.products.get(i.product_id) ?? EMPTY_PRODUCT, settings));
 
     // packages, in the order their first line was added
-    const groups = new Map<string, LineEval[]>();
-    for (const e of evals) groups.set(e.packageKey, [...(groups.get(e.packageKey) ?? []), e]);
+    const groups = groupBy(evals, (e) => e.packageKey);
     const quotes = new Map<string, PackageQuote>();
     await Promise.all([...groups].map(async ([key, lines]) => quotes.set(key, await this.quotePackage(lines, dest, currency))));
 
@@ -323,8 +338,8 @@ export class CartChecker {
       detected.set(e.item.id, list);
     }
     await this.hintAlternatives(evals.filter((e) => !e.alternatives && (e.blocked || quotes.get(e.packageKey)!.notShippable.has(e.item.id))));
-    const storedFor = (rows: NoticeRow[], id: string) => rows.filter((n) => n.item_id === id);
-    const preState = new Map(evals.map((e) => [e.item.id, lineState(planNotices(e.item.id, storedFor(storedNotices, e.item.id), detected.get(e.item.id)!, now, newId).open)]));
+    const storedByItem = groupBy(storedNotices, (n) => n.item_id);
+    const preState = new Map(evals.map((e) => [e.item.id, lineState(planNotices(e.item.id, storedByItem.get(e.item.id) ?? [], detected.get(e.item.id)!, now, newId).open)]));
 
     // coupons and discounts for the eligible lines
     const eligible = evals.filter((e) => preState.get(e.item.id) === 'ok');
@@ -339,13 +354,14 @@ export class CartChecker {
     const { plans, cartRow } = await this.repo.transaction(async (tx) => {
       const locked = (await tx.getCart(cart.id, { forUpdate: true })) ?? cart;
       const present = new Set((await tx.listItems(cart.id)).map((i) => i.id));
-      const fresh = await tx.listNotices([...present]);
+      const fresh = groupBy(await tx.listNotices([...present]), (n) => n.item_id);
       const plans = new Map<string, NoticePlan>();
       const inserts: NoticeRow[] = [];
       const resolves: string[] = [];
+      const onlyChecked: string[] = [];
       for (const e of evals) {
         if (!present.has(e.item.id)) continue;
-        const plan = planNotices(e.item.id, storedFor(fresh, e.item.id), detected.get(e.item.id)!, now, newId);
+        const plan = planNotices(e.item.id, fresh.get(e.item.id) ?? [], detected.get(e.item.id)!, now, newId);
         plans.set(e.item.id, plan);
         inserts.push(...plan.insert);
         resolves.push(...plan.resolve);
@@ -361,8 +377,11 @@ export class CartChecker {
           if (e.offer.condition !== e.item.condition) patch.condition = e.offer.condition;
           if (e.offer.stockItemId !== e.item.stock_item_id) patch.stock_item_id = e.offer.stockItemId;
         }
-        await tx.updateItem(e.item.id, patch);
+        // most lines only get the check time: those are written together below
+        if (Object.keys(patch).length === 1) onlyChecked.push(e.item.id);
+        else await tx.updateItem(e.item.id, patch);
       }
+      await tx.markChecked(onlyChecked, now);
       await tx.insertNotices(inserts);
       await tx.resolveNotices(resolves, now);
       if (consumeInfo) {
@@ -453,11 +472,7 @@ export class CartChecker {
   private async hintAlternatives(lines: LineEval[]) {
     if (!lines.length) return;
     const offersApi = this.ctx.use('offers');
-    const groups = new Map<string, LineEval[]>();
-    for (const l of lines) {
-      const key = `${l.item.product_id}:${l.item.variant_id}:${l.condition}`;
-      groups.set(key, [...(groups.get(key) ?? []), l]);
-    }
+    const groups = groupBy(lines, (l) => `${l.item.product_id}:${l.item.variant_id}:${l.condition}`);
     await Promise.all(
       [...groups.values()].map(async (group) => {
         const first = group[0]!;

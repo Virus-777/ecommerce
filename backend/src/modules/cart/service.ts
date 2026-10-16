@@ -247,9 +247,7 @@ export class CartService implements CartPublicApi {
 
   async getBadge(scope: Scope): Promise<CartBadge> {
     const cart = await this.activeCart(await this.shopperOf(scope));
-    if (!cart) return { itemCount: 0, attentionCount: 0 };
-    const [agg, attention] = await Promise.all([this.repo.aggregateCart(cart.id), this.repo.countAttentionLines(cart.id)]);
-    return { itemCount: agg?.itemCount ?? 0, attentionCount: attention };
+    return cart ? this.repo.badgeCounts(cart.id) : { itemCount: 0, attentionCount: 0 };
   }
 
   async addItem(scope: Scope, input: AddItemInput, by: By): Promise<AddItemResult> {
@@ -520,13 +518,12 @@ export class CartService implements CartPublicApi {
     }
     const codes = storedCoupons(cart.coupon_codes);
     const known = codes.some((c) => c.code === code);
-    if (!known) await this.repo.updateCart(cart.id, { coupon_codes: [...codes, { code, covered: [] }] as never });
-    const fresh = (await this.repo.getCart(cart.id))!;
+    const fresh = known ? cart : await this.repo.updateCart(cart.id, { coupon_codes: [...codes, { code, covered: [] }] as never });
     const checked = await this.checkFor(fresh, s, true);
     const result = checked.view.coupons.find((c) => c.code === code) ?? { code, status: 'rejected' as const, amount: null, label: code, fundedBy: null, reason: "This code can't be used on your cart.", coverage: [], notCovered: [] };
     if (result.status === 'rejected' && !known) {
       // a rejected code is explained, not kept
-      const after = storedCoupons((await this.repo.getCart(cart.id))!.coupon_codes).filter((c) => c.code !== code);
+      const after = storedCoupons(checked.cart.coupon_codes).filter((c) => c.code !== code);
       await this.repo.updateCart(cart.id, { coupon_codes: after as never });
       return { cart: { ...checked.view, coupons: checked.view.coupons.filter((c) => c.code !== code) }, result };
     }
@@ -598,7 +595,11 @@ export class CartService implements CartPublicApi {
       const lockedGuest = await tx.getCart(guest.id, { forUpdate: true });
       if (!lockedGuest || lockedGuest.status !== 'active') return { done: false as const };
       const into = (await tx.getCart(target.id, { forUpdate: true }))!;
-      let lineCount = await tx.countItems(into.id);
+      // the customer's lines, read once: guest lines have distinct offers, so each customer line is matched at most once
+      const intoLines = await tx.listItems(into.id);
+      const intoByOffer = new Map(intoLines.map((x) => [x.offer_id, x]));
+      const intoVariants = new Set(intoLines.map((x) => x.variant_id));
+      let lineCount = intoLines.length;
       const lines: MergeLine[] = [];
       for (const e of evals) {
         const i = e.item;
@@ -608,7 +609,7 @@ export class CartService implements CartPublicApi {
           lines.push({ itemId: null, offerId: i.offer_id, title, outcome: 'dropped_unavailable', note: unavailableMessage[blocking?.kind ?? 'out_of_stock'] ?? 'No longer available.' });
           continue;
         }
-        const same = await tx.getItemByOffer(into.id, i.offer_id);
+        const same = intoByOffer.get(i.offer_id);
         if (same) {
           const sum = same.quantity + i.quantity;
           const qty = Math.min(sum, Math.max(e.maxQuantity, same.quantity));
@@ -625,10 +626,11 @@ export class CartService implements CartPublicApi {
           lines.push({ itemId: null, offerId: i.offer_id, title, outcome: 'dropped_unavailable', note: `Your cart is full (${maxLines} items).` });
           continue;
         }
-        const otherOffer = (await tx.listItems(into.id)).some((x) => x.variant_id === i.variant_id);
+        const otherOffer = intoVariants.has(i.variant_id);
         const qty = Math.min(i.quantity, e.maxQuantity);
         await tx.moveItems([i.id], into.id, now);
         if (qty !== i.quantity) await tx.updateItem(i.id, { quantity: qty });
+        intoVariants.add(i.variant_id);
         lineCount++;
         lines.push(
           qty < i.quantity
@@ -679,8 +681,7 @@ export class CartService implements CartPublicApi {
     const checked = await this.checkFor(cart, s, false);
     const invalidCodes = checked.view.coupons.filter((c) => carried.includes(c.code) && c.status !== 'applied').map((c) => c.code);
     if (!invalidCodes.length) return;
-    const now = (await this.repo.getCart(cartId))!;
-    await this.repo.updateCart(cartId, { coupon_codes: storedCoupons(now.coupon_codes).filter((c) => !invalidCodes.includes(c.code)) as never });
+    await this.repo.updateCart(cartId, { coupon_codes: storedCoupons(checked.cart.coupon_codes).filter((c) => !invalidCodes.includes(c.code)) as never });
   }
 
   private async storedReport(guest: CartRow, s: Shopper): Promise<MergeReport | null> {
@@ -963,9 +964,9 @@ export class CartService implements CartPublicApi {
     if (!items.length) return;
     const now = this.now();
     await this.repo.transaction(async (tx) => {
-      const open = (await tx.listNotices(items.map((i) => i.id))).filter((n) => !n.resolved_at && n.kind === kind);
+      const flagged = new Set((await tx.listNotices(items.map((i) => i.id))).filter((n) => !n.resolved_at && n.kind === kind).map((n) => n.item_id));
       const rows = items
-        .filter((i) => !open.some((n) => n.item_id === i.id))
+        .filter((i) => !flagged.has(i.id))
         .map((i) => ({ id: newId(), item_id: i.id, kind, severity: 'blocking', previous: {}, current, detected_at: now, accepted_at: null, resolved_at: null }));
       await tx.insertNotices(rows);
     });
@@ -1050,14 +1051,14 @@ export class CartService implements CartPublicApi {
       if (!rows.length) return;
       const itemIds = rows.map((r) => r.item_id);
       const items = await this.repo.getItemsByIds(itemIds);
-      for (const cartId of new Set(items.map((i) => i.cart_id))) {
-        const cart = await this.repo.getCart(cartId);
-        if (!cart || cart.status !== 'active') continue;
+      const carts = await this.repo.getCarts([...new Set(items.map((i) => i.cart_id))]);
+      for (const cart of carts) {
+        if (cart.status !== 'active') continue;
         try {
           await this.checkFor(cart, this.ownerOf(cart), false);
         } catch (err) {
-          if (isNotImplemented(err)) this.ctx.log.debug({ cartId }, 'cart: recheck skipped, a dependency is not built yet');
-          else this.ctx.log.warn({ err, cartId }, 'cart: recheck failed; the next read re-checks');
+          if (isNotImplemented(err)) this.ctx.log.debug({ cartId: cart.id }, 'cart: recheck skipped, a dependency is not built yet');
+          else this.ctx.log.warn({ err, cartId: cart.id }, 'cart: recheck failed; the next read re-checks');
         }
       }
       await this.repo.dequeue(itemIds);

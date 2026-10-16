@@ -1,6 +1,7 @@
 import type { Page, PageRequest } from '../../kernel/lib/pagination.js';
 import { orThrow } from '../../kernel/lib/or-throw.js';
 import type { Filter, ModuleStore } from '../../kernel/mongo/index.js';
+import { groupBy } from './domain/rules.js';
 import type { AdminCartFilter, CartAggregate, CartRow, ItemMatch, ItemRow, Lock, MergeRow, NoticeRow, OwnerKey, QueueRow, SavedRow } from './ports.js';
 
 const ownerFilter = (owner: OwnerKey): Filter =>
@@ -34,8 +35,9 @@ export class CartRepository {
     const blocked = new Set(open.filter((n) => n.severity === 'blocking').map((n) => n.item_id));
     const openPerItem = new Map<string, number>();
     for (const n of open) openPerItem.set(n.item_id, (openPerItem.get(n.item_id) ?? 0) + 1);
+    const linesOf = groupBy(items, (i) => i.cart_id);
     return carts.map((cart) => {
-      const lines = items.filter((i) => i.cart_id === cart.id);
+      const lines = linesOf.get(cart.id) ?? [];
       return {
         cart,
         itemCount: lines.reduce((s, i) => s + i.quantity, 0),
@@ -53,6 +55,10 @@ export class CartRepository {
 
   getCart(id: string, lock?: Lock): Promise<CartRow | undefined> {
     return this.#t.carts.get(id, { forUpdate: lock?.forUpdate });
+  }
+
+  getCarts(ids: string[]): Promise<CartRow[]> {
+    return this.#t.carts.getMany(ids);
   }
 
   /** The most recent cart of a guest session in any status (active first) */
@@ -125,6 +131,12 @@ export class CartRepository {
     return orThrow(await this.#t.items.update(id, patch), `cart: cart item ${id}`);
   }
 
+  /** Stamps the check time on lines that need no other change (one write for all of them) */
+  async markChecked(itemIds: string[], at: Date): Promise<void> {
+    if (!itemIds.length) return;
+    await this.#t.items.updateMany({ id: { $in: itemIds } }, { last_checked_at: at });
+  }
+
   /** Moves lines to another cart (merge) */
   async moveItems(itemIds: string[], toCartId: string, at: Date): Promise<void> {
     if (!itemIds.length) return;
@@ -183,11 +195,12 @@ export class CartRepository {
     await this.#t.notices.updateMany({ id: { $in: ids }, resolved_at: null }, { accepted_at: at, resolved_at: at });
   }
 
-  /** Counts open warning or blocking notices per cart line, for the badge */
-  async countAttentionLines(cartId: string): Promise<number> {
-    const itemIds = await this.#t.items.distinct<string>('id', { cart_id: cartId });
-    if (!itemIds.length) return 0;
-    return (await this.#t.notices.distinct<string>('item_id', { item_id: { $in: itemIds }, resolved_at: null, severity: { $in: ['warning', 'blocking'] } })).length;
+  /** The badge: units in the cart and lines with an open warning or blocking notice (two reads) */
+  async badgeCounts(cartId: string): Promise<{ itemCount: number; attentionCount: number }> {
+    const items = await this.#t.items.find({ cart_id: cartId });
+    if (!items.length) return { itemCount: 0, attentionCount: 0 };
+    const attention = await this.#t.notices.distinct<string>('item_id', { item_id: { $in: items.map((i) => i.id) }, resolved_at: null, severity: { $in: ['warning', 'blocking'] } });
+    return { itemCount: items.reduce((s, i) => s + i.quantity, 0), attentionCount: attention.length };
   }
 
   /* ---------------------------------------------------------------- merges */

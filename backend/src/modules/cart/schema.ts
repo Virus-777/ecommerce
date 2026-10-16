@@ -32,6 +32,8 @@ const carts = new Schema(
 carts.index({"customer_id":1}, {"name":"carts_customer_id_519502","unique":true,"partialFilterExpression":{"status":"active","customer_id":{"$type":"string"}}});
 carts.index({"guest_session_id":1}, {"name":"carts_guest_session_id_0e01a2","unique":true,"partialFilterExpression":{"status":"active","guest_session_id":{"$type":"string"}}});
 carts.index({"status":1,"expires_at":1}, {"name":"carts_status_expires_at_613245"});
+carts.index({"customer_id":1,"status":1}, {"name":"carts_customer_id_status_68f973"});
+carts.index({"guest_session_id":1,"status":1}, {"name":"carts_guest_session_id_status_92c84c"});
 
 /** Lines bound to an offer; one line per offer per cart */
 const cart_items = new Schema(
@@ -64,6 +66,8 @@ const cart_items = new Schema(
 cart_items.index({"cart_id":1,"offer_id":1}, {"name":"cart_items_cart_id_offer_id_0715a9","unique":true});
 cart_items.index({"offer_id":1}, {"name":"cart_items_offer_id_959ceb"});
 cart_items.index({"seller_id":1}, {"name":"cart_items_seller_id_b7adb7"});
+cart_items.index({"stock_item_id":1}, {"name":"cart_items_stock_item_id_597367"});
+cart_items.index({"product_id":1}, {"name":"cart_items_product_id_6c3e3e"});
 
 /** Detected changes per line; kept until accepted, resolved or the line is removed */
 const cart_item_notices = new Schema(
@@ -82,7 +86,7 @@ const cart_item_notices = new Schema(
   },
   collectionOptions("cart.cart_item_notices"),
 );
-cart_item_notices.index({"item_id":1}, {"name":"cart_item_notices_item_id_dac279","partialFilterExpression":{"resolved_at":{"$type":"null"}}});
+cart_item_notices.index({"item_id":1}, {"name":"cart_item_notices_item_id_bf2bb1"});
 
 /** Save for later (phase 3) */
 const saved_items = new Schema(
@@ -103,6 +107,7 @@ const saved_items = new Schema(
 saved_items.index({"customer_id":1,"offer_id":1}, {"name":"saved_items_customer_id_offer_id_73c1a6","unique":true,"partialFilterExpression":{"customer_id":{"$type":"string"}}});
 saved_items.index({"guest_session_id":1,"offer_id":1}, {"name":"saved_items_guest_session_id_offer_id_7c74e7","unique":true,"partialFilterExpression":{"guest_session_id":{"$type":"string"}}});
 saved_items.index({"guest_session_id":1}, {"name":"saved_items_guest_session_id_a02466"});
+saved_items.index({"customer_id":1,"saved_at":1}, {"name":"saved_items_customer_id_saved_at_8ababc"});
 
 /** Guest-to-customer merges with their report */
 const cart_merges = new Schema(
@@ -117,6 +122,8 @@ const cart_merges = new Schema(
   },
   collectionOptions("cart.cart_merges"),
 );
+cart_merges.index({"from_cart_id":1}, {"name":"cart_merges_from_cart_id_02e44e"});
+cart_merges.index({"into_cart_id":1}, {"name":"cart_merges_into_cart_id_8a4bc3"});
 
 /** Lines touched by offer, stock or seller events; the recheck job refreshes their notices */
 const recheck_queue = new Schema(
@@ -129,6 +136,7 @@ const recheck_queue = new Schema(
   },
   collectionOptions("cart.recheck_queue"),
 );
+recheck_queue.index({"queued_at":1}, {"name":"recheck_queue_queued_at_561468"});
 
 /** Table name → schema */
 export const schemas = {

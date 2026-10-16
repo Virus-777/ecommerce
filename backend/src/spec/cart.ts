@@ -1549,6 +1549,20 @@ export const spec = defineModuleSpec({
             "status": 1,
             "expires_at": 1
           }
+        },
+        {
+          "name": "carts_customer_id_status_68f973",
+          "key": {
+            "customer_id": 1,
+            "status": 1
+          }
+        },
+        {
+          "name": "carts_guest_session_id_status_92c84c",
+          "key": {
+            "guest_session_id": 1,
+            "status": 1
+          }
         }
       ],
       "unenforced": []
@@ -1756,6 +1770,18 @@ export const spec = defineModuleSpec({
           "key": {
             "seller_id": 1
           }
+        },
+        {
+          "name": "cart_items_stock_item_id_597367",
+          "key": {
+            "stock_item_id": 1
+          }
+        },
+        {
+          "name": "cart_items_product_id_6c3e3e",
+          "key": {
+            "product_id": 1
+          }
         }
       ],
       "unenforced": []
@@ -1843,14 +1869,9 @@ export const spec = defineModuleSpec({
       },
       "indexes": [
         {
-          "name": "cart_item_notices_item_id_dac279",
+          "name": "cart_item_notices_item_id_bf2bb1",
           "key": {
             "item_id": 1
-          },
-          "partial": {
-            "resolved_at": {
-              "$type": "null"
-            }
           }
         }
       ],
@@ -1966,6 +1987,13 @@ export const spec = defineModuleSpec({
           "key": {
             "guest_session_id": 1
           }
+        },
+        {
+          "name": "saved_items_customer_id_saved_at_8ababc",
+          "key": {
+            "customer_id": 1,
+            "saved_at": 1
+          }
         }
       ],
       "unenforced": []
@@ -2024,7 +2052,20 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "cart_merges_from_cart_id_02e44e",
+          "key": {
+            "from_cart_id": 1
+          }
+        },
+        {
+          "name": "cart_merges_into_cart_id_8a4bc3",
+          "key": {
+            "into_cart_id": 1
+          }
+        }
+      ],
       "unenforced": []
     },
     "recheck_queue": {
@@ -2073,7 +2114,14 @@ export const spec = defineModuleSpec({
           "additionalProperties": false
         }
       },
-      "indexes": [],
+      "indexes": [
+        {
+          "name": "recheck_queue_queued_at_561468",
+          "key": {
+            "queued_at": 1
+          }
+        }
+      ],
       "unenforced": []
     }
   },
