@@ -110,7 +110,7 @@ export interface paths {
          *
          *     **Permission:** `access.roles.manage`
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)
+         *     **Step-up:** single-use re-auth token in the body (purpose `role-grant`)
          *
          *     **Approval:** Approval action access.roles.sensitive-grant. Sensitive permissions need a second reviewer; the caller's own role and the Business Owner role need the Business Owner
          *
@@ -186,7 +186,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Staff members with roles, lead/backup duties, away status and 2-step state
+         * Staff members with roles, lead/backup duties and away status
          * @description **Permission:** `access.roles.view`
          *
          *     **Screens:** admin/staff
@@ -233,11 +233,11 @@ export interface paths {
         put?: never;
         /**
          * Invite a staff member with roles
-         * @description Calls identity.inviteStaff (7-day link, 2-step set-up on accept) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.
+         * @description Calls identity.inviteStaff (7-day link; the person accepts with the link, a pass code and a new password) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.
          *
          *     **Permission:** `access.roles.manage`
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)
+         *     **Step-up:** single-use re-auth token in the body (purpose `role-grant`)
          *
          *     **Audited:** recorded in the action history.
          *
@@ -267,7 +267,7 @@ export interface paths {
          *
          *     **Permission:** `access.roles.manage`
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `role-grant`)
+         *     **Step-up:** single-use re-auth token in the body (purpose `role-grant`)
          *
          *     **Approval:** Approval action access.roles.sensitive-grant. Roles with sensitive permissions need a second reviewer; the Business Owner role or any role for yourself needs the Business Owner
          *
@@ -493,7 +493,7 @@ export interface paths {
         put?: never;
         /**
          * Approve (first or second approval)
-         * @description Refused for the requester, for someone who already approved it, and for people whose limit does not cover the amount. Money approvals above stepUpAbove need a fresh 2-step code.
+         * @description Refused for the requester, for someone who already approved it, and for people whose limit does not cover the amount. Money approvals above stepUpAbove need the approver's password again: reauthToken (purpose approval) from POST /api/admin/identity/reauth, otherwise STEP_UP_REQUIRED.
          *
          *     **Audited:** recorded in the action history.
          *
@@ -829,7 +829,9 @@ export interface paths {
         };
         /**
          * Own promotions and paid ads in every lifecycle status
-         * @description **Permission:** `advertising.campaigns.view`
+         * @description Exported through reports (POST /api/admin/reports/exports) as dataset advertising.admin.campaigns with the same filters (q, source, placementKey, status, linkedPromotionId): one row per campaign (G72).
+         *
+         *     **Permission:** `advertising.campaigns.view`
          *
          *     **Screens:** admin/ads
          */
@@ -859,7 +861,9 @@ export interface paths {
         };
         /**
          * Campaign with approvals, checks, conflicts, creatives and metrics
-         * @description **Permission:** `advertising.campaigns.view`
+         * @description The campaign id or its AD- ref (G69c), so links can carry the ref.
+         *
+         *     **Permission:** `advertising.campaigns.view`
          *
          *     **Screens:** admin/ad-campaign, admin/ads
          */
@@ -1095,7 +1099,9 @@ export interface paths {
         put?: never;
         /**
          * Pause immediately (off the site within 1 minute)
-         * @description **Permission:** `advertising.campaigns.publish`
+         * @description The reason is optional (G68): without one the history and the audit entry say 'Paused by the Advertising team'.
+         *
+         *     **Permission:** `advertising.campaigns.publish`
          *
          *     **Audited:** recorded in the action history.
          *
@@ -1147,7 +1153,7 @@ export interface paths {
         put?: never;
         /**
          * Finish a scheduled, live or paused campaign early
-         * @description Paid campaigns are charged only for delivery so far.
+         * @description Paid campaigns are charged only for delivery so far. The reason is optional (G68): without one the history and the audit entry say 'Finished early by the Advertising team'.
          *
          *     **Permission:** `advertising.campaigns.publish`
          *
@@ -2624,7 +2630,15 @@ export interface paths {
         get: operations["catalog.getOwnProduct"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a draft product
+         * @description Only drafts and products with changes requested that were never listed and have no open submission (withdraw it first). The product, its variants and review history are removed and its files are released.
+         *
+         *     **Permission:** `catalog.products.submit`
+         *
+         *     **Screens:** seller/products
+         */
+        delete: operations["catalog.deleteDraft"];
         options?: never;
         head?: never;
         /**
@@ -2658,6 +2672,30 @@ export interface paths {
          *     **Screens:** seller/product-new
          */
         post: operations["catalog.submitProduct"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/catalog/products/{id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw a submission waiting for review
+         * @description Only a product that was never listed (its first submission or a resubmission before approval): it goes back to draft, the open submission is marked withdrawn and leaves the review queue (its workqueues item closes). Products already listed change through correction suggestions.
+         *
+         *     **Permission:** `catalog.products.submit`
+         *
+         *     **Screens:** seller/products
+         */
+        post: operations["catalog.withdrawSubmission"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2715,7 +2753,7 @@ export interface paths {
         };
         /**
          * Submissions waiting for review, oldest first
-         * @description **Permission:** `catalog.products.review`
+         * @description **Permission:** `catalog.view`
          *
          *     **Screens:** admin/product-review, admin/dashboard
          */
@@ -2737,7 +2775,9 @@ export interface paths {
         };
         /**
          * All products with filters
-         * @description Rows carry ref, contentScore, missing, duplicateSuspected and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. Tab counts come from GET /products/stats.
+         * @description Rows carry ref, contentScore, missing, duplicateSuspected, imagesToRecrop and the listing columns offerCount, liveOfferCount, bestPrice and offerNote. missingContent=true: a content score under 100 or images to re-crop. Tab counts come from GET /products/stats.
+         *
+         *     **Permission:** `catalog.view`
          *
          *     **Screens:** admin/catalog
          */
@@ -2766,6 +2806,8 @@ export interface paths {
         /**
          * Counts for the catalog product tabs and page header
          * @description All, Active, Hidden, Suspended, Missing content, Duplicates suspected, open submissions (Review queue · 23) and total offers.
+         *
+         *     **Permission:** `catalog.view`
          *
          *     **Screens:** admin/catalog
          */
@@ -2813,7 +2855,9 @@ export interface paths {
         };
         /**
          * Product with review history and duplicate candidates
-         * @description **Screens:** admin/product-review
+         * @description **Permission:** `catalog.view`
+         *
+         *     **Screens:** admin/product-review
          */
         get: operations["catalog.getProductAdmin"];
         put?: never;
@@ -2850,6 +2894,32 @@ export interface paths {
          *     **Screens:** admin/product-review
          */
         post: operations["catalog.dismissCheck"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/catalog/products/{id}/checks/{kind}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo a dismissed check finding
+         * @description Opens the finding again on the latest submission. For duplicate checks, matchedProductId restores one dismissed candidate; omit it to restore all. Recorded in the review log; a duplicate finding puts the product back in Duplicates suspected.
+         *
+         *     **Permission:** `catalog.products.review`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/product-review
+         */
+        post: operations["catalog.restoreCheck"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3151,7 +3221,7 @@ export interface paths {
         };
         /**
          * Open correction suggestions
-         * @description **Permission:** `catalog.products.review`
+         * @description **Permission:** `catalog.view`
          *
          *     **Screens:** admin/product-review
          */
@@ -3200,6 +3270,8 @@ export interface paths {
         /**
          * Full category tree including hidden, with product and offer counts
          * @description productCount (active products with at least one eligible offer) and offerCount include subcategories; refreshed every 10 minutes.
+         *
+         *     **Permission:** `catalog.view`
          *
          *     **Screens:** admin/categories
          */
@@ -3259,6 +3331,8 @@ export interface paths {
          * Category attributes with fill rates, inheritance and image standards
          * @description Attributes defined on an ancestor are listed with inheritedFrom and are edited there. filledCount / productCount shows how many products have a value; for required attributes the difference is the "N products are missing Warranty" alert (those products appear under Missing content).
          *
+         *     **Permission:** `catalog.view`
+         *
          *     **Screens:** admin/categories
          */
         get: operations["catalog.getCategoryAttributesAdmin"];
@@ -3290,6 +3364,8 @@ export interface paths {
         /**
          * All brands with counts, seller authorization and status
          * @description Brands tab (page total = tab count), the Brand filter on the products list, and seller brand requests waiting (status=under_review, requested=true).
+         *
+         *     **Permission:** `catalog.view`
          *
          *     **Screens:** admin/categories, admin/catalog
          */
@@ -3982,6 +4058,122 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/content/official-store": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Official Store profile: name, logo, banner, introduction, policy links and feedback summary
+         * @description The Official Store is not a seller record: its profile comes from content settings (officialStoreLogoUrl, officialStoreBannerUrl, officialStoreIntroduction, officialStorePolicyKinds), current policies and the reviews feedback summary for OFFICIAL_STORE_ID.
+         *
+         *     **Screens:** store/official
+         */
+        get: operations["content.getOfficialStore"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/content/help": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Seller Help Center: seller topics, popular articles and searches, featured guide and contact channels
+         * @description Same as the store's GET /help?audience=seller, with the seller session.
+         *
+         *     **Seller context:** optional (works before a seller is chosen).
+         *
+         *     **Screens:** seller/help
+         */
+        get: operations["content.getSellerHelpHome"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/content/help/articles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search or browse seller help articles
+         * @description Articles for sellers (audience seller or both).
+         *
+         *     **Seller context:** optional (works before a seller is chosen).
+         *
+         *     **Screens:** seller/help
+         */
+        get: operations["content.searchSellerHelp"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/content/help/articles/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A seller help article
+         * @description Published articles for sellers (audience seller or both); customer-only articles answer NOT_FOUND.
+         *
+         *     **Seller context:** optional (works before a seller is chosen).
+         *
+         *     **Screens:** seller/help
+         */
+        get: operations["content.getSellerHelpArticle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/content/help/articles/{id}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Was this helpful? (seller)
+         * @description **Seller context:** optional (works before a seller is chosen).
+         *
+         *     **Screens:** seller/help
+         */
+        post: operations["content.rateSellerHelpArticle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/content/policies": {
         parameters: {
             query?: never;
@@ -4073,7 +4265,7 @@ export interface paths {
         };
         /**
          * Homepage sections with owner, schedule, status and locked ad positions
-         * @description **Permission:** `content.homepage.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/content
          */
@@ -4147,7 +4339,7 @@ export interface paths {
          * Products in a section, resolved with title, seller and stock
          * @description Resolves the section product source (manual list, collection or rule) through catalog, offers and inventory. Unavailable products are listed only with includeHidden=true and carry hiddenReason.
          *
-         *     **Permission:** `content.homepage.manage`
+         *     **Permission:** `content.view`
          *
          *     **Screens:** admin/content
          */
@@ -4363,7 +4555,7 @@ export interface paths {
         };
         /**
          * Homepage version history
-         * @description **Permission:** `content.homepage.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/content
          */
@@ -4411,7 +4603,7 @@ export interface paths {
         };
         /**
          * Campaign pages and collections with publish and removal times
-         * @description **Permission:** `content.pages.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/content
          */
@@ -4441,7 +4633,7 @@ export interface paths {
         };
         /**
          * Page with draft and live versions, checks and linked promotion
-         * @description **Permission:** `content.pages.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/content
          */
@@ -4669,7 +4861,7 @@ export interface paths {
         };
         /**
          * Version history of a page
-         * @description **Permission:** `content.pages.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/content
          */
@@ -4715,7 +4907,7 @@ export interface paths {
         };
         /**
          * Published articles, policies, articles needing review and helpful rating
-         * @description **Permission:** `content.help.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content
          */
@@ -4737,7 +4929,7 @@ export interface paths {
         };
         /**
          * Policies and help articles in one list
-         * @description **Permission:** `content.help.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content
          */
@@ -4759,7 +4951,7 @@ export interface paths {
         };
         /**
          * Help categories including hidden
-         * @description **Permission:** `content.help.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content
          */
@@ -4837,7 +5029,7 @@ export interface paths {
         };
         /**
          * Article with status, versions and feedback
-         * @description **Permission:** `content.help.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content
          */
@@ -4895,7 +5087,7 @@ export interface paths {
         };
         /**
          * Article version history
-         * @description **Permission:** `content.help.manage`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content
          */
@@ -4941,7 +5133,7 @@ export interface paths {
         };
         /**
          * Policies with current, scheduled and draft versions
-         * @description **Permission:** `content.policies.edit`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content, admin/settings
          */
@@ -4971,7 +5163,7 @@ export interface paths {
         };
         /**
          * All versions of a policy with effective date, summary and approver
-         * @description **Permission:** `content.policies.edit`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content
          */
@@ -5001,7 +5193,7 @@ export interface paths {
         };
         /**
          * A policy version with approvals
-         * @description **Permission:** `content.policies.edit`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content
          */
@@ -5033,7 +5225,7 @@ export interface paths {
         };
         /**
          * Changes from the previous version
-         * @description **Permission:** `content.policies.edit`
+         * @description **Permission:** `content.view`
          *
          *     **Screens:** admin/help-content
          */
@@ -5189,7 +5381,7 @@ export interface paths {
         };
         /**
          * Account tab home: tiles, alerts, recent orders, open cases and returns
-         * @description One call renders account/overview on web and Android. Aggregated in-process with a 300 ms budget per source: orders.countInProgress + orders.listRecentForCustomer + orders.listDelayedItemsForCustomer (orders in progress, recent orders, delay alerts), returns.listOpenForCustomer (open returns tile and list), messaging.unreadCount (unread messages), support.listOpenCasesForCustomer (open cases), wallet.getBalance (store credit, phase 3; otherwise available=false). A source that is disabled or times out is listed in `unavailable` instead of failing the page.
+         * @description One call renders account/overview on web and Android. Aggregated in-process with a 300 ms budget per source: orders.countInProgress + orders.listRecentForCustomer + orders.listDelayedItemsForCustomer (orders in progress, recent orders, delay alerts), returns.listOpenForCustomer (open returns tile and list), messaging.unreadCount (unread messages), support.listOpenCasesForCustomer (open cases), wallet.getBalance (store credit, phase 3; otherwise available=false), payments.listFailedPaymentsForCustomer (payments that failed after the order was placed, last 7 days). A source that is disabled or times out is listed in `unavailable` instead of failing the page. Alerts: item_delayed (delayed packages), payment_being_checked (recent orders whose payment is being checked), payment_failed (an order cancelled because its payment finally failed, last 7 days), return_action_needed (an open return waiting on the customer: a question to answer, or approved and to be sent back), case_waiting_on_you (an open case waiting on the customer).
          *
          *     **Screens:** account/overview
          */
@@ -5443,7 +5635,9 @@ export interface paths {
         };
         /**
          * My export and closure requests
-         * @description **Screens:** account/profile
+         * @description Newest first. Cancelled data exports are left out unless includeCancelled is true (they are kept for the audit trail).
+         *
+         *     **Screens:** account/profile
          */
         get: operations["customers.listDataRequests"];
         put?: never;
@@ -5533,7 +5727,7 @@ export interface paths {
         put?: never;
         /**
          * Find a guest order by reference and checkout email
-         * @description Verifies the pair with orders (orders.findGuestOrder), then calls identity.grantGuestOrderAccess(guestSessionId, orderId, email, 'lookup') so the caller's guest session can open the order in orders, shipping, returns and support. Wrong combinations return the same GUEST_ORDER_NOT_FOUND without saying which part was wrong. Limited per IP and per email.
+         * @description Verifies the pair with orders (orders.findGuestOrder), then calls identity.grantGuestOrderAccess(guestSessionId, orderId, email, 'lookup') so the caller's guest session can open the order in orders, shipping, returns and support. Wrong combinations return the same GUEST_ORDER_NOT_FOUND without saying which part was wrong. Only guest orders open this way (owner decision G29e): a reference that belongs to a registered customer's order answers GUEST_ORDER_SIGN_IN_REQUIRED whatever email was given, so the answer never confirms the email. Limited per IP and per email.
          *
          *     **Screens:** auth/guest-orders
          */
@@ -6123,7 +6317,9 @@ export interface paths {
         };
         /**
          * Collected payments, company sales, fee income, owed to sellers, refunds, holds and discount funding
-         * @description **Permission:** `finance.ledger.view`
+         * @description Exported through reports (POST /api/admin/reports/exports) as dataset finance.admin.overview with filters { from, to, basis }: one row per figure (G72).
+         *
+         *     **Permission:** `finance.ledger.view`
          *
          *     **Screens:** admin/finance, admin/dashboard
          */
@@ -6941,7 +7137,7 @@ export interface paths {
          *
          *     **Permission:** `finance.destinations.review`
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `payout-destination`)
+         *     **Step-up:** single-use re-auth token in the body (purpose `payout-destination`)
          *
          *     **Approval:** Approval action finance.destinations.approve. The reviewer cannot be the person who requested the change; always a recorded review
          *
@@ -6971,7 +7167,7 @@ export interface paths {
          * Reject a payout destination change
          * @description **Permission:** `finance.destinations.review`
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `payout-destination`)
+         *     **Step-up:** single-use re-auth token in the body (purpose `payout-destination`)
          *
          *     **Audited:** recorded in the action history.
          *
@@ -8399,7 +8595,7 @@ export interface paths {
         put?: never;
         /**
          * Open an order from an emailed link
-         * @description Grants the (new or given) guest session access to that order. Signed-in customers whose verified email matches see it in their account instead.
+         * @description Visitors: grants the (new or given) guest session access to that order. A signed-in customer gets the order id and ref without any guest access (guestSession null): the order opens in their account when it is theirs. Returns orderRef when the link recorded it.
          *
          *     **Screens:** auth/guest-orders, account/order
          */
@@ -8438,31 +8634,11 @@ export interface paths {
         put?: never;
         /**
          * Accept an invitation and set a password
-         * @description Seller members: signs in to Seller Center for the inviting seller. Staff: returns a 2-step set-up that must be confirmed before the first session.
+         * @description Seller members: signs in to Seller Center for the inviting seller. Staff: passCode is required (the pass code handed over with the link); the account becomes active and is signed in to the Admin Center at once. A wrong pass code is PASS_CODE_INVALID with details.attemptsLeft; the 5th revokes the link (npm run staff-link gives a new link and pass code).
          *
          *     **Publishes:** `identity.invitation.accepted`
          */
         post: operations["identity.acceptInvitation"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/public/identity/invitations/two-step": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Staff: confirm the authenticator code and start the first session
-         * @description **Publishes:** `identity.two_step.changed`
-         */
-        post: operations["identity.confirmInvitationTwoStep"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8624,7 +8800,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm it is you before a sensitive Admin Center action
-         * @description Same check as the store re-auth (password or 2-step code) on the staff session. Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose (two-step-removal and recovery-codes for the staff member's own 2-step settings).
+         * @description The staff member re-enters their password (staff have no 2-step). Returns a single-use re-auth token valid reauthTokenMinutes, bound to the account, session and purpose: role-grant (access roles and invitations), staff-account (staff accounts and invitations), payout-destination (finance payout destinations) and approval (approving a request above access stepUpAbove).
          *
          *     **Audited:** recorded in the action history.
          */
@@ -8646,7 +8822,9 @@ export interface paths {
         put?: never;
         /**
          * Start turning on 2-step verification
-         * @description **Screens:** account/security
+         * @description Members only: staff accounts sign in with email and password and cannot add a 2-step method (TWO_STEP_NOT_FOR_STAFF).
+         *
+         *     **Screens:** account/security
          */
         post: operations["identity.startTwoStepSetup"];
         delete?: never;
@@ -8666,7 +8844,9 @@ export interface paths {
         put?: never;
         /**
          * Confirm the first code; returns recovery codes once
-         * @description **Publishes:** `identity.two_step.changed`
+         * @description Members only (TWO_STEP_NOT_FOR_STAFF for staff accounts).
+         *
+         *     **Publishes:** `identity.two_step.changed`
          *
          *     **Screens:** account/security
          */
@@ -8688,9 +8868,7 @@ export interface paths {
         put?: never;
         /**
          * Turn off a 2-step method
-         * @description Staff accounts cannot remove their last method (TWO_STEP_REQUIRED).
-         *
-         *     **Step-up:** single-use re-auth token in the body (purpose `two-step-removal`)
+         * @description **Step-up:** single-use re-auth token in the body (purpose `two-step-removal`)
          *
          *     **Publishes:** `identity.two_step.changed`
          *
@@ -8994,7 +9172,7 @@ export interface paths {
         put?: never;
         /**
          * Remove 2-step methods after an identity check (lost phone)
-         * @description Staff accounts must set up 2-step again at next sign-in. The identity check performed is recorded.
+         * @description Member accounts (staff accounts have no 2-step). The member can turn 2-step on again from their security page. The identity check performed is recorded.
          *
          *     **Permission:** `identity.accounts.manage`
          *
@@ -9050,7 +9228,7 @@ export interface paths {
          *
          *     **Permission:** `identity.staff-accounts.manage`
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `staff-account`)
+         *     **Step-up:** single-use re-auth token in the body (purpose `staff-account`)
          *
          *     **Audited:** recorded in the action history.
          *
@@ -9080,7 +9258,7 @@ export interface paths {
          *
          *     **Permission:** `identity.staff-accounts.manage`
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `staff-account`)
+         *     **Step-up:** single-use re-auth token in the body (purpose `staff-account`)
          *
          *     **Audited:** recorded in the action history.
          *
@@ -9150,9 +9328,11 @@ export interface paths {
         put?: never;
         /**
          * Resend a staff invitation (new 7-day link)
-         * @description **Permission:** `identity.staff-accounts.manage`
+         * @description Issues a new link and pass code (the old ones stop working). The pass code is not shown here: the server operator prints the link and pass code with npm run staff-link and hands them over.
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `staff-account`)
+         *     **Permission:** `identity.staff-accounts.manage`
+         *
+         *     **Step-up:** single-use re-auth token in the body (purpose `staff-account`)
          *
          *     **Audited:** recorded in the action history.
          *
@@ -9180,7 +9360,7 @@ export interface paths {
          * Cancel a staff invitation
          * @description **Permission:** `identity.staff-accounts.manage`
          *
-         *     **Step-up:** 2-step code in X-Step-Up-Code (purpose `staff-account`)
+         *     **Step-up:** single-use re-auth token in the body (purpose `staff-account`)
          *
          *     **Audited:** recorded in the action history.
          *
@@ -10165,6 +10345,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/media/image-specs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The product image spec (aspect ratio and the detail and thumbnail sizes)
+         * @description The value in force of the setting media.productImage, with the ratio and both sizes worked out (height = round(width × H ÷ W)). The store frames product cards and the gallery at this ratio. Product configuration with no permission; apps may cache it for 10 minutes.
+         *
+         *     **Screens:** store/home, store/product, store/search
+         */
+        get: operations["media.getStoreImageSpecs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/seller/media/uploads": {
         parameters: {
             query?: never;
@@ -10175,8 +10377,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, case evidence, bulk files)
-         * @description **Permission:** `media.assets.upload`
+         * Start an upload (product images and video, store logo and banner, ad creatives, documents, inspection photos, return evidence, case evidence, bulk files)
+         * @description return_evidence: files for a return's evidence before any case (POST /api/seller/returns/requests/{id}/evidence attaches them with usage return_evidence, which takes only this purpose).
+         *
+         *     **Permission:** `media.assets.upload`
          *
          *     **Screens:** seller/product-new, seller/offer, seller/store, seller/ad-request, seller/bulk-update, seller/return, seller/returns, seller/setup
          */
@@ -10317,6 +10521,30 @@ export interface paths {
          * @description **Screens:** seller/finance, seller/bulk-update, seller/return
          */
         get: operations["media.getSellerDownload"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/media/image-specs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The product image spec the Seller Center crops product photos to
+         * @description Same answer as the store's GET /image-specs. Product images uploaded here must have this aspect ratio (1% tolerance) and at least the detail size, or processing rejects them (rejectionReason says what to fix).
+         *
+         *     **Seller context:** optional (works before a seller is chosen).
+         *
+         *     **Screens:** seller/product-new
+         */
+        get: operations["media.getSellerImageSpecs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10559,6 +10787,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/media/image-specs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The product image spec in force
+         * @description Same answer as the store's GET /image-specs. Staff change it with the settings change flow (POST /api/admin/settings/changes, key media.productImage).
+         *
+         *     **Screens:** admin/settings, admin/official
+         */
+        get: operations["media.getAdminImageSpecs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks/media/storage-events": {
         parameters: {
             query?: never;
@@ -10673,6 +10923,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/messaging/product-conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Message the seller about one of its products before buying
+         * @description Decision G4: signed-in customers only. One conversation per customer, seller and product (starting again appends to it). The same content filter as order messages masks contact details and outside links; sellers see it in their inbox with the reply target. A customer starts at most presaleConversationsPerDay new pre-sale conversations a day (RATE_LIMITED, details.retryAfterSeconds); replies inside a conversation are not limited. The offer must be one customers can see (active or out of stock), else NOT_FOUND. A messaging restriction gives MESSAGING_RESTRICTED.
+         *
+         *     **Publishes:** `messaging.conversation.started`, `messaging.message.sent`
+         *
+         *     **Screens:** store/product, account/messages
+         */
+        post: operations["messaging.startProductConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/messaging/conversations/{id}/read": {
         parameters: {
             query?: never;
@@ -10751,7 +11025,7 @@ export interface paths {
         get: operations["messaging.listSellerConversations"];
         put?: never;
         /**
-         * Message the buyer of one of the seller's orders
+         * Message the buyer of one of the seller's orders, optionally about an item or a return
          * @description **Permission:** `messaging.conversations.reply`
          *
          *     **Publishes:** `messaging.conversation.started`, `messaging.message.sent`
@@ -11205,6 +11479,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/notifications/inbox/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive one notice (for me)
+         * @description Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.
+         *
+         *     **Screens:** account/notifications
+         */
+        post: operations["notifications.archiveNotice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/store/notifications/inbox/archive-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive all (or one group) for me
+         * @description Open action notices stay in the inbox.
+         *
+         *     **Screens:** account/notifications
+         */
+        post: operations["notifications.archiveAllNotices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/notifications/inbox/read-all": {
         parameters: {
             query?: never;
@@ -11373,6 +11691,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/seller/notifications/inbox/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive one notice (for me)
+         * @description Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.
+         *
+         *     **Screens:** seller/notifications
+         */
+        post: operations["notifications.archiveSellerNotice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/notifications/inbox/archive-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive all (or one group) for me
+         * @description Open action notices stay in the inbox.
+         *
+         *     **Screens:** seller/notifications
+         */
+        post: operations["notifications.archiveAllSellerNotices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/seller/notifications/inbox/read-all": {
         parameters: {
             query?: never;
@@ -11423,7 +11785,7 @@ export interface paths {
         get?: never;
         /**
          * Set one member's topics and channel
-         * @description The owner (notifications.preferences.manage) sets anyone's; members may change their own channel and non-essential groups. Essential groups stay on for the owner; owner-only groups cannot be given to staff.
+         * @description The owner (notifications.preferences.manage) sets anyone's; members may change their own channel and non-essential groups. Essential groups stay on for the owner; owner-only groups cannot be given to staff. An invited member's preferences open once they accept the invitation (409 MEMBER_NOT_JOINED until then).
          *
          *     **Also needs:** `notifications.preferences.manage` when params.memberId is not the caller's own (self-member)
          *
@@ -11533,6 +11895,70 @@ export interface paths {
          * @description **Screens:** admin/inbox
          */
         post: operations["notifications.markStaffRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/notifications/inbox/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive one notice (for me)
+         * @description Hides it from the inbox and its counts; it stays listed with archived=true until it expires. An open action notice is archived once its work is done.
+         *
+         *     **Screens:** admin/inbox
+         */
+        post: operations["notifications.archiveStaffNotice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/notifications/inbox/archive-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive all (or one area) for me
+         * @description Open action notices stay in the inbox.
+         *
+         *     **Screens:** admin/inbox
+         */
+        post: operations["notifications.archiveAllStaffNotices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/notifications/inbox/{id}/unread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark one notice as unread (for me)
+         * @description **Screens:** admin/inbox
+         */
+        post: operations["notifications.markStaffUnread"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12228,7 +12654,7 @@ export interface paths {
         };
         /**
          * Counts for the list tabs and the page heading
-         * @description Offer status counts plus tab totals that combine the product review state (from catalog) with publication. Tabs: All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended; the heading reads '{all} offers across {productCount} products'.
+         * @description Offer status counts plus tab totals that combine the product review state (from catalog) with publication. Tabs: All, Active, Draft, Submitted, Changes requested, Rejected, Hidden or suspended; the heading reads '{all} offers across {productCount} products'. productDraft counts offers on unsubmitted product drafts; productPublication counts non-removed offers by the product's publication (active, hidden, suspended), matching the list's productPublication filter.
          *
          *     **Screens:** seller/products, seller/dashboard
          */
@@ -12818,7 +13244,7 @@ export interface paths {
         };
         /**
          * Official Store offers with price, cost, margin and sellable stock
-         * @description **Permission:** `offers.official.manage`
+         * @description **Permission:** `offers.official.view`
          *
          *     **Screens:** admin/official
          */
@@ -12984,7 +13410,7 @@ export interface paths {
         };
         /**
          * Pending, scheduled and recent price changes
-         * @description **Permission:** `offers.official.price`
+         * @description **Permission:** `offers.official.view`
          *
          *     **Screens:** admin/official
          */
@@ -13058,7 +13484,7 @@ export interface paths {
         };
         /**
          * Official Store bulk job state and totals
-         * @description **Permission:** `offers.official.price`
+         * @description **Permission:** `offers.official.view`
          *
          *     **Screens:** admin/official
          *
@@ -13082,7 +13508,7 @@ export interface paths {
         };
         /**
          * Official Store bulk preview rows
-         * @description **Permission:** `offers.official.price`
+         * @description **Permission:** `offers.official.view`
          *
          *     **Screens:** admin/official
          *
@@ -13230,7 +13656,7 @@ export interface paths {
         };
         /**
          * Order history with search, date range and status tab
-         * @description q matches the order reference or a product title. Each order shows a status per package so a mixed order reads as partly delivered.
+         * @description q matches the order reference, a product title or a seller name. Each order shows a status per package so a mixed order reads as partly delivered.
          *
          *     **Screens:** account/orders, account/overview
          */
@@ -13252,7 +13678,9 @@ export interface paths {
         };
         /**
          * Counts per status tab
-         * @description **Screens:** account/orders
+         * @description q narrows the counts like the order list search, so the tabs follow a search.
+         *
+         *     **Screens:** account/orders
          */
         get: operations["orders.getMyOrderCounts"];
         put?: never;
@@ -13590,7 +14018,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel items the seller cannot fulfill
-         * @description Only unshipped items. The buyer is notified and refunded for the cancelled items under the cancellation policy; seller cancellations count toward the cancellation rate.
+         * @description Only unshipped items, and not items on a bought label the carrier has not scanned (CANCELLATION_NOT_ALLOWED: void the label first; allowedActions leaves out cancel_items while every cancellable item is on one). The buyer is notified and refunded for the cancelled items under the cancellation policy; seller cancellations count toward the cancellation rate.
          *
          *     **Permission:** `orders.fulfillment.cancel`
          *
@@ -13618,7 +14046,7 @@ export interface paths {
         put?: never;
         /**
          * Accept the buyer's cancellation and refund
-         * @description Does not count against the seller's cancellation rate.
+         * @description Does not count against the seller's cancellation rate. Refused while an item of the request is on a bought label the carrier has not scanned (CANCELLATION_NOT_ALLOWED: void the label, or decline because it ships).
          *
          *     **Permission:** `orders.fulfillment.cancel`
          *
@@ -13718,7 +14146,7 @@ export interface paths {
         put?: never;
         /**
          * Export the seller's orders (own items only)
-         * @description Creates an authorized export job through reports.requestExport (dataset orders.seller.orders, sellerId from the session; only the seller's own groups). Poll GET /exports/{id} for the download link.
+         * @description Creates an authorized export job through reports.requestExport (dataset orders.seller.orders, sellerId from the session; only the seller's own groups). filters takes the order list filters (tab, tabs, q, placedFrom, placedTo, overdueOnly, fulfilledBy, sort) and, to export selected rows, groupIds (seller group ids) and/or refs (order references), at most 500 each; a list given with nothing usable exports no rows. Poll GET /exports/{id} for the download link.
          *
          *     **Permission:** `orders.fulfillment.export`
          *
@@ -13860,7 +14288,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel unshipped items as staff, with a reason
-         * @description For sellers that cannot fulfill, long-overdue dispatch, risk or address problems. The response shows the effect on open shipments, cases and the refund. Shipped items cannot be cancelled; use returns or a case.
+         * @description For sellers that cannot fulfill, long-overdue dispatch, risk or address problems. The response shows the effect on open shipments, cases and the refund. Shipped items cannot be cancelled; use returns or a case. Items on a bought label the carrier has not scanned are refused (CANCELLATION_NOT_ALLOWED: void the label first; allowedActions leaves out cancel_items while every cancellable item is on one).
          *
          *     **Permission:** `orders.orders.cancel`
          *
@@ -13890,7 +14318,9 @@ export interface paths {
         put?: never;
         /**
          * Decide a customer's cancellation request for the seller (or override a decline)
-         * @description **Permission:** `orders.cancellations.decide`
+         * @description Accepting is refused while an item of the request is on a bought label the carrier has not scanned (CANCELLATION_NOT_ALLOWED: void the label first).
+         *
+         *     **Permission:** `orders.cancellations.decide`
          *
          *     **Idempotent:** send an Idempotency-Key.
          *
@@ -15292,7 +15722,7 @@ export interface paths {
         put?: never;
         /**
          * Leave a campaign
-         * @description Before the start: immediate. After the start: becomes a withdrawal request decided by Marketing.
+         * @description Before the start: immediate. After the start: becomes a withdrawal request decided by Marketing. The reason is optional (G57b): without one the record says 'Left the campaign' before the start or 'Asked to leave the campaign' after it.
          *
          *     **Permission:** `promotions.campaigns.join`
          *
@@ -15636,7 +16066,7 @@ export interface paths {
         put?: never;
         /**
          * Finance confirms funding
-         * @description A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided.
+         * @description A budget above the Marketing limit or above the confirming Finance member's limit raises an approval request (access); the campaign stays in review until it is decided. Separation of duties (G65a): the person who created the campaign or sent it to Finance can't confirm its funding (SAME_REVIEWER).
          *
          *     **Permission:** `promotions.funding.confirm`
          *
@@ -15718,7 +16148,7 @@ export interface paths {
         put?: never;
         /**
          * Pause a scheduled or live campaign
-         * @description Takes effect for new evaluations immediately; open reservations may still commit.
+         * @description Takes effect for new evaluations immediately; open reservations may still commit. The reason is optional (G68): without one the history and the audit entry say 'Paused by Marketing'.
          *
          *     **Permission:** `promotions.campaigns.publish`
          *
@@ -17863,6 +18293,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/seller/returns/requests/{id}/remedy/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a full or partial refund before issuing it: the customer's refund and the effect on the seller's earnings
+         * @description Nothing is saved. The breakdown uses the same rules as POST /remedy (deductions, amount capped at the remaining refundable amount); the earnings effect is finance's preview (finance.previewRefundImpact) with the return label the seller pays (G55d).
+         *
+         *     **Permission:** `returns.refunds.issue`
+         *
+         *     **Screens:** seller/return
+         */
+        post: operations["returns.previewSellerRemedy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/seller/returns/requests/{id}/remedy": {
         parameters: {
             query?: never;
@@ -18240,7 +18694,7 @@ export interface paths {
         };
         /**
          * Official Store and Fulfilled by Marketly returns received, arriving and decided
-         * @description **Permission:** `returns.inspections.record`
+         * @description **Permission:** `returns.inspections.view`
          *
          *     **Screens:** ops/return-inspection, ops/queues
          */
@@ -18262,7 +18716,7 @@ export interface paths {
         };
         /**
          * Inspection queue KPIs
-         * @description **Permission:** `returns.inspections.record`
+         * @description **Permission:** `returns.inspections.view`
          *
          *     **Screens:** ops/return-inspection
          */
@@ -19122,6 +19576,36 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/seller/reviews/questions/{id}/skip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skip a product question (leave it unanswered)
+         * @description Takes the question off the seller's open list (state=skipped lists it). Nothing changes for shoppers: the question stays published and customers or other sellers may answer it. Repeating it is harmless.
+         *
+         *     **Permission:** `reviews.responses.post`
+         *
+         *     **Screens:** seller/customers
+         */
+        post: operations["reviews.skipQuestion"];
+        /**
+         * Put a skipped question back on the open list
+         * @description **Permission:** `reviews.responses.post`
+         *
+         *     **Screens:** seller/customers
+         */
+        delete: operations["reviews.unskipQuestion"];
         options?: never;
         head?: never;
         patch?: never;
@@ -20303,6 +20787,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/sellers/applications/{id}/response-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save a draft answer to the information request (nothing is sent)
+         * @description Keeps notes and attached documents per open item (InfoRequestItem.response with draft true) so the applicant can come back; items left out keep their draft. POST /applications/{id}/respond sends it: a saved note counts as the answer unless the send gives another. G33c
+         *
+         *     **Screens:** sell/status
+         */
+        put: operations["sellers.saveInformationResponseDraft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/sellers/applications/{id}/withdraw": {
         parameters: {
             query?: never;
@@ -20772,7 +21278,9 @@ export interface paths {
         };
         /**
          * Owner and staff with roles, status and last activity
-         * @description **Permission:** `sellers.staff.manage`
+         * @description Without status, revoked invitations and removed members are left out (G49b); status=all lists everyone.
+         *
+         *     **Permission:** `sellers.staff.manage`
          *
          *     **Screens:** seller/staff
          */
@@ -21708,7 +22216,7 @@ export interface paths {
         };
         /**
          * Application queue, oldest decision target first
-         * @description **Permission:** `sellers.applications.review`
+         * @description **Permission:** `sellers.applications.view`
          *
          *     **Screens:** admin/seller-application, admin/sellers, admin/dashboard
          */
@@ -21730,7 +22238,7 @@ export interface paths {
         };
         /**
          * Application with checks, risk flags, documents, notes and timeline
-         * @description **Permission:** `sellers.applications.review`
+         * @description **Permission:** `sellers.applications.view`
          *
          *     **Screens:** admin/seller-application
          */
@@ -22297,6 +22805,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/seller/settings/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Current values of the settings sellers can see
+         * @description Every setting marked sellerVisible (definitions of enabled modules), with the value in force now, e.g. catalog.minDescriptionLength, inventory.defaultLowStockThreshold. Read-only; scheduled changes are in upcoming-changes.
+         *
+         *     **Seller context:** optional (works before a seller is chosen).
+         *
+         *     **Screens:** seller/product-new, seller/inventory, seller/bulk-update
+         */
+        get: operations["settings.listCurrentSellerSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/settings/overview": {
         parameters: {
             query?: never;
@@ -22498,7 +23030,7 @@ export interface paths {
         put?: never;
         /**
          * Save: schedule, or send for approval
-         * @description Settings that need approval go to access (Business Owner or second reviewer) and are scheduled only after approval. Sellers are notified of seller-visible changes when scheduled.
+         * @description Settings that need approval go to access (Business Owner or second reviewer) and are scheduled only after approval. Sellers are notified of seller-visible changes when scheduled. The reason is asked here: the body's reason replaces the draft's; without either the call answers VALIDATION_FAILED (path reason). The body may be left out when the draft has a reason.
          *
          *     **Permission:** `settings.changes.propose`
          *
@@ -23541,7 +24073,17 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete a draft notice
+         * @description Only drafts (never published or scheduled) can be deleted; a scheduled, live or ended notice is withdrawn instead (ILLEGAL_TRANSITION). The deletion is audited with the draft as it was.
+         *
+         *     **Permission:** `shipping.notices.manage`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/shipping
+         */
+        delete: operations["shipping.deleteNotice"];
         options?: never;
         head?: never;
         /**
@@ -25459,6 +26001,32 @@ export interface paths {
          *     **Screens:** admin/trust
          */
         post: operations["trust.requestEvidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trust/evidence-requests/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an open proof request
+         * @description Only while open; the seller's or customer's 'send proof' notice is closed and the report's timeline notes it. The reason is optional (default 'No longer needed').
+         *
+         *     **Permission:** `trust.reports.investigate`
+         *
+         *     **Audited:** recorded in the action history.
+         *
+         *     **Screens:** admin/trust
+         */
+        post: operations["trust.cancelEvidenceRequest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -28218,6 +28786,18 @@ export interface components {
             height?: number | null;
             /** @description File size in bytes (media sizeBytes), shown next to attachments and evidence files */
             bytes?: number | null;
+            /** @description The file's name as uploaded (media fileName), e.g. for attachments and evidence lists */
+            fileName?: string | null;
+            /**
+             * Format: uri
+             * @description Product images only: the thumbnail rendition (cards, lists, cart, orders, gallery strip); null for other files
+             */
+            thumbUrl?: string | null;
+            /**
+             * Format: uri
+             * @description Product images only: the detail rendition (product page); null for other files. url is the size the response asked for (product pages: detail)
+             */
+            detailUrl?: string | null;
         };
         DateRange: {
             /** Format: date */
@@ -28231,6 +28811,11 @@ export interface components {
             label: string;
             detail?: string | null;
             actor?: components["schemas"]["Actor"] | null;
+            /**
+             * @description Tone of the event, so screens can colour the history the same way everywhere (G58c); absent where the owning module does not set one
+             * @enum {string|null}
+             */
+            state?: "info" | "success" | "warning" | "danger" | null;
         };
         ApprovalInfo: {
             required: boolean;
@@ -28448,7 +29033,7 @@ export interface components {
             eligibleApproverRoles: components["schemas"]["access.RoleRef"][];
             /** @description People who could approve now, backups included */
             eligibleApprovers: components["schemas"]["access.StaffRef"][];
-            /** @description The amount is above stepUpAbove: whoever acts or approves must give a fresh 2-step code (X-Step-Up-Code). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself. */
+            /** @description The amount is above stepUpAbove: whoever acts or approves must confirm with their password again (a re-auth token, purpose approval). A module acting on an allowed decision asks the caller for it before acting (STEP_UP_REQUIRED); access asks approvers itself. */
             stepUpRequired: boolean;
         };
         "access.ApprovalTarget": {
@@ -28580,6 +29165,8 @@ export interface components {
             /** Format: uuid */
             reportsToAccountId?: string | null;
             reason: string;
+            /** @description Re-auth token for purpose role-grant (POST /api/admin/identity/reauth with the password) */
+            reauthToken: string;
             /** @description Request approval limits from the Business Owner: opens an access.limits.change approval request asking the Business Owner to confirm or adjust the limits the chosen roles carry before the new member uses them. Until it is decided the member's approval actions stay at no limit (they can prepare but not approve). */
             requestLimitReview?: boolean | null;
         };
@@ -28707,6 +29294,12 @@ export interface components {
             /** @description e.g. Once per session · max 3 per visitor per 7 days */
             label: string;
         };
+        "advertising.FrequencyCapInput": {
+            perSession?: number | null;
+            perDay?: number | null;
+            perWindow?: components["schemas"]["advertising.FrequencyWindow"] | null;
+            perCampaign?: number | null;
+        };
         "advertising.FrequencyWindow": {
             count: number;
             days: number;
@@ -28718,6 +29311,11 @@ export interface components {
             /** @description e.g. Closing hides that campaign for 7 days */
             label: string;
         };
+        "advertising.DismissalRuleInput": {
+            /** @enum {string} */
+            mode: "not_dismissible" | "session" | "days" | "campaign";
+            days?: number | null;
+        };
         "advertising.RotationRule": {
             /** @enum {string} */
             mode: "priority_then_even" | "relevance_then_priority" | "category_match_then_priority" | "carousel";
@@ -28725,6 +29323,13 @@ export interface components {
             maxInRotation?: number | null;
             pauseOnHoverAndFocus: boolean;
             label: string;
+        };
+        "advertising.RotationRuleInput": {
+            /** @enum {string} */
+            mode: "priority_then_even" | "relevance_then_priority" | "category_match_then_priority" | "carousel";
+            carouselSeconds?: number | null;
+            maxInRotation?: number | null;
+            pauseOnHoverAndFocus: boolean;
         };
         "advertising.PopupTrigger": {
             afterSeconds?: number | null;
@@ -28771,10 +29376,13 @@ export interface components {
             enabled?: boolean | null;
             eligiblePages?: string[] | null;
             formats?: components["schemas"]["advertising.CreativeFormat"][] | null;
-            frequencyCap?: components["schemas"]["advertising.FrequencyCap"] | null;
+            /** @description The label is written by the server */
+            frequencyCap?: components["schemas"]["advertising.FrequencyCapInput"] | null;
             trigger?: components["schemas"]["advertising.PopupTrigger"] | null;
-            rotation?: components["schemas"]["advertising.RotationRule"] | null;
-            dismissal?: components["schemas"]["advertising.DismissalRule"] | null;
+            /** @description The label is written by the server */
+            rotation?: components["schemas"]["advertising.RotationRuleInput"] | null;
+            /** @description The label is written by the server */
+            dismissal?: components["schemas"]["advertising.DismissalRuleInput"] | null;
             maxPerPage?: number | null;
             positions?: number[] | null;
             reason: string;
@@ -28850,6 +29458,16 @@ export interface components {
             spent: components["schemas"]["Money"];
             remaining?: components["schemas"]["Money"] | null;
         };
+        "advertising.AdBudgetInput": {
+            /** @enum {string} */
+            billing: "none" | "cpc" | "cpm" | "fixed_daily";
+            rate?: components["schemas"]["Money"] | null;
+            /** @description Spending limit per market day (see AdBudget.dailyLimit) */
+            dailyLimit?: components["schemas"]["Money"] | null;
+            totalLimit?: components["schemas"]["Money"] | null;
+            /** @description Maximum displays (own promotions have no budget charge) */
+            deliveryCap?: number | null;
+        };
         "advertising.AdvertiserRef": {
             /** @enum {string} */
             kind: "platform" | "official_store" | "seller" | "brand";
@@ -28889,14 +29507,16 @@ export interface components {
             /** Format: date-time */
             endsAt: string;
             timeZone: string;
-            /** @description Defaults to the placement cap */
-            frequencyCap?: components["schemas"]["advertising.FrequencyCap"] | null;
-            dismissal?: components["schemas"]["advertising.DismissalRule"] | null;
+            /** @description Defaults to the placement cap; the label is written by the server */
+            frequencyCap?: components["schemas"]["advertising.FrequencyCapInput"] | null;
+            /** @description Defaults to the placement rule; the label is written by the server */
+            dismissal?: components["schemas"]["advertising.DismissalRuleInput"] | null;
             /** @description 1 low, 2 normal, 3 high; equal priority rotates evenly */
             priority: number;
-            budget?: components["schemas"]["advertising.AdBudget"] | null;
-            /** @description Stop when the linked promotion ends or its budget runs out */
-            stopWithPromotion: boolean;
+            /** @description Spent and remaining are kept by the server (AdCampaign.budget) */
+            budget?: components["schemas"]["advertising.AdBudgetInput"] | null;
+            /** @description Stop when the linked promotion ends or its budget runs out. Default false; true needs linkedPromotionId */
+            stopWithPromotion?: boolean | null;
             creativeIds: string[];
             /**
              * @description What happens when the last approval step lands: schedule for startsAt (default) or go live at once. activate is refused at submit (PROMOTION_NOT_STARTED) when AdCampaign.activateBlockedReason is set.
@@ -29675,6 +30295,8 @@ export interface components {
             offerId: string;
             /** Format: uuid */
             productId: string;
+            /** @description For the product link /p/{productSlug}/{productId}; null when the catalog did not answer */
+            productSlug?: string | null;
             /** Format: uuid */
             variantId: string;
             seller: components["schemas"]["cart.SellerLabel"];
@@ -29786,7 +30408,7 @@ export interface components {
             /** Format: uuid */
             itemId: string;
             title: string;
-            /** @description e.g. 'already on a seller markdown' */
+            /** @description 'Already on sale' or 'Not included in this coupon' (the same wording at checkout) */
             reason: string;
         };
         "cart.CartTotals": {
@@ -29898,6 +30520,8 @@ export interface components {
             offerId: string;
             /** Format: uuid */
             productId: string;
+            /** @description For the product link /p/{productSlug}/{productId}; null when the catalog did not answer */
+            productSlug?: string | null;
             /** Format: uuid */
             variantId: string;
             seller: components["schemas"]["cart.SellerLabel"];
@@ -29991,6 +30615,25 @@ export interface components {
             kind: "text" | "number" | "enum" | "bool";
             unit?: string | null;
             options: string[];
+            required: boolean;
+            /** @description Shown as a category filter in the store */
+            filterable: boolean;
+            /** @description Creates variants (colour, size) */
+            variantDefining: boolean;
+        };
+        "catalog.AttributeInput": {
+            /**
+             * Format: uuid
+             * @description An attribute of this category to keep (its id stays, so product values keep pointing at it); omitted for a new attribute
+             */
+            id?: string | null;
+            /** @description e.g. Screen size */
+            name: string;
+            /** @enum {string} */
+            kind: "text" | "number" | "enum" | "bool";
+            unit?: string | null;
+            /** @description The values to choose from (kind enum) */
+            options?: string[] | null;
             required: boolean;
             /** @description Shown as a category filter in the store */
             filterable: boolean;
@@ -30134,6 +30777,10 @@ export interface components {
              * @description When the product was first approved and listed (New listing / Listed on …)
              */
             listedAt?: string | null;
+            /** @description Store product detail (GET /api/store/catalog/products/{id}) only: listed within search.newArrivalsWindowDays, the same rule as the New listing badge on search cards; null elsewhere */
+            isNewListing?: boolean | null;
+            /** @description Store product detail only: best-seller rank in its category from search (search.bestSellerRanks), e.g. #3 in Headphones; null without a rank, when search is off, and elsewhere */
+            bestSellerRank?: components["schemas"]["search.BestSellerRank"] | null;
         };
         "catalog.ProductAdmin": {
             product: components["schemas"]["catalog.Product"];
@@ -30170,6 +30817,8 @@ export interface components {
             offerNote?: string | null;
             /** @description The calling reviewer's unsent decision on the open submission (staff only) */
             reviewDraft?: components["schemas"]["catalog.ReviewDraft"] | null;
+            /** @description Images of the product and its variants that no longer have the product image spec's aspect ratio (media.productImage changed): show "Re-crop images". Not blocking: the product stays live and the store shows them cover-cropped. Empty when none */
+            imagesToRecrop?: string[] | null;
         };
         "catalog.ReviewLogEntry": {
             /** Format: uuid */
@@ -30388,7 +31037,7 @@ export interface components {
              * @enum {string}
              */
             severity: "blocking" | "warning";
-            /** @description Machine-checkable parameters passed to media.checkImage, e.g. { "minWidth": 1000 } */
+            /** @description Machine-checkable parameters passed to media.checkImage, e.g. { "minWidth": 1000 }. aspectRatios are ignored for product photos: the product image spec's ratio (media.productImage) applies to every category */
             check?: unknown;
         };
         "catalog.AttributeAdmin": {
@@ -30665,6 +31314,8 @@ export interface components {
             offerId: string;
             /** Format: uuid */
             productId: string;
+            /** @description For the product link /p/{productSlug}/{productId}; null when it was not known when the line was quoted */
+            productSlug?: string | null;
             /** Format: uuid */
             variantId: string;
             /** Format: uuid */
@@ -30722,6 +31373,7 @@ export interface components {
         "checkout.CouponExclusion": {
             lineId: string;
             title: string;
+            /** @description 'Already on sale' or 'Not included in this coupon' (the same wording as the cart) */
             reason: string;
         };
         "checkout.CouponResult": {
@@ -30783,6 +31435,8 @@ export interface components {
             sellerName: string;
             amount: components["schemas"]["Money"];
             free: boolean;
+            /** @description No delivery option is chosen yet (before an address): amount stays 0 and free is false; screens say 'Calculated at the next step' */
+            pending: boolean;
         };
         "checkout.QuoteTotals": {
             itemCount: number;
@@ -31097,6 +31751,8 @@ export interface components {
         "content.ProductTile": {
             /** Format: uuid */
             productId: string;
+            /** @description Product slug for the product link /p/{slug}/{productId} */
+            slug?: string | null;
             /** Format: uuid */
             offerId?: string | null;
             title: string;
@@ -31120,6 +31776,8 @@ export interface components {
         "content.SellerTile": {
             /** Format: uuid */
             sellerId: string;
+            /** @description Storefront slug for /shop/{slug} (sellers.getStorefrontCard) */
+            sellerSlug?: string | null;
             name: string;
             logo?: components["schemas"]["MediaRef"] | null;
             verified: boolean;
@@ -31130,6 +31788,10 @@ export interface components {
         "content.BrandTile": {
             /** Format: uuid */
             brandId: string;
+            /** @description Brand slug (catalog.getBrands) for the brand page */
+            slug?: string | null;
+            /** @description Slug of the brand's published collection page the tile comes from (/pages/{pageSlug}) */
+            pageSlug?: string | null;
             name: string;
             logo?: components["schemas"]["MediaRef"] | null;
             productCount: number;
@@ -31137,6 +31799,8 @@ export interface components {
         "content.CategoryTile": {
             /** Format: uuid */
             categoryId: string;
+            /** @description Category slug for the category page */
+            slug?: string | null;
             name: string;
             image?: components["schemas"]["MediaRef"] | null;
         };
@@ -31278,8 +31942,8 @@ export interface components {
             categories: components["schemas"]["content.CategoryTile"][];
             sellers: components["schemas"]["content.SellerTile"][];
             brands: components["schemas"]["content.BrandTile"][];
-            /** @description promotions.FlashSaleBlock[] when promotions is enabled (countdown, claimed meters, limits) */
-            deals?: unknown;
+            /** @description Flash sales from promotions (countdown, claimed meters, limits); null when promotions is off or for other kinds */
+            deals?: components["schemas"]["promotions.FlashSaleBlock"][] | null;
             /** @description PROMISE_STRIP only: the promises in order; empty for other kinds */
             promiseItems: components["schemas"]["content.PromiseItem"][];
             /** @description For ad_position sections: the slot to request from advertising (POST /api/store/advertising/decisions) */
@@ -31455,6 +32119,8 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             version: number;
+            /** @description About pages only (kind about): company facts and the approved-seller count; null for other pages */
+            about?: components["schemas"]["content.AboutFacts"] | null;
         };
         "content.CollectionCard": {
             /** Format: uuid */
@@ -31528,6 +32194,7 @@ export interface components {
             slug: string;
             title: string;
             category: components["schemas"]["content.HelpCategory"];
+            /** @description Help Center (/help), then the topic (/help?topic={category slug}) */
             breadcrumb: components["schemas"]["content.LinkRef"][];
             /** Format: date-time */
             effectiveAt?: string | null;
@@ -31537,7 +32204,7 @@ export interface components {
             /** @description Structured rich text (headings, lists, tables, links), sanitized */
             body: string;
             /** @description e.g. who pays return shipping */
-            tables?: unknown[] | null;
+            tables?: components["schemas"]["content.ContentTable"][] | null;
             related: components["schemas"]["content.HelpArticleSummary"][];
             /** @description e.g. Go to my orders, Contact us */
             actions: components["schemas"]["content.LinkRef"][];
@@ -31551,7 +32218,7 @@ export interface components {
             categoryId: string;
             summary?: string | null;
             body: string;
-            tables?: unknown[] | null;
+            tables?: components["schemas"]["content.ContentTable"][] | null;
             relatedIds?: string[] | null;
             policyKeys?: string[] | null;
             /** @enum {string|null} */
@@ -31580,6 +32247,50 @@ export interface components {
             helpfulPct?: number | null;
             feedbackCount: number;
             schedule: components["schemas"]["content.Schedule"];
+            /** @description Who wrote the current draft version (null without a draft); the author cannot approve it (SAME_REVIEWER) */
+            draftAuthor?: components["schemas"]["Actor"] | null;
+            /** @description The draft waits for review and the caller is not its author, so the Approve button can show */
+            canApprove: boolean;
+        };
+        "content.ContentTable": {
+            /** @description e.g. Who pays return shipping */
+            caption?: string | null;
+            /** @description Column headings */
+            columns: string[];
+            /** @description Cells as plain text, one list per row in column order */
+            rows: string[][];
+            note?: string | null;
+        };
+        "content.HelpSummaryTabs": {
+            all: number;
+            articles: number;
+            policies: number;
+            needsReview: number;
+        };
+        "content.OfficialStoreProfile": {
+            /**
+             * Format: uuid
+             * @description OFFICIAL_STORE_ID
+             */
+            id: string;
+            /** @description OFFICIAL_STORE_NAME */
+            name: string;
+            /** @description Setting content.officialStoreLogoUrl (an absolute URL or a path on the store site) */
+            logoUrl?: string | null;
+            /** @description Setting content.officialStoreBannerUrl */
+            bannerUrl?: string | null;
+            /** @description Setting content.officialStoreIntroduction */
+            introduction?: string | null;
+            /** @description Current policies of the kinds in content.officialStorePolicyKinds (returns, shipping, purchase terms by default), linking to /policies/{key} */
+            policies: components["schemas"]["content.LinkRef"][];
+            /** @description Official Store feedback summary (reviews); null when reviews is off */
+            feedback?: components["schemas"]["reviews.SellerFeedbackSummary"] | null;
+        };
+        "content.AboutFacts": {
+            /** @description Emails, postal address, founding year and headquarters (settings market.*); null when settings is off */
+            company?: components["schemas"]["settings.CompanyFacts"] | null;
+            /** @description Marketplace sellers approved to sell now (sellers.searchSellers, statuses approved and restricted); null when sellers is off */
+            approvedSellerCount?: number | null;
         };
         "content.ContentListItem": {
             /** Format: uuid */
@@ -31604,11 +32315,14 @@ export interface components {
             articlesNeedingReview: number;
             helpfulPct: number;
             helpfulWindowDays: number;
-            tabs: unknown;
+            tabs: components["schemas"]["content.HelpSummaryTabs"];
         };
         "content.ContactChannel": {
-            /** @enum {string} */
-            kind: "chat" | "phone" | "message";
+            /**
+             * @description Support owns the channels: support.contactChannels in support's order (none while support is off); live chat is not offered
+             * @enum {string}
+             */
+            kind: "phone" | "message" | "email";
             label: string;
             hours: string;
             detail: string;
@@ -31662,7 +32376,7 @@ export interface components {
             /** @enum {string} */
             state: "draft" | "in_review" | "approved" | "scheduled" | "current" | "superseded" | "withdrawn";
             body: string;
-            tables?: unknown[] | null;
+            tables?: components["schemas"]["content.ContentTable"][] | null;
             /** Format: date-time */
             effectiveAt?: string | null;
             changeSummary?: string | null;
@@ -31694,7 +32408,7 @@ export interface components {
         "content.PolicyVersionInput": {
             title?: string | null;
             body: string;
-            tables?: unknown[] | null;
+            tables?: components["schemas"]["content.ContentTable"][] | null;
             /** Format: date-time */
             effectiveAt?: string | null;
             changeSummary?: string | null;
@@ -31717,7 +32431,7 @@ export interface components {
             /** Format: date-time */
             effectiveAt: string;
             body: string;
-            tables?: unknown[] | null;
+            tables?: components["schemas"]["content.ContentTable"][] | null;
             previousVersion?: components["schemas"]["content.PolicyVersionRef"] | null;
             /** @description A scheduled version with its effective date and change summary */
             upcoming?: components["schemas"]["content.PolicyVersionRef"] | null;
@@ -31731,7 +32445,7 @@ export interface components {
             header: components["schemas"]["content.LinkRef"][];
             footer: components["schemas"]["content.FooterGroup"][];
             contact: components["schemas"]["content.ContactChannel"][];
-            /** @description settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · 500 Market St …); when settings is off: '© <year> Marketly' */
+            /** @description settings.storeInfo market.companyLine (footer line, e.g. Marketly, Inc. · Portland, OR); when settings is off: '© <year> Marketly' */
             companyLine: string;
             /** @description settings.storeInfo market.legalName; 'Marketly' when settings is off */
             legalName: string;
@@ -31922,7 +32636,7 @@ export interface components {
             orderRef?: string | null;
             caseRef?: string | null;
             returnRef?: string | null;
-            /** @description e.g. wait, cancel_item, view_case */
+            /** @description e.g. wait, cancel_item, view_case, view_return, view_order */
             actions: string[];
         };
         "customers.OverviewOrder": {
@@ -31958,6 +32672,13 @@ export interface components {
             returnId: string;
             ref: string;
             productTitle: string;
+            /**
+             * Format: uuid
+             * @description For the product link /p/{productSlug}/{productId}
+             */
+            productId?: string | null;
+            /** @description Current product slug; null when the catalog did not answer */
+            productSlug?: string | null;
             image?: components["schemas"]["MediaRef"] | null;
             returnStatus: string;
             /** @description Requested, Under review, Approved, Processing, Sent or Failed. Approved does not mean the money has arrived. */
@@ -32188,9 +32909,9 @@ export interface components {
         };
         "finance.Reference": {
             /** @enum {string} */
-            kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "fulfillment_service" | "statement" | "seller" | "reconciliation";
+            kind: "order" | "order_item" | "return" | "refund" | "case" | "chargeback" | "payout" | "adjustment" | "ad_campaign" | "fulfillment_service" | "statement" | "seller" | "reconciliation" | "receipt";
             id: string;
-            /** @description Human reference, e.g. MK-261005-17730, RT-…, PO-… */
+            /** @description Human reference, e.g. MK-261005-17730, RT-…, PO-…, REC-… (a purchasing receipt: the buying cost of the units received) */
             ref?: string | null;
         };
         "finance.SettlementRules": {
@@ -32609,6 +33330,8 @@ export interface components {
             /** Format: date */
             date?: string | null;
             reference?: components["schemas"]["finance.Reference"] | null;
+            /** @description Seller SKU of the order item the line is about (sales, fees and refunds of an item, from the order's offer snapshot); null for other lines */
+            sku?: string | null;
             description: string;
             detail?: string | null;
             units?: number | null;
@@ -32847,6 +33570,15 @@ export interface components {
             feeRefunds: components["schemas"]["Money"];
             netFeeIncome: components["schemas"]["Money"];
             adIncome: components["schemas"]["Money"];
+        };
+        "finance.DailyCompanyCost": {
+            /** Format: date */
+            date: string;
+            /** @enum {string} */
+            kind: "buying_cost" | "discount" | "shipping_expense" | "return_loss" | "write_off" | "chargeback_loss" | "supplier_credit";
+            amount: components["schemas"]["Money"];
+            /** @description Trading entries summed into amount */
+            entries: number;
         };
         "finance.MarketplaceIncome": {
             range: components["schemas"]["DateRange"];
@@ -33410,7 +34142,7 @@ export interface components {
             authenticatedAt?: string | null;
             /**
              * Format: date-time
-             * @description Set when this session passed 2-step verification; used for step-up checks
+             * @description Set when this member session passed 2-step verification. Staff sessions never have it (staff sign in with email and password; nothing requires it)
              */
             twoStepVerifiedAt?: string | null;
         };
@@ -33515,7 +34247,7 @@ export interface components {
             /** @enum {string} */
             method: "totp" | "sms" | "recovery_code";
             code: string;
-            /** @description Skip 2-step on this device for 30 days (members only; staff always verify) */
+            /** @description Skip 2-step on this device for 30 days (members only) */
             rememberDevice: boolean;
         };
         "identity.RegistrationRequest": {
@@ -33603,7 +34335,7 @@ export interface components {
         };
         "identity.TwoStepStatus": {
             enabled: boolean;
-            /** @description Always true for staff */
+            /** @description Always false: 2-step is optional for members, and staff accounts have none (they sign in with email and password) */
             required: boolean;
             methods: components["schemas"]["identity.TwoStepMethod"][];
             recoveryCodesRemaining: number;
@@ -33676,6 +34408,8 @@ export interface components {
             account: components["schemas"]["identity.AccountSummary"];
             /** Format: date-time */
             passwordChangedAt?: string | null;
+            /** @description False for accounts that sign in with Google or Apple only; password actions (change password, confirm with password) answer PASSWORD_NOT_SET */
+            hasPassword: boolean;
             email: components["schemas"]["identity.EmailStatus"];
             twoStep: components["schemas"]["identity.TwoStepStatus"];
             devices: components["schemas"]["identity.Device"][];
@@ -33744,7 +34478,8 @@ export interface components {
             contextLabel?: string | null;
             /** @description True: confirm with the current password instead of creating one */
             existingAccount: boolean;
-            requiresTwoStepSetup: boolean;
+            /** @description True for staff invitations: the accept form asks for the pass code the server operator handed over with the link */
+            requiresPassCode: boolean;
             policy: components["schemas"]["identity.PasswordPolicy"];
             /** Format: date-time */
             expiresAt: string;
@@ -33754,18 +34489,31 @@ export interface components {
             password?: string | null;
             /** @description Existing member accounts */
             currentPassword?: string | null;
+            /** @description Staff invitations: the 8-character pass code handed over with the link (XXXX-XXXX; letters in any case, the dash and spaces are ignored) */
+            passCode?: string | null;
             name?: string | null;
             device: components["schemas"]["identity.DeviceInfo"];
             /** @description From the invitation link (sent in the body, never in the URL path) */
             token: string;
         };
         "identity.AcceptInvitationResult": {
-            /** @enum {string} */
-            status: "signed_in" | "two_step_setup_required";
+            /**
+             * @description Always signed_in: the invitation is accepted and the person is signed in
+             * @enum {string}
+             */
+            status: "signed_in";
             account: components["schemas"]["identity.AccountSummary"];
             tokens?: components["schemas"]["identity.SessionTokens"] | null;
-            /** @description Staff must confirm an authenticator code before the first session */
-            twoStepSetup?: components["schemas"]["identity.TwoStepSetup"] | null;
+        };
+        "identity.StaffInvitationIssued": {
+            invitation: components["schemas"]["identity.Invitation"];
+            /**
+             * Format: uri
+             * @description SENSITIVE: the accept link (also in identity.invitation.created)
+             */
+            acceptUrl: string;
+            /** @description SENSITIVE, in-process only: the pass code, shown once as XXXX-XXXX. Only its hash is stored; it is never in an event, an HTTP response or a log */
+            passCode: string;
         };
         "identity.AccountListItem": {
             account: components["schemas"]["identity.AccountSummary"];
@@ -33808,12 +34556,12 @@ export interface components {
         };
         "identity.ReauthRequest": {
             /**
-             * @description The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers). A token works only for that purpose. Code step-ups (role-grant, staff-account, payout-destination) take an X-Step-Up-Code header instead and need no token.
+             * @description The reauth step-up purpose of the endpoint that will consume the token: account-closure (customers.requestClosure), email-change, two-step-removal and recovery-codes (identity), business-change, payout-account and seller-closure (sellers); for staff, role-grant (access roles and invitations), staff-account (identity staff accounts and invitations), payout-destination (finance) and approval (approving a request above access stepUpAbove). A token works only for that purpose.
              * @enum {string}
              */
-            purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure";
+            purpose: "account-closure" | "email-change" | "two-step-removal" | "recovery-codes" | "business-change" | "payout-account" | "seller-closure" | "role-grant" | "staff-account" | "payout-destination" | "approval";
             password?: string | null;
-            /** @description 2-step code instead of the password */
+            /** @description Members: a 2-step code instead of the password. Staff always use the password (they have no 2-step) */
             code?: string | null;
         };
         "identity.ReauthToken": {
@@ -33822,9 +34570,12 @@ export interface components {
             expiresAt: string;
         };
         "identity.OrderLinkRedemption": {
-            guestSession: components["schemas"]["identity.GuestSession"];
+            /** @description The guest session that may now open the order; null for a signed-in customer (no guest access is created: the order opens in their account when it is theirs) */
+            guestSession?: components["schemas"]["identity.GuestSession"] | null;
             /** Format: uuid */
             orderId: string;
+            /** @description The order's reference, as screens show it; null for links issued before it was recorded or by an issuer that did not pass it */
+            orderRef?: string | null;
             emailMasked: string;
         };
         "inventory.StockQuantities": {
@@ -34010,8 +34761,11 @@ export interface components {
             /** Format: uuid */
             stockItemId: string;
             newAvailable: number;
-            /** @enum {string} */
-            reasonCode: "received_stock" | "count_correction" | "damaged_or_defective" | "lost_or_missing" | "returned_item_restocked" | "moved_to_another_channel" | "other";
+            /**
+             * @description bulk_update: the row is part of a bulk stock edit (recorded as Bulk update, G53b)
+             * @enum {string}
+             */
+            reasonCode: "received_stock" | "count_correction" | "damaged_or_defective" | "lost_or_missing" | "returned_item_restocked" | "moved_to_another_channel" | "bulk_update" | "other";
         };
         "inventory.AdjustmentResult": {
             /** Format: uuid */
@@ -34472,8 +35226,11 @@ export interface components {
             expiresAt: string;
         };
         "media.Rendition": {
-            /** @enum {string} */
-            size: "thumb" | "small" | "medium" | "large" | "zoom" | "poster" | "video_720" | "video_1080";
+            /**
+             * @description Product images: detail (product page) and thumb (cards, lists) at the product image spec; images processed before it may also keep small to zoom. Other images: thumb, small, medium, large, zoom by renditionWidths
+             * @enum {string}
+             */
+            size: "thumb" | "small" | "medium" | "large" | "zoom" | "detail" | "poster" | "video_720" | "video_1080";
             /**
              * Format: uri
              * @description Signed link to GET /files/{bucket}/{key}: permanent for public files (usable as <img src>), short-lived for private ones
@@ -34508,7 +35265,7 @@ export interface components {
             visibility: "public" | "private";
             /**
              * Format: uri
-             * @description Public: permanent signed link to the medium rendition (images) or poster (video). Private files have no URL; use the download endpoint.
+             * @description Public: permanent signed link to the medium rendition (images; the detail rendition for product images) or poster (video). Private files have no URL; use the download endpoint.
              */
             url?: string | null;
             renditions: components["schemas"]["media.Rendition"][];
@@ -34648,9 +35405,44 @@ export interface components {
             /** @description Public URLs return a neutral placeholder instead of 404 */
             showPlaceholder: boolean;
         };
+        "media.ImageSize": {
+            width: number;
+            height: number;
+        };
+        "media.ProductImageSpec": {
+            /** @description W:H, e.g. 1:1 or 4:5 (setting media.productImage) */
+            aspectRatio: string;
+            /** @description Product page image width in px */
+            detailWidth: number;
+            /** @description Thumbnail width in px (cards, lists, cart, orders) */
+            thumbnailWidth: number;
+            /** @description WebP and JPEG quality, 50–95 */
+            quality: number;
+            /** @description The ratio as two whole numbers */
+            ratio: components["schemas"]["media.ImageSize"];
+            /** @description detailWidth × round(detailWidth × H ÷ W): the size product images are uploaded at, and their minimum */
+            detail: components["schemas"]["media.ImageSize"];
+            /** @description thumbnailWidth × round(thumbnailWidth × H ÷ W) */
+            thumbnail: components["schemas"]["media.ImageSize"];
+        };
+        "media.ImageSpecs": {
+            productImage: components["schemas"]["media.ProductImageSpec"];
+        };
+        "media.RecropItem": {
+            /** Format: uuid */
+            assetId: string;
+            owner: components["schemas"]["media.MediaOwner"];
+            /** @description true: the image no longer has the spec's aspect ratio (re-crop it); false: it has it again */
+            recrop: boolean;
+            /** @description Active usages of the image (catalog: product_image and variant_image with the product id) */
+            usages: components["schemas"]["media.Usage"][];
+        };
         "messaging.Subject": {
-            /** @enum {string} */
-            kind: "order" | "order_item" | "return" | "case" | "seller_account" | "application";
+            /**
+             * @description product: a pre-sale message about one of the seller's products (no order)
+             * @enum {string}
+             */
+            kind: "order" | "order_item" | "return" | "case" | "seller_account" | "application" | "product";
             /** Format: uuid */
             orderId?: string | null;
             orderRef?: string | null;
@@ -34662,8 +35454,15 @@ export interface components {
             /** Format: uuid */
             caseId?: string | null;
             caseRef?: string | null;
+            /**
+             * Format: uuid
+             * @description kind product: the product asked about
+             */
+            productId?: string | null;
             /** @description e.g. Linen duvet cover */
             title: string;
+            /** @description Order conversations: the items concerned, e.g. Linen duvet cover, or Linen duvet cover + 2 more items (the seller's package, or the one item). Null on conversations started before it was kept, until the conversation is opened */
+            itemSummary?: string | null;
             /** Format: uri */
             imageUrl?: string | null;
             /** @description e.g. Package 3 of 3 */
@@ -34705,7 +35504,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /**
-             * @description staff_seller: started by Marketly staff with a seller or seller applicant
+             * @description order: customer with a seller or the Official Store (about an order, item, return, or a product before purchase: subject.kind product); staff_seller: started by Marketly staff with a seller or seller applicant
              * @enum {string}
              */
             kind: "order" | "support" | "staff_seller";
@@ -34771,6 +35570,8 @@ export interface components {
             hidden: boolean;
             hiddenReason?: string | null;
             clientMessageId?: string | null;
+            /** @description The caller already reported this message (any report status; staff reads: false) */
+            viewerReported: boolean;
             /** Format: date-time */
             at: string;
         };
@@ -34834,6 +35635,21 @@ export interface components {
             orderId: string;
             /** Format: uuid */
             orderItemId?: string | null;
+            /**
+             * Format: uuid
+             * @description A return on the seller's items of the order: the conversation is about the return (Return.conversation shows it; G55b)
+             */
+            returnId?: string | null;
+            body: string;
+            mediaIds?: string[] | null;
+            clientMessageId?: string | null;
+        };
+        "messaging.ProductConversationInput": {
+            /**
+             * Format: uuid
+             * @description The offer the customer asks about (its seller and product); the Official Store's offers reach the Official Store team
+             */
+            offerId: string;
             body: string;
             mediaIds?: string[] | null;
             clientMessageId?: string | null;
@@ -34847,6 +35663,26 @@ export interface components {
             awaitingReply: number;
             overdue: number;
             period: components["schemas"]["DateRange"];
+        };
+        "messaging.DailyReplyStats": {
+            /**
+             * Format: date
+             * @description Market day the customer's message that waits for a reply was sent
+             */
+            date: string;
+            /**
+             * Format: uuid
+             * @description OFFICIAL_STORE_ID for Official Store conversations
+             */
+            sellerId: string;
+            /** @description Customer messages that started a wait for the seller's reply (a reply round) */
+            waiting: number;
+            replied: number;
+            /** @description Minutes from the customer's message to the seller's reply, summed over replied (wall-clock time) */
+            replyMinutesTotal: number;
+            /** @description Replies within the reply target (targetHours) */
+            repliedWithinTarget: number;
+            targetHours: number;
         };
         "messaging.ReplyTemplate": {
             /** Format: uuid */
@@ -34938,7 +35774,7 @@ export interface components {
             /** @description order, order_item, shipment, return, refund, case, conversation, product, seller_order, payout, statement, hold, restriction, approval, queue, setting_change, account, campaign */
             kind: string;
             id: string;
-            /** @description MK-260914-48213, RT-261002-0520, CS-261005-3381, PO-261005-3381 */
+            /** @description Reference of the record the screen opens, next to its id: MK-260914-48213 for order, shipment (tracking) and seller order links (refund notices link to the order, the return or the case and carry that reference, never the RF- one), RT-261002-0520, CS-261005-3381, PO-261005-3381 */
             ref?: string | null;
             /** @description Button text, e.g. Open dispatch queue */
             label?: string | null;
@@ -34988,7 +35824,7 @@ export interface components {
             group: string;
             title: string;
             body: string;
-            /** @description Icon name from the design system, e.g. truck */
+            /** @description Lucide icon name as lucide-react 1.x names it, e.g. truck, triangle-alert, circle-x (never the old aliases alert-triangle, x-circle) */
             icon?: string | null;
             /** @enum {string} */
             tone: "info" | "success" | "warning" | "danger" | "brand" | "deal" | "neutral";
@@ -34997,6 +35833,11 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             readAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Archived by me (hidden from the inbox and its counts; listed with archived=true)
+             */
+            archivedAt?: string | null;
             actionRequired: boolean;
             deadline?: components["schemas"]["Deadline"] | null;
             /**
@@ -35119,10 +35960,11 @@ export interface components {
         "notifications.TemplateContent": {
             /** @description Email; keep under 60 characters */
             subject?: string | null;
+            /** @description Email preview line with {{variables}}; shortened to 90 characters after rendering (never inside a variable) */
             preheader?: string | null;
             /** @description In-app and push title */
             title?: string | null;
-            /** @description Plain text with {{variables}}; email HTML is rendered from the layout */
+            /** @description Plain text with {{variables}}; email HTML is rendered from the layout; push bodies are shortened to 140 characters after rendering */
             body: string;
             button?: components["schemas"]["notifications.TemplateButton"] | null;
             /** @description Marketly Orders <orders@marketly.example> */
@@ -35745,6 +36587,8 @@ export interface components {
             orderWithinMinutes?: number | null;
             /** @description Holiday or known interruption (from shipping) */
             serviceNotice?: string | null;
+            /** @description The delivery location this estimate is for (DeliverTo.label), e.g. 'Portland 97205' */
+            locationLabel?: string | null;
         };
         "offers.Availability": {
             /** @enum {string} */
@@ -35858,6 +36702,28 @@ export interface components {
             variants: components["schemas"]["offers.VariantAvailability"][];
             quantityOptions: number[];
             unavailable?: components["schemas"]["offers.UnavailableInfo"] | null;
+            /** @description Present when the Official Store has an offer for this variant that can't be bought at this location while another seller's offer is selected (the 'Official Store out of stock, other sellers have it' state); null otherwise */
+            officialStore?: components["schemas"]["offers.OfficialStoreCue"] | null;
+        };
+        "offers.OfficialStoreCue": {
+            /** Format: uuid */
+            offerId: string;
+            /**
+             * @description out_of_stock: no stock now; not_shippable: does not ship to the delivery location; unavailable: paused or not eligible
+             * @enum {string}
+             */
+            state: "out_of_stock" | "not_shippable" | "unavailable";
+            /** @description e.g. 'Out of stock at the Official Store' */
+            title: string;
+            /** @description e.g. 'Expected back around 2026-10-28 (estimate). Other sellers have it now.' */
+            message: string;
+            /**
+             * Format: date
+             * @description From inventory incoming stock; an estimate
+             */
+            expectedRestockDate?: string | null;
+            /** @description The Official Store's price for the variant */
+            price: components["schemas"]["Money"];
         };
         "offers.OtherOffersCue": {
             count: number;
@@ -35925,6 +36791,11 @@ export interface components {
             statusReason?: components["schemas"]["offers.StatusReason"] | null;
             featured: boolean;
             featuredEligible: boolean;
+            /**
+             * Format: uuid
+             * @description The inventory stock item the offer sells from (for stock pages and bulk stock updates)
+             */
+            stockItemId: string;
         };
         "offers.StockCue": {
             available: number;
@@ -36090,6 +36961,10 @@ export interface components {
             /** @enum {string} */
             result: "ready" | "error" | "unchanged" | "applied" | "skipped" | "pending_approval";
             error?: components["schemas"]["offers.BulkRowError"] | null;
+            /** @description Signed price change in percent when the row changes the price */
+            changePct?: number | null;
+            /** @description Seller files: the row changes a published offer's price by more than largeSellerPriceChangePct, so apply needs confirmLargeChanges. Draft offers are exempt; always false on Official Store files (those go through price-change approval) */
+            largeChange: boolean;
         };
         "offers.BulkRowError": {
             /**
@@ -36167,6 +37042,7 @@ export interface components {
             deliveryDayAdjustmentPct: number;
             /** @description Conditions that compete by default, e.g. ['new']; others compete only within their condition filter */
             competingConditions: string[];
+            /** @description Applied in order when adjusted totals are exactly equal: official_store (the Official Store's offer first), on_time_dispatch (better record first), earliest_publication. Offer id decides last. Version 2 (owner decision G17b): ['official_store', 'on_time_dispatch', 'earliest_publication'] */
             tieBreakers: string[];
         };
         "offers.FeaturedRuleInput": {
@@ -36375,6 +37251,8 @@ export interface components {
             deliveredAt?: string | null;
             /** Format: date-time */
             returnWindowEndsAt?: string | null;
+            /** @description Units on a bought label the carrier does not have yet (not handed over): neither shippable nor cancellable until the label is voided or handed over. Always set in orders' own responses (0 when none) */
+            onLabelQuantity?: number | null;
             /**
              * Format: uuid
              * @description Set when a partial cancel, shipment or return split the line
@@ -36556,12 +37434,37 @@ export interface components {
             statusLabel: string;
             total: components["schemas"]["Money"];
             itemCount: number;
+            /** @description Units per item state, e.g. { shipped: 2, delivered: 1 }; adds up to itemCount */
+            itemStates: {
+                [key: string]: number;
+            };
             sellerCount: number;
             packageCount: number;
             packages: components["schemas"]["orders.PackageLine"][];
             thumbnails: components["schemas"]["MediaRef"][];
+            /** @description Every item line of the order (product links and Buy again); thumbnails are the first four item images */
+            items: components["schemas"]["orders.OrderSummaryItem"][];
             note?: string | null;
             actions: ("view" | "track" | "return" | "cancel" | "review" | "buy_again")[];
+        };
+        "orders.OrderSummaryItem": {
+            /** Format: uuid */
+            itemId: string;
+            /** Format: uuid */
+            productId: string;
+            /** @description For the product link /p/{productSlug}/{productId}; null when the catalog did not answer */
+            productSlug?: string | null;
+            /** Format: uuid */
+            variantId: string;
+            /**
+             * Format: uuid
+             * @description The offer bought (Buy again adds it to the cart)
+             */
+            offerId: string;
+            title: string;
+            variantLabel: string;
+            image?: components["schemas"]["MediaRef"] | null;
+            quantity: number;
         };
         "orders.OrderDisplayStatus": {
             /**
@@ -36820,6 +37723,8 @@ export interface components {
             state: string;
             shippedQuantity: number;
             cancelledQuantity: number;
+            /** @description Units on a bought label not handed over yet: subtract them from what can still be shipped or cancelled */
+            onLabelQuantity: number;
         };
         "orders.SellerOrderMoney": {
             itemSubtotal: components["schemas"]["Money"];
@@ -36904,6 +37809,8 @@ export interface components {
             /** @description Who handles the overdue group (warehouse, seller or a named manager) */
             owner?: string | null;
             flags: components["schemas"]["orders.OrderFlag"][];
+            /** @description Open shipping delivery exceptions on the order (late dispatch, missing tracking, failed delivery …), oldest due first, from shipping.openExceptionIdsForOrders (orders' own exception facts when shipping does not answer): the Admin Center reminds the seller with POST /api/admin/shipping/exceptions/{id}/notify-seller */
+            openExceptionIds: string[];
         };
         "orders.GroupMoney": {
             /** Format: uuid */
@@ -37237,6 +38144,16 @@ export interface components {
             /** Format: uuid */
             orderId?: string | null;
             orderRef?: string | null;
+            /**
+             * Format: date-time
+             * @description When the order was placed (orders' placedAt); null while no order exists
+             */
+            placedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description When the payment failed (state failed only)
+             */
+            failedAt?: string | null;
             /** Format: date-time */
             lastCheckedAt?: string | null;
             nextCheckInSeconds?: number | null;
@@ -37956,6 +38873,10 @@ export interface components {
             leavePolicy: string;
             /** @description Historical context; never a promise of sales */
             salesNote?: string | null;
+            /** @description The text the seller agrees to by accepting (worded for the eligible offers; once accepted, the exact text recorded with the participation) */
+            consentText: string;
+            /** @description Version of the consent wording shown; send it back as consentTextVersion when accepting */
+            consentTextVersion: string;
         };
         "promotions.SellerDiscountInput": {
             name: string;
@@ -38035,6 +38956,8 @@ export interface components {
             /** Format: uuid */
             sellerId: string;
             sellerName: string;
+            /** @description Storefront slug for /shop/:slug; null for the Official Store */
+            sellerSlug?: string | null;
             dealPrice: components["schemas"]["Money"];
             regularPrice: components["schemas"]["Money"];
             percentOffBps: number;
@@ -38133,8 +39056,11 @@ export interface components {
             discountCost: components["schemas"]["promotions.FundingBreakdown"];
             sharedCost: components["schemas"]["Money"];
             officialMargin: {
+                /** @description Official Store gross margin % over the same number of days just before the range (reports.officialMargin); null when reports is off or nothing was costed */
                 before?: number | null;
+                /** @description Official Store gross margin % in the range */
                 after?: number | null;
+                /** @description after − before in points; without both, the change of official revenue over its cost basis on promoted orders */
                 changePts?: number | null;
             };
             couponRedemptions: number;
@@ -38236,6 +39162,8 @@ export interface components {
             title: string;
             image?: components["schemas"]["MediaRef"] | null;
             sellerName: string;
+            /** @description Storefront slug for /shop/:slug; null for the Official Store */
+            sellerSlug?: string | null;
             price: components["schemas"]["Money"];
             wasPrice?: components["schemas"]["Money"] | null;
             /** Format: date-time */
@@ -38799,6 +39727,11 @@ export interface components {
             confirmedBy?: components["schemas"]["Actor"] | null;
             /** Format: date-time */
             confirmedAt?: string | null;
+            /**
+             * Format: uuid
+             * @description The inventory inbound receipt (InboundReceipt.id) made on submit, for links to the confirmation queue; null before submit
+             */
+            inboundId?: string | null;
         };
         "purchasing.ReceiptTotals": {
             expected: number;
@@ -39084,14 +40017,14 @@ export interface components {
              * @description Every dataset a screen can export. See the exportDatasets setting for owner, permission, audience and screens.
              * @enum {string}
              */
-            key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
+            key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.admin.overview" | "advertising.admin.campaigns" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
         };
         "reports.ExportDataset": {
             /**
              * @description An ExportDatasetKey value
              * @enum {string}
              */
-            key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
+            key: "reports.report_result" | "catalog.admin.products" | "offers.admin.offers" | "offers.seller.offers" | "inventory.admin.stock" | "inventory.seller.stock" | "purchasing.admin.receiving" | "shipping.admin.exceptions" | "returns.admin.requests" | "returns.seller.requests" | "returns.admin.inspections" | "support.admin.cases" | "finance.admin.ledger" | "finance.admin.payout_run" | "finance.admin.checks" | "finance.admin.overview" | "advertising.admin.campaigns" | "finance.seller.ledger" | "promotions.admin.campaigns" | "workqueues.admin.items" | "orders.admin.orders" | "orders.seller.orders" | "customers.admin.accounts" | "sellers.admin.accounts" | "audit.admin.entries" | "trust.admin.reports" | "fulfillment-service.seller.fees" | "fulfillment-service.seller.stock" | "fulfillment-service.admin.stock_by_owner" | "fulfillment-service.admin.fees";
             /** @description Module that supplies the rows through its publicApi exportRows */
             owner: string;
             title: string;
@@ -39621,8 +40554,13 @@ export interface components {
             trackingUrl?: string | null;
             /** Format: uri */
             labelUrl?: string | null;
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Drop-off link the QR encodes (prepaid_qr)
+             */
             qrCodeUrl?: string | null;
+            /** @description prepaid_qr: the code the carrier scans at drop-off; apps draw the QR from it (decision G26a) */
+            dropOffCode?: string | null;
             /** Format: date-time */
             dropOffBy?: string | null;
             dropOffPoints: components["schemas"]["returns.DropOffPoint"][];
@@ -39751,6 +40689,8 @@ export interface components {
             decision?: components["schemas"]["returns.ReturnDecision"] | null;
             shipment?: components["schemas"]["returns.ReturnShipment"] | null;
             refund?: components["schemas"]["returns.RefundView"] | null;
+            /** @description Before the refund is decided: what the customer can expect back (isEstimate true; return shipping the customer pays and the coupon share already taken off; inspection can still change it). Null once refund is set, or when the remedy is not a refund or store credit, or the return is closed (G26b) */
+            refundEstimate?: components["schemas"]["returns.RefundBreakdown"] | null;
             replacement?: components["schemas"]["returns.Replacement"] | null;
             /** @description Terms accepted at purchase */
             terms: components["schemas"]["returns.EffectiveTerms"];
@@ -39841,10 +40781,10 @@ export interface components {
             items: components["schemas"]["returns.ChecklistItem"][];
         };
         "returns.InspectionDraft": {
-            /** @description Partial InspectionInput as last saved */
-            inspection: unknown;
-            /** @description Partial RemedyInput (seller inspect-and-refund form) */
-            remedy?: unknown;
+            /** @description Partial InspectionInput as last saved (G75: typed; unknown keys and values that do not fit a field are left out) */
+            inspection: components["schemas"]["returns.InspectionDraftValues"];
+            /** @description Partial RemedyInput (seller inspect-and-refund form), typed the same way */
+            remedy?: components["schemas"]["returns.RemedyDraftValues"] | null;
             savedBy: components["schemas"]["Actor"];
             /** Format: date-time */
             savedAt: string;
@@ -39866,6 +40806,44 @@ export interface components {
              * @description Set once copied into the support case on escalation
              */
             caseId?: string | null;
+        };
+        "returns.RemedyPreviewInput": {
+            /** @enum {string} */
+            kind: "full_refund" | "partial_refund" | "store_credit";
+            /** @description Partial refunds: what is taken off and why */
+            deductions?: components["schemas"]["returns.RefundDeduction"][] | null;
+            /** @description Partial refunds: the amount instead of deductions */
+            amount?: components["schemas"]["Money"] | null;
+        };
+        "returns.RemedyPreview": {
+            /** @description The refund the customer would get (isEstimate true) */
+            breakdown: components["schemas"]["returns.RefundBreakdown"];
+            /** @description Effect on the seller's earnings; null when finance cannot answer */
+            earningsImpact?: components["schemas"]["returns.EarningsImpact"] | null;
+        };
+        "returns.InspectionDraftValues": {
+            /** @enum {string|null} */
+            conditionOutcome?: "as_described" | "damaged_by_customer" | "missing_parts" | "not_matching_request" | "wrong_item_returned" | "empty_package" | null;
+            /** @enum {string|null} */
+            grade?: "new_sealed" | "like_new" | "good" | "damaged" | null;
+            checks?: components["schemas"]["returns.InspectionCheck"][] | null;
+            missingParts?: string[] | null;
+            notes?: string | null;
+            mediaIds?: string[] | null;
+            /** @description The photos of mediaIds, resolved (empty when none, or when media is off) */
+            media: components["schemas"]["MediaRef"][];
+            /** @enum {string|null} */
+            proposedStockOutcome?: "restock" | "different_condition" | "damaged_stock" | "repair" | "return_to_supplier" | "write_off" | null;
+            regradeCondition?: string | null;
+        };
+        "returns.RemedyDraftValues": {
+            /** @enum {string|null} */
+            kind?: "full_refund" | "partial_refund" | "replacement" | "exchange" | "store_credit" | null;
+            deductions?: components["schemas"]["returns.RefundDeduction"][] | null;
+            amount?: components["schemas"]["Money"] | null;
+            explanation?: string | null;
+            /** Format: uuid */
+            exchangeVariantId?: string | null;
         };
         "returns.InspectionInput": {
             /** @enum {string} */
@@ -39928,9 +40906,14 @@ export interface components {
         };
         "returns.EarningsImpact": {
             refundToCustomer: components["schemas"]["Money"];
+            /** @description Before the refund is booked a preview (finance.previewRefundImpact); once payments sent it and finance booked it, the posted refund entries (finance.bookedRefundImpact) */
             sellerEarningsChange: components["schemas"]["Money"];
+            /** @description Preview before booking; the posted fee_refund entries after */
             feeReturned: components["schemas"]["Money"];
+            /** @description Return label the seller pays. Before the seller approves (no label yet): the price the label would cost, from shipping.estimateLabelCost (labelChargeEstimated true; G55c) */
             labelCharge?: components["schemas"]["Money"] | null;
+            /** @description labelCharge is an estimate (the label is not bought yet) */
+            labelChargeEstimated: boolean;
             totalBalanceChange: components["schemas"]["Money"];
             /** @description True when the sale was already paid out; the amount is deducted from the next payout */
             afterPayout: boolean;
@@ -40007,6 +40990,8 @@ export interface components {
         };
         "returns.ReturnCase": {
             detail: components["schemas"]["returns.ReturnDetail"];
+            /** @description Seller and staff wording, as the seller and admin lists show it, e.g. Return requested, Waiting on customer (detail.statusLabel is the customer's wording) */
+            statusLabel: string;
             customer: {
                 displayName: string;
                 city?: string | null;
@@ -40116,6 +41101,8 @@ export interface components {
             };
             item: components["schemas"]["returns.ReturnItemView"];
             reason: string;
+            /** @description The customer's reason as the code the list's reason filter takes, e.g. damaged (reason is its label, e.g. Arrived damaged) */
+            reasonCode: string;
             amount: components["schemas"]["Money"];
             owner?: components["schemas"]["Actor"] | null;
             deadline?: components["schemas"]["Deadline"] | null;
@@ -40134,6 +41121,7 @@ export interface components {
             awaitingInspection: number;
             refundsPending: components["schemas"]["Money"];
             refundsPendingCount: number;
+            /** @description Returns with a refund-without-return exception, open or completed: the Exceptions tab (same as tabCounts.exceptions) */
             exceptions: number;
             tabCounts: {
                 allOpen: number;
@@ -40238,6 +41226,8 @@ export interface components {
             editedAt?: string | null;
             helpfulCount: number;
             viewerVotedHelpful?: boolean | null;
+            /** @description The signed-in customer has reported this review (open or decided), so the Report button can say Reported; null without a customer session */
+            viewerReported?: boolean | null;
             response?: components["schemas"]["reviews.SellerResponse"] | null;
         };
         "reviews.RatingBucket": {
@@ -40255,6 +41245,8 @@ export interface components {
             writtenCount: number;
             distribution: components["schemas"]["reviews.RatingBucket"][];
             answeredQuestions: number;
+            /** @description Published questions with no published answer yet (listQuestions state=awaiting) */
+            awaitingQuestions: number;
             withPhotos: number;
         };
         "reviews.Answer": {
@@ -40272,6 +41264,8 @@ export interface components {
             /** Format: date-time */
             answeredAt: string;
             helpfulCount: number;
+            /** @description The signed-in customer marked this answer helpful; null without a customer session and outside the store's question list */
+            viewerVotedHelpful?: boolean | null;
             /** @enum {string} */
             status: "pending_review" | "published" | "edit_requested" | "removed";
         };
@@ -40345,6 +41339,16 @@ export interface components {
             average?: number | null;
             /** @description From shipping dispatch metrics, last 90 days */
             onTimeDispatchPct?: number | null;
+            /** @description The positive-feedback target sellers are measured against (setting sellerFeedbackTargetPct) and whether this summary meets it; always given by reviews */
+            target?: components["schemas"]["reviews.FeedbackTarget"] | null;
+        };
+        "reviews.FeedbackTarget": {
+            /** @description Target positive percentage, e.g. 95 */
+            positivePct: number;
+            /** @description e.g. Target: at least 95% positive */
+            label: string;
+            /** @description positivePct of the summary >= the target; null until there is feedback in the period */
+            meets?: boolean | null;
         };
         "reviews.ModerationOutcome": {
             /** @enum {string} */
@@ -40468,6 +41472,8 @@ export interface components {
                  */
                 id: string;
                 name: string;
+                /** @description Storefront slug for /shop/{slug} (sellers' public API); null for the Official Store */
+                slug?: string | null;
             };
             existingReview?: components["schemas"]["reviews.MyReview"] | null;
             existingFeedback?: components["schemas"]["reviews.MyFeedback"] | null;
@@ -40566,6 +41572,8 @@ export interface components {
             productImage?: components["schemas"]["MediaRef"] | null;
             offerSku?: string | null;
             needsAnswer: boolean;
+            /** @description The seller skipped this question (skipQuestion): it leaves the open list; customers and other sellers can still answer it */
+            skipped: boolean;
         };
         "reviews.AdminQuestionRow": {
             question: components["schemas"]["reviews.Question"];
@@ -40654,6 +41662,24 @@ export interface components {
             age: string;
             /** @enum {string} */
             status: "open" | "decided";
+            /** @description The latest decision on a decided item; null while open */
+            decision?: components["schemas"]["reviews.ModerationDecisionView"] | null;
+        };
+        "reviews.ModerationDecisionView": {
+            /**
+             * @description What was decided (ModerationDecisionInput.decision)
+             * @enum {string}
+             */
+            outcome: "keep" | "remove" | "request_edit" | "publish" | "reject_response";
+            /** @description e.g. Kept / Removed / Edit requested */
+            outcomeLabel: string;
+            reasonCode: string;
+            /** @description The policy reason in words, e.g. Personal information */
+            reason: string;
+            /** @description The moderator (name from access), or system for decisions carried out for a Trust and Risk enforcement */
+            by: components["schemas"]["Actor"];
+            /** Format: date-time */
+            at: string;
         };
         "reviews.ModerationDetail": {
             item: components["schemas"]["reviews.ModerationItem"];
@@ -40812,6 +41838,7 @@ export interface components {
             slug: string;
             title: string;
             brandName?: string | null;
+            /** @description The product image in the thumbnail size (url = thumb; detailUrl for a larger view) */
             image?: components["schemas"]["MediaRef"] | null;
             /**
              * Format: uuid
@@ -40832,6 +41859,8 @@ export interface components {
             sellerName: string;
             /** Format: uuid */
             sellerId?: string | null;
+            /** @description Storefront slug of the card's seller for /shop/{slug} (sellers' public API); null for the Official Store or when sellers cannot answer */
+            sellerSlug?: string | null;
             official: boolean;
             condition: string;
             wasPrice?: components["schemas"]["Money"] | null;
@@ -40846,6 +41875,8 @@ export interface components {
             offerCount: number;
             /** @description e.g. 'Official Store', 'Deal', 'New listing' */
             badges: string[];
+            /** @description First listed within newArrivalsWindowDays (the New listing badge) */
+            isNewListing?: boolean | null;
         };
         "search.SponsoredMark": {
             /** @description Always visible: 'Sponsored' */
@@ -40886,6 +41917,7 @@ export interface components {
             removeQuery: string;
         };
         "search.FacetValue": {
+            /** @description The value the filter takes: category, brand and store slugs (official for the Official Store), condition codes, attribute values */
             value: string;
             label: string;
             /** @description Results if this value is added to the current filters */
@@ -40893,6 +41925,10 @@ export interface components {
             selected: boolean;
             /** @description e.g. 'Shows company offers at the prices listed' for Official Store */
             note?: string | null;
+            /** @description Price presets only (facet price): send as priceMin (minor units); null = no lower bound */
+            priceMin?: number | null;
+            /** @description Price presets only: send as priceMax (minor units); null = no upper bound */
+            priceMax?: number | null;
         };
         "search.PriceRange": {
             min?: components["schemas"]["Money"] | null;
@@ -41295,10 +42331,9 @@ export interface components {
             launchReview: components["schemas"]["sellers.LaunchReview"];
             /** @description New agreement versions waiting for the owner's acceptance */
             pendingAgreements: number;
-            /** @description { name, replyTarget } */
-            accountManager?: unknown;
-            /** @description The calling member: { memberId, role, permissions, isOwner } */
-            me: unknown;
+            accountManager?: components["schemas"]["sellers.AccountManager"] | null;
+            /** @description The calling member; null for staff */
+            me?: components["schemas"]["sellers.MemberAccess"] | null;
             /** @description Staff answers only: the approval request of a closure waiting for a second reviewer (pendingChange); null for sellers */
             approval?: components["schemas"]["ApprovalInfo"] | null;
             /** @description Staff answers only: a closure waiting for a second reviewer; null for sellers */
@@ -41347,8 +42382,11 @@ export interface components {
             /** Format: date */
             effectiveFrom: string;
             summary: string;
-            /** Format: uri */
-            url: string;
+            /**
+             * Format: uri
+             * @description Store page of the published policy, <store>/policies/<key> with the content policy key (e.g. /policies/seller_agreement); null while no version is published (content off)
+             */
+            url?: string | null;
             /** @description Fee schedule shows example rates during the preview */
             isExample: boolean;
         };
@@ -41380,28 +42418,21 @@ export interface components {
             effectiveFrom: string;
         };
         "sellers.SellerProgram": {
-            /** @description { id, name, icon, needsExtraApproval } */
-            launchCategories: unknown[];
+            launchCategories: components["schemas"]["sellers.LaunchCategory"][];
             /** @description e.g. digital goods, subscriptions, gift cards, perishable food, weapons, recalled items */
             notAllowed: string[];
-            /** @description { title, detail } */
-            requirements: unknown[];
-            /** @description { categoryName, ratePct, basis } from finance fee rules when enabled, else settings; marked isExample */
-            feeExamples: unknown[];
+            requirements: components["schemas"]["sellers.ProgramRequirement"][];
+            /** @description From finance fee rules when enabled, else settings; marked isExample */
+            feeExamples: components["schemas"]["sellers.FeeExample"][];
             feeNotes: string[];
-            /** @description { holdDaysAfterDelivery, schedule, arrival, isExample } */
-            payoutTiming: unknown;
-            /** @description { name, availability: launch|later, detail } */
-            fulfillmentModels: unknown[];
+            payoutTiming: components["schemas"]["sellers.PayoutTiming"];
+            fulfillmentModels: components["schemas"]["sellers.FulfillmentModel"][];
             serviceTargets: components["schemas"]["sellers.PerformanceTarget"][];
             agreements: components["schemas"]["sellers.AgreementDocument"][];
             steps: string[];
-            /** @description { label, means, doesNotMean } */
-            verificationLabels: unknown[];
-            /** @description { q, a } */
-            faq: unknown[];
-            /** @description { email, phone, hours } */
-            contact: unknown;
+            verificationLabels: components["schemas"]["sellers.VerificationLabelInfo"][];
+            faq: components["schemas"]["sellers.FaqEntry"][];
+            contact: components["schemas"]["sellers.ProgramContact"];
             estimatedMinutes: number;
             /** @description False during invite-only launch unless the caller has a seller invitation */
             applicationsOpen: boolean;
@@ -41460,8 +42491,8 @@ export interface components {
             registrationDocumentIds?: string[] | null;
             /** @enum {string} */
             taxIdType: "ein" | "ssn";
-            /** @description Sent once; stored encrypted, only the last 4 digits are ever returned */
-            taxId: string;
+            /** @description Sent once; stored encrypted, only the last 4 digits are ever returned. Leave it out on later saves to keep the stored one (submitting needs one) */
+            taxId?: string | null;
             /** @enum {string} */
             w9Method: "online" | "uploaded";
             /** Format: uuid */
@@ -41533,8 +42564,7 @@ export interface components {
             trustReportId?: string | null;
             /** @enum {string|null} */
             level?: "low" | "medium" | "high" | null;
-            /** @description { severity: low|medium|high, text } */
-            flags: unknown[];
+            flags: components["schemas"]["sellers.RiskFlag"][];
             recommendation?: string | null;
             reviewedBy?: components["schemas"]["Actor"] | null;
             /** Format: date-time */
@@ -41550,7 +42580,8 @@ export interface components {
             documentKind?: string | null;
             /** @enum {string} */
             status: "open" | "provided" | "accepted" | "rejected";
-            response?: unknown;
+            /** @description What the applicant sent, or saved as a draft while the item is still open (G33c) */
+            response?: components["schemas"]["sellers.InfoRequestResponse"] | null;
         };
         "sellers.InformationRequest": {
             /** Format: uuid */
@@ -41567,6 +42598,11 @@ export interface components {
             /** Format: date-time */
             respondedAt?: string | null;
             deadline: components["schemas"]["Deadline"];
+            /**
+             * Format: date-time
+             * @description When the applicant last saved a draft response (PUT /applications/{id}/response-draft); null when none
+             */
+            draftSavedAt?: string | null;
         };
         "sellers.ApplicationDecision": {
             /** @enum {string} */
@@ -41609,13 +42645,12 @@ export interface components {
             missing: {
                 [key: string]: string[];
             };
-            account?: unknown;
-            business?: unknown;
-            /** @description owners (BusinessOwner[]), registrationDocumentIds, taxIdType, taxIdLast4, w9Method */
-            verification?: unknown;
+            account?: components["schemas"]["sellers.ApplicationAccountView"] | null;
+            business?: components["schemas"]["sellers.ApplicationBusinessView"] | null;
+            /** @description The tax id itself is never returned, only its last 4 digits */
+            verification?: components["schemas"]["sellers.ApplicationVerificationView"] | null;
             payout?: components["schemas"]["sellers.PayoutDetails"] | null;
-            /** @description { sameAsBusiness, contactName, phone, address } */
-            returnAddress?: unknown;
+            returnAddress?: components["schemas"]["sellers.ReturnAddressView"] | null;
             agreementsRequired: components["schemas"]["sellers.AgreementDocument"][];
             agreementsAccepted: components["schemas"]["sellers.AgreementAcceptance"][];
             documents: components["schemas"]["sellers.ApplicationDocument"][];
@@ -41623,6 +42658,8 @@ export interface components {
             decision?: components["schemas"]["sellers.ApplicationDecision"] | null;
             /** Format: uuid */
             appealId?: string | null;
+            /** @description The latest appeal against a rejection, with its state and outcome (G33d); null when none */
+            appeal?: components["schemas"]["sellers.ApplicationAppeal"] | null;
             timeline: components["schemas"]["TimelineEvent"][];
             /** Format: date-time */
             draftSavedAt: string;
@@ -41680,8 +42717,7 @@ export interface components {
             submittedAt?: string | null;
             deadline?: components["schemas"]["Deadline"] | null;
             reviewer?: components["schemas"]["Actor"] | null;
-            /** @description { passed, needsAttention, failed, pending } */
-            checks: unknown;
+            checks: components["schemas"]["sellers.CheckCounts"];
             riskLevel?: string | null;
             categories: string[];
             invited: boolean;
@@ -41706,8 +42742,7 @@ export interface components {
             state: "done" | "action_needed" | "pending" | "locked" | "not_started";
             /** @description Module that answers it: sellers, shipping, returns, finance, catalog */
             source: string;
-            /** @description { label, screen } */
-            cta?: unknown;
+            cta?: components["schemas"]["sellers.StepCta"] | null;
         };
         "sellers.SetupChecklist": {
             accountStatus: string;
@@ -41719,10 +42754,9 @@ export interface components {
             completed: number;
             total: number;
             launchReview: components["schemas"]["sellers.LaunchReview"];
-            /** @description { productId, title, reviewState, outcome: will_go_live|waits_for_approval|stays_unpublished } */
-            goLivePreview: unknown[];
-            /** @description { name, replyTarget } */
-            accountManager?: unknown;
+            /** @description One row per product */
+            goLivePreview: components["schemas"]["sellers.GoLiveItem"][];
+            accountManager?: components["schemas"]["sellers.AccountManager"] | null;
             unavailable: string[];
         };
         "sellers.BusinessDetails": {
@@ -41736,8 +42770,8 @@ export interface components {
             taxIdType: string;
             taxIdLast4: string;
             owners: components["schemas"]["sellers.BusinessOwner"][];
-            /** @description { name, email, phone, supportHours } — editable without review */
-            contact: unknown;
+            /** @description Editable without review */
+            contact: components["schemas"]["sellers.BusinessContact"];
         };
         "sellers.ChangeRequest": {
             /** Format: uuid */
@@ -41812,8 +42846,8 @@ export interface components {
             location?: string | null;
             contactOptions: components["schemas"]["sellers.ContactOptions"];
             warranty?: string | null;
-            /** @description { categoryId, name, state: active|paused, reason? } derived from offers and restrictions */
-            categories: unknown[];
+            /** @description Derived from offers and restrictions */
+            categories: components["schemas"]["sellers.ProfileCategory"][];
             collections: components["schemas"]["sellers.FeaturedCollection"][];
             claims: components["schemas"]["sellers.PublicClaim"][];
             pendingChanges: components["schemas"]["sellers.ChangeRequest"][];
@@ -41856,23 +42890,20 @@ export interface components {
             sellingSince: string;
             /** @description False while suspended; the page explains that existing orders are still looked after */
             sellingNow: boolean;
-            /** @description { positivePct, ratingCount, onTimeDispatchPct, repliesWithin24hPct, medianReplyHours } */
-            highlights: unknown;
+            highlights: components["schemas"]["sellers.StorefrontHighlights"];
             verification: components["schemas"]["sellers.VerificationLabel"];
-            /** @description { kind, text } — only staff-approved claims */
-            approvedClaims: unknown[];
-            /** @description From shipping: { shipsFrom, shipsTo, dispatch, carriers, cutoff } */
-            shipping?: unknown;
-            /** @description From returns: { window, returnShipping, warranty } */
-            returns?: unknown;
-            /** @description { canMessage, productQuestions, replyTarget, phone? } */
-            contact: unknown;
-            /** @description { categoryId, name, offerCount } from search when enabled */
-            categories: unknown[];
-            /** @description { id, title, image, offerIds, itemCount } */
-            collections: unknown[];
+            /** @description Only staff-approved claims */
+            approvedClaims: components["schemas"]["sellers.StorefrontClaim"][];
+            /** @description From shipping */
+            shipping?: components["schemas"]["sellers.StorefrontShipping"] | null;
+            /** @description From returns */
+            returns?: components["schemas"]["sellers.StorefrontReturns"] | null;
+            contact: components["schemas"]["sellers.StorefrontContact"];
+            /** @description From search when enabled */
+            categories: components["schemas"]["sellers.StorefrontCategory"][];
+            collections: components["schemas"]["sellers.StorefrontCollection"][];
             /** @description Active seller-funded promotion banner from promotions */
-            promotion?: unknown;
+            promotion?: components["schemas"]["promotions.PromoBanner"] | null;
             productCount: number;
             unavailable: string[];
             /** @description One-line store tagline under the store name */
@@ -41969,8 +43000,8 @@ export interface components {
             /** @enum {string} */
             overall: "good" | "at_risk" | "action_needed";
             metrics: components["schemas"]["sellers.PerformanceMetric"][];
-            /** @description { positivePct, ratingCount } from reviews */
-            feedback?: unknown;
+            /** @description From reviews */
+            feedback?: components["schemas"]["sellers.FeedbackSummary"] | null;
             warnings: components["schemas"]["sellers.SellerWarning"][];
             /** @description Warnings and actions, last 12 months */
             history: components["schemas"]["TimelineEvent"][];
@@ -41985,6 +43016,13 @@ export interface components {
             conditions?: string[] | null;
             offerIds?: string[] | null;
             productIds?: string[] | null;
+            /** @description Responses only: the scope's categories with their names from catalog (G58d); ignored on input */
+            categories?: components["schemas"]["sellers.ScopeCategory"][] | null;
+        };
+        "sellers.ScopeCategory": {
+            /** Format: uuid */
+            id: string;
+            name: string;
         };
         "sellers.AppealRoute": {
             /** Format: date-time */
@@ -42037,6 +43075,8 @@ export interface components {
             pendingChange?: components["schemas"]["sellers.PendingStaffChange"] | null;
             appeals: components["schemas"]["sellers.Appeal"][];
             resolutionEvidence: components["schemas"]["MediaRef"][];
+            /** @description The resolution evidence with its document type, note and time (G58e); resolutionEvidence lists the same files */
+            evidence: components["schemas"]["sellers.ResolutionEvidence"][];
             /** Format: date-time */
             liftedAt?: string | null;
             liftReason?: string | null;
@@ -42092,10 +43132,10 @@ export interface components {
             unshippedValue: components["schemas"]["Money"];
             openReturns: number;
             openCases: number;
-            /** @description { available, pending } Money from finance; they move to Held with the review date */
-            balances?: unknown;
-            /** @description { area, effect } rows shown in the suspend dialog */
-            effects: unknown[];
+            /** @description From finance; they move to Held with the review date */
+            balances?: components["schemas"]["sellers.SuspensionBalances"] | null;
+            /** @description Rows shown in the suspend dialog */
+            effects: components["schemas"]["sellers.SuspensionEffect"][];
             unavailable: string[];
         };
         "sellers.Appeal": {
@@ -42120,8 +43160,7 @@ export interface components {
             reviewer?: components["schemas"]["Actor"] | null;
             originalDecider: components["schemas"]["Actor"];
             decideBy: components["schemas"]["Deadline"];
-            /** @description { outcome, explanation, changes, decidedBy, decidedAt } */
-            decision?: unknown;
+            decision?: components["schemas"]["sellers.AppealDecision"] | null;
             /** Format: date-time */
             submittedAt: string;
             /** Format: uuid */
@@ -42143,13 +43182,14 @@ export interface components {
             /** Format: uuid */
             id: string;
             ref: string;
+            /** @description Storefront slug (/shop/:slug); the admin seller detail also accepts it in place of the id (G69a) */
+            slug: string;
             storeName: string;
             logo?: components["schemas"]["MediaRef"] | null;
             location?: string | null;
             status: string;
             verified: boolean;
-            /** @description { positivePct, ratingCount } */
-            feedback?: unknown;
+            feedback?: components["schemas"]["sellers.FeedbackSummary"] | null;
             onTimeDispatchPct?: number | null;
             openCases: number;
             /** @description From finance; what is owed to the seller, not yet paid */
@@ -42166,8 +43206,8 @@ export interface components {
             belowDispatchTarget: number;
             restrictedOrSuspended: number;
             appealsUnderReview: number;
-            /** @description { total, held, negativeCount } from finance */
-            balances?: unknown;
+            /** @description From finance (sellerBalanceTotals: total = pending + available + held); null without finance.ledger.view or when finance is off */
+            balances?: components["schemas"]["sellers.SellerBalanceTotals"] | null;
             byStatus: {
                 [key: string]: number;
             };
@@ -42176,19 +43216,301 @@ export interface components {
         "sellers.SellerAdminDetail": {
             account: components["schemas"]["sellers.SellerAccount"];
             business: components["schemas"]["sellers.BusinessDetails"];
-            /** @description { name, email, phone } */
-            owner: unknown;
+            owner: components["schemas"]["sellers.SellerOwnerContact"];
             restrictions: components["schemas"]["sellers.Restriction"][];
             performance: components["schemas"]["sellers.PerformanceSummary"];
-            /** @description From orders, returns, support: { openOrders, overdueOrders: [{ orderId, orderRef, itemTitle, statusLabel, deadline }], openReturns: [{ id, ref }], openCases: [{ id, ref }] } */
-            obligations?: unknown;
+            /** @description From orders, returns and support; null when none of them answers */
+            obligations?: components["schemas"]["sellers.SellerObligations"] | null;
             appeals: components["schemas"]["sellers.Appeal"][];
-            /** @description From finance: { pending, available, held, holds: [{ amount, reason, reviewDate, setBy }], nextPayout: { date, amount, destinationLabel, status } } */
-            payouts?: unknown;
+            /** @description From finance; null without finance.ledger.view or when finance is off */
+            payouts?: components["schemas"]["sellers.SellerPayoutsView"] | null;
             changeRequests: components["schemas"]["sellers.ChangeRequest"][];
             notes: components["schemas"]["sellers.SellerNote"][];
             history: components["schemas"]["TimelineEvent"][];
             unavailable: string[];
+        };
+        "sellers.AccountManager": {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description e.g. Replies within 1 business day */
+            replyTarget: string;
+        };
+        "sellers.MemberAccess": {
+            /** Format: uuid */
+            memberId: string;
+            role: string;
+            permissions: string[];
+            isOwner: boolean;
+        };
+        "sellers.LaunchCategory": {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Catalog category slug, used as the icon key */
+            icon?: string | null;
+            needsExtraApproval: boolean;
+        };
+        "sellers.ProgramRequirement": {
+            title: string;
+            detail: string;
+        };
+        "sellers.FeeExample": {
+            categoryName: string;
+            ratePct: number;
+            basis: string;
+            isExample: boolean;
+        };
+        "sellers.PayoutTiming": {
+            holdDaysAfterDelivery: number;
+            schedule: string;
+            arrival: string;
+            isExample: boolean;
+        };
+        "sellers.FulfillmentModel": {
+            name: string;
+            /** @enum {string} */
+            availability: "launch" | "later";
+            detail: string;
+        };
+        "sellers.VerificationLabelInfo": {
+            label: string;
+            means: string;
+            doesNotMean: string;
+        };
+        "sellers.FaqEntry": {
+            q: string;
+            a: string;
+        };
+        "sellers.ProgramContact": {
+            email: string;
+            phone: string;
+            hours: string;
+        };
+        "sellers.RiskFlag": {
+            /** @enum {string} */
+            severity: "low" | "medium" | "high";
+            text: string;
+        };
+        "sellers.InfoRequestResponse": {
+            documentIds: string[];
+            note?: string | null;
+            /** @description True while it is only a saved draft (the item is still open) */
+            draft?: boolean | null;
+        };
+        "sellers.InfoResponseItemInput": {
+            /** Format: uuid */
+            itemId: string;
+            documentIds?: string[] | null;
+            note?: string | null;
+        };
+        "sellers.ApplicationAccountView": {
+            /** @enum {string|null} */
+            accountMode?: "existing_member" | "new_seller_login" | null;
+            contactName?: string | null;
+            contactPhone?: string | null;
+            workEmail?: string | null;
+            storeName?: string | null;
+            /** @enum {string|null} */
+            sellerType?: "business" | "individual" | null;
+            market?: string | null;
+            tipsOptIn?: boolean | null;
+        };
+        "sellers.ApplicationBusinessView": {
+            /** @enum {string|null} */
+            kind?: "registered_business" | "individual" | null;
+            legalName?: string | null;
+            storeName?: string | null;
+            /** @enum {string|null} */
+            businessType?: "llc" | "corporation" | "partnership" | "sole_proprietor" | null;
+            stateOfRegistration?: string | null;
+            registryNumber?: string | null;
+            address?: components["schemas"]["Address"] | null;
+            phone?: string | null;
+            website?: string | null;
+            categoryIds?: string[] | null;
+            /** @enum {string|null} */
+            plannedProductCount?: "1_20" | "21_100" | "101_500" | "over_500" | null;
+            plannedProducts?: string | null;
+            shippingPlan?: string | null;
+            supportHours?: string | null;
+        };
+        "sellers.ApplicationVerificationView": {
+            owners: components["schemas"]["sellers.BusinessOwner"][];
+            registrationDocumentIds: string[];
+            /** @enum {string|null} */
+            taxIdType?: "ein" | "ssn" | null;
+            taxIdLast4?: string | null;
+            /** @enum {string|null} */
+            w9Method?: "online" | "uploaded" | null;
+            /** Format: uuid */
+            w9DocumentId?: string | null;
+        };
+        "sellers.ReturnAddressView": {
+            sameAsBusiness: boolean;
+            contactName: string;
+            phone: string;
+            address?: components["schemas"]["Address"] | null;
+        };
+        "sellers.ApplicationAppeal": {
+            /** Format: uuid */
+            id: string;
+            ref: string;
+            level: number;
+            /** @enum {string} */
+            state: "submitted" | "under_review" | "upheld" | "overturned" | "partly_overturned" | "withdrawn";
+            /** Format: date-time */
+            submittedAt: string;
+            decideBy?: components["schemas"]["Deadline"] | null;
+            decision?: components["schemas"]["sellers.AppealDecision"] | null;
+        };
+        "sellers.CheckCounts": {
+            passed: number;
+            needsAttention: number;
+            failed: number;
+            pending: number;
+        };
+        "sellers.StepCta": {
+            label: string;
+            /** @description Prototype screen id, e.g. seller/store */
+            screen: string;
+        };
+        "sellers.GoLiveItem": {
+            /** Format: uuid */
+            productId: string;
+            title: string;
+            reviewState: string;
+            /** @enum {string} */
+            outcome: "will_go_live" | "waits_for_approval" | "stays_unpublished";
+        };
+        "sellers.BusinessContact": {
+            name?: string | null;
+            email?: string | null;
+            phone?: string | null;
+            supportHours?: string | null;
+        };
+        "sellers.ProfileCategory": {
+            /** Format: uuid */
+            categoryId: string;
+            name: string;
+            /** @enum {string} */
+            state: "active" | "paused";
+            reason?: string | null;
+        };
+        "sellers.StorefrontHighlights": {
+            positivePct?: number | null;
+            ratingCount?: number | null;
+            onTimeDispatchPct?: number | null;
+            repliesWithin24hPct?: number | null;
+            medianReplyHours?: number | null;
+        };
+        "sellers.StorefrontClaim": {
+            /** @enum {string} */
+            kind: "brand_affiliation" | "authorized_retailer" | "certification" | "award" | "other";
+            text: string;
+        };
+        "sellers.StorefrontShipping": {
+            shipsFrom?: string | null;
+            /** @description Coverage label */
+            shipsTo: string;
+            /** @description e.g. Ships in 1 business day */
+            dispatch: string;
+            carriers: string[];
+            /** @description Same-day cutoff HH:MM, market time */
+            cutoff?: string | null;
+        };
+        "sellers.StorefrontReturns": {
+            /** @description e.g. 30 days */
+            window: string;
+            returnShipping: string;
+            warranty?: string | null;
+        };
+        "sellers.StorefrontContact": {
+            canMessage: boolean;
+            productQuestions: boolean;
+            /** @enum {string} */
+            replyTarget: "within_12h" | "within_24h";
+            phone?: string | null;
+        };
+        "sellers.StorefrontCategory": {
+            /** Format: uuid */
+            categoryId: string;
+            name: string;
+            offerCount: number;
+        };
+        "sellers.StorefrontCollection": {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            image?: components["schemas"]["MediaRef"] | null;
+            offerIds: string[];
+            offerCount: number;
+            position: number;
+            visible: boolean;
+            itemCount: number;
+        };
+        "sellers.FeedbackSummary": {
+            positivePct?: number | null;
+            ratingCount?: number | null;
+        };
+        "sellers.ResolutionEvidence": {
+            file?: components["schemas"]["MediaRef"] | null;
+            /** @enum {string|null} */
+            documentType?: "authorization_letter" | "invoice" | "certificate" | "test_report" | "license" | "other" | null;
+            note?: string | null;
+            /** Format: date-time */
+            at?: string | null;
+        };
+        "sellers.SuspensionBalances": {
+            available: components["schemas"]["Money"];
+            pending: components["schemas"]["Money"];
+        };
+        "sellers.SuspensionEffect": {
+            area: string;
+            effect: string;
+        };
+        "sellers.AppealDecision": {
+            /** @enum {string} */
+            outcome: "upheld" | "overturned" | "partly_overturned";
+            explanation: string;
+            /** @description For partly_overturned: what changed (new scope, affected activities or review date) */
+            changes?: unknown;
+            decidedBy: components["schemas"]["Actor"];
+            /** Format: date-time */
+            decidedAt: string;
+        };
+        "sellers.SellerBalanceTotals": {
+            total: components["schemas"]["Money"];
+            held: components["schemas"]["Money"];
+            negativeCount: number;
+        };
+        "sellers.SellerOwnerContact": {
+            name: string;
+            email?: string | null;
+            phone?: string | null;
+        };
+        "sellers.ObligationRef": {
+            /** Format: uuid */
+            id?: string | null;
+            ref?: string | null;
+        };
+        "sellers.OverdueOrderRef": {
+            /** Format: uuid */
+            orderId: string;
+            orderRef: string;
+        };
+        "sellers.SellerObligations": {
+            openOrders: number;
+            overdueOrders: components["schemas"]["sellers.OverdueOrderRef"][];
+            openReturns: components["schemas"]["sellers.ObligationRef"][];
+            openCases: components["schemas"]["sellers.ObligationRef"][];
+        };
+        "sellers.SellerPayoutsView": {
+            pending: components["schemas"]["Money"];
+            available: components["schemas"]["Money"];
+            held: components["schemas"]["Money"];
+            holds: components["schemas"]["finance.Hold"][];
+            nextPayout?: components["schemas"]["finance.NextPayout"] | null;
         };
         "sellers.SellerInvitation": {
             /** Format: uuid */
@@ -42251,6 +43573,39 @@ export interface components {
             legalName: string;
             /** @description market.companyLine */
             companyLine: string;
+            /** @description market.defaultDeliveryLocation: where prices and delivery dates are estimated before a visitor gives an address */
+            defaultDeliveryLocation?: components["schemas"]["settings.DeliveryLocation"] | null;
+            /** @description Public company facts (market.* keys) */
+            company?: components["schemas"]["settings.CompanyFacts"] | null;
+        };
+        "settings.DeliveryLocation": {
+            /** @description e.g. 97205 */
+            postalCode: string;
+            /** @description e.g. Portland, OR 97205, shown as Deliver to Portland, OR 97205 */
+            label: string;
+        };
+        "settings.CompanyFacts": {
+            /**
+             * Format: email
+             * @description market.helpEmail
+             */
+            helpEmail?: string | null;
+            /**
+             * Format: email
+             * @description market.sellersEmail (seller enquiries)
+             */
+            sellersEmail?: string | null;
+            /**
+             * Format: email
+             * @description market.pressEmail
+             */
+            pressEmail?: string | null;
+            /** @description market.postalAddress, one line */
+            postalAddress?: string | null;
+            /** @description market.foundedYear */
+            foundedYear?: number | null;
+            /** @description market.headquarters, e.g. Portland, OR */
+            headquarters?: string | null;
         };
         "settings.ServiceRegion": {
             code: string;
@@ -42295,8 +43650,12 @@ export interface components {
             serviceRegionLabel: string;
             /** @description Legal name of the operating company, e.g. Marketly, Inc. (footer, policies, receipts) */
             legalName: string;
-            /** @description One-line company details for the footer and emails, e.g. Marketly, Inc. · 500 Market St, San Francisco, CA */
+            /** @description One-line company details for the footer and emails, e.g. Marketly, Inc. · Portland, OR */
             companyLine: string;
+            /** @description Where prices and delivery dates are estimated before a visitor gives an address (Deliver to … label); always given */
+            defaultDeliveryLocation?: components["schemas"]["settings.DeliveryLocation"] | null;
+            /** @description Contact emails, postal address, founding year and headquarters for the About and contact pages; always given */
+            company?: components["schemas"]["settings.CompanyFacts"] | null;
         };
         "settings.PublicSupport": {
             hoursLabel: string;
@@ -42402,7 +43761,12 @@ export interface components {
              * @enum {string}
              */
             applyScope: "new_only" | "open_commitments";
-            reason: string;
+            /** @description Why. Optional while drafting and previewing; required by submitChange (given here or in its body) */
+            reason?: string | null;
+        };
+        "settings.SubmitChangeInput": {
+            /** @description Why the change is made; replaces the draft's reason. Required when the draft has none */
+            reason?: string | null;
         };
         "settings.ChangeItem": {
             key: string;
@@ -42449,7 +43813,8 @@ export interface components {
             effectiveAt: string;
             /** @enum {string} */
             applyScope: "new_only" | "open_commitments";
-            reason: string;
+            /** @description Null on a draft saved without one (the reason is asked at submit) */
+            reason?: string | null;
             impact: components["schemas"]["settings.ImpactPreview"];
             createdBy: components["schemas"]["Actor"];
             /** Format: date-time */
@@ -42463,11 +43828,29 @@ export interface components {
             timeline: components["schemas"]["TimelineEvent"][];
         };
         "settings.SectionValue": {
+            /** @description The setting key (definition key) for values settings owns: edit it with POST /changes; for values another module reports, that module's own key or null */
             key?: string | null;
             label: string;
             valueText: string;
+            /** @description The raw value in force (what ChangeItemInput.value takes); null for values another module reports without one */
+            value?: unknown;
+            /** @description SettingDefinition.valueType for settings-owned values */
+            valueType?: string | null;
             hint?: string | null;
             exampleValue: boolean;
+        };
+        "settings.SellerSettingValue": {
+            /** @description e.g. catalog.minDescriptionLength */
+            key: string;
+            module: string;
+            label: string;
+            description: string;
+            valueType: string;
+            unit?: string | null;
+            /** @description The value in force now */
+            value: unknown;
+            /** @description e.g. 40 characters */
+            valueText: string;
         };
         "settings.SectionLink": {
             module: string;
@@ -42819,8 +44202,14 @@ export interface components {
             pendingChange?: components["schemas"]["shipping.PendingChange"] | null;
             customerPreview: components["schemas"]["shipping.CustomerPreview"];
             history: components["schemas"]["TimelineEvent"][];
+            /** @description Handling days the seller may choose (setting sellerHandlingRange, default 0–3; 0 = same business day). updateSellerSettings refuses others with HANDLING_OUT_OF_RANGE */
+            allowedHandlingDays: components["schemas"]["shipping.HandlingRange"];
             /** @description 'New settings apply to orders placed after the effective time. Existing orders keep the delivery terms and prices the customer accepted.' */
             applyNote: string;
+        };
+        "shipping.HandlingRange": {
+            min: number;
+            max: number;
         };
         "shipping.PendingChange": {
             /** Format: date-time */
@@ -43036,6 +44425,8 @@ export interface components {
             reason?: string | null;
             options: components["schemas"]["shipping.DeliveryOption"][];
             default?: components["schemas"]["shipping.DeliveryOption"] | null;
+            /** @description Lowest order value that makes the default option's method free (method free-over, profile threshold or an active free-shipping rule); null when there is none or it is always free */
+            freeOver?: components["schemas"]["Money"] | null;
         };
         "shipping.PackageQuoteItem": {
             lineId: string;
@@ -43176,9 +44567,11 @@ export interface components {
             labelUrl: string;
             /**
              * Format: uri
-             * @description Return labels with labelMethod prepaid_qr: code scanned at drop-off
+             * @description Return labels with labelMethod prepaid_qr: drop-off link (the URL the QR encodes)
              */
             qrCodeUrl?: string | null;
+            /** @description Return labels with labelMethod prepaid_qr: the code the carrier scans at drop-off; apps draw the QR from it (decision G26a) */
+            dropOffCode?: string | null;
             /** Format: date-time */
             dropOffBy?: string | null;
             /** @enum {string} */
@@ -43262,7 +44655,7 @@ export interface components {
             /** Format: uuid */
             sellerId?: string | null;
             sellerName: string;
-            /** @description 'Package 2 of 3' */
+            /** @description 'Shipment 2 of 3': this shipment among the order's shipments (orders' 'Package x of y' is the seller group); 'Return parcel' for returns */
             packageLabel: string;
             carrierCode?: string | null;
             carrierName?: string | null;
@@ -43412,6 +44805,8 @@ export interface components {
             itemsSummary: string;
             /** @description The order items the exception is about (empty when it covers the whole group) */
             orderItemIds: string[];
+            /** @description orderItemIds with the units concerned (G75), in the same order */
+            items: components["schemas"]["shipping.ExceptionItem"][];
             /** @description e.g. 'USPS number not recognized' or 'Label created, no scan 36 h' */
             situation: string;
             /** @description The plan's required response for the kind */
@@ -43438,6 +44833,12 @@ export interface components {
             openedBy: components["schemas"]["Actor"];
             /** Format: date-time */
             openedAt: string;
+        };
+        "shipping.ExceptionItem": {
+            /** Format: uuid */
+            orderItemId: string;
+            /** @description Units of the order item the exception is about; null on exceptions opened before quantities were kept */
+            quantity?: number | null;
         };
         "shipping.ExceptionOwner": {
             /** Format: uuid */
@@ -43536,6 +44937,33 @@ export interface components {
             /** @description e.g. Medium box · 30 × 20 × 15 cm · 1.2 kg */
             defaultParcelLabel?: string | null;
             dispatchLabel: string;
+        };
+        "support.DailyCaseStats": {
+            /**
+             * Format: date
+             * @description Market day the cases were opened
+             */
+            date: string;
+            /**
+             * Format: uuid
+             * @description Seller the cases are about; null for cases about no seller (Official Store orders, account questions)
+             */
+            sellerId?: string | null;
+            categoryKey: string;
+            categoryLabel: string;
+            group: string;
+            /** @enum {string} */
+            audience: "customer" | "seller";
+            opened: number;
+            /** @description Of the cases opened, those with a first reply (by Marketly support, or the seller when the seller handles the case) */
+            firstReplied: number;
+            /** @description Minutes from opening to the first reply, summed over firstReplied (wall-clock time) */
+            firstReplyMinutesTotal: number;
+            /** @description First replies on or before the case's first-response due time (targets count business hours) */
+            firstReplyWithinTarget: number;
+            /** @description Customer cases about a seller where the seller replied */
+            sellerReplied: number;
+            sellerReplyMinutesTotal: number;
         };
         "support.CaseCategory": {
             /** @description e.g. delivery_late, return_dispute, fees_payouts */
@@ -43813,7 +45241,8 @@ export interface components {
         "support.CaseCreateInput": {
             /** @enum {string} */
             kind: "customer_help" | "order_problem";
-            category: string;
+            /** @description Help topic key. May be left out when problemType is given: the topic is derived from it */
+            category?: string | null;
             /** Format: uuid */
             orderId?: string | null;
             orderItemIds?: string[] | null;
@@ -43824,18 +45253,38 @@ export interface components {
             mediaIds?: string[] | null;
             /** @enum {string|null} */
             desiredRemedy?: "refund" | "keep_waiting" | "replacement" | "other" | null;
-            /** @enum {string|null} */
+            /**
+             * @description chat is accepted from older clients and answered by email (live chat is not offered, decision G7)
+             * @enum {string|null}
+             */
             replyChannel?: "email" | "chat" | "phone" | null;
             callbackPhone?: string | null;
         };
         "support.ContactChannel": {
-            /** @enum {string} */
-            kind: "email" | "chat" | "phone" | "messages";
+            /**
+             * @description No chat: live chat is not offered (decision G7)
+             * @enum {string}
+             */
+            kind: "email" | "phone" | "messages";
             label: string;
-            /** @description e.g. Within 1 business day / About 2 minutes */
+            /** @description e.g. Within 1 business day / About 5 minutes */
             expectedResponse: string;
             available: boolean;
             hours: string;
+            /** @description One line under the label, e.g. the phone number or We reply within one business day */
+            detail?: string | null;
+            /** @description Where the channel opens, e.g. Write to us → /help/contact, or tel: for the phone */
+            action?: components["schemas"]["support.ContactAction"] | null;
+        };
+        "support.ContactAction": {
+            label: string;
+            /** @description Store or Seller Center path, or a tel: link */
+            url: string;
+            /**
+             * @description help: an app page; external: a tel: link
+             * @enum {string}
+             */
+            kind: "help" | "external";
         };
         "support.ContactOptions": {
             topics: components["schemas"]["support.CaseCategory"][];
@@ -44133,6 +45582,40 @@ export interface components {
             statusLabel?: string | null;
             /** @description Admin screen to open, e.g. admin/seller */
             screen?: string | null;
+            /** @description Seller subjects: the store's slug for /sellers/{slug} links; ref and slug are read from sellers (getSellers) when the report is shown */
+            slug?: string | null;
+        };
+        "trust.TrustNextStep": {
+            /**
+             * @description What the report needs next, from its state: a failed enforcement, a missing assessment (seller_application, account_risk), no investigator, a recommendation not sent yet, one waiting for the owner team, proof asked for and not answered yet, no evidence, no recommendation, or everything decided (resolve it)
+             * @enum {string}
+             */
+            key: "check_enforcement" | "record_assessment" | "assign" | "route_recommendation" | "await_owner" | "await_proof" | "gather_evidence" | "add_recommendation" | "resolve";
+            /** @description e.g. Waiting for Catalog to decide */
+            label: string;
+            /** @description e.g. Suspend the Gadget Grove offer for BRL-S2; Proof due Oct 14 */
+            detail?: string | null;
+        };
+        "trust.TrustReportBrief": {
+            /** Format: uuid */
+            id: string;
+            ref: string;
+            type: string;
+            title: string;
+            status: string;
+            /** @description resolution.outcome of a closed report */
+            outcome?: string | null;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        "trust.SubjectHistory": {
+            subject: components["schemas"]["trust.TrustSubject"];
+            /** @description Other reports naming this subject (merged ones left out) */
+            totalReports: number;
+            /** @description The 5 most recent of them */
+            reports: components["schemas"]["trust.TrustReportBrief"][];
+            /** @description Enforcements against this subject not reversed (any report) */
+            enforcementsInForce: number;
         };
         "trust.RiskFactor": {
             factor: string;
@@ -44426,6 +45909,10 @@ export interface components {
             reporterOutcome?: string | null;
             /** @description For seller_application and account_risk: { level, flags: [{ severity, text }], recommendation, recommendedHoldDays? } */
             assessment?: unknown;
+            /** @description Recommended next step while the report is active (null once resolved, dismissed or merged) */
+            nextStep?: components["schemas"]["trust.TrustNextStep"] | null;
+            /** @description getReport only: other reports and enforcements about each subject of this report */
+            subjectHistory?: components["schemas"]["trust.SubjectHistory"][] | null;
             /** Format: date-time */
             createdAt: string;
             /** Format: date-time */
@@ -45937,10 +47424,7 @@ export interface operations {
     "access.setRolePermissions": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path: {
                 id: string;
             };
@@ -45951,6 +47435,7 @@ export interface operations {
                 "application/json": {
                     permissionKeys: string[];
                     reason: string;
+                    reauthToken: string;
                 };
             };
         };
@@ -45988,7 +47473,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -46270,10 +47755,7 @@ export interface operations {
     "access.inviteStaff": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -46313,7 +47795,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -46337,10 +47819,7 @@ export interface operations {
     "access.assignRole": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
@@ -46354,6 +47833,7 @@ export interface operations {
                     reason: string;
                     /** Format: date-time */
                     expiresAt?: string | null;
+                    reauthToken: string;
                 };
             };
         };
@@ -46388,7 +47868,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -46996,7 +48476,8 @@ export interface operations {
             content: {
                 "application/json": {
                     note?: string | null;
-                    stepUpCode?: string | null;
+                    /** @description Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove */
+                    reauthToken?: string | null;
                 };
             };
         };
@@ -47032,7 +48513,7 @@ export interface operations {
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     SELF_APPROVAL_NOT_ALLOWED: You cannot approve or reject your own request.
              *     NOT_ELIGIBLE_APPROVER: Your roles' limits do not cover this action or amount. details.eligibleRoles lists who can.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -48909,7 +50390,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    reason: string;
+                    reason?: string | null;
                 };
             };
         };
@@ -49064,7 +50545,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    reason: string;
+                    reason?: string | null;
                 };
             };
         };
@@ -53605,6 +55086,74 @@ export interface operations {
             };
         };
     };
+    "catalog.deleteDraft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "catalog.updateDraft": {
         parameters: {
             query?: never;
@@ -53693,6 +55242,83 @@ export interface operations {
                 "application/json": {
                     /** @description Note to the reviewer, e.g. what changed on resubmission */
                     note?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["catalog.ProductAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "catalog.withdrawSubmission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Kept in the review log */
+                    reason?: string | null;
                 };
             };
         };
@@ -54013,7 +55639,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -54114,7 +55743,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -54239,7 +55871,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -54338,6 +55973,76 @@ export interface operations {
             content: {
                 "application/json": {
                     reason: string;
+                    /** Format: uuid */
+                    matchedProductId?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["catalog.ProductAdmin"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "catalog.restoreCheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                kind: "duplicate" | "image_standard" | "category_fit" | "prohibited_claim" | "brand_authorization" | "restricted_item" | "identifier";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason?: string | null;
                     /** Format: uuid */
                     matchedProductId?: string | null;
                 };
@@ -54767,7 +56472,8 @@ export interface operations {
                 "application/json": {
                     /** @enum {string} */
                     publication: "active" | "hidden" | "suspended";
-                    reason: string;
+                    /** @description Optional (owner decision G68); without one the change is recorded and audited with a default text, e.g. Hidden from the store by staff */
+                    reason?: string | null;
                     /** Format: uuid */
                     trustReportId?: string | null;
                 };
@@ -55302,7 +57008,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -55491,7 +57200,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -55523,7 +57235,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    attributes: components["schemas"]["catalog.Attribute"][];
+                    attributes: components["schemas"]["catalog.AttributeInput"][];
                     imageRules: components["schemas"]["catalog.ImageRule"][];
                 };
             };
@@ -55633,7 +57345,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -57897,6 +59612,296 @@ export interface operations {
             };
             /** @description RATE_LIMITED: Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds). */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "content.getOfficialStore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["content.OfficialStoreProfile"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "content.getSellerHelpHome": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["content.HelpHome"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "content.searchSellerHelp": {
+        parameters: {
+            query?: {
+                q?: string | null;
+                category?: string | null;
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["content.HelpArticleSummary"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "content.getSellerHelpArticle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["content.HelpArticle"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "content.rateSellerHelpArticle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    helpful: boolean;
+                    comment?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -62490,7 +64495,9 @@ export interface operations {
     };
     "customers.listDataRequests": {
         parameters: {
-            query?: never;
+            query?: {
+                includeCancelled?: boolean | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -62627,7 +64634,7 @@ export interface operations {
             };
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -62762,7 +64769,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     GUEST_ORDER_SIGN_IN_REQUIRED: The order belongs to a registered customer: sign in to see it (answered whatever email was given, so it never confirms the email)
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -64330,6 +66340,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             *     OWNER_ONLY: Only the seller owner can do this.
              */
             403: {
                 headers: {
@@ -66435,8 +68446,8 @@ export interface operations {
                 "application/json": {
                     confirmedReview: boolean;
                     note?: string | null;
-                    /** @description Current 2-step code; required when the run is above access stepUpAbove */
-                    stepUpCode?: string | null;
+                    /** @description Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove */
+                    reauthToken?: string | null;
                 };
             };
         };
@@ -66471,7 +68482,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -66872,10 +68883,7 @@ export interface operations {
     "finance.approveDestination": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path: {
                 id: string;
             };
@@ -66888,6 +68896,7 @@ export interface operations {
                     /** @description The owner confirmed the change on a callback to the phone number on file */
                     callbackConfirmed: boolean;
                     callbackNote?: string | null;
+                    reauthToken: string;
                 };
             };
         };
@@ -66922,7 +68931,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -66959,10 +68968,7 @@ export interface operations {
     "finance.rejectDestination": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path: {
                 id: string;
             };
@@ -66972,6 +68978,7 @@ export interface operations {
             content: {
                 "application/json": {
                     reason: string;
+                    reauthToken: string;
                 };
             };
         };
@@ -67006,7 +69013,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -70665,7 +72672,7 @@ export interface operations {
             };
             /**
              * @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.
-             *     INVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock.
+             *     INVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes.
              */
             401: {
                 headers: {
@@ -71425,6 +73432,7 @@ export interface operations {
             };
             /**
              * @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.
+             *     PASS_CODE_INVALID: The invitation pass code is missing or wrong. details.attemptsLeft; the 5th wrong pass code revokes the link (ask the server operator for a new link and pass code).
              *     WEAK_PASSWORD: The password breaks a rule. details.failed lists the rules (min_length, number, uppercase, personal_info, breached).
              */
             400: {
@@ -71437,7 +73445,7 @@ export interface operations {
             };
             /**
              * @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.
-             *     INVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock.
+             *     INVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes.
              */
             401: {
                 headers: {
@@ -71457,81 +73465,6 @@ export interface operations {
                 };
             };
             /** @description INVITATION_INVALID: The invitation was accepted, revoked or has expired. */
-            410: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    "identity.confirmInvitationTwoStep": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    token: string;
-                    /** Format: uuid */
-                    setupId: string;
-                    code: string;
-                    device: components["schemas"]["identity.DeviceInfo"];
-                };
-            };
-        };
-        responses: {
-            /** @description Success */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        tokens: components["schemas"]["identity.SessionTokens"];
-                        recoveryCodes: components["schemas"]["identity.RecoveryCodes"];
-                    };
-                };
-            };
-            /**
-             * @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.
-             *     CODE_INVALID: The code is wrong. details.attemptsLeft.
-             */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /**
-             * @description CODE_EXPIRED: The code or challenge has expired; request a new one.
-             *     INVITATION_INVALID: The invitation was accepted, revoked or has expired.
-             */
             410: {
                 headers: {
                     [name: string]: unknown;
@@ -71585,7 +73518,7 @@ export interface operations {
             };
             /**
              * @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.
-             *     INVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock.
+             *     INVALID_CREDENTIALS: Email and password don't match. details.attemptsLeft before a temporary lock of details.lockoutMinutes minutes.
              */
             401: {
                 headers: {
@@ -71717,6 +73650,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description PASSWORD_NOT_SET: The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description RATE_LIMITED: Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds). */
             429: {
                 headers: {
@@ -71777,7 +73719,7 @@ export interface operations {
             };
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -71844,6 +73786,15 @@ export interface operations {
             };
             /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description PASSWORD_NOT_SET: The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -71918,6 +73869,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description PASSWORD_NOT_SET: The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description RATE_LIMITED: Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds). */
             429: {
                 headers: {
@@ -71954,7 +73914,6 @@ export interface operations {
             /**
              * @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.
              *     CURRENT_PASSWORD_WRONG: The current password is incorrect.
-             *     CODE_INVALID: The code is wrong. details.attemptsLeft.
              */
             400: {
                 headers: {
@@ -72037,8 +73996,20 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     TWO_STEP_NOT_FOR_STAFF: Staff accounts sign in with email and password only; they cannot add a 2-step method.
+             */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description PASSWORD_NOT_SET: The account has no password (it signs in with Google or Apple), so it cannot confirm with one. Not counted as a failed attempt; confirm with a 2-step code where the endpoint accepts one. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -72095,7 +74066,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     TWO_STEP_NOT_FOR_STAFF: Staff accounts sign in with email and password only; they cannot add a 2-step method.
+             */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -72175,7 +74149,7 @@ export interface operations {
             };
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -72187,15 +74161,6 @@ export interface operations {
             };
             /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description TWO_STEP_REQUIRED: Staff accounts must keep at least one 2-step method. */
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -72252,7 +74217,7 @@ export interface operations {
             };
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -73084,10 +75049,7 @@ export interface operations {
     "identity.disableAccount": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path: {
                 id: string;
             };
@@ -73097,6 +75059,7 @@ export interface operations {
             content: {
                 "application/json": {
                     reason: string;
+                    reauthToken: string;
                 };
             };
         };
@@ -73131,7 +75094,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              *     SELF_ACTION_NOT_ALLOWED: Staff cannot lock, disable or reset their own account.
              */
             403: {
@@ -73165,10 +75128,7 @@ export interface operations {
     "identity.enableAccount": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path: {
                 id: string;
             };
@@ -73178,6 +75138,7 @@ export interface operations {
             content: {
                 "application/json": {
                     reason: string;
+                    reauthToken: string;
                 };
             };
         };
@@ -73212,7 +75173,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -73389,16 +75350,19 @@ export interface operations {
     "identity.resendInvitation": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path: {
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    reauthToken: string;
+                };
+            };
+        };
         responses: {
             /** @description Success */
             200: {
@@ -73430,7 +75394,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -73463,10 +75427,7 @@ export interface operations {
     "identity.revokeInvitation": {
         parameters: {
             query?: never;
-            header: {
-                /** @description Current 2-step code for endpoints with stepUp kind "code"; missing → 403 STEP_UP_REQUIRED */
-                "X-Step-Up-Code": string;
-            };
+            header?: never;
             path: {
                 id: string;
             };
@@ -73476,6 +75437,7 @@ export interface operations {
             content: {
                 "application/json": {
                     reason: string;
+                    reauthToken: string;
                 };
             };
         };
@@ -73510,7 +75472,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -76732,6 +78694,53 @@ export interface operations {
             };
         };
     };
+    "media.getStoreImageSpecs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["media.ImageSpecs"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "media.createSellerUpload": {
         parameters: {
             query?: never;
@@ -77394,6 +79403,56 @@ export interface operations {
             };
             /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "media.getSellerImageSpecs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["media.ImageSpecs"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -78212,6 +80271,53 @@ export interface operations {
             };
         };
     };
+    "media.getAdminImageSpecs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["media.ImageSpecs"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "media.storageEvent": {
         parameters: {
             query?: never;
@@ -78644,6 +80750,90 @@ export interface operations {
             };
         };
     };
+    "messaging.startProductConversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["messaging.ProductConversationInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        conversation: components["schemas"]["messaging.Conversation"];
+                        message: components["schemas"]["messaging.Message"];
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     MESSAGING_RESTRICTED: The customer's account is restricted from messaging sellers (replies inside a case stay possible). details.reason, details.endsAt.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description CONVERSATION_LOCKED: The conversation takes no new messages: locked by Marketly (details.reason = the lock reason) or archived (details.reason = archived; starting a conversation on the same subject reopens an archived one, replying inside it does not). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description RATE_LIMITED: Too many requests; retry after the Retry-After header (seconds, also in details.retryAfterSeconds). */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "messaging.markCustomerRead": {
         parameters: {
             query?: never;
@@ -78942,6 +81132,15 @@ export interface operations {
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
              */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -80240,6 +82439,7 @@ export interface operations {
             query?: {
                 group?: "orders" | "returns_refunds" | "cases" | "account" | "promotions" | null;
                 unreadOnly?: boolean | null;
+                archived?: boolean | null;
                 /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
                 cursor?: string | null;
                 /** @description 1-based page number. Used by the website's numbered pages. */
@@ -80394,6 +82594,130 @@ export interface operations {
             };
             /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.archiveNotice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["notifications.Notice"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOTICE_ACTION_OPEN: The notice still needs action; it can be archived once the work is done. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.archiveAllNotices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    group?: string | null;
+                    /** @description Only notices I have read */
+                    readOnly?: boolean | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        updated: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -80671,6 +82995,7 @@ export interface operations {
                 group?: "orders" | "returns_cases" | "products" | "account_finance" | null;
                 unreadOnly?: boolean | null;
                 actionRequired?: boolean | null;
+                archived?: boolean | null;
                 /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
                 cursor?: string | null;
                 /** @description 1-based page number. Used by the website's numbered pages. */
@@ -80834,6 +83159,136 @@ export interface operations {
             };
             /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.archiveSellerNotice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["notifications.Notice"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOTICE_ACTION_OPEN: The notice still needs action; it can be archived once the work is done. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.archiveAllSellerNotices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    group?: string | null;
+                    /** @description Only notices I have read */
+                    readOnly?: boolean | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        updated: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -81014,7 +83469,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description GROUP_LOCKED: That topic group cannot be changed for this member (essential for the owner, or owner-only). */
+            /**
+             * @description GROUP_LOCKED: That topic group cannot be changed for this member (essential for the owner, or owner-only).
+             *     MEMBER_NOT_JOINED: The member has been invited and has not accepted yet; notification preferences open once they join.
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -81144,6 +83602,7 @@ export interface operations {
                 view?: "all" | "needs_my_action" | "mentions" | null;
                 area?: string | null;
                 unreadOnly?: boolean | null;
+                archived?: boolean | null;
                 /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
                 cursor?: string | null;
                 /** @description 1-based page number. Used by the website's numbered pages. */
@@ -81250,6 +83709,188 @@ export interface operations {
         };
     };
     "notifications.markStaffRead": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["notifications.Notice"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.archiveStaffNotice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["notifications.Notice"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOTICE_ACTION_OPEN: The notice still needs action; it can be archived once the work is done. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.archiveAllStaffNotices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    area?: string | null;
+                    /** @description Only notices I have read */
+                    readOnly?: boolean | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        updated: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "notifications.markStaffUnread": {
         parameters: {
             query?: never;
             header?: never;
@@ -81529,7 +84170,8 @@ export interface operations {
             content: {
                 "application/json": {
                     channels: components["schemas"]["notifications.ChannelSetting"][];
-                    reason: string;
+                    /** @description Recorded in the audit log; default 'Notification channels changed in the Admin Center' */
+                    reason?: string | null;
                 };
             };
         };
@@ -83251,6 +85893,7 @@ export interface operations {
                 featured?: boolean | null;
                 hiddenOrSuspended?: boolean | null;
                 missingContent?: "images" | "identifiers" | null;
+                productPublication?: "active" | "hidden" | "suspended" | null;
                 /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
                 cursor?: string | null;
                 /** @description 1-based page number. Used by the website's numbered pages. */
@@ -83419,6 +86062,13 @@ export interface operations {
                         hiddenOrSuspended: number;
                         /** @description Distinct products the seller's non-removed offers are on */
                         productCount: number;
+                        /** @description Offers on a product draft the seller has not submitted yet (list with productReviewState=draft) */
+                        productDraft: number;
+                        productPublication: {
+                            active: number;
+                            hidden: number;
+                            suspended: number;
+                        };
                     };
                 };
             };
@@ -86407,6 +89057,7 @@ export interface operations {
         parameters: {
             query?: {
                 range?: "last_30_days" | "last_3_months" | "last_6_months" | "this_year" | "all" | null;
+                q?: string | null;
             };
             header?: never;
             path?: never;
@@ -87550,6 +90201,7 @@ export interface operations {
             /**
              * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
              *     FULFILLED_BY_MARKETLY: Marketly ships this package; you can't prepare, delay, cancel, answer cancellations or print packing slips for it. The Order Manager handles its cancellations.
+             *     CANCELLATION_NOT_ALLOWED: One or more items cannot be cancelled now (shipped, delivered, already in a return). details.items lists each item with the reason and the alternative (return, refuse delivery).
              */
             409: {
                 headers: {
@@ -88357,7 +91009,10 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     CANCELLATION_NOT_ALLOWED: One or more items cannot be cancelled now (shipped, delivered, already in a return). details.items lists each item with the reason and the alternative (return, refuse delivery).
+             */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -92680,7 +95335,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    reason: string;
+                    reason?: string | null;
                 };
             };
         };
@@ -93881,6 +96536,7 @@ export interface operations {
             /**
              * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
              *     APPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).
+             *     SAME_REVIEWER: The person who created a campaign or sent it to Finance can't confirm its funding.
              */
             409: {
                 headers: {
@@ -94050,7 +96706,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    reason: string;
+                    reason?: string | null;
                 };
             };
         };
@@ -100865,6 +103521,95 @@ export interface operations {
             };
         };
     };
+    "returns.previewSellerRemedy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["returns.RemedyPreviewInput"];
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["returns.RemedyPreview"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.
+             *     DUPLICATE_REFUND: A refund request still in progress (requested, under review, approved or processing) already covers these items. Sent, failed, declined and cancelled requests do not block a second refund; the remaining refundable amount from payments caps it. details.refundRequestId.
+             */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description REFUND_EXCEEDS_REFUNDABLE: Amount is above the remaining refundable amount. details.maxRefundable.
+             *     REMEDY_NOT_AVAILABLE: The chosen remedy is not offered (e.g. no stock for a replacement, store credit off).
+             */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "returns.sellerIssueRemedy": {
         parameters: {
             query?: never;
@@ -102705,8 +105450,8 @@ export interface operations {
             content: {
                 "application/json": {
                     note?: string | null;
-                    /** @description Current 2-step code; required when the refund is above access stepUpAbove */
-                    stepUpCode?: string | null;
+                    /** @description Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); required when the amount is above access stepUpAbove */
+                    reauthToken?: string | null;
                 };
             };
         };
@@ -102741,7 +105486,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -103304,6 +106049,7 @@ export interface operations {
                 rating?: number | null;
                 critical?: boolean | null;
                 variantId?: string | null;
+                q?: string | null;
                 sort?: "most_helpful" | "newest" | "highest" | "lowest" | null;
                 /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
                 cursor?: string | null;
@@ -103485,6 +106231,7 @@ export interface operations {
         parameters: {
             query?: {
                 q?: string | null;
+                state?: "answered" | "awaiting" | null;
                 sort?: "most_helpful" | "newest" | null;
                 /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
                 cursor?: string | null;
@@ -104761,7 +107508,7 @@ export interface operations {
     "reviews.listSellerQuestions": {
         parameters: {
             query?: {
-                state?: "open" | "answered" | "all" | null;
+                state?: "open" | "answered" | "skipped" | "all" | null;
                 productId?: string | null;
                 /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
                 cursor?: string | null;
@@ -104815,6 +107562,128 @@ export interface operations {
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
              */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "reviews.skipQuestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["reviews.SellerQuestionRow"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "reviews.unskipQuestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["reviews.SellerQuestionRow"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -108340,6 +111209,79 @@ export interface operations {
             };
         };
     };
+    "sellers.saveInformationResponseDraft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    items: components["schemas"]["sellers.InfoResponseItemInput"][];
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["sellers.SellerApplication"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "sellers.withdrawApplication": {
         parameters: {
             query?: never;
@@ -108932,7 +111874,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -109639,7 +112581,9 @@ export interface operations {
     };
     "sellers.listMembers": {
         parameters: {
-            query?: never;
+            query?: {
+                status?: "invited" | "active" | "suspended" | "removed" | "expired" | "revoked" | "all" | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -110457,6 +113401,11 @@ export interface operations {
                 "application/json": {
                     evidenceIds: string[];
                     note?: string | null;
+                    /**
+                     * @description What the files are (G58e); kept with each file in Restriction.evidence
+                     * @enum {string|null}
+                     */
+                    documentType?: "authorization_letter" | "invoice" | "certificate" | "test_report" | "license" | "other" | null;
                 };
             };
         };
@@ -110837,7 +113786,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              *     OWNER_ONLY: Only the seller owner can do this.
              */
             403: {
@@ -111047,7 +113996,7 @@ export interface operations {
             /**
              * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
-             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token in the body or a 2-step code in X-Step-Up-Code. details.kind, details.purpose.
+             *     STEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.
              */
             403: {
                 headers: {
@@ -113965,6 +116914,56 @@ export interface operations {
             };
         };
     };
+    "settings.listCurrentSellerSettings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["settings.SellerSettingValue"][];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     "settings.getOverview": {
         parameters: {
             query?: never;
@@ -114598,7 +117597,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["settings.SubmitChangeInput"] | null;
+            };
+        };
         responses: {
             /** @description Success */
             200: {
@@ -116240,8 +119243,8 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description LABEL_FAILED: The carrier refused or did not answer the label request; nothing was charged. details.carrierMessage. */
-            502: {
+            /** @description LABEL_FAILED: The carrier did not sell the label; nothing was charged. 422 when the carrier refused (change the package or service), 502 when the carrier could not be reached (try again; decision G42). details.carrierMessage, details.carrierReached (bool). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -117737,6 +120740,74 @@ export interface operations {
              *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
              */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "shipping.deleteNotice": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success, no content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -121032,7 +124103,8 @@ export interface operations {
                     caseIds: string[];
                     /** @enum {string} */
                     priority: "low" | "medium" | "high" | "urgent";
-                    reason: string;
+                    /** @description Optional (G68); left out: Priority changed from the case list (still recorded in each case history and the audit log) */
+                    reason?: string | null;
                 };
             };
         };
@@ -123743,6 +126815,82 @@ export interface operations {
             };
             /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "trust.cancelEvidenceRequest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["trust.EvidenceRequest"];
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).
+             *     FORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -127904,7 +131052,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description LABEL_FAILED: The carrier did not return a label; retry with the same Idempotency-Key. details.carrierMessage */
+            /** @description LABEL_FAILED: The carrier did not return a label. 502 when it could not be reached (retry with the same Idempotency-Key); 422 when it refused the parcel or service (change them), as shipping answers. details.carrierMessage */
             502: {
                 headers: {
                     [name: string]: unknown;

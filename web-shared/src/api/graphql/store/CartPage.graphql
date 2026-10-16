@@ -37,6 +37,7 @@ query CartPage($postalCode: String, $savedLimit: Int = 20, $recentlyViewedLimit:
         id
         offerId
         productId
+        productSlug
         variantId
         title
         variantLabel
@@ -113,6 +114,7 @@ query CartPage($postalCode: String, $savedLimit: Int = 20, $recentlyViewedLimit:
       id
       offerId
       productId
+      productSlug
       variantId
       title
       variantLabel

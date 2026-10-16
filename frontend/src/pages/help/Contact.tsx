@@ -260,7 +260,6 @@ export default function Contact() {
               {options.data ? (
                 <KeyValue
                   pairs={(options.data.channels ?? [])
-                    .filter((c) => c.kind !== 'chat')
                     .map((c): [string, string] => [c.kind === 'phone' ? 'Phone' : c.kind === 'email' ? 'Email' : 'Messages', c.kind === 'phone' ? `${options.data!.phone}, ${c.hours}` : `${c.hours}, reply ${c.expectedResponse.replace(/^W/, 'w')}`])}
                 />
               ) : (

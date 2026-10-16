@@ -426,7 +426,7 @@ function ReturnFields({ f, set, e }: StepProps) {
   );
 }
 
-function AgreementStep({ f, set, e, app, agreements }: StepProps & { agreements: Array<{ key: string; title: string; summary: string; versionLabel: string; url: string | null; isExample?: boolean }> }) {
+function AgreementStep({ f, set, e, app, agreements }: StepProps & { agreements: Array<{ key: string; title: string; summary: string; versionLabel: string; url?: string | null; isExample?: boolean }> }) {
   const s = sections(app);
   const docs = app?.documents ?? [];
   const ret = s.returnAddress?.sameAsBusiness ? formatAddress(s.business?.address) : formatAddress(s.returnAddress?.address);

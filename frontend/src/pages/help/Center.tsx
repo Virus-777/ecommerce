@@ -67,8 +67,8 @@ export default function Center() {
       },
       { preventScrollReset: true },
     );
-  // Live chat has no API behind it (G7): the chat card is hidden.
-  const contact = (h?.contact ?? []).filter((c) => c.kind !== 'chat');
+  // No live chat (G7: the API sends phone, message and email only).
+  const contact = h?.contact ?? [];
   const openCases = cases.data?.total ?? cases.data?.items.length ?? 0;
   const firstCase = cases.data?.items[0];
 

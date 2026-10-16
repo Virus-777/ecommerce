@@ -1,9 +1,9 @@
 # screens: admin/case
 # replaces: GET support/cases/{id}, GET orders/orders/{id}, GET shipping/shipments, GET payments/orders/{orderId}/refundable, GET finance/holds, GET returns/refunds/{id}, GET access/approval-requests/{id}, GET access/me, POST access/authority-checks
-# why: A dispute decision needs the case file, the order with its shipments, refundable amounts, seller holds, the refund approval, the decider's own approval limit and the seller earnings effect of the proposed remedy together. Pass withRemedyPreview once a remedy is filled in.
+# why: A dispute decision needs the case file, the order with its shipments, refundable amounts, seller holds, the refund approval, the decider's own approval limit and the seller earnings effect of the proposed remedy together. Pass withRemedyPreview (with orderRef) once a remedy is filled in; cases without an order leave orderRef out.
 query AdminCase(
   $ref: String!
-  $orderRef: String!
+  $orderRef: String = ""
   $approvalActionKey: String! = "support.remedies.approve"
   $withRemedyPreview: Boolean = false
   $remedyItems: [FinanceRefundImpactItemInput!]
