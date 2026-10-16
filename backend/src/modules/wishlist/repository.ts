@@ -129,8 +129,7 @@ export class WishlistRepository {
 
   /** Product ids saved or watched with a variant (stock events name the variant only) */
   async productIdsForVariant(variantId: string): Promise<string[]> {
-    const fromAlerts = await this.#t.alerts.distinct<string>('product_id', { variant_id: variantId });
-    const fromItems = await this.#t.items.distinct<string>('product_id', { variant_id: variantId });
+    const [fromAlerts, fromItems] = await Promise.all([this.#t.alerts.distinct<string>('product_id', { variant_id: variantId }), this.#t.items.distinct<string>('product_id', { variant_id: variantId })]);
     return [...new Set([...fromAlerts, ...fromItems])];
   }
 
@@ -215,9 +214,12 @@ export class WishlistRepository {
   /* ---------------------------------------------------------------- customer data */
   /** Every list, item and alert (not removed) of the customer ids */
   async customerData(customerIds: string[]): Promise<{ lists: ListRow[]; items: ItemRow[]; alerts: AlertRow[] }> {
-    const lists = await this.#t.lists.find({ customer_id: { $in: customerIds } }, { sort: { created_at: 1, id: 1 } });
-    const items = await this.#t.items.find({ customer_id: { $in: customerIds } }, { sort: { added_at: 1, id: 1 } });
-    const alerts = await this.#t.alerts.find({ customer_id: { $in: customerIds }, state: { $ne: 'removed' } }, { sort: { created_at: 1, id: 1 } });
+    // read outside transactions (the customer data export): the three at once
+    const [lists, items, alerts] = await Promise.all([
+      this.#t.lists.find({ customer_id: { $in: customerIds } }, { sort: { created_at: 1, id: 1 } }),
+      this.#t.items.find({ customer_id: { $in: customerIds } }, { sort: { added_at: 1, id: 1 } }),
+      this.#t.alerts.find({ customer_id: { $in: customerIds }, state: { $ne: 'removed' } }, { sort: { created_at: 1, id: 1 } }),
+    ]);
     return { lists, items, alerts };
   }
 
@@ -232,20 +234,22 @@ export class WishlistRepository {
   /* ---------------------------------------------------------------- insights */
   async insights({ from, to, limit }: { from?: Date; to?: Date; limit: number }): Promise<InsightRow[]> {
     const added = { ...(from ? { $gte: from } : {}), ...(to ? { $lt: to } : {}) };
-    const savedRows = await this.#t.items.aggregate<{ _id: string; saves: number }>([
-      ...(from || to ? [{ $match: { added_at: added } }] : []),
-      { $group: { _id: { p: '$product_id', c: '$customer_id' } } },
-      { $group: { _id: '$_id.p', saves: { $sum: 1 } } },
-    ]);
-    const alertRows = await this.#t.alerts.aggregate<{ _id: string; price: number; stock: number }>([
-      { $match: { state: 'active' } },
-      {
-        $group: {
-          _id: '$product_id',
-          price: { $sum: { $cond: [{ $eq: ['$kind', 'price_drop'] }, 1, 0] } },
-          stock: { $sum: { $cond: [{ $eq: ['$kind', 'back_in_stock'] }, 1, 0] } },
+    const [savedRows, alertRows] = await Promise.all([
+      this.#t.items.aggregate<{ _id: string; saves: number }>([
+        ...(from || to ? [{ $match: { added_at: added } }] : []),
+        { $group: { _id: { p: '$product_id', c: '$customer_id' } } },
+        { $group: { _id: '$_id.p', saves: { $sum: 1 } } },
+      ]),
+      this.#t.alerts.aggregate<{ _id: string; price: number; stock: number }>([
+        { $match: { state: 'active' } },
+        {
+          $group: {
+            _id: '$product_id',
+            price: { $sum: { $cond: [{ $eq: ['$kind', 'price_drop'] }, 1, 0] } },
+            stock: { $sum: { $cond: [{ $eq: ['$kind', 'back_in_stock'] }, 1, 0] } },
+          },
         },
-      },
+      ]),
     ]);
     const out = new Map<string, { product_id: string; saves: number; active_price_alerts: number; active_stock_alerts: number }>();
     const row = (id: string) => {

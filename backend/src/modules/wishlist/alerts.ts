@@ -24,6 +24,17 @@ export interface Change {
   sellerId: string | null;
 }
 
+/** Alerts by product, in their order */
+function byProductOf(alerts: readonly AlertCandidate[]): Map<string, AlertCandidate[]> {
+  const out = new Map<string, AlertCandidate[]>();
+  for (const a of alerts) {
+    const list = out.get(a.product_id);
+    if (list) list.push(a);
+    else out.set(a.product_id, [a]);
+  }
+  return out;
+}
+
 /** Whether a change concerns an alert: a saved offer is followed exactly; else the alert's variant and seller limits apply */
 export function concerns(a: AlertCandidate, c: Change): boolean {
   if (a.variant_id && a.variant_id !== c.variantId) return false;
@@ -130,13 +141,14 @@ export class AlertEngine {
   async buyableNow(productId: string, lk: Lookups = new Lookups(this.ctx)): Promise<{ change: Change; price: common.Money }[] | null> {
     try {
       if (!(await lk.purchasable(productId))) return [];
-      const out: { change: Change; price: common.Money }[] = [];
-      for (const s of await this.ctx.use('offers').listActiveOffersForProduct(productId)) {
-        const [offer, quote] = await Promise.all([lk.offer(s.id), lk.quote(s.id)]);
-        if (!offer || offer.status !== 'active' || !quote || quote.status !== 'active' || quote.availability.state === 'out_of_stock') continue;
-        out.push({ change: { productId, variantId: offer.variantId, offerId: offer.id, sellerId: offer.sellerId ?? null }, price: quote.price });
-      }
-      return out;
+      // every active offer's details and quote read at once, kept in the offers' order
+      const summaries = await this.ctx.use('offers').listActiveOffersForProduct(productId);
+      const read = await Promise.all(summaries.map((s) => Promise.all([lk.offer(s.id), lk.quote(s.id)])));
+      return read.flatMap(([offer, quote]) =>
+        !offer || offer.status !== 'active' || !quote || quote.status !== 'active' || quote.availability.state === 'out_of_stock'
+          ? []
+          : [{ change: { productId, variantId: offer.variantId, offerId: offer.id, sellerId: offer.sellerId ?? null }, price: quote.price }],
+      );
     } catch (err) {
       this.ctx.log.warn({ err, productId }, 'wishlist: availability of a watched product could not be read');
       return null;
@@ -225,15 +237,14 @@ export class AlertEngine {
    */
   async evaluatePrices(): Promise<number> {
     const offersApi = this.ctx.use('offers');
+    const minDrop = await this.ctx.settings.get('minDropPct');
     let fired = 0;
     let after: string | null = null;
     for (;;) {
       const batch = await this.repo.activeAlertsAfter('price_drop', after, BATCH);
       if (!batch.length) break;
       after = batch.at(-1)!.id;
-      const byProduct = new Map<string, AlertCandidate[]>();
-      for (const a of batch) byProduct.set(a.product_id, [...(byProduct.get(a.product_id) ?? []), a]);
-      for (const [productId, alerts] of byProduct) {
+      for (const [productId, alerts] of byProductOf(batch)) {
         const lk = new Lookups(this.ctx);
         let summaries: { id: string; variantId: string }[] = [];
         try {
@@ -243,14 +254,11 @@ export class AlertEngine {
           continue;
         }
         // saved offers of items may not be in the active list (paused or out of stock): they simply don't count now
-        const changes: { change: Change; price: common.Money }[] = [];
-        for (const s of summaries) {
-          const offer = await lk.offer(s.id);
-          if (!offer || offer.status !== 'active') continue;
-          changes.push({ change: { productId, variantId: offer.variantId, offerId: offer.id, sellerId: offer.sellerId ?? null }, price: await lk.effectivePrice(offer.id, offer.price) });
-        }
+        const active = (await Promise.all(summaries.map((s) => lk.offer(s.id)))).filter((o): o is NonNullable<typeof o> => o?.status === 'active');
+        // their prices as customers pay them, with one promotions call for the product's offers
+        const prices = await lk.effectivePrices(active.map((o) => ({ offerId: o.id, regular: o.price })));
+        const changes: { change: Change; price: common.Money }[] = active.map((offer, i) => ({ change: { productId, variantId: offer.variantId, offerId: offer.id, sellerId: offer.sellerId ?? null }, price: prices[i]! }));
         if (!changes.length) continue;
-        const minDrop = await this.ctx.settings.get('minDropPct');
         for (const a of alerts) {
           // the lowest price among the offers this alert follows
           const best = changes.filter((c) => concerns(a, c.change)).sort((x, y) => x.price.amount - y.price.amount)[0];
@@ -276,9 +284,7 @@ export class AlertEngine {
       const batch = await this.repo.activeAlertsAfter('back_in_stock', after, BATCH);
       if (!batch.length) break;
       after = batch.at(-1)!.id;
-      const byProduct = new Map<string, AlertCandidate[]>();
-      for (const a of batch) byProduct.set(a.product_id, [...(byProduct.get(a.product_id) ?? []), a]);
-      for (const [productId, alerts] of byProduct) {
+      for (const [productId, alerts] of byProductOf(batch)) {
         const inStock = await this.buyableNow(productId);
         if (inStock === null) continue;
         const unarmed: AlertRow[] = [];

@@ -604,10 +604,12 @@ export class WishlistService implements WishlistPublicApi {
         }
       };
       walk(await this.ctx.use('catalog').listCategories({ includeHidden: true }), false);
+      lk.prefetchProducts(rows.map((r) => r.product_id));
       const withCat = await Promise.all(rows.map(async (r) => ({ r, p: await lk.product(r.product_id) })));
       rows = withCat.filter((x) => x.p?.categoryId && inTree.has(x.p.categoryId)).map((x) => x.r);
     }
     const p = pageOf(rows, page);
+    lk.prefetchProducts(p.items.map((r) => r.product_id));
     const stats = p.items.length ? await this.ctx.use('offers').getOfferStats(p.items.map((r) => r.product_id)) : {};
     const items = await Promise.all(
       p.items.map(async (r) => ({

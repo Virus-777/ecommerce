@@ -44,6 +44,27 @@ export class Lookups {
 
   product = (id: string) => this.memo(this.#products, id, () => orNull(this.ctx.use('catalog').getProduct(id)));
   purchasable = (id: string) => this.memo(this.#purchasable, id, async () => (await orNull(this.ctx.use('catalog').isPurchasable(id))) ?? false);
+
+  /**
+   * Products and whether they can be bought, for many ids in batched catalog reads (getProducts, 200 a call)
+   * instead of a getProduct and an isPurchasable per product; product() and purchasable() then answer from them.
+   */
+  prefetchProducts(ids: readonly string[]): void {
+    const missing = [...new Set(ids)].filter((id) => !this.#products.has(id) && !this.#purchasable.has(id));
+    for (let i = 0; i < missing.length; i += 200) {
+      const chunk = missing.slice(i, i + 200);
+      const read = orNull(this.ctx.use('catalog').getProducts(chunk)).then((list) => new Map((list ?? []).map((r) => [r.product.id, r])));
+      for (const id of chunk) {
+        const product = read.then((records) => records.get(id)?.product ?? null);
+        const purchasable = read.then((records) => records.get(id)?.purchasable ?? false);
+        // a failed read is reported to whoever awaits these; never as an unhandled rejection
+        product.catch(() => undefined);
+        purchasable.catch(() => undefined);
+        this.#products.set(id, product);
+        this.#purchasable.set(id, purchasable);
+      }
+    }
+  }
   offer = (id: string) => this.memo(this.#offers, id, () => orNull(this.ctx.use('offers').getOffer(id)));
   quote = (offerId: string) => this.memo(this.#quotes, offerId, () => orNull(this.ctx.use('offers').quoteOffer(offerId, 1)));
   featured = (variantId: string) => this.memo(this.#featured, variantId, () => orNull(this.ctx.use('offers').getFeaturedOffer(variantId)));
@@ -63,6 +84,17 @@ export class Lookups {
     if (!promotions) return regular;
     const [p] = await promotions.priceOffers([offerId], {});
     return p && p.price.currency === regular.currency && p.price.amount < regular.amount ? p.price : regular;
+  }
+
+  /** effectivePrice of several offers with one promotions call, in their order */
+  async effectivePrices(list: readonly { offerId: string; regular: common.Money }[]): Promise<common.Money[]> {
+    const promotions = this.ctx.tryUse('promotions');
+    if (!promotions || !list.length) return list.map((o) => o.regular);
+    const priced = new Map((await promotions.priceOffers(list.map((o) => o.offerId), {})).map((p) => [p.offerId, p]));
+    return list.map(({ offerId, regular }) => {
+      const p = priced.get(offerId);
+      return p && p.price.currency === regular.currency && p.price.amount < regular.amount ? p.price : regular;
+    });
   }
 }
 
@@ -110,9 +142,18 @@ export class Views {
   /** Saved items with live price, hint, stock and alert toggles. `publicView` (shared lists) leaves out notes, price history and alerts. */
   async items(rows: ItemRow[], alerts: AlertRow[], o: { publicView?: boolean; lookups?: Lookups } = {}): Promise<ItemDetail[]> {
     const lk = o.lookups ?? this.lookups();
+    lk.prefetchProducts(rows.map((r) => r.product_id));
     const days = await this.ctx.settings.get('priceHintDays');
     const cart = Boolean(this.ctx.tryUse('cart'));
     const promotions = this.ctx.tryUse('promotions');
+    // each item's alerts (not removed), looked up by item instead of scanning per row
+    const alertsBy = new Map<string, AlertRow[]>();
+    for (const a of alerts) {
+      if (!a.item_id || a.state === 'removed') continue;
+      const list = alertsBy.get(a.item_id);
+      if (list) list.push(a);
+      else alertsBy.set(a.item_id, [a]);
+    }
     return Promise.all(
       rows.map(async (r): Promise<ItemDetail> => {
         const [product, purchasable] = await Promise.all([lk.product(r.product_id), lk.purchasable(r.product_id)]);
@@ -142,7 +183,7 @@ export class Views {
             : priceHint(await orNull(this.ctx.use('offers').priceRange(shown.offerId, days)), price, days);
         if (o.publicView) hint.label = '';
 
-        const own = o.publicView ? [] : alerts.filter((a) => a.item_id === r.id && a.state !== 'removed');
+        const own = o.publicView ? [] : (alertsBy.get(r.id) ?? []);
         const live = availability === 'in_stock' || availability === 'low_stock';
         const item: SavedItem = {
           id: r.id,
@@ -175,6 +216,7 @@ export class Views {
   /** Alerts with title, image and the condition in words */
   async alerts(rows: AlertRow[], lookups?: Lookups): Promise<Alert[]> {
     const lk = lookups ?? this.lookups();
+    lk.prefetchProducts(rows.map((a) => a.product_id));
     const sellerNames = new Map<string, Promise<string | null>>();
     const sellerName = (a: AlertRow): Promise<string | null> => {
       if (!a.seller_id) return Promise.resolve(null);
