@@ -33,7 +33,7 @@ import {
 } from './index.js';
 import { CALLER_LIMITS, callerKey, CLASS_LIMITS, enforce, FILES_IP_LIMIT, IP_LIMIT, rateLimitClassOf, REFRESH_LIMIT, WEBHOOK_LIMIT, type RateLimitStore } from './rate-limit.js';
 import type { RevocationList } from './revocation.js';
-import { TokenError, verifyAccessToken, type AccessClaims, type KeyRing } from './tokens.js';
+import { cachingVerifier, TokenError, type AccessClaims, type KeyRing } from './tokens.js';
 
 /** Verifies a provider's signature over the raw body; returns the provider and event, or false. */
 export type WebhookVerifier = (
@@ -160,7 +160,11 @@ export class AuthChain {
   /** The Android minimum version (settings), 60 s */
   readonly androidMinimum: TtlCache<Awaited<ReturnType<Authorities['androidMinimum']>>>;
 
+  /** Access tokens, verified once per token text (then only their times are checked again) */
+  readonly #verifyToken: (token: string) => AccessClaims;
+
   constructor(readonly k: AuthKernel) {
+    this.#verifyToken = cachingVerifier(k.keys, { issuer: k.config.auth.issuer, leewaySeconds: 60, now: () => k.clock.now() });
     this.permissions = new TtlCache(k.clock);
     this.members = new TtlCache(k.clock);
     this.customers = new TtlCache(k.clock, false); // a customer created after the first request must be in scope at once
@@ -250,7 +254,7 @@ export class AuthChain {
     if (!token) throw tokenRejected('missing');
     let claims: AccessClaims;
     try {
-      claims = verifyAccessToken(this.k.keys, token, { issuer: this.k.config.auth.issuer, leewaySeconds: 60, now: () => this.k.clock.now() });
+      claims = this.#verifyToken(token);
     } catch (err) {
       if (err instanceof TokenError) throw tokenRejected(err.reason);
       throw err;

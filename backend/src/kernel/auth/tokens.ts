@@ -82,11 +82,41 @@ export function verifyAccessToken(ring: KeyRing, token: string, o: TokenOptions)
   if (claims.iss !== o.issuer) throw new TokenError('wrong_issuer');
   if (!AUDIENCES.has(claims.aud) || !KINDS.has(claims.kind) || typeof claims.sid !== 'string') throw new TokenError('malformed');
   if (claims.kind !== 'visitor' && typeof claims.sub !== 'string') throw new TokenError('malformed');
+  checkTimes(claims, o);
+  if (claims.dev && !header.kid!.startsWith('dev-')) delete claims.dev; // dev claims only count on dev-key tokens
+  return claims;
+}
+
+function checkTimes(claims: AccessClaims, o: TokenOptions) {
   const now = Math.floor(o.now().getTime() / 1000);
   if (typeof claims.exp !== 'number' || claims.exp + o.leewaySeconds < now) throw new TokenError('expired');
   if (typeof claims.iat !== 'number' || claims.iat - o.leewaySeconds > now) throw new TokenError('not_yet_valid');
-  if (claims.dev && !header.kid!.startsWith('dev-')) delete claims.dev; // dev claims only count on dev-key tokens
-  return claims;
+}
+
+/**
+ * verifyAccessToken that remembers the tokens it has verified. An app sends the same token with every request for
+ * its whole lifetime, and the signature check is most of the middleware's CPU (about 0.1 ms): a token seen before
+ * (the exact same text, so the same signature) only has its times checked again. Each call returns its own copy of
+ * the claims. At most `max` tokens are kept; when full, the memory starts over.
+ */
+export function cachingVerifier(ring: KeyRing, o: TokenOptions, max = 10_000): (token: string) => AccessClaims {
+  const verified = new Map<string, AccessClaims>();
+  return (token) => {
+    const hit = verified.get(token);
+    if (hit) {
+      try {
+        checkTimes(hit, o);
+      } catch (err) {
+        verified.delete(token); // expired: it never becomes valid again
+        throw err;
+      }
+      return { ...hit };
+    }
+    const claims = verifyAccessToken(ring, token, o);
+    if (verified.size >= max) verified.clear();
+    verified.set(token, { ...claims });
+    return claims;
+  };
 }
 
 export function signAccessToken(signer: { kid: string; key: KeyObject }, claims: Omit<AccessClaims, 'iat' | 'exp' | 'jti' | 'iss'>, o: { issuer: string; ttlSeconds?: number; now?: Date }): string {
