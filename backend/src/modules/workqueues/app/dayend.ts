@@ -170,7 +170,7 @@ export class DayEnd {
     const roles = (built.shared_with_roles ?? []) as string[];
     const now = core.now();
     const [openItems, overdueItems] = await Promise.all([this.repo.countItems({ states: ACTIVE }), this.repo.countItems({ states: ACTIVE, deadlineStates: ['overdue'], now })]);
-    const claimed = await this.repo.transaction((tx) => tx.claim(`day-end-prepared:${date}`));
+    const claimed = await this.repo.claim(`day-end-prepared:${date}`); // one atomic upsert: no transaction needed
     if (!claimed) return built;
     core.ctx.events.publish('workqueues.day_end.prepared', { reviewId: built.id, date: built.date, dueAt: built.due_at.toISOString(), openItems, overdueItems, roleKeys: roles }, { actor: SYSTEM });
     return built;
