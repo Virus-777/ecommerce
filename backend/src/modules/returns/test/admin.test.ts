@@ -443,3 +443,27 @@ describe('staff reads and case refunds for support', () => {
     expect(inspection).toMatchObject({ refundsWithFinance: dock.length, refundsWithFinanceAmount: { amount: sum(dock), currency: 'USD' } });
   });
 });
+
+describe('inspection queue figures', () => {
+  it('count every received return at the dock, not only the first 500', async () => {
+    const m = await officialReturn();
+    await h.service.recordWarehouseReceipt(m.ret.id, now(), { kind: 'staff', id: newId(), name: 'Dock' }, null);
+    const repo = h.service.core.repo;
+    const base = (await repo.get('returns', m.ret.id))!;
+    const before = (await h.call('GET', '/api/admin/returns/inspections/stats', staff())).body;
+    // 510 more received Official Store returns, received a month ago: all past their inspection target
+    const longAgo = new Date(h.clock.now().getTime() - 30 * 86_400_000);
+    const clones = Array.from({ length: 510 }, (_, i) => ({ ...base, id: newId(), ref: `RT-CAP-${i}-${newId().slice(-6)}`, received_at: longAgo, requested_at: longAgo }));
+    await repo.insertMany('returns', clones);
+    try {
+      const after = (await h.call('GET', '/api/admin/returns/inspections/stats', staff())).body;
+      expect(after.waiting).toBe(before.waiting + 510);
+      expect(after.tabCounts.received).toBe(after.waiting);
+      expect(after.overdue).toBe(before.overdue + 510);
+      // the overdue return requested first is named (a clone: requested a month ago)
+      expect(after.overdueRef).toMatch(/^RT-CAP-/);
+    } finally {
+      await h.app.kernel.mongo.db.collection('returns.returns').deleteMany({ _id: { $in: clones.map((c) => c.id) } as never });
+    }
+  });
+});

@@ -103,8 +103,16 @@ export class ReturnsRepository {
    * never hide the rows after them, and only one batch is in memory at a time.
    * The walk ends with the first batch shorter than `size`.
    */
-  async *batches<T extends TableName>(table: T, where: Where<Recs[T]>, size: number): AsyncGenerator<Recs[T][]> {
-    const filter = whereFilter(where);
+  batches<T extends TableName>(table: T, where: Where<Recs[T]>, size: number): AsyncGenerator<Recs[T][]> {
+    return this.#batches(table, whereFilter(where), size);
+  }
+
+  /** batches of the returns matching a ReturnFilter (e.g. the received returns at the Marketly dock) */
+  async *returnBatches(f: ReturnFilter, size: number): AsyncGenerator<ReturnRec[]> {
+    yield* this.#batches('returns', await this.#returnFilter(f), size);
+  }
+
+  async *#batches<T extends TableName>(table: T, filter: Filter, size: number): AsyncGenerator<Recs[T][]> {
     let afterId: string | null = null;
     for (;;) {
       const rows: Recs[T][] = await this.#t(table).find(afterId ? { $and: [filter, { id: { $gt: afterId } }] } : filter, { sort: { id: 1 }, limit: size });

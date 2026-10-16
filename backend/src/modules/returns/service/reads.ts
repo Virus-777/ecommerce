@@ -24,7 +24,7 @@ import type {
   SellerReturnRow,
 } from '../../../spec/returns.js';
 import { ACTIVE_STATUSES, CLOSED_STATUSES, DAY, deadline, is, itemVerdict, OPEN_STATUSES, PENDING_REFUND, REFUND_LABEL, shortDate } from '../domain/rules.js';
-import type { RefundFilter, ReturnFilter } from '../ports.js';
+import type { RefundFilter, ReturnFilter, ReturnRec } from '../ports.js';
 import { notFound, unavailable, type Agg, type By, type Core, type Visibility } from './core.js';
 import type { Views } from './views.js';
 
@@ -57,6 +57,8 @@ export interface ItemEligibilityOut {
 
 export class Reads {
   #registered?: Promise<void>;
+  /** Rows per read when the inspection figures walk the received returns (repo.returnBatches) */
+  statsBatchSize = 200;
 
   constructor(
     private readonly core: Core,
@@ -313,28 +315,45 @@ export class Reads {
     const repo = this.core.repo;
     const now = this.core.now();
     const weekAgo = new Date(now.getTime() - 7 * DAY);
-    const [receivedPage, arriving, inspected, withFinance] = await Promise.all([
-      repo.listReturns(this.inspectionFilter('received'), { mode: 'cursor', cursor: null, limit: 500 }),
+    const [waiting, overdue, arriving, inspected, withFinance] = await Promise.all([
+      repo.countReturns(this.inspectionFilter('received')),
+      this.overdueInspections(now),
       repo.countReturns(this.inspectionFilter('arriving')),
       repo.find('inspections', { inspected_at: { op: '>=', value: weekAgo } }),
       // refunds of dock returns with Finance: the Official Store's, and the seller-funded ones of Fulfilled by Marketly
       // returns, counted and summed by the database (no rows read, no cap)
       repo.dockRefundTotals(['requested', 'under_review']),
     ]);
-    // oldest first (the list pages newest first)
-    const received = receivedPage.items.sort((a, b) => a.requested_at.getTime() - b.requested_at.getTime());
     const decided = [...new Set(inspected.map((i) => i.return_id))];
-    const [aggs, decidedOfficial] = await Promise.all([this.core.loadMany(received.map((r) => r.id)), decided.length ? repo.countReturns({ marketlyDock: true, ids: decided }) : 0]);
-    const overdue = [...aggs.values()].filter((a) => (this.views.inspectBy(a)?.getTime() ?? Infinity) < now.getTime());
+    const decidedOfficial = decided.length ? await repo.countReturns({ marketlyDock: true, ids: decided }) : 0;
     return {
-      waiting: received.length,
-      overdue: overdue.length,
-      overdueRef: overdue[0]?.ret.ref ?? null,
+      waiting,
+      overdue: overdue.count,
+      overdueRef: overdue.oldestRef,
       arrivingThisWeek: arriving,
       refundsWithFinance: withFinance.count,
       refundsWithFinanceAmount: money(withFinance.total, this.core.currency),
-      tabCounts: { received: received.length, arriving, decidedThisWeek: decidedOfficial },
+      tabCounts: { received: waiting, arriving, decidedThisWeek: decidedOfficial },
     };
+  }
+
+  /**
+   * Received returns at the dock past their inspection target, and the ref of the one requested first. The target
+   * counts business days from receipt under each return's own terms (views.inspectBy), which a database query
+   * cannot compute, so every received return is walked in batches (only one batch loaded at a time).
+   */
+  private async overdueInspections(now: Date): Promise<{ count: number; oldestRef: string | null }> {
+    let count = 0;
+    let oldest: ReturnRec | null = null;
+    for await (const batch of this.core.repo.returnBatches(this.inspectionFilter('received'), this.statsBatchSize)) {
+      const aggs = await this.core.loadMany(batch.map((r) => r.id));
+      for (const a of aggs.values()) {
+        if ((this.views.inspectBy(a)?.getTime() ?? Infinity) >= now.getTime()) continue;
+        count++;
+        if (!oldest || a.ret.requested_at.getTime() < oldest.requested_at.getTime()) oldest = a.ret;
+      }
+    }
+    return { count, oldestRef: oldest?.ref ?? null };
   }
 
   /* ---------------------------------------------------------------- refund requests */
