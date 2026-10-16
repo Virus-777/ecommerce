@@ -14,7 +14,7 @@ import type * as common from '../../../spec/common.js';
 import { OFFICIAL_STORE_NAME } from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
 import { pctOf, type CampaignModel, type OfferAttrs } from '../domain/rules.js';
-import { toModel } from '../mappers.js';
+import { groupBy, toModel } from '../mappers.js';
 import type { CampaignRec } from '../ports.js';
 import type { PromotionsRepository } from '../repository.js';
 import type { CampaignsPart } from './campaigns.js';
@@ -146,27 +146,28 @@ export class Core {
 
   /* ---------------------------------------------------------------- campaigns */
 
-  async models(rows: readonly CampaignRec[], repo: PromotionsRepository = this.repo): Promise<CampaignModel[]> {
+  /** Campaign rows with their targets and codes (three reads for the whole list, outside transactions) */
+  async models(rows: readonly CampaignRec[]): Promise<CampaignModel[]> {
     if (!rows.length) return [];
     const ids = rows.map((r) => r.id);
-    const [targets, codes] = await Promise.all([repo.find('campaign_targets', { campaign_id: ids }), repo.find('coupon_codes', { campaign_id: ids, kind: 'shared' })]);
-    const unique = new Set((await repo.find('coupon_codes', { campaign_id: ids, kind: 'unique' }, { limit: 10000 })).map((c) => c.campaign_id));
+    const [targets, codes, unique] = await Promise.all([
+      this.repo.find('campaign_targets', { campaign_id: ids }),
+      this.repo.find('coupon_codes', { campaign_id: ids, kind: 'shared' }),
+      this.repo.campaignsWithUniqueCodes(ids),
+    ]);
+    const targetsOf = groupBy(targets, (t) => t.campaign_id);
+    const codesOf = groupBy(codes, (c) => c.campaign_id);
     return rows.map((r) => {
-      const model = toModel(
-        r,
-        targets.filter((t) => t.campaign_id === r.id),
-        codes.filter((c) => c.campaign_id === r.id),
-      );
+      const model = toModel(r, targetsOf.get(r.id) ?? [], codesOf.get(r.id) ?? []);
       model.hasUniqueCodes = unique.has(r.id);
       return model;
     });
   }
 
-  async campaign(id: string, o: { repo?: PromotionsRepository; forUpdate?: boolean } = {}): Promise<{ row: CampaignRec; model: CampaignModel }> {
-    const repo = o.repo ?? this.repo;
-    const row = isUuid(id) ? await repo.get('campaigns', id, { forUpdate: o.forUpdate }) : undefined;
+  async campaign(id: string): Promise<{ row: CampaignRec; model: CampaignModel }> {
+    const row = isUuid(id) ? await this.repo.get('campaigns', id) : undefined;
     if (!row) throw notFound('Campaign');
-    const [model] = await this.models([row], repo);
+    const [model] = await this.models([row]);
     return { row, model: model! };
   }
 
@@ -213,6 +214,22 @@ export class Core {
       if (!isNotImplemented(err)) this.ctx.log.warn({ err, productId }, 'promotions: product lookup failed');
       return null;
     }
+  }
+
+  /** Catalog products by id (catalog.getProducts, 200 per call); unknown products, or a catalog unable to answer, are left out */
+  async products(productIds: readonly string[]): Promise<Map<string, NonNullable<Awaited<ReturnType<Core['product']>>>>> {
+    const ids = [...new Set(productIds.filter(isUuid))];
+    const out = new Map<string, NonNullable<Awaited<ReturnType<Core['product']>>>>();
+    for (let i = 0; i < ids.length; i += 200) {
+      try {
+        for (const { product: p } of await this.ctx.use('catalog').getProducts(ids.slice(i, i + 200))) {
+          out.set(p.id, { title: p.title, image: p.images?.[0] ?? null, categoryId: p.categoryId ?? null, brandId: p.brand?.id ?? null });
+        }
+      } catch (err) {
+        if (!isNotImplemented(err)) this.ctx.log.warn({ err }, 'promotions: product lookup failed');
+      }
+    }
+    return out;
   }
 
   async sellerNames(ids: readonly (string | null | undefined)[]): Promise<Map<string, string>> {
@@ -262,10 +279,11 @@ export class Core {
     const sellerId = o.sellerId;
     const found = sellerId ? await Promise.all(ids.map((id) => api.getOwnOffer(sellerId, id))) : Object.values(await api.getOffers(ids));
     const list = found.filter((x): x is offers.Offer => Boolean(x));
-    const products = new Map<string, Awaited<ReturnType<Core['product']>>>();
-    for (const pid of new Set(list.map((x) => x.productId))) products.set(pid, await this.product(pid));
-    const stock = o.withStock === false ? new Map<string, number>() : await this.stockOf(list.map((x) => x.stockItemId));
-    const sellers = await this.sellerCards(list.map((x) => x.sellerId));
+    const [products, stock, sellers] = await Promise.all([
+      this.products(list.map((x) => x.productId)),
+      o.withStock === false ? new Map<string, number>() : this.stockOf(list.map((x) => x.stockItemId)),
+      this.sellerCards(list.map((x) => x.sellerId)),
+    ]);
     for (const offer of list) {
       const p = products.get(offer.productId) ?? null;
       const seller = offer.ownerType === 'official' ? undefined : sellers.get(offer.sellerId ?? '');

@@ -13,7 +13,7 @@ import type * as offers from '../../../spec/offers.js';
 import type { AccountCoupons, CodeCheck, CouponCard, DealProduct, DealsPage, DiscountAllocation, FlashCountdown, FlashSaleBlock, OfferPromotion, ProductPromotions, PromoBadge, PromoBanner, PublicCampaign, UpcomingEvent } from '../../../spec/promotions.js';
 import { evaluate, type EvalLine, type PriceOption } from '../domain/evaluate.js';
 import { amountAndUnit, bpsLabel, COUPON_KINDS, customerCheck, dayLabel, discountLabel, isRunning, m, moneyLabel, needsConsent, PRICE_KINDS, scopeCheck, scopeLabel, SHIPPING_KINDS, type CampaignModel, type OfferAttrs } from '../domain/rules.js';
-import { iso, periodOf } from '../mappers.js';
+import { groupBy, iso, periodOf } from '../mappers.js';
 import type { FlashItemRec } from '../ports.js';
 import { invalid, notFound, Part, type OfferCard } from './core.js';
 
@@ -45,16 +45,19 @@ export class StorefrontPart extends Part {
   async priceList(list: offers.Offer[], at: Date, customerId: string | null): Promise<OfferPromotion[]> {
     if (!list.length) return [];
     const ids = list.map((o) => o.id);
-    const running = await this.core.models(await this.repo.runningCampaigns(at, { kinds: [...PRICE_KINDS] }));
+    // price campaigns and coupons in one read (both running at `at`); the order (soonest ending first) is kept per kind
+    const runningAll = await this.core.models(await this.repo.runningCampaigns(at, { kinds: [...PRICE_KINDS, ...COUPON_KINDS] }));
+    const running = runningAll.filter((c) => PRICE_KINDS.includes(c.kind));
     const upcomingFlash = (await this.core.models(await this.repo.find('campaigns', { status: 'scheduled', kind: 'flash_sale', starts_at: { op: '>', value: at } }, { limit: 50 }))).filter((c) => c.startsAt.getTime() - at.getTime() <= 7 * 86_400_000);
     const flashIds = [...running.filter((c) => c.kind === 'flash_sale'), ...upcomingFlash].map((c) => c.id);
     const flashRows = flashIds.length ? await this.repo.find('flash_items', { campaign_id: flashIds, offer_id: ids }) : [];
-    const eligible = await this.repo.eligibleFor(ids, running.map((c) => c.id));
+    const flashOf = new Map(flashRows.map((f) => [`${f.campaign_id}:${f.offer_id}`, f]));
+    const eligible = new Set((await this.repo.eligibleFor(ids, running.map((c) => c.id))).map((e) => `${e.campaign_id}:${e.offer_id}`));
     // automatic discounts the customer gets without doing anything: autoApply coupons for everyone (or every signed-in
     // customer). A minimum spend counts when one unit of the offer reaches it (the one-unit evaluation below decides);
     // category and brand scopes are resolved from catalog (one batch read) when such a campaign runs.
-    const automatic = (await this.core.models(await this.repo.runningCampaigns(at, { kinds: [...COUPON_KINDS] }))).filter(
-      (c) => c.autoApply && (c.discount.percentOffBps || c.discount.amountOff) && (c.eligibility.audience === 'everyone' || (c.eligibility.audience === 'signed_in' && Boolean(customerId))),
+    const automatic = runningAll.filter(
+      (c) => COUPON_KINDS.includes(c.kind) && c.autoApply && (c.discount.percentOffBps || c.discount.amountOff) && (c.eligibility.audience === 'everyone' || (c.eligibility.audience === 'signed_in' && Boolean(customerId))),
     );
     const needsProduct = automatic.some((c) => [...c.scope.include, ...c.scope.exclude].some((t) => t.kind === 'category' || t.kind === 'brand'));
     const productFacts = needsProduct ? await this.productFacts(list.map((o) => o.productId)) : new Map<string, { categoryIds: string[]; brandId: string | null }>();
@@ -73,20 +76,21 @@ export class StorefrontPart extends Part {
       lines.push({ lineId: o.id, offerId: o.id, productId: o.productId, variantId: o.variantId, sellerId, officialStore: attrs.official, categoryId: pf?.categoryIds[0] ?? null, quantity: 1, unitPrice: o.price, packageId: o.id, attrs });
       const opts: PriceOption[] = [];
       for (const c of running) {
-        if (!eligible.some((e) => e.campaign_id === c.id && e.offer_id === o.id)) continue;
+        if (!eligible.has(`${c.id}:${o.id}`)) continue;
         let consentBps: number | null = null;
         if (!attrs.official && needsConsent(c)) {
           const s = consents.get(c.id)?.get(sellerId);
           if (!s?.offerIds.has(o.id)) continue;
           consentBps = s.platformBps;
         }
-        const f = flashRows.find((x) => x.campaign_id === c.id && x.offer_id === o.id);
+        const f = flashOf.get(`${c.id}:${o.id}`);
         if (c.kind === 'flash_sale' && !f) continue;
         opts.push({ campaign: c, consentBps, flash: f ? { dealPrice: f.deal_price, dealStock: f.deal_stock, claimed: f.claimed, reserved: f.reserved, purchaseLimit: f.purchase_limit, state: f.state } : null });
       }
       priceOptions.set(o.id, opts);
     }
     // a one-unit cart per offer: amounts, minimum spends and budgets are judged per offer, never split across the list
+    const coupons = automatic.map((c) => ({ campaign: c, source: 'automatic' as const, code: null, codeInfo: null }));
     const evalLines = lines.map((ln) => evaluate({
       at,
       currency: list[0]!.price.currency,
@@ -98,22 +102,24 @@ export class StorefrontPart extends Part {
       lines: [ln],
       shipping: null,
       priceOptions: new Map([[ln.lineId, priceOptions.get(ln.lineId) ?? []]]),
-      coupons: automatic.map((c) => ({ campaign: c, source: 'automatic' as const, code: null, codeInfo: null })),
+      coupons,
       rejected: [],
       usage,
       consents,
     }).lines[0]!);
-    const out = { lines: evalLines };
     const automaticById = new Map(automatic.map((c) => [c.id, c]));
     const promos = await this.activeSellerPromotions([...new Set(list.map((o) => o.sellerId).filter((s): s is string => Boolean(s)))], { customerId: customerId ?? undefined, at: at.toISOString() }, true);
     const byId = new Map(running.map((c) => [c.id, c]));
+    const upcomingById = new Map(upcomingFlash.map((c) => [c.id, c]));
     const days = await this.core.lookbackDays();
-    const result: OfferPromotion[] = [];
-    for (const o of list) {
-      const l = out.lines.find((x) => x.lineId === o.id)!;
-      const priceCampaign = l.allocations.map((a) => byId.get(a.campaignId)).find(Boolean) ?? null;
+    const priced = list.map((o, i) => {
+      const l = evalLines[i]!;
+      return { o, l, off: l.regularUnitPrice.amount - l.unitPrice.amount, priceCampaign: l.allocations.map((a) => byId.get(a.campaignId)).find(Boolean) ?? null };
+    });
+    // honest was prices: one offers read per discounted offer, side by side
+    const refs = await Promise.all(priced.map(({ o, off, priceCampaign }) => (off > 0 && priceCampaign ? this.referencePriceAt(o.id, priceCampaign.startsAt, days) : null)));
+    return priced.map(({ o, l, off, priceCampaign }, i) => {
       const badges: PromoBadge[] = [];
-      const off = l.regularUnitPrice.amount - l.unitPrice.amount;
       if (off > 0) badges.push({ label: `−${bpsLabel(Math.round((off * 10000) / l.regularUnitPrice.amount))}`, kind: priceCampaign?.kind === 'flash_sale' ? 'flash' : 'deal' });
       for (const a of l.allocations) {
         const c = byId.get(a.campaignId);
@@ -124,18 +130,13 @@ export class StorefrontPart extends Part {
       }
       const sellerPromos = (o.sellerId ? (promos[o.sellerId] ?? []) : []).filter((b) => (b as PromoBanner & { offerIds?: string[] }).offerIds?.includes(o.id) ?? true).map(({ offerIds: _o, ...b }: PromoBanner & { offerIds?: string[] }) => b);
       if (sellerPromos.some((p) => /free shipping/i.test(p.title + p.detail))) badges.push({ label: 'Free shipping', kind: 'free_shipping' });
-      let wasPrice: common.Money | null = null;
-      let wasPriceRule: string | null = null;
-      if (off > 0 && priceCampaign) {
-        const ref = await this.referencePriceAt(o.id, priceCampaign.startsAt, days);
-        if (ref && ref.amount > l.unitPrice.amount) {
-          wasPrice = ref;
-          wasPriceRule = `Lowest price from this seller in the ${days} days before ${dayLabel(priceCampaign.startsAt, priceCampaign.timeZone)}`;
-        }
-      }
-      const flashRow = flashRows.find((f) => f.offer_id === o.id && (byId.get(f.campaign_id)?.kind === 'flash_sale' || upcomingFlash.some((u) => u.id === f.campaign_id)));
-      const flashCampaign = flashRow ? (byId.get(flashRow.campaign_id) ?? upcomingFlash.find((u) => u.id === flashRow.campaign_id)) : undefined;
-      result.push({
+      const ref = refs[i];
+      const honest = ref && priceCampaign && ref.amount > l.unitPrice.amount;
+      const wasPrice: common.Money | null = honest ? ref : null;
+      const wasPriceRule = honest ? `Lowest price from this seller in the ${days} days before ${dayLabel(priceCampaign.startsAt, priceCampaign.timeZone)}` : null;
+      const flashRow = flashRows.find((f) => f.offer_id === o.id && (byId.get(f.campaign_id)?.kind === 'flash_sale' || upcomingById.has(f.campaign_id)));
+      const flashCampaign = flashRow ? (byId.get(flashRow.campaign_id) ?? upcomingById.get(flashRow.campaign_id)) : undefined;
+      return {
         offerId: o.id,
         regularPrice: l.regularUnitPrice,
         price: l.unitPrice,
@@ -147,9 +148,8 @@ export class StorefrontPart extends Part {
         flash: flashRow && flashCampaign ? this.countdown(flashCampaign, flashRow, at) : null,
         sellerPromos,
         ...this.automaticDiscountOf(l.allocations, automaticById, l.unitPrice.currency),
-      });
-    }
-    return result;
+      };
+    });
   }
 
   /** Category chain and brand per product for scope rules (catalog.getProducts, 200 ids per call); unknown products are left out */
@@ -264,11 +264,13 @@ export class StorefrontPart extends Part {
   async cards(campaigns: CampaignModel[], customerId: string | null): Promise<CouponCard[]> {
     if (!campaigns.length) return [];
     const ids = campaigns.map((c) => c.id);
-    const names = await this.core.sellerNames(campaigns.map((c) => c.sellerId));
-    const clips = customerId ? await this.repo.find('coupon_clips', { customer_id: customerId, campaign_id: ids }) : [];
-    const assigned = customerId ? await this.repo.find('coupon_codes', { campaign_id: ids, assigned_customer_id: customerId }) : [];
-    const usage = customerId ? await this.repo.find('usage_counters', { campaign_id: ids, customer_key: customerId }) : [];
-    const used = customerId ? await this.repo.find('redemptions', { campaign_id: ids, customer_id: customerId, state: ['committed', 'partially_reversed'] }, { orderBy: [['created_at', 'desc']] }) : [];
+    const [names, clips, assigned, usage, used] = await Promise.all([
+      this.core.sellerNames(campaigns.map((c) => c.sellerId)),
+      customerId ? this.repo.find('coupon_clips', { customer_id: customerId, campaign_id: ids }) : [],
+      customerId ? this.repo.find('coupon_codes', { campaign_id: ids, assigned_customer_id: customerId }) : [],
+      customerId ? this.repo.find('usage_counters', { campaign_id: ids, customer_key: customerId }) : [],
+      customerId ? this.repo.find('redemptions', { campaign_id: ids, customer_id: customerId, state: ['committed', 'partially_reversed'] }, { orderBy: [['created_at', 'desc']] }) : [],
+    ]);
     const refs = await this.parts.campaigns.orderRefs(used.map((r) => r.order_id ?? ''));
     const now = this.now();
     return campaigns.map((c) => {
@@ -406,12 +408,17 @@ export class StorefrontPart extends Part {
     if (!campaigns.length) return [];
     const rows = await this.repo.find('eligible_offers', { campaign_id: campaigns.map((c) => c.id), eligible: true }, { orderBy: [['offer_id', 'asc']], limit: 500 });
     const consents = await this.parts.participation.consents(campaigns.filter(needsConsent).map((c) => c.id));
+    const byId = new Map(campaigns.map((c) => [c.id, c]));
     const ok = rows.filter((r) => {
-      const c = campaigns.find((x) => x.id === r.campaign_id)!;
+      const c = byId.get(r.campaign_id)!;
       return r.official_store || !needsConsent(c) || consents.get(c.id)?.get(r.seller_id)?.offerIds.has(r.offer_id);
     });
     const offerIds = [...new Set(ok.map((r) => r.offer_id))];
-    return this.dealProducts(offerIds, (offerId) => campaigns.find((c) => ok.some((r) => r.offer_id === offerId && r.campaign_id === c.id))?.endsAt ?? null, o);
+    // an offer in several clearance campaigns shows the end of the one that ends first (campaigns are soonest ending first)
+    const okByCampaign = groupBy(ok, (r) => r.campaign_id);
+    const endsAt = new Map<string, Date>();
+    for (const c of campaigns) for (const r of okByCampaign.get(c.id) ?? []) if (!endsAt.has(r.offer_id)) endsAt.set(r.offer_id, c.endsAt);
+    return this.dealProducts(offerIds, (offerId) => endsAt.get(offerId) ?? null, o);
   }
 
   async dealProducts(offerIds: string[], endsAt: (offerId: string) => Date | null, o: { categoryId?: string; customerId?: string | null } = {}): Promise<DealProduct[]> {

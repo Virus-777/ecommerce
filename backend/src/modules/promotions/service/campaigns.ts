@@ -50,7 +50,7 @@ import {
   type CampaignModel,
   type Issue,
 } from '../domain/rules.js';
-import { decodeActor, encodeActor, iso, isoOrNull, periodOf, toCode, toFundingReview, toLogEntry, toRedemption, toSummary } from '../mappers.js';
+import { decodeActor, encodeActor, iso, isoOrNull, periodOf, toCode, toFundingReview, toLogEntry, toRedemption, toSummary, unitsPerRedemption } from '../mappers.js';
 import type { CampaignRec, EligibleRec, FlashItemRec, FundingReviewRec, ResultRec, TargetRec } from '../ports.js';
 import type { PromotionsRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, type By, type OfferCard } from './core.js';
@@ -965,12 +965,16 @@ export class CampaignsPart extends Part {
     await this.core.campaign(id);
     const p = await this.repo.page('redemptions', { campaign_id: id, ...(state ? { state: state.split(',') } : {}) }, page, { column: 'created_at', direction: 'desc' });
     const ids = p.items.map((r) => r.id);
-    const lines = ids.length ? await this.repo.find('redemption_lines', { redemption_id: ids }) : [];
-    const codes = new Map((await this.repo.getMany('coupon_codes', p.items.map((r) => r.code_id).filter((x): x is string => Boolean(x)))).map((c) => [c.id, c.code]));
-    const refs = await this.orderRefs(p.items.map((r) => r.order_id ?? ''));
+    const [lines, codeRows, refs] = await Promise.all([
+      ids.length ? this.repo.find('redemption_lines', { redemption_id: ids }) : [],
+      this.repo.getMany('coupon_codes', p.items.map((r) => r.code_id).filter((x): x is string => Boolean(x))),
+      this.orderRefs(p.items.map((r) => r.order_id ?? '')),
+    ]);
+    const codes = new Map(codeRows.map((c) => [c.id, c.code]));
+    const units = unitsPerRedemption(lines);
     return {
       ...p,
-      items: p.items.map((r) => toRedemption(r, { code: r.code_id ? (codes.get(r.code_id) ?? null) : null, orderRef: r.order_id ? (refs.get(r.order_id) ?? null) : null, items: lines.filter((l) => l.redemption_id === r.id).reduce((a, l) => a + l.quantity, 0) })),
+      items: p.items.map((r) => toRedemption(r, { code: r.code_id ? (codes.get(r.code_id) ?? null) : null, orderRef: r.order_id ? (refs.get(r.order_id) ?? null) : null, items: units.get(r.id) ?? 0 })),
     };
   }
 

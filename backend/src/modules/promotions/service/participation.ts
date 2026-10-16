@@ -11,7 +11,7 @@ import type { Invitation, Participation } from '../../../spec/promotions.js';
 import type { ConsentMap } from '../domain/evaluate.js';
 import { sellerParticipationMachine } from '../domain/state-machines.js';
 import { bpsLabel, CONSENT_TEXT_VERSION, consentText, dayLabel, discountLabel, earningsImpact, fundingLabel, platformShareBps, unitDiscount, type CampaignModel } from '../domain/rules.js';
-import { decodeActor, encodeActor, iso, isoOrNull, periodOf } from '../mappers.js';
+import { decodeActor, encodeActor, groupBy, iso, isoOrNull, periodOf } from '../mappers.js';
 import type { ParticipationRec } from '../ports.js';
 import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
@@ -275,9 +275,10 @@ export class ParticipationPart extends Part {
     if (!campaignIds.length) return out;
     const parts = await this.repo.find('participations', { campaign_id: [...campaignIds], state: ['accepted', 'withdrawal_requested'] });
     const offers = parts.length ? await this.repo.find('participation_offers', { participation_id: parts.map((p) => p.id), included: true }) : [];
+    const offersOf = groupBy(offers, (o) => o.participation_id);
     for (const p of parts) {
       const map = out.get(p.campaign_id) ?? new Map();
-      map.set(p.seller_id, { platformBps: p.platform_share_bps, offerIds: new Set(offers.filter((o) => o.participation_id === p.id).map((o) => o.offer_id)) });
+      map.set(p.seller_id, { platformBps: p.platform_share_bps, offerIds: new Set((offersOf.get(p.id) ?? []).map((o) => o.offer_id)) });
       out.set(p.campaign_id, map);
     }
     return out;

@@ -126,6 +126,12 @@ export class PromotionsRepository {
     return this.#t('eligible_offers').find({ offer_id: { $in: [...new Set(offerIds)] }, campaign_id: { $in: [...new Set(campaignIds)] }, eligible: true });
   }
 
+  /** Ids among `campaignIds` that have unique (per-customer) codes */
+  async campaignsWithUniqueCodes(campaignIds: readonly string[]): Promise<Set<string>> {
+    if (!campaignIds.length) return new Set();
+    return new Set(await this.#codes.distinct<string>('campaign_id', { campaign_id: { $in: [...new Set(campaignIds)] }, kind: 'unique' }));
+  }
+
   /** Active code rows by case-insensitive code */
   async activeCodes(list: readonly string[]): Promise<CodeRec[]> {
     const upper = upperAll(list);

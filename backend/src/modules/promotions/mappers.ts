@@ -7,6 +7,25 @@ import { fundingLabel, m, periodDisplay, type CampaignModel, type Kind, type Sta
 import type { CampaignRec, CodeRec, FundingReviewRec, LogRec, RedemptionRec, TargetRec } from './ports.js';
 
 
+/** Rows grouped by a key (Map.groupBy, which the ES2023 lib of this project does not have yet) */
+export function groupBy<T, K>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
+  const out = new Map<K, T[]>();
+  for (const r of rows) {
+    const k = key(r);
+    const list = out.get(k);
+    if (list) list.push(r);
+    else out.set(k, [r]);
+  }
+  return out;
+}
+
+/** Units per redemption, summed over its lines */
+export function unitsPerRedemption(lines: readonly { redemption_id: string; quantity: number }[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const l of lines) out.set(l.redemption_id, (out.get(l.redemption_id) ?? 0) + l.quantity);
+  return out;
+}
+
 export const iso = (d: Date | string) => new Date(d).toISOString();
 export const isoOrNull = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString() : null);
 

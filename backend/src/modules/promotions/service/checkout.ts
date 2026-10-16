@@ -12,9 +12,8 @@ import type { CartEvaluation, CartEvaluationInput, FundingSplit, Redemption, Red
 import { evaluate, type CouponCandidate, type EvalLine, type Hold, type PriceOption } from '../domain/evaluate.js';
 import { flashItemMachine, redemptionMachine } from '../domain/state-machines.js';
 import { COUPON_KINDS, m, moneyLabel, needsConsent, PRICE_KINDS, SHIPPING_KINDS, type CampaignModel } from '../domain/rules.js';
-import { toRedemption } from '../mappers.js';
+import { toRedemption, unitsPerRedemption } from '../mappers.js';
 import type { FlashItemRec, RedemptionLineRec, RedemptionRec } from '../ports.js';
-import type { PromotionsRepository } from '../repository.js';
 import { invalid, notFound, Part, SYSTEM, type By } from './core.js';
 
 /** What an evaluation row keeps: the input, the answer and the holds a reservation takes */
@@ -101,8 +100,10 @@ export class CheckoutPart extends Part {
     const running = await this.core.models(await this.repo.runningCampaigns(at));
     const priceCampaigns = running.filter((c) => PRICE_KINDS.includes(c.kind));
     const offerIds = lines.map((l) => l.offerId);
-    const eligibleRows = await this.repo.eligibleFor(offerIds, priceCampaigns.map((c) => c.id));
-    const flashRows = priceCampaigns.some((c) => c.kind === 'flash_sale') ? await this.repo.find('flash_items', { campaign_id: priceCampaigns.filter((c) => c.kind === 'flash_sale').map((c) => c.id), offer_id: offerIds }) : [];
+    const eligible = new Set((await this.repo.eligibleFor(offerIds, priceCampaigns.map((c) => c.id))).map((e) => `${e.campaign_id}:${e.offer_id}`));
+    const flashCampaignIds = priceCampaigns.filter((c) => c.kind === 'flash_sale').map((c) => c.id);
+    const flashRows = flashCampaignIds.length ? await this.repo.find('flash_items', { campaign_id: flashCampaignIds, offer_id: offerIds }) : [];
+    const flashOf = new Map(flashRows.map((f) => [`${f.campaign_id}:${f.offer_id}`, f]));
 
     // coupon candidates: typed codes, clipped coupons, automatic offers
     const rejected: RejectedCode[] = [];
@@ -130,8 +131,9 @@ export class CheckoutPart extends Part {
     if (customerId) {
       const clips = await this.repo.find('coupon_clips', { customer_id: customerId });
       const codes = new Map((await this.repo.getMany('coupon_codes', clips.map((c) => c.code_id).filter((x): x is string => Boolean(x)))).map((c) => [c.id, c]));
+      const runningById = new Map(running.map((c) => [c.id, c]));
       for (const clip of clips) {
-        const c = running.find((r) => r.id === clip.campaign_id);
+        const c = runningById.get(clip.campaign_id);
         if (!c || !couponKinds(c)) continue;
         const cr = clip.code_id ? codes.get(clip.code_id) : undefined;
         candidates.push({ campaign: c, source: 'clipped', code: cr?.code ?? c.code, codeInfo: cr ? { id: cr.id, code: cr.code, kind: cr.kind, maxRedemptions: cr.max_redemptions, redemptions: cr.redemptions, active: cr.active, assignedCustomerId: cr.assigned_customer_id } : null });
@@ -157,14 +159,14 @@ export class CheckoutPart extends Part {
     for (const line of lines) {
       const opts: PriceOption[] = [];
       for (const c of priceCampaigns) {
-        if (!eligibleRows.some((e) => e.campaign_id === c.id && e.offer_id === line.offerId)) continue;
+        if (!eligible.has(`${c.id}:${line.offerId}`)) continue;
         let consentBps: number | null = null;
         if (!line.officialStore && needsConsent(c)) {
           const s = consents.get(c.id)?.get(line.sellerId);
           if (!s || !s.offerIds.has(line.offerId)) continue;
           consentBps = s.platformBps;
         }
-        const f = c.kind === 'flash_sale' ? flashRows.find((x) => x.campaign_id === c.id && x.offer_id === line.offerId) : undefined;
+        const f = c.kind === 'flash_sale' ? flashOf.get(`${c.id}:${line.offerId}`) : undefined;
         if (c.kind === 'flash_sale' && !f) continue;
         opts.push({ campaign: c, consentBps, flash: f ? { dealPrice: f.deal_price, dealStock: f.deal_stock, claimed: f.claimed, reserved: f.reserved, purchaseLimit: f.purchase_limit, state: f.state } : null });
       }
@@ -334,11 +336,12 @@ export class CheckoutPart extends Part {
     this.core.publish('promotions.budget.threshold_reached', { campaignId, budget: m(row.budget_amount, row.currency), used: m(row.budget_used, row.currency) });
   }
 
-  async redemptionsView(rows: RedemptionRec[], repo: PromotionsRepository = this.repo): Promise<Redemption[]> {
+  async redemptionsView(rows: RedemptionRec[]): Promise<Redemption[]> {
     if (!rows.length) return [];
-    const lines = await repo.find('redemption_lines', { redemption_id: rows.map((r) => r.id) });
-    const codes = new Map((await repo.getMany('coupon_codes', rows.map((r) => r.code_id).filter((x): x is string => Boolean(x)))).map((c) => [c.id, c.code]));
-    return rows.map((r) => toRedemption(r, { code: r.code_id ? (codes.get(r.code_id) ?? null) : null, orderRef: null, items: lines.filter((l) => l.redemption_id === r.id).reduce((a, l) => a + l.quantity, 0) }));
+    const lines = await this.repo.find('redemption_lines', { redemption_id: rows.map((r) => r.id) });
+    const codes = new Map((await this.repo.getMany('coupon_codes', rows.map((r) => r.code_id).filter((x): x is string => Boolean(x)))).map((c) => [c.id, c.code]));
+    const units = unitsPerRedemption(lines);
+    return rows.map((r) => toRedemption(r, { code: r.code_id ? (codes.get(r.code_id) ?? null) : null, orderRef: null, items: units.get(r.id) ?? 0 }));
   }
 
   /**
