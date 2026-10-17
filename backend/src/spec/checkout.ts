@@ -527,6 +527,8 @@ export interface CheckoutView {
   totals: QuoteTotals;
   legal: LegalInfo;
   giftNote?: string | null;
+  /** Gift option: the packing slip shows no prices (PUT /sessions/{id}/preferences) */
+  hidePricesOnSlip: boolean;
   readyToPlace: boolean;
   blockers: string[];
   /** 'Tapping twice or refreshing won't create two orders or charge you twice.' */
@@ -578,6 +580,7 @@ export const CheckoutView: z.ZodType<CheckoutView> = z.object({
     return LegalInfo;
   },
   giftNote: z.string().nullish(),
+  hidePricesOnSlip: z.boolean().describe("Gift option: the packing slip shows no prices (PUT /sessions/{id}/preferences)"),
   readyToPlace: z.boolean(),
   blockers: z.array(z.string()),
   doubleSubmitNote: z.string().describe("'Tapping twice or refreshing won't create two orders or charge you twice.'"),

@@ -318,6 +318,7 @@ Turns a cart (or a Buy now offer) into an accepted order: identify the customer 
 | totals | `QuoteTotals` |
 | legal | `LegalInfo` |
 | giftNote | `string?` |
+| hidePricesOnSlip | `bool` Gift option: the packing slip shows no prices (PUT /sessions/{id}/preferences) |
 | readyToPlace | `bool` |
 | blockers | `string[]` |
 | doubleSubmitNote | `string` 'Tapping twice or refreshing won't create two orders or charge you twice.' |

@@ -160057,6 +160057,10 @@
               "null"
             ]
           },
+          "hidePricesOnSlip": {
+            "type": "boolean",
+            "description": "Gift option: the packing slip shows no prices (PUT /sessions/{id}/preferences)"
+          },
           "readyToPlace": {
             "type": "boolean"
           },
@@ -160127,6 +160131,7 @@
           "payment",
           "totals",
           "legal",
+          "hidePricesOnSlip",
           "readyToPlace",
           "blockers",
           "doubleSubmitNote",
