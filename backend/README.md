@@ -109,6 +109,21 @@ Every module is built. A new module starts from its spec (`npm run module:new <n
 | `npm run migrate` | Apply the MongoDB schema to `MONGODB_URI` (read from `.env` when it exists): kernel and module collections, validators and indexes, then pending data migrations. In the URI, percent-encode special characters in the password (`@` → `%40`, `#` → `%23`, `!` → `%21`) and don't quote it |
 | `npm run token -- <visitor\|customer\|seller\|staff>` | Development token, valid 12 h (`--permissions a,b`, `--seller <id>`, `--account <id>`, `--audience store\|seller\|admin`) |
 
+## The first staff accounts
+
+On a new database (or after removing every staff account to test from the beginning), create the first two Business Owners from this folder:
+
+```bash
+npm run bootstrap-owner -- --email owner@company.example --name "Owner Name" --deputy-email deputy@company.example --deputy-name "Deputy Name"
+```
+
+- It prints a link and pass code for each person. Each one opens their link, enters the pass code and chooses a password. Both get **Business Owner + Platform Administrator** straight away, with no approval needed.
+- **Always include the deputy.** Sensitive grants (Business Owner permission changes, giving someone the Business Owner role, approval limits) need a second Business Owner to approve them, and nobody can approve their own request. With two Business Owners, each approves the other's requests; with one, those requests wait until they expire.
+- Invite everyone else from Admin Center > Staff, then run `npm run staff-link -- --email …` for their link and pass code (no email is sent from this server).
+- An Admin Center tab still signed in as a removed account fails: sign out or reload before you start.
+
+The full procedure, including lost links and mistyped emails: [docs/MAINTAINING.md](../docs/MAINTAINING.md) §7.
+
 ## Configuration
 
 Environment variables, read and checked at startup by `src/kernel/config/index.ts` (an invalid value stops the server). Every one has a working default for local development; [.env.example](.env.example) lists them with comments, and [.env.production.example](.env.production.example) is the production settings file of the one-server offline deployment ([deploy/linux/README.md](deploy/linux/README.md)). The search engine's own variables (`SEARCH_ENGINE`, `OPENSEARCH_*`) are read by the search module (`src/modules/search/engine-config.ts`; [docs/02 §9](../docs/02-backend-architecture.md#9-search-engine-opensearch)).
