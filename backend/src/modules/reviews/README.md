@@ -34,6 +34,7 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | GET | `/api/store/reviews/products/{productId}/questions` | Questions with answers labelled Seller, Marketly staff or Customer | visitor | Page<Question> |
 | POST | `/api/store/reviews/products/{productId}/questions` | Ask a question about the product | customer | `{ text: text }` → `Question` |
 | POST | `/api/store/reviews/questions/{id}/answers` | Answer another shopper's question (labelled Customer) | customer | `{ text: text }` → `Answer` |
+| GET | `/api/store/reviews/me/answers` | My answers to other shoppers' questions, with status | customer | Page<MyAnswer> |
 | PATCH | `/api/store/reviews/me/answers/{id}` | Edit my answer, or fix and resubmit it after an edit request | customer | `{ text: text }` → `Answer` |
 | POST | `/api/store/reviews/votes` | Mark a review or answer helpful (or undo) | customer | `{ targetType: enum(product_review|answer), targetId: uuid, helpful: bool }` → `{ helpfulCount: int }` |
 | POST | `/api/store/reviews/reports` | Report a review, feedback, question, answer or seller response | customer | `ReportInput` → `MyReport` |
@@ -182,6 +183,18 @@ Product reviews (Verified Purchase), seller feedback kept separate from product 
 | helpfulCount | `int` |
 | viewerVotedHelpful | `bool?` The signed-in customer marked this answer helpful; null without a customer session and outside the store's question list |
 | status | `enum(pending_review|published|edit_requested|removed)` |
+
+### MyAnswer
+
+| Field | Type |
+|---|---|
+| answer | `Answer` |
+| questionId | `uuid` |
+| questionText | `text` |
+| productId | `uuid` |
+| productTitle | `string` |
+| productSlug | `string?` |
+| canEdit | `bool` PATCH /me/answers/{id} applies: a published answer can be edited, one with an edit request fixed and resubmitted |
 
 ### Question
 

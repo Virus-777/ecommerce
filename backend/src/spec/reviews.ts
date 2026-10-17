@@ -188,6 +188,29 @@ export const Answer: z.ZodType<Answer> = z.object({
   status: z.enum(["pending_review", "published", "edit_requested", "removed"]),
 }).register(common.apiTypes, { id: "reviews.Answer" });
 
+export interface MyAnswer {
+  answer: Answer;
+  questionId: string;
+  questionText: string;
+  productId: string;
+  productTitle: string;
+  productSlug?: string | null;
+  /** PATCH /me/answers/{id} applies: a published answer can be edited, one with an edit request fixed and resubmitted */
+  canEdit: boolean;
+}
+
+export const MyAnswer: z.ZodType<MyAnswer> = z.object({
+  get answer() {
+    return Answer;
+  },
+  questionId: z.uuid(),
+  questionText: z.string(),
+  productId: z.uuid(),
+  productTitle: z.string(),
+  productSlug: z.string().nullish(),
+  canEdit: z.boolean().describe("PATCH /me/answers/{id} applies: a published answer can be edited, one with an edit request fixed and resubmitted"),
+}).register(common.apiTypes, { id: "reviews.MyAnswer" });
+
 export interface Question {
   id: string;
   productId: string;
@@ -1731,6 +1754,20 @@ export const endpoints = defineEndpoints({
     status: 201,
     events: ["reviews.answer.published"],
     screens: ["store/product"],
+    phase: 1,
+  },
+  listMyAnswers: {
+    area: "store",
+    method: "GET",
+    path: "/me/answers",
+    auth: "customer",
+    scope: "own-customer",
+    summary: "My answers to other shoppers' questions, with status",
+    desc: "Newest first, every status except removed by the author, so a held answer or an edit request can be found and fixed.",
+    paging: true,
+    response: () => MyAnswer,
+    status: 200,
+    screens: ["account/reviews"],
     phase: 1,
   },
   editMyAnswer: {
