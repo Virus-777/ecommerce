@@ -44,10 +44,18 @@ describe('bins', () => {
     const before = h.events.length;
     const r = await h.call('PUT', `/stock-items/${item.id}/bins`, { bins: [{ binId: bins['E-01-2'].id, primary: false }, { binId: bins['E-01-1'].id, primary: true }] });
     expect(r.status, JSON.stringify(r.body)).toBe(200);
-    expect(r.body).toEqual([
-      { stockItemId: item.id, sku: 'BIN-ITEM-1', label: 'Speaker, Walnut', binId: bins['E-01-1'].id, binCode: 'E-01-1', primary: true },
-      { stockItemId: item.id, sku: 'BIN-ITEM-1', label: 'Speaker, Walnut', binId: bins['E-01-2'].id, binCode: 'E-01-2', primary: false },
-    ]);
+    const assigned = [
+      { stockItemId: item.id, sku: 'BIN-ITEM-1', label: 'Speaker, Walnut', binId: bins['E-01-1'].id, binCode: 'E-01-1', binKind: 'pick', primary: true },
+      { stockItemId: item.id, sku: 'BIN-ITEM-1', label: 'Speaker, Walnut', binId: bins['E-01-2'].id, binCode: 'E-01-2', binKind: 'pick', primary: false },
+    ];
+    expect(r.body).toEqual(assigned);
+    // the current list, read before an edit (PUT replaces it), with warehouse.view only
+    const read = await h.call('GET', `/stock-items/${item.id}/bins`, undefined, { token: callers.staff(['warehouse.view']) });
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(read.body).toEqual(assigned);
+    expect((await h.call('GET', `/stock-items/${newId()}/bins`)).status).toBe(404);
+    expect((await h.call('GET', `/stock-items/${h.item('BIN-ITEM-0', 'No bins yet').id}/bins`)).body).toEqual([]);
+    expect((await h.call('GET', `/stock-items/${item.id}/bins`, undefined, { token: callers.staff([]) })).status).toBe(403);
     expect(h.events.slice(before).filter((e) => e.name === 'warehouse.bin.assigned').map((e) => e.payload)).toEqual([
       { stockItemId: item.id, binId: bins['E-01-2'].id, binCode: 'E-01-2', primary: false },
       { stockItemId: item.id, binId: bins['E-01-1'].id, binCode: 'E-01-1', primary: true },

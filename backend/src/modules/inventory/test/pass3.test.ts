@@ -340,8 +340,10 @@ describe('discrepancy photos', () => {
     try {
       const a = await officialItem(h, main.id, 3);
       const photo = newId();
-      const d = await h.api.reportDiscrepancy({ kind: 'damage_found', stockItemId: a.id, locationId: main.id, quantity: 1, note: 'Crushed box', photoIds: [photo], reportedBy: { kind: 'staff', id: newId() } });
-      expect(attach).toHaveBeenCalledWith(photo, expect.objectContaining({ module: 'inventory', kind: 'inspection_photo', refId: d.id }), { kind: 'platform' });
+      const reporter = newId();
+      const d = await h.api.reportDiscrepancy({ kind: 'damage_found', stockItemId: a.id, locationId: main.id, quantity: 1, note: 'Crushed box', photoIds: [photo], reportedBy: { kind: 'staff', id: reporter } });
+      // the reporting staff member's photos (media also takes the platform files they uploaded)
+      expect(attach).toHaveBeenCalledWith(photo, expect.objectContaining({ module: 'inventory', kind: 'inspection_photo', refId: d.id }), { kind: 'staff', id: reporter });
 
       const bad = newId();
       attach.mockImplementation(async (id) => {

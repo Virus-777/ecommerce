@@ -18,6 +18,8 @@ export const adminRoutes = (service: WarehouseService) =>
     createBins: async ({ body, actor, requestId, principal }) => service.bins.create(body, { actor, requestId, principal }),
     /** PATCH /bins/{id}: Change kind or deactivate a bin */
     updateBin: async ({ params, body, actor, requestId, principal }) => service.bins.update(params.id, body, { actor, requestId, principal }),
+    /** GET /stock-items/{stockItemId}/bins: The bins a company stock item is stored in, primary first */
+    listStockItemBins: async ({ params }) => service.bins.listStockItemBins(params.stockItemId),
     /** PUT /stock-items/{stockItemId}/bins: Set the bins a company stock item is stored in (one primary) */
     setStockItemBins: async ({ params, body, actor, requestId, principal }) => service.bins.setStockItemBins(params.stockItemId, body, { actor, requestId, principal }),
     /** GET /fulfillments: Official Store orders to pick and pack, most urgent first */

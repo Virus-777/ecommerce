@@ -37,6 +37,16 @@ const FS_REVIEW = 'fulfillment-service.enrollment.review';
 const FS_RECEIVE = 'fulfillment-service.inbound.receive';
 const FS_OPERATIONS = 'fulfillment-service.operations.view';
 const FS_FEES = 'fulfillment-service.fees.manage';
+/**
+ * Staff uploads (media spec: POST /api/admin/media/uploads and its content and complete steps). Every role whose work
+ * attaches files gets it: inspection, damage and receiving photos, case, trust and dispute evidence, Official Store,
+ * content and ad files. It only starts uploads: editing and deleting platform files stay with media.assets.manage, and
+ * attaching a file still needs the permission of the screen that uses it. Installs seeded before it get it from access
+ * migration 2026-10-17-staff-work-uploads.
+ */
+export const STAFF_UPLOADS = 'media.uploads.create';
+/** The Marketing Manager searches offers when adding flash-sale items (Admin › Promotions); installs seeded before it get it from the same migration */
+export const MARKETING_OFFERS_VIEW = 'offers.offers.view';
 
 export const SYSTEM_ROLES: SeedRole[] = [
   {
@@ -45,7 +55,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     kind: 'owner',
     workArea: 'Business',
     description: 'Sets approval limits and is the final approver above every limit.',
-    permissions: ['*.view', 'access.limits.approve', 'access.limits.propose', 'access.approvals.view-all', 'audit.entries.*', 'audit.retention.manage', ...QUEUES],
+    permissions: ['*.view', 'access.limits.approve', 'access.limits.propose', 'access.approvals.view-all', 'audit.entries.*', 'audit.retention.manage', STAFF_UPLOADS, ...QUEUES],
     limits: {}, // permitted without limit for every registered action (added by the registry sync)
   },
   {
@@ -89,7 +99,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Official store',
     description: 'Company offers and official store prices.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['offers.official.manage', 'offers.official.price', 'catalog.products.manage-official', 'inventory.stock.view', 'purchasing.orders.view', ...QUEUES],
+    permissions: ['offers.official.manage', 'offers.official.price', 'catalog.products.manage-official', 'inventory.stock.view', 'purchasing.orders.view', STAFF_UPLOADS, ...QUEUES],
     limits: { 'offers.prices.change': { authority: 'permitted', limitNumber: 30 } },
   },
   {
@@ -99,7 +109,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Official store',
     description: 'Suppliers, purchase orders, receipts and supplier claims.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['purchasing.*', ...QUEUES],
+    permissions: ['purchasing.*', STAFF_UPLOADS, ...QUEUES],
     limits: { 'purchasing.orders.send': upTo(25_000) },
   },
   {
@@ -119,7 +129,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Inventory and warehouse',
     description: 'Warehouse bins, waves, picking, packing and put-away.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['warehouse.*', 'inventory.stock.view', 'inventory.discrepancies.resolve', FS_RECEIVE, FS_OPERATIONS, ...QUEUES],
+    permissions: ['warehouse.*', 'inventory.stock.view', 'inventory.discrepancies.resolve', FS_RECEIVE, FS_OPERATIONS, STAFF_UPLOADS, ...QUEUES],
     limits: { 'fulfillment-service.reimbursements.approve': upTo(500) },
   },
   {
@@ -139,7 +149,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Orders and shipping',
     description: 'Shipping settings, shipments, delivery exceptions and carrier claims.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['shipping.*', ...QUEUES],
+    permissions: ['shipping.*', STAFF_UPLOADS, ...QUEUES],
     limits: { 'shipping.claims.open': upTo(1_000) },
   },
   {
@@ -149,7 +159,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Returns and cases',
     description: 'Return requests, inspections and return policies. Refund approval belongs to Finance.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['returns.requests.*', 'returns.inspections.record', 'returns.exceptions.propose', 'returns.policies.manage', 'inventory.returns.record', FS_RECEIVE, OWNER_DECIDES, ...QUEUES],
+    permissions: ['returns.requests.*', 'returns.inspections.record', 'returns.exceptions.propose', 'returns.policies.manage', 'inventory.returns.record', FS_RECEIVE, OWNER_DECIDES, STAFF_UPLOADS, ...QUEUES],
     limits: { 'returns.baseline.change': RECOMMEND, 'returns.policies.shorten-window': RECOMMEND },
   },
   {
@@ -160,7 +170,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     description: 'Product review and publication, taxonomy, media and search synonyms.',
     escalationRoleKey: BUSINESS_OWNER,
     // offers.offers.remove: Catalog owns offer suspension (decision D8)
-    permissions: ['catalog.*', 'media.assets.*', 'search.synonyms.manage', 'reviews.answers.staff', 'offers.offers.view', 'offers.offers.remove', OWNER_DECIDES, ...QUEUES],
+    permissions: ['catalog.*', 'media.assets.*', STAFF_UPLOADS, 'search.synonyms.manage', 'reviews.answers.staff', 'offers.offers.view', 'offers.offers.remove', OWNER_DECIDES, ...QUEUES],
     limits: { 'catalog.products.publication-override': PERMITTED },
   },
   {
@@ -185,7 +195,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Customers and support',
     description: 'Support cases, customer accounts and messaging.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['support.*', 'customers.*', '!customers.accounts.export', 'messaging.*', 'orders.orders.view', 'orders.customers.view-contact', 'returns.requests.view', 'wallet.credit.view', 'wallet.goodwill.grant', OWNER_DECIDES, ...QUEUES],
+    permissions: ['support.*', 'customers.*', '!customers.accounts.export', 'messaging.*', 'orders.orders.view', 'orders.customers.view-contact', 'returns.requests.view', 'wallet.credit.view', 'wallet.goodwill.grant', OWNER_DECIDES, STAFF_UPLOADS, ...QUEUES],
     limits: {
       'support.remedies.approve': upTo(500),
       'wallet.goodwill.grant': upTo(50),
@@ -199,7 +209,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Finance',
     description: 'Ledger, payouts, holds, adjustments, payments and refunds.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['finance.*', 'payments.*', 'returns.refunds.approve', 'returns.requests.view', 'reports.marketplace-finance.view', 'reports.trading.view', 'wallet.*', FS_FEES, OWNER_DECIDES, ...QUEUES],
+    permissions: ['finance.*', 'payments.*', 'returns.refunds.approve', 'returns.requests.view', 'reports.marketplace-finance.view', 'reports.trading.view', 'wallet.*', FS_FEES, OWNER_DECIDES, STAFF_UPLOADS, ...QUEUES],
     limits: {
       'finance.payouts.release': upTo(250_000, { secondReviewerAboveMoney: usd(50_000), secondReviewerRoleKeys: ['finance_manager', BUSINESS_OWNER] }),
       'finance.holds.place': upTo(50_000),
@@ -231,7 +241,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Promotions, homepage and marketing broadcasts.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['promotions.*', 'content.homepage.manage', 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', ...QUEUES],
+    permissions: ['promotions.*', 'content.homepage.manage', 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', MARKETING_OFFERS_VIEW, STAFF_UPLOADS, ...QUEUES],
     limits: { 'promotions.budgets.approve': upTo(5_000) },
   },
   {
@@ -241,7 +251,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Advertising',
     description: 'Ad campaigns, placements, rules and billing.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['advertising.*', ...QUEUES],
+    permissions: ['advertising.*', STAFF_UPLOADS, ...QUEUES],
     limits: { 'advertising.charges.void': upTo(500), 'advertising.rules.change': RECOMMEND },
   },
   {
@@ -251,7 +261,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Pages, help center and policies (policies approved by the Business Owner).',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['content.*', 'media.assets.manage', 'advertising.campaigns.review', ...QUEUES],
+    permissions: ['content.*', 'media.assets.manage', STAFF_UPLOADS, 'advertising.campaigns.review', ...QUEUES],
     limits: { 'content.policies.approve': RECOMMEND, 'content.policies.short-notice': RECOMMEND },
   },
   {
@@ -261,7 +271,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Trust and risk',
     description: 'Reports, investigations, enforcements, review moderation and appeals.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['trust.*', '!trust.reports.export-identities', 'reviews.moderation.*', 'reviews.appeals.decide', ...QUEUES],
+    permissions: ['trust.*', '!trust.reports.export-identities', 'reviews.moderation.*', 'reviews.appeals.decide', STAFF_UPLOADS, ...QUEUES],
     limits: { 'trust.enforcements.reverse': PERMITTED, 'catalog.products.publication-override': PERMITTED },
   },
   {
@@ -281,7 +291,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Inventory and warehouse',
     description: 'Picking, packing, put-away and receiving returns.',
     escalationRoleKey: 'warehouse_manager',
-    permissions: ['warehouse.view', 'warehouse.picking.perform', 'warehouse.packing.perform', 'warehouse.putaway.perform', 'warehouse.returns.receive', FS_RECEIVE, ...QUEUES],
+    permissions: ['warehouse.view', 'warehouse.picking.perform', 'warehouse.packing.perform', 'warehouse.putaway.perform', 'warehouse.returns.receive', FS_RECEIVE, STAFF_UPLOADS, ...QUEUES],
     limits: {},
   },
   {
@@ -321,7 +331,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Customers and support',
     description: 'Support cases, customer notes and conversations.',
     escalationRoleKey: 'customer_support_manager',
-    permissions: ['support.cases.view', 'support.cases.handle', 'customers.accounts.view', 'customers.notes.write', 'messaging.conversations.read', 'messaging.conversations.participate', 'orders.orders.view', 'wallet.credit.view', 'wallet.goodwill.grant', ...QUEUES],
+    permissions: ['support.cases.view', 'support.cases.handle', 'customers.accounts.view', 'customers.notes.write', 'messaging.conversations.read', 'messaging.conversations.participate', 'orders.orders.view', 'wallet.credit.view', 'wallet.goodwill.grant', STAFF_UPLOADS, ...QUEUES],
     limits: { 'support.remedies.approve': upTo(50), 'wallet.goodwill.grant': upTo(50) },
   },
 ];
