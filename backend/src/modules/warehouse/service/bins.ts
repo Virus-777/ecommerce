@@ -95,13 +95,22 @@ export class Bins {
     return this.view(after);
   }
 
+  /** GET /stock-items/{stockItemId}/bins: what PUT replaces, so the Admin Center can keep the other bins when it saves */
+  async listStockItemBins(stockItemId: string): Promise<BinAssignment[]> {
+    if (!(await this.core.stockInfo([stockItemId])).get(stockItemId)) throw notFound('Stock item');
+    return this.assignments(stockItemId);
+  }
+
   async assignments(stockItemId: string): Promise<BinAssignment[]> {
     const rows = await this.repo.find('bin_assignments', { stock_item_id: stockItemId });
     if (!rows.length) return [];
     const [bins, info] = await Promise.all([this.repo.find('bins', { id: rows.map((r) => r.bin_id) }), this.core.stockInfo([stockItemId])]);
     const i = info.get(stockItemId);
     return rows
-      .map((r) => ({ stockItemId, sku: i?.sku ?? '', label: i?.label ?? '', binId: r.bin_id, binCode: bins.find((b) => b.id === r.bin_id)?.code ?? '', primary: r.primary_bin }))
+      .map((r) => {
+        const bin = bins.find((b) => b.id === r.bin_id);
+        return { stockItemId, sku: i?.sku ?? '', label: i?.label ?? '', binId: r.bin_id, binCode: bin?.code ?? '', binKind: (bin?.kind ?? 'pick') as BinAssignment['binKind'], primary: r.primary_bin };
+      })
       .sort((a, b) => Number(b.primary) - Number(a.primary) || a.binCode.localeCompare(b.binCode));
   }
 
