@@ -210,6 +210,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
       'finance.destinations.approve': PERMITTED,
       'finance.reconciliation.correct': upTo(5_000),
       'payments.disputes.accept': upTo(10_000),
+      'payments.payments.correct': upTo(10_000), // manual capture, void, orphan refund, refund retry or cancel
       'returns.refunds.approve': upTo(10_000),
       'advertising.charges.void': upTo(10_000),
       'shipping.claims.open': upTo(10_000),
@@ -385,6 +386,7 @@ export const DEFAULT_ELIGIBLE: Record<string, string[]> = {
   'inventory.adjustments.apply': ['inventory_manager', 'finance_manager', BUSINESS_OWNER],
   'offers.prices.change': ['official_store_manager', BUSINESS_OWNER],
   'payments.disputes.accept': ['finance_staff', 'finance_manager'],
+  'payments.payments.correct': ['finance_manager', BUSINESS_OWNER],
   'promotions.budgets.approve': ['marketing_manager', 'finance_manager', BUSINESS_OWNER],
   'purchasing.orders.send': ['purchasing_manager', BUSINESS_OWNER],
   'returns.refunds.approve': ['finance_staff', 'finance_manager', BUSINESS_OWNER],

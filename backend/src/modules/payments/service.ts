@@ -21,7 +21,7 @@ import type {
 } from '../../spec/payments.js';
 import { ACCEPTED, customerState, is } from './domain/rules.js';
 import type { IntentRec } from './ports.js';
-import { Core, SYSTEM, notFound, type By, type PaymentsServiceDeps } from './service/core.js';
+import { Core, MANUAL_ACTION, SYSTEM, notFound, type By, type PaymentsServiceDeps } from './service/core.js';
 import { Credit } from './service/credit.js';
 import { Disputes } from './service/disputes.js';
 import { Intents } from './service/intents.js';
@@ -322,9 +322,34 @@ export class PaymentsService implements PaymentsPublicApi {
     return this.refunds.onItemCancelled(event);
   }
 
-  /** access.approval.decided: Complete or drop a dispute concession waiting for approval */
-  onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>): Promise<void> {
+  /** access.approval.decided: Complete or drop a dispute concession waiting for approval; carry out an approved manual money action */
+  async onApprovalDecidedFromAccess(event: EventPayload<'access.approval.decided'>): Promise<void> {
+    if (event.actionKey === MANUAL_ACTION) return this.onManualApproved(event);
     return this.disputes.onApprovalDecided(event);
+  }
+
+  /**
+   * An approved manual money action (Core.manual) runs now with what was asked (the request's details), as the
+   * approver. Rejected, cancelled or expired: nothing was done, nothing to undo. When the record changed meanwhile
+   * (the refund is no longer failed, the payment was captured) the action is refused as usual and only logged:
+   * staff see the current state and can ask again.
+   */
+  private async onManualApproved(e: EventPayload<'access.approval.decided'>): Promise<void> {
+    if (e.outcome !== 'approved') return;
+    const req = await this.core.soft('access', 'approval request', (a) => a.getApproval(e.requestId));
+    const d = (req?.details ?? {}) as { reason?: string; amount?: common.Money | null; groupId?: string | null };
+    const by: By = { actor: e.decidedBy ?? SYSTEM };
+    const reason = d.reason?.trim() || `Approved in ${e.ref}`;
+    const approved = { approvedBy: e.requestId };
+    try {
+      if (e.target.type === 'payment_capture') await this.intents.adminCapture(e.target.id, { amount: d.amount ?? null, groupId: d.groupId ?? null, reason }, { ...by, idempotencyKey: `approval:${e.requestId}` }, approved);
+      else if (e.target.type === 'payment_void') await this.intents.adminVoid(e.target.id, reason, by, approved);
+      else if (e.target.type === 'payment_orphan_refund') await this.intents.resolveOrphan(e.target.id, { action: 'refund', reason }, by, approved);
+      else if (e.target.type === 'refund_retry') await this.refunds.adminRetry(e.target.id, reason, by, approved);
+      else if (e.target.type === 'refund_cancel') await this.refunds.cancel(e.target.id, reason, by, approved);
+    } catch (err) {
+      this.core.ctx.log.warn({ err, requestId: e.requestId, target: e.target }, 'payments: approved manual action could not be carried out');
+    }
   }
 
   /* ---------------------------------------------------------------- jobs */

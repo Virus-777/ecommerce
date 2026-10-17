@@ -13,6 +13,7 @@
 import type { PageRequest } from '../../../kernel/lib/pagination.js';
 import { AppError, isAppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import { format } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { ItemPaidAmount } from '../../../spec/orders.js';
 import type { Refund, RefundableItem, RefundableSummary, RefundView, StartRefundInput } from '../../../spec/payments.js';
@@ -681,12 +682,17 @@ export class Refunds {
     return this.toApi(await this.check(refundId, by));
   }
 
-  async adminRetry(refundId: string, reason: string, by: By): Promise<Refund> {
+  /** Manual money action: limits and step-up through access (Core.manual, payments.payments.correct, the refund amount) */
+  async adminRetry(refundId: string, reason: string, by: By, o: { reauthToken?: string | null; approvedBy?: string | null } = {}): Promise<Refund> {
     if (!reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
     const before = await this.get(refundId);
-    const after = await this.retry(refundId, by, reason, { admin: true });
-    await this.core.audit({ action: 'payments.refund.retry', actionLabel: 'Retried a failed refund', category: 'financial', target: { type: 'refund', id: before.id, ref: before.ref, label: before.destination_label, screen: 'admin/finance' }, reason, before: { status: before.status, attempts: before.attempts }, after: { status: after.status, attempts: after.attempts } }, by);
-    return this.toApi(after);
+    const amount = this.m(before.amount, before.currency);
+    const op = { kind: 'refund_retry' as const, id: before.id, ref: before.ref, label: before.destination_label, summary: `Retry refund ${before.ref} of ${format(amount)}`, amount, reason: reason.trim() };
+    return this.core.manual(op, by, o, async () => {
+      const after = await this.retry(refundId, by, reason, { admin: true });
+      await this.core.audit({ action: 'payments.refund.retry', actionLabel: 'Retried a failed refund', category: 'financial', target: { type: 'refund', id: before.id, ref: before.ref, label: before.destination_label, screen: 'admin/finance' }, reason, before: { status: before.status, attempts: before.attempts }, after: { status: after.status, attempts: after.attempts }, approvalRequestId: o.approvedBy ?? null }, by);
+      return this.toApi(after);
+    });
   }
 
   async requestDestination(refundId: string, message: string | null | undefined, by: By): Promise<Refund> {
@@ -710,14 +716,20 @@ export class Refunds {
     return this.toApi(after);
   }
 
-  async cancel(refundId: string, reason: string, by: By): Promise<Refund> {
+  /** Manual money action: limits and step-up through access (Core.manual, payments.payments.correct, the refund amount) */
+  async cancel(refundId: string, reason: string, by: By, o: { reauthToken?: string | null; approvedBy?: string | null } = {}): Promise<Refund> {
     if (!reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason, e.g. settled another way' }]);
     const before = await this.get(refundId);
-    const moved = await this.move(refundId, 'cancel', by, `Cancelled: ${reason.trim()}`, { strict: true, patch: { next_attempt_at: null, destination_ref: null, attempt_key: null } });
-    const after = moved?.r ?? (await this.get(refundId));
-    if (after.status === 'cancelled') await this.credit.unreserve(after.intent_id, refundKey(after.id)); // a store-credit part not given back yet is free again
-    await this.core.audit({ action: 'payments.refund.cancel', actionLabel: 'Cancelled a refund', category: 'financial', target: { type: 'refund', id: before.id, ref: before.ref, label: before.destination_label, screen: 'admin/finance' }, reason, before: { status: before.status, amount: before.amount }, after: { status: after.status } }, by);
-    return this.toApi(after);
+    refundExecutionMachine.next(before.status as RefundStatus, 'cancel'); // ILLEGAL_TRANSITION before asking anyone to approve
+    const amount = this.m(before.amount, before.currency);
+    const op = { kind: 'refund_cancel' as const, id: before.id, ref: before.ref, label: before.destination_label, summary: `Cancel refund ${before.ref} of ${format(amount)}`, amount, reason: reason.trim() };
+    return this.core.manual(op, by, o, async () => {
+      const moved = await this.move(refundId, 'cancel', by, `Cancelled: ${reason.trim()}`, { strict: true, patch: { next_attempt_at: null, destination_ref: null, attempt_key: null } });
+      const after = moved?.r ?? (await this.get(refundId));
+      if (after.status === 'cancelled') await this.credit.unreserve(after.intent_id, refundKey(after.id)); // a store-credit part not given back yet is free again
+      await this.core.audit({ action: 'payments.refund.cancel', actionLabel: 'Cancelled a refund', category: 'financial', target: { type: 'refund', id: before.id, ref: before.ref, label: before.destination_label, screen: 'admin/finance' }, reason, before: { status: before.status, amount: before.amount }, after: { status: after.status }, approvalRequestId: o.approvedBy ?? null }, by);
+      return this.toApi(after);
+    });
   }
 
   /* ---------------------------------------------------------------- store */

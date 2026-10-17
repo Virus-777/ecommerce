@@ -24,7 +24,7 @@ export const adminRoutes = (service: PaymentsService) =>
     /** POST /payments/{id}/capture: Capture an authorization manually (e.g. after a capture failure) */
     capturePaymentAdmin: ({ params, body, actor, requestId, principal, idempotencyKey }) => service.intents.adminCapture(params.id, body, { actor, requestId, principal, idempotencyKey }),
     /** POST /payments/{id}/void: Void an authorization that should not be captured */
-    voidPaymentAdmin: ({ params, body, actor, requestId, principal }) => service.intents.adminVoid(params.id, body.reason, { actor, requestId, principal }),
+    voidPaymentAdmin: ({ params, body, actor, requestId, principal }) => service.intents.adminVoid(params.id, body.reason, { actor, requestId, principal }, { reauthToken: body.reauthToken }),
     /** POST /payments/{id}/resolve-orphan: Refund or link a payment that has no order */
     resolveOrphanPayment: ({ params, body, actor, requestId, principal }) => service.intents.resolveOrphan(params.id, body, { actor, requestId, principal }),
     /** GET /refunds: Refund executions, e.g. failing refunds */
@@ -34,11 +34,11 @@ export const adminRoutes = (service: PaymentsService) =>
     /** POST /refunds/{id}/check: Ask the provider for the refund's outcome */
     checkRefund: ({ params, actor, requestId, principal }) => service.refunds.adminCheck(params.id, { actor, requestId, principal }),
     /** POST /refunds/{id}/retry: Retry a failed refund (checks the provider first) */
-    retryRefund: ({ params, body, actor, requestId, principal }) => service.refunds.adminRetry(params.id, body.reason, { actor, requestId, principal }),
+    retryRefund: ({ params, body, actor, requestId, principal }) => service.refunds.adminRetry(params.id, body.reason, { actor, requestId, principal }, { reauthToken: body.reauthToken }),
     /** POST /refunds/{id}/request-destination: Ask the customer for a new payment method for a failed refund */
     requestNewRefundDestination: ({ params, body, actor, requestId, principal }) => service.refunds.requestDestination(params.id, body.message, { actor, requestId, principal }),
     /** POST /refunds/{id}/cancel: Cancel a requested or failed refund with a reason */
-    cancelRefund: ({ params, body, actor, requestId, principal }) => service.refunds.cancel(params.id, body.reason, { actor, requestId, principal }),
+    cancelRefund: ({ params, body, actor, requestId, principal }) => service.refunds.cancel(params.id, body.reason, { actor, requestId, principal }, { reauthToken: body.reauthToken }),
     /** GET /disputes: Chargebacks and payment disputes, evidence due first */
     listDisputes: ({ query, page }) => service.disputes.list(query, page),
     /** GET /disputes/{id}: One dispute with order, evidence and seller balance effect */
