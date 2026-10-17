@@ -12,7 +12,7 @@ import { contactChannelsFrom, contentTables, isValidSlug, plainText, readMinutes
 import { contentPublicationMachine } from '../domain/state-machines.js';
 import type { ArticleRow, CategoryRow, VersionRow } from '../ports.js';
 import type { ContentRepository } from '../repository.js';
-import { dateOrNull, invalid, iso, notFound, requireText, SYSTEM, unique, type By, type DraftReview } from './base.js';
+import { actorFromKey, dateOrNull, invalid, iso, notFound, requireText, SYSTEM, unique, type By, type DraftReview } from './base.js';
 import { ContentHomepage } from './homepage.js';
 
 /** An article version's content */
@@ -217,6 +217,7 @@ export class ContentHelp extends ContentHomepage {
     return {
       draftAuthor,
       canApprove: awaitingReview && !isAuthor,
+      draftReview: this.draftReviewOut(a, draft),
       article: await this.articleView(a, snap, v),
       status: a.status as Status,
       owner,
@@ -227,6 +228,13 @@ export class ContentHelp extends ContentHomepage {
       feedbackCount: stats.total,
       schedule: this.schedule(a.publish_at, a.unpublish_at, await this.marketTimeZone()),
     };
+  }
+
+  /** The review of a live article's new draft; before the first publication the article's status tells it instead */
+  private draftReviewOut(a: ArticleRow, draft: VersionRow | undefined): HelpArticleAdmin['draftReview'] {
+    const r = a.live_version_id ? this.articleSnapOf(draft)?._review : null;
+    if (!r) return null;
+    return { state: r.state, by: r.by ?? actorFromKey(null), at: r.at ?? iso(draft!.created_at)!, reason: r.reason ?? null };
   }
 
   async getHelpArticleAdmin(id: string, viewer?: By): Promise<HelpArticleAdmin> {
@@ -331,7 +339,9 @@ export class ContentHelp extends ContentHomepage {
     if (a.status === 'removed') throw new AppError('CONFLICT', 'The article was removed; restore it before editing');
     const { live, draft } = await this.articleVersions(a);
     const draftSnap = this.articleSnapOf(draft);
-    if (draftSnap?._review) throw new AppError('CONFLICT', 'The draft is in review; request changes before editing');
+    // a draft in review or approved is frozen; after changes were requested it is edited again (the note stays)
+    const review = draftSnap?._review;
+    if (review && review.state !== 'changes_requested') throw new AppError('CONFLICT', review.state === 'approved' ? 'The draft is approved; publish it, or request changes before editing' : 'The draft is in review; request changes before editing');
     const snap = await this.normalizeArticle(input, { articleId: id, by, current: draftSnap ?? this.articleSnapOf(live) });
     const summary = input.changeNote?.trim() || 'Edited the draft';
     let row: ArticleRow;
@@ -339,7 +349,7 @@ export class ContentHelp extends ContentHomepage {
       row = await this.repo.transaction(async (tx) => {
         const locked = (await tx.getArticle(id, { forUpdate: true }))!;
         let draftId = locked.draft_version_id;
-        if (draftId) await tx.updateVersion(draftId, { snapshot: snap as never, summary, author_kind: by.actor.kind, author_id: by.actor.id ?? null, created_at: this.now() });
+        if (draftId) await tx.updateVersion(draftId, { snapshot: (review ? { ...snap, _review: review } : snap) as never, summary, author_kind: by.actor.kind, author_id: by.actor.id ?? null, created_at: this.now() });
         else draftId = (await tx.insertVersion(this.newVersionRow('article', id, (await tx.maxVersionNumber('article', id)) + 1, snap, by, { summary }))).id;
         return tx.updateArticle(id, { draft_version_id: draftId, owner_staff_id: snap.ownerStaffId, ...(locked.live_version_id ? {} : this.columnsOf(snap)), updated_at: this.now() });
       });
@@ -376,7 +386,9 @@ export class ContentHelp extends ContentHomepage {
     switch (body.action) {
       case 'submit': {
         if (liveWithDraft) {
-          if (draftReview) throw illegal('The draft is already in review');
+          if (draftReview?.state === 'in_review') throw illegal('The draft is already in review');
+          if (draftReview?.state === 'approved') throw illegal('The draft is already approved; publish it');
+          // first submit, or again after changes were requested (the note is replaced)
           await this.setArticleDraftReview(a, { state: 'in_review', by: by.actor, at: now.toISOString() });
         } else await this.repo.updateArticle(id, { status: contentPublicationMachine.next(status, 'submit'), updated_at: now });
         break;
@@ -386,7 +398,10 @@ export class ContentHelp extends ContentHomepage {
         const approving = body.action === 'approve';
         if (!approving) requireText(body.reason, 'reason', 'Say what needs to change');
         if (approving && draft && draft.author_id && draft.author_id === by.actor.id) throw this.ctx.error('SAME_REVIEWER', 'The author cannot approve their own article.');
-        if (status !== 'in_review' && draftReview?.state === 'in_review') await this.setArticleDraftReview(a, approving ? { state: 'approved', by: by.actor, at: now.toISOString() } : null);
+        if (status !== 'in_review' && draftReview?.state === 'in_review') {
+          // the live article stays live; the author sees why in draftReview.reason
+          await this.setArticleDraftReview(a, approving ? { state: 'approved', by: by.actor, at: now.toISOString() } : { state: 'changes_requested', by: by.actor, at: now.toISOString(), reason: body.reason!.trim() });
+        } else if (liveWithDraft) throw illegal(draftReview ? `The draft is ${draftReview.state.replace('_', ' ')}, not waiting for review` : 'Submit the draft for review first');
         else await this.repo.updateArticle(id, { status: contentPublicationMachine.next(status, body.action), updated_at: now });
         break;
       }
@@ -396,6 +411,9 @@ export class ContentHelp extends ContentHomepage {
         const unpublishAt = dateOrNull(body.unpublishAt);
         if (unpublishAt && unpublishAt <= publishAt) throw invalid('unpublishAt', 'The removal time must be after the publish time');
         if (review && status === 'draft') throw illegal('The article needs review before it is scheduled');
+        // a live article stays live until its draft is published (scheduling would take it down meanwhile)
+        if (status === 'published') throw illegal('The article is live: publish its approved draft now, or unpublish it to schedule it');
+        if (review && liveWithDraft && draftReview?.state !== 'approved') throw illegal('The draft needs review before it is scheduled');
         await this.repo.updateArticle(id, { status: contentPublicationMachine.next(status, 'schedule'), publish_at: publishAt, unpublish_at: unpublishAt, updated_at: now });
         break;
       }
