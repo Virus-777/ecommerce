@@ -248,7 +248,7 @@ export class MediaService implements MediaPublicApi {
     if (!usage.refId?.trim()) throw invalid('usage.refId', 'The record id is required');
     let asset = await this.repo.getAsset(assetId);
     if (!asset) throw notFound();
-    if (!sameOwner(expectedOwner, ownerOf(asset))) throw new AppError('ASSET_NOT_OWNED', 'This file belongs to another owner and cannot be attached here.', { assetId });
+    if (!(await this.ownedBy(asset, expectedOwner))) throw new AppError('ASSET_NOT_OWNED', 'This file belongs to another owner and cannot be attached here.', { assetId });
     if (!purposeFitsUsage(asset.purpose, usage.kind)) {
       throw new AppError('VALIDATION_FAILED', `A ${label(asset.purpose)} file can't be used as ${label(usage.kind)}.`, {
         issues: [{ path: 'usage.kind', message: `Allowed file purposes: ${purposesForUsage(usage.kind).join(', ')}` }],
@@ -404,7 +404,7 @@ export class MediaService implements MediaPublicApi {
   ): Promise<{ fileName: string; contentType: string; sizeBytes: number; body: Uint8Array }> {
     const row = isUuid(assetId) ? await this.repo.getAsset(assetId) : null;
     if (!row || GONE.includes(row.status)) throw notFound();
-    if (expectedOwner && !sameOwner(expectedOwner, ownerOf(row))) throw new AppError('ASSET_NOT_OWNED', 'This file belongs to another owner.', { assetId });
+    if (expectedOwner && !(await this.ownedBy(row, expectedOwner))) throw new AppError('ASSET_NOT_OWNED', 'This file belongs to another owner.', { assetId });
     if (row.status !== 'ready') throw new AppError('ILLEGAL_TRANSITION', `This file is ${label(row.status)}, not ready to read.`, { from: row.status, event: 'read' });
     const maxBytes = opts?.maxBytes ?? READ_MAX_BYTES;
     if (Number(row.size_bytes) > maxBytes) throw new AppError('FILE_TOO_LARGE', `The file is ${mb(Number(row.size_bytes))}; at most ${mb(maxBytes)} can be read.`, { maxBytes });
@@ -1595,6 +1595,21 @@ export class MediaService implements MediaPublicApi {
   }
 
   /** Display name of a customer or staff owner (identity, when it runs); guests and the platform have fixed labels */
+  /**
+   * Whether a file belongs to the owner a using module expects (attach, readFile). Staff work files (media spec notes,
+   * Ownership): the Admin Center uploads every file as the platform's (ownerKind platform) and the upload records the
+   * staff member who started it, so a module expecting a staff member's own file (return inspection, warehouse damage
+   * reports and return parcels, case, trust and message evidence) also takes a platform file that same staff member
+   * uploaded. Never one another staff member uploaded, and never a generated platform file (it has no upload record):
+   * staff still can't attach each other's private files.
+   */
+  private async ownedBy(asset: AssetRow, expected: MediaOwner): Promise<boolean> {
+    if (sameOwner(expected, ownerOf(asset))) return true;
+    if (expected.kind !== 'staff' || !expected.id || asset.owner_kind !== 'platform') return false;
+    const upload = await this.repo.uploadOfAsset(asset.id);
+    return upload?.created_by_kind === 'staff' && upload.created_by_id === expected.id;
+  }
+
   private async ownerLabel(owner: MediaOwner): Promise<string | null> {
     if (owner.kind === 'guest') return 'Guest';
     if (owner.kind === 'platform') return 'Marketly';

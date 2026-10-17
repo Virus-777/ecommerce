@@ -28,7 +28,7 @@ export class Discrepancies {
     const ref: MovementRef = { kind: 'discrepancy', id, label: input.orderRef ? `Damage found, order ${input.orderRef}` : 'Damage found at packing' };
     // photos are attached (inspection_photo) so the media orphan sweep never deletes them
     const photoIds = [...new Set(input.photoIds ?? [])];
-    const detach = await this.#attachPhotos(photoIds, { refId: id, refLabel: `${input.kind === 'pick_shortage' ? 'Pick shortage' : 'Damage found'} · ${item.sku}` });
+    const detach = await this.#attachPhotos(photoIds, input.reportedBy, { refId: id, refLabel: `${input.kind === 'pick_shortage' ? 'Pick shortage' : 'Damage found'} · ${item.sku}` });
     let moved: Row<'stock_movements'>[] = [];
     const changed = await this.core.stock('discrepancy', async (st) => {
       moved = st.movements;
@@ -80,18 +80,24 @@ export class Discrepancies {
     return (await this.core.discrepanciesApi([(await this.core.repo.get('discrepancies', id))!]))[0]!;
   }
 
-  /** Attaches discrepancy photos (media usage inspection_photo) and returns an undo; unknown files are a validation problem */
-  async #attachPhotos(photoIds: string[], usage: { refId: string; refLabel: string }): Promise<() => Promise<void>> {
+  /**
+   * Attaches discrepancy photos (media usage inspection_photo) and returns an undo; unknown files are a validation problem.
+   * The photos are the reporting staff member's: warehouse passes on the photos of its damage report, which it attached
+   * as that staff member's (media accepts the staff member's own files and the platform files they uploaded, which is
+   * what the Admin Center sends; media spec notes, Ownership). A report without a staff member expects platform files.
+   */
+  async #attachPhotos(photoIds: string[], reportedBy: common.Actor, usage: { refId: string; refLabel: string }): Promise<() => Promise<void>> {
     const media = this.core.ctx.tryUse('media');
     const done: string[] = [];
     const undo = async () => {
       for (const assetId of done) await media?.detach(assetId, { module: 'inventory', kind: 'inspection_photo', refId: usage.refId }).catch(() => {});
     };
     if (!media || !photoIds.length) return undo;
+    const owner = reportedBy.kind === 'staff' && reportedBy.id ? { kind: 'staff' as const, id: reportedBy.id } : { kind: 'platform' as const };
     try {
       for (const [i, assetId] of photoIds.entries()) {
         try {
-          await media.attach(assetId, { module: 'inventory', kind: 'inspection_photo', refId: usage.refId, refLabel: usage.refLabel }, { kind: 'platform' });
+          await media.attach(assetId, { module: 'inventory', kind: 'inspection_photo', refId: usage.refId, refLabel: usage.refLabel }, owner);
         } catch (err) {
           if (isAppError(err) && (err.code === 'NOT_FOUND' || err.code === 'VALIDATION_FAILED')) throw invalid(`photoIds[${i}]`, 'Photo not found or not an inspection photo; upload it again');
           throw err;
