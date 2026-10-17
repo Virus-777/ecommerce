@@ -3,7 +3,7 @@
 # Each runs the current release's tool as the service user with the server's settings, so nothing else is needed.
 #
 #   sudo marketly bootstrap-owner --email owner@example.com --name "Ana Lee" --deputy-email deputy@example.com --deputy-name "Ben Ruiz"
-#   sudo marketly staff-link --email ana@example.com [--revoke "Mistyped email"]
+#   sudo marketly staff-link --email ana@example.com [--revoke "Mistyped email" | --disable "Left" | --enable | --lock "reason" | --unlock | --sign-out-all]
 #   sudo marketly check | logs | status | restart | backup | rollback
 #   sudo marketly migrate | db-setup | keys [--rotate]
 set -euo pipefail
@@ -21,6 +21,8 @@ Usage: sudo marketly <command> [options]
                        invite the first Business Owner (and a deputy): prints each link and pass code
   staff-link --email E [--revoke "reason"]
                        a new invitation link and pass code, or a password reset link, for a staff member
+  staff-link --email E --disable "reason" | --enable | --lock "reason" | --unlock | --sign-out-all
+                       a leaver or compromised account, when no administrator can (docs/MAINTAINING.md §7)
   check                check services, HTTPS, database, disk, backups and certificate
   status               systemctl status of the server
   logs                 follow the server's log (Ctrl+C to stop)

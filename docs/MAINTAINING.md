@@ -248,6 +248,22 @@ and the previous ones stop working (both are stored only as hashes, so an old on
 Every action is in the audit trail as "Server operator". Check who is asking before handing over a link and pass
 code: together they let the person in.
 
+**Leavers and compromised accounts, from the server.** Normally an administrator does this in Admin Center > Staff.
+When none can (they are away, or the leaver is one of them), the same tool does the same actions, through the
+same identity code, so the security history, the audit trail and the role clean-up are the same as from the Admin
+Center. One action per run; the reason goes into the audit trail.
+
+| Situation | Command |
+|---|---|
+| Someone left | `npm run staff-link -- --email ana@company.example --disable "Left the company"`: signs them out everywhere and ends their roles and cover duties |
+| They come back | `... --enable` (optional `--reason "Rehired"`): they can sign in again, but get no role back: assign roles in the Admin Center |
+| A suspected compromise (stolen laptop, shared password) | `... --lock "Laptop stolen"`: signs them out everywhere, keeps their roles; `... --unlock` lifts it |
+| Signed in on a shared or lost PC | `... --sign-out-all` (optional `--reason`): ends every session; their password still works |
+
+Disabling the last Business Owner is allowed, as in the Admin Center; `bootstrap-owner` then works again to invite a
+new one. An invitation not accepted yet is cancelled with `--revoke`, not disabled. On the server the commands are
+`sudo marketly staff-link --email … --disable "…"` and so on.
+
 ## 8. When `npm run check` fails
 
 It runs six steps and stops at the first failure; the name in the output tells you which.
