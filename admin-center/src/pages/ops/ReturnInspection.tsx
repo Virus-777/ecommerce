@@ -12,6 +12,8 @@ import { LoadError, SkeletonLines, dateTime, deadlineLabel, deadlineTone, shortD
 import { useStaffSession } from '@/app/session';
 import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
 import { useDatasetExport } from '@/pages/admin/data/report-export';
+import { isStepUpCancel, reauthField, useStepUp } from '@/pages/admin/data/step-up';
+import { CheckInDialog, ParcelsCard } from './data/parcels';
 import { CONDITIONS, OUTCOMES, outcomeDisabled, stockMovement, type Grade, type Outcome } from './data/returns';
 import { BeforeAfter, EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
@@ -20,9 +22,12 @@ import { BeforeAfter, EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows 
 // API: GET returns/inspections (tab received | arriving | decided), GET returns/inspections/stats,
 // POST returns/requests/{id}/start-inspection, GET returns/requests/{id} (ReturnCase: checklist, draft, payment, timeline),
 // PUT returns/requests/{id}/inspection-draft, POST returns/requests/{id}/inspection, POST returns/requests/{id}/remedy
-// (idempotent; Returns Manager decides the refund, which then waits for Finance approval).
+// (idempotent, may ask for the password: STEP_UP_REQUIRED → reauthToken; the Returns Manager decides the refund, which
+// usually waits for Finance approval: refundRequest.status under_review).
+// Tab "Parcels at the dock" (view "parcels"): GET/POST warehouse/return-parcels, POST return-parcels/{id}/hand-over (data/parcels.tsx).
 
-type Tab = 'received' | 'arriving' | 'decided';
+// 'parcels' is not a returns tab: it lists the warehouse's return parcels (data/parcels.tsx).
+type Tab = 'received' | 'arriving' | 'decided' | 'parcels';
 
 interface QueueRow {
   returnId: string;
@@ -62,12 +67,12 @@ interface ReturnCase {
     reason: string;
     details: string | null;
     timeline: Array<{ at: string; label: string; detail?: string | null }>;
-    refund: { status?: string; amount?: MoneyValue } | null;
+    refund: { status?: string; statusLabel?: string; amount?: MoneyValue; breakdown?: { total: MoneyValue } } | null;
   };
   customer: { displayName: string };
   payment: { itemPaid: MoneyValue; shippingPaid: MoneyValue; maxRefundable: MoneyValue; refundedSoFar: MoneyValue; methodLabel: string };
   inspection: { inspectedBy?: { name?: string | null }; grade: Grade; proposedStockOutcome: Outcome; notes: string | null; media: Array<{ url: string }> } | null;
-  refundRequest: { status?: string; amount?: MoneyValue; approverLabel?: string | null } | null;
+  refundRequest: { status?: string; amount?: MoneyValue; breakdown?: { total: MoneyValue }; approval?: { required?: boolean } | null; approverLabel?: string | null } | null;
   inspectionChecklist: { items: ChecklistItem[] } | null;
   inspectionDraft: { inspection: Partial<DraftInput>; savedAt: string } | null;
   inspector: { name?: string | null } | null;
@@ -87,17 +92,56 @@ const usd = (amount: number): MoneyValue => ({ amount, currency: 'USD' });
 const isUrgent = (r: QueueRow) => deadlineTone(r.target?.state) === 'danger';
 const isRisk = (r: QueueRow) => deadlineTone(r.target?.state) === 'warning';
 
+/**
+ * What happened to the refund, from the refund request's status as the server answered it. Staff refunds are
+ * usually under_review (Finance approves them), but one within the decider's own limit can come back approved.
+ */
+function refundOutcome(status: string | undefined, amount: MoneyValue | undefined, aboveLimit: boolean): { title: string; body: string } {
+  const sum = amount ? `${formatMoney(amount)} refund` : 'The refund';
+  switch (status) {
+    case 'under_review':
+    case 'requested':
+      return {
+        title: `Sent to Finance: ${sum} proposed`,
+        body: `${aboveLimit ? 'It is above the approval limit and waits for an approver. ' : ''}Finance approves the refund. The customer sees "Refund under review" until then.`,
+      };
+    case 'approved':
+    case 'processing':
+      return { title: `${sum} approved`, body: 'It goes to the customer’s original payment method. The customer sees "Sent" only when the payment provider confirms.' };
+    case 'sent':
+      return { title: `${sum} sent`, body: 'The payment provider confirmed the refund.' };
+    case 'declined':
+    case 'failed':
+    case 'cancelled':
+      return { title: `${sum} ${status}`, body: 'Open the return in Returns to see why and what to do next.' };
+    default:
+      return { title: 'Remedy recorded', body: 'The return record shows the decision.' };
+  }
+}
+
 /* ---------------- Queue ---------------- */
 
-function Queue() {
+function Queue({ initialTab = 'received' }: { initialTab?: Tab }) {
   const { api } = useApi();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const staff = useStaffSession();
-  const [tab, setTab] = useState<Tab>('received');
+  const canSeeParcels = staff.can('warehouse.view');
+  const canReceive = staff.can('warehouse.returns.receive');
+  const [tab, setTab] = useState<Tab>(initialTab === 'parcels' && !canSeeParcels ? 'received' : initialTab);
+  const [checkIn, setCheckIn] = useState<{ code: string } | null>(null);
+  const [parcelMsg, setParcelMsg] = useState('');
   const canInspect = staff.can('returns.inspections.record');
   const inspectionsExport = useDatasetExport('returns.admin.inspections');
-  const list = useQuery({ queryKey: ['returns', 'inspections', tab], queryFn: () => call(api.GET('/api/admin/returns/inspections', { params: { query: { tab, limit: 100 } } })) as Promise<{ items: QueueRow[] }> });
+  const list = useQuery({
+    queryKey: ['returns', 'inspections', tab],
+    queryFn: () => call(api.GET('/api/admin/returns/inspections', { params: { query: { tab: tab as Exclude<Tab, 'parcels'>, limit: 100 } } })) as Promise<{ items: QueueRow[] }>,
+    enabled: tab !== 'parcels',
+  });
+  const parcelDone = (msg: string) => {
+    setParcelMsg(msg);
+    announce(msg);
+  };
   const stats = useQuery({ queryKey: ['returns', 'inspections', 'stats'], queryFn: () => call(api.GET('/api/admin/returns/inspections/stats')) as Promise<Stats> });
   const start = useMutation({
     mutationFn: (r: QueueRow) => call(api.POST('/api/admin/returns/requests/{id}/start-inspection', { params: { path: { id: r.returnId } }, body: {} })),
@@ -115,6 +159,14 @@ function Queue() {
   const received = (r: QueueRow) => (r.receivedAt ? shortDate(r.receivedAt) : r.expectedAt ? `Arriving ${shortDate(r.expectedAt)}` : '—');
 
   const action = (r: QueueRow) => {
+    // Arriving: the parcel is checked in at the dock (offline nothing else marks a return received).
+    if (tab === 'arriving')
+      return canReceive ? (
+        <button type="button" className="btn btn-sm btn-secondary" onClick={() => setCheckIn({ code: r.ref })}>
+          <span>Check in</span>
+          <span className="sr-only"> {r.ref}</span>
+        </button>
+      ) : null;
     if (tab !== 'received') return null;
     const cont = !!r.inspector;
     if (!canInspect)
@@ -148,11 +200,19 @@ function Queue() {
         title="Return inspection"
         sub="Official Store returns received at Reno, NV. Warehouse inspects, Inventory records the stock outcome, Finance approves the refund."
         actions={
-          staff.can('reports.exports.create') && staff.can('returns.inspections.record') ? <ExportButton exp={inspectionsExport} filters={{ tab }} /> : undefined
+          <>
+            {canReceive && (
+              <Button variant="secondary" icon="scan-barcode" onClick={() => setCheckIn({ code: '' })}>
+                Check in parcel
+              </Button>
+            )}
+            {staff.can('reports.exports.create') && staff.can('returns.inspections.record') && tab !== 'parcels' && <ExportButton exp={inspectionsExport} filters={{ tab }} />}
+          </>
         }
       />
       <ExportNotice exp={inspectionsExport} />
       {start.error && <Alert tone="danger">{errorMessage(start.error)}</Alert>}
+      {parcelMsg && <Alert tone="success" title={parcelMsg} />}
       {stats.error ? (
         <LoadError error={stats.error} onRetry={() => void stats.refetch()} />
       ) : (
@@ -168,10 +228,14 @@ function Queue() {
           { label: 'Received', value: 'received', count: st?.tabCounts.received },
           { label: 'Arriving', value: 'arriving', count: st?.tabCounts.arriving },
           { label: 'Decided this week', value: 'decided', count: st?.tabCounts.decidedThisWeek },
+          ...(canSeeParcels ? [{ label: 'Parcels at the dock', value: 'parcels' as const }] : []),
         ]}
         active={tab}
         onChange={setTab}
       />
+      {tab === 'parcels' ? (
+        <ParcelsCard onCheckIn={(code) => setCheckIn({ code })} onDone={parcelDone} />
+      ) : (
       <Card title="Return queue" flush>
         {list.error ? (
           <div className="card-body">
@@ -253,6 +317,7 @@ function Queue() {
                     {r.reason} · received {received(r)}
                   </div>
                   <div className="xs sub">{target(r)}</div>
+                  {tab === 'arriving' && action(r) && <div className="row gap-2 mt-1-5">{action(r)}</div>}
                 </div>
               ))}
               {!list.isPending && !rows.length && <div className="ac-mi xs sub">Nothing in this tab.</div>}
@@ -261,6 +326,8 @@ function Queue() {
           </>
         )}
       </Card>
+      )}
+      <CheckInDialog open={!!checkIn} code={checkIn?.code} onClose={() => setCheckIn(null)} onDone={parcelDone} />
     </>
   );
 }
@@ -313,6 +380,12 @@ function Bench({ returnId }: { returnId: string }) {
   const mediaIds = [...savedIds, ...photos.assetIds];
   const done = !!c?.inspection;
   const disabled = done || !canInspect;
+  const refundState = c ? (c.refundRequest ?? c.detail.refund) : null;
+  // Inspected but no refund decided yet (inspected by someone without refund rights, or the decision failed or the
+  // password prompt was closed): a Returns Manager decides it from here.
+  const decisionPending = done && canDecide && !refundState;
+  const deductionLabel = !done && missing.length ? `Missing ${missing.map((m) => m.label).join(', ')}` : 'Deduction';
+  const stepUp = useStepUp();
 
   const errors = {
     photos: mediaIds.length === 0 ? 'Add at least one photo of the returned item.' : '',
@@ -322,6 +395,8 @@ function Bench({ returnId }: { returnId: string }) {
   };
   const shown = tried ? errors : { photos: '', condition: '', outcome: '', why: '' };
   const nErrors = Object.values(errors).filter(Boolean).length;
+  // only the deduction reason matters when the inspection is already recorded
+  const blocking = decisionPending ? (errors.why ? 1 : 0) : nErrors;
 
   const input = (): DraftInput => ({
     grade: grade as Grade,
@@ -344,29 +419,45 @@ function Bench({ returnId }: { returnId: string }) {
     },
   });
   const send = useMutation({
-    mutationFn: async () => {
-      const i = input();
-      await call(
-        api.POST('/api/admin/returns/requests/{id}/inspection', {
-          params: { path: { id: returnId } },
-          body: { ...i, conditionOutcome: i.missingParts.length ? 'missing_parts' : 'as_described', regradeCondition: outcome === 'different_condition' ? (grade === 'good' ? 'Used – Good' : 'Used – Like new') : undefined } as never,
-        }),
+    mutationFn: async (): Promise<ReturnCase | null> => {
+      // Skipped when the inspection is already recorded and only the refund decision is left (decisionPending).
+      if (!c?.inspection) {
+        const i = input();
+        await call(
+          api.POST('/api/admin/returns/requests/{id}/inspection', {
+            params: { path: { id: returnId } },
+            body: { ...i, conditionOutcome: i.missingParts.length ? 'missing_parts' : 'as_described', regradeCondition: outcome === 'different_condition' ? (grade === 'good' ? 'Used – Good' : 'Used – Like new') : undefined } as never,
+          }),
+        );
+      }
+      if (!canDecide) return null;
+      const body =
+        deductionMinor > 0
+          ? { kind: 'partial_refund', amount: usd(refund), deductions: [{ label: deductionLabel, amount: usd(deductionMinor), reason: why.trim() }], explanation: why.trim() }
+          : { kind: 'full_refund' };
+      // A staff refund may need the password again (403 STEP_UP_REQUIRED): useStepUp asks for it and resends with
+      // reauthToken. The server releases the Idempotency-Key when it refuses, so the retry keeps the same key.
+      return stepUp.run(
+        (token) =>
+          call(
+            api.POST('/api/admin/returns/requests/{id}/remedy', {
+              params: { path: { id: returnId }, header: { 'Idempotency-Key': remedyKey.current } },
+              body: { ...body, ...reauthField(token) } as never,
+            } as never),
+          ) as Promise<ReturnCase>,
       );
-      if (!canDecide) return false;
-      await call(
-        api.POST('/api/admin/returns/requests/{id}/remedy', {
-          params: { path: { id: returnId }, header: { 'Idempotency-Key': remedyKey.current } },
-          body: (deductionMinor > 0
-            ? { kind: 'partial_refund', amount: usd(refund), deductions: [{ label: missing.length ? `Missing ${missing.map((m) => m.label).join(', ')}` : 'Deduction', amount: usd(deductionMinor), reason: why.trim() }], explanation: why.trim() }
-            : { kind: 'full_refund' }) as never,
-        } as never),
-      );
-      return true;
     },
     onSuccess: (decided) => {
-      announce(decided ? `Inspection sent to Finance. Proposed refund ${formatMoney(usd(refund))}` : 'Inspection recorded. The Returns Manager decides the refund.');
+      if (!decided) announce('Inspection recorded. The Returns Manager decides the refund.');
+      else {
+        // say what the server did with the refund (usually under review with Finance), not what we expect it to do
+        const r = decided.refundRequest;
+        announce(refundOutcome(r?.status ?? decided.detail.refund?.status, r?.breakdown?.total ?? usd(refund), !!r?.approval?.required).title);
+      }
       refresh();
     },
+    // the inspection may be recorded although the refund decision failed: reload so the bench shows what was saved
+    onError: refresh,
   });
 
   if (rc.isPending) {
@@ -387,7 +478,9 @@ function Bench({ returnId }: { returnId: string }) {
   const d = c.detail;
   const item = d.items[0];
   const inspector = c.inspector?.name ?? c.inspection?.inspectedBy?.name ?? staff.name;
-  const refundState = c.refundRequest ?? d.refund;
+  // RefundRequest carries the amount in breakdown.total (the local `amount` is kept for older answers)
+  const refundAmount = c.refundRequest?.breakdown?.total ?? c.refundRequest?.amount ?? d.refund?.breakdown?.total ?? d.refund?.amount;
+  const outcomeMsg = refundState ? refundOutcome(refundState.status, refundAmount, !!c.refundRequest?.approval?.required) : null;
   const events: TimelineEvent[] = [
     ...d.timeline.map((e) => ({ t: e.label, d: dateTime(e.at), state: 'done' as const, body: e.detail ?? undefined })),
     { t: 'Inspection', d: `${done ? 'Done' : 'Today'} · ${inspector}`, state: done ? 'done' : 'current' },
@@ -409,11 +502,11 @@ function Bench({ returnId }: { returnId: string }) {
         </div>
       </div>
       {done && (
-        <Alert tone="success" title={refundState?.amount ? `Sent to Finance: ${formatMoney(refundState.amount)} proposed refund` : 'Inspection recorded'}>
-          {refundState ? 'Finance approves the refund. The customer sees "Refund under review" until then.' : 'The Returns Manager decides the refund next.'} <Link to={href('ops/return-inspection')}>Back to the return queue</Link>
+        <Alert tone={decisionPending ? 'info' : 'success'} title={outcomeMsg?.title ?? 'Inspection recorded'}>
+          {outcomeMsg?.body ?? (decisionPending ? 'Decide the refund below and send it.' : 'The Returns Manager decides the refund next.')} <Link to={href('ops/return-inspection')}>Back to the return queue</Link>
         </Alert>
       )}
-      {send.error && <Alert tone="danger">{errorMessage(send.error)}</Alert>}
+      {send.error && !isStepUpCancel(send.error) && <Alert tone="danger">{errorMessage(send.error)}</Alert>}
       {tried && nErrors > 0 && !done && (
         <Alert tone="danger" title={`Finish ${nErrors} step${nErrors > 1 ? 's' : ''} before sending`}>
           {Object.values(errors).filter(Boolean).join(' ')}
@@ -581,21 +674,23 @@ function Bench({ returnId }: { returnId: string }) {
             titleAs="h3"
             sub="Sent to Finance for approval"
             foot={
-              canInspect ? (
+              canInspect || decisionPending ? (
                 <>
-                  <Button variant="ghost" size="sm" onClick={() => saveDraft.mutate()} disabled={disabled || saveDraft.isPending}>
-                    {saved ? 'Saved' : 'Save inspection'}
-                  </Button>
+                  {canInspect && (
+                    <Button variant="ghost" size="sm" onClick={() => saveDraft.mutate()} disabled={disabled || saveDraft.isPending}>
+                      {saved ? 'Saved' : 'Save inspection'}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     icon="send"
                     onClick={() => {
                       setTried(true);
-                      if (!nErrors && !photos.uploading) send.mutate();
+                      if (!blocking && !photos.uploading) send.mutate();
                     }}
-                    disabled={disabled || send.isPending}
+                    disabled={(disabled && !decisionPending) || send.isPending}
                   >
-                    {done ? 'Sent to Finance' : canDecide ? 'Send to Finance' : 'Record inspection'}
+                    {decisionPending ? 'Send refund decision' : done ? (outcomeMsg ? (refundState?.status === 'under_review' ? 'Sent to Finance' : 'Decided') : 'Recorded') : canDecide ? 'Send to Finance' : 'Record inspection'}
                   </Button>
                 </>
               ) : (
@@ -608,16 +703,16 @@ function Bench({ returnId }: { returnId: string }) {
             <SummaryRow k="Original shipping" v={formatMoney(c.payment.shippingPaid)} />
             {c.payment.refundedSoFar.amount > 0 && <SummaryRow k="Refunded so far" v={`−${formatMoney(c.payment.refundedSoFar)}`} />}
             <SummaryRow k="Refundable" v={formatMoney(c.payment.maxRefundable)} />
-            {deductionMinor > 0 && <SummaryRow k={missing.length ? `Missing ${missing.map((m) => m.label).join(', ')}` : 'Deduction'} v={`−${formatMoney(usd(deductionMinor))}`} />}
+            {deductionMinor > 0 && <SummaryRow k={deductionLabel} v={`−${formatMoney(usd(deductionMinor))}`} />}
             <div className="divider" />
-            <SummaryRow className="total" k="Proposed refund" v={formatMoney(refundState?.amount ?? usd(refund))} />
-            {canDecide && !done && (
+            <SummaryRow className="total" k="Proposed refund" v={formatMoney(refundAmount ?? usd(refund))} />
+            {canDecide && (!done || decisionPending) && (
               <Field label="Deduction" optional hint="For missing parts or damage, per the returns policy">
                 <TextInput id="rq-ded" type="number" min={0} prefix="$" value={deduction} onChange={(e) => setDeduction(e.target.value)} />
               </Field>
             )}
             <Field label={canDecide ? 'Reason for deduction' : 'Inspection notes'} error={shown.why || undefined}>
-              <Textarea id="rq-why" value={c.inspection?.notes ?? why} disabled={disabled} onChange={(e) => setWhy(e.target.value)} />
+              <Textarea id="rq-why" value={decisionPending ? why : (c.inspection?.notes ?? why)} disabled={disabled && !decisionPending} onChange={(e) => setWhy(e.target.value)} />
             </Field>
             <div className="panel xs sub stack gap-1">
               <span>
@@ -634,6 +729,7 @@ function Bench({ returnId }: { returnId: string }) {
           </Card>
         </div>
       </div>
+      {stepUp.dialog}
     </>
   );
 }
@@ -677,5 +773,6 @@ export default function ReturnInspection() {
   const [view] = useView();
   const [params] = useSearchParams();
   const ref = view === 'inspecting' ? (params.get('rt') ?? '') : view.startsWith('inspecting-') ? view.slice('inspecting-'.length) : '';
-  return <OpsLayout active="return-inspection">{ref ? <BenchByRef refNo={ref} /> : <Queue />}</OpsLayout>;
+  // view "parcels" (the Return parcels work queue's screen filter) opens the Parcels at the dock tab
+  return <OpsLayout active="return-inspection">{ref ? <BenchByRef refNo={ref} /> : <Queue initialTab={view === 'parcels' ? 'parcels' : 'received'} />}</OpsLayout>;
 }

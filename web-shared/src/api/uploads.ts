@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { endIfUnauthorized } from './client';
 import { ApiError, errorMessage, toApiError } from './errors';
 import type { components } from './openapi';
 import { useApi } from './provider';
@@ -42,6 +43,7 @@ async function api<T>(session: Session, method: string, path: string, body?: unk
     });
   let res = await send(await session.token());
   if (res.status === 401) res = await send(await session.refresh());
+  if (res.status === 401) endIfUnauthorized(session, 401, await res.clone().json().catch(() => undefined));
   if (!res.ok) throw await toApiError(res);
   return (res.status === 204 ? undefined : await res.json()) as T;
 }

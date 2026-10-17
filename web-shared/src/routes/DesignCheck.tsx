@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useApi } from '../api';
-import { SCREENS, type Screen, type ScreenId } from './catalogue';
+import { SCREENS, type Screen, type ScreenId, type ScreenView } from './catalogue';
 import { CURRENT_APP } from './apps';
 import { sampleHref, sampleKey, useDesignSamples, type DesignCheckOptions, type DesignCheckSessions, type DesignSample, type DesignSamplesFile, type SampleSession } from './designSamples';
 
@@ -84,7 +84,8 @@ function compare(a: Map<string, number>, b: Map<string, number>) {
 const allRows = (file: DesignSamplesFile | null): Row[] =>
   // Screens added after the design (no design file) have nothing to compare with.
   SCREENS.filter((s) => s.app === CURRENT_APP && s.file).flatMap((s) => {
-    const views = s.views.length ? s.views.map((v) => v.slug) : [''];
+    const designed = (s.views as readonly ScreenView[]).filter((v) => !v.noDesign);
+    const views = designed.length ? designed.map((v) => v.slug) : [''];
     return views.map((v) => {
       const key = sampleKey(s.id, v);
       const sample = file?.samples[key];

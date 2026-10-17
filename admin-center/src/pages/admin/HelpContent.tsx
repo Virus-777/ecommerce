@@ -6,7 +6,7 @@ import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, announce, Badge, Breadcrumbs, Button, Card, Field, Icon, IconButton, Pager, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { Alert, announce, Badge, Breadcrumbs, Button, Card, Dialog, Field, Icon, IconButton, Pager, SearchInput, Select, Stat, StatusBadge, TableWrap, Tabs, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime } from '@/app/parts';
 
@@ -22,9 +22,20 @@ type S = components['schemas'];
 type Item = S['content.ContentListItem'];
 type PolicyVersion = S['content.PolicyVersion'];
 type ArticleAdmin = S['content.HelpArticleAdmin'];
+// HelpArticleAdmin.draftReview: the review of the unpublished draft of a live (published or unpublished) article;
+// null when there is no draft or it was never sent for review.
+type DraftReview = S['content.HelpArticleDraftReview'];
+const draftReviewOf = (a?: ArticleAdmin) => a?.draftReview ?? null;
+/** Where an article's pending version is in review; 'none' = not sent (or nothing pending). */
+type ReviewState = 'none' | DraftReview['state'];
+const LIVE_DRAFT_TEXT: Record<ReviewState, string> = { none: 'edits not sent for review', in_review: 'edits in review', approved: 'edits approved', changes_requested: 'changes requested' };
+const REVIEW_LABEL: Record<ReviewState, string> = { none: 'Not sent', in_review: 'In review', approved: 'Approved', changes_requested: 'Changes requested' };
+const REVIEW_TONE: Record<ReviewState, 'info' | 'success' | 'danger' | undefined> = { none: undefined, in_review: 'info', approved: 'success', changes_requested: 'danger' };
 
 const PAGE = 10;
-const NOTICE_DAYS = 14;
+/** Used until the policyNoticeDays setting has loaded (or when the caller can't read settings). */
+const DEFAULT_NOTICE_DAYS = 14;
+const NOTICE_SETTING = 'content.policyNoticeDays';
 const TZ = 'America/Los_Angeles';
 
 const STATUS: Record<string, string> = {
@@ -154,6 +165,42 @@ function EditorHead({ title, sub, badge, preview, crumb }: { title: string; sub:
   );
 }
 
+/** Asks why changes are needed: the backend requires a reason (articles) or note (policies) to send work back. */
+function ReasonDialog({ open, title, hint, pending, error, onClose, onConfirm }: { open: boolean; title: string; hint: string; pending: boolean; error?: string; onClose: () => void; onConfirm: (reason: string) => void }) {
+  const [reason, setReason] = useState('');
+  const [tried, setTried] = useState(false);
+  const missing = tried && !reason.trim();
+  return (
+    <Dialog
+      open={open}
+      size="sm"
+      onClose={onClose}
+      title={title}
+      foot={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setTried(true);
+              if (reason.trim()) onConfirm(reason.trim());
+            }}
+            disabled={pending}
+          >
+            Request changes
+          </Button>
+        </>
+      }
+    >
+      {error && <Alert tone="danger" title={error} />}
+      <Field label="What needs to change" hint={hint} error={missing ? 'Say what needs to change.' : undefined}>
+        <Textarea id="hp-reason" rows={4} value={reason} onChange={(e) => setReason(e.target.value)} />
+      </Field>
+    </Dialog>
+  );
+}
+
 function EditorFrame({ children }: { children: ReactNode }) {
   return (
     <AdminLayout active="help-content">
@@ -223,10 +270,24 @@ function PolicyForm({
 }) {
   const { api } = useApi();
   const qc = useQueryClient();
-  const { can, name: me } = useStaffSession();
+  const { can, name: me, accountId } = useStaffSession();
   const canEdit = can('content.policies.edit');
-  const canApprove = can('content.policies.approve');
+  // The owner step is decided by the policy's owner, or by someone who manages all policies (backend: FORBIDDEN otherwise).
+  const canApprove = can('content.policies.approve') && (summary.owner.staffId === accountId || can('content.policies.manage'));
   const current = versions.find((v) => v.state === 'current');
+  // Notice period for customer-facing changes (setting content.policyNoticeDays). A shorter notice is allowed: the
+  // backend then asks the Business Owner to approve the schedule, so the form only warns.
+  const noticeSetting = useQuery({
+    queryKey: ['settings', 'value', NOTICE_SETTING],
+    enabled: can('settings.view'),
+    queryFn: () => call(api.GET('/api/admin/settings/values/{key}', { params: { path: { key: NOTICE_SETTING } } })),
+  });
+  const noticeValue = Number(noticeSetting.data?.current.value);
+  const noticeDays = Number.isFinite(noticeValue) && noticeValue >= 0 ? noticeValue : DEFAULT_NOTICE_DAYS;
+  // The backend applies the notice to changes of a published policy whose audience isn't sellers only. The summary
+  // has no audience field, so seller rules stand in for seller-only policies.
+  const needsNotice = !!current && summary.kind !== 'seller_rules';
+  const [askChanges, setAskChanges] = useState(false);
   const base = current?.body ?? '';
   const [d, setD] = useState(() => ({
     title: working?.title ?? summary.title,
@@ -252,9 +313,8 @@ function PolicyForm({
     const e: PolicyErrors = {};
     if (!d.title.trim()) e.title = 'Enter a title.';
     if (!d.body.trim()) e.body = 'Enter the text.';
-    const min = new Date(Date.now() + NOTICE_DAYS * 86_400_000);
     if (!d.effective) e.effective = 'Choose the date and time the new version takes effect.';
-    else if (new Date(wallToIso(d.effective)) < min) e.effective = `Choose ${date(min.toISOString())} or later: customer-facing changes need ${NOTICE_DAYS} days' notice.`;
+    else if (new Date(wallToIso(d.effective)) < new Date()) e.effective = 'Choose a date and time in the future.';
     if (!d.summary.trim()) e.summary = 'Summarize what changed. Customers see it at the top of the policy.';
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -292,12 +352,14 @@ function PolicyForm({
     },
   });
   const act = useMutation({
-    mutationFn: (kind: 'approve' | 'changes' | 'schedule') => {
+    mutationFn: ({ kind, note }: { kind: 'approve' | 'changes' | 'schedule'; note?: string }) => {
       const id = working!.id;
       if (kind === 'schedule') return call(api.POST('/api/admin/content/policy-versions/{id}/schedule', { params: { path: { id } }, body: { effectiveAt: working!.effectiveAt ?? wallToIso(d.effective) } }));
-      return call(api.POST('/api/admin/content/policy-versions/{id}/approve', { params: { path: { id } }, body: { approve: kind === 'approve' } }));
+      // Sending a version back needs a note for the editor (backend: VALIDATION_FAILED without it).
+      return call(api.POST('/api/admin/content/policy-versions/{id}/approve', { params: { path: { id } }, body: kind === 'approve' ? { approve: true } : { approve: false, note } }));
     },
-    onSuccess: (v, kind) => {
+    onSuccess: (v, { kind }) => {
+      setAskChanges(false);
       refresh();
       const pending = v.approval?.required && v.state === 'in_review';
       setNotice({
@@ -418,7 +480,7 @@ function PolicyForm({
             titleAs="h3"
             foot={
               state === 'approved' && canEdit ? (
-                <Button size="sm" icon="calendar" onClick={() => act.mutate('schedule')} disabled={act.isPending}>
+                <Button size="sm" icon="calendar" onClick={() => act.mutate({ kind: 'schedule' })} disabled={act.isPending}>
                   Schedule
                 </Button>
               ) : (
@@ -433,14 +495,19 @@ function PolicyForm({
               )
             }
           >
-            {(save.isError || act.isError) && (
+            {(save.isError || (act.isError && !askChanges)) && (
               <Alert tone="danger" title="That didn’t work">
                 {errorMessage(save.error ?? act.error)}
               </Alert>
             )}
-            <Field label="Effective date" hint={`At least ${NOTICE_DAYS} days after publishing for customer-facing changes · Pacific Time`} error={errors.effective}>
+            <Field label="Effective date" hint={needsNotice ? `Customer-facing changes need ${noticeDays} days' notice · Pacific Time` : 'Pacific Time'} error={errors.effective}>
               <TextInput id="hp-eff" type="datetime-local" icon="calendar" value={d.effective} error={!!errors.effective} onChange={(e) => set('effective', e.target.value)} disabled={locked} />
             </Field>
+            {needsNotice && d.effective && !errors.effective && new Date(wallToIso(d.effective)).getTime() < Date.now() + noticeDays * 86_400_000 && (
+              <Alert tone="warning" title={`Less than ${noticeDays} days' notice`}>
+                Scheduling this date needs the Business Owner&rsquo;s approval. Choose a later date to avoid it.
+              </Alert>
+            )}
             <Field label="Change summary" hint="Shown at the top of the policy page and in the notice" error={errors.summary}>
               <Textarea id="hp-sum" value={d.summary} onChange={(e) => set('summary', e.target.value)} disabled={locked} />
             </Field>
@@ -492,10 +559,18 @@ function PolicyForm({
                       </span>
                       {canDecideOwner && (
                         <span className="row gap-2">
-                          <Button size="sm" onClick={() => act.mutate('approve')} disabled={act.isPending}>
+                          <Button size="sm" onClick={() => act.mutate({ kind: 'approve' })} disabled={act.isPending}>
                             Approve
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => act.mutate('changes')} disabled={act.isPending}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              act.reset();
+                              setAskChanges(true);
+                            }}
+                            disabled={act.isPending}
+                          >
                             Request changes
                           </Button>
                         </span>
@@ -515,6 +590,16 @@ function PolicyForm({
           </Card>
         </div>
       </div>
+      <ReasonDialog
+        key={askChanges ? 'open' : 'closed'}
+        open={askChanges}
+        title={`Request changes to ${d.title} ${d.version}`}
+        hint="The editor sees this note with the version sent back to draft."
+        pending={act.isPending}
+        error={act.isError ? errorMessage(act.error) : undefined}
+        onClose={() => setAskChanges(false)}
+        onConfirm={(note) => act.mutate({ kind: 'changes', note })}
+      />
     </AdminLayout>
   );
 }
@@ -559,8 +644,18 @@ function ArticleForm({ a, categories }: { a?: ArticleAdmin; categories: S['conte
     setErrors((e) => ({ ...e, [k]: undefined }));
   };
   const status = a?.status ?? 'draft';
-  const locked = !canEdit || status === 'in_review' || status === 'scheduled';
+  // A live article keeps status published (or unpublished) while its next version is drafted; that draft's review is
+  // tracked separately in draftReview. First publication still runs on status alone.
+  const draftReview = draftReviewOf(a);
+  const liveDraft = !!a && (status === 'published' || status === 'unpublished') && a.draftVersion != null;
+  const review: ReviewState = liveDraft ? (draftReview?.state ?? 'none') : status === 'in_review' ? 'in_review' : status === 'approved' ? 'approved' : 'none';
+  const inReview = review === 'in_review';
+  const approved = review === 'approved';
+  const locked = !canEdit || inReview || status === 'scheduled';
+  // The review step shows a tick once the pending version is approved, or when the live article has nothing pending.
+  const stepDone = approved || (!liveDraft && status === 'published');
   const base = a?.article.body ?? '';
+  const [askChanges, setAskChanges] = useState(false);
 
   const refresh = (r: ArticleAdmin) => {
     qc.setQueryData(['content', 'article', r.article.id], r);
@@ -582,10 +677,14 @@ function ArticleForm({ a, categories }: { a?: ArticleAdmin; categories: S['conte
     },
   });
   const transition = useMutation({
-    mutationFn: (action: 'approve' | 'requestChanges' | 'publish') => call(api.POST('/api/admin/content/help/articles/{id}/transition', { params: { path: { id: a!.article.id } }, body: { action } })),
-    onSuccess: (r, action) => {
+    // requestChanges needs a reason (backend: VALIDATION_FAILED without it); it comes from the reason dialog.
+    mutationFn: ({ action, reason }: { action: 'approve' | 'requestChanges' | 'publish'; reason?: string }) =>
+      call(api.POST('/api/admin/content/help/articles/{id}/transition', { params: { path: { id: a!.article.id } }, body: action === 'requestChanges' ? { action, reason } : { action } })),
+    onSuccess: (r, { action }) => {
+      setAskChanges(false);
       refresh(r);
       setNotice(action === 'publish' ? 'Published' : action === 'approve' ? 'Approved' : 'Changes requested');
+      announce(action === 'publish' ? `${r.article.title} published` : action === 'approve' ? 'Approved' : 'Changes requested');
     },
   });
   const validate = () => {
@@ -604,12 +703,20 @@ function ArticleForm({ a, categories }: { a?: ArticleAdmin; categories: S['conte
         crumb={d.title || 'New article'}
         title={`${d.title || 'New article'}${a ? ` · version ${a.draftVersion ?? a.liveVersion ?? a.article.version}` : ''}`}
         sub={`Help article · editor ${a?.owner.name ?? me ?? 'Content'}${a?.owner.role ? `, ${a.owner.role}` : ''}`}
-        badge={status === 'in_review' ? <Badge tone="info">In review</Badge> : <Badge>{STATUS[status] ?? status}</Badge>}
+        badge={
+          liveDraft ? (
+            <Badge tone={REVIEW_TONE[review]}>{`${STATUS[status]} · ${LIVE_DRAFT_TEXT[review]}`}</Badge>
+          ) : status === 'in_review' ? (
+            <Badge tone="info">In review</Badge>
+          ) : (
+            <Badge>{STATUS[status] ?? status}</Badge>
+          )
+        }
         preview={a ? href('help/article', '', { slug: a.article.slug }) : href('help/article')}
       />
       {notice && (
         <Alert tone="success" title={notice}>
-          {notice === 'Sent for review' ? 'The article publishes once another Content editor approves it. ' : ''}
+          {notice === 'Sent for review' ? (liveDraft || status === 'published' ? 'The live article stays as it is until another Content editor approves the changes and they are published. ' : 'The article can be published once another Content editor approves it. ') : ''}
           <Link to={href('admin/help-content')}>Back to Help and policies</Link>
         </Alert>
       )}
@@ -643,23 +750,24 @@ function ArticleForm({ a, categories }: { a?: ArticleAdmin; categories: S['conte
             title="Publishing"
             titleAs="h3"
             foot={
-              status === 'approved' && canEdit ? (
-                <Button size="sm" onClick={() => transition.mutate('publish')} disabled={transition.isPending}>
-                  Publish
+              approved && canEdit ? (
+                <Button size="sm" onClick={() => transition.mutate({ action: 'publish' })} disabled={transition.isPending}>
+                  {liveDraft ? 'Publish changes' : 'Publish'}
                 </Button>
               ) : (
                 <>
                   <Button variant="ghost" size="sm" onClick={() => (d.title.trim() ? save.mutate(false) : setErrors({ title: 'Enter a title.' }))} disabled={locked || save.isPending}>
                     Save draft
                   </Button>
+                  {/* Saving first, then submit: for a live article this sends its draft (draftReview), otherwise the article. */}
                   <Button size="sm" onClick={() => validate() && save.mutate(true)} disabled={locked || save.isPending}>
-                    {status === 'in_review' ? 'Sent' : 'Send for review'}
+                    {inReview ? 'Sent' : review === 'changes_requested' ? 'Send for review again' : 'Send for review'}
                   </Button>
                 </>
               )
             }
           >
-            {(save.isError || transition.isError) && (
+            {(save.isError || (transition.isError && !askChanges)) && (
               <Alert tone="danger" title="That didn’t work">
                 {errorMessage(save.error ?? transition.error)}
               </Alert>
@@ -674,32 +782,57 @@ function ArticleForm({ a, categories }: { a?: ArticleAdmin; categories: S['conte
             <div className="divider" />
             <ul className="ab-approvals">
               <li>
-                <span className={cx('n', status === 'approved' || status === 'published' ? 'is-done' : 'is-wait')}>{status === 'approved' || status === 'published' ? <Icon name="check" className="ic-sm" /> : 1}</span>
+                <span className={cx('n', stepDone ? 'is-done' : 'is-wait')}>{stepDone ? <Icon name="check" className="ic-sm" /> : 1}</span>
                 <span className="ab-cell">
-                  <span className="strong">Content review</span>
-                  <span className="xs muted">Another Content editor checks accuracy and links</span>
-                  {status === 'in_review' && a?.draftAuthor?.name && <span className="xs muted">Written by {a.draftAuthor.name}</span>}
-                  {status === 'in_review' && canEdit && a && !a.canApprove && <span className="xs muted">You wrote this version, so another Content editor approves it.</span>}
-                  {status === 'in_review' && canEdit && (
+                  <span className="strong">Content review{liveDraft ? ` · version ${a!.draftVersion}` : ''}</span>
+                  <span className="xs muted">{liveDraft ? `Another Content editor checks the changes before they replace live version ${a!.liveVersion ?? a!.article.version}` : 'Another Content editor checks accuracy and links'}</span>
+                  {inReview && a?.draftAuthor?.name && <span className="xs muted">Written by {a.draftAuthor.name}</span>}
+                  {liveDraft && draftReview && (
+                    <span className="xs muted">
+                      {draftReview.state === 'in_review' ? 'Sent for review' : draftReview.state === 'approved' ? 'Approved' : 'Changes requested'}
+                      {actorName(draftReview.by) ? ` by ${actorName(draftReview.by)}` : ''} · {dateTime(draftReview.at)}
+                      {draftReview.state === 'changes_requested' && draftReview.reason ? `: ${draftReview.reason}` : ''}
+                    </span>
+                  )}
+                  {inReview && canEdit && a && !a.canApprove && <span className="xs muted">You wrote this version, so another Content editor approves it.</span>}
+                  {inReview && canEdit && (
                     <span className="row gap-2">
                       {/* canApprove: in review and the caller isn't the draft's author (SAME_REVIEWER otherwise). */}
                       {a?.canApprove && (
-                        <Button size="sm" onClick={() => transition.mutate('approve')} disabled={transition.isPending}>
+                        <Button size="sm" onClick={() => transition.mutate({ action: 'approve' })} disabled={transition.isPending}>
                           Approve
                         </Button>
                       )}
-                      <Button variant="ghost" size="sm" onClick={() => transition.mutate('requestChanges')} disabled={transition.isPending}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          transition.reset();
+                          setAskChanges(true);
+                        }}
+                        disabled={transition.isPending}
+                      >
                         Request changes
                       </Button>
                     </span>
                   )}
                 </span>
-                <StatusBadge status={STATUS[status] ?? status} />
+                <StatusBadge status={liveDraft ? REVIEW_LABEL[review] : (STATUS[status] ?? status)} />
               </li>
             </ul>
           </Card>
         </div>
       </div>
+      <ReasonDialog
+        key={askChanges ? 'open' : 'closed'}
+        open={askChanges}
+        title={`Request changes to ${d.title || 'this article'}`}
+        hint="The writer sees this with the draft sent back to them."
+        pending={transition.isPending}
+        error={transition.isError ? errorMessage(transition.error) : undefined}
+        onClose={() => setAskChanges(false)}
+        onConfirm={(reason) => transition.mutate({ action: 'requestChanges', reason })}
+      />
     </AdminLayout>
   );
 }

@@ -3,7 +3,7 @@
 export { Icon, LogoMark, iconFor, type IconName } from './Icon';
 export { Button, IconButton, CopyButton, type ButtonVariant } from './Button';
 export { Badge, StatusBadge, Sponsored, Count, statusTone, STATUS_TONE, type Tone } from './Badge';
-export { Img, Avatar, LogoTile, tintClass, type Tint } from './Media';
+export { Img, Avatar, LogoTile, sameOriginFile, tintClass, type Tint } from './Media';
 export { Price, Stars, Stars5, SellerBadge, SellerLine, ShipLine, ProductCard, QuantityStepper, Countdown, Meter, type CardProduct } from './Commerce';
 export {
   Card, Breadcrumbs, PageHeader, SectionHeader, Tabs, SegmentedControl, Chip, ChipRow, Steps, Track, Timeline,

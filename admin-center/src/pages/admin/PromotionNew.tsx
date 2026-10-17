@@ -7,10 +7,13 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, num } from '@marketly/web-shared/lib/format';
 import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, PageHeader, Price, Radio, Select, StatusBadge, TableWrap, Textarea, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Checkbox, EmptyState, Field, Icon, Img, PageHeader, Price, Radio, Select, StatusBadge, Textarea, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, dateTime, shortDate } from '@/app/parts';
 import { STATUS_LABEL, kindLabel, type Campaign, type CampaignInput } from './data/promotions';
+import { PromotionFlashItems } from './PromotionFlashItems';
+import { PromotionParticipants } from './PromotionParticipants';
+import { StopCampaign } from './PromotionStop';
 
 // Design: pages/admin/admin-promotion-new.html (step 1, set up) · view "finance-confirmation" = after "Send to Finance":
 // step 2, the setup locked (.ab-locked) and the Finance confirmation card. QA m-9 (locked text at 2.48:1) is fixed in
@@ -20,6 +23,9 @@ import { STATUS_LABEL, kindLabel, type Campaign, type CampaignInput } from './da
 // confirms with POST /confirm-funding or sends it back with /request-changes. Categories come from
 // GET /api/admin/catalog/categories; seller participation from /campaigns/{id}/participations; the price preview from
 // POST /campaigns/{id}/price-preview (once the campaign is saved).
+// Fix round (review §2a #7): minimum-spend campaigns send the threshold as discount.minSpend (A17); flash sales set
+// their offers with PUT /campaigns/{id}/flash-items (PromotionFlashItems, A16); sellers are invited and their
+// withdrawal requests decided in section 8 (PromotionParticipants, A18); End / Cancel sit in the header (PromotionStop).
 
 /* ---------------- Options ---------------- */
 
@@ -88,6 +94,8 @@ interface Form {
   cats: Cat[];
   customers: Audience;
   value: string;
+  /** Minimum-spend threshold in dollars (min_spend only). */
+  minSpend: string;
   max: string;
   budget: string;
   cap: string;
@@ -110,6 +118,7 @@ const EMPTY: Form = {
   cats: [],
   customers: 'everyone',
   value: '',
+  minSpend: '',
   max: '',
   budget: '',
   cap: '',
@@ -125,7 +134,7 @@ const isInt = (s: string) => /^\d[\d,]*$/.test(s.trim()) && toNum(s) > 0;
 const cents = (s: string) => Math.round(toNum(s) * 100);
 const usd = (amount: number) => ({ amount, currency: 'USD' });
 
-type Errors = Partial<Record<'name' | 'code' | 'start' | 'end' | 'cats' | 'value' | 'max' | 'budget' | 'cap' | 'perCustomer' | 'perOrder', string>>;
+type Errors = Partial<Record<'name' | 'code' | 'start' | 'end' | 'cats' | 'value' | 'minSpend' | 'max' | 'budget' | 'cap' | 'perCustomer' | 'perOrder', string>>;
 
 function validate(f: Form): Errors {
   const e: Errors = {};
@@ -140,6 +149,11 @@ function validate(f: Form): Errors {
     const v = toNum(f.value);
     if (!f.value.trim() || Number.isNaN(v) || v <= 0) e.value = 'Enter the discount value.';
     else if (pct && v > 90) e.value = 'Enter a discount between 1% and 90%.';
+  }
+  if (f.type === 'min_spend') {
+    const m = toNum(f.minSpend);
+    if (!f.minSpend.trim() || Number.isNaN(m) || m <= 0) e.minSpend = 'Enter the minimum spend.';
+    else if (toNum(f.value) >= m) e.value = 'The discount must be less than the minimum spend.';
   }
   if (f.max.trim() && (Number.isNaN(toNum(f.max)) || toNum(f.max) <= 0)) e.max = 'Enter an amount, or leave it empty for no maximum.';
   if (!(toNum(f.budget) > 0)) e.budget = 'Enter the total budget.';
@@ -193,6 +207,7 @@ function fromCampaign(c: Campaign, cats: Cat[]): Form {
     cats: included,
     customers: c.eligibility.audience,
     value: pct ? String((d.percentOffBps ?? 0) / 100) : d.amountOff ? String(d.amountOff.amount / 100) : '',
+    minSpend: d.minSpend ? String(d.minSpend.amount / 100) : '',
     max: d.maxDiscountPerOrder ? String(d.maxDiscountPerOrder.amount / 100) : '',
     budget: c.limits.budget ? String(c.limits.budget.amount / 100) : '',
     cap: c.limits.usageCap != null ? String(c.limits.usageCap) : '',
@@ -219,7 +234,11 @@ function toInput(f: Form, exclude: CampaignInput['scope']['exclude']): CampaignI
     discount: {
       kind: f.type,
       percentOffBps: pct ? Math.round(v * 100) : null,
-      amountOff: !pct && f.type !== 'free_shipping' && f.type !== 'min_spend' ? usd(cents(f.value)) : f.type === 'min_spend' ? usd(cents(f.value)) : null,
+      // Fixed coupons and minimum-spend discounts take an amount off; min_spend also needs its threshold (A17).
+      amountOff: !pct && f.type !== 'free_shipping' ? usd(cents(f.value)) : null,
+      minSpend: f.type === 'min_spend' ? usd(cents(f.minSpend)) : null,
+      // Measured on the campaign's eligible items in the cart (what the form's hint says).
+      minSpendScope: f.type === 'min_spend' ? 'eligible_items' : null,
       maxDiscountPerOrder: f.max.trim() ? usd(cents(f.max)) : null,
       freeShipping: f.type === 'free_shipping' ? true : null,
     },
@@ -307,8 +326,6 @@ function SumList({ rows }: { rows: Array<[string, ReactNode]> }) {
     </div>
   );
 }
-
-const PARTICIPATION_LABEL: Record<string, string> = { invited: 'Pending', accepted: 'Accepted', declined: 'Declined', withdrawal_requested: 'Withdrawal requested', withdrawn: 'Withdrawn', removed: 'Removed', expired: 'Expired' };
 
 /* ---------------- Page ---------------- */
 
@@ -425,7 +442,7 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
     : f.type === 'markdown' ? `${value}% markdown`
     : f.type === 'flash_sale' ? `${value}% flash sale`
     : f.type === 'fixed_coupon' ? `${fmtCap(value)} coupon`
-    : f.type === 'min_spend' ? `${fmtCap(value)} off a minimum spend`
+    : f.type === 'min_spend' ? `${fmtCap(value)} off orders of ${fmtCap(toNum(f.minSpend) || 0)} or more`
     : 'Free shipping';
   const fundSummary = f.funding === 'shared' ? 'Shared 50/50' : fund.label;
   const stacking = COMBOS.filter((x) => f.combos[x.key]).map((x) => x.short);
@@ -485,7 +502,7 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
     const e = validate(f);
     const first = Object.keys(e)[0];
     if (first) {
-      const fid = { name: 'pn-name', code: 'pn-code', start: 'pn-start', end: 'pn-end', cats: 'pn-scope-1', value: 'pn-val', max: 'pn-max', budget: 'pn-bud', cap: 'pn-cap', perCustomer: 'pn-pc', perOrder: 'pn-po' }[first];
+      const fid = { name: 'pn-name', code: 'pn-code', start: 'pn-start', end: 'pn-end', cats: 'pn-scope-1', value: 'pn-val', minSpend: 'pn-min', max: 'pn-max', budget: 'pn-bud', cap: 'pn-cap', perCustomer: 'pn-pc', perOrder: 'pn-po' }[first];
       if (fid) document.getElementById(fid)?.focus();
       return;
     }
@@ -539,7 +556,14 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
         crumbs={[{ label: 'Promotions and coupons', to: href('admin/promotions') }, { label: c ? c.name : 'New campaign' }]}
         title={c ? c.name : 'Create campaign'}
         sub={c ? `${typeLabel(c.discount.kind)} · ${c.period.display}${createdBy ? ` · created by ${createdBy}` : ''}` : 'Marketing sets up the campaign. Finance confirms funding before it can go live.'}
-        actions={c ? <StatusBadge status={STATUS_LABEL[status] ?? status} /> : undefined}
+        actions={
+          c ? (
+            <>
+              <StatusBadge status={STATUS_LABEL[status] ?? status} />
+              <StopCampaign c={c} onDone={(saved, k) => setNotice({ tone: 'success', title: k === 'end' ? 'Campaign ended' : 'Campaign cancelled', text: `${saved.name} is ${k === 'end' ? 'ended' : 'cancelled'}. The reason is in Action history.` })} />
+            </>
+          ) : undefined
+        }
       />
       <WizardSteps items={STEPS} current={step} />
       {notice && (
@@ -660,6 +684,15 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
               {' · Selecting single products or offers is not available here yet.'}
             </span>
           </Section>
+          {f.type === 'flash_sale' && (
+            <Card titleAs="h3" title="Flash-sale items" sub="The offers in this flash sale, with deal price, deal stock and a limit per customer">
+              {c && c.discount.kind === 'flash_sale' ? (
+                <PromotionFlashItems c={c} percentOff={toNum(f.value) || 0} />
+              ) : (
+                <span className="xs muted">Save the draft as a flash sale to add its offers. Finance can’t review a flash sale until at least one is set.</span>
+              )}
+            </Card>
+          )}
           <Section n={4} title="Eligible customers">
             <div className="ab-checkgrid">
               {CUSTOMERS.map((x, i) => (
@@ -676,6 +709,11 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
                   <TextInput id="pn-val" prefix="$" value={f.value} error={!!errors.value} inputMode="decimal" readOnly={locked || f.type === 'free_shipping'} onChange={(e) => set('value', e.target.value)} placeholder="" />
                 )}
               </Field>
+              {f.type === 'min_spend' && (
+                <Field label="Minimum spend" hint="The discount applies when the eligible items reach this amount" error={errors.minSpend}>
+                  <TextInput id="pn-min" prefix="$" value={f.minSpend} error={!!errors.minSpend} inputMode="decimal" readOnly={locked} onChange={(e) => set('minSpend', e.target.value)} placeholder="" />
+                </Field>
+              )}
               <Field label="Maximum discount per order" optional error={errors.max}>
                 <TextInput id="pn-max" prefix="$" value={f.max} error={!!errors.max} inputMode="decimal" readOnly={locked} onChange={(e) => set('max', e.target.value)} placeholder="" />
               </Field>
@@ -729,48 +767,9 @@ function Editor({ campaign: c, categories, categoriesError }: { campaign?: Campa
           <Section n={8} title="Seller participation">
             <Checkbox id="pn-sp" label="Invite sellers to join. Each seller must consent before its offers are included." checked={f.invite} disabled={locked} onChange={(e) => set('invite', e.target.checked)} />
             {c ? (
-              sellers.length ? (
-                <TableWrap label="8 Seller participation table">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Seller</th>
-                        <th scope="col">Offers</th>
-                        <th scope="col">Consent</th>
-                        <th className="r" scope="col">
-                          Seller earns per $100 sale
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sellers.map((s) => (
-                        <tr key={s.id}>
-                          <td>{s.sellerName}</td>
-                          <td>{s.offerCount}</td>
-                          <td>
-                            <StatusBadge status={PARTICIPATION_LABEL[s.state] ?? s.state} />
-                          </td>
-                          <td className="r">
-                            {s.earningsExample ? (
-                              <span className="num">
-                                {formatMoney(s.earningsExample.sellerEarns)} <span className="xs muted">(was {formatMoney(s.earningsExample.regularSellerEarns)})</span>
-                              </span>
-                            ) : (
-                              <span className="xs muted">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </TableWrap>
-              ) : participations.isPending ? (
-                <SkeletonLines rows={2} />
-              ) : (
-                <span className="xs muted">No sellers invited yet.{f.invite ? ' Invitations go out once Finance confirms the funding.' : ''}</span>
-              )
+              <PromotionParticipants c={c} sellers={sellers} pending={participations.isPending} inviteChecked={f.invite} />
             ) : (
-              <span className="xs muted">Sellers can be invited once the campaign is saved.</span>
+              <span className="xs muted">Sellers can be invited once the campaign is saved{f.funding !== 'platform' ? '; seller and shared funding need each seller’s consent' : ''}.</span>
             )}
             {example && <div className="panel small">{example.explanation}</div>}
             {example && (

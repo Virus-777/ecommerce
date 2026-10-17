@@ -7,17 +7,20 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { formatMoney, money, num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Card, Dialog, Drawer, EmptyState, Field, Icon, KeyValue, PageHeader, Pager, SearchInput, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput } from '@marketly/web-shared/ui';
+import { Alert, Button, Card, Checkbox, Drawer, EmptyState, Field, Icon, KeyValue, PageHeader, Pager, SearchInput, Select, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { date, dateTime, LoadError, shortDate, SkeletonLines } from '@/app/parts';
 import { ON_TIME_WARN, PO_STATUS_LABEL, poLimit, poStatusLabel, STATUS_FILTERS, type PoStatusKey, type PurchaseOrder, type PurchaseOrderRow, type ReorderSuggestion, type Supplier } from './data/purchasing';
+import { ClosePoForm, DeliveryForm, DeliveryList, isOpenDelivery, type Delivery } from './data/purchasing-deliveries';
+import { PriceListDialog, SupplierDialog } from './data/purchasing-suppliers';
 
 // Design: pages/admin/admin-purchasing.html (purchase orders + suppliers) ·
 // view "purchase-order" = the purchase order drawer (?view=purchase-order&po=<ref>). Draft POs open the same
 // drawer with editable lines; "New purchase order" and reorder suggestions start a new draft (po=new).
 // API: GET /api/admin/purchasing/summary, /suppliers (+/{id} price list), /purchase-orders (+/{id}), /reorder-suggestions;
 // POST /purchase-orders, PATCH /purchase-orders/{id}, POST /{id}/send (approval above the buyer's limit), /{id}/cancel,
-// POST /claims, POST /suppliers.
+// POST /claims. After sending: POST /{id}/deliveries, PATCH /deliveries/{id}, POST /{id}/close (data/purchasing-deliveries).
+// Suppliers: POST /suppliers, PATCH /suppliers/{id}, PUT /suppliers/{id}/items (data/purchasing-suppliers).
 
 type View = 'purchase-order';
 type TabKey = 'pos' | 'suppliers' | 'reorder';
@@ -130,7 +133,8 @@ function ReceivedLine({ l }: { l: PurchaseOrder['lines'][number] }) {
   );
 }
 
-function SupplierTable({ suppliers, label, loading }: { suppliers: Supplier[]; label: string; loading: boolean }) {
+function SupplierTable({ suppliers, label, loading, onEdit, onPrices }: { suppliers: Supplier[]; label: string; loading: boolean; onEdit?: (s: Supplier) => void; onPrices?: (s: Supplier) => void }) {
+  const cols = onEdit ? 6 : 5;
   return (
     <TableWrap label={label}>
       <table className="table">
@@ -141,12 +145,17 @@ function SupplierTable({ suppliers, label, loading }: { suppliers: Supplier[]; l
             <th className="r" scope="col">Lead time</th>
             <th className="r" scope="col">On time</th>
             <th className="r" scope="col">Open POs</th>
+            {onEdit && (
+              <th scope="col">
+                <span className="sr-only">Actions</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
           {loading && (
             <tr>
-              <td colSpan={5}>
+              <td colSpan={cols}>
                 <SkeletonLines rows={3} />
               </td>
             </tr>
@@ -160,18 +169,36 @@ function SupplierTable({ suppliers, label, loading }: { suppliers: Supplier[]; l
                 </span>
               </td>
               <td>
-                <span className="small">{s.contactName || s.email || '—'}</span>
+                <span className="stack gap-0">
+                  <span className="small">{s.contactName || s.email || '—'}</span>
+                  {s.contactName && s.email && <span className="xs muted">{s.email}</span>}
+                  {s.phone && <span className="xs muted">{s.phone}</span>}
+                </span>
               </td>
               <td className="r">{plural(s.actualLeadTimeDays ?? s.leadTimeDays, 'day')}</td>
               <td className="r">
                 <span className={cx(s.onTimePct != null && s.onTimePct < ON_TIME_WARN && 't-warning-text strong')}>{s.onTimePct == null ? 'New' : `${Math.round(s.onTimePct)}%`}</span>
               </td>
               <td className="r">{s.openPurchaseOrders}</td>
+              {onEdit && (
+                <td>
+                  <span className="row gap-1 nowrap">
+                    <Button variant="ghost" size="sm" onClick={() => onPrices?.(s)}>
+                      Price list
+                      <span className="sr-only"> {s.name}</span>
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => onEdit(s)}>
+                      Edit
+                      <span className="sr-only"> {s.name}</span>
+                    </Button>
+                  </span>
+                </td>
+              )}
             </tr>
           ))}
           {!loading && suppliers.length === 0 && (
             <tr>
-              <td colSpan={5}>
+              <td colSpan={cols}>
                 <EmptyState icon="truck" title="No suppliers yet">
                   Add a supplier to start a purchase order.
                 </EmptyState>
@@ -186,27 +213,15 @@ function SupplierTable({ suppliers, label, loading }: { suppliers: Supplier[]; l
 
 /* ---------- Page ---------- */
 
-interface SupplierForm {
-  name: string;
-  city: string;
-  contact: string;
-  lead: string;
-}
-const EMPTY_SUPPLIER: SupplierForm = { name: '', city: '', contact: '', lead: '' };
-function validateSupplier(f: SupplierForm, existing: Supplier[]) {
-  const e: Partial<Record<keyof SupplierForm, string>> = {};
-  if (!f.name.trim()) e.name = "Enter the supplier's name.";
-  else if (existing.some((s) => s.name.toLowerCase() === f.name.trim().toLowerCase())) e.name = 'This supplier is already in the list.';
-  if (f.city.trim() && !/^.+,\s*[A-Z]{2}$/.test(f.city.trim())) e.city = 'Enter a city and state, like Reno, NV.';
-  if (!/^\d+$/.test(f.lead.trim()) || Number(f.lead) < 1) e.lead = 'Enter a lead time in whole days, like 7.';
-  return e;
-}
+/** What the PO drawer shows below the lines of a sent PO: a delivery form, or the close-short form. */
+type Panel = { kind: 'add-delivery' } | { kind: 'edit-delivery'; delivery: Delivery } | { kind: 'close' } | null;
 
 export default function Purchasing() {
   const { api } = useApi();
   const qc = useQueryClient();
   const { accountId, can } = useStaffSession();
   const canManage = can('purchasing.orders.manage');
+  const canSuppliers = can('purchasing.suppliers.manage');
   const [view] = useView<View>();
   const [params, setParams] = useSearchParams();
   const [tab, setTab] = useState<TabKey>('pos');
@@ -260,8 +275,17 @@ export default function Purchasing() {
   const [tried, setTried] = useState(false);
   const [drawerError, setDrawerError] = useState('');
   const [newSupplierLocked, setNewSupplierLocked] = useState(false);
+  // Emailing the PO is opt-in: offline servers have no email, and many suppliers get the order another way.
+  const [emailIt, setEmailIt] = useState(false);
+  const [panel, setPanel] = useState<Panel>(null);
+  // Set after sending so the drawer opens the delivery form once the sent PO has loaded.
+  const [askDeliveryFor, setAskDeliveryFor] = useState('');
   useEffect(() => {
     if (po) setForm(po.status === 'draft' && canManage ? toForm(po) : null);
+  }, [po?.id, po?.status]);
+  useEffect(() => {
+    setPanel(po && askDeliveryFor === po.id && po.status === 'sent' && !po.deliveries.length ? { kind: 'add-delivery' } : null);
+    if (po && askDeliveryFor === po.id && po.status !== 'draft') setAskDeliveryFor('');
   }, [po?.id, po?.status]);
   const editing = form !== null && (isNew || po?.status === 'draft');
 
@@ -270,6 +294,7 @@ export default function Purchasing() {
     enabled: drawerOpen && !!form?.supplierId,
     queryFn: () => call(api.GET('/api/admin/purchasing/suppliers/{id}', { params: { path: { id: form!.supplierId } } })),
   });
+  const supplierEmail = form ? (supplierDetail.data?.supplier.email ?? suppliers.find((s) => s.id === form.supplierId)?.email) || '' : '';
 
   const setPo = (ref: string) => {
     const next = new URLSearchParams(params);
@@ -280,11 +305,13 @@ export default function Purchasing() {
   const openPo = (p: PurchaseOrderRow) => {
     setTried(false);
     setDrawerError('');
+    setEmailIt(false);
     setPo(p.ref);
   };
   const startDraft = (supplierId = '', lines: LineForm[] = []) => {
     setForm({ supplierId, expected: '', freight: '0.00', lines, addSku: '' });
     setNewSupplierLocked(false);
+    setEmailIt(false);
     setTried(false);
     setDrawerError('');
     setPo('new');
@@ -294,6 +321,7 @@ export default function Purchasing() {
     next.delete('view');
     next.delete('po');
     setParams(next);
+    setPanel(null);
   };
 
   const errors: FormErrors = form && tried ? validateForm(form) : { line: {} };
@@ -323,24 +351,31 @@ export default function Purchasing() {
       } else {
         saved = await call(api.PATCH('/api/admin/purchasing/purchase-orders/{id}', { params: { path: { id: po.id } }, body: common }));
       }
-      if (mode === 'save') return { mode, po: saved };
-      const sent = await call(api.POST('/api/admin/purchasing/purchase-orders/{id}/send', { params: { path: { id: saved.id } }, body: { emailSupplier: true } }));
-      return { mode, po: sent };
+      if (mode === 'save') return { mode, po: saved, emailed: false };
+      // The backend refuses emailSupplier for a supplier without an email, so only ask for it when there is one.
+      const emailed = emailIt && !!supplierEmail;
+      const sent = await call(api.POST('/api/admin/purchasing/purchase-orders/{id}/send', { params: { path: { id: saved.id } }, body: { emailSupplier: emailed } }));
+      return { mode, po: sent, emailed };
     },
-    onSuccess: ({ mode, po: p }) => {
+    onSuccess: ({ mode, po: p, emailed }) => {
       const total = formatMoney(p.total);
       const pendingApproval = mode === 'send' && p.status === 'draft' && p.approval?.required;
+      const handOver = emailed ? `It is also emailed to ${supplierEmail} if this server can send email.` : `Send or give the order to ${p.supplier.name} yourself.`;
       setNotice(
         mode === 'save'
           ? { title: `${p.ref} saved as a draft`, body: `${plural(p.lines.length, 'line')} · ${total}. Nothing is sent to ${p.supplier.name} until you send it.` }
           : pendingApproval
-            ? { title: `${p.ref} sent to ${p.approval?.approvers.join(' or ') || 'the approver'} for approval`, body: `${total} is over your limit. It goes to ${p.supplier.name} once it is approved.` }
-            : { title: `${p.ref} sent to ${p.supplier.name}`, body: `${total} committed. The warehouse sees it as incoming stock.` },
+            ? { title: `${p.ref} sent to ${p.approval?.approvers.join(' or ') || 'the approver'} for approval`, body: `${total} is over your limit. It is marked sent to ${p.supplier.name} once it is approved. Then add its expected delivery.` }
+            : { title: `${p.ref} marked as sent to ${p.supplier.name}`, body: `${total} committed and counted as incoming stock. ${handOver} Add the expected delivery so the warehouse sees it in Receiving.` },
       );
       void qc.invalidateQueries({ queryKey: ['purchasing'] });
       void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
       setForm(null);
-      closeDrawer();
+      if (mode === 'send' && !pendingApproval) {
+        // Stay on the sent PO and open "Add expected delivery": without a delivery it never reaches Receiving.
+        setAskDeliveryFor(p.id);
+        setPo(p.ref);
+      } else closeDrawer();
     },
     onError: (e) => setDrawerError(errorMessage(e)),
   });
@@ -381,26 +416,21 @@ export default function Purchasing() {
     onError: (e) => setDrawerError(errorMessage(e)),
   });
 
-  /* ----- Add supplier ----- */
-  const [supOpen, setSupOpen] = useState(false);
-  const [sup, setSup] = useState<SupplierForm>(EMPTY_SUPPLIER);
-  const [supTried, setSupTried] = useState(false);
-  const [supError, setSupError] = useState('');
-  const supErrors = supTried ? validateSupplier(sup, suppliers) : {};
-  const addSupplier = useMutation({
-    mutationFn: () => call(api.POST('/api/admin/purchasing/suppliers', { body: { name: sup.name.trim(), contactName: sup.contact.trim() || null, leadTimeDays: Number(sup.lead), notes: sup.city.trim() ? `Location: ${sup.city.trim()}` : null } })),
-    onSuccess: (s) => {
-      setNotice({ title: `${s.name} added`, body: 'Add its price list before choosing it on a new purchase order.' });
-      void qc.invalidateQueries({ queryKey: ['purchasing', 'suppliers'] });
-      setSupOpen(false);
-    },
-    onError: (e) => setSupError(errorMessage(e)),
-  });
-  const saveSupplier = () => {
-    setSupTried(true);
-    setSupError('');
-    if (Object.keys(validateSupplier(sup, suppliers)).length) return;
-    addSupplier.mutate();
+  /* ----- Suppliers: add, edit, price list (dialogs in data/purchasing-suppliers) ----- */
+  // supDialog.key remounts the form so it starts from the chosen supplier.
+  const [supDialog, setSupDialog] = useState<{ key: number; supplier?: Supplier } | null>(null);
+  const [priceList, setPriceList] = useState<Supplier | null>(null);
+  const supplierActions = canSuppliers ? { onEdit: (s: Supplier) => setSupDialog({ key: Date.now(), supplier: s }), onPrices: (s: Supplier) => setPriceList(s) } : {};
+
+  /* ----- Sent PO: deliveries and closing short ----- */
+  const openDeliveries = (po?.deliveries ?? []).filter(isOpenDelivery);
+  const canAddDelivery = canManage && !!po && (po.status === 'sent' || po.status === 'partly_received') && po.lines.some((l) => l.quantityOpen > 0);
+  // Shown inside the drawer (the page notice is hidden behind it); cleared when another PO opens.
+  const [drawerNotice, setDrawerNotice] = useState('');
+  useEffect(() => setDrawerNotice(''), [po?.id]);
+  const panelDone = (message: string) => {
+    setPanel(null);
+    setDrawerNotice(message);
   };
 
   const supplierInfo = po ? suppliers.find((s) => s.id === po.supplier.id) : undefined;
@@ -421,24 +451,18 @@ export default function Purchasing() {
         title="Suppliers and purchasing"
         sub={`Your sending authority: ${limitText}`}
         actions={
-          canManage && (
+          (canManage || canSuppliers) && (
             <>
-              <Button
-                variant="secondary"
-                size="sm"
-                icon="plus"
-                onClick={() => {
-                  setSup(EMPTY_SUPPLIER);
-                  setSupTried(false);
-                  setSupError('');
-                  setSupOpen(true);
-                }}
-              >
-                Add supplier
-              </Button>
-              <Button size="sm" icon="file-plus" onClick={() => startDraft()}>
-                New purchase order
-              </Button>
+              {canSuppliers && (
+                <Button variant="secondary" size="sm" icon="plus" onClick={() => setSupDialog({ key: Date.now() })}>
+                  Add supplier
+                </Button>
+              )}
+              {canManage && (
+                <Button size="sm" icon="file-plus" onClick={() => startDraft()}>
+                  New purchase order
+                </Button>
+              )}
             </>
           )
         }
@@ -604,7 +628,7 @@ export default function Purchasing() {
             )}
           </>
         )}
-        {tab === 'suppliers' && <SupplierTable suppliers={suppliers} label="Supplier list table" loading={suppliersQ.isPending} />}
+        {tab === 'suppliers' && <SupplierTable suppliers={suppliers} label="Supplier list table" loading={suppliersQ.isPending} {...supplierActions} />}
         {tab === 'reorder' && (
           <TableWrap label="Reorder suggestions table">
             <table className="table">
@@ -679,7 +703,7 @@ export default function Purchasing() {
       </section>
 
       <Card title="Suppliers" sub="Lead time and on-time arrival over the last 90 days" flush>
-        <SupplierTable suppliers={suppliers} label="Suppliers table" loading={suppliersQ.isPending} />
+        <SupplierTable suppliers={suppliers} label="Suppliers table" loading={suppliersQ.isPending} {...supplierActions} />
       </Card>
 
       <Drawer
@@ -706,9 +730,23 @@ export default function Purchasing() {
                   {claimed ? 'Supplier claim opened' : 'Open supplier claim'}
                 </Button>
               )}
-              <Button icon="package-check" to={href('ops/receiving')}>
-                Record receipt
-              </Button>
+              {canManage && po.status === 'partly_received' && (
+                <Button variant="ghost" onClick={() => setPanel({ kind: 'close' })} disabled={panel?.kind === 'close'}>
+                  Close short
+                </Button>
+              )}
+              {/* Receiving lists deliveries, so "Record receipt" only helps once the PO has an open one. */}
+              {openDeliveries.length > 0 ? (
+                <Button icon="package-check" to={href('ops/receiving')}>
+                  Record receipt
+                </Button>
+              ) : (
+                canAddDelivery && (
+                  <Button icon="truck" onClick={() => setPanel({ kind: 'add-delivery' })} disabled={panel?.kind === 'add-delivery'}>
+                    Add expected delivery
+                  </Button>
+                )
+              )}
             </>
           ) : (
             <Button variant="ghost" onClick={closeDrawer}>
@@ -718,6 +756,7 @@ export default function Purchasing() {
         }
       >
         {drawerError && <Alert tone="danger" title={drawerError} />}
+        {drawerNotice && <Alert tone="success" title={drawerNotice} />}
         {!isNew && (detail.isPending || lookup.isPending) && !po && <SkeletonLines rows={5} />}
         {!isNew && detail.isError && <LoadError error={detail.error} onRetry={() => void detail.refetch()} />}
         {!isNew && lookup.isSuccess && !poId && (
@@ -806,7 +845,9 @@ export default function Purchasing() {
                       </Button>
                     </div>
                   )}
-                  {form.supplierId && supplierDetail.isSuccess && supplierDetail.data.items.length === 0 && <span className="xs muted">This supplier has no price list yet, so there is nothing to add.</span>}
+                  {form.supplierId && supplierDetail.isSuccess && supplierDetail.data.items.length === 0 && (
+                    <span className="xs muted">This supplier has no price list yet, so there is nothing to add. Add its items with Price list on the Suppliers tab.</span>
+                  )}
                 </div>
                 <div className="grid md2 gap-3">
                   <Field label="Freight" error={errors.freight}>
@@ -826,6 +867,15 @@ export default function Purchasing() {
                     You can send purchase orders up to {formatMoney({ amount: limit, currency: 'USD' })}. This one is {money(fTotal)}, so it goes to an approver before the supplier sees it.
                   </Alert>
                 )}
+                {form.supplierId &&
+                  (supplierEmail ? (
+                    <div className="stack gap-1">
+                      <Checkbox id="po-email" label={`Also email the PO to the supplier (${supplierEmail})`} checked={emailIt} onChange={(e) => setEmailIt(e.target.checked)} />
+                      <span className="xs muted">Needs email set up on the server. Otherwise the PO is only marked as sent and you send it to the supplier yourself.</span>
+                    </div>
+                  ) : (
+                    <span className="xs muted">Sending marks the PO as sent; send or give the order to the supplier yourself.</span>
+                  ))}
                 {limit === 0 && (
                   <Alert tone="info" title="You can prepare but not send">
                     Your roles have no authority to send purchase orders. Save the draft for someone who can.
@@ -885,6 +935,26 @@ export default function Purchasing() {
                       {plural(po.receipts.length, 'receiving record')} on this purchase order. Inventory makes received units sellable after counting.
                     </Alert>
                   )}
+                  <DeliveryList po={po} canManage={canManage} onEdit={(d) => setPanel({ kind: 'edit-delivery', delivery: d })} />
+                  {canAddDelivery && !openDeliveries.length && !panel && (
+                    <Alert tone="warning" title="No expected delivery yet">
+                      The warehouse only sees this order in Receiving once it has an expected delivery. Use Add expected delivery.
+                    </Alert>
+                  )}
+                  {canAddDelivery && openDeliveries.length > 0 && !panel && (
+                    <div className="row">
+                      <Button variant="ghost" size="sm" icon="plus" onClick={() => setPanel({ kind: 'add-delivery' })}>
+                        Add another delivery
+                      </Button>
+                    </div>
+                  )}
+                  {panel?.kind === 'add-delivery' && canAddDelivery && (
+                    <DeliveryForm key={`add-${po.id}`} po={po} leadTimeDays={supplierInfo?.leadTimeDays ?? 0} onDone={panelDone} onCancel={() => setPanel(null)} />
+                  )}
+                  {panel?.kind === 'edit-delivery' && (
+                    <DeliveryForm key={`edit-${panel.delivery.id}`} po={po} leadTimeDays={supplierInfo?.leadTimeDays ?? 0} delivery={panel.delivery} onDone={panelDone} onCancel={() => setPanel(null)} />
+                  )}
+                  {panel?.kind === 'close' && po.status === 'partly_received' && <ClosePoForm po={po} canClaim={can('purchasing.claims.manage')} onDone={panelDone} onCancel={() => setPanel(null)} />}
                 </>
               )
             )}
@@ -893,37 +963,34 @@ export default function Purchasing() {
         )}
       </Drawer>
 
-      <Dialog
-        open={supOpen}
-        onClose={() => setSupOpen(false)}
-        title="Add supplier"
-        foot={
-          <>
-            <Button variant="ghost" onClick={() => setSupOpen(false)}>
-              Cancel
-            </Button>
-            <Button icon="check" onClick={saveSupplier} disabled={addSupplier.isPending}>
-              Add supplier
-            </Button>
-          </>
-        }
-      >
-        {supError && <Alert tone="danger" title={supError} />}
-        <Field label="Supplier name" error={supErrors.name}>
-          <TextInput id="sup-name" value={sup.name} error={!!supErrors.name} onChange={(e) => setSup({ ...sup, name: e.target.value })} />
-        </Field>
-        <div className="grid md2 gap-3">
-          <Field label="City and state" optional error={supErrors.city}>
-            <TextInput id="sup-city" placeholder="Reno, NV" value={sup.city} error={!!supErrors.city} onChange={(e) => setSup({ ...sup, city: e.target.value })} />
-          </Field>
-          <Field label="Lead time" error={supErrors.lead}>
-            <TextInput id="sup-lead" suffix="days" inputMode="numeric" value={sup.lead} error={!!supErrors.lead} onChange={(e) => setSup({ ...sup, lead: e.target.value })} />
-          </Field>
-        </div>
-        <Field label="Contact" optional>
-          <TextInput id="sup-contact" value={sup.contact} onChange={(e) => setSup({ ...sup, contact: e.target.value })} />
-        </Field>
-      </Dialog>
+      {supDialog && (
+        <SupplierDialog
+          key={supDialog.key}
+          open
+          supplier={supDialog.supplier}
+          suppliers={suppliers}
+          onClose={() => setSupDialog(null)}
+          onSaved={(s, created) => {
+            setSupDialog(null);
+            if (created) {
+              // A new supplier has nothing to order until its price list exists, so go straight to it.
+              setNotice({ title: `${s.name} added`, body: 'Add the items it sells and their buying costs so you can order them.' });
+              setPriceList(s);
+            } else setNotice({ title: `${s.name} saved`, body: s.active ? 'The supplier details are updated.' : 'The supplier is inactive and can’t be chosen on new purchase orders.' });
+          }}
+        />
+      )}
+      {priceList && (
+        <PriceListDialog
+          key={priceList.id}
+          supplier={priceList}
+          onClose={() => setPriceList(null)}
+          onSaved={(count) => {
+            setNotice({ title: `${priceList.name} price list saved`, body: `${plural(count, 'item')} can now be ordered from ${priceList.name}.` });
+            setPriceList(null);
+          }}
+        />
+      )}
     </AdminLayout>
   );
 }

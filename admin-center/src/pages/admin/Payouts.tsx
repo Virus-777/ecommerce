@@ -20,8 +20,8 @@ import {
 
 // Design: pages/admin/admin-payouts.html · view "approve-run" = the approval dialog.
 // Data: GET /api/admin/finance/payout-runs (the newest open run, or ?run=<ref>), …/{id}/payouts (sellers),
-// /finance/payouts?status=failed, /finance/destination-reviews. Writes: submit, approve (Idempotency-Key,
-// the password again above the approver's limit), send-back, payouts/{id}/retry, destination-reviews approve/reject
+// /finance/payouts?status=failed, /finance/destination-reviews. Writes: submit, approve (Idempotency-Key; the
+// password again when the API asks with STEP_UP_REQUIRED, also within the approver's own limit), send-back, payouts/{id}/retry, destination-reviews approve/reject
 // (always the password again: reauthToken, purpose payout-destination), access approval-requests/{id}/remind,
 // POST reports/exports (dataset finance.admin.payout_run, filter runId; polled, then downloaded).
 // Kept on REST although AdminPayoutRun now answers: the run picker needs the run list, the writes answer REST PayoutRun
@@ -113,7 +113,7 @@ type DestDecision = { review: DestinationReview; approve: boolean } | null;
 export default function Payouts() {
   const { api } = useApi();
   const qc = useQueryClient();
-  const { can, name, roles } = useStaffSession();
+  const { accountId, can, name, roles } = useStaffSession();
   const [view, setView] = useView<View>();
   const [params] = useSearchParams();
   const [q, setQ] = useState('');
@@ -195,11 +195,19 @@ export default function Payouts() {
     onSuccess: (r) => {
       refreshRun();
       void qc.invalidateQueries({ queryKey: ['access', 'me'] });
-      if (r.status === 'approved' || r.status === 'releasing')
+      // Above the approver's limit the API answers 200 with the run still pending_approval (not APPROVAL_REQUIRED).
+      // Whether my approval counted shows in approvals[]: it does when my authority reaches the second-review
+      // threshold (or I am the second reviewer); otherwise the run was only sent on to someone with a higher limit.
+      const released = r.status === 'approved' || r.status === 'releasing';
+      const mineCounted = (r.approvals ?? []).some((a) => a.status === 'approved' && a.approver?.id === accountId);
+      const who = r.approval?.approvers?.length ? r.approval.approvers.join(' or ') : 'A Finance reviewer with a higher payout limit';
+      if (released)
         setNotice({ tone: 'success', title: `Payout run ${r.ref} approved`, body: `Release is scheduled for ${releaseLabel(r.scheduledRelease)}. Each payout moves to Processing at release and shows Paid when the bank confirms.` });
-      else
+      else if (mineCounted)
         setNotice({ tone: 'info', title: 'Your approval is recorded; sent for a second approval', body: r.approval?.reason ?? 'A second, different Finance reviewer approves before the run is released.' });
-      announce('Payout run approval recorded');
+      else
+        setNotice({ tone: 'info', title: 'Sent for approval', body: `This run is above your payout limit, so your approval doesn’t release it. ${who} approves it before it is released.` });
+      announce(released ? 'Payout run approved' : mineCounted ? 'Payout run approval recorded' : 'Payout run sent for approval');
       close();
     },
     onError: (e) => {

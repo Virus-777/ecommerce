@@ -10,8 +10,8 @@ import { Alert, Badge, Button, Dialog, EmptyState, Field, Img, OptionCard, PageH
 import { useStaffSession } from '@/app/session';
 import { date, dateTime, LoadError, SkeletonLines } from '@/app/parts';
 import {
-  AUTHOR_BADGE, isQa, isReported, isResponse, KIND_LABEL, LEGIT, NOUN, reasonLabel, reasonTone, rowActions, rowEdge,
-  type ContentType, type Edge, type ModerationDetail, type ModerationItem, type ModerationReason, type ReasonCode, type RowAction,
+  AUTHOR_BADGE, isQa, isReported, isResponse, KIND_LABEL, LEGIT, NOUN, OUTCOME_LABEL, reasonLabel, reasonTone, rowActions, rowEdge,
+  type AppealRow, type ContentType, type Edge, type ModerationDetail, type ModerationItem, type ModerationReason, type ReasonCode, type RowAction,
 } from './data/reviews';
 
 // Design: pages/admin/admin-reviews.html (reported content: queue + decision) ·
@@ -19,9 +19,11 @@ import {
 // API: GET /api/admin/reviews/moderation-items (status open / decided; decided items carry `decision`: outcome, reason,
 // moderator), /moderation-items/{id}, /moderation-reasons;
 // POST /moderation-items/{id}/decide and /refer; staff answers POST /reviews/questions/{id}/answers.
+// Appeals tab: GET /appeals?status=submitted, POST /appeals/{id}/decide { overturn, reason } (an item under appeal
+// refuses Keep/Remove; the appeal is decided by a moderator other than the original one, SAME_MODERATOR otherwise).
 
 type View = 'q-a-and-seller-responses';
-type TabKey = 'reported' | 'qa' | 'seller' | 'decided';
+type TabKey = 'reported' | 'appeals' | 'qa' | 'seller' | 'decided';
 type Decision = 'keep' | 'remove' | 'edit';
 
 const KIND_FILTERS: Array<{ value: '' | ContentType; label: string }> = [
@@ -139,11 +141,12 @@ function contentOf(d: ModerationDetail) {
 export default function Reviews() {
   const { api } = useApi();
   const qc = useQueryClient();
-  const { can } = useStaffSession();
+  const { can, accountId } = useStaffSession();
   const canDecide = can('reviews.moderation.decide');
+  const canDecideAppeal = can('reviews.appeals.decide');
   const canStaffAnswer = can('reviews.answers.staff');
   const [view, setView] = useView<View>();
-  const [sub, setSub] = useState<'' | 'seller' | 'decided'>('');
+  const [sub, setSub] = useState<'' | 'seller' | 'decided' | 'appeals'>('');
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   const [actionError, setActionError] = useState('');
 
@@ -192,6 +195,7 @@ export default function Reviews() {
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['reviews', 'moderation'] });
+    void qc.invalidateQueries({ queryKey: ['reviews', 'appeals'] });
     void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
   };
 
@@ -220,6 +224,47 @@ export default function Reviews() {
         onError: (e) => setActionError(errorMessage(e)),
       },
     );
+  };
+
+  /* ----- Appeals: an author asks to change a moderation decision ----- */
+  const appealsQ = useQuery({
+    queryKey: ['reviews', 'appeals', 'submitted'],
+    queryFn: () => call(api.GET('/api/admin/reviews/appeals', { params: { query: { status: 'submitted', limit: 100 } } })),
+  });
+  const appeals: AppealRow[] = appealsQ.data?.items ?? [];
+  const [appealId, setAppealId] = useState('');
+  const activeAppeal = appeals.find((a) => a.id === appealId) ?? appeals[0];
+  const [overturn, setOverturn] = useState(false);
+  const [appealReason, setAppealReason] = useState('');
+  const [appealTried, setAppealTried] = useState(false);
+  useEffect(() => {
+    setOverturn(false);
+    setAppealReason('');
+    setAppealTried(false);
+  }, [activeAppeal?.id]);
+  // The original moderator can't decide the appeal (backend SAME_MODERATOR).
+  const ownAppealDecision = !!activeAppeal && activeAppeal.originalModerator.kind === 'staff' && activeAppeal.originalModerator.id === accountId;
+  const appealM = useMutation({
+    mutationFn: (v: { id: string; overturn: boolean; reason: string }) => call(api.POST('/api/admin/reviews/appeals/{id}/decide', { params: { path: { id: v.id } }, body: { overturn: v.overturn, reason: v.reason } })),
+    onSuccess: (_r, v) => {
+      const a = appeals.find((x) => x.id === v.id);
+      const n = a ? (NOUN[a.contentType as ContentType] ?? 'content') : 'content';
+      setNotice({
+        title: v.overturn ? `Appeal upheld: the ${n} is restored` : 'Appeal reviewed: the decision stands',
+        body: `${a?.author.displayName ?? 'The author'} is told the outcome. Recorded in Action history.`,
+      });
+      const rest = appeals.filter((x) => x.id !== v.id);
+      setAppealId(rest[0]?.id ?? '');
+      refresh();
+    },
+    onError: (e) => setActionError(errorMessage(e)),
+  });
+  const submitAppeal = () => {
+    if (!activeAppeal) return;
+    setAppealTried(true);
+    if (!appealReason.trim()) return;
+    setActionError('');
+    appealM.mutate({ id: activeAppeal.id, overturn, reason: appealReason.trim() });
   };
 
   /* ----- Decided ----- */
@@ -287,13 +332,13 @@ export default function Reviews() {
   /* ----- Tabs ----- */
   const sellerRef = useRef<HTMLElement>(null);
   const isQaView = view === 'q-a-and-seller-responses';
-  const tab: TabKey = isQaView ? (sub === 'seller' ? 'seller' : 'qa') : sub === 'decided' ? 'decided' : 'reported';
+  const tab: TabKey = isQaView ? (sub === 'seller' ? 'seller' : 'qa') : sub === 'decided' ? 'decided' : sub === 'appeals' ? 'appeals' : 'reported';
   useEffect(() => {
     if (tab === 'seller') sellerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [tab]);
   const onTab = (t: TabKey) => {
     setNotice(null);
-    setSub(t === 'seller' ? 'seller' : t === 'decided' ? 'decided' : '');
+    setSub(t === 'seller' ? 'seller' : t === 'decided' ? 'decided' : t === 'appeals' ? 'appeals' : '');
     setView(t === 'qa' || t === 'seller' ? 'q-a-and-seller-responses' : '');
   };
 
@@ -345,6 +390,7 @@ export default function Reviews() {
       <Tabs<TabKey>
         items={[
           { value: 'reported', label: 'Reported content', count: openQ.data ? pending.length : undefined },
+          { value: 'appeals', label: 'Appeals', count: appealsQ.data ? appeals.length : undefined },
           { value: 'qa', label: 'Q&A answers', count: openQ.data ? qaRows.length : undefined },
           { value: 'seller', label: 'Seller responses', count: openQ.data ? srRows.length : undefined },
           { value: 'decided', label: 'Decided' },
@@ -548,6 +594,117 @@ export default function Reviews() {
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {tab === 'appeals' && (
+        <div className="aa-rv">
+          <section className="card">
+            <div className="card-head">
+              <span className="h4">Appeals</span>
+            </div>
+            {appealsQ.isError ? (
+              <div className="card-body">
+                <LoadError error={appealsQ.error} onRetry={() => void appealsQ.refetch()} />
+              </div>
+            ) : appealsQ.isPending ? (
+              <div className="card-body">
+                <SkeletonLines rows={4} />
+              </div>
+            ) : appeals.length ? (
+              <nav className="aa-q" aria-label="Appeals">
+                {appeals.map((a) => (
+                  <a
+                    key={a.id}
+                    href="#"
+                    className={cx(a.id === activeAppeal?.id && 'is-active')}
+                    aria-current={a.id === activeAppeal?.id ? 'true' : undefined}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setAppealId(a.id);
+                    }}
+                  >
+                    <span className="row between">
+                      <span className="xs strong muted">{KIND_LABEL[a.contentType as ContentType] ?? a.contentType}</span>
+                      <span className="xs muted">{date(a.submittedAt)}</span>
+                    </span>
+                    <span className="small strong">{a.author.displayName}</span>
+                    <span className="row gap-2">
+                      <Badge tone="warning">{OUTCOME_LABEL[a.originalDecision.decision] ?? a.originalDecision.decision}</Badge>
+                    </span>
+                    <span className="xs muted">"{a.excerpt}"</span>
+                  </a>
+                ))}
+              </nav>
+            ) : (
+              <div className="card-body">
+                <EmptyState icon="circle-check" title="No appeals waiting">
+                  When an author appeals a moderation decision, it appears here.
+                </EmptyState>
+              </div>
+            )}
+          </section>
+
+          {activeAppeal && (
+            <div className="stack gap-5">
+              <section className="card">
+                <div className="card-head">
+                  <div className="stack gap-0">
+                    <span className="eyebrow">{KIND_LABEL[activeAppeal.contentType as ContentType] ?? activeAppeal.contentType}</span>
+                    <span className="small strong">By {activeAppeal.author.displayName}</span>
+                  </div>
+                  <Badge tone="warning">Appealed {date(activeAppeal.submittedAt)}</Badge>
+                </div>
+                <div className="card-body">
+                  <p className="small">"{activeAppeal.excerpt}"</p>
+                  <dl className="kv">
+                    <KvRow k="Original decision" v={`${OUTCOME_LABEL[activeAppeal.originalDecision.decision] ?? activeAppeal.originalDecision.decision}: ${activeAppeal.originalDecision.reasonText}`} />
+                    <KvRow
+                      k="Decided by"
+                      v={`${activeAppeal.originalModerator.name ?? (activeAppeal.originalModerator.kind === 'system' ? 'Automatic check' : 'Marketly staff')}${activeAppeal.originalDecision.decidedAt ? ` · ${dateTime(activeAppeal.originalDecision.decidedAt)}` : ''}`}
+                    />
+                  </dl>
+                  <div className="aa-note">
+                    <span className="xs strong">Why the author appeals</span>
+                    <span>{activeAppeal.reason}</span>
+                  </div>
+                </div>
+              </section>
+
+              {!canDecideAppeal ? (
+                <Alert tone="info" title="View only">
+                  Deciding appeals needs the appeal permission.
+                </Alert>
+              ) : ownAppealDecision ? (
+                <Alert tone="info" title="Another moderator decides this appeal">
+                  You made the original decision, so a different moderator reviews the appeal.
+                </Alert>
+              ) : (
+                <section className="card">
+                  <div className="card-head">
+                    <div className="stack gap-0">
+                      <h2 className="h4">Appeal decision</h2>
+                      <span className="xs muted">The author sees the outcome and your reason</span>
+                    </div>
+                  </div>
+                  <div className="card-body">
+                    <div className="grid md2 gap-2">
+                      <OptionCard id="aa-rv-ap1" name="aa-rv-ap" title={<span className="small strong">Decision stands</span>} body="The original decision was right" checked={!overturn} onChange={() => setOverturn(false)} />
+                      <OptionCard id="aa-rv-ap2" name="aa-rv-ap" title={<span className="small strong">Overturn</span>} body="Restore the content and publish it again" checked={overturn} onChange={() => setOverturn(true)} />
+                    </div>
+                    <Field label="Reason for the author" error={appealTried && !appealReason.trim() ? 'Explain the outcome to the author.' : undefined}>
+                      <Textarea id="aa-rv-ap-why" value={appealReason} className={cx(appealTried && !appealReason.trim() && 'is-error')} onChange={(e) => setAppealReason(e.target.value)} />
+                    </Field>
+                  </div>
+                  <div className="card-foot">
+                    <Button variant="primary" icon={overturn ? 'undo-2' : 'check'} onClick={submitAppeal} disabled={appealM.isPending}>
+                      {overturn ? 'Overturn and restore' : 'Keep the decision'}
+                    </Button>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -7,6 +7,16 @@ import type { Tone } from '@marketly/web-shared/ui';
 export type ModerationItem = components['schemas']['reviews.ModerationItem'];
 export type ModerationDetail = components['schemas']['reviews.ModerationDetail'];
 export type ModerationReason = { code: string; label: string; removes: boolean };
+export type AppealRow = components['schemas']['reviews.AppealRow'];
+
+/** The decision an author appeals (ModerationOutcome.decision). */
+export const OUTCOME_LABEL: Record<AppealRow['originalDecision']['decision'], string> = {
+  kept: 'Kept',
+  removed: 'Removed',
+  edit_requested: 'Edit requested',
+  published: 'Published',
+  hidden_pending_review: 'Hidden while reviewed',
+};
 export type ContentType = ModerationItem['contentType'];
 export type ReasonCode = 'legitimate_experience' | 'personal_information' | 'hate_or_harassment' | 'spam_or_links' | 'off_topic' | 'conflict_of_interest' | 'proven_fake' | 'medical_claim' | 'off_platform_offer' | 'payment_for_review' | 'inaccurate';
 
@@ -21,8 +31,11 @@ export const KIND_LABEL: Record<ContentType, string> = {
 };
 export const NOUN: Record<ContentType, string> = { product_review: 'review', seller_feedback: 'feedback', question: 'question', answer: 'answer', seller_response: 'response' };
 
-/** Which tab a moderation item belongs to. */
-export const isReported = (i: ModerationItem) => i.queue === 'reported' || i.queue === 'auto_held' || i.queue === 'appeal';
+/**
+ * Which tab a moderation item belongs to. Items under appeal are not in Reported: Keep/Remove is refused on them
+ * ("decide the appeal instead"); they are decided on the Appeals tab through GET/POST /api/admin/reviews/appeals.
+ */
+export const isReported = (i: ModerationItem) => i.queue === 'reported' || i.queue === 'auto_held';
 export const isQa = (i: ModerationItem) => i.queue === 'qa_check';
 export const isResponse = (i: ModerationItem) => i.queue === 'response_check';
 

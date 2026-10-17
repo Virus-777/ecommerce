@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'react-router';
-import { createContext, useCallback, useContext, useRef, useMemo, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import { call, useApi, useSessionState, type SessionTokens } from '@marketly/web-shared/api';
 import { BackOfficeIdentityProvider, type BackOfficeIdentity, type NavCount } from '@marketly/web-shared/layouts';
+import { announce } from '@marketly/web-shared/ui';
 import { SignIn } from './SignIn';
 
 // The Admin and Operations Center session, backed by the API: a staff session (identity, audience admin),
@@ -148,13 +149,30 @@ export function StaffSessionProvider({ children }: { children: ReactNode }) {
   // After sign-out the session is idle again: that is signed out (sign-in), not starting (loading).
   const started = useRef(false);
   if (state.status === 'ready' || state.status === 'error') started.current = true;
+  // The session ended by itself (idle too long, revoked, account disabled; web-shared session.ts): drop the staff
+  // data the panels loaded, so the next person to sign in on this PC doesn't see it.
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (state.ended) qc.removeQueries({ predicate: (q) => q.queryKey[0] !== 'session' });
+  }, [state.ended, qc]);
+  useEffect(() => {
+    if (state.ended) announce(endedText(state.ended));
+  }, [state.ended]);
   // The invitation and reset pages are for people who can't sign in yet: no sign-in gate, no staff layout.
   if (PUBLIC_PATHS.has(pathname)) return <>{children}</>;
   if (!state.claims && (state.status === 'starting' || (state.status === 'idle' && !started.current))) {
     return <div className="route-loading" role="status" aria-label="Loading" />;
   }
-  if (!accountId) return <SignIn startError={start.error} />;
+  if (!accountId) {
+    return <SignIn startError={start.error} notice={state.ended ? endedText(state.ended) : undefined} />;
+  }
   return <SignedIn accountId={accountId}>{children}</SignedIn>;
+}
+
+/** The sign-in screen's line after the session ended without the person signing out. */
+function endedText(reason: string): string {
+  if (reason === 'session_idle') return 'Signed out after a period without activity. Sign in again to continue.';
+  return 'You were signed out. Sign in again to continue.';
 }
 
 /** Public staff pages (links from `bootstrap-owner` / `staff-link`), served without signing in. */

@@ -6,16 +6,20 @@ import { isoInText } from '@marketly/web-shared/lib/format';
 import { OpsLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Card, Field, Icon, Meter, PageHeader, SegmentedControl, Stat, TableWrap, Textarea, announce } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Card, Field, Icon, IconButton, Meter, PageHeader, SegmentedControl, Stat, TableWrap, Textarea, announce } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, longDate, screenHref, time } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
 import { EmptyRow, OpsLegend, SkeletonRows, humanize, staffName, type StaffRef } from './data/shared';
+import { QueuePeopleDialog, RoutineDoneDialog, WorkItemsCard, type ItemScope } from './QueueWork';
 
 // Design: pages/ops/ops-queues.html (single view).
 // API: GET workqueues/me (stats, queues, reminders and today's day-end review; all=true lists every queue for
 // callers with workqueues.items.view-all), GET workqueues/routines/today (the whole team's routine: /me only
 // carries the checks the caller owns), POST workqueues/day-end-reviews, GET/POST workqueues/saved-filters,
 // GET warehouse/summary (ship today), POST workqueues/items/exports.
+// Added without a design (QueueWork.tsx): the work items list and drawer (claim, start, wait, resolve, dismiss…),
+// New task, queue lead/backup edit (PATCH workqueues/queues/{key}) and routine "Mark done"
+// (POST workqueues/routine-checks/{id}/complete).
 
 interface Oldest {
   ref?: string | null;
@@ -104,6 +108,9 @@ export default function Queues() {
   const [needNote, setNeedNote] = useState<string[]>([]);
   const [exported, setExported] = useState(false);
   const dayEndRef = useRef<HTMLElement>(null);
+  const [itemScope, setItemScope] = useState<ItemScope>({ mode: 'mine', queueKey: '' });
+  const [editQueue, setEditQueue] = useState<string | null>(null);
+  const [doneCheck, setDoneCheck] = useState<RoutineCheck | null>(null);
 
   // Stats and rows follow the tab: all=true widens both to every queue (the server keeps the caller's own when they lack view-all).
   const me = useQuery({
@@ -126,6 +133,14 @@ export default function Queues() {
   const sharedBy = [...new Set(filters.filter((f) => f.shared && f.owner?.staffId !== staff.accountId).map((f) => staffName(f.owner)))];
   const stats = me.data?.stats;
   const canRunDayEnd = staff.can('workqueues.day-end.run');
+  const canWork = staff.can('workqueues.items.work');
+  const canManageQueues = staff.can('workqueues.queues.manage');
+
+  /** Show a queue's items (or mine) in the Work items card and bring it into view. */
+  const showItems = (s: ItemScope) => {
+    setItemScope(s);
+    document.getElementById('work-items')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
 
   const exportItems = useMutation({
     mutationFn: () => call(api.POST('/api/admin/workqueues/items/exports', { body: { filters: scope === 'mine' ? { mine: true } : {}, format: 'csv' } as never })),
@@ -206,7 +221,16 @@ export default function Queues() {
       ) : (
         <div className="ac-kpis">
           <div className="card pad">
-            {stats ? <Stat label="Assigned to me" value={String(stats.assignedToMe)} note={`${stats.queuesILead} ${stats.queuesILead === 1 ? 'queue' : 'queues'} where I lead`} /> : <span className="sk sk-line" />}
+            {stats ? (
+              <>
+                <Stat label="Assigned to me" value={String(stats.assignedToMe)} note={`${stats.queuesILead} ${stats.queuesILead === 1 ? 'queue' : 'queues'} where I lead`} />
+                <Button variant="link" size="sm" onClick={() => showItems({ mode: 'mine', queueKey: '' })}>
+                  Show my items
+                </Button>
+              </>
+            ) : (
+              <span className="sk sk-line" />
+            )}
           </div>
           <div className="card pad">
             {/* Design: a rise in overdue items is bad, so the arrow points up with the "down bad" colour. */}
@@ -337,10 +361,16 @@ export default function Queues() {
                                 </span>
                               </td>
                               <td className="col-pin">
-                                <Link className="btn btn-ghost btn-sm" to={to}>
-                                  <span>Open</span>
-                                  <span className="sr-only"> {q.name}</span>
-                                </Link>
+                                <span className="row gap-1 nowrap">
+                                  <Button variant="ghost" size="sm" onClick={() => showItems({ mode: 'queue', queueKey: q.key })}>
+                                    Items<span className="sr-only"> in {q.name}</span>
+                                  </Button>
+                                  <Link className="btn btn-ghost btn-sm" to={to}>
+                                    <span>Open</span>
+                                    <span className="sr-only"> {q.name}</span>
+                                  </Link>
+                                  {canManageQueues && <IconButton icon="pencil" size="sm" label={`Change lead and backup of ${q.name}`} onClick={() => setEditQueue(q.key)} />}
+                                </span>
                               </td>
                             </tr>
                           );
@@ -372,6 +402,16 @@ export default function Queues() {
                       <div className="xs sub">
                         Oldest: <span className="mono">{q.oldest?.ageLabel ?? '—'}</span>
                       </div>
+                      <div className="row gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => showItems({ mode: 'queue', queueKey: q.key })}>
+                          Items<span className="sr-only"> in {q.name}</span>
+                        </Button>
+                        {canManageQueues && (
+                          <Button variant="ghost" size="sm" icon="pencil" onClick={() => setEditQueue(q.key)}>
+                            Lead and backup<span className="sr-only"> of {q.name}</span>
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -379,6 +419,7 @@ export default function Queues() {
               </>
             )}
           </Card>
+          <WorkItemsCard id="work-items" scope={itemScope} onScope={setItemScope} />
           <section className="card" ref={dayEndRef}>
             <div className="card-head">
               <div className="stack gap-0">
@@ -477,6 +518,12 @@ export default function Queues() {
                           <span className="xs muted">{[r.areaLabel, owner && owner !== 'Not set' ? owner : '', when].filter(Boolean).join(' · ')}</span>
                         </span>
                         <span className="sr-only">{state === 'done' ? 'Done' : state === 'late' ? 'Overdue' : 'Not done'}</span>
+                        {canWork && r.state !== 'done' && (
+                          <Button variant="ghost" size="sm" className="nowrap" onClick={() => setDoneCheck(r)}>
+                            {r.checkedIn ? 'Check in' : 'Mark done'}
+                            <span className="sr-only">: {r.title}</span>
+                          </Button>
+                        )}
                       </li>
                     );
                   })}
@@ -525,6 +572,8 @@ export default function Queues() {
           )}
         </div>
       </div>
+      <QueuePeopleDialog queueKey={editQueue} onClose={() => setEditQueue(null)} />
+      <RoutineDoneDialog check={doneCheck} onClose={() => setDoneCheck(null)} />
     </OpsLayout>
   );
 }

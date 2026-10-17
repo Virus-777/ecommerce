@@ -11,11 +11,13 @@ import {
 } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, dateTime, shortDate } from '@/app/parts';
-import { REC_STATE, STATUS_LABEL, ownerLabel, reporterOutcomeFor, subjectHref, subjectIcon, subjectKind, typeOf, type ReportRow, type TrustReportDetail } from './data/trust';
+import { STATUS_LABEL, reporterOutcomeFor, subjectHref, subjectIcon, subjectKind, typeOf, type ReportRow, type TrustReportDetail } from './data/trust';
 import {
   TRUST_ACTIONS, actionDef, actionsFor, available, factorsOf, isClosed, nextStepOf, paramsFor, reasonCode, timelineOf,
   type CaseAction, type Reversible, type TrustActionKey,
 } from './data/trust-reports';
+import { RESOLVE_OUTCOMES, canReopenStatus, canResolveStatus, openWithOwners, outcomeLabel, type ResolveOutcome } from './data/trust-decisions';
+import { RecommendationItem, type Done } from './TrustRecommendations';
 import './TrustReport.css';
 
 // Trust report (admin/trust-report): designed in React after the design export, following
@@ -26,9 +28,11 @@ import './TrustReport.css';
 // the Trust and risk queue.
 // Data: the URL carries the ref (TR-…): GET /api/admin/trust/reports?q=<ref> resolves the id, then
 // GET /reports/{id} (nextStep: the recommended next step; subjectHistory: other reports and enforcements per
-// subject). Actions: POST /reports/{id}/assign, /dismiss (Clear), /evidence-requests (Request info),
-// POST /evidence-requests/{id}/cancel (Withdraw request),
-// /recommendations + /recommendations/{id}/route (Restrict listing, Hold payouts, Suspend).
+// subject). Actions: POST /reports/{id}/assign, /resolve (Resolve, with an outcome), /dismiss (Dismiss, no action),
+// /reopen (closed reports), /evidence-requests (Request info), POST /evidence-requests/{id}/cancel (Withdraw request),
+// /recommendations + /recommendations/{id}/route (Restrict listing, Hold payouts, Suspend). Each recommendation on
+// the report can be sent, withdrawn or (by the owner team) accepted or declined in place (TrustRecommendations).
+// J / K walk GET /reports?status=active (the server filters to open, under review and escalated).
 //
 // Rules applied here (blueprint "Create and edit forms"): the dialog's submit button is never
 // disabled, errors show on submit; the result is an inline alert, not a toast (it is not a
@@ -60,8 +64,11 @@ const KEY_OF: Record<string, TrustActionKey> = {
 
 interface Draft {
   action: TrustActionKey;
+  /** Reason code; for Resolve, the outcome key. */
   reason: string;
   note: string;
+  /** Resolve and Dismiss: what the reporter is told (prefilled from the outcome or reason, editable). */
+  reporter: string;
 }
 
 interface Recorded extends Draft {
@@ -162,17 +169,22 @@ function Investigation({ d }: { d: TrustReportDetail }) {
   const [recorded, setRecorded] = useState<Recorded | null>(null);
   const actions = actionsFor(d);
   const step = nextStepOf(d, actions);
-  const [draft, setDraft] = useState<Draft>({ action: step?.action ?? 'request-info', reason: '', note: '' });
+  const [draft, setDraft] = useState<Draft>({ action: step?.action ?? 'request-info', reason: '', note: '', reporter: '' });
+  const [notice, setNotice] = useState<Done | null>(null);
+  const [reopening, setReopening] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenTried, setReopenTried] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [allFactors, setAllFactors] = useState(false);
   const [tab, setTab] = useState<EvTab>('entities');
 
   const canInvestigate = can('trust.reports.investigate');
   const canDecide = can('trust.reports.decide');
-  const allowed = (k: TrustActionKey) => (k === 'clear' ? canDecide : canInvestigate);
+  const allowed = (k: TrustActionKey) => (k === 'resolve' || k === 'dismiss' ? canDecide : canInvestigate);
 
-  const queue = useQuery({ queryKey: ['trust', 'reports', 'queue'], queryFn: () => call(api.GET('/api/admin/trust/reports', { params: { query: { limit: 100 } } })) });
-  const rows: ReportRow[] = (queue.data?.items ?? []).filter((x) => ['open', 'under_review', 'escalated'].includes(x.status));
+  // A12: the server returns active reports only, highest risk first (the first 100 are enough for J / K).
+  const queue = useQuery({ queryKey: ['trust', 'reports', 'queue', 'nav'], queryFn: () => call(api.GET('/api/admin/trust/reports', { params: { query: { status: 'active', sort: 'risk', limit: 100 } } })) });
+  const rows: ReportRow[] = queue.data?.items ?? [];
   const idx = rows.findIndex((x) => x.id === d.id);
   const prev = idx > 0 ? rows[idx - 1] : undefined;
   const next = idx >= 0 ? rows[idx + 1] : rows[0]?.id !== d.id ? rows[0] : undefined;
@@ -214,14 +226,33 @@ function Investigation({ d }: { d: TrustReportDetail }) {
     },
   });
 
+  const reopen = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/trust/reports/{id}/reopen', { params: { path: { id: d.id } }, body: { reason: reopenReason.trim() } })),
+    onSuccess: (r) => {
+      qc.setQueryData(['trust', 'report', d.id], r);
+      refresh();
+      setReopening(false);
+      setView('', { replace: true });
+      setNotice({ title: 'Report reopened', text: `${d.ref} is back under review. The earlier decision stays in the timeline.` });
+      announce(`${d.ref} reopened`);
+    },
+  });
+
   const submitM = useMutation({
     mutationFn: async (v: Draft): Promise<Recorded> => {
       const c = actions[v.action];
       if (!available(c)) throw new Error('This action does not apply to the report.');
-      const text = v.note.trim() ? `${v.reason}. ${v.note.trim()}` : v.reason;
       const at = new Date().toISOString();
-      if (v.action === 'clear') {
-        await call(api.POST('/api/admin/trust/reports/{id}/dismiss', { params: { path: { id: d.id } }, body: { reason: text, reporterOutcome: reporterOutcomeFor(v.reason) } }));
+      if (v.action === 'resolve') {
+        // Resolve runs from under review or escalated; an open report is assigned to you first.
+        if (!canResolveStatus(d.status) && canInvestigate) await call(api.POST('/api/admin/trust/reports/{id}/assign', { params: { path: { id: d.id } }, body: { staffId: accountId } }));
+        const summary = v.note.trim() ? `${outcomeLabel(v.reason)}. ${v.note.trim()}` : outcomeLabel(v.reason);
+        await call(api.POST('/api/admin/trust/reports/{id}/resolve', { params: { path: { id: d.id } }, body: { outcome: v.reason as ResolveOutcome, summary, reporterOutcome: v.reporter.trim() } }));
+        return { ...v, at };
+      }
+      const text = v.note.trim() ? `${v.reason}. ${v.note.trim()}` : v.reason;
+      if (v.action === 'dismiss') {
+        await call(api.POST('/api/admin/trust/reports/{id}/dismiss', { params: { path: { id: d.id } }, body: { reason: text, reporterOutcome: v.reporter.trim() || reporterOutcomeFor(v.reason) } }));
         return { ...v, at };
       }
       if (v.action === 'request-info' && c.to) {
@@ -253,11 +284,13 @@ function Investigation({ d }: { d: TrustReportDetail }) {
   const decided = view === 'decision-recorded';
   // Opening ?view=decision-recorded directly shows the latest recorded decision on the report.
   const latestRec = [...d.recommendations].reverse().find((x) => KEY_OF[x.action]);
-  const resolution = d.resolution as { summary?: string; decidedAt?: string } | null | undefined;
+  const resolution = d.resolution as { outcome?: string; summary?: string; decidedAt?: string } | null | undefined;
   const fallback: Recorded | null = resolution
-    ? { action: 'clear', reason: resolution.summary ?? '', note: '', at: resolution.decidedAt ?? d.updatedAt }
+    ? resolution.outcome === 'dismissed'
+      ? { action: 'dismiss', reason: resolution.summary ?? '', note: '', reporter: '', at: resolution.decidedAt ?? d.updatedAt }
+      : { action: 'resolve', reason: resolution.outcome ?? '', note: '', reporter: '', at: resolution.decidedAt ?? d.updatedAt }
     : latestRec
-      ? { action: KEY_OF[latestRec.action], reason: latestRec.rationale, note: '', at: latestRec.routedAt ?? d.updatedAt, routed: latestRec.state !== 'pending' }
+      ? { action: KEY_OF[latestRec.action], reason: latestRec.rationale, note: '', reporter: '', at: latestRec.routedAt ?? d.updatedAt, routed: latestRec.state !== 'pending' }
       : null;
   const shown = decided ? (recorded ?? fallback) : null;
 
@@ -268,20 +301,34 @@ function Investigation({ d }: { d: TrustReportDetail }) {
   const errors = attempted
     ? {
         action: selCase ? undefined : 'Choose an action that applies to this report.',
-        reason: draft.reason ? undefined : 'Choose a reason code. It is written to Action history with this decision.',
+        reason: draft.reason ? undefined : draft.action === 'resolve' ? 'Choose the outcome.' : 'Choose a reason code. It is written to Action history with this decision.',
+        reporter: (draft.action === 'resolve' || draft.action === 'dismiss') && !draft.reporter.trim() ? 'Write what the reporter is told.' : undefined,
       }
     : {};
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((x) => ({ ...x, [k]: v }));
+  // Choosing an outcome (Resolve) or reason (Dismiss) prefills what the reporter is told; staff can edit it.
+  const chooseReason = (v: string) =>
+    setDraft((x) => ({
+      ...x,
+      reason: v,
+      reporter: x.action === 'resolve' ? (RESOLVE_OUTCOMES.find((o) => o.value === v)?.reporter ?? '') : x.action === 'dismiss' && v ? reporterOutcomeFor(v) : x.reporter,
+    }));
+  // Resolve is refused while a recommendation is with an owner team, unless the outcome is "referred".
+  const withOwners = openWithOwners(d).length;
+  const reasonOptions =
+    draft.action === 'resolve'
+      ? RESOLVE_OUTCOMES.filter((o) => !withOwners || o.value === 'referred').map((o) => ({ value: o.value, label: o.label }))
+      : sel.reasons.map((x) => ({ value: x, label: x }));
 
   const openAction = (k: TrustActionKey = step?.action ?? 'request-info') => {
-    setDraft({ action: k, reason: '', note: '' });
+    setDraft({ action: k, reason: '', note: '', reporter: '' });
     setAttempted(false);
     submitM.reset();
     setView('take-action');
   };
   const submit = () => {
     setAttempted(true);
-    if (!selCase || !draft.reason) return;
+    if (!selCase || !draft.reason || ((draft.action === 'resolve' || draft.action === 'dismiss') && !draft.reporter.trim())) return;
     submitM.mutate(draft);
   };
 
@@ -340,6 +387,21 @@ function Investigation({ d }: { d: TrustReportDetail }) {
                 Take action
               </Button>
             )}
+            {canDecide && canReopenStatus(d.status) && (
+              <Button
+                variant="secondary"
+                size="sm"
+                icon="undo-2"
+                onClick={() => {
+                  setReopening(true);
+                  setReopenReason('');
+                  setReopenTried(false);
+                  reopen.reset();
+                }}
+              >
+                Reopen
+              </Button>
+            )}
           </>
         }
       />
@@ -382,16 +444,21 @@ function Investigation({ d }: { d: TrustReportDetail }) {
           {errorMessage(assign.error)}
         </Alert>
       )}
+      {notice && (
+        <Alert tone="success" title={notice.title}>
+          {notice.text}
+        </Alert>
+      )}
 
       {decided && shown && outcome && (
         <>
           <Alert
             tone="success"
-            title={outcome.def.byTrust ? `${outcome.def.label} recorded` : shown.routed === false ? `${outcome.def.label} drafted` : `${outcome.def.label} sent to ${outcomeOwner || 'the owning team'}`}
+            title={outcome.def.byTrust ? outcome.def.recorded : shown.routed === false ? `${outcome.def.label} drafted` : `${outcome.def.label} sent to ${outcomeOwner || 'the owning team'}`}
           >
             {shown.reason && (
               <>
-                Reason code <span className="mono">{reasonCode(shown.reason)}</span> was written to Action history.{' '}
+                {shown.action === 'resolve' ? 'Outcome' : 'Reason code'} <span className="mono">{reasonCode(shown.reason)}</span> was written to Action history.{' '}
               </>
             )}
             {!outcome.def.byTrust && shown.routed === false ? `A Trust and Risk decider sends it to ${outcomeOwner.split(' · ')[0]}. ` : ''}
@@ -646,19 +713,9 @@ function Investigation({ d }: { d: TrustReportDetail }) {
           <Card title="Actions on this report" sub="Trust recommends; the owning team carries out the action and records its reason">
             {d.recommendations.length ? (
               <ul className="ab-route">
-                {d.recommendations.map((a) => {
-                  const st = a.approvalRequestId && a.state === 'sent_to_owner' ? { label: 'Waiting for approval', tone: 'warning' as const } : (REC_STATE[a.state] ?? { label: a.state, tone: '' as const });
-                  return (
-                    <li key={a.id}>
-                      <span className="stack gap-0">
-                        <span className="small strong">{a.label}</span>
-                        <span className="xs muted">{ownerLabel(a)}</span>
-                      </span>
-                      <Badge tone={st.tone}>{st.label}</Badge>
-                      {(a.decisionReason || a.rationale) && <span className="xs sub">Reason recorded: {a.decisionReason ?? a.rationale}</span>}
-                    </li>
-                  );
-                })}
+                {d.recommendations.map((a) => (
+                  <RecommendationItem key={a.id} r={a} onDone={setNotice} />
+                ))}
               </ul>
             ) : (
               <span className="small muted">No actions recommended yet.</span>
@@ -781,7 +838,7 @@ function Investigation({ d }: { d: TrustReportDetail }) {
                 right={ok ? <span className={cx('trr-undo', u.cls)}>{u.text}</span> : undefined}
                 checked={draft.action === a.key}
                 disabled={!ok}
-                onChange={() => setDraft((x) => ({ ...x, action: a.key, reason: '' }))}
+                onChange={() => setDraft((x) => ({ ...x, action: a.key, reason: '', reporter: '' }))}
               />
             );
           })}
@@ -821,11 +878,58 @@ function Investigation({ d }: { d: TrustReportDetail }) {
             )}
           </div>
         )}
-        <Field label="Reason code" hint={draft.reason ? <>Written to Action history as <span className="mono">{reasonCode(draft.reason)}</span></> : 'Written to Action history with your name and this report'} error={errors.reason}>
-          <Select id="tra-reason" options={[{ value: '', label: 'Select a reason code' }, ...sel.reasons.map((x) => ({ value: x, label: x }))]} value={draft.reason} onChange={(e) => set('reason', e.target.value)} />
+        <Field
+          label={draft.action === 'resolve' ? 'Outcome' : 'Reason code'}
+          hint={
+            draft.action === 'resolve' && withOwners
+              ? 'Only “Referred” can close it while a recommendation is with an owner team. Withdraw the recommendation, or wait for the owner’s decision, to record another outcome.'
+              : draft.reason
+                ? <>Written to Action history as <span className="mono">{reasonCode(draft.reason)}</span></>
+                : 'Written to Action history with your name and this report'
+          }
+          error={errors.reason}
+        >
+          <Select id="tra-reason" options={[{ value: '', label: draft.action === 'resolve' ? 'Select the outcome' : 'Select a reason code' }, ...reasonOptions]} value={draft.reason} onChange={(e) => chooseReason(e.target.value)} />
         </Field>
-        <Field label="Note for the record" optional hint={draft.action === 'request-info' ? 'Sent with the request, so write it for the person you are asking.' : 'Staff only. Saved with the reason code.'}>
+        <Field label={draft.action === 'resolve' ? 'Summary for the record' : 'Note for the record'} optional hint={draft.action === 'request-info' ? 'Sent with the request, so write it for the person you are asking.' : 'Staff only. Saved with the reason code.'}>
           <Textarea id="tra-note" placeholder="What you checked and why" value={draft.note} onChange={(e) => set('note', e.target.value)} />
+        </Field>
+        {(draft.action === 'resolve' || draft.action === 'dismiss') && (
+          <Field label="What the reporter is told" hint="Shown to the reporter with the outcome in their account. Never name the other party." error={errors.reporter}>
+            <Textarea id="tra-reporter" value={draft.reporter} onChange={(e) => set('reporter', e.target.value)} placeholder="Choose the outcome or reason to start from a suggested message" />
+          </Field>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={reopening}
+        onClose={() => setReopening(false)}
+        title={`Reopen ${d.ref}`}
+        foot={
+          <>
+            <Button variant="ghost" onClick={() => setReopening(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setReopenTried(true);
+                if (reopenReason.trim()) reopen.mutate();
+              }}
+              disabled={reopen.isPending}
+            >
+              Reopen report
+            </Button>
+          </>
+        }
+      >
+        <p className="small sub">The report goes back to Under review with a new decision deadline. The earlier outcome stays in the timeline and Action history.</p>
+        {reopen.isError && (
+          <Alert tone="danger" title="The report wasn’t reopened">
+            {errorMessage(reopen.error)}
+          </Alert>
+        )}
+        <Field label="What changed" hint="For example: new evidence from the brand owner" error={reopenTried && !reopenReason.trim() ? 'Say why the report is reopened.' : undefined}>
+          <Textarea id="tra-reopen" value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} />
         </Field>
       </Dialog>
     </AdminLayout>

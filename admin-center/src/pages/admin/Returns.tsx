@@ -7,20 +7,28 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Deadline, Drawer, EmptyState, Field, Img, KeyValue, PageHeader, Pager, SearchInput, Select, StatusBadge, SummaryRow, TableWrap, Tabs, Textarea, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Checkbox, Deadline, Drawer, EmptyState, Field, Img, KeyValue, PageHeader, Pager, SearchInput, Select, StatusBadge, SummaryRow, TableWrap, Tabs, TextInput, Textarea, Timeline, announce, type TimelineEvent } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineTone } from '@/app/parts';
 import {
   API_TAB, EXCEPTION_REASONS, NO_RETURN_FILTERS, REASONS, REFUND_LABEL, SENT_REFUNDS, STATIC_OPTIONS, TAB_COUNT_KEY, TAB_LABELS, flagStyle, rowEdge,
   type ReturnCase, type ReturnEdge, type ReturnFilters, type ReturnRow, type ReturnTab, type RowFlag,
 } from './data/returns';
+import {
+  ACTION_ORDER, CANCELLABLE_REPLACEMENT, DECISION_ACTIONS, DONE, INSPECTION_ACTIONS, LABEL_METHODS, REJECT_REASONS, TAKE_OVER_REASONS, refundOutcome,
+  type DecisionAction, type LabelMethod, type RejectCode, type TakeOverReason,
+} from './data/return-decisions';
+import { useStaffOptions } from './data/audit';
+import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
 
-// Design: pages/admin/admin-returns.html · view "exception-review" = the refund-without-return drawer
+// Design: pages/admin/admin-returns.html · view "exception-review" = the return drawer
 // (?rt=<ref> picks the return; without it the drawer opens on the first exception in the queue).
 // Data: GET returns/requests (tab, filters, page), GET returns/requests/stats (KPIs, tab counts, queue owner),
-// GET returns/requests/{ref} (drawer; the RT- ref is accepted as the id), POST …/approve-without-return
-// (sends the refund to Finance; the response says whether it waits for approval), POST …/request-info,
-// POST reports/exports (dataset returns.admin.requests).
+// GET returns/requests/{ref} (drawer; the RT- ref is accepted as the id), POST reports/exports (dataset
+// returns.admin.requests). The drawer offers the decisions the return's allowedActions name (data/return-decisions.ts):
+// POST …/approve, /reject, /request-info, /take-over, /overturn, /assign, /receive, /approve-without-return
+// (refund without return: may ask for the password again; the refund usually waits "Under review" for Finance),
+// POST returns/replacements/{id}/cancel. Inspection and the remedy stay on Ops › Return inspection.
 
 type View = 'exception-review';
 
@@ -118,31 +126,53 @@ export default function Returns() {
   const current = open ? detail.data : undefined;
   const notFound = detail.error instanceof ApiError && detail.error.status === 404;
 
-  // Drawer form, reset when another return is opened.
+  // Drawer form, reset when another return is opened. `action` is the decision form shown (null: the list of
+  // decisions this return offers); `text` is that form's note, explanation, reason or question.
   const [formFor, setFormFor] = useState('');
+  const [action, setAction] = useState<DecisionAction | null>(null);
   const [excReason, setExcReason] = useState<(typeof EXCEPTION_REASONS)[number]['value']>(EXCEPTION_REASONS[0].value);
   const [details, setDetails] = useState('');
-  const [question, setQuestion] = useState('');
-  const [asking, setAsking] = useState(false);
+  const [text, setText] = useState('');
+  const [labelMethod, setLabelMethod] = useState<LabelMethod>('prepaid_qr');
+  const [rejectCode, setRejectCode] = useState<RejectCode>('outside_window');
+  const [takeOverReason, setTakeOverReason] = useState<TakeOverReason>('seller_no_response');
+  const [withoutReturn, setWithoutReturn] = useState(false);
+  const [ownerId, setOwnerId] = useState('');
+  const [tracking, setTracking] = useState('');
   const [attempted, setAttempted] = useState(false);
   const [drawerError, setDrawerError] = useState('');
+  const [drawerNotice, setDrawerNotice] = useState('');
   const idem = useRef<string>('');
+  const pick = (a: DecisionAction | null) => {
+    setAction(a);
+    setText('');
+    setWithoutReturn(false);
+    setOwnerId('');
+    setTracking('');
+    setAttempted(false);
+    setDrawerError('');
+    if (a) setDrawerNotice('');
+  };
   if (current && formFor !== current.detail.ref) {
     setFormFor(current.detail.ref);
     setExcReason((current.exception?.reasonCode as typeof excReason) ?? EXCEPTION_REASONS[0].value);
     setDetails(current.exception?.details ?? '');
-    setQuestion('');
-    setAsking(false);
-    setAttempted(false);
-    setDrawerError('');
+    pick(null);
+    setDrawerNotice('');
     idem.current = newIdempotencyKey();
   }
+  const stepUp = useStepUp();
+  // Other staff for Assign; listing them needs access.roles.view, without it only "Me" is offered.
+  const mayListStaff = can('access.roles.view');
+  const staff = useStaffOptions(open && action === 'assign' && mayListStaff);
 
   const rows: ReturnRow[] = list.data?.items ?? [];
   const totalPages = list.data?.totalPages ?? 1;
   const s = stats.data;
   const drawerLink = (ref: string) => href('admin/returns', 'exception-review', undefined, { rt: ref });
-  const close = () =>
+  const close = () => {
+    pick(null);
+    setDrawerNotice('');
     setParams(
       (prev) => {
         const p = new URLSearchParams(prev);
@@ -152,6 +182,7 @@ export default function Returns() {
       },
       { preventScrollReset: true },
     );
+  };
   const say = (msg: string) => {
     setNotice(msg);
     setError('');
@@ -169,64 +200,100 @@ export default function Returns() {
 
   const refundStatus = current?.refundRequest?.status ?? null;
   const mayPropose = can('returns.exceptions.propose');
-  const canSend = !!current && mayPropose && !current.exception && !(refundStatus && SENT_REFUNDS.has(refundStatus));
-  const canAsk = !!current && can('returns.requests.manage') && (current.allowedActions ?? current.detail.allowedActions ?? []).includes('request-info');
+  // What this return offers now comes from the API (allowedActions), filtered by the permissions of the person.
+  const allowed = current ? (current.allowedActions ?? current.detail.allowedActions ?? []) : [];
+  const replacement = current?.detail.replacement ?? null;
+  const offers = (a: DecisionAction) => {
+    const m = DECISION_ACTIONS[a];
+    if (!current || !can(m.permission)) return false;
+    if (a === 'cancel-replacement') return !!replacement && CANCELLABLE_REPLACEMENT.has(replacement.status);
+    // A refund already with Finance or sent blocks a second request even if the return still allows it.
+    if (a === 'exception') return allowed.includes('approve-without-return') && !current.exception && !(refundStatus && SENT_REFUNDS.has(refundStatus));
+    return allowed.includes(m.allowed!);
+  };
+  const available = ACTION_ORDER.filter(offers);
+  const atInspection = allowed.some((a) => INSPECTION_ACTIONS.includes(a)) && can('returns.inspections.view');
   const detailsError = attempted && !details.trim() ? 'Enter the details for the record. Finance reads them before approving.' : '';
+  const TEXT_REQUIRED: Partial<Record<DecisionAction, string>> = {
+    reject: 'Explain the decision. The customer sees it.',
+    'request-info': 'Write what you need from the customer.',
+    'take-over': 'Say why Marketly takes over.',
+    overturn: 'Say why the rejection is overturned. The customer sees it.',
+    'cancel-replacement': 'Say why the replacement is cancelled.',
+  };
+  const textMissing = !!action && !!TEXT_REQUIRED[action] && text.trim().length < (action === 'request-info' ? 5 : 1);
+  const textError = attempted && textMissing ? TEXT_REQUIRED[action!]! : '';
+  // After a decision the drawer stays open on the updated return, so the next step (e.g. approve after taking over) is at hand.
+  const done = (msg: string) => {
+    say(msg);
+    setDrawerNotice(msg);
+    pick(null);
+    refresh();
+  };
 
   const sendToFinance = useMutation({
     mutationFn: () =>
-      call(
-        api.POST('/api/admin/returns/requests/{id}/approve-without-return', {
-          params: { path: { id: current!.detail.id }, header: { 'Idempotency-Key': idem.current } },
-          body: { reasonCode: excReason, details: details.trim(), remedy: { kind: 'full_refund' } },
-        }),
-      ) as Promise<ReturnCase>,
-    onSuccess: (res) => {
-      const rr = res?.refundRequest;
-      const waiting = !rr || rr.status === 'requested' || rr.status === 'under_review';
-      const approvers = Array.isArray(rr?.approval?.approvers) ? rr.approval.approvers.join(' or ') : rr?.approval?.approvers;
-      say(
-        waiting
-          ? `${current!.detail.ref} sent to Finance for approval.${rr?.approval?.reason ? ` ${rr.approval.reason}.` : ''}${approvers ? ` Approver: ${approvers}.` : ''} The customer sees "Refund requested" until the money is sent.`
-          : `${current!.detail.ref}: refund without return approved and handed to payments.`,
-      );
-      refresh();
-      close();
+      // Staff refunds can need the password again (403 STEP_UP_REQUIRED): useStepUp asks and retries with reauthToken.
+      stepUp.run(
+        (token) =>
+          call(
+            api.POST('/api/admin/returns/requests/{id}/approve-without-return', {
+              params: { path: { id: current!.detail.id }, header: { 'Idempotency-Key': token ? newIdempotencyKey() : idem.current } },
+              body: { reasonCode: excReason, details: details.trim(), remedy: { kind: 'full_refund' }, ...reauthField(token) },
+            }),
+          ) as Promise<ReturnCase>,
+      ),
+    // The message follows the refund the API answered with: staff refunds usually wait "Under review" for Finance.
+    onSuccess: (res) => done(refundOutcome(current!.detail.ref, res?.refundRequest)),
+    onError: (e) => {
+      if (!isStepUpCancel(e)) setDrawerError(errorMessage(e));
     },
+  });
+  const decide = useMutation({
+    // The answer (the updated return, or the cancelled replacement) is not read: the drawer refetches the return.
+    mutationFn: (a: Exclude<DecisionAction, 'exception'>): Promise<unknown> => {
+      const params = { path: { id: current!.detail.id } };
+      const note = text.trim();
+      switch (a) {
+        case 'approve':
+          return call(api.POST('/api/admin/returns/requests/{id}/approve', { params, body: { labelMethod, reason: note || null } }));
+        case 'reject':
+          return call(api.POST('/api/admin/returns/requests/{id}/reject', { params, body: { reasonCode: rejectCode, explanation: note } }));
+        case 'request-info':
+          return call(api.POST('/api/admin/returns/requests/{id}/request-info', { params, body: { question: note } }));
+        case 'take-over':
+          // No ownerId: the person taking over becomes the owner (Assign changes it).
+          return call(api.POST('/api/admin/returns/requests/{id}/take-over', { params, body: { reason: takeOverReason, note } }));
+        case 'overturn':
+          return call(api.POST('/api/admin/returns/requests/{id}/overturn', { params, body: { withoutReturn, reason: note, labelMethod: withoutReturn ? null : labelMethod } }));
+        case 'assign':
+          return call(api.POST('/api/admin/returns/requests/{id}/assign', { params, body: { ownerId: ownerId || accountId, note: note || null } }));
+        case 'receive':
+          return call(api.POST('/api/admin/returns/requests/{id}/receive', { params, body: { trackingNumber: tracking.trim() || null, note: note || null } }));
+        case 'cancel-replacement':
+          return call(api.POST('/api/admin/returns/replacements/{id}/cancel', { params: { path: { id: replacement!.id } }, body: { reason: note } }));
+      }
+    },
+    onSuccess: (_r, a) => done(DONE[a](current!.detail.ref)),
     onError: (e) => setDrawerError(errorMessage(e)),
   });
-  const requestInfo = useMutation({
-    mutationFn: () => call(api.POST('/api/admin/returns/requests/{id}/request-info', { params: { path: { id: current!.detail.id } }, body: { question: question.trim() } })),
-    onSuccess: () => {
-      say(`Asked ${current?.customer?.displayName ?? 'the customer'} for more information on ${current?.detail.ref}.`);
-      refresh();
-      close();
-    },
-    onError: (e) => setDrawerError(errorMessage(e)),
-  });
+  const busy = decide.isPending || sendToFinance.isPending;
   const exportCsv = useMutation({
     mutationFn: () => call(api.POST('/api/admin/reports/exports', { body: { dataset: 'returns.admin.requests', filters: listQuery, format: 'csv' } })),
     onSuccess: () => announce('Export started. It is logged in Action history.'),
     onError: (e) => setError(errorMessage(e)),
   });
 
-  const onSend = () => {
+  const onSubmit = () => {
+    if (!action) return;
     setAttempted(true);
-    if (!details.trim()) return;
     setDrawerError('');
-    sendToFinance.mutate();
-  };
-  const onAsk = () => {
-    if (!asking) {
-      setAsking(true);
+    if (action === 'exception') {
+      if (details.trim()) sendToFinance.mutate();
       return;
     }
-    if (question.trim().length < 5) {
-      setDrawerError('Write what you need from the customer.');
-      return;
-    }
-    setDrawerError('');
-    requestInfo.mutate();
+    if (textMissing) return;
+    decide.mutate(action);
   };
 
   const rr = current?.refundRequest;
@@ -244,6 +311,8 @@ export default function Returns() {
         { t: `Refund sent to ${current.payment?.methodLabel ?? 'the original payment'}`, d: rr?.status === 'sent' ? 'Sent · 3–5 business days to arrive' : 'After approval · 3–5 business days to arrive', state: rr?.status === 'sent' ? 'done' : '' },
       ]
     : [];
+  const meta = action ? DECISION_ACTIONS[action] : null;
+  const staffOpts = [{ value: '', label: 'Me' }, ...[...staff].filter(([id]) => id !== accountId).map(([id, n]) => ({ value: id, label: n }))];
   const photos = [...(current?.detail.media ?? []), ...(current?.evidence ?? [])].filter((m) => m.url);
   const it = current?.detail.items[0];
   const kpis = s
@@ -471,20 +540,16 @@ export default function Returns() {
       <Drawer
         open={open}
         onClose={close}
-        title={current ? `${current.detail.ref} · refund without return` : (rtRef ?? 'Return')}
+        title={current ? `${current.detail.ref} · ${meta ? meta.label.toLowerCase() : (current.statusLabel ?? current.detail.statusLabel)}` : (rtRef ?? 'Return')}
         foot={
-          canSend || canAsk ? (
+          current && meta ? (
             <>
-              {canAsk && (
-                <Button variant="ghost" onClick={onAsk} disabled={requestInfo.isPending}>
-                  {asking ? 'Send question' : 'Request more photos'}
-                </Button>
-              )}
-              {canSend && (
-                <Button icon="send" onClick={onSend} disabled={sendToFinance.isPending}>
-                  Send to Finance
-                </Button>
-              )}
+              <Button variant="ghost" onClick={() => pick(null)} disabled={busy}>
+                Back
+              </Button>
+              <Button variant={meta.variant} icon={meta.icon} onClick={onSubmit} disabled={busy}>
+                {meta.confirm}
+              </Button>
             </>
           ) : (
             <Button variant="ghost" onClick={close}>
@@ -536,6 +601,8 @@ export default function Returns() {
                   </>,
                 ],
                 ['Owner', current.owner?.name ?? (current.detail.seller.ownerType === 'seller' ? current.detail.seller.name : 'Unassigned')],
+                ['Status', <StatusBadge status={current.statusLabel ?? current.detail.statusLabel} />],
+                ...(replacement ? [[replacement.kind === 'exchange' ? 'Exchange' : 'Replacement', `${replacement.title ?? 'Item'} · ${replacement.status}`] as [string, string]] : []),
               ]}
             />
             {(photos.length > 0 || current.detail.details) && (
@@ -551,37 +618,120 @@ export default function Returns() {
                 {current.detail.details && <p className="small sub">"{current.detail.details}"</p>}
               </div>
             )}
-            <Alert tone="warning" title="Exception to the standard return journey">
-              Refund without return is a controlled exception. The reason is recorded and Finance approves the money. The item is written off in stock, not restocked.
-            </Alert>
-            {!canSend && (exc || (refundStatus && SENT_REFUNDS.has(refundStatus))) && (
-              <Alert tone="info" title={`Refund ${(REFUND_LABEL[refundStatus ?? ''] ?? 'requested').toLowerCase()}`}>
-                This refund is already with Finance or sent, so a second request is blocked.
-              </Alert>
-            )}
-            {!mayPropose && !exc && <p className="xs muted">Proposing a refund without return needs the Returns Manager role.</p>}
+            {drawerNotice && <Alert tone="success" title={drawerNotice} />}
             {drawerError && <Alert tone="danger" title={drawerError} />}
-            <Field label="Recorded reason">
-              <Select id="aa-rt-exc" options={EXCEPTION_REASONS} value={excReason} disabled={!canSend} onChange={(e) => setExcReason(e.target.value as typeof excReason)} />
-            </Field>
-            <Field label="Details" hint={detailsError ? undefined : 'Required. Visible to Finance and in Action history.'} error={detailsError}>
-              <Textarea id="aa-rt-exc-d" placeholder="" value={details} disabled={!canSend} onChange={(e) => setDetails(e.target.value)} />
-            </Field>
-            {asking && (
-              <Field label="Question for the customer" hint="The decision deadline moves while the customer answers.">
-                <Textarea id="aa-rt-ask" value={question} onChange={(e) => setQuestion(e.target.value)} />
+
+            {/* ----- No form open: what this return offers now ----- */}
+            {!action && (
+              <>
+                {(exc || (refundStatus && SENT_REFUNDS.has(refundStatus))) && (
+                  <Alert tone="info" title={`Refund ${(REFUND_LABEL[refundStatus ?? ''] ?? 'requested').toLowerCase()}`}>
+                    {refundStatus === 'requested' || refundStatus === 'under_review' ? 'The refund waits for Finance approval, so a second request is blocked.' : 'This refund is already approved or sent, so a second request is blocked.'}
+                  </Alert>
+                )}
+                <div className="stack gap-2">
+                  <span className="label">Decide</span>
+                  {available.length ? (
+                    <div className="row gap-2">
+                      {available.map((a) => (
+                        <Button key={a} variant="secondary" size="sm" icon={DECISION_ACTIONS[a].icon} onClick={() => pick(a)}>
+                          {DECISION_ACTIONS[a].label}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="xs muted">{allowed.length ? 'Your role can’t take the decisions this return is waiting for.' : 'Nothing to decide on this return now.'}</p>
+                  )}
+                  {atInspection && (
+                    <p className="xs muted">
+                      Inspection and the remedy are recorded on <Link to={href('ops/return-inspection')}>Return inspection</Link>.
+                    </p>
+                  )}
+                  {!mayPropose && allowed.includes('approve-without-return') && !exc && <p className="xs muted">Proposing a refund without return needs the Returns Manager role.</p>}
+                </div>
+                {/* The refund-without-return track, once one was proposed */}
+                {exc && <Timeline events={timeline} />}
+              </>
+            )}
+
+            {/* ----- Refund without return (controlled exception) ----- */}
+            {action === 'exception' && (
+              <>
+                <Alert tone="warning" title="Exception to the standard return journey">
+                  Refund without return is a controlled exception. The reason is recorded and Finance approves the money. The item is written off in stock, not restocked.
+                </Alert>
+                <Field label="Recorded reason">
+                  <Select id="aa-rt-exc" options={EXCEPTION_REASONS} value={excReason} onChange={(e) => setExcReason(e.target.value as typeof excReason)} />
+                </Field>
+                <Field label="Details" hint={detailsError ? undefined : 'Required. Visible to Finance and in Action history.'} error={detailsError}>
+                  <Textarea id="aa-rt-exc-d" placeholder="" value={details} onChange={(e) => setDetails(e.target.value)} />
+                </Field>
+                <div className="well stack gap-2">
+                  <SummaryRow k="Refund amount" v={formatMoney(current.payment?.maxRefundable)} />
+                  <SummaryRow k="Refund to" v={current.payment?.methodLabel ?? 'Original payment'} />
+                  <SummaryRow k="Stock outcome" v="Written off" />
+                  <SummaryRow k="Approval" v={rr?.approval?.reason ?? 'Finance, within the approver’s refund limit'} />
+                </div>
+                <Timeline events={timeline} />
+              </>
+            )}
+
+            {/* ----- The other decisions ----- */}
+            {(action === 'approve' || (action === 'overturn' && !withoutReturn)) && (
+              <Field label="Return label" hint="Customers never pay return shipping for damaged, wrong or defective items.">
+                <Select id="aa-rt-label" options={LABEL_METHODS} value={labelMethod} onChange={(e) => setLabelMethod(e.target.value as LabelMethod)} />
               </Field>
             )}
-            <div className="well stack gap-2">
-              <SummaryRow k="Refund amount" v={formatMoney(current.payment?.maxRefundable)} />
-              <SummaryRow k="Refund to" v={current.payment?.methodLabel ?? 'Original payment'} />
-              <SummaryRow k="Stock outcome" v="Written off" />
-              <SummaryRow k="Approval" v={rr?.approval?.reason ?? 'Finance, within the approver’s refund limit'} />
-            </div>
-            <Timeline events={timeline} />
+            {action === 'reject' && (
+              <Field label="Reason">
+                <Select id="aa-rt-rej" options={REJECT_REASONS} value={rejectCode} onChange={(e) => setRejectCode(e.target.value as RejectCode)} />
+              </Field>
+            )}
+            {action === 'take-over' && (
+              <>
+                <p className="small sub">Marketly handles this return from now on instead of {current.detail.seller.name}. You become its owner; the seller sees the change.</p>
+                <Field label="Why">
+                  <Select id="aa-rt-to" options={TAKE_OVER_REASONS} value={takeOverReason} onChange={(e) => setTakeOverReason(e.target.value as TakeOverReason)} />
+                </Field>
+              </>
+            )}
+            {action === 'overturn' && (
+              <Checkbox id="aa-rt-ovr-nr" label="Approve without asking for the item back" checked={withoutReturn} onChange={(e) => setWithoutReturn(e.target.checked)} />
+            )}
+            {action === 'assign' && (
+              <Field label="Owner" hint={mayListStaff ? undefined : 'Picking another staff member needs the permission to view staff.'}>
+                <Select id="aa-rt-owner-to" options={staffOpts} value={ownerId} onChange={(e) => setOwnerId(e.target.value)} />
+              </Field>
+            )}
+            {action === 'receive' && (
+              <>
+                <p className="small sub">Records that the parcel arrived at the seller’s return address today. It can be inspected next.</p>
+                <Field label="Tracking number" optional>
+                  <TextInput id="aa-rt-trk" value={tracking} onChange={(e) => setTracking(e.target.value)} />
+                </Field>
+              </>
+            )}
+            {action === 'cancel-replacement' && replacement && (
+              <p className="small sub">
+                Cancels the {replacement.kind === 'exchange' ? 'exchange' : 'replacement'} ({replacement.title ?? 'item'}, {replacement.status}) before it ships and releases the reserved stock. The return then waits for a refund instead.
+              </p>
+            )}
+            {action && action !== 'exception' && (
+              <Field
+                label={
+                  action === 'reject' ? 'Explanation for the customer' : action === 'request-info' ? 'Question for the customer' : action === 'take-over' ? 'Note' : action === 'overturn' ? 'Reason shown to the customer' : action === 'cancel-replacement' ? 'Reason' : 'Note'
+                }
+                optional={!TEXT_REQUIRED[action]}
+                hint={textError ? undefined : action === 'request-info' ? 'The decision deadline moves while the customer answers.' : action === 'approve' ? 'Visible to the seller.' : 'Recorded in Action history.'}
+                error={textError || undefined}
+              >
+                <Textarea id="aa-rt-text" value={text} onChange={(e) => setText(e.target.value)} />
+              </Field>
+            )}
           </>
         )}
       </Drawer>
+      {stepUp.dialog}
     </AdminLayout>
   );
 }

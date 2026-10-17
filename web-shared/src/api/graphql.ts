@@ -1,3 +1,4 @@
+import { endIfUnauthorized } from './client';
 import { ApiError, isTokenProblem } from './errors';
 import type { Audience, Session } from './session';
 
@@ -67,6 +68,7 @@ export function createGraphql(session: Session, baseUrl = '') {
       res = await send(await session.refresh());
       body = (await res.json().catch(() => ({}))) as typeof body;
     }
+    endIfUnauthorized(session, res.status, body);
     if (body.error) throw new ApiError(res.status, body.error.code, body.error.message, body.error.details ?? {}, res.headers.get('x-request-id'));
     if (!body.data) {
       const first = body.errors?.[0];

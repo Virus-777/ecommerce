@@ -72,7 +72,8 @@ export interface Payouts {
   pending?: MoneyValue | null;
   available?: MoneyValue | null;
   held?: MoneyValue | null;
-  holds?: Array<{ amount?: MoneyValue | null; reason?: string | null; reviewDate?: string | null; setBy?: Actor | null }>;
+  // finance's Hold names who placed it `placedBy`
+  holds?: Array<{ amount?: MoneyValue | null; reason?: string | null; reviewDate?: string | null; placedBy?: Actor | null }>;
   nextPayout?: {
     scheduledFor?: string | null;
     estimatedAmount?: MoneyValue | null;

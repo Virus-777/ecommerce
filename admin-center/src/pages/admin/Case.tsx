@@ -26,7 +26,9 @@ import {
 // (refund cap), the AdminCase screen query with withRemedyPreview (refundImpactPreview: the seller earnings effect of the
 // remedy being drafted; the case file stays on REST because AdminCase has no `can` flags or pending approval) and
 // POST /access/authority-checks (the decider's approval limit and eligible approvers). Writes: messages, assign, escalate,
-// decision-draft, decide (Idempotency-Key), resolve (an escalated case needs a recorded decision first).
+// decision-draft, decide (Idempotency-Key), resolve (an escalated case needs a recorded decision first), request-info,
+// reopen, appeal/decide (Idempotency-Key; an appealed case only leaves "appealed" this way, decided by someone other
+// than the original decider, SAME_DECIDER otherwise).
 // "decision-recorded" follows the case's decision.
 
 /* ---------------- Evidence ---------------- */
@@ -152,6 +154,24 @@ function SumList({ rows }: { rows: Array<[string, ReactNode]> }) {
 
 const EV_STATE = (i: number, n: number): Ev['state'] => (i === n - 1 ? 'current' : 'done');
 
+/* ---------------- Side dialogs and appeal ---------------- */
+
+type SideAction = 'assign' | 'escalate' | 'reopen' | 'request-info';
+const SIDE_TITLE: Record<SideAction, string> = { assign: 'Reassign', escalate: 'Escalate', reopen: 'Reopen', 'request-info': 'Request information on' };
+/** Statuses that accept POST …/request-info (case machine: requestInfo to the customer, sendToSeller to the seller). */
+const ASK_FROM: Record<'customer' | 'seller', string[]> = {
+  customer: ['open', 'waiting_on_seller', 'escalated', 'reopened'],
+  seller: ['open', 'waiting_on_customer', 'escalated', 'reopened'],
+};
+
+type AppealRemedy = 'none' | 'refund' | 'partial_refund';
+const APPEAL_REMEDIES: Array<{ value: AppealRemedy; label: string }> = [
+  { value: 'none', label: 'No new remedy' },
+  { value: 'refund', label: 'Refund the item' },
+  { value: 'partial_refund', label: 'Partial refund' },
+];
+const APPEAL_STATUS: Record<string, string> = { submitted: 'Waiting for review', in_review: 'In review', decision_stands: 'Decision stands', overturned: 'Overturned' };
+
 const FUNDED_BY: Record<ChargedTo, 'SELLER' | 'PLATFORM' | 'SHARED'> = { seller: 'SELLER', platform: 'PLATFORM', shared: 'SHARED' };
 
 export default function Case() {
@@ -167,15 +187,26 @@ export default function Case() {
   const [replyErr, setReplyErr] = useState('');
   const [notice, setNotice] = useState<{ tone: 'success' | 'info' | 'danger'; title: string; body: string } | null>(null);
   const decideKey = useRef(newIdempotencyKey());
-  const [side, setSide] = useState<null | 'assign' | 'escalate'>(null);
+  const [side, setSide] = useState<null | SideAction>(null);
   const [assignTo, setAssignTo] = useState('');
   const [escalateTo, setEscalateTo] = useState<(typeof ESCALATE_TO)[number]['value']>('support_lead');
   const [sideReason, setSideReason] = useState('');
   const [sideErr, setSideErr] = useState('');
+  const [infoFrom, setInfoFrom] = useState<'customer' | 'seller'>('customer');
+  const [infoDue, setInfoDue] = useState(plusDays(2));
+  // Appeal review: keep the decision or change it, optionally with a new refund (the old decision's open refunds are cancelled).
+  const [appealChoice, setAppealChoice] = useState<'stands' | 'overturn'>('stands');
+  const [appealReason, setAppealReason] = useState('');
+  const [appealRemedy, setAppealRemedy] = useState<AppealRemedy>('none');
+  const [appealAmount, setAppealAmount] = useState('');
+  const [appealCharged, setAppealCharged] = useState<ChargedTo>('seller');
+  const [appealTried, setAppealTried] = useState(false);
+  const appealKey = useRef(newIdempotencyKey());
 
   const canHandle = can('support.cases.handle');
   const canAssign = can('support.cases.assign');
   const canDecide = can('support.disputes.decide');
+  const canDecideAppeal = can('support.appeals.decide');
 
   const detail = useQuery({
     queryKey: ['support', 'case', ref],
@@ -199,6 +230,8 @@ export default function Case() {
   const refundItems = (refundable.data?.items ?? []).filter((i) => !itemIds.length || itemIds.includes(i.orderItemId));
   const maxRefund = refundable.data ? refundItems.reduce((n, i) => n + i.remaining.amount, 0) : null;
   const paidTotal = refundItems.reduce((n, i) => n + i.paid.amount, 0);
+  // Who can be asked for information in this status (a seller request has no customer, the Official Store no seller id).
+  const askable = (['customer', 'seller'] as const).filter((f) => !!c && ASK_FROM[f].includes(c.status) && (f === 'customer' ? c.kind !== 'seller_request' && !!data?.customer : !!data?.seller?.id));
 
   const defaults: Draft = {
     outcome: 'customer_favored',
@@ -323,6 +356,46 @@ export default function Case() {
     },
     onError: (e) => setNotice({ tone: 'danger', title: 'The case wasn’t resolved', body: errorMessage(e) }),
   });
+  const reopen = useMutation({
+    mutationFn: (reason: string) => call(api.POST('/api/admin/support/cases/{id}/reopen', { params: { path: { id: caseId! } }, body: { reason } })),
+    onSuccess: () => {
+      refresh();
+      setSide(null);
+      setNotice({ tone: 'success', title: 'Case reopened', body: 'It is back in the support queue. The reason is kept as an internal note.' });
+    },
+    onError: (e) => setSideErr(errorMessage(e)),
+  });
+  const requestInfo = useMutation({
+    mutationFn: (v: { from: 'customer' | 'seller'; question: string; dueAt: string }) => call(api.POST('/api/admin/support/cases/{id}/request-info', { params: { path: { id: caseId! } }, body: v })),
+    onSuccess: (_r, v) => {
+      refresh();
+      setSide(null);
+      setNotice({ tone: 'success', title: `Asked the ${v.from} for information`, body: `The question is in the conversation. The case waits for the ${v.from} until ${date(v.dueAt)}.` });
+    },
+    onError: (e) => setSideErr(errorMessage(e)),
+  });
+  const decideAppeal = useMutation({
+    mutationFn: (v: { overturn: boolean; reason: string; remedies: DecisionInput['remedies'] | null }) =>
+      call(api.POST('/api/admin/support/cases/{id}/appeal/decide', { params: { path: { id: caseId! }, header: { 'Idempotency-Key': appealKey.current } }, body: v })) as Promise<CaseDetail>,
+    onSuccess: (r, v) => {
+      qc.setQueryData(['support', 'case', ref], r);
+      refresh();
+      appealKey.current = newIdempotencyKey();
+      // A new refund above the reviewer's limit waits for approval (pendingApproval), like a first decision.
+      announce(r.pendingApproval ? 'Appeal decision sent for approval' : 'Appeal decided');
+      setNotice(
+        r.pendingApproval
+          ? { tone: 'info', title: 'Appeal decision sent for approval', body: r.pendingApproval.reason ?? `The new remedy is above your limit. ${r.pendingApproval.approvers.join(', ') || 'Finance'} approves it before it is published.` }
+          : { tone: 'success', title: v.overturn ? 'Appeal accepted: the decision was changed' : 'Appeal reviewed: the decision stands', body: 'Both parties see the outcome in the case. This decision is final.' },
+      );
+    },
+    onError: (e) => {
+      if (sentForApproval(e)) {
+        refresh();
+        setNotice({ tone: 'info', title: 'Appeal decision sent for approval', body: 'The new remedy is above your limit. It was sent to an approver; nothing is published until it is approved.' });
+      }
+    },
+  });
 
   const record = () => {
     setAttempted(true);
@@ -336,14 +409,41 @@ export default function Case() {
     }
     send.mutate({ body: reply.trim(), audience: API_AUDIENCE[audience] });
   };
-  const openSide = (k: 'assign' | 'escalate') => {
+  const openSide = (k: SideAction) => {
     setSide(k);
     setSideReason('');
     setSideErr('');
     setAssignTo('');
+    setInfoDue(plusDays(2));
+    if (k === 'request-info') setInfoFrom(askable[0] ?? 'customer');
+  };
+  const appealErrors = (): { reason?: string; amount?: string } => {
+    const e: { reason?: string; amount?: string } = {};
+    if (!appealReason.trim()) e.reason = 'Explain the outcome. Both parties see it.';
+    if (appealChoice === 'overturn' && appealRemedy !== 'none') {
+      const n = toMinor(appealAmount);
+      if (Number.isNaN(n) || n <= 0) e.amount = 'Enter the refund amount.';
+      else if (maxRefund != null && n > maxRefund) e.amount = `The most you can refund is ${formatMoney({ amount: maxRefund, currency: 'USD' })}.`;
+    }
+    return e;
+  };
+  const submitAppeal = () => {
+    setAppealTried(true);
+    if (Object.keys(appealErrors()).length) return;
+    const overturn = appealChoice === 'overturn';
+    const remedies: DecisionInput['remedies'] | null =
+      overturn && appealRemedy !== 'none' ? [{ kind: appealRemedy, amount: { amount: toMinor(appealAmount), currency: 'USD' }, chargedTo: appealCharged, orderItemIds: itemIds.length ? itemIds : null, dueAt: null }] : null;
+    decideAppeal.mutate({ overturn, reason: appealReason.trim(), remedies });
   };
   const doSide = () => {
-    if (side === 'assign') {
+    if (side === 'reopen') {
+      if (!sideReason.trim()) return setSideErr('Enter why the case is reopened.');
+      reopen.mutate(sideReason.trim());
+    } else if (side === 'request-info') {
+      if (!sideReason.trim()) return setSideErr('Write the question.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(infoDue) || infoDue < plusDays(0)) return setSideErr('Choose a reply-by date from today on.');
+      requestInfo.mutate({ from: infoFrom, question: sideReason.trim(), dueAt: pacificEndOfDay(infoDue) });
+    } else if (side === 'assign') {
       const owner = assignTo || accountId;
       assign.mutate({ ownerId: owner, reason: sideReason.trim() });
     } else if (side === 'escalate') {
@@ -414,6 +514,10 @@ export default function Case() {
   const remediesDone = remedies.every((r) => r.status === 'completed' || r.status === 'cancelled');
   const needsApproval = authority.data?.decision === 'approval_required';
   const chargedText = CHARGED.find((x) => x.value === form.charged)!.text;
+  // An appealed case only leaves "appealed" through the appeal decision, by someone other than the original decider.
+  const appeal = c.appeal;
+  const appealOpen = c.status === 'appealed' && !!appeal && (appeal.status === 'submitted' || appeal.status === 'in_review');
+  const ownDecision = !!decision && decision.decidedBy.kind === 'staff' && !!decision.decidedBy.id && decision.decidedBy.id === accountId;
 
   return (
     <AdminLayout active="cases">
@@ -450,6 +554,16 @@ export default function Case() {
             {canHandle && c.can.escalate && open && (
               <Button variant="secondary" size="sm" icon="arrow-up-right" onClick={() => openSide('escalate')}>
                 Escalate
+              </Button>
+            )}
+            {canHandle && askable.length > 0 && (
+              <Button variant="secondary" size="sm" icon="message-square" onClick={() => openSide('request-info')}>
+                Request info
+              </Button>
+            )}
+            {canHandle && c.can.reopen && !open && (
+              <Button variant="secondary" size="sm" icon="undo-2" onClick={() => openSide('reopen')}>
+                Reopen
               </Button>
             )}
           </>
@@ -634,6 +748,101 @@ export default function Case() {
           </Card>
         </div>
         <div className="stack gap-5">
+          {appeal && (
+            <Card
+              title="Appeal"
+              titleAs="h3"
+              sub={`${appeal.by.name ?? (appeal.by.kind === 'customer' ? 'Customer' : appeal.by.kind === 'seller' ? 'Seller' : 'A party')} appealed ${dateTime(appeal.submittedAt)}`}
+              foot={
+                appealOpen && canDecideAppeal && !ownDecision ? (
+                  <Button size="sm" icon="scale" onClick={submitAppeal} disabled={decideAppeal.isPending || !!data.pendingApproval}>
+                    {appealChoice === 'overturn' ? 'Change the decision' : 'Keep the decision'}
+                  </Button>
+                ) : undefined
+              }
+            >
+              <div className="row between gap-2">
+                <StatusBadge status={APPEAL_STATUS[appeal.status] ?? appeal.status} />
+                {appeal.reviewer?.name && <span className="xs muted">Reviewer {appeal.reviewer.name}</span>}
+              </div>
+              <p className="small">“{appeal.reason}”</p>
+              {appeal.attachments.length > 0 && (
+                <div className="ab-photos">
+                  {appeal.attachments.map((m) => (
+                    <figure key={m.id}>
+                      <Img icon="image" tint="3" className="r43" src={m.url} alt={m.alt ?? ''} />
+                    </figure>
+                  ))}
+                </div>
+              )}
+              {appeal.decidedAt && (
+                <KeyValue
+                  pairs={[
+                    ['Decided', dateTime(appeal.decidedAt)],
+                    ['Outcome', appeal.outcome ?? '—'],
+                  ]}
+                />
+              )}
+              {appealOpen &&
+                (!canDecideAppeal ? (
+                  <p className="small sub">Your role can’t decide appeals. A Support lead reviews it.</p>
+                ) : ownDecision ? (
+                  <p className="small sub">You made the original decision, so a different staff member reviews this appeal.</p>
+                ) : (
+                  <>
+                    {data.pendingApproval && (
+                      <Alert tone="info" title="Sent for approval">
+                        {data.pendingApproval.reason ?? 'The new remedy is above the reviewer’s limit.'}
+                      </Alert>
+                    )}
+                    {decideAppeal.error && !sentForApproval(decideAppeal.error) && (
+                      <Alert tone="danger" title="The appeal wasn’t decided">
+                        {errorMessage(decideAppeal.error)}
+                      </Alert>
+                    )}
+                    <SegmentedControl
+                      label="Appeal outcome"
+                      items={[
+                        { value: 'stands', label: 'Decision stands' },
+                        { value: 'overturn', label: 'Overturn' },
+                      ]}
+                      active={appealChoice}
+                      onChange={setAppealChoice}
+                    />
+                    {appealChoice === 'overturn' && (
+                      <>
+                        <p className="xs muted">Refunds of the earlier decision that haven’t been sent are cancelled.</p>
+                        <Field label="New remedy">
+                          <Select
+                            id="cd-ap-rem"
+                            options={APPEAL_REMEDIES}
+                            value={appealRemedy}
+                            onChange={(e) => {
+                              setAppealRemedy(e.target.value as AppealRemedy);
+                              if (!appealAmount && maxRefund != null) setAppealAmount(dollarsText(maxRefund));
+                            }}
+                          />
+                        </Field>
+                        {appealRemedy !== 'none' && (
+                          <>
+                            <Field label="Refund amount" error={appealTried ? appealErrors().amount : undefined} hint={maxRefund != null ? `Maximum refundable: ${formatMoney({ amount: maxRefund, currency: 'USD' })}.` : undefined}>
+                              <TextInput id="cd-ap-amt" prefix="$" inputMode="decimal" value={appealAmount} error={appealTried && !!appealErrors().amount} onChange={(e) => setAppealAmount(e.target.value)} />
+                            </Field>
+                            <Field label="Charged to">
+                              <Select id="cd-ap-who" options={CHARGED.map((x) => ({ value: x.value, label: x.label }))} value={appealCharged} onChange={(e) => setAppealCharged(e.target.value as ChargedTo)} />
+                            </Field>
+                          </>
+                        )}
+                      </>
+                    )}
+                    <Field label="Reason shared with both parties" error={appealTried ? appealErrors().reason : undefined}>
+                      <Textarea id="cd-ap-why" value={appealReason} onChange={(e) => setAppealReason(e.target.value)} />
+                    </Field>
+                    <p className="xs muted">The appeal decision is final and published to both parties.</p>
+                  </>
+                ))}
+            </Card>
+          )}
           {decided && decision ? (
             <Card
               title="Decision"
@@ -647,7 +856,12 @@ export default function Case() {
                     </Button>
                   )}
                   {canHandle && (
-                    <Button size="sm" disabled={!open || !remediesDone || resolve.isPending} title={remediesDone ? undefined : 'The case closes after every remedy is complete'} onClick={() => resolve.mutate(decision.reason)}>
+                    <Button
+                      size="sm"
+                      disabled={!open || !remediesDone || c.status === 'appealed' || resolve.isPending}
+                      title={c.status === 'appealed' ? 'Decide the appeal first' : remediesDone ? undefined : 'The case closes after every remedy is complete'}
+                      onClick={() => resolve.mutate(decision.reason)}
+                    >
                       Resolve case
                     </Button>
                   )}
@@ -810,15 +1024,15 @@ export default function Case() {
       <Dialog
         open={side !== null}
         onClose={() => setSide(null)}
-        title={side === 'assign' ? `Reassign ${c.ref}` : `Escalate ${c.ref}`}
+        title={side ? `${SIDE_TITLE[side]} ${c.ref}` : ''}
         size="sm"
         foot={
           <>
             <Button variant="ghost" onClick={() => setSide(null)}>
               Cancel
             </Button>
-            <Button onClick={doSide} disabled={assign.isPending || escalate.isPending}>
-              {side === 'assign' ? 'Reassign' : 'Escalate'}
+            <Button onClick={doSide} disabled={assign.isPending || escalate.isPending || reopen.isPending || requestInfo.isPending}>
+              {side === 'assign' ? 'Reassign' : side === 'escalate' ? 'Escalate' : side === 'reopen' ? 'Reopen case' : 'Send question'}
             </Button>
           </>
         }
@@ -840,12 +1054,32 @@ export default function Case() {
               ]}
             />
           </Field>
-        ) : (
+        ) : side === 'escalate' ? (
           <Field label="Escalate to">
             <Select id="cd-esc" value={escalateTo} onChange={(e) => setEscalateTo(e.target.value as typeof escalateTo)} options={ESCALATE_TO} />
           </Field>
-        )}
-        <Field label="Reason" optional={side === 'assign'} error={side === 'escalate' && sideErr && !sideReason.trim() ? sideErr : undefined}>
+        ) : side === 'request-info' ? (
+          <>
+            <Field label="Ask">
+              <Select
+                id="cd-ask-from"
+                value={infoFrom}
+                onChange={(e) => setInfoFrom(e.target.value as 'customer' | 'seller')}
+                options={askable.map((f) => ({ value: f, label: f === 'customer' ? `Customer${customer ? `: ${customer.name}` : ''}` : `Seller${seller ? `: ${seller.name}` : ''}` }))}
+              />
+            </Field>
+            <Field label="Reply by" hint="11:59 PM Pacific on this day. The case waits for the answer until then.">
+              <TextInput id="cd-ask-due" type="date" icon="calendar" value={infoDue} min={plusDays(0)} onChange={(e) => setInfoDue(e.target.value)} />
+            </Field>
+          </>
+        ) : side === 'reopen' ? (
+          <p className="small sub">The case goes back to the support queue with new response deadlines. The parties see that Marketly reopened it.</p>
+        ) : null}
+        <Field
+          label={side === 'request-info' ? 'Question' : 'Reason'}
+          optional={side === 'assign'}
+          hint={side === 'request-info' ? 'Sent in the conversation to the person you ask.' : side === 'reopen' ? 'Kept as an internal note.' : undefined}
+        >
           <Textarea id="cd-side-reason" value={sideReason} onChange={(e) => setSideReason(e.target.value)} />
         </Field>
       </Dialog>

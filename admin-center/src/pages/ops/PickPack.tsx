@@ -16,7 +16,8 @@ import { useStaffSession } from '@/app/session';
 // POST pick-lines/{id}/pick, POST pick-lines/{id}/report-shortage, POST fulfillments/{id}/report-damage,
 // GET warehouse/fulfillments(/{id}), POST fulfillments/{id}/packages, POST packages/{id}/scan, PATCH packages/{id},
 // GET packages/{id}/service-options, POST packages/{id}/label (idempotent), GET packages/{id}/label, POST packages/{id}/pack,
-// GET warehouse/box-types, GET warehouse/summary (location and carrier pickup).
+// GET warehouse/box-types, GET warehouse/summary (location and carrier pickup), POST fulfillments/{id}/resume (held orders),
+// POST packages/{id}/void-label, GET packages/{id}/packing-slip (PDF).
 
 type View = 'packing-station';
 
@@ -492,7 +493,22 @@ function PackingStation({ orderRef }: { orderRef: string }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [damage, setDamage] = useState<{ fulfillmentId: string; line: Line } | null>(null);
   const [tried, setTried] = useState(false);
-  const labelKey = useRef(newIdempotencyKey());
+  // One Idempotency-Key per package: the server scopes a key to the operation and hashes the path, so reusing one
+  // key for package 2 is refused (IDEMPOTENCY_KEY_REUSED). A retry of the same package keeps its key, so a label
+  // bought by a request whose answer got lost is replayed, not bought twice. Voiding a label drops the key.
+  const labelKeys = useRef(new Map<string, string>());
+  const labelKeyFor = (packageId: string) => {
+    let k = labelKeys.current.get(packageId);
+    if (!k) {
+      k = newIdempotencyKey();
+      labelKeys.current.set(packageId, k);
+    }
+    return k;
+  };
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidTried, setVoidTried] = useState(false);
+  const canResume = staff.can('warehouse.waves.manage');
 
   const found = useQuery({
     queryKey: ['warehouse', 'fulfillment', 'find', orderRef],
@@ -546,7 +562,7 @@ function PackingStation({ orderRef }: { orderRef: string }) {
       let p = pkg!;
       if (p.status === 'open') {
         await call(api.PATCH('/api/admin/warehouse/packages/{id}', { params: { path: { id: p.id } }, body: { boxTypeId: box || undefined, weight: { value: Number(weight), unit: 'lb', fromScale: true }, fragile, serviceCode: service || undefined } as never }));
-        const label = (await call(api.POST('/api/admin/warehouse/packages/{id}/label', { params: { path: { id: p.id }, header: { 'Idempotency-Key': labelKey.current } }, body: { printer: 'PS-2' } as never } as never))) as { package: Package };
+        const label = (await call(api.POST('/api/admin/warehouse/packages/{id}/label', { params: { path: { id: p.id }, header: { 'Idempotency-Key': labelKeyFor(p.id) } }, body: { printer: 'PS-2' } as never } as never))) as { package: Package };
         p = label.package;
       }
       return call(api.POST('/api/admin/warehouse/packages/{id}/pack', { params: { path: { id: p.id } } }));
@@ -556,9 +572,36 @@ function PackingStation({ orderRef }: { orderRef: string }) {
       refresh();
       void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
     },
+    // The label may have been bought before a later step failed: reload so the next try starts from the package's real state.
+    onError: refresh,
   });
   const reprint = useMutation({
     mutationFn: () => call(api.GET('/api/admin/warehouse/packages/{id}/label', { params: { path: { id: pkg!.id } } })) as Promise<{ url: string }>,
+    onSuccess: (l) => window.open(l.url, '_blank', 'noopener'),
+  });
+  // Held order: back to picking once Inventory resolved the shortage or damage (409 DISCREPANCY_OPEN until then).
+  const resume = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/warehouse/fulfillments/{id}/resume', { params: { path: { id: f!.id } }, body: {} })),
+    onSuccess: () => {
+      announce(`${f!.orderRef} resumed`);
+      refresh();
+      void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
+    },
+  });
+  // Wrong service or bad print: void the label while the package is still open on the bench (labelled, not packed).
+  const voidLabel = useMutation({
+    mutationFn: () => call(api.POST('/api/admin/warehouse/packages/{id}/void-label', { params: { path: { id: pkg!.id } }, body: { reason: voidReason.trim() } })),
+    onSuccess: () => {
+      // the package is open again: its next label is a new purchase, so it needs a new key
+      labelKeys.current.delete(pkg!.id);
+      setVoidOpen(false);
+      announce('Label voided. Choose the service and mark the package packed to buy a new label.');
+      refresh();
+    },
+  });
+  // The packing slip as a PDF from the server: only this package's items, package n of N, the returns note.
+  const slip = useMutation({
+    mutationFn: () => call(api.GET('/api/admin/warehouse/packages/{id}/packing-slip', { params: { path: { id: pkg!.id } } })) as Promise<{ url: string }>,
     onSuccess: (l) => window.open(l.url, '_blank', 'noopener'),
   });
 
@@ -640,7 +683,24 @@ function PackingStation({ orderRef }: { orderRef: string }) {
           {openPkg.error && <span className="xs t-danger-text"> {errorMessage(openPkg.error)}</span>}
         </Alert>
       )}
-      {f.holdReason && <Alert tone="warning" title="On hold">{f.holdReason}</Alert>}
+      {(f.holdReason || f.status === 'on_hold') && (
+        <Alert tone="warning" title="On hold">
+          {f.holdReason ?? 'A shortage or damaged item was reported.'}
+          {f.status === 'on_hold' && (
+            <>
+              {' '}
+              {canResume ? (
+                <Button size="sm" icon="play" onClick={() => resume.mutate()} disabled={resume.isPending}>
+                  {resume.isPending ? 'Resuming…' : 'Resume'}
+                </Button>
+              ) : (
+                'A Warehouse Manager resumes it once Inventory has resolved the report.'
+              )}
+              {resume.error && <span className="xs t-danger-text"> {errorMessage(resume.error)}</span>}
+            </>
+          )}
+        </Alert>
+      )}
       {pkg && (
         <form onSubmit={onScan}>
           <label className="ac-scan" htmlFor="pk-scan">
@@ -748,11 +808,13 @@ function PackingStation({ orderRef }: { orderRef: string }) {
             title="Packing slip"
             titleAs="h3"
             actions={
-              <Button variant="ghost" size="sm" icon="printer" onClick={() => window.print()}>
+              // With a package, print the server's PDF slip (what goes in the box); before that, the preview below.
+              <Button variant="ghost" size="sm" icon="printer" onClick={() => (pkg ? slip.mutate() : window.print())} disabled={slip.isPending}>
                 Print
               </Button>
             }
           >
+            {slip.error && <span className="xs t-danger-text">{errorMessage(slip.error)}</span>}
             <div className="ac-slip">
               <div className="row between">
                 <Logo />
@@ -789,6 +851,21 @@ function PackingStation({ orderRef }: { orderRef: string }) {
                   <Button variant="ghost" size="sm" icon="printer" onClick={() => reprint.mutate()} disabled={!pkg?.trackingNumber || reprint.isPending}>
                     Reprint label
                   </Button>
+                  {pkg?.status === 'labelled' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      icon="circle-x"
+                      onClick={() => {
+                        voidLabel.reset();
+                        setVoidReason('');
+                        setVoidTried(false);
+                        setVoidOpen(true);
+                      }}
+                    >
+                      Void label
+                    </Button>
+                  )}
                   <Button size="sm" icon="package-check" onClick={markPacked} disabled={!pkg || packed || pack.isPending}>
                     {packed ? 'Packed' : pack.isPending ? 'Packing…' : 'Mark as packed'}
                   </Button>
@@ -821,6 +898,38 @@ function PackingStation({ orderRef }: { orderRef: string }) {
         </div>
       )}
       <DamageDialog target={damage} onClose={() => setDamage(null)} onDone={setProblem} />
+      <Dialog
+        open={voidOpen}
+        onClose={() => setVoidOpen(false)}
+        title="Void label"
+        size="sm"
+        foot={
+          <>
+            <Button variant="ghost" onClick={() => setVoidOpen(false)}>
+              Keep label
+            </Button>
+            <Button
+              variant="danger"
+              icon="circle-x"
+              onClick={() => {
+                setVoidTried(true);
+                if (voidReason.trim()) voidLabel.mutate();
+              }}
+              disabled={voidLabel.isPending}
+            >
+              Void label
+            </Button>
+          </>
+        }
+      >
+        {voidLabel.error && <Alert tone="danger">{errorMessage(voidLabel.error)}</Alert>}
+        <p className="small">
+          {pkg?.carrier} {pkg?.service} · tracking <span className="mono">{pkg?.trackingNumber ?? '—'}</span>. The package opens again so you can choose another service and buy a new label. Throw the old label away.
+        </p>
+        <Field label="Why is the label voided?" error={voidTried && !voidReason.trim() ? 'Say why the label is voided.' : undefined}>
+          <Textarea id="pk-void" value={voidReason} onChange={(e) => setVoidReason(e.target.value)} />
+        </Field>
+      </Dialog>
     </>
   );
 }

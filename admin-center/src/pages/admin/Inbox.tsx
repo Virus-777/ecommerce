@@ -17,7 +17,7 @@ import { ALL_AREAS, API_VIEW, APPROVAL_STATUS, byDay, needsMe, noticeHref, notic
 // "Mentions" links to "#" in the design; here it is a local tab that lists the mentions.
 // Data: GET notifications/inbox (view, area, unreadOnly, cursor), GET notifications/inbox/summary, POST inbox/{id}/read,
 // POST inbox/read-all, GET/PUT notifications/my-preferences (Notification settings dialog), approval notices open
-// the approval request (GET access/approval-requests/{id}, POST …/approve | …/reject; step-up code when asked).
+// the approval request (GET access/approval-requests/{id}, POST …/approve | …/reject; the password again when asked).
 // POST inbox/{id}/unread puts a read notice back to unread (the row's toggle).
 
 const LIMIT = 30;

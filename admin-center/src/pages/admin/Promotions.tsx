@@ -11,11 +11,13 @@ import { LoadError, SkeletonLines, shortDate } from '@/app/parts';
 import { ExportButton, ExportNotice } from './data/export-button';
 import { useDatasetExport } from './data/report-export';
 import { FUND_TONE, PROMO_KINDS, STATUS_LABEL, TABS, kindLabel, type CampaignRow, type PromotionsDashboard, type TabKey } from './data/promotions';
+import { StopCampaign } from './PromotionStop';
 
 // Design: pages/admin/admin-promotions.html (no views).
 // Data: GET /api/admin/promotions/dashboard (KPIs, campaign results, daily discount cost),
 // GET /api/admin/promotions/campaigns (the table; filtered on the page); POST /campaigns/{id}/pause|resume (the
-// reason is optional: the server records a default). Export: dataset promotions.admin.campaigns (POST reports/exports).
+// reason is optional: the server records a default), End (live or paused) and Cancel (not started yet) with a reason
+// (PromotionStop). Export: dataset promotions.admin.campaigns (POST reports/exports).
 // Rows open the campaign editor (admin/promotion-new?id=…), on the Finance confirmation view while in review.
 
 const pct1 = (n?: number | null) => (n == null ? '—' : `${Math.round(n * 10) / 10}%`);
@@ -50,6 +52,7 @@ export default function Promotions() {
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
   const [fund, setFund] = useState('');
+  const [stopped, setStopped] = useState<string | null>(null);
 
   const dash = useQuery({ queryKey: ['promotions', 'dashboard'], enabled: canResults, queryFn: () => call(api.GET('/api/admin/promotions/dashboard')) });
   const list = useQuery({ queryKey: ['promotions', 'campaigns', 'all'], queryFn: () => call(api.GET('/api/admin/promotions/campaigns', { params: { query: { limit: 100 } } })) });
@@ -108,6 +111,11 @@ export default function Promotions() {
         </div>
       )}
       {dash.isError && <LoadError error={dash.error} onRetry={() => void dash.refetch()} title="We couldn’t load the promotion results" />}
+      {stopped && (
+        <Alert tone="success" title="Campaign stopped">
+          {stopped}
+        </Alert>
+      )}
       {pause.isError && (
         <Alert tone="danger" title="The campaign wasn’t changed">
           {errorMessage(pause.error)}
@@ -210,19 +218,22 @@ export default function Promotions() {
                       <StatusBadge status={STATUS_LABEL[p.status] ?? p.status} />
                     </td>
                     <td className="col-pin">
-                      {live ? (
-                        canPublish ? (
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => pause.mutate(p)} disabled={pause.isPending}>
-                            <span>{p.status === 'live' ? 'Pause' : 'Resume'}</span>
+                      <span className="row gap-1 nowrap">
+                        {live ? (
+                          canPublish ? (
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => pause.mutate(p)} disabled={pause.isPending}>
+                              <span>{p.status === 'live' ? 'Pause' : 'Resume'}</span>
+                              <span className="sr-only"> {p.name}</span>
+                            </button>
+                          ) : null
+                        ) : (
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate(editorHref(p))}>
+                            <span>{canManage && ['draft', 'changes_requested'].includes(p.status) ? 'Edit' : 'Open'}</span>
                             <span className="sr-only"> {p.name}</span>
                           </button>
-                        ) : null
-                      ) : (
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate(editorHref(p))}>
-                          <span>{canManage && ['draft', 'changes_requested'].includes(p.status) ? 'Edit' : 'Open'}</span>
-                          <span className="sr-only"> {p.name}</span>
-                        </button>
-                      )}
+                        )}
+                        <StopCampaign c={p} onDone={(c, k) => setStopped(`${c.name} is ${k === 'end' ? 'ended' : 'cancelled'}. The reason is in Action history.`)} />
+                      </span>
                     </td>
                   </tr>
                 );

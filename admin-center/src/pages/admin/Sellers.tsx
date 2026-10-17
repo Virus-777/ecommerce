@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
@@ -11,9 +11,12 @@ import { Alert, Badge, Button, Dialog, EmptyState, Field, Icon, LogoTile, Meter,
 import { useStaffSession } from '@/app/session';
 import { LoadError } from '@/app/parts';
 import { SELLER_STATUS, feedbackLabel, initialsOf, signedMoney, statusLabel, tintOf, useDebounced, useInView, type ApplicationRow, type SellerRow } from './data/seller';
+import { AppealsQueue, LaunchReviewQueue } from './data/seller-queues';
 
 // Design: pages/admin/admin-sellers.html (single view). Status tabs link to "#" in the design;
 // here they filter the list, in sync with the Status filter.
+// ?filter=appeals | launch_reviews (no design; the work queues sellers.appeals and sellers.launch_reviews link here)
+// swaps the list for the appeals or launch review queue (data/seller-queues).
 // Data: GET /api/admin/sellers/sellers (q, status, verified, onTimeBelow, categoryId, balance; page on the website,
 // cursor on the phone), …/sellers/stats (header, KPIs, tab counts), …/applications (open applications: the
 // Applications button and links for sellers still in review), …/performance-targets (dispatch target),
@@ -32,6 +35,8 @@ const BAL_OPTS = [
   { value: 'negative', label: 'Negative balance' },
 ];
 const LIMIT = 24;
+const QUEUES = ['appeals', 'launch_reviews'] as const;
+type Queue = '' | (typeof QUEUES)[number];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 interface Category {
@@ -48,6 +53,18 @@ export default function Sellers() {
   const { api } = useApi();
   const { can } = useStaffSession();
   const isPhone = useIsPhone();
+  const [params, setParams] = useSearchParams();
+  const queue = QUEUES.find((x) => x === params.get('filter')) ?? '';
+  const setQueue = (v: Queue) =>
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (v) p.set('filter', v);
+        else p.delete('filter');
+        return p;
+      },
+      { preventScrollReset: true },
+    );
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'' | ApiStatus>('');
   const [ver, setVer] = useState(VER_OPTS[0]);
@@ -137,6 +154,9 @@ export default function Sellers() {
     ...TAB_ORDER.map((s) => ({ value: s, label: SELLER_STATUS[s]!, count: stats.data ? (byStatus[s] ?? 0) : undefined })),
   ];
   const balances = stats.data?.balances ?? null;
+  // Open launch reviews: the work queue count (same query and cache as the sidebar counts in app/session).
+  const queues = useQuery({ queryKey: ['workqueues', 'queues'], queryFn: () => call(api.GET('/api/admin/workqueues/queues')) as Promise<Array<{ key: string; open: number }>>, retry: false });
+  const launchCount = queues.data?.find((x) => x.key === 'sellers.launch_reviews')?.open;
 
   const sendInvite = useMutation({
     mutationFn: () => call(api.POST('/api/admin/sellers/seller-invitations', { body: { email: email.trim(), businessName: business.trim() } })),
@@ -276,190 +296,204 @@ export default function Sellers() {
         </div>
       </div>
 
-      <section className="card">
-        <Tabs<'' | ApiStatus> items={tabs} active={status} onChange={setStatus} label="Seller status" />
-        <div className="card-body">
-          <div className="toolbar">
-            <SearchInput id="aa-sl-q" placeholder="Search seller name, legal name or contact email" value={q} onChange={setQ} />
-          </div>
-          <div className="aa-filters c5">
-            <Field label="Status" className="aa-flt">
-              <Select
-                id="aa-sl-st"
-                options={[{ value: '', label: 'Any status' }, ...STATUSES.map((s) => ({ value: s, label: SELLER_STATUS[s]! }))]}
-                value={status}
-                onChange={(e) => setStatus(e.target.value as '' | ApiStatus)}
-              />
-            </Field>
-            <Field label="Verification" className="aa-flt">
-              <Select id="aa-sl-ver" options={VER_OPTS} value={ver} onChange={(e) => setVer(e.target.value)} />
-            </Field>
-            <Field label="On-time dispatch" className="aa-flt">
-              <Select id="aa-sl-perf" options={PERF_OPTS.map((o) => ({ value: o, label: perfLabel(o) }))} value={perf} onChange={(e) => setPerf(e.target.value)} />
-            </Field>
-            <Field label="Main category" className="aa-flt">
-              <Select id="aa-sl-cat" options={catOpts} value={cat} onChange={(e) => setCat(e.target.value)} />
-            </Field>
-            <Field label="Balance" className="aa-flt">
-              <Select id="aa-sl-bal" options={BAL_OPTS} value={bal} onChange={(e) => setBal(e.target.value)} />
-            </Field>
-          </div>
-        </div>
-
-        {active.isError && !loaded ? (
+      <Tabs<Queue>
+        items={[
+          { value: '', label: 'Sellers' },
+          { value: 'appeals', label: 'Appeals', count: stats.data?.appealsUnderReview },
+          { value: 'launch_reviews', label: 'Launch reviews', count: launchCount },
+        ]}
+        active={queue}
+        onChange={setQueue}
+        label="Seller work"
+      />
+      {queue ? (
+        <section className="card">{queue === 'appeals' ? <AppealsQueue /> : <LaunchReviewQueue />}</section>
+      ) : (
+        <section className="card">
+          <Tabs<'' | ApiStatus> items={tabs} active={status} onChange={setStatus} label="Seller status" />
           <div className="card-body">
-            <LoadError error={active.error} onRetry={() => void active.refetch()} title="We couldn’t load the sellers" />
+            <div className="toolbar">
+              <SearchInput id="aa-sl-q" placeholder="Search seller name, legal name or contact email" value={q} onChange={setQ} />
+            </div>
+            <div className="aa-filters c5">
+              <Field label="Status" className="aa-flt">
+                <Select
+                  id="aa-sl-st"
+                  options={[{ value: '', label: 'Any status' }, ...STATUSES.map((s) => ({ value: s, label: SELLER_STATUS[s]! }))]}
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as '' | ApiStatus)}
+                />
+              </Field>
+              <Field label="Verification" className="aa-flt">
+                <Select id="aa-sl-ver" options={VER_OPTS} value={ver} onChange={(e) => setVer(e.target.value)} />
+              </Field>
+              <Field label="On-time dispatch" className="aa-flt">
+                <Select id="aa-sl-perf" options={PERF_OPTS.map((o) => ({ value: o, label: perfLabel(o) }))} value={perf} onChange={(e) => setPerf(e.target.value)} />
+              </Field>
+              <Field label="Main category" className="aa-flt">
+                <Select id="aa-sl-cat" options={catOpts} value={cat} onChange={(e) => setCat(e.target.value)} />
+              </Field>
+              <Field label="Balance" className="aa-flt">
+                <Select id="aa-sl-bal" options={BAL_OPTS} value={bal} onChange={(e) => setBal(e.target.value)} />
+              </Field>
+            </div>
           </div>
-        ) : (
-          <>
-            <div className="no-phone">
-              {!loaded ? (
-                skeleton
-              ) : rows.length ? (
-                <>
-                  <TableWrap label="Sellers table">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Seller</th>
-                          <th scope="col">Status</th>
-                          <th scope="col">Verified</th>
-                          <th scope="col">Rating</th>
-                          <th scope="col">On-time dispatch</th>
-                          <th className="r" scope="col">Open cases</th>
-                          <th className="r" scope="col">Balance</th>
-                          <th scope="col">Restrictions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows.map((r) => {
-                          const edge = rowEdge(r);
-                          const pct = onTime(r);
-                          const below = pct !== undefined && pct < TARGET;
-                          const rating = feedbackLabel(r.feedback);
-                          const negative = r.negativeBalance || (r.balance?.amount ?? 0) < 0;
-                          return (
-                            <tr key={r.id} className={cx(edge && `is-${edge}`)}>
-                              <td>
-                                {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
-                                <Link className="row nowrap gap-2 link-inherit" to={sellerTo(r)}>
-                                  <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.id)} size="sm" />
+
+          {active.isError && !loaded ? (
+            <div className="card-body">
+              <LoadError error={active.error} onRetry={() => void active.refetch()} title="We couldn’t load the sellers" />
+            </div>
+          ) : (
+            <>
+              <div className="no-phone">
+                {!loaded ? (
+                  skeleton
+                ) : rows.length ? (
+                  <>
+                    <TableWrap label="Sellers table">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Seller</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Verified</th>
+                            <th scope="col">Rating</th>
+                            <th scope="col">On-time dispatch</th>
+                            <th className="r" scope="col">Open cases</th>
+                            <th className="r" scope="col">Balance</th>
+                            <th scope="col">Restrictions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((r) => {
+                            const edge = rowEdge(r);
+                            const pct = onTime(r);
+                            const below = pct !== undefined && pct < TARGET;
+                            const rating = feedbackLabel(r.feedback);
+                            const negative = r.negativeBalance || (r.balance?.amount ?? 0) < 0;
+                            return (
+                              <tr key={r.id} className={cx(edge && `is-${edge}`)}>
+                                <td>
+                                  {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
+                                  <Link className="row nowrap gap-2 link-inherit" to={sellerTo(r)}>
+                                    <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.id)} size="sm" />
+                                    <span className="stack gap-0">
+                                      <span className="small strong">{r.storeName}</span>
+                                      <span className="xs muted">{r.location ?? r.ref}</span>
+                                    </span>
+                                  </Link>
+                                </td>
+                                <td>
+                                  <StatusBadge status={statusLabel(r.status)} />
+                                </td>
+                                <td>
+                                  {r.verified ? (
+                                    <Badge tone="info" icon="shield-check">
+                                      Verified
+                                    </Badge>
+                                  ) : (
+                                    <span className="xs muted">Not verified</span>
+                                  )}
+                                </td>
+                                <td>{rating ? <span className="small num">{rating}</span> : <span className="muted">—</span>}</td>
+                                <td>
+                                  {pct !== undefined ? (
+                                    <span className="stack gap-1 minw-90">
+                                      <span className={cx('strong num', below && 't-danger-text')}>{pct.toFixed(1)}%</span>
+                                      <Meter pct={pct} tone={below ? 'danger' : 'success'} label={`On-time dispatch: ${r.storeName}`} />
+                                      {below && <span className="xs strong meter-note t-danger-text">Below target</span>}
+                                    </span>
+                                  ) : (
+                                    <span className="muted">—</span>
+                                  )}
+                                </td>
+                                <td className="r">{r.openCases ? <span className={cx('strong', r.openCases >= 3 && 't-warning-text')}>{r.openCases}</span> : 0}</td>
+                                <td className="r">
                                   <span className="stack gap-0">
-                                    <span className="small strong">{r.storeName}</span>
-                                    <span className="xs muted">{r.location ?? r.ref}</span>
+                                    <span className={cx('strong', negative && 't-danger-text')}>{signedMoney(r.balance)}</span>
+                                    {r.held?.amount ? <span className="xs t-warning-text strong">{formatMoney(r.held)} held</span> : null}
+                                    {negative && <Badge tone="danger">Negative</Badge>}
                                   </span>
-                                </Link>
-                              </td>
-                              <td>
-                                <StatusBadge status={statusLabel(r.status)} />
-                              </td>
-                              <td>
-                                {r.verified ? (
-                                  <Badge tone="info" icon="shield-check">
-                                    Verified
-                                  </Badge>
-                                ) : (
-                                  <span className="xs muted">Not verified</span>
-                                )}
-                              </td>
-                              <td>{rating ? <span className="small num">{rating}</span> : <span className="muted">—</span>}</td>
-                              <td>
-                                {pct !== undefined ? (
-                                  <span className="stack gap-1 minw-90">
-                                    <span className={cx('strong num', below && 't-danger-text')}>{pct.toFixed(1)}%</span>
-                                    <Meter pct={pct} tone={below ? 'danger' : 'success'} label={`On-time dispatch: ${r.storeName}`} />
-                                    {below && <span className="xs strong meter-note t-danger-text">Below target</span>}
-                                  </span>
-                                ) : (
-                                  <span className="muted">—</span>
-                                )}
-                              </td>
-                              <td className="r">{r.openCases ? <span className={cx('strong', r.openCases >= 3 && 't-warning-text')}>{r.openCases}</span> : 0}</td>
-                              <td className="r">
-                                <span className="stack gap-0">
-                                  <span className={cx('strong', negative && 't-danger-text')}>{signedMoney(r.balance)}</span>
-                                  {r.held?.amount ? <span className="xs t-warning-text strong">{formatMoney(r.held)} held</span> : null}
-                                  {negative && <Badge tone="danger">Negative</Badge>}
-                                </span>
-                              </td>
-                              <td>
-                                {r.restrictionSummary ? (
-                                  <span className="small u-maxw-28ch u-d-inline-block">{r.restrictionSummary}</span>
-                                ) : r.warningNote ? (
-                                  <span className="xs t-warning-text strong">{r.warningNote}</span>
-                                ) : (
-                                  <span className="xs muted">None</span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </TableWrap>
-                  {legend}
-                </>
-              ) : (
-                empty
-              )}
-            </div>
+                                </td>
+                                <td>
+                                  {r.restrictionSummary ? (
+                                    <span className="small u-maxw-28ch u-d-inline-block">{r.restrictionSummary}</span>
+                                  ) : r.warningNote ? (
+                                    <span className="xs t-warning-text strong">{r.warningNote}</span>
+                                  ) : (
+                                    <span className="xs muted">None</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </TableWrap>
+                    {legend}
+                  </>
+                ) : (
+                  empty
+                )}
+              </div>
 
-            <div className="only-phone card-pad-phone">
-              {!loaded ? (
-                skeleton
-              ) : rows.length ? (
-                <>
-                  <div className="aa-mlist">
-                    {rows.map((r) => {
-                      const edge = rowEdge(r);
-                      const pct = onTime(r);
-                      return (
-                        <Link key={r.id} className={cx('aa-mcard', edge && `is-${edge}`)} to={sellerTo(r)}>
-                          {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
-                          <span className="row nowrap gap-3">
-                            <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.id)} size="sm" />
-                            <span className="stack gap-0 grow">
-                              <span className="small strong">{r.storeName}</span>
-                              <span className="xs muted">{r.location ?? r.ref}</span>
+              <div className="only-phone card-pad-phone">
+                {!loaded ? (
+                  skeleton
+                ) : rows.length ? (
+                  <>
+                    <div className="aa-mlist">
+                      {rows.map((r) => {
+                        const edge = rowEdge(r);
+                        const pct = onTime(r);
+                        return (
+                          <Link key={r.id} className={cx('aa-mcard', edge && `is-${edge}`)} to={sellerTo(r)}>
+                            {edge && <span className="sr-only">{edge === 'flagged' ? 'Urgent: ' : 'At risk: '}</span>}
+                            <span className="row nowrap gap-3">
+                              <LogoTile initials={initialsOf(r.storeName)} tint={tintOf(r.id)} size="sm" />
+                              <span className="stack gap-0 grow">
+                                <span className="small strong">{r.storeName}</span>
+                                <span className="xs muted">{r.location ?? r.ref}</span>
+                              </span>
+                              <StatusBadge status={statusLabel(r.status)} />
                             </span>
-                            <StatusBadge status={statusLabel(r.status)} />
-                          </span>
-                          <span className="row gap-3 xs">
-                            <span>
-                              On time <b>{pct !== undefined ? `${pct.toFixed(1)}%` : '—'}</b>
+                            <span className="row gap-3 xs">
+                              <span>
+                                On time <b>{pct !== undefined ? `${pct.toFixed(1)}%` : '—'}</b>
+                              </span>
+                              <span>
+                                Cases <b>{r.openCases}</b>
+                              </span>
+                              <span>
+                                Balance <b>{signedMoney(r.balance)}</b>
+                              </span>
+                              {r.verified && (
+                                <Badge tone="info" icon="shield-check">
+                                  Verified
+                                </Badge>
+                              )}
                             </span>
-                            <span>
-                              Cases <b>{r.openCases}</b>
-                            </span>
-                            <span>
-                              Balance <b>{signedMoney(r.balance)}</b>
-                            </span>
-                            {r.verified && (
-                              <Badge tone="info" icon="shield-check">
-                                Verified
-                              </Badge>
-                            )}
-                          </span>
-                          {r.restrictionSummary && <span className="xs sub">{r.restrictionSummary}</span>}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                  <div ref={more} />
-                  {legend}
-                </>
-              ) : (
-                empty
-              )}
-            </div>
-          </>
-        )}
+                            {r.restrictionSummary && <span className="xs sub">{r.restrictionSummary}</span>}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                    <div ref={more} />
+                    {legend}
+                  </>
+                ) : (
+                  empty
+                )}
+              </div>
+            </>
+          )}
 
-        <div className="card-foot between">
-          <span className="xs muted">Balance is what we owe the seller after fees and refunds. It is not paid until a payout is sent.</span>
-          {isPhone ? loaded && rows.length > 0 && <Pager only="phone" end={!phoneQ.hasNextPage} /> : totalPages > 1 && <Pager page={page} total={totalPages} onPage={setPage} only="website" />}
-        </div>
-      </section>
+          <div className="card-foot between">
+            <span className="xs muted">Balance is what we owe the seller after fees and refunds. It is not paid until a payout is sent.</span>
+            {isPhone ? loaded && rows.length > 0 && <Pager only="phone" end={!phoneQ.hasNextPage} /> : totalPages > 1 && <Pager page={page} total={totalPages} onPage={setPage} only="website" />}
+          </div>
+        </section>
+      )}
 
       <Dialog
         open={invite}

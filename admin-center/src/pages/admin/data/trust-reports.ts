@@ -1,20 +1,22 @@
 // Detail for admin/trust-report (designed in React; blueprint: reports/Best ecommerce site UX patterns.md,
-// "Trust and risk report detail"), built from GET /api/admin/trust/reports/{id}. The design's five actions map
-// onto the trust API: Clear = dismiss; Request info = an evidence request to the reported seller or customer;
-// Restrict listing, Hold payouts and Suspend = an enforcement recommendation routed to the owning team
-// (Trust recommends, owners act).
+// "Trust and risk report detail"), built from GET /api/admin/trust/reports/{id}. The design's actions map onto the
+// trust API: the design's "Clear" is split in two (review §2a #7, A11): Resolve = POST …/resolve with an outcome
+// (checks that no recommendation is still with an owner team) and Dismiss = POST …/dismiss (no action); Request
+// info = an evidence request to the reported seller or customer; Restrict listing, Hold payouts and Suspend = an
+// enforcement recommendation routed to the owning team (Trust recommends, owners act).
 import type { components } from '@marketly/web-shared/api';
 import type { IconName, TimelineEvent } from '@marketly/web-shared/ui';
 import { DISMISS_REASONS, OWNER_TEAM, type TrustReportDetail, type TrustSubject } from './trust';
+import { RESOLVE_OUTCOMES, canResolveStatus, openWithOwners } from './trust-decisions';
 
 type S = components['schemas'];
 export type RecommendationInput = S['trust.RecommendationInput'];
 export type RecAction = RecommendationInput['action'];
 
-export type TrustActionKey = 'clear' | 'request-info' | 'restrict-listing' | 'hold-payouts' | 'suspend';
+export type TrustActionKey = 'resolve' | 'dismiss' | 'request-info' | 'restrict-listing' | 'hold-payouts' | 'suspend';
 export type Reversible = 'yes' | 'partly' | 'no';
 
-/** The fixed action set. Trust performs Clear and Request info; the others go to the owning team. */
+/** The fixed action set. Trust performs Resolve, Dismiss and Request info; the others go to the owning team. */
 export interface TrustActionDef {
   key: TrustActionKey;
   label: string;
@@ -25,14 +27,18 @@ export interface TrustActionDef {
   reasons: string[];
   /** Primary button label in the dialog. */
   submit: string;
+  /** Title of the success alert once it is recorded. */
+  recorded: string;
 }
 
 export const TRUST_ACTIONS: TrustActionDef[] = [
-  { key: 'clear', label: 'Clear', icon: 'circle-check', byTrust: true, reversible: 'yes', undo: 'Can be undone: the report can be reopened with a reason.', reasons: [...DISMISS_REASONS, 'Seller proved the items are genuine'], submit: 'Clear report' },
-  { key: 'request-info', label: 'Request info', icon: 'message-circle-question', byTrust: true, reversible: 'yes', undo: 'Nothing else changes while it is open. The request stays open until it is answered or expires.', reasons: ['Proof of authenticity needed', 'Supplier cannot be verified', 'Identity check needed', 'More detail needed from the reported party'], submit: 'Send request' },
-  { key: 'restrict-listing', label: 'Restrict listing', icon: 'eye-off', byTrust: false, reversible: 'yes', undo: 'Can be undone: Catalog can lift the restriction and the offer returns as it was.', reasons: ['Suspected counterfeit', 'Listing policy violation', 'Product safety risk', 'Misleading listing'], submit: 'Send to Catalog' },
-  { key: 'hold-payouts', label: 'Hold payouts', icon: 'wallet', byTrust: false, reversible: 'yes', undo: 'Can be undone: Finance releases the hold and the money goes out in the next payout run. A hold never takes money away.', reasons: ['Pending counterfeit review', 'Refund and chargeback exposure', 'Suspected fraud', 'Identity not verified'], submit: 'Send to Finance' },
-  { key: 'suspend', label: 'Suspend', icon: 'ban', byTrust: false, reversible: 'partly', undo: 'Only partly: a suspension can be lifted on appeal, but cancelled orders and lost search ranking are not restored.', reasons: ['Confirmed counterfeit goods', 'Repeated policy violations', 'Confirmed fraud', 'Identity could not be verified'], submit: 'Send to Seller Manager' },
+  // Resolve: the "reason" is the outcome key (RESOLVE_OUTCOMES); the dialog shows its label.
+  { key: 'resolve', label: 'Resolve', icon: 'circle-check', byTrust: true, reversible: 'yes', undo: 'Can be undone: the report can be reopened with a reason.', reasons: RESOLVE_OUTCOMES.map((o) => o.value), submit: 'Resolve report', recorded: 'Report resolved' },
+  { key: 'dismiss', label: 'Dismiss', icon: 'circle-x', byTrust: true, reversible: 'yes', undo: 'Can be undone: the report can be reopened with a reason.', reasons: DISMISS_REASONS, submit: 'Dismiss report', recorded: 'Report dismissed' },
+  { key: 'request-info', label: 'Request info', icon: 'message-circle-question', byTrust: true, reversible: 'yes', undo: 'Nothing else changes while it is open. The request stays open until it is answered or expires.', reasons: ['Proof of authenticity needed', 'Supplier cannot be verified', 'Identity check needed', 'More detail needed from the reported party'], submit: 'Send request', recorded: 'Request sent' },
+  { key: 'restrict-listing', label: 'Restrict listing', icon: 'eye-off', byTrust: false, reversible: 'yes', undo: 'Can be undone: Catalog can lift the restriction and the offer returns as it was.', reasons: ['Suspected counterfeit', 'Listing policy violation', 'Product safety risk', 'Misleading listing'], submit: 'Send to Catalog', recorded: 'Restrict listing' },
+  { key: 'hold-payouts', label: 'Hold payouts', icon: 'wallet', byTrust: false, reversible: 'yes', undo: 'Can be undone: Finance releases the hold and the money goes out in the next payout run. A hold never takes money away.', reasons: ['Pending counterfeit review', 'Refund and chargeback exposure', 'Suspected fraud', 'Identity not verified'], submit: 'Send to Finance', recorded: 'Hold payouts' },
+  { key: 'suspend', label: 'Suspend', icon: 'ban', byTrust: false, reversible: 'partly', undo: 'Only partly: a suspension can be lifted on appeal, but cancelled orders and lost search ranking are not restored.', reasons: ['Confirmed counterfeit goods', 'Repeated policy violations', 'Confirmed fraud', 'Identity could not be verified'], submit: 'Send to Seller Manager', recorded: 'Suspend' },
 ];
 
 export const actionDef = (k: TrustActionKey) => TRUST_ACTIONS.find((a) => a.key === k)!;
@@ -94,11 +100,25 @@ export function actionsFor(d: TrustReportDetail): Record<TrustActionKey, CaseAct
     const r = hasRec(d, action);
     return r ? `${r.label} (${r.state === 'completed' ? 'completed' : 'already sent to the owner'})` : undefined;
   };
-  const closedNote = { unavailable: `The report is ${d.status}. Reopen it before acting.` };
+  const closedNote = { unavailable: d.status === 'merged' ? 'The report was merged into another report; act on that one.' : `The report is ${d.status}. Reopen it before acting.` };
+  const withOwners = openWithOwners(d).length;
   return {
-    clear: closed
+    resolve: closed
       ? closedNote
-      : { what: `Close ${d.ref} with no further action`, consequence: 'The report closes and the reporter is told the outcome. Actions other teams already took stay in place until they reverse them.', owner: 'Trust and Risk', submit: 'Clear report' },
+      : {
+          what: `Close ${d.ref} with an outcome`,
+          consequence:
+            (withOwners
+              ? `${withOwners} ${withOwners === 1 ? 'recommendation is' : 'recommendations are'} still with the owner team, so the only outcome you can record now is “Referred”. `
+              : 'The report closes with the outcome you choose and the reporter is told it. ') +
+            (canResolveStatus(d.status) ? '' : 'Nobody is assigned yet: you become the assignee first. ') +
+            'Actions other teams already took stay in place until they reverse them.',
+          owner: 'Trust and Risk',
+          submit: 'Resolve report',
+        },
+    dismiss: closed
+      ? closedNote
+      : { what: `Close ${d.ref} with no action`, consequence: 'The report closes as dismissed and the reporter is told no action was taken. Use Resolve instead when action was taken.' + (withOwners ? ' Recommendations still with an owner team are not withdrawn by this: withdraw them first if they no longer apply.' : ''), owner: 'Trust and Risk', submit: 'Dismiss report' },
     'request-info': closed
       ? closedNote
       : party
@@ -133,7 +153,7 @@ export function actionsFor(d: TrustReportDetail): Record<TrustActionKey, CaseAct
 
 /**
  * The report's next step as the API states it (TrustReport.nextStep: label and detail), with the action on this
- * page that carries it out, when there is one: ask for proof, recommend an owner action, or clear the report.
+ * page that carries it out, when there is one: ask for proof, recommend an owner action, or resolve the report.
  */
 export function nextStepOf(d: TrustReportDetail, actions: Record<TrustActionKey, CaseAction>): { key: string; label: string; detail: string | null; action: TrustActionKey | null } | null {
   const n = d.nextStep;
@@ -142,7 +162,7 @@ export function nextStepOf(d: TrustReportDetail, actions: Record<TrustActionKey,
   const action =
     n.key === 'gather_evidence' ? pick('request-info')
     : n.key === 'add_recommendation' ? pick('restrict-listing', 'suspend', 'hold-payouts')
-    : n.key === 'resolve' ? 'clear'
+    : n.key === 'resolve' ? pick('resolve')
     : null;
   return { key: n.key, label: n.label, detail: n.detail ?? null, action };
 }

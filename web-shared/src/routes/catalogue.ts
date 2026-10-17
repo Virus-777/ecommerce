@@ -5,7 +5,8 @@
 export type Area = 'theme' | 'store' | 'seller' | 'admin' | 'ops';
 /** The React app that serves a screen: frontend (store), seller-center (seller) or admin-center (admin, incl. Operations). */
 export type App = 'store' | 'seller' | 'admin';
-export interface ScreenView { slug: string; name: string }
+/** noDesign: a view added after the design (built in React), so /design/check has no file to compare with. */
+export interface ScreenView { slug: string; name: string; noDesign?: boolean }
 export interface Screen {
   id: string;
   app: App;
@@ -130,7 +131,7 @@ export const SCREENS = [
   { id: 'admin/seller-application', app: 'admin', area: 'admin', group: "Sellers", title: "Seller application review", path: '/sellers/applications/:ref', sample: { ref: 'APP-2610-0031' }, file: 'admin-seller-application', views: [{ slug: '', name: "Review" }, { slug: 'request-information', name: "Request information" }, { slug: 'reject', name: "Reject" }] },
   { id: 'admin/seller', app: 'admin', area: 'admin', group: "Sellers", title: "Seller detail", path: '/sellers/:slug', sample: { slug: 'northwind-audio' }, file: 'admin-seller', views: [{ slug: '', name: "Profile" }, { slug: 'suspend-seller', name: "Suspend seller" }] },
   { id: 'admin/shipping', app: 'admin', area: 'admin', group: "Shipping", title: "Shipping settings", path: '/shipping', file: 'admin-shipping', views: [{ slug: '', name: "Settings" }, { slug: 'add-service-notice', name: "Add service notice" }] },
-  { id: 'admin/finance', app: 'admin', area: 'admin', group: "Finance", title: "Payments and fees", path: '/finance', file: 'admin-finance', views: [{ slug: '', name: "Unexplained amounts" }, { slug: 'disputes-and-chargebacks', name: "Disputes and chargebacks" }, { slug: 'refunds-failing', name: "Refunds failing" }] },
+  { id: 'admin/finance', app: 'admin', area: 'admin', group: "Finance", title: "Payments and fees", path: '/finance', file: 'admin-finance', views: [{ slug: '', name: "Unexplained amounts" }, { slug: 'disputes-and-chargebacks', name: "Disputes and chargebacks" }, { slug: 'refunds-failing', name: "Refunds failing" }, { slug: 'refunds-to-approve', name: "Refunds to approve", noDesign: true }] },
   { id: 'admin/payouts', app: 'admin', area: 'admin', group: "Finance", title: "Payout run", path: '/payouts', file: 'admin-payouts', views: [{ slug: '', name: "Run review" }, { slug: 'approve-run', name: "Approve run" }] },
   { id: 'admin/customers', app: 'admin', area: 'admin', group: "Customers and service", title: "Customers", path: '/customers', file: 'admin-customers', views: [{ slug: '', name: "List" }, { slug: 'customer-detail', name: "Customer detail" }] },
   { id: 'admin/cases', app: 'admin', area: 'admin', group: "Customers and service", title: "Cases and disputes", path: '/cases', file: 'admin-cases', views: [{ slug: '', name: "Queue" }, { slug: 'bulk-assign', name: "Bulk assign" }] },
@@ -157,7 +158,7 @@ export const SCREENS = [
   { id: 'ops/receiving', app: 'admin', area: 'ops', group: "Work queues", title: "Receiving", path: '/ops/receiving', file: 'ops-receiving', views: [{ slug: '', name: "Expected" }, { slug: 'receiving-pur-2610-0042', name: "Receiving PUR-2610-0042" }] },
   { id: 'ops/pick-pack', app: 'admin', area: 'ops', group: "Work queues", title: "Pick and pack", path: '/ops/pick-pack', file: 'ops-pick-pack', views: [{ slug: '', name: "Pick list" }, { slug: 'packing-station', name: "Packing station" }] },
   { id: 'ops/dispatch', app: 'admin', area: 'ops', group: "Work queues", title: "Dispatch and delivery exceptions", path: '/ops/dispatch', file: 'ops-dispatch', views: [{ slug: '', name: "Late dispatch" }, { slug: 'seller-cannot-fulfill', name: "Seller cannot fulfill" }, { slug: 'missing-tracking', name: "Missing tracking" }, { slug: 'lost-or-damaged', name: "Lost or damaged" }, { slug: 'delivery-failed', name: "Delivery failed" }] },
-  { id: 'ops/return-inspection', app: 'admin', area: 'ops', group: "Work queues", title: "Return inspection", path: '/ops/return-inspection', file: 'ops-return-inspection', views: [{ slug: '', name: "Queue" }, { slug: 'inspecting-rt-261005-0212', name: "Inspecting RT-261005-0212" }] },
+  { id: 'ops/return-inspection', app: 'admin', area: 'ops', group: "Work queues", title: "Return inspection", path: '/ops/return-inspection', file: 'ops-return-inspection', views: [{ slug: '', name: "Queue" }, { slug: 'inspecting-rt-261005-0212', name: "Inspecting RT-261005-0212" }, { slug: 'parcels', name: "Parcels at the dock", noDesign: true }] },
   { id: 'ops/finance-checks', app: 'admin', area: 'ops', group: "Work queues", title: "Daily finance checks", path: '/ops/finance-checks', file: 'ops-finance-checks', views: [] },
 ] as const satisfies readonly Screen[];
 

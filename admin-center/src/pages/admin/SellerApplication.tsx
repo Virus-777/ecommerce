@@ -11,14 +11,18 @@ import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, shortDate } from '@/app/parts';
 import { MessageDialog } from './data/seller-message';
 import { UUID_RE, cap, endOfDayIso, isoDay, type ApplicationAdmin, type ApplicationRow } from './data/seller';
+import { ApproveDialog, CheckResultDialog, TrustReviewDialog, type ApproveBody } from './data/seller-decisions';
+
+type Check = ApplicationAdmin['checks'][number];
 
 // Design: pages/admin/admin-seller-application.html
 // Views: "request-information" and "reject" replace the Decision card with an inline form.
 // Route /sellers/applications/:ref carries the application ref (SA-…) or id; an unknown ref (e.g. the sidebar's
 // sample link) shows the applications waiting for a decision.
 // Data: GET /api/admin/sellers/applications (q = ref; the waiting list), GET …/applications/{id} (ApplicationAdmin).
-// Writes: POST …/{id}/start-review, /assign, /request-information, /approve, /reject, /notes,
-// POST /api/admin/messaging/conversations (applicationId).
+// Writes: POST …/{id}/start-review, /assign, /request-information, /approve (after a confirm dialog with the note,
+// payout hold and condition options), /reject, /notes, /checks/{checkId}/result (manual result: offline the automated
+// provider is a dev stub), /checks/{checkId}/rerun, /trust-review, POST /api/admin/messaging/conversations (applicationId).
 
 type Need = { id: string; title: string; detail: string; neededFor: string; documentKind?: string; defaultOn: boolean };
 type TimelineEvt = { t: string; d: string; state: 'done' | 'current' | 'warn' | 'danger' };
@@ -184,6 +188,9 @@ export default function SellerApplication() {
   const [flash, setFlash] = useState<{ title: string; body: string } | null>(null);
   const [message, setMessage] = useState(false);
   const [note, setNote] = useState('');
+  const [approving, setApproving] = useState(false);
+  const [recording, setRecording] = useState<Check | null>(null);
+  const [askTrust, setAskTrust] = useState(false);
 
   const resolved = useQuery({ queryKey: ['sellers', 'applications', 'resolve', ref], queryFn: () => resolveApplication(api, ref), staleTime: Infinity });
   const id = resolved.data?.id;
@@ -254,8 +261,9 @@ export default function SellerApplication() {
     },
   });
   const approve = useMutation({
-    mutationFn: () => call(api.POST('/api/admin/sellers/applications/{id}/approve', { params: { path }, body: {} })),
+    mutationFn: (body: ApproveBody) => call(api.POST('/api/admin/sellers/applications/{id}/approve', { params: { path }, body })),
     onSuccess: (res) => {
+      setApproving(false);
       const approved = res.application.state === 'approved';
       setFlash(
         approved
@@ -269,7 +277,14 @@ export default function SellerApplication() {
     mutationFn: () => call(api.POST('/api/admin/sellers/applications/{id}/notes', { params: { path }, body: { body: note.trim() } })),
     onSuccess: () => (setNote(''), announce('Note added'), void qc.invalidateQueries({ queryKey: ['sellers', 'applications', 'detail', id] })),
   });
-  const writeError = [startReview, assign, approve].find((m) => m.isError)?.error;
+  // Run an automated check again (e.g. after the applicant uploaded a new document).
+  const rerun = useMutation({
+    mutationFn: (checkId: string) => call(api.POST('/api/admin/sellers/applications/{id}/checks/{checkId}/rerun', { params: { path: { id: id ?? '', checkId } } })),
+    onSuccess: (c) => (announce(`Check ran again: ${cap(c.result)}`), refresh()),
+  });
+  const done = (title: string, body: string) => (setFlash({ title, body }), refresh());
+  // approve errors show in its confirm dialog
+  const writeError = [startReview, assign, rerun].find((m) => m.isError)?.error;
 
   if (resolved.isSuccess && !resolved.data) return <Waiting refParam={ref} />;
   const notFound = detail.error instanceof ApiError && detail.error.status === 404;
@@ -339,6 +354,11 @@ export default function SellerApplication() {
 
   const checks = d.checks;
   const passed = checks.filter((c) => c.result === 'passed').length;
+  // "Pending" checks are still running; only failed and needs-attention ones need the reviewer.
+  const running = checks.filter((c) => c.result === 'pending').length;
+  const attention = checks.length - passed - running;
+  const checksSub = [`${passed} passed`, `${attention} need${attention === 1 ? 's' : ''} attention`, running ? `${running} running` : ''].filter(Boolean).join(' · ');
+  const canWorkChecks = canReview && !decided;
   const missingDocs = d.requiredDocuments.filter((r) => !r.uploaded);
   const canApprove = canDecide && state === 'under_review' && d.approveBlockedBy.length === 0;
   const risk = d.riskReview;
@@ -400,7 +420,8 @@ export default function SellerApplication() {
           {canDecide && (
             <>
               <label className={cx('opt-card', !canApprove && 'is-disabled')} htmlFor="aa-ap-d1">
-                <input type="radio" name="aa-ap-d" id="aa-ap-d1" disabled={!canApprove || approve.isPending} checked={false} onChange={() => approve.mutate()} />
+                {/* Opens the confirm dialog: approving on the radio itself let one mis-click approve a seller. */}
+                <input type="radio" name="aa-ap-d" id="aa-ap-d1" disabled={!canApprove || approve.isPending} checked={false} onChange={() => (approve.reset(), setApproving(true))} />
                 <span className="stack gap-1 grow">
                   <span className="small strong">Approve</span>
                   <span className="small sub">Seller can set up their store. Products still need review before they go live.</span>
@@ -516,7 +537,7 @@ export default function SellerApplication() {
         <Select id="aa-ap-ra" options={[...REAPPLY]} value={reapply} onChange={(e) => setReapply(e.target.value as Reapply)} />
       </Field>
       <Alert tone="info" title="Before you reject">
-        {`${passed} check${passed === 1 ? '' : 's'} passed and ${checks.length - passed} need${checks.length - passed === 1 ? 's' : ''} attention. Requesting information is usually the right step when documents can fix the issue.`}
+        {`${checksSub}. Requesting information is usually the right step when documents can fix the issue.`}
       </Alert>
     </Card>
   );
@@ -578,7 +599,7 @@ export default function SellerApplication() {
               <KeyValue pairs={STORE} />
             </div>
           </Card>
-          <Card title="Verification checks" sub={`${passed} passed · ${checks.length - passed} need attention`} titleAs="h3">
+          <Card title="Verification checks" sub={checksSub} titleAs="h3">
             {checks.length ? (
               checks.map((c) => {
                 const meta = CHECK_META[c.kind] ?? { icon: 'circle-check' as IconName, title: cap(c.kind) };
@@ -594,6 +615,18 @@ export default function SellerApplication() {
                       <span className="small sub">{c.summary}</span>
                       <span className="xs muted">{[c.source === 'automated' ? 'Automated check' : 'Manual check', c.checkedBy?.name ?? c.provider, c.checkedAt ? dateTime(c.checkedAt) : ''].filter(Boolean).join(' · ')}</span>
                       {c.acceptedWithNote && <span className="xs muted">{`Accepted with note: ${c.acceptedWithNote}`}</span>}
+                      {canWorkChecks && (
+                        <span className="row gap-2">
+                          <Button variant={c.result === 'passed' ? 'ghost' : 'secondary'} size="sm" onClick={() => setRecording(c)}>
+                            Record result
+                          </Button>
+                          {c.result !== 'pending' && (
+                            <Button variant="ghost" size="sm" icon="refresh-cw" disabled={rerun.isPending} onClick={() => rerun.mutate(c.id)}>
+                              Run again
+                            </Button>
+                          )}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
@@ -606,6 +639,13 @@ export default function SellerApplication() {
             title="Risk flags from Trust and Risk"
             sub={risk.reviewedBy?.name ? `${risk.reviewedBy.name}${risk.reviewedAt ? ` · reviewed ${shortDate(risk.reviewedAt)}` : ''}` : risk.state === 'requested' ? 'Review requested' : 'No Trust and Risk review needed'}
             titleAs="h3"
+            actions={
+              canWorkChecks && risk.state !== 'requested' ? (
+                <Button variant="ghost" size="sm" icon="shield-alert" onClick={() => setAskTrust(true)}>
+                  Ask Trust and Risk
+                </Button>
+              ) : undefined
+            }
           >
             {flags.length ? (
               <ul className="list">
@@ -679,6 +719,9 @@ export default function SellerApplication() {
         </div>
       </div>
       <MessageDialog open={message} onClose={() => setMessage(false)} to={owner} target={{ applicationId: app.id }} onSent={(b) => setFlash({ title: 'Message sent', body: b })} />
+      {approving && <ApproveDialog storeName={storeName} pending={approve.isPending} error={approve.error} onClose={() => setApproving(false)} onConfirm={(b) => approve.mutate(b)} />}
+      {recording && <CheckResultDialog applicationId={app.id} check={recording} title={CHECK_META[recording.kind]?.title ?? cap(recording.kind)} onClose={() => setRecording(null)} onDone={done} />}
+      {askTrust && <TrustReviewDialog applicationId={app.id} onClose={() => setAskTrust(false)} onDone={done} />}
     </AdminLayout>
   );
 }

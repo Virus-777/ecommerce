@@ -17,12 +17,15 @@ import {
   ADMIN_ORDER, CANCELLABLE, CANCEL_REASONS, FUNDED_BY, REFUND_REASONS, defaultFunding, parseMinor, sum, toInput, toTimeline, usd, withinLimit,
   type Amt, type MyLimit, type OrderAdmin, type OrderGroup, type OrderItem, type SellerLabel,
 } from './data/order';
+import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
 
 // Design: pages/admin/admin-order.html · view "issue-refund" = the refund dialog. Submitting sends one refund request
-// per seller group (POST returns/refunds); within the staff member's refund limit it is approved at once, above it the
-// response carries the approval and the page shows "sent for approval".
-// Data: GraphQL AdminOrder(ref) (partial data allowed; `history` is the order timeline), GET access/me and
-// access/approval-actions (limits), POST orders/orders/{id}/cancel-items, …/notes, POST messaging/conversations.
+// per seller group (POST returns/refunds); within the staff member's refund limit it is approved at once (above the
+// step-up threshold only after the password again: 403 STEP_UP_REQUIRED, retried with reauthToken), above the limit or
+// without refund authority it stays under review with an access approval request and the page shows "sent for approval".
+// Data: GraphQL AdminOrder(ref) (partial data allowed; `history` is the order timeline), GET access/me (my limits) and,
+// only for holders of access.roles.view, access/approval-actions (the approver names); POST orders/orders/{id}/cancel-items,
+// …/notes, POST messaging/conversations.
 
 type View = 'issue-refund';
 type Mode = 'refund' | 'cancel';
@@ -96,7 +99,16 @@ export default function Order() {
   });
   const o = q.data ?? null;
   const me = useQuery({ queryKey: ['access', 'me', accountId], queryFn: () => call(api.GET('/api/admin/access/me')) });
-  const actions = useQuery({ queryKey: ['access', 'approval-actions'], queryFn: () => call(api.GET('/api/admin/access/approval-actions')), staleTime: 10 * 60_000, enabled: view === 'issue-refund' });
+  // approval-actions needs access.roles.view, which most refund staff don't have: ask only when it will answer, and treat
+  // a refusal as "no names" (the route text falls back to my own limit's approvers).
+  const actions = useQuery({
+    queryKey: ['access', 'approval-actions'],
+    queryFn: () => call(api.GET('/api/admin/access/approval-actions')),
+    staleTime: 10 * 60_000,
+    retry: false,
+    enabled: view === 'issue-refund' && can('access.roles.view'),
+  });
+  const stepUp = useStepUp();
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ['orders'] });
@@ -164,6 +176,7 @@ export default function Order() {
 
   const refundLimits = ((me.data?.limits ?? []) as unknown as MyLimit[]).filter((l) => l.action.key === 'returns.refunds.approve');
   const refundAction = (actions.data as Array<{ key: string; approvers: string }> | undefined)?.find((a) => a.key === 'returns.refunds.approve');
+  const approverNames = refundAction?.approvers ?? refundLimits[0]?.action.approvers ?? null;
   const inLimit = withinLimit(refundLimits, refundTotal.amount);
 
   const openDialog = (m: Mode, preselect?: string[]) => {
@@ -198,26 +211,46 @@ export default function Order() {
           destination: 'original_method' as const,
           note: form.note.trim(),
         };
-        const res = await call(api.POST('/api/admin/returns/refunds', { body, params: { header: { 'Idempotency-Key': keyFor(gid) } } }));
+        // Within my limit and above the step-up threshold the API asks for the password (403 STEP_UP_REQUIRED): the
+        // retry carries reauthToken under the same Idempotency-Key (a refused try releases the key on the server).
+        const res = await stepUp.run((token) =>
+          call(api.POST('/api/admin/returns/refunds', { body: { ...body, ...reauthField(token) }, params: { header: { 'Idempotency-Key': keyFor(gid) } } })),
+        );
         results.push(res);
       }
       return results;
     },
     onSuccess: (results) => {
-      const total = sum(results.map((r) => r.breakdown?.total ?? usd(0)));
+      // The returned status decides the message: approved/processing/sent = within my limit and sent to payments;
+      // requested/under_review = waiting for an approver (above my limit, or I have no refund authority).
       const waiting = results.filter((r) => r.status === 'requested' || r.status === 'under_review');
-      const approval = (waiting[0] as unknown as { approval?: { reason?: string | null; approvers?: string[] | string | null } } | undefined)?.approval;
-      const approvers = Array.isArray(approval?.approvers) ? approval.approvers.join(' or ') : approval?.approvers;
-      const title = waiting.length ? `Refund of ${money(total)} sent to Finance for approval` : `Refund of ${money(total)} approved and sent to payments`;
-      const body = waiting.length
-        ? `${approval?.reason ?? 'Above your refund limit.'}${approvers ? ` Approver: ${approvers}.` : ''} The customer sees "Refund requested" until Finance sends it; approval is not money arrived.`
-        : `It was within your refund limit. The money goes to ${o?.payment?.methodLabel ?? 'the original payment method'}; card refunds usually arrive 3–5 business days after we send them.`;
+      const sent = results.filter((r) => !waiting.includes(r));
+      const sentTotal = sum(sent.map((r) => r.breakdown?.total ?? usd(0)));
+      const waitingTotal = sum(waiting.map((r) => r.breakdown?.total ?? usd(0)));
+      const approval = waiting.find((r) => r.approval)?.approval;
+      const approvers = approval?.approvers?.length ? approval.approvers.join(' or ') : approverNames;
+      const title =
+        waiting.length && sent.length
+          ? `Refund of ${money(sentTotal)} approved and sent; ${money(waitingTotal)} sent for approval`
+          : waiting.length
+            ? `Refund of ${money(waitingTotal)} sent for approval`
+            : `Refund of ${money(sentTotal)} approved and sent`;
+      const sentText = sent.length ? `The money goes to ${o?.payment?.methodLabel ?? 'the original payment method'}; card refunds usually arrive 3–5 business days after we send them.` : '';
+      const waitingText = waiting.length
+        ? `${approval?.reason ? `${approval.reason}.` : 'It is above your refund limit.'} ${approvers ? `${approvers} approves it` : 'An approver with a higher refund limit approves it'} in Finance › Refunds to approve or their Inbox. The customer sees "Refund requested" until it is sent; approval is not money arrived.`
+        : '';
+      const body = [waitingText, sentText].filter(Boolean).join(' ');
       setNotice({ tone: waiting.length ? 'warning' : 'success', title, body });
       announce(title);
       refresh();
       close();
     },
-    onError: (e) => setSubmitError(errorMessage(e)),
+    onError: (e) => {
+      // Closing the password prompt leaves the dialog as it was, without an error. Refresh anyway: with several sellers
+      // an earlier group's refund may already exist (its items then show as waiting, and a resubmit replays its key).
+      if (isStepUpCancel(e)) refresh();
+      else setSubmitError(errorMessage(e));
+    },
   });
 
   const submitCancel = useMutation({
@@ -869,13 +902,14 @@ export default function Order() {
               <span className="strong">Refund total</span>
               <span className="h3 num">{money(refundTotal)}</span>
             </div>
-            <SummaryRow k="Approval route" v={inLimit ? 'Within your limit · approved when you send it' : (refundAction?.approvers ?? 'Finance approval')} />
+            <SummaryRow k="Approval route" v={inLimit ? 'Within your limit · approved when you send it' : (approverNames ?? 'Finance approval')} />
             <SummaryRow k="Your refund authority" v={refundLimits.length ? refundLimits.map((l) => `${l.summary} · ${l.role.name}`).join('; ') : `None${me.data?.roles?.[0] ? ` · ${me.data.roles[0].name} role` : ''}`} />
             <span className="xs muted">The customer sees "Refund requested" until Finance sends it; approval is not money arrived.</span>
           </div>
         )}
       </Dialog>
 
+      {stepUp.dialog}
       <ContactDialog group={contact} orderId={o.id} orderRef={o.ref} onClose={() => setContact(null)} />
     </AdminLayout>
   );

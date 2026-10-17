@@ -11,18 +11,20 @@ import { Alert, Avatar, Button, Card, Deadline, Dialog, Field, Icon, KeyValue, L
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone } from '@/app/parts';
 import { exportNote, useDatasetExport } from './data/dataset-export';
+import { RefundApprovals, useRefundRequests } from './data/refund-approvals';
 import {
   PERIODS, feeRulePairs, pct, periodRange, reconEdge, refundEdge, refundWhy,
   type Dispute, type Edge, type FeeRules, type FinanceOverview, type Money, type Period, type ReconItem, type Refund,
 } from './data/finance';
 
 // Design: pages/admin/admin-finance.html · views "disputes-and-chargebacks" and "refunds-failing"
-// are the tabs of the Finance queues card.
+// are the tabs of the Finance queues card. "refunds-to-approve" has no design: the Finance approval queue for refunds
+// staff started (GET returns/refunds?status=under_review; approve / send back / revise), in data/refund-approvals.tsx.
 // Data: GET /api/admin/finance/overview (KPIs, money flow, discount funding), /finance/fee-rules, the open
 // reconciliation items (Unexplained amounts), /payments/disputes and /payments/refunds?failing=true; Export =
 // POST reports/exports (dataset finance.admin.overview for the shown range, payment-date basis; polled, then downloaded).
 
-type Tab = 'disputes-and-chargebacks' | 'refunds-failing';
+type Tab = 'disputes-and-chargebacks' | 'refunds-failing' | 'refunds-to-approve';
 
 const LEGEND_TEXT = { danger: 'Red edge = urgent: overdue or past target', warning: 'Amber edge = at risk: due soon or near target' } as const;
 
@@ -124,7 +126,7 @@ export default function Finance() {
   const qc = useQueryClient();
   const { can } = useStaffSession();
   const [view] = useView<Tab>();
-  const tab: Tab | '' = view === 'disputes-and-chargebacks' || view === 'refunds-failing' ? view : '';
+  const tab: Tab | '' = view === 'disputes-and-chargebacks' || view === 'refunds-failing' || view === 'refunds-to-approve' ? view : '';
   const [period, setPeriod] = useState<Period>('mtd');
   const [done, setDone] = useState<{ tab: Tab | ''; title: string; body: string } | null>(null);
   const [pending, setPending] = useState<Pending>(null);
@@ -140,6 +142,7 @@ export default function Finance() {
   const canDisputes = can('payments.disputes.manage');
   const canRefundsView = can('payments.refunds.view');
   const canRefundsManage = can('payments.refunds.manage');
+  const canRefundRequests = can('returns.requests.view');
 
   const overview = useQuery({
     queryKey: ['finance', 'overview', range.from, range.to],
@@ -158,6 +161,9 @@ export default function Finance() {
     queryFn: () => call(api.GET('/api/admin/payments/refunds', { params: { query: { failing: true, limit: 100 } } })),
     enabled: canRefundsView,
   });
+
+  // Only the tab count here; the tab's own table shares this query (same key).
+  const toApprove = useRefundRequests('under_review', 1, canRefundRequests);
 
   const invalidateWork = () => {
     void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
@@ -229,6 +235,7 @@ export default function Finance() {
     { label: 'Unexplained amounts', value: '', count: canRecon ? (recon.data?.total ?? reconRows.length) : undefined, to: href('admin/finance') },
     { label: 'Disputes and chargebacks', value: 'disputes-and-chargebacks', count: canDisputes ? (disputes.data?.total ?? disputeRows.length) : undefined, to: href('admin/finance', 'disputes-and-chargebacks') },
     { label: 'Refunds failing', value: 'refunds-failing', count: canRefundsView ? openRefunds : undefined, to: href('admin/finance', 'refunds-failing') },
+    { label: 'Refunds to approve', value: 'refunds-to-approve', count: canRefundRequests ? toApprove.data?.total : undefined, to: href('admin/finance', 'refunds-to-approve') },
   ];
 
   const o = overview.data;
@@ -330,6 +337,10 @@ export default function Finance() {
                 <p className="ab-note">
                   <Icon name="info" className="ic-sm" /> {rules?.treatment.text ?? 'The marketplace fee is kept while a chargeback is open and returned to the seller if we win. Final treatment is in the seller agreement.'}
                 </p>
+              ) : tab === 'refunds-to-approve' ? (
+                <p className="ab-note">
+                  <Icon name="info" className="ic-sm" /> Approving hands the refund to payments; the customer sees Sent only when the provider confirms it. Refunds above your limit go on to an approver with a higher limit.
+                </p>
               ) : tab === 'refunds-failing' ? (
                 <p className="ab-note">
                   <Icon name="info" className="ic-sm" /> A retry first asks the payment provider for the result, so a refund is never sent twice. The customer sees "Failed" with the next step, not "Sent".
@@ -370,196 +381,200 @@ export default function Finance() {
                 </Alert>
               </div>
             )}
-            <TableWrap label="Finance queues table">
-              {tab === 'disputes-and-chargebacks' ? (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Case</th>
-                      <th scope="col">Order and seller</th>
-                      <th scope="col">Customer</th>
-                      <th scope="col">Reason given</th>
-                      <th className="r" scope="col">Amount</th>
-                      <th scope="col">Evidence due</th>
-                      <th scope="col">Seller balance effect</th>
-                      <th scope="col">Status</th>
-                      <th className="col-pin" scope="col">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <QueueState cols={9} q={disputes} allowed={canDisputes} noAccess="Your role doesn’t work payment disputes." empty="No open disputes or chargebacks." />
-                    {disputeRows.map((d) => {
-                      const edge = disputeEdge(d);
-                      return (
-                        <tr key={d.id} className={edgeClass(edge)}>
-                          <td>
-                            <EdgeMark edge={edge} />
-                            {refLink(d.ref)}
-                          </td>
-                          <td>
-                            <span className="ab-cell">
-                              <span className="strong">{orderLink(d.orderRef)}</span>
-                              <span className="xs muted">{d.sellerName ?? (d.ownerType === 'official' ? 'Marketly Official' : '')}</span>
-                            </span>
-                          </td>
-                          <td>{d.customerName}</td>
-                          <td>{d.reason}</td>
-                          <td className="r">
-                            <span className="num">{formatMoney(d.amount)}</span>
-                          </td>
-                          <td>
-                            {d.evidence.submittedAt ? (
-                              <span className="xs muted">Evidence sent {date(d.evidence.submittedAt)}</span>
-                            ) : d.decidedAt ? (
-                              <span className="xs muted">
-                                {d.statusLabel} {date(d.decidedAt)}
+            {tab === 'refunds-to-approve' ? (
+              <RefundApprovals />
+            ) : (
+              <TableWrap label="Finance queues table">
+                {tab === 'disputes-and-chargebacks' ? (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Case</th>
+                        <th scope="col">Order and seller</th>
+                        <th scope="col">Customer</th>
+                        <th scope="col">Reason given</th>
+                        <th className="r" scope="col">Amount</th>
+                        <th scope="col">Evidence due</th>
+                        <th scope="col">Seller balance effect</th>
+                        <th scope="col">Status</th>
+                        <th className="col-pin" scope="col">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <QueueState cols={9} q={disputes} allowed={canDisputes} noAccess="Your role doesn’t work payment disputes." empty="No open disputes or chargebacks." />
+                      {disputeRows.map((d) => {
+                        const edge = disputeEdge(d);
+                        return (
+                          <tr key={d.id} className={edgeClass(edge)}>
+                            <td>
+                              <EdgeMark edge={edge} />
+                              {refLink(d.ref)}
+                            </td>
+                            <td>
+                              <span className="ab-cell">
+                                <span className="strong">{orderLink(d.orderRef)}</span>
+                                <span className="xs muted">{d.sellerName ?? (d.ownerType === 'official' ? 'Marketly Official' : '')}</span>
                               </span>
-                            ) : d.evidenceDue ? (
-                              <Deadline tone={deadlineTone(d.evidenceDue.state)}>{deadlineLabel(d.evidenceDue.dueAt)}</Deadline>
-                            ) : (
-                              <span className="xs muted">No deadline</span>
-                            )}
-                          </td>
-                          <td>
-                            <span className={cx('xs', d.status === 'won' ? 't-success-text strong' : 'muted')}>{d.sellerBalanceEffect}</span>
-                          </td>
-                          <td>
-                            <StatusBadge status={d.statusLabel} />
-                          </td>
-                          <td className="col-pin">
-                            {canSubmitEvidence(d) ? (
-                              <RowButton sr={d.ref} onClick={() => open({ kind: 'evidence', row: d })}>
-                                Submit evidence
-                              </RowButton>
-                            ) : (
-                              <Link className="btn btn-ghost btn-sm" to={href('admin/order', '', { ref: d.orderRef })}>
-                                <span>Open</span>
-                                <span className="sr-only"> {d.ref}</span>
-                              </Link>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              ) : tab === 'refunds-failing' ? (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Refund</th>
-                      <th scope="col">Order</th>
-                      <th scope="col">Customer</th>
-                      <th className="r" scope="col">Amount</th>
-                      <th scope="col">Why it failed</th>
-                      <th scope="col">Attempts</th>
-                      <th scope="col">Status</th>
-                      <th className="col-pin" scope="col">
-                        Next step
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <QueueState cols={8} q={refunds} allowed={canRefundsView} noAccess="Your role can’t see refunds." empty="No refunds are failing. Every refund was sent or is on its way." />
-                    {refundRows.map((r) => {
-                      const edge = refundEdge(r);
-                      const why = refundWhy(r);
-                      const actionable = r.status === 'failed' || r.outcomeUnknown;
-                      return (
-                        <tr key={r.id} className={edgeClass(edge)}>
-                          <td>
-                            <EdgeMark edge={edge} />
-                            {refLink(r.ref)}
-                          </td>
-                          <td>{orderLink(r.orderRef)}</td>
-                          <td>{r.customerName}</td>
-                          <td className="r">
-                            <span className="num">{formatMoney(r.amount)}</span>
-                          </td>
-                          <td>
-                            <span className="ab-cell">
-                              <span className="strong">{why.why}</span>
-                              <span className="xs muted">
-                                {why.detail}
-                                {r.lastAttemptAt ? ` · ${dateTime(r.lastAttemptAt)}` : ''}
+                            </td>
+                            <td>{d.customerName}</td>
+                            <td>{d.reason}</td>
+                            <td className="r">
+                              <span className="num">{formatMoney(d.amount)}</span>
+                            </td>
+                            <td>
+                              {d.evidence.submittedAt ? (
+                                <span className="xs muted">Evidence sent {date(d.evidence.submittedAt)}</span>
+                              ) : d.decidedAt ? (
+                                <span className="xs muted">
+                                  {d.statusLabel} {date(d.decidedAt)}
+                                </span>
+                              ) : d.evidenceDue ? (
+                                <Deadline tone={deadlineTone(d.evidenceDue.state)}>{deadlineLabel(d.evidenceDue.dueAt)}</Deadline>
+                              ) : (
+                                <span className="xs muted">No deadline</span>
+                              )}
+                            </td>
+                            <td>
+                              <span className={cx('xs', d.status === 'won' ? 't-success-text strong' : 'muted')}>{d.sellerBalanceEffect}</span>
+                            </td>
+                            <td>
+                              <StatusBadge status={d.statusLabel} />
+                            </td>
+                            <td className="col-pin">
+                              {canSubmitEvidence(d) ? (
+                                <RowButton sr={d.ref} onClick={() => open({ kind: 'evidence', row: d })}>
+                                  Submit evidence
+                                </RowButton>
+                              ) : (
+                                <Link className="btn btn-ghost btn-sm" to={href('admin/order', '', { ref: d.orderRef })}>
+                                  <span>Open</span>
+                                  <span className="sr-only"> {d.ref}</span>
+                                </Link>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : tab === 'refunds-failing' ? (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Refund</th>
+                        <th scope="col">Order</th>
+                        <th scope="col">Customer</th>
+                        <th className="r" scope="col">Amount</th>
+                        <th scope="col">Why it failed</th>
+                        <th scope="col">Attempts</th>
+                        <th scope="col">Status</th>
+                        <th className="col-pin" scope="col">
+                          Next step
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <QueueState cols={8} q={refunds} allowed={canRefundsView} noAccess="Your role can’t see refunds." empty="No refunds are failing. Every refund was sent or is on its way." />
+                      {refundRows.map((r) => {
+                        const edge = refundEdge(r);
+                        const why = refundWhy(r);
+                        const actionable = r.status === 'failed' || r.outcomeUnknown;
+                        return (
+                          <tr key={r.id} className={edgeClass(edge)}>
+                            <td>
+                              <EdgeMark edge={edge} />
+                              {refLink(r.ref)}
+                            </td>
+                            <td>{orderLink(r.orderRef)}</td>
+                            <td>{r.customerName}</td>
+                            <td className="r">
+                              <span className="num">{formatMoney(r.amount)}</span>
+                            </td>
+                            <td>
+                              <span className="ab-cell">
+                                <span className="strong">{why.why}</span>
+                                <span className="xs muted">
+                                  {why.detail}
+                                  {r.lastAttemptAt ? ` · ${dateTime(r.lastAttemptAt)}` : ''}
+                                </span>
                               </span>
-                            </span>
-                          </td>
-                          <td>
-                            {r.attempts} of {r.maxAttempts}
-                          </td>
-                          <td>
-                            <StatusBadge status={r.statusLabel} />
-                          </td>
-                          <td className="col-pin">
-                            {!actionable ? (
-                              <span className="xs muted">{r.status === 'sent' ? 'No retry needed' : 'Request sent'}</span>
-                            ) : !canRefundsManage ? (
-                              <span className="xs muted">Finance handles this</span>
-                            ) : r.outcomeUnknown ? (
-                              <RowButton icon="refresh-cw" sr={r.ref} disabled={refundAction.isPending} onClick={() => refundAction.mutate(r)}>
-                                Check status
+                            </td>
+                            <td>
+                              {r.attempts} of {r.maxAttempts}
+                            </td>
+                            <td>
+                              <StatusBadge status={r.statusLabel} />
+                            </td>
+                            <td className="col-pin">
+                              {!actionable ? (
+                                <span className="xs muted">{r.status === 'sent' ? 'No retry needed' : 'Request sent'}</span>
+                              ) : !canRefundsManage ? (
+                                <span className="xs muted">Finance handles this</span>
+                              ) : r.outcomeUnknown ? (
+                                <RowButton icon="refresh-cw" sr={r.ref} disabled={refundAction.isPending} onClick={() => refundAction.mutate(r)}>
+                                  Check status
+                                </RowButton>
+                              ) : (
+                                <RowButton disabled={refundAction.isPending} onClick={() => refundAction.mutate(r)}>
+                                  Ask customer for a new method
+                                </RowButton>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Reference</th>
+                        <th scope="col">What we found</th>
+                        <th className="r" scope="col">Difference</th>
+                        <th scope="col">Detected</th>
+                        <th scope="col">Owner</th>
+                        <th className="col-pin" scope="col">
+                          Next step
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <QueueState cols={6} q={recon} allowed={canRecon} noAccess="Your role doesn’t work finance checks." empty="No unexplained amounts. Every difference has a recorded reason." />
+                      {reconRows.map((u) => {
+                        const edge = reconEdge(u);
+                        const ref = u.reference?.ref ?? u.subject;
+                        return (
+                          <tr key={u.id} className={edgeClass(edge)}>
+                            <td>
+                              <EdgeMark edge={edge} />
+                              {u.reference?.kind === 'order' && u.reference.ref ? orderLink(u.reference.ref) : refLink(ref)}
+                            </td>
+                            <td>
+                              <span className="ab-cell">
+                                <span className="strong">{u.subject}</span>
+                                <span className="xs muted">{u.description}</span>
+                              </span>
+                            </td>
+                            <td className="r">{neg(u.difference) ? <span className="t-danger-text strong num">−{formatMoney({ ...u.difference, amount: -u.difference.amount })}</span> : <span className="num strong">{formatMoney(u.difference)}</span>}</td>
+                            <td>{dateTime(u.detectedAt)}</td>
+                            <td>{u.owner?.name ? <PersonCell name={u.owner.name} role={u.ownerRole} /> : <span className="xs t-warning-text strong">Unassigned</span>}</td>
+                            <td className="col-pin">
+                              <RowButton sr={ref} onClick={() => open({ kind: 'resolve', row: u })}>
+                                Explain with reason
                               </RowButton>
-                            ) : (
-                              <RowButton disabled={refundAction.isPending} onClick={() => refundAction.mutate(r)}>
-                                Ask customer for a new method
-                              </RowButton>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              ) : (
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Reference</th>
-                      <th scope="col">What we found</th>
-                      <th className="r" scope="col">Difference</th>
-                      <th scope="col">Detected</th>
-                      <th scope="col">Owner</th>
-                      <th className="col-pin" scope="col">
-                        Next step
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <QueueState cols={6} q={recon} allowed={canRecon} noAccess="Your role doesn’t work finance checks." empty="No unexplained amounts. Every difference has a recorded reason." />
-                    {reconRows.map((u) => {
-                      const edge = reconEdge(u);
-                      const ref = u.reference?.ref ?? u.subject;
-                      return (
-                        <tr key={u.id} className={edgeClass(edge)}>
-                          <td>
-                            <EdgeMark edge={edge} />
-                            {u.reference?.kind === 'order' && u.reference.ref ? orderLink(u.reference.ref) : refLink(ref)}
-                          </td>
-                          <td>
-                            <span className="ab-cell">
-                              <span className="strong">{u.subject}</span>
-                              <span className="xs muted">{u.description}</span>
-                            </span>
-                          </td>
-                          <td className="r">{neg(u.difference) ? <span className="t-danger-text strong num">−{formatMoney({ ...u.difference, amount: -u.difference.amount })}</span> : <span className="num strong">{formatMoney(u.difference)}</span>}</td>
-                          <td>{dateTime(u.detectedAt)}</td>
-                          <td>{u.owner?.name ? <PersonCell name={u.owner.name} role={u.ownerRole} /> : <span className="xs t-warning-text strong">Unassigned</span>}</td>
-                          <td className="col-pin">
-                            <RowButton sr={ref} onClick={() => open({ kind: 'resolve', row: u })}>
-                              Explain with reason
-                            </RowButton>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </TableWrap>
-            <EdgeLegend items={tab === 'disputes-and-chargebacks' ? ['warning'] : ['danger', 'warning']} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </TableWrap>
+            )}
+            {tab !== 'refunds-to-approve' && <EdgeLegend items={tab === 'disputes-and-chargebacks' ? ['warning'] : ['danger', 'warning']} />}
           </Card>
 
           {canLedger && (

@@ -4,23 +4,30 @@ import { Link } from 'react-router';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Badge, Button, Card, Deadline, Dialog, EmptyState, Field, Icon, PageHeader, Select, Stat, StatusBadge, TableWrap, Tabs, Textarea, announce } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Badge, Button, Card, Deadline, Dialog, EmptyState, Field, Icon, PageHeader, Pager, Select, Stat, StatusBadge, TableWrap, Tabs, Textarea, announce } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, deadlineTone, shortDate } from '@/app/parts';
 import {
-  APPEAL_STATUS, DISMISS_REASONS, REC_STATE, REPORT_TYPES, STATUS_LABEL, TRUST_KPIS, evidenceTone, isTabType, linkedRecords, ownerLabel, reportMeta, reporterOutcomeFor, typeOf,
+  APPEAL_STATUS, DISMISS_REASONS, REPORT_TYPES, STATUS_LABEL, TRUST_KPIS, evidenceTone, isTabType, linkedRecords, reportMeta, reporterOutcomeFor, typeOf,
   type EvidenceTone, type ReportRow, type ReportType, type TrustAppeal, type TrustReportDetail,
 } from './data/trust';
+import { AppealActions } from './TrustAppealActions';
+import { OwnerRecommendations, RecommendationItem, useOwnerRecommendations, type Done } from './TrustRecommendations';
 
 // Design: pages/admin/admin-trust.html (single view). Tabs filter the report list; "Dismiss with
 // reason" opens a dialog that needs a reason before the report leaves the queue. "Open report" and the
 // report ID open the report detail (admin/trust-report).
-// Data: GET /api/admin/trust/overview (KPIs), /reports (queue, highest risk first), /reports/{id} for each
-// card's evidence and routed recommendations, /appeals; POST /reports/{id}/dismiss, /reports/exports.
+// Data: GET /api/admin/trust/overview (KPIs), /reports?status=active (queue, highest risk first, a page at a time,
+// filtered by type on the server), /reports/{id} for each card's evidence and routed recommendations, /appeals;
+// POST /reports/{id}/dismiss, /reports/exports. Decisions (review §2a #7): the "Recommendations" tab lists what
+// Trust routed to the caller's teams (GET /recommendations) to accept or decline; recommendation rows on the cards
+// can be decided, sent or withdrawn in place; appeals get a reviewer and a decision (TrustAppealActions).
+// Owner teams (Catalog, Seller Manager, Support, Finance…) usually lack trust.reports.view: they land on the
+// Recommendations tab and the report queue is not fetched for them.
 
-type TabKey = 'all' | ReportType | 'appeals';
+type TabKey = 'all' | ReportType | 'appeals' | 'recommendations';
 
-const OPEN = new Set(['open', 'under_review', 'escalated']);
+const PAGE_SIZE = 20;
 
 const EVIDENCE: Record<EvidenceTone, { icon: 'circle-x' | 'triangle-alert' | 'info' | 'circle-check'; sr?: string }> = {
   fail: { icon: 'circle-x', sr: 'Failed: ' },
@@ -29,7 +36,7 @@ const EVIDENCE: Record<EvidenceTone, { icon: 'circle-x' | 'triangle-alert' | 'in
   ok: { icon: 'circle-check', sr: 'Passed: ' },
 };
 
-function ReportCard({ r, detail, first, onDismiss }: { r: ReportRow; detail?: TrustReportDetail; first: boolean; onDismiss?: () => void }) {
+function ReportCard({ r, detail, first, onDismiss, onDone }: { r: ReportRow; detail?: TrustReportDetail; first: boolean; onDismiss?: () => void; onDone: (d: Done) => void }) {
   const H = first ? 'h2' : 'h3';
   const type = typeOf(r.type);
   const level = r.riskLevel === 'high' ? 'high' : 'med';
@@ -103,19 +110,9 @@ function ReportCard({ r, detail, first, onDismiss }: { r: ReportRow; detail?: Tr
           {detail ? (
             detail.recommendations.length ? (
               <ul className="ab-route">
-                {detail.recommendations.map((a) => {
-                  const st = REC_STATE[a.state] ?? { label: a.state, tone: '' };
-                  return (
-                    <li key={a.id}>
-                      <span className="stack gap-0">
-                        <span className="small strong">{a.label}</span>
-                        <span className="xs muted">{ownerLabel(a)}</span>
-                      </span>
-                      <Badge tone={st.tone}>{st.label}</Badge>
-                      {a.decisionReason && <span className="xs sub">Reason recorded: {a.decisionReason}</span>}
-                    </li>
-                  );
-                })}
+                {detail.recommendations.map((a) => (
+                  <RecommendationItem key={a.id} r={a} onDone={onDone} />
+                ))}
               </ul>
             ) : (
               <span className="xs muted">No actions recommended yet. Open the report to recommend one.</span>
@@ -129,7 +126,7 @@ function ReportCard({ r, detail, first, onDismiss }: { r: ReportRow; detail?: Tr
   );
 }
 
-function AppealsCard({ appeals, H }: { appeals: TrustAppeal[]; H: 'h2' | 'h3' }) {
+function AppealsCard({ appeals, H, onDone }: { appeals: TrustAppeal[]; H: 'h2' | 'h3'; onDone: (d: Done) => void }) {
   return (
     <section className="card">
       <div className="card-head">
@@ -150,6 +147,9 @@ function AppealsCard({ appeals, H }: { appeals: TrustAppeal[]; H: 'h2' | 'h3' })
                 <th scope="col">Reviewer</th>
                 <th scope="col">Decide by</th>
                 <th scope="col">Status</th>
+                <th className="col-pin" scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -190,6 +190,9 @@ function AppealsCard({ appeals, H }: { appeals: TrustAppeal[]; H: 'h2' | 'h3' })
                     <td>
                       <StatusBadge status={APPEAL_STATUS[a.state] ?? a.state} />
                     </td>
+                    <td className="col-pin">
+                      <AppealActions a={a} onDone={onDone} />
+                    </td>
                   </tr>
                 );
               })}
@@ -214,22 +217,40 @@ export default function Trust() {
   const { api } = useApi();
   const qc = useQueryClient();
   const { can } = useStaffSession();
+  const canView = can('trust.reports.view');
   const canDecide = can('trust.reports.decide');
   const canExport = can('trust.reports.export');
+  const canOwner = can('trust.recommendations.decide');
 
-  const [tab, setTab] = useState<TabKey>('all');
+  // Owner teams without the trust queue start on their recommendations.
+  const [tab, setTabState] = useState<TabKey>(!canView && canOwner ? 'recommendations' : 'all');
+  const [page, setPage] = useState(1);
+  const setTab = (t: TabKey) => {
+    setTabState(t);
+    setPage(1);
+  };
   const [dismissing, setDismissing] = useState<ReportRow | null>(null);
   const [reason, setReason] = useState('');
   const [details, setDetails] = useState('');
   const [attempted, setAttempted] = useState(false);
-  const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
+  const [notice, setNotice] = useState<Done | null>(null);
 
-  const overview = useQuery({ queryKey: ['trust', 'overview'], queryFn: () => call(api.GET('/api/admin/trust/overview')) });
-  const reports = useQuery({ queryKey: ['trust', 'reports', 'queue'], queryFn: () => call(api.GET('/api/admin/trust/reports', { params: { query: { limit: 100 } } })) });
-  const appeals = useQuery({ queryKey: ['trust', 'appeals'], queryFn: () => call(api.GET('/api/admin/trust/appeals', { params: { query: { limit: 50 } } })) });
+  const reportTab = isTabType(tab) || tab === 'all';
+  const overview = useQuery({ queryKey: ['trust', 'overview'], enabled: canView, queryFn: () => call(api.GET('/api/admin/trust/overview')) });
+  // A12: the server filters to active reports (open, under review, escalated) and by type, a page at a time, so
+  // closed reports never take the slots of open ones.
+  const reports = useQuery({
+    queryKey: ['trust', 'reports', 'queue', isTabType(tab) ? tab : 'all', page],
+    enabled: canView && reportTab,
+    queryFn: () => call(api.GET('/api/admin/trust/reports', { params: { query: { status: 'active', ...(isTabType(tab) ? { type: tab } : {}), sort: 'risk', page, limit: PAGE_SIZE } } })),
+  });
+  const appeals = useQuery({ queryKey: ['trust', 'appeals'], enabled: canView, queryFn: () => call(api.GET('/api/admin/trust/appeals', { params: { query: { limit: 50 } } })) });
+  // Shares its cache with the Recommendations view's first page, so the tab count and the list agree.
+  const ownerRecs = useOwnerRecommendations('sent_to_owner', 1, canOwner);
 
-  const rows = (reports.data?.items ?? []).filter((r) => OPEN.has(r.status));
-  const visible = tab === 'appeals' ? [] : rows.filter((r) => tab === 'all' || r.type === tab);
+  const rows = reports.data?.items ?? [];
+  const totalPages = reports.data?.totalPages ?? 1;
+  const visible = reportTab ? rows : [];
   const details$ = useQueries({
     queries: visible.map((r) => ({ queryKey: ['trust', 'report', r.id], queryFn: () => call(api.GET('/api/admin/trust/reports/{id}', { params: { path: { id: r.id } } })) })),
   });
@@ -237,7 +258,8 @@ export default function Trust() {
   const ov = overview.data;
   const appealRows = appeals.data?.items ?? [];
   const openAppeals = ov?.appealsWaiting ?? appealRows.filter((a) => a.state === 'open' || a.state === 'under_review').length;
-  const countOf = (k: TabKey): number => (k === 'all' ? (ov?.open ?? rows.length) : k === 'appeals' ? openAppeals : (ov?.byType?.[k] ?? rows.filter((r) => r.type === k).length));
+  const countOf = (k: TabKey): number =>
+    k === 'all' ? (ov?.open ?? 0) : k === 'appeals' ? openAppeals : k === 'recommendations' ? (ownerRecs.data?.total ?? ownerRecs.data?.items.length ?? 0) : (ov?.byType?.[k] ?? 0);
   const noteOf = (k: (typeof TRUST_KPIS)[number]) => {
     if (!ov) return k.note;
     if (k.source === 'all') return `${ov.highRisk} high risk`;
@@ -246,11 +268,16 @@ export default function Trust() {
   };
 
   const tabs: Array<{ label: string; value: TabKey; count: number }> = [
-    { label: 'All open', value: 'all', count: countOf('all') },
-    ...(Object.keys(REPORT_TYPES) as ReportType[]).map((k) => ({ label: REPORT_TYPES[k].label, value: k, count: countOf(k) })),
-    { label: 'Appeals', value: 'appeals', count: countOf('appeals') },
+    ...(canView
+      ? [
+          { label: 'All open', value: 'all' as TabKey, count: countOf('all') },
+          ...(Object.keys(REPORT_TYPES) as ReportType[]).map((k) => ({ label: REPORT_TYPES[k].label, value: k as TabKey, count: countOf(k) })),
+          { label: 'Appeals', value: 'appeals' as TabKey, count: countOf('appeals') },
+        ]
+      : []),
+    ...(canOwner ? [{ label: 'Recommendations', value: 'recommendations' as TabKey, count: countOf('recommendations') }] : []),
   ];
-  const showAppeals = tab === 'all' || tab === 'appeals';
+  const showAppeals = canView && (tab === 'all' || tab === 'appeals');
 
   const dismissM = useMutation({
     mutationFn: (v: { r: ReportRow; reason: string; details: string }) =>
@@ -302,13 +329,15 @@ export default function Trust() {
           ) : undefined
         }
       />
-      <div className="ab-kpis k6">
-        {TRUST_KPIS.map((k) => (
-          <div key={k.label} className="card pad">
-            {ov ? <Stat icon={k.icon} label={k.label} value={countOf(k.source)} note={noteOf(k)} /> : <SkeletonLines rows={1} />}
-          </div>
-        ))}
-      </div>
+      {canView && (
+        <div className="ab-kpis k6">
+          {TRUST_KPIS.map((k) => (
+            <div key={k.label} className="card pad">
+              {ov ? <Stat icon={k.icon} label={k.label} value={countOf(k.source)} note={noteOf(k)} /> : <SkeletonLines rows={1} />}
+            </div>
+          ))}
+        </div>
+      )}
       {overview.isError && <LoadError error={overview.error} onRetry={() => void overview.refetch()} />}
       {exportM.isError && (
         <Alert tone="danger" title="The export didn’t start">
@@ -320,23 +349,27 @@ export default function Trust() {
           {notice.text}
         </Alert>
       )}
-      {!canDecide && <p className="ab-note">You can view reports. Dismissing and deciding need the Trust and Risk decide permission.</p>}
-      <Tabs items={tabs} active={tab} onChange={setTab} />
+      {canView && !canDecide && <p className="ab-note">You can view reports. Dismissing and deciding need the Trust and Risk decide permission.</p>}
+      {!canView && !canOwner && <p className="ab-note">Your role can’t see the trust queue or decide recommendations.</p>}
+      {tabs.length > 0 && <Tabs items={tabs} active={tab} onChange={setTab} />}
 
-      {reports.isPending && tab !== 'appeals' && (
+      {tab === 'recommendations' && canOwner && <OwnerRecommendations onDone={setNotice} />}
+
+      {canView && reportTab && reports.isPending && (
         <Card pad>
           <SkeletonLines rows={4} />
         </Card>
       )}
-      {reports.isError && <LoadError error={reports.error} onRetry={() => void reports.refetch()} />}
+      {reportTab && reports.isError && <LoadError error={reports.error} onRetry={() => void reports.refetch()} />}
 
       {visible.map((r, i) => (
-        <ReportCard key={r.id} r={r} detail={details$[i]?.data} first={i === 0} onDismiss={canDecide ? () => openDismiss(r) : undefined} />
+        <ReportCard key={r.id} r={r} detail={details$[i]?.data} first={i === 0} onDismiss={canDecide ? () => openDismiss(r) : undefined} onDone={setNotice} />
       ))}
-      {reports.isSuccess && tab !== 'appeals' && visible.length === 0 && (
+      {reportTab && totalPages > 1 && <Pager page={page} total={totalPages} onPage={setPage} />}
+      {reportTab && reports.isSuccess && visible.length === 0 && (
         <Card pad>
           <EmptyState icon="shield-check" title="No open reports here" as="h2">
-            {tab === 'all' ? 'New reports appear here as soon as they are filed or detected.' : `New ${REPORT_TYPES[tab].label.toLowerCase()} reports appear here as soon as they are filed or detected.`}
+            {isTabType(tab) ? `New ${REPORT_TYPES[tab].label.toLowerCase()} reports appear here as soon as they are filed or detected.` : 'New reports appear here as soon as they are filed or detected.'}
           </EmptyState>
         </Card>
       )}
@@ -349,7 +382,7 @@ export default function Trust() {
         ) : appeals.isError ? (
           <LoadError error={appeals.error} onRetry={() => void appeals.refetch()} title="We couldn’t load the appeals" />
         ) : (
-          <AppealsCard appeals={appealRows} H={H} />
+          <AppealsCard appeals={appealRows} H={H} onDone={setNotice} />
         ))}
 
       <Dialog

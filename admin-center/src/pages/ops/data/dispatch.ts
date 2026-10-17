@@ -81,3 +81,12 @@ export const CLAIM_STATUS: Record<string, string> = {
   rejected: 'Rejected',
   withdrawn: 'Withdrawn',
 };
+
+/** The seller's answer to an exception (shipping.SellerResponse.action) as staff read it. */
+export const SELLER_RESPONSE: Record<string, string> = {
+  tracking_provided: 'Tracking provided',
+  will_ship_by: 'Will ship by',
+  cannot_fulfill: 'Cannot fulfill',
+  replacement_sent: 'Replacement sent',
+  other: 'Replied',
+};

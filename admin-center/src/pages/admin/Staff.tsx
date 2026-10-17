@@ -13,10 +13,14 @@ import {
   type AwayPeriod, type Coverage, type LimitChange, type LimitDraft, type Role, type RoleDetail, type StaffMember,
 } from './data/staff';
 import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
+import { StaffInvitations } from './data/staff-invitations';
+import { StaffMemberDrawer } from './data/staff-member-drawer';
 
 // Design: pages/admin/admin-staff.html · view "edit-role" = full-page role editor (?view=edit-role&role=<role id>;
 // without a role it opens the Finance Manager, the design's example).
 // Data: access roles, members, coverage, away periods, role detail; invitations and permission changes are confirmed with the password (reauth).
+// A member row opens the member drawer (data/staff-member-drawer.tsx: roles, account status, disable, lock, sign out…);
+// Staff members › Invited lists the identity invitations with Resend and Cancel (data/staff-invitations.tsx).
 
 type StaffFilter = 'all' | 'active' | 'invited';
 interface Invite { name: string; email: string; roleId: string; managerId: string; reason: string; requestLimits: boolean }
@@ -85,6 +89,10 @@ export default function Staff() {
 
   const [q, setQ] = useState('');
   const [filter, setFilter] = useState<StaffFilter>('all');
+  /** The member whose drawer is open. */
+  const [memberId, setMemberId] = useState<string | null>(null);
+  // Invitations come from identity (Resend, Cancel); without that permission "Invited" filters the member list.
+  const canInvitations = me.can('identity.staff-accounts.manage');
   const [notice, setNotice] = useState<{ title: string; text: string } | null>(null);
   const flash = (title: string, text: string) => {
     setNotice({ title, text });
@@ -580,7 +588,9 @@ export default function Staff() {
               />
             }
           >
-            {membersQ.isError ? (
+            {filter === 'invited' && canInvitations ? (
+              <StaffInvitations onDone={flash} />
+            ) : membersQ.isError ? (
               <LoadError error={membersQ.error} onRetry={() => void membersQ.refetch()} />
             ) : (
               <>
@@ -612,7 +622,9 @@ export default function Staff() {
                                 <span className="ac-who">
                                   <Avatar name={s.account.displayName} className="ac-av" />
                                   <span className="stack gap-0">
-                                    <span className="small strong">{s.account.displayName}</span>
+                                    <button type="button" className="btn btn-link small strong" onClick={() => setMemberId(s.account.id)}>
+                                      {s.account.displayName}
+                                    </button>
                                     <span className="xs muted">{s.account.email}</span>
                                   </span>
                                 </span>
@@ -646,7 +658,9 @@ export default function Staff() {
                   {shownStaff.map((s) => (
                     <div className="ac-mi" key={s.account.id}>
                       <div className="row between gap-2 nowrap top">
-                        <span className="small strong min-w-0">{s.account.displayName}</span>
+                        <button type="button" className="btn btn-link small strong min-w-0" onClick={() => setMemberId(s.account.id)}>
+                          {s.account.displayName}
+                        </button>
                         <StatusBadge status={MEMBER_STATUS[s.status]} />
                       </div>
                       {s.status === 'invited' ? (
@@ -692,7 +706,7 @@ export default function Staff() {
               <Field label="Work email" error={inviteErr.email ?? inviteFieldErr.email}>
                 <TextInput id="st-email" type="email" placeholder="name@marketly.example" value={invite.email} onChange={(e) => setInv('email', e.target.value)} />
               </Field>
-              <Field label="Role" hint="You can add more roles after they accept." error={inviteErr.role}>
+              <Field label="Role" hint="Add more roles from their name under Staff members." error={inviteErr.role}>
                 <Select id="st-role" options={roleOptions} value={invite.roleId} onChange={(e) => setInv('roleId', e.target.value)} />
               </Field>
               <Field label="Reports to">
@@ -796,6 +810,7 @@ export default function Staff() {
           <Textarea id="st-nr-reason" value={newRole.reason} onChange={(e) => setNewRole((r) => ({ ...r, reason: e.target.value }))} />
         </Field>
       </Dialog>
+      <StaffMemberDrawer accountId={memberId} member={members.find((x) => x.account.id === memberId)} roles={roles} onClose={() => setMemberId(null)} onDone={flash} />
       {stepUp.dialog}
     </AdminLayout>
   );

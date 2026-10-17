@@ -1,5 +1,5 @@
 import createClient, { type Client } from 'openapi-fetch';
-import { ApiError, apiErrorFrom, isTokenProblem, toApiError } from './errors';
+import { ApiError, apiErrorFrom, isTokenProblem, reasonOf, toApiError, type ErrorBody } from './errors';
 import type { paths } from './openapi';
 import type { Session } from './session';
 
@@ -20,20 +20,36 @@ export function createApi(session: Session, baseUrl = ''): Api {
       r.headers.set('X-Client', 'web');
       return fetch(r);
     };
+    const bodyOf = async (r: Response): Promise<unknown> => {
+      try {
+        return await r.clone().json();
+      } catch {
+        return undefined;
+      }
+    };
     const retry = input.clone();
     let res = await send(input, await session.token());
     if (res.status === 401) {
-      let body: unknown;
-      try {
-        body = await res.clone().json();
-      } catch {
-        /* empty */
+      let body = await bodyOf(res);
+      if (isTokenProblem(401, body)) {
+        res = await send(retry, await session.refresh());
+        body = res.status === 401 ? await bodyOf(res) : undefined;
       }
-      if (isTokenProblem(401, body)) res = await send(retry, await session.refresh());
+      endIfUnauthorized(session, res.status, body);
     }
     return res;
   };
   return createClient<paths>({ baseUrl, fetch: authFetch });
+}
+
+/**
+ * Call after the last try of any API request (REST, GraphQL, uploads). Still refused by the auth middleware (code
+ * UNAUTHORIZED; not a wrong password, which is INVALID_CREDENTIALS) for a reason a refresh can't fix (session_idle,
+ * or token_* again after refreshing): the session decides whether that ends it (the Admin Center goes to its
+ * sign-in; the other apps carry on).
+ */
+export function endIfUnauthorized(session: Session, status: number, body: unknown): void {
+  if (status === 401 && (body as ErrorBody | undefined)?.error?.code === 'UNAUTHORIZED') session.unauthorized(reasonOf(body));
 }
 
 /**

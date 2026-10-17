@@ -137,7 +137,11 @@ export interface ReturnCase {
     timeline?: Array<{ at: string; label: string; detail?: string | null }>;
     allowedActions?: string[];
     requestedAt: string;
+    /** Replacement or exchange shipped instead of a refund (cancellable while pending or reserved). */
+    replacement?: { id: string; kind: 'replacement' | 'exchange'; status: string; title?: string | null } | null;
   };
+  /** Seller and staff wording of the status (detail.statusLabel is the customer's). */
+  statusLabel?: string;
   customer: { displayName: string; city?: string | null } | null;
   payment: { itemPaid: Money; discountShare?: Money | null; maxRefundable: Money; refundedSoFar: Money; methodLabel?: string | null } | null;
   policyApplied?: { windowDays?: number | null } | null;

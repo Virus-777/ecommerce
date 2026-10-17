@@ -1,7 +1,7 @@
 // Types and helpers for the admin order 360 (design: pages/admin/admin-order.html and admin-order--issue-refund.html).
 // Data: GraphQL AdminOrder (orderAdmin(ref), partial data allowed; `history` is the order timeline, `auditTrail`
-// only audited staff actions), GET access/me + access/approval-actions
-// (refund approval limits), POST returns/refunds (one request per seller group), POST orders/orders/{id}/cancel-items,
+// only audited staff actions), GET access/me (my refund approval limits; access/approval-actions only for holders of
+// access.roles.view), POST returns/refunds (one request per seller group), POST orders/orders/{id}/cancel-items,
 // POST orders/orders/{id}/notes, POST messaging/conversations (Contact seller).
 import ADMIN_ORDER from '@marketly/web-shared/api/graphql/admin/AdminOrder.graphql?raw';
 import type { TimelineEvent } from '@marketly/web-shared/ui';

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { endIfUnauthorized } from './client';
 import { ApiError, toApiError } from './errors';
 import { useApi } from './provider';
 import type { Session } from './session';
@@ -88,6 +89,7 @@ async function fetchSpec(session: Session): Promise<ProductImageSpec> {
   const get = (token: string) => fetch(`/api/${session.audience}/media/image-specs`, { headers: { Authorization: `Bearer ${token}`, 'X-Client': 'web' } });
   let res = await get(await session.token());
   if (res.status === 401) res = await get(await session.refresh());
+  if (res.status === 401) endIfUnauthorized(session, 401, await res.clone().json().catch(() => undefined));
   // Not served yet (backend not updated): use the defaults.
   if (res.status === 404 || res.status === 405 || res.status === 501) return DEFAULT_PRODUCT_IMAGE_SPEC;
   if (!res.ok) throw await toApiError(res);

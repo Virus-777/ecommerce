@@ -26,9 +26,11 @@ export class ApiError extends Error {
   }
 }
 
+/** `details.reason` of an error envelope ('' when there is none), e.g. token_expired, session_idle. */
+export const reasonOf = (body: unknown): string => String((body as ErrorBody | undefined)?.error?.details?.reason ?? '');
+
 /** 401 whose reason starts with `token_`: the only case where the client refreshes and retries. */
-export const isTokenProblem = (status: number, body: unknown): boolean =>
-  status === 401 && String((body as ErrorBody | undefined)?.error?.details?.reason ?? '').startsWith('token_');
+export const isTokenProblem = (status: number, body: unknown): boolean => status === 401 && reasonOf(body).startsWith('token_');
 
 export async function toApiError(res: Response): Promise<ApiError> {
   let body: unknown;

@@ -13,8 +13,12 @@ import { useStaffSession } from '@/app/session';
 import { LoadError, SkeletonLines, date, dateTime, deadlineLabel, deadlineTone, monthYear, shortDate } from '@/app/parts';
 import { MessageDialog } from './data/seller-message';
 import {
+  AddRestrictionDialog, AppealDecideDialog, LAUNCH_STATE, LaunchReviewDialog, LiftRestrictionDialog, ReinstateDialog, ResolveWarningDialog, WarningDialog,
+  useAssignAppeal, useSellerRefresh, type SellerWarning,
+} from './data/seller-decisions';
+import {
   CLOSED_GROUP, CLOSED_RETURN, cap, initialsOf, isoDay, statusLabel, tintOf,
-  type AdminSellerGql, type Obligations, type Owner, type Payouts, type Restriction, type SellerDetail,
+  type AdminSellerGql, type Appeal, type Obligations, type Owner, type Payouts, type Restriction, type SellerDetail,
 } from './data/seller';
 
 // Design: pages/admin/admin-seller.html · view "suspend-seller" = the suspend dialog.
@@ -24,7 +28,8 @@ import {
 // orders, returns and cases; approvals waiting on the seller), GET …/{id}/suspension-impact and
 // POST /api/admin/access/authority-checks (sellers.sellers.suspend: the eligible second reviewers).
 // Writes: POST …/{id}/suspend (always a second reviewer), PATCH /api/admin/sellers/restrictions/{id},
-// POST …/{id}/notes, POST /api/admin/messaging/conversations.
+// POST …/{id}/notes, POST /api/admin/messaging/conversations; and, through data/seller-decisions: reinstate,
+// add/lift a restriction, send/resolve a warning, decide the launch review, assign/decide an appeal.
 
 type ObKind = 'orders' | 'returns' | 'cases';
 type Tone = 'success' | 'warning' | 'danger';
@@ -133,6 +138,14 @@ export default function Seller() {
   const [note, setNote] = useState('');
   const [message, setMessage] = useState(false);
   const [editing, setEditing] = useState<Restriction | null>(null);
+  // The decision dialog that is open (each one is a small component in data/seller-decisions).
+  const [dialog, setDialog] = useState<
+    | { kind: 'reinstate' | 'restrict' | 'warn' | 'launch' }
+    | { kind: 'lift'; r: Restriction }
+    | { kind: 'resolve'; w: SellerWarning }
+    | { kind: 'appeal'; ap: Appeal }
+    | null
+  >(null);
 
   // The detail route accepts the store slug or the id.
   const detail = useQuery({
@@ -165,11 +178,9 @@ export default function Seller() {
 
   const d = detail.data;
   const sellerId = d?.account.id ?? '';
-  const refresh = () => {
-    void qc.invalidateQueries({ queryKey: ['sellers'] });
-    void qc.invalidateQueries({ queryKey: ['workqueues', 'queues'] });
-    void qc.invalidateQueries({ queryKey: ['notifications', 'summary', 'staff'] });
-  };
+  const refresh = useSellerRefresh();
+  const done = (title: string, body: string) => (setFlash({ title, body }), refresh());
+  const assignAppeal = useAssignAppeal(done);
 
   // GraphQL approvals waiting on this seller: a suspension sent for second review shows as pending.
   const pendingApprovals = ((screen.data?.data?.sellerAdmin as { pendingApprovals?: Array<{ status: string; action?: { label?: string | null } | null }> } | null)?.pendingApprovals ?? []).filter(
@@ -206,7 +217,8 @@ export default function Seller() {
     onSuccess: () => {
       setNote('');
       announce('Note added');
-      void qc.invalidateQueries({ queryKey: ['sellers', 'detail', id] });
+      // The detail is cached under the route's slug (or id), not the UUID.
+      void qc.invalidateQueries({ queryKey: ['sellers', 'detail', slug] });
     },
   });
 
@@ -266,6 +278,11 @@ export default function Seller() {
   const statusBadge = pending ? <StatusBadge status="Suspension pending" tone="danger" /> : <StatusBadge status={status} />;
   const activeRestrictions = d.restrictions.filter((r) => r.state === 'active' || r.state === 'pending_approval');
   const canRestrict = can('sellers.accounts.restrict');
+  const selling = a.status === 'approved' || a.status === 'restricted';
+  const canDecideAppeals = can('sellers.appeals.decide');
+  const warnings: SellerWarning[] = d.performance.warnings ?? [];
+  const openWarnings = warnings.filter((w) => w.state === 'open');
+  const launch = a.launchReview;
 
   // Performance: every metric but policy violations (shown in the note under the grid).
   const metrics = d.performance.metrics.filter((m) => m.key !== 'policy_violations');
@@ -366,6 +383,10 @@ export default function Seller() {
     <Button variant="danger-soft" size="sm" icon="ban" disabled>
       Suspension pending
     </Button>
+  ) : a.status === 'suspended' ? (
+    <Button variant="secondary" size="sm" icon="rotate-ccw" onClick={() => setDialog({ kind: 'reinstate' })}>
+      Reinstate
+    </Button>
   ) : suspended ? null : (
     <Button variant="danger-soft" size="sm" icon="ban" to={href('admin/seller', 'suspend-seller', { slug })} onClick={(e) => (e.preventDefault(), openSuspend())}>
       Suspend
@@ -400,6 +421,11 @@ export default function Seller() {
                 Edit restriction
               </Button>
             )}
+            {canRestrict && selling && (
+              <Button variant="secondary" size="sm" icon="circle-minus" onClick={() => setDialog({ kind: 'restrict' })}>
+                Add restriction
+              </Button>
+            )}
             {suspendButton}
           </>
         }
@@ -421,9 +447,16 @@ export default function Seller() {
               <Icon name="triangle-alert" />
               <h2 className="h4">{r.state === 'pending_approval' ? `Restriction waiting for approval: ${r.title}` : `Active restriction since ${date(r.startedAt ?? a.statusSince)}`}</h2>
             </div>
-            <Badge tone="warning" icon="calendar">
-              {`Review ${shortDate(r.reviewDate)}`}
-            </Badge>
+            <span className="row gap-2">
+              <Badge tone="warning" icon="calendar">
+                {`Review ${shortDate(r.reviewDate)}`}
+              </Badge>
+              {canRestrict && r.state === 'active' && (
+                <Button variant="secondary" size="sm" onClick={() => setDialog({ kind: 'lift', r })}>
+                  Lift
+                </Button>
+              )}
+            </span>
           </div>
           <div className="card-body">
             <KeyValue pairs={restrictionPairs(r)} />
@@ -533,6 +566,11 @@ export default function Seller() {
                       <th scope="col">Argument</th>
                       <th scope="col">Owner</th>
                       <th scope="col">Status</th>
+                      {canDecideAppeals && (
+                        <th scope="col">
+                          <span className="sr-only">Actions</span>
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -561,6 +599,22 @@ export default function Seller() {
                               ) : null}
                             </span>
                           </td>
+                          {canDecideAppeals && (
+                            <td>
+                              {open && (
+                                <span className="row gap-2 nowrap">
+                                  {ap.reviewer?.id !== accountId && (
+                                    <Button variant="ghost" size="sm" disabled={assignAppeal.isPending} onClick={() => assignAppeal.mutate({ appealId: ap.id, reviewerId: accountId })}>
+                                      Assign to me
+                                    </Button>
+                                  )}
+                                  <Button variant="secondary" size="sm" onClick={() => setDialog({ kind: 'appeal', ap })}>
+                                    Decide
+                                  </Button>
+                                </span>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -571,6 +625,50 @@ export default function Seller() {
               <div className="card-body">
                 <span className="small muted">No appeals.</span>
               </div>
+            )}
+            {assignAppeal.isError && (
+              <div className="card-body">
+                <Alert tone="danger" title="We couldn’t assign the appeal">
+                  {errorMessage(assignAppeal.error)}
+                </Alert>
+              </div>
+            )}
+          </Card>
+          <Card
+            title="Warnings"
+            sub={openWarnings.length ? `${openWarnings.length} open` : undefined}
+            titleAs="h3"
+            actions={
+              canRestrict && selling ? (
+                <Button variant="ghost" size="sm" icon="message-square-warning" onClick={() => setDialog({ kind: 'warn' })}>
+                  Send warning
+                </Button>
+              ) : undefined
+            }
+          >
+            {warnings.length ? (
+              <ul className="list">
+                {warnings.map((w) => (
+                  <li key={w.id}>
+                    <span className="grow stack gap-0">
+                      <span className="small strong">{w.title}</span>
+                      <span className="xs sub">{w.detail}</span>
+                      <span className="xs muted">
+                        {[cap(w.kind), shortDate(w.issuedAt), w.issuedBy?.name, w.state === 'resolved' && w.resolutionNote ? `Resolved: ${w.resolutionNote}` : ''].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    {w.state === 'open' && canRestrict ? (
+                      <Button variant="secondary" size="sm" onClick={() => setDialog({ kind: 'resolve', w })}>
+                        Resolve
+                      </Button>
+                    ) : (
+                      <StatusBadge status={cap(w.state)} />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="small muted">No warnings.</span>
             )}
           </Card>
           <Card
@@ -589,6 +687,29 @@ export default function Seller() {
           <Card title="Account" titleAs="h3">
             <KeyValue pairs={accountKv} />
           </Card>
+          {launch && (selling || launch.state !== 'not_started') && (
+            <Card
+              title="Launch readiness review"
+              sub="Offers go live only after this review passes"
+              titleAs="h3"
+              actions={
+                launch.state === 'requested' && can('sellers.applications.decide') ? (
+                  <Button size="sm" icon="rocket" onClick={() => setDialog({ kind: 'launch' })}>
+                    Decide
+                  </Button>
+                ) : undefined
+              }
+            >
+              <div className="stack gap-2">
+                <SummaryRow k="Status" v={<StatusBadge status={LAUNCH_STATE[launch.state]} />} />
+                {launch.requestedAt && <SummaryRow k="Requested" v={dateTime(launch.requestedAt)} />}
+                {launch.decidedAt && <SummaryRow k="Decided" v={[dateTime(launch.decidedAt), launch.decidedBy?.name].filter(Boolean).join(' · ')} />}
+              </div>
+              {launch.issues.length > 0 && <span className="xs sub">{`Changes asked: ${launch.issues.join('; ')}`}</span>}
+              {launch.note && <span className="xs muted">{launch.note}</span>}
+              {launch.state === 'not_started' && <span className="xs muted">The seller asks for the review once payouts are verified and a first product or offer is submitted.</span>}
+            </Card>
+          )}
           <Card
             title="Payouts and holds"
             titleAs="h3"
@@ -608,7 +729,7 @@ export default function Seller() {
                 {(payouts.holds ?? []).map((h, i) => (
                   <div key={i} className="panel stack gap-1">
                     <span className="small strong">{`Hold · ${formatMoney(h.amount)}`}</span>
-                    <span className="xs sub">{[h.reason ? `Reason: ${h.reason}.` : '', h.reviewDate ? `Review date ${shortDate(h.reviewDate)}.` : '', h.setBy?.name ? `Set by ${h.setBy.name}.` : ''].filter(Boolean).join(' ')}</span>
+                    <span className="xs sub">{[h.reason ? `Reason: ${h.reason}.` : '', h.reviewDate ? `Review date ${shortDate(h.reviewDate)}.` : '', h.placedBy?.name ? `Set by ${h.placedBy.name}.` : ''].filter(Boolean).join(' ')}</span>
                   </div>
                 ))}
                 {payouts.nextPayout?.scheduledFor && (
@@ -741,7 +862,14 @@ export default function Seller() {
         </div>
       </Dialog>
 
-      {editing && <EditRestriction r={editing} onClose={() => setEditing(null)} onDone={(t, b) => (setFlash({ title: t, body: b }), refresh())} />}
+      {editing && <EditRestriction r={editing} onClose={() => setEditing(null)} onDone={done} />}
+      {dialog?.kind === 'reinstate' && <ReinstateDialog sellerId={sellerId} storeName={a.storeName} restrictions={d.restrictions} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === 'restrict' && <AddRestrictionDialog sellerId={sellerId} storeName={a.storeName} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === 'lift' && <LiftRestrictionDialog r={dialog.r} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === 'warn' && <WarningDialog sellerId={sellerId} storeName={a.storeName} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === 'resolve' && <ResolveWarningDialog w={dialog.w} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === 'launch' && <LaunchReviewDialog sellerId={sellerId} storeName={a.storeName} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === 'appeal' && <AppealDecideDialog appeal={dialog.ap} onClose={() => setDialog(null)} onDone={done} />}
       <MessageDialog open={message} onClose={() => setMessage(false)} to={a.storeName} target={{ sellerId }} onSent={(b) => setFlash({ title: 'Message sent', body: b })} />
     </AdminLayout>
   );

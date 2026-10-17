@@ -12,7 +12,7 @@ import { LoadError, SkeletonLines, dateTime, deadlineTone, shortDate } from '@/a
 import { useStaffSession } from '@/app/session';
 import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
 import { useDatasetExport } from '@/pages/admin/data/report-export';
-import { ACTIONS, CLAIM_STATUS, RESOLUTIONS, SELLER_FILTERS, TABS, type ActionKey, type DispatchView, type ExceptionKind } from './data/dispatch';
+import { ACTIONS, CLAIM_STATUS, RESOLUTIONS, SELLER_FILTERS, SELLER_RESPONSE, TABS, type ActionKey, type DispatchView, type ExceptionKind } from './data/dispatch';
 import { EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
 // Design: pages/ops/ops-dispatch.html (Late dispatch) and the views seller-cannot-fulfill, missing-tracking,
@@ -41,8 +41,16 @@ interface Exception {
   deadlineLabel: string;
   status: 'open' | 'in_progress' | 'escalated' | 'resolved' | 'closed';
   escalatedTo: string | null;
-  sellerResponse: string | null;
+  sellerResponse: SellerResponse | null;
   claimId: string | null;
+}
+/** The seller's reply (shipping.SellerResponse). It is an object, not text: render it with SellerReply. */
+interface SellerResponse {
+  action: 'tracking_provided' | 'will_ship_by' | 'cannot_fulfill' | 'replacement_sent' | 'other';
+  note?: string | null;
+  shipBy?: string | null;
+  at: string;
+  by: { kind?: string; id?: string | null; name?: string | null } | null;
 }
 interface Counts {
   sellerCannotFulfill: number;
@@ -118,6 +126,24 @@ function SellerCell({ e }: { e: Exception }) {
       ) : (
         <Badge tone="outline">Marketplace</Badge>
       )}
+    </span>
+  );
+}
+
+/** The seller's reply: what they will do (with the ship-by date), their note, and who answered when. */
+function SellerReply({ r }: { r: SellerResponse }) {
+  const what = SELLER_RESPONSE[r.action] ?? SELLER_RESPONSE.other;
+  const shipBy = r.action === 'will_ship_by' ? (r.shipBy ? ` ${shortDate(r.shipBy)}` : ' (no date given)') : r.shipBy ? ` · ships by ${shortDate(r.shipBy)}` : '';
+  return (
+    <span className="stack gap-0">
+      <span>
+        Seller: {what}
+        {shipBy}
+      </span>
+      {r.note && <span className="xs sub">“{r.note}”</span>}
+      <span className="xs muted">
+        {r.by?.name ?? 'Seller'} · {dateTime(r.at)}
+      </span>
     </span>
   );
 }
@@ -311,7 +337,8 @@ export default function Dispatch() {
     );
   };
   const orderHref = (ref: string) => href('admin/order', '', { ref });
-  const response = (r: Exception) => r.sellerResponse ?? r.nextStep ?? r.requiredResponse;
+  // The seller's reply when there is one (an object: SellerReply renders it), else the next step to take.
+  const response = (r: Exception) => (r.sellerResponse ? <SellerReply r={r.sellerResponse} /> : (r.nextStep ?? r.requiredResponse));
   const item = (r: Exception) => (r.situation ? `${r.itemsSummary} · ${r.situation}` : r.itemsSummary);
 
   return (
@@ -471,9 +498,7 @@ export default function Dispatch() {
                     <div className="xs sub">
                       Customer notified: {r.customerNotifiedAt ? `Yes · ${dateTime(r.customerNotifiedAt)}` : 'No'} · Owner {r.owner?.name ?? 'Unassigned'}
                     </div>
-                    <div className="xs sub">
-                      <b>{response(r)}</b>
-                    </div>
+                    <div className="xs sub">{r.sellerResponse ? <SellerReply r={r.sellerResponse} /> : <b>{response(r)}</b>}</div>
                     {acts.length > 0 && (
                       <div className="row gap-2 mt-1-5">
                         {acts.slice(0, 2).map((a) => (

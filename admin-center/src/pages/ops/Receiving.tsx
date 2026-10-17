@@ -7,20 +7,22 @@ import { cx } from '@marketly/web-shared/lib/cx';
 import { formatMoney, num, type MoneyValue } from '@marketly/web-shared/lib/format';
 import { useScrollRegion, useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Breadcrumbs, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, PageHeader, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, Textarea, TextInput, announce, type Tone } from '@marketly/web-shared/ui';
+import { Alert, Badge, Breadcrumbs, Button, Card, Checkbox, EmptyState, Field, Icon, Img, KeyValue, PageHeader, Pager, Stat, StatusBadge, SummaryRow, TableWrap, Tabs, Textarea, TextInput, announce, type Tone } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, dateTime, shortDate, time, dayKey } from '@/app/parts';
 import { useStaffSession } from '@/app/session';
 import { ExportButton, ExportNotice } from '@/pages/admin/data/export-button';
 import { useDatasetExport } from '@/pages/admin/data/report-export';
+import { PutawayTaskList, usePutawayLabels, usePutawayTasks } from './data/putaway';
 import { EDGE_RISK, EDGE_URGENT, EmptyRow, OpsLegend, SkeletonRows } from './data/shared';
 
 // Design: pages/ops/ops-receiving.html (Expected list) · view "receiving-<po ref>" (design: receiving-pur-2610-0042) =
 // receiving one purchase order's delivery.
 // API: GET purchasing/deliveries, GET purchasing/deliveries/stats, POST purchasing/deliveries/{id}/arrive (check in),
 // POST purchasing/deliveries/{id}/receipts (start receiving), GET/PATCH purchasing/receipts/{id}, POST receipts/{id}/submit,
-// GET inventory/inbound + POST inventory/inbound/{id}/confirm (Inventory Manager makes the units sellable).
+// POST inventory/inbound/{id}/confirm with Receipt.inboundId (Inventory Manager makes the units sellable),
+// GET warehouse/putaway-tasks (+ labels, scan, complete) for step 4 "Put away" and the "Put away" tab (data/putaway.tsx).
 
-type Tab = 'expected' | 'receiving' | 'issues' | 'completed';
+type Tab = 'expected' | 'receiving' | 'issues' | 'completed' | 'putaway';
 type DeliveryStatus = 'expected' | 'delayed' | 'arrived' | 'receiving' | 'received' | 'received_with_issues' | 'cancelled';
 
 interface Delivery {
@@ -82,11 +84,8 @@ interface Receipt {
   receivedBy: { name?: string | null } | null;
   startedAt: string;
   confirmedBy: { name?: string | null } | null;
-}
-interface Inbound {
-  id: string;
-  receiptId: string;
-  state: 'awaiting_confirmation' | 'confirmed';
+  /** The inventory inbound record created on submit; the Inventory Manager confirms it to make the units sellable. */
+  inboundId?: string | null;
 }
 
 const STATUS: Record<DeliveryStatus, { label: string; tone: Tone }> = {
@@ -104,6 +103,7 @@ const TAB_STATUSES: Record<Tab, DeliveryStatus[]> = {
   receiving: ['arrived', 'receiving'],
   issues: ['received_with_issues'],
   completed: ['received'],
+  putaway: [], // the Put away tab lists warehouse tasks, not deliveries
 };
 
 const STEPS = ['Check in', 'Count lines', 'Record issues', 'Put away', 'Make available'];
@@ -136,6 +136,31 @@ function ReceivingSteps({ current }: { current: number }) {
   );
 }
 
+/**
+ * Open put-away tasks of every receipt, so units left in the receiving area can be put away later
+ * (a receipt's own tasks are on its receiving page, step 4).
+ */
+function OpenPutaway({ canPerform }: { canPerform: boolean }) {
+  const [page, setPage] = useState(1);
+  const tasks = usePutawayTasks({ status: 'open', page, limit: 24 });
+  const totalPages = tasks.data?.totalPages ?? 1;
+  return (
+    <Card
+      title="Open put-away tasks"
+      sub="Received units waiting for a bin, all receipts. Picking takes stock only from bins, so put these away first."
+      foot={totalPages > 1 ? <Pager page={page} total={totalPages} onPage={setPage} only="website" /> : undefined}
+    >
+      {tasks.error ? (
+        <LoadError error={tasks.error} onRetry={() => void tasks.refetch()} />
+      ) : tasks.isPending ? (
+        <SkeletonLines rows={3} />
+      ) : (
+        <PutawayTaskList tasks={tasks.data.items} showReceipt canPerform={canPerform} empty="Nothing is waiting to be put away." />
+      )}
+    </Card>
+  );
+}
+
 function useDeliveries() {
   const { api } = useApi();
   return useQuery({ queryKey: ['purchasing', 'deliveries'], queryFn: () => call(api.GET('/api/admin/purchasing/deliveries', { params: { query: { limit: 100 } } })) as Promise<{ items: Delivery[] }> });
@@ -150,6 +175,9 @@ function DeliveryList({ notice }: { notice: string }) {
   const deliveries = useDeliveries();
   const stats = useQuery({ queryKey: ['purchasing', 'deliveries', 'stats'], queryFn: () => call(api.GET('/api/admin/purchasing/deliveries/stats', { params: { query: {} } })) as Promise<Stats> });
   const canRecord = staff.can('purchasing.receipts.record');
+  const canSeePutaway = staff.can('warehouse.view');
+  // count for the Put away tab (page 1 of one row: the response carries the total)
+  const openPutaway = usePutawayTasks({ status: 'open', page: 1, limit: 1 }, { enabled: canSeePutaway });
   const receivingExport = useDatasetExport('purchasing.admin.receiving');
 
   const all = (deliveries.data?.items ?? []).filter((d) => d.status !== 'cancelled');
@@ -161,6 +189,7 @@ function DeliveryList({ notice }: { notice: string }) {
     receiving: 'Deliveries being counted at the dock',
     issues: 'Shortages and damage waiting on Purchasing',
     completed: 'Received and made available',
+    putaway: '',
   };
 
   const arrive = useMutation({
@@ -252,88 +281,93 @@ function DeliveryList({ notice }: { notice: string }) {
           { label: 'Receiving', value: 'receiving', count: st?.tabCounts.receiving },
           { label: 'Received with issues', value: 'issues', count: st?.tabCounts.receivedWithIssues },
           { label: 'Completed', value: 'completed' },
+          ...(canSeePutaway ? [{ label: 'Put away', value: 'putaway' as const, count: openPutaway.data?.total }] : []),
         ]}
         active={tab}
         onChange={setTab}
       />
-      <Card title="Purchase deliveries" sub={subs[tab]} flush>
-        {deliveries.error ? (
-          <div className="card-body">
-            <LoadError error={deliveries.error} onRetry={() => void deliveries.refetch()} />
-          </div>
-        ) : (
-          <>
-            <div className="no-phone">
-              <TableWrap label="Purchase deliveries table">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Purchase order</th>
-                      <th scope="col">Supplier</th>
-                      <th scope="col">Expected</th>
-                      <th scope="col">Carrier</th>
-                      <th className="r" scope="col">Lines</th>
-                      <th className="r" scope="col">Units</th>
-                      <th scope="col">Status</th>
-                      <th scope="col">
-                        <span className="sr-only">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {deliveries.isPending && <SkeletonRows cols={8} />}
-                    {!deliveries.isPending && !rows.length && <EmptyRow cols={8}>No purchase deliveries here.</EmptyRow>}
-                    {rows.map((d) => (
-                      <tr key={d.id} className={cx(late(d) && 'is-warn')}>
-                        <td>
-                          {late(d) && <span className="sr-only">At risk: </span>}
-                          {poLink(d)}
-                        </td>
-                        <td>
-                          <span className="small strong">{d.supplierName}</span>
-                        </td>
-                        <td>
-                          <span className="small nowrap">{d.arrivedAt && d.status !== 'arrived' ? `Received ${shortDate(d.arrivedAt)}` : windowLabel(d)}</span>
-                        </td>
-                        <td>
-                          <span className="xs sub">{carrierLabel(d)}</span>
-                        </td>
-                        <td className="r">{d.lineCount}</td>
-                        <td className="r">{d.units}</td>
-                        <td>
-                          <StatusBadge status={statusLabel(d)} tone={STATUS[d.status].tone} />
-                        </td>
-                        <td>{action(d)}</td>
+      {tab === 'putaway' ? (
+        <OpenPutaway canPerform={staff.can('warehouse.putaway.perform')} />
+      ) : (
+        <Card title="Purchase deliveries" sub={subs[tab]} flush>
+          {deliveries.error ? (
+            <div className="card-body">
+              <LoadError error={deliveries.error} onRetry={() => void deliveries.refetch()} />
+            </div>
+          ) : (
+            <>
+              <div className="no-phone">
+                <TableWrap label="Purchase deliveries table">
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Purchase order</th>
+                        <th scope="col">Supplier</th>
+                        <th scope="col">Expected</th>
+                        <th scope="col">Carrier</th>
+                        <th className="r" scope="col">Lines</th>
+                        <th className="r" scope="col">Units</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">
+                          <span className="sr-only">Actions</span>
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </TableWrap>
-              <OpsLegend items={[{ tone: 'warning', label: EDGE_RISK }]} />
-            </div>
-            <div className="ac-mlist only-phone">
-              {deliveries.isPending && <SkeletonLines rows={3} />}
-              {!deliveries.isPending && !rows.length && <div className="ac-mi xs sub">No purchase deliveries here.</div>}
-              {rows.map((d) => (
-                <div key={d.id} className={cx('ac-mi', late(d) && 'is-warn')}>
-                  {late(d) && <span className="sr-only">At risk: </span>}
-                  <div className="row between gap-2 nowrap top">
-                    <span className="small strong min-w-0">{poLink(d)}</span>
-                    <StatusBadge status={statusLabel(d)} tone={STATUS[d.status].tone} />
+                    </thead>
+                    <tbody>
+                      {deliveries.isPending && <SkeletonRows cols={8} />}
+                      {!deliveries.isPending && !rows.length && <EmptyRow cols={8}>No purchase deliveries here.</EmptyRow>}
+                      {rows.map((d) => (
+                        <tr key={d.id} className={cx(late(d) && 'is-warn')}>
+                          <td>
+                            {late(d) && <span className="sr-only">At risk: </span>}
+                            {poLink(d)}
+                          </td>
+                          <td>
+                            <span className="small strong">{d.supplierName}</span>
+                          </td>
+                          <td>
+                            <span className="small nowrap">{d.arrivedAt && d.status !== 'arrived' ? `Received ${shortDate(d.arrivedAt)}` : windowLabel(d)}</span>
+                          </td>
+                          <td>
+                            <span className="xs sub">{carrierLabel(d)}</span>
+                          </td>
+                          <td className="r">{d.lineCount}</td>
+                          <td className="r">{d.units}</td>
+                          <td>
+                            <StatusBadge status={statusLabel(d)} tone={STATUS[d.status].tone} />
+                          </td>
+                          <td>{action(d)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </TableWrap>
+                <OpsLegend items={[{ tone: 'warning', label: EDGE_RISK }]} />
+              </div>
+              <div className="ac-mlist only-phone">
+                {deliveries.isPending && <SkeletonLines rows={3} />}
+                {!deliveries.isPending && !rows.length && <div className="ac-mi xs sub">No purchase deliveries here.</div>}
+                {rows.map((d) => (
+                  <div key={d.id} className={cx('ac-mi', late(d) && 'is-warn')}>
+                    {late(d) && <span className="sr-only">At risk: </span>}
+                    <div className="row between gap-2 nowrap top">
+                      <span className="small strong min-w-0">{poLink(d)}</span>
+                      <StatusBadge status={statusLabel(d)} tone={STATUS[d.status].tone} />
+                    </div>
+                    <div className="xs sub">
+                      {d.supplierName} · {d.lineCount} lines · {d.units} units
+                    </div>
+                    <div className="xs sub">{windowLabel(d)}</div>
+                    <div className="xs sub">{carrierLabel(d)}</div>
+                    {action(d) && <div className="row gap-2 mt-1-5">{action(d)}</div>}
                   </div>
-                  <div className="xs sub">
-                    {d.supplierName} · {d.lineCount} lines · {d.units} units
-                  </div>
-                  <div className="xs sub">{windowLabel(d)}</div>
-                  <div className="xs sub">{carrierLabel(d)}</div>
-                  {action(d) && <div className="row gap-2 mt-1-5">{action(d)}</div>}
-                </div>
-              ))}
-            </div>
-            <OpsLegend className="only-phone" items={[{ tone: 'warning', label: EDGE_RISK }]} />
-          </>
-        )}
-      </Card>
+                ))}
+              </div>
+              <OpsLegend className="only-phone" items={[{ tone: 'warning', label: EDGE_RISK }]} />
+            </>
+          )}
+        </Card>
+      )}
       <div className="grid lg2 gap-5">
         {delayed.length > 0 ? (
           <Alert tone="warning" title={`${delayed[0].purchaseOrderRef} running late`}>
@@ -445,6 +479,11 @@ function ReceivePo({ poRef, onSaveLater }: { poRef: string; onSaveLater: (ref: s
   const r = receipt.data;
   const canRecord = staff.can('purchasing.receipts.record');
   const canConfirm = staff.can('inventory.inbound.confirm');
+  // Step 4: the warehouse creates the put-away tasks when the receipt is submitted.
+  const submitted = !!r && (r.status === 'awaiting_confirmation' || r.status === 'confirmed');
+  const canSeePutaway = staff.can('warehouse.view');
+  const tasks = usePutawayTasks({ receiptId: r?.id }, { enabled: submitted && canSeePutaway, pollUntilFound: (r?.totals.received ?? 0) > 0 });
+  const labels = usePutawayLabels();
 
   const [drafts, setDrafts] = useState<Record<string, LineDraft>>({});
   const [note, setNote] = useState('');
@@ -472,8 +511,8 @@ function ReceivePo({ poRef, onSaveLater }: { poRef: string; onSaveLater: (ref: s
   const shortage = lines.reduce((a, l) => a + Math.max(0, l.expected - l.received), 0);
   const sellable = received - damaged;
   const missingPhotos = lines.filter((l) => l.damaged > 0 && !(drafts[l.purchaseOrderLineId]?.photoIds.length ?? l.photos.length));
-  const missingBins = lines.filter((l) => !String(drafts[l.purchaseOrderLineId]?.binCode ?? l.binCode ?? '').trim());
-  const canFinish = confirmed && !missingPhotos.length && !missingBins.length && received > 0;
+  // The bin on a line is only a suggestion for put-away (step 4 confirms the real bin), so it is optional.
+  const canFinish = confirmed && !missingPhotos.length && received > 0;
 
   const patchBody = () => ({
     lines: lines.map((l) => {
@@ -503,13 +542,11 @@ function ReceivePo({ poRef, onSaveLater }: { poRef: string; onSaveLater: (ref: s
         await call(api.PATCH('/api/admin/purchasing/receipts/{id}', { params: { path: { id: current.id } }, body: patchBody() as never }));
         current = (await call(api.POST('/api/admin/purchasing/receipts/{id}/submit', { params: { path: { id: current.id } }, body: { raiseClaims: true } as never }))) as Receipt;
       }
-      if (!canConfirm) return { confirmed: false };
-      const inbound = (await call(api.GET('/api/admin/inventory/inbound', { params: { query: { limit: 100 } as never } }))) as { items: Inbound[] };
-      const item = inbound.items.find((i) => i.receiptId === current.id && i.state === 'awaiting_confirmation');
-      if (!item) return { confirmed: false };
+      // the receipt names its inventory inbound record (set on submit)
+      if (!canConfirm || !current.inboundId) return { confirmed: false };
       await call(
         api.POST('/api/admin/inventory/inbound/{id}/confirm', {
-          params: { path: { id: item.id } },
+          params: { path: { id: current.inboundId } },
           body: { checked: true, lines: current.lines.map((l) => ({ stockItemId: l.stockItemId, sellable: l.received - Math.min(l.damaged, l.received), damaged: Math.min(l.damaged, l.received) })), note: note.trim() || undefined } as never,
         }),
       );
@@ -569,8 +606,12 @@ function ReceivePo({ poRef, onSaveLater }: { poRef: string; onSaveLater: (ref: s
     );
   }
 
-  const done = r.status === 'awaiting_confirmation' || r.status === 'confirmed';
-  const step = r.status === 'confirmed' ? STEPS.length : r.status === 'awaiting_confirmation' ? 4 : shortage > 0 || damaged > 0 ? 2 : 1;
+  const done = submitted;
+  const taskList = tasks.data?.items ?? [];
+  const openTasks = taskList.filter((t) => t.status === 'open').length;
+  // Put away is done when every task is done (or nothing was received to put away).
+  const putAwayDone = !canSeePutaway || (tasks.isSuccess && openTasks === 0 && (taskList.length > 0 || r.totals.received === 0));
+  const step = !done ? (shortage > 0 || damaged > 0 ? 2 : 1) : !putAwayDone ? 3 : r.status === 'confirmed' ? STEPS.length : 4;
   const busy = save.isPending || finish.isPending;
 
   return (
@@ -584,15 +625,25 @@ function ReceivePo({ poRef, onSaveLater }: { poRef: string; onSaveLater: (ref: s
           </p>
         </div>
         <div className="actions">
-          <Button variant="secondary" size="sm" icon="printer" onClick={() => window.print()}>
-            Print labels
-          </Button>
+          {canSeePutaway && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon="printer"
+              onClick={() => labels.mutate(r.id)}
+              disabled={!taskList.length || labels.isPending}
+              title={taskList.length ? 'Item and put-away labels for this delivery' : 'Labels are ready once counting is finished'}
+            >
+              Print labels
+            </Button>
+          )}
         </div>
       </div>
       <ReceivingSteps current={step} />
       {r.status === 'confirmed' && (
         <Alert tone="success" title={`${r.totals.sellable ?? sellable} units available for sale`}>
-          Put away to the bins below. {r.totals.shortage > 0 && `Purchasing has the ${r.totals.shortage}-unit shortage claim. `}
+          {openTasks > 0 && 'Put the units away below: picking takes stock only from scanned bins. '}
+          {r.totals.shortage > 0 && `Purchasing has the ${r.totals.shortage}-unit shortage claim. `}
           <Link to={href('ops/receiving')}>Back to Receiving</Link>
         </Alert>
       )}
@@ -602,9 +653,28 @@ function ReceivePo({ poRef, onSaveLater }: { poRef: string; onSaveLater: (ref: s
           <Link to={href('ops/receiving')}>Back to Receiving</Link>
         </Alert>
       )}
-      {(save.error || finish.error) && <Alert tone="danger">{errorMessage(save.error ?? finish.error)}</Alert>}
+      {(save.error || finish.error || labels.error) && <Alert tone="danger">{errorMessage(save.error ?? finish.error ?? labels.error)}</Alert>}
       <div className="ac-main">
         <div className="stack gap-4">
+          {done && canSeePutaway && (
+            <Card
+              title="Put away"
+              titleAs="h2"
+              sub={taskList.length ? `${openTasks} of ${taskList.length} open · scan the bin each item goes into` : 'Units go to the bins the warehouse suggests; damaged units to quarantine'}
+            >
+              {tasks.error ? (
+                <LoadError error={tasks.error} onRetry={() => void tasks.refetch()} />
+              ) : tasks.isPending ? (
+                <SkeletonLines rows={2} />
+              ) : (
+                <PutawayTaskList
+                  tasks={taskList}
+                  canPerform={staff.can('warehouse.putaway.perform')}
+                  empty={r.totals.received > 0 ? 'The warehouse is preparing the put-away tasks…' : 'Nothing was received, so there is nothing to put away.'}
+                />
+              )}
+            </Card>
+          )}
           <div className="row between">
             <h2 className="h3">Lines</h2>
             <span className="xs muted">
@@ -665,9 +735,9 @@ function ReceivePo({ poRef, onSaveLater }: { poRef: string; onSaveLater: (ref: s
                     </div>
                     <div className="field">
                       <label className="label" htmlFor={`rc-loc-${i}`}>
-                        Put-away bin
+                        Suggested bin
                       </label>
-                      <input className={cx('input ac-loc', tried && !bin.trim() && 'is-error')} id={`rc-loc-${i}`} value={bin} disabled={!editable} onChange={(e) => setLine(l.purchaseOrderLineId, { binCode: e.target.value.toUpperCase() })} />
+                      <input className="input ac-loc" id={`rc-loc-${i}`} value={bin} disabled={!editable} onChange={(e) => setLine(l.purchaseOrderLineId, { binCode: e.target.value.toUpperCase() })} />
                     </div>
                   </div>
                   {short > 0 && (
@@ -755,7 +825,7 @@ function ReceivePo({ poRef, onSaveLater }: { poRef: string; onSaveLater: (ref: s
             {tried && !canFinish && (
               <span className="error-text">
                 <Icon name="circle-alert" className="ic-sm" />
-                {!confirmed ? 'Confirm that you counted and checked these units.' : missingPhotos.length ? 'Add damage photos for every line with damaged units.' : missingBins.length ? 'Enter a put-away bin for every line.' : 'There are no received units to make available.'}
+                {!confirmed ? 'Confirm that you counted and checked these units.' : missingPhotos.length ? 'Add damage photos for every line with damaged units.' : 'There are no received units to make available.'}
               </span>
             )}
           </Card>

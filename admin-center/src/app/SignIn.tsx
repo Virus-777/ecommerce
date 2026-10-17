@@ -65,7 +65,8 @@ function message(e: unknown): string {
   return errorMessage(e);
 }
 
-export function SignIn({ startError }: { startError?: unknown }) {
+/** notice: why the person is on this screen without signing out (e.g. signed out after a period without activity). */
+export function SignIn({ startError, notice }: { startError?: unknown; notice?: string }) {
   const { api, session } = useApi();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -106,6 +107,7 @@ export function SignIn({ startError }: { startError?: unknown }) {
       ) : (
         <form className="stack gap-4" onSubmit={(e) => void submit(e)} noValidate>
           <p className="small sub">Staff only. Use the work email you were invited with.</p>
+          {notice && !error && <Alert tone="info">{notice}</Alert>}
           {error && <Alert tone="danger">{error}</Alert>}
           <Field label="Work email">
             <TextInput id="ac-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} />
