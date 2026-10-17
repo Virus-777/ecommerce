@@ -62,7 +62,7 @@ async function inviteFinanceManager(inviter: Staff, email: string, name: string)
   expect(invited.status, JSON.stringify(invited.body)).toBe(201);
   const request = requested.findLast((r) => r.actionKey === 'access.roles.sensitive-grant' && String(r.target.label).includes(name));
   expect(request, `approval request for ${name}`).toBeDefined();
-  return { accountId: invited.body.account.id as string, request };
+  return { accountId: invited.body.member.account.id as string, request };
 }
 
 describe('bootstrap with a deputy Business Owner', () => {

@@ -15,6 +15,7 @@ import type {
   RoleAssignment,
   RoleRef,
   StaffInvitationInput,
+  StaffInvitationSent,
   StaffMember,
   StaffMemberDetail,
   StaffRef,
@@ -168,7 +169,7 @@ export class Members {
     };
   }
 
-  async inviteStaff(caller: Caller, input: StaffInvitationInput): Promise<StaffMember> {
+  async inviteStaff(caller: Caller, input: StaffInvitationInput): Promise<StaffInvitationSent> {
     await this.core.ready();
     const dir = await loadDirectory(this.core.repo, this.core.now());
     const roles = uniq(input.roleIds).map((id) => dir.roleById.get(id));
@@ -182,8 +183,8 @@ export class Members {
     if (issues.length) throw validation('The invitation cannot be sent', issues);
 
     const idp = this.core.ctx.use('identity');
-    // the pass code is not shown in the Admin Center: the operator prints a link and pass code with npm run staff-link
-    const { invitation } = await idp.inviteStaff({ email: input.email, name: input.name, invitedBy: caller.actor });
+    // the link and pass code go back to the inviter once (no email offline); npm run staff-link can issue new ones
+    const { invitation, acceptUrl, passCode } = await idp.inviteStaff({ email: input.email, name: input.name, invitedBy: caller.actor });
     const accountId = invitation.accountId ?? (await idp.findAccountByEmail(input.email, 'staff'))?.id;
     if (!accountId) throw new AppError('CONFLICT', 'The staff account could not be created; try again');
     const prefixes = await this.core.sensitivePrefixes();
@@ -220,7 +221,8 @@ export class Members {
     if (!accounts.has(accountId)) {
       accounts.set(accountId, { id: accountId, realm: 'staff', email: input.email, displayName: input.name, status: 'invited', emailVerified: false, twoStepEnabled: false });
     }
-    return (await this.memberViews([accountId], fresh, accounts))[0]!;
+    const member = (await this.memberViews([accountId], fresh, accounts))[0]!;
+    return { member, acceptUrl, passCode, expiresAt: invitation.expiresAt };
   }
 
   /**

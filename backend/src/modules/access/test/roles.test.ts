@@ -167,12 +167,14 @@ describe('role assignments', () => {
     }
   });
 
-  it('invites staff with roles; assignments start when the invitation is accepted', async () => {
+  it('invites staff with roles and returns the link and pass code; assignments start when the invitation is accepted', async () => {
     const res = await f.call('POST', '/staff-invitations', f.token(admin), { email: 'new.hire@marketly.test', name: 'Nina Hire', roleIds: [await f.roleId('support_agent')], reason: 'New agent', requestLimitReview: true });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body).toMatchObject({ status: 'invited', roles: [{ key: 'support_agent' }], limitReview: { required: true } });
+    expect(res.body).toMatchObject({ member: { status: 'invited', roles: [{ key: 'support_agent' }], limitReview: { required: true } }, passCode: 'ABCD-EFGH' });
+    expect(res.body.acceptUrl).toContain('/invitation#token=');
+    expect(res.body.expiresAt).toBeTruthy();
     expect(f.invitations.map((i) => i.email)).toContain('new.hire@marketly.test');
-    const id = res.body.account.id;
+    const id = res.body.member.account.id;
     expect(await f.svc.hasPermission(f.principal(id), 'support.cases.view')).toBe(false);
     f.accounts.set(id, { ...f.accounts.get(id)!, status: 'active' });
     await f.svc.onInvitationAcceptedFromIdentity({ invitationId: newId(), accountId: id, purpose: 'staff' });
@@ -180,7 +182,7 @@ describe('role assignments', () => {
     expect(await f.svc.hasPermission(f.principal(id), 'support.cases.view')).toBe(true);
     // limits wait for the Business Owner's review: the new agent may prepare but not approve
     expect((await f.svc.check(f.principal(id), 'support.remedies.approve', { money: usd(10) })).decision).toBe('approval_required');
-    const review = await f.svc.getApproval(res.body.limitReview.approvalRequestId);
+    const review = await f.svc.getApproval(res.body.member.limitReview.approvalRequestId);
     expect(review).toMatchObject({ action: { key: 'access.limits.change' }, target: { type: 'staff_member', id } });
     await expect(f.svc.decide(review!.id, f.principal(admin2), { kind: 'approve' })).rejects.toMatchObject({ code: 'NOT_ELIGIBLE_APPROVER' });
     await f.svc.decide(review!.id, f.principal(owner), { kind: 'approve' });
@@ -191,7 +193,7 @@ describe('role assignments', () => {
     const invite = async (email: string, name: string) => {
       const res = await f.call('POST', '/staff-invitations', f.token(admin), { email, name, roleIds: [await f.roleId('finance_staff')], reason: 'Finance hire' });
       expect(res.status, JSON.stringify(res.body)).toBe(201);
-      const id = res.body.account.id as string;
+      const id = res.body.member.account.id as string;
       const assignment = (await f.svc.members.getMember(f.principal(owner) as never, id)).assignments[0]!;
       expect(assignment.status).toBe('pending_approval');
       return { id, assignmentId: assignment.id, requestId: assignment.approval!.approvalRequestId! };

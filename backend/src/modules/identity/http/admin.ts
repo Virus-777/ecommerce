@@ -34,8 +34,8 @@ export const adminRoutes = (service: IdentityService) =>
     /** GET /invitations: Staff invitations */
     listInvitations: async ({ query, page }) => service.invitations.listInvitations(query.status, page),
     /** POST /invitations/{id}/resend: Resend a staff invitation (new 7-day link) */
-    // only the invitation: the new pass code is printed by npm run staff-link, never sent over HTTP
-    resendInvitation: async (input) => (await service.invitations.resendInvitation(input.params.id, caller(input))).invitation,
+    // the new link and pass code go back to the caller once, to hand over (npm run staff-link does the same on the server)
+    resendInvitation: async (input) => service.invitations.resendInvitation(input.params.id, caller(input)),
     /** POST /invitations/{id}/revoke: Cancel a staff invitation */
     revokeInvitation: async (input) => service.invitations.revokeStaffInvitation(input.params.id, input.body.reason, caller(input)),
   });

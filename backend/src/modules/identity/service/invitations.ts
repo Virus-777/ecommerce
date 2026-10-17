@@ -3,8 +3,8 @@
  * code), and the staff list with resend and revoke.
  *
  * Staff pass codes (owner decision 2026-10-14: the server runs offline, staff use no authenticator app): each staff
- * link comes with a pass code that only the code which created the invitation sees (StaffInvitationIssued, printed
- * by npm run bootstrap-owner and npm run staff-link). The link alone, e.g. from a forwarded email, does not let
+ * link comes with a pass code that only the code which created the invitation sees (StaffInvitationIssued: shown once
+ * to the inviter in the invite and resend responses, printed by npm run bootstrap-owner and npm run staff-link). The link alone, e.g. from a forwarded email, does not let
  * anyone in. Only a keyed hash is stored, and the 5th wrong pass code ends the link.
  */
 import { AppError } from '../../../kernel/errors/index.js';

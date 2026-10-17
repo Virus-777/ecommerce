@@ -230,7 +230,7 @@ describe('staff invitations', () => {
     expect((await kit.call('POST', url, { token: t, body: { reauthToken: res.body.reauthToken } })).body.error.code).toBe('STEP_UP_REQUIRED');
   });
 
-  it('lists, resends and revokes staff invitations (audited); the resend never shows the pass code', async () => {
+  it('lists, resends and revokes staff invitations (audited); the resend returns the new link and pass code', async () => {
     const email = uniqueEmail('pending');
     const { invitation: inv } = await identity.inviteStaff({ email, name: 'Pat Pending', invitedBy: inviter });
     const list = await kit.call('GET', `${ADMIN}/invitations?status=pending`, { token: staffToken() });
@@ -239,9 +239,10 @@ describe('staff invitations', () => {
 
     const resent = await kit.call('POST', `${ADMIN}/invitations/${inv.id}/resend`, { token: staffToken(), body: { reauthToken: devReauth } });
     expect(resent.status, JSON.stringify(resent.body)).toBe(200);
-    expect(resent.body.passCode).toBeUndefined();
-    expect(resent.body.acceptUrl).toBeUndefined();
-    expect(Date.parse(resent.body.expiresAt) - kit.clock.now().getTime()).toBe(7 * 24 * 3600_000);
+    expect(resent.body.passCode).toMatch(/^[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+    expect(resent.body.acceptUrl).toContain('/invitation#token=');
+    expect(Date.parse(resent.body.invitation.expiresAt) - kit.clock.now().getTime()).toBe(7 * 24 * 3600_000);
+    expect(JSON.stringify(lastAudit())).not.toContain(resent.body.passCode);
     expect(lastAudit()).toMatchObject({ action: 'identity.invitation.resend', module: 'identity', category: 'security' });
 
     const revoked = await kit.call('POST', `${ADMIN}/invitations/${inv.id}/revoke`, { token: staffToken(), body: { reason: 'Hired elsewhere', reauthToken: devReauth } });
