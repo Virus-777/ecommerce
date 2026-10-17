@@ -197,6 +197,10 @@ export class Refunds {
 
     const created = await this.repo.transaction(async (tx) => {
       const locked = (await tx.get('intents', intent.id, { forUpdate: true }))!;
+      // A concurrent hand-over with the same key may have committed while we waited for the lock (returns can hand
+      // the same approved refund over from the approve call and from the approval event): its amount is now in
+      // flight, so the cap check below would refuse this replay. Answer with that refund instead (below).
+      if ((await tx.find('refunds', { idempotency_key: idempotencyKey }))[0]) return null;
       const c = await this.caps(tx, input.orderId, locked, paid);
       const over = input.items
         .map((x) => ({ x, cap: c.items.find((i) => i.orderItemId === x.orderItemId)! }))
