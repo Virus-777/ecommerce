@@ -1,13 +1,13 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
-import { call, errorMessage, useApi } from '@marketly/web-shared/api';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react';
+import { call, errorMessage, resolveProductImageSpec, uploadMedia, useApi } from '@marketly/web-shared/api';
 import { AdminLayout } from '@marketly/web-shared/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { num } from '@marketly/web-shared/lib/format';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import {
-  Alert, Badge, Breadcrumbs, Button, Card, Dialog, EmptyState, Field, Icon, IconButton, LogoTile, OptionCard, PageHeader, Pager, SearchInput, Select,
-  StatusBadge, StatusLegend, Switch, TableWrap, Tabs, Textarea, TextInput,
+  Alert, Badge, Breadcrumbs, Button, Card, Dialog, EmptyState, Field, Icon, IconButton, ImageCropper, Img, LogoTile, OptionCard, PageHeader, Pager, SearchInput, Select,
+  StatusBadge, StatusLegend, Switch, TableWrap, Tabs, Textarea, TextInput, type CropWording, type ProcessedImage,
 } from '@marketly/web-shared/ui';
 import { useStaffSession } from '@/app/session';
 import { LoadError, shortDate, SkeletonLines } from '@/app/parts';
@@ -39,6 +39,70 @@ const HEAD_BADGE: Record<CatStatus, ReactNode> = {
   hidden: <Badge>Hidden</Badge>,
   soon: <Badge tone="info">Coming soon</Badge>,
 };
+
+/* ---------------- Tile image ---------------- */
+
+// Category tile image (designed in React; the design has no control for it): uploaded as a content image when it
+// is cropped, attached to the category when the changes are published (imageId on POST/PATCH categories).
+const TILE_SPEC = resolveProductImageSpec({ aspectRatio: '1:1', detailWidth: 600, thumbnailWidth: 240, quality: 85 });
+const TILE_WORDING: CropWording = { what: 'category images', place: 'frame the subject', detail: ['Categories page', 'the Categories page'], thumbnail: ['Shortcuts', 'shortcuts'] };
+
+function TileImage({ cat, canEdit, onChange }: { cat: CategoryNode; canEdit: boolean; onChange: (image: CategoryNode['image']) => void }) {
+  const { session } = useApi();
+  const input = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const upload = async (img: ProcessedImage) => {
+    setBusy(true);
+    setError('');
+    try {
+      const asset = await uploadMedia(session, img.file, 'content_image', { alt: cat.name });
+      onChange({ id: asset.id, url: img.thumbUrl });
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="stack gap-2">
+      <span className="label">Tile image</span>
+      <div className="row gap-3 items-center">
+        <Img icon="image" src={cat.image?.url} alt={cat.image ? `${cat.name} tile` : ''} className="xl" />
+        <div className="stack gap-2">
+          <span className="small sub">Shown on the store’s Categories page and in the homepage and Official Store shortcuts. Square, saved at 600 × 600.</span>
+          {canEdit && (
+            <div className="row gap-2 wrap">
+              <Button variant="secondary" size="sm" icon="upload" onClick={() => input.current?.click()} disabled={busy}>
+                {busy ? 'Uploading…' : cat.image ? 'Replace image' : 'Upload image'}
+              </Button>
+              {cat.image && (
+                <Button variant="ghost" size="sm" onClick={() => onChange(null)} disabled={busy}>
+                  Remove
+                </Button>
+              )}
+              <input
+                ref={input}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                hidden
+                onChange={(e) => {
+                  setFiles([...(e.target.files ?? [])].slice(0, 1));
+                  e.target.value = '';
+                }}
+              />
+            </div>
+          )}
+          {error && <span className="xs t-danger-text">{error}</span>}
+        </div>
+      </div>
+      {files.length > 0 && <ImageCropper files={files} spec={TILE_SPEC} wording={TILE_WORDING} onProcessed={(img) => void upload(img)} onClose={() => setFiles([])} />}
+    </div>
+  );
+}
 
 /* ---------------- Categories tab ---------------- */
 
@@ -188,6 +252,7 @@ function CategoriesTab({ nodes, setNodes, activeId, setActiveId, attrSet, attrsL
                 <OptionCard id="aa-ct-e2" name="aa-ct-empty" title={<span className="small strong">Show "Coming soon"</span>} body="Page stays visible with a short note" checked={cat.empty === 'soon'} disabled={!canEdit} onChange={() => setCat({ empty: 'soon' })} />
               </div>
             </div>
+            <TileImage cat={cat} canEdit={canEdit} onChange={(image) => setCat({ image })} />
           </div>
         </section>
 
@@ -774,7 +839,7 @@ export default function Categories() {
     setNodes((list) => {
       const idx = list.reduce((last, n, i) => (n.parent === parent || n.id === parent ? i : last), list.length - 1);
       const next = [...list];
-      next.splice(idx + 1, 0, { id, name: 'New category', parent, count: 0, offers: 0, slug: '', position: list.filter((n) => n.parent === parent).length + 1, visible: true, empty: 'hide', isNew: true });
+      next.splice(idx + 1, 0, { id, name: 'New category', parent, count: 0, offers: 0, slug: '', position: list.filter((n) => n.parent === parent).length + 1, visible: true, empty: 'hide', image: null, isNew: true });
       return next;
     });
     setActiveId(id);
@@ -784,7 +849,7 @@ export default function Categories() {
   const changed = nodes.filter((n) => {
     if (n.isNew) return true;
     const s = saved.find((x) => x.id === n.id);
-    return s && (s.name !== n.name || s.parent !== n.parent || s.visible !== n.visible || s.empty !== n.empty);
+    return s && (s.name !== n.name || s.parent !== n.parent || s.visible !== n.visible || s.empty !== n.empty || s.image?.id !== n.image?.id);
   });
   const dirty = changed.length > 0 || Object.keys(attrEdits).length > 0;
 
@@ -796,10 +861,11 @@ export default function Categories() {
       for (const n of ordered) {
         const parentId = n.parent ? idMap[n.parent] ?? n.parent : null;
         if (n.isNew) {
-          const c = await call(api.POST('/api/admin/catalog/categories', { body: { name: n.name.trim(), parentId, visible: n.visible, comingSoon: n.empty === 'soon' } }));
+          const c = await call(api.POST('/api/admin/catalog/categories', { body: { name: n.name.trim(), parentId, visible: n.visible, comingSoon: n.empty === 'soon', imageId: n.image?.id ?? null } }));
           idMap[n.id] = c.id;
         } else {
-          await call(api.PATCH('/api/admin/catalog/categories/{id}', { params: { path: { id: n.id } }, body: { name: n.name.trim(), parentId, visible: n.visible, comingSoon: n.empty === 'soon' } }));
+          const imageChanged = saved.find((x) => x.id === n.id)?.image?.id !== n.image?.id;
+          await call(api.PATCH('/api/admin/catalog/categories/{id}', { params: { path: { id: n.id } }, body: { name: n.name.trim(), parentId, visible: n.visible, comingSoon: n.empty === 'soon', ...(imageChanged ? { imageId: n.image?.id ?? null } : {}) } }));
         }
       }
       for (const [catId, list] of Object.entries(attrEdits)) {

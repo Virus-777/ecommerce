@@ -21,6 +21,19 @@ export interface ProcessedImage {
   crop: CropRect;
 }
 
+/** Wording for what is being cropped (default: product images). */
+export interface CropWording {
+  /** "product images" */
+  what: string;
+  /** "place the product" */
+  place: string;
+  /** Label and use of the large size: "Product page" / "the product page". */
+  detail: [string, string];
+  /** Label and use of the small size: "Lists" / "lists". */
+  thumbnail: [string, string];
+}
+const PRODUCT_WORDING: CropWording = { what: 'product images', place: 'place the product', detail: ['Product page', 'the product page'], thumbnail: ['Lists', 'lists'] };
+
 interface View {
   scale: number;
   x: number;
@@ -31,7 +44,7 @@ interface View {
  * Crops a queue of photos one at a time. `onProcessed` is called for each photo the person confirms; `onSkip` when
  * they skip one; `onClose` when the queue is done or cancelled.
  */
-export function ImageCropper({ files, spec, onProcessed, onSkip, onClose }: { files: File[]; spec: ProductImageSpec; onProcessed: (img: ProcessedImage) => void; onSkip?: (file: File, reason?: string) => void; onClose: () => void }) {
+export function ImageCropper({ files, spec, wording = PRODUCT_WORDING, onProcessed, onSkip, onClose }: { files: File[]; spec: ProductImageSpec; wording?: CropWording; onProcessed: (img: ProcessedImage) => void; onSkip?: (file: File, reason?: string) => void; onClose: () => void }) {
   const [index, setIndex] = useState(0);
   const file = files[index];
   const next = () => (index + 1 < files.length ? setIndex(index + 1) : onClose());
@@ -49,6 +62,7 @@ export function ImageCropper({ files, spec, onProcessed, onSkip, onClose }: { fi
           key={`${index}-${file.name}`}
           file={file}
           spec={spec}
+          wording={wording}
           last={index + 1 >= files.length}
           onDone={(img) => {
             onProcessed(img);
@@ -65,7 +79,7 @@ export function ImageCropper({ files, spec, onProcessed, onSkip, onClose }: { fi
   );
 }
 
-function CropStep({ file, spec, last, onDone, onSkip, onCancel }: { file: File; spec: ProductImageSpec; last: boolean; onDone: (img: ProcessedImage) => void; onSkip: (reason?: string) => void; onCancel: () => void }) {
+function CropStep({ file, spec, wording, last, onDone, onSkip, onCancel }: { file: File; spec: ProductImageSpec; wording: CropWording; last: boolean; onDone: (img: ProcessedImage) => void; onSkip: (reason?: string) => void; onCancel: () => void }) {
   const [img, setImg] = useState<LoadedImage | null>(null);
   const [loadError, setLoadError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -193,7 +207,7 @@ function CropStep({ file, spec, last, onDone, onSkip, onCancel }: { file: File; 
   return (
     <div className="stack gap-4">
       <p className="small sub">
-        {file.name} · product images are {ratioText}. Drag the photo to place the product, and zoom with the slider. It is saved at {sizeText(spec.detail)} for the product page and {sizeText(spec.thumbnail)} for lists.
+        {file.name} · {wording.what} are {ratioText}. Drag the photo to {wording.place}, and zoom with the slider. It is saved at {sizeText(spec.detail)} for {wording.detail[1]} and {sizeText(spec.thumbnail)} for {wording.thumbnail[1]}.
       </p>
       {loadError ? (
         <Alert tone="danger" title={isHeic(file) ? 'HEIC photos aren’t supported' : 'This image can’t be used'}>
@@ -239,8 +253,8 @@ function CropStep({ file, spec, last, onDone, onSkip, onCancel }: { file: File; 
             </label>
             {frameW > 0 && (
               <div className="row gap-3 items-end">
-                {preview('Product page', spec.detail, 112)}
-                {preview('Lists', spec.thumbnail, 64)}
+                {preview(wording.detail[0], spec.detail, 112)}
+                {preview(wording.thumbnail[0], spec.thumbnail, 64)}
               </div>
             )}
             {view && img && !tooSmall && <p className="xs muted">Visible area: {sizeText({ width: Math.round(frameW / view.scale), height: Math.round(frameH / view.scale) })} of {sizeText(img)} px</p>}

@@ -1,4 +1,4 @@
-import type { components } from '@marketly/web-shared/api';
+import { renditionUrl, type components } from '@marketly/web-shared/api';
 import type { IconName, Tone } from '@marketly/web-shared/ui';
 
 // Admin Categories and brands (design: pages/admin/admin-categories.html, --brands), fed by
@@ -24,13 +24,15 @@ export interface CategoryNode {
   visible: boolean;
   /** What the store shows when the category has no eligible inventory. */
   empty: 'hide' | 'soon';
+  /** Tile image (store Categories page, homepage and Official Store shortcuts): asset id and a preview URL. */
+  image: { id: string; url: string } | null;
   /** Created here and not yet saved. */
   isNew?: boolean;
 }
 
 export function flattenTree(tree: ApiCategory[], parent: string | null = null): CategoryNode[] {
   return tree.flatMap((c) => [
-    { id: c.id, name: c.name, parent, count: c.productCount ?? 0, offers: c.offerCount ?? 0, slug: c.slug, position: c.position ?? 0, visible: c.visible, empty: c.comingSoon ? ('soon' as const) : ('hide' as const) },
+    { id: c.id, name: c.name, parent, count: c.productCount ?? 0, offers: c.offerCount ?? 0, slug: c.slug, position: c.position ?? 0, visible: c.visible, empty: c.comingSoon ? ('soon' as const) : ('hide' as const), image: c.image ? { id: c.image.id, url: renditionUrl(c.image, 'thumb') || c.image.url } : null },
     ...flattenTree((c.children ?? []) as ApiCategory[], c.id),
   ]);
 }
