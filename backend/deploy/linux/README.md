@@ -178,6 +178,8 @@ person gets their link and pass code from the server:
 ```bash
 sudo marketly staff-link --email ana@company.example                     # new link + pass code, or a password reset link
 sudo marketly staff-link --email ana@compnay.example --revoke "Mistyped email"
+sudo marketly staff-link --email ana@company.example --disable "Left the company"  # a leaver: signed out, roles ended
+sudo marketly staff-link --email ana@company.example --lock "Laptop stolen"      # also --enable, --unlock, --sign-out-all
 ```
 
 (`docs/MAINTAINING.md` §7 explains each case. In the release folder the same tools are

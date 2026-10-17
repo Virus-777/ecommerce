@@ -417,6 +417,36 @@ describe('tokens other than bearer', () => {
     expect((await app.inject({ method: 'POST', url, payload: { refreshToken: REFRESH } })).statusCode).toBe(200);
   });
 
+  it('takes the cookie from a page on the address the request came to (Admin Center opened by IP or another name)', async () => {
+    const url = '/api/public/demo/sessions/refresh';
+    const cookie = `__Secure-mk_refresh_store=${REFRESH}`;
+    const refresh = (headers: Record<string, string>) =>
+      app.inject({ method: 'POST', url, headers: { cookie, 'x-requested-with': 'fetch', ...headers }, payload: { audience: 'store' } });
+    // same origin as the request (inject speaks plain http); ports and letter case compare like the browser's Origin
+    for (const [host, origin] of [
+      ['192.168.1.10', 'http://192.168.1.10'],
+      ['192.168.1.10:8443', 'http://192.168.1.10:8443'],
+      ['Server-1.LAN:80', 'http://server-1.lan'],
+      ['[fd00::10]', 'http://[fd00::10]'],
+    ] as const) {
+      expect((await refresh({ host, origin })).statusCode, `${host} ${origin}`).toBe(200);
+    }
+    // another site's page, another port or scheme of the same host, and no Host at all stay refused
+    for (const [host, origin] of [
+      ['192.168.1.10', 'https://evil.example'],
+      ['192.168.1.10', 'http://192.168.1.10:8443'],
+      ['192.168.1.10', 'https://192.168.1.10'],
+      ['', 'http://192.168.1.10'],
+    ] as const) {
+      const res = await refresh({ host, origin });
+      expect(res.statusCode, `${host} ${origin}`).toBe(403);
+      expect(res.json().error.details.reason).toBe('origin_not_allowed');
+    }
+    // X-Forwarded-* count only from the proxies TRUST_PROXY names (none here)
+    const forwarded = { host: '192.168.1.10', origin: 'https://marketly.example', 'x-forwarded-host': 'marketly.example', 'x-forwarded-proto': 'https' };
+    expect((await refresh(forwarded)).statusCode).toBe(403);
+  });
+
   it('processes a signed webhook once and acknowledges replays without running the handler', async () => {
     const body = JSON.stringify({ id: 'evt_1' });
     const headers = { 'content-type': 'application/json', 'x-event-id': 'evt_1' };

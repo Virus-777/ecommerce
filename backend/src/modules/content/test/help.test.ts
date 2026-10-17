@@ -179,3 +179,61 @@ describe('help articles', () => {
     expect((await h.admin('GET', '/help/items?type=policy')).json().items[0]).toMatchObject({ type: 'policy', category: 'Policies', editUrl: expect.stringContaining('/admin/help-content/policies/') });
   });
 });
+
+describe('reviewing an edit of a live article (draftReview)', () => {
+  const t = (id: string, body: Record<string, unknown>, who: string) => h.admin('POST', `/help/articles/${id}/transition`, body, h.staff(who));
+  let id: string;
+
+  it('a live article without a draft, or with a draft never submitted, has no draftReview', async () => {
+    const created = (await h.admin('POST', '/help/articles', article({ title: 'Track a parcel', slug: 'track-a-parcel', featured: false }), h.staff(author))).json();
+    id = created.article.id;
+    expect(created.draftReview).toBeNull(); // first publication: status tells it
+    expect((await t(id, { action: 'submit' }, author)).json()).toMatchObject({ status: 'in_review', draftReview: null });
+    await t(id, { action: 'approve' }, reviewer);
+    expect((await t(id, { action: 'publish' }, reviewer)).json()).toMatchObject({ status: 'published', draftReview: null });
+    const edit = await h.admin('PATCH', `/help/articles/${id}`, article({ title: 'Track a parcel (v2)', slug: 'track-a-parcel', featured: false }), h.staff(author));
+    expect(edit.json()).toMatchObject({ status: 'published', liveVersion: 1, draftVersion: 2, draftReview: null, canApprove: false });
+  });
+
+  it('submit, request changes with a note that survives edits, submit again, approve, publish', async () => {
+    const sent = (await t(id, { action: 'submit' }, author)).json();
+    expect(sent).toMatchObject({ status: 'published', draftReview: { state: 'in_review', by: { id: author }, reason: null } });
+    expect(sent.draftReview.at).toBeTruthy();
+    expect((await h.admin('GET', `/help/articles/${id}`, undefined, h.staff(reviewer))).json().canApprove).toBe(true);
+    expect((await t(id, { action: 'submit' }, author)).json().error.code).toBe('ILLEGAL_TRANSITION');
+    expect((await h.admin('PATCH', `/help/articles/${id}`, article({ title: 'Frozen', slug: 'track-a-parcel' }), h.staff(author))).json().error.code).toBe('CONFLICT');
+
+    expect((await t(id, { action: 'requestChanges' }, reviewer)).statusCode).toBe(400); // the reason is required
+    const back = (await t(id, { action: 'requestChanges', reason: 'Add the carrier list' }, reviewer)).json();
+    expect(back).toMatchObject({ status: 'published', canApprove: false, draftReview: { state: 'changes_requested', by: { id: reviewer }, reason: 'Add the carrier list' } });
+    expect((await t(id, { action: 'approve' }, reviewer)).json().error.code).toBe('ILLEGAL_TRANSITION');
+    expect((await t(id, { action: 'publish' }, reviewer)).json().error.code).toBe('ILLEGAL_TRANSITION');
+    // the author edits: the note stays until the draft is sent again
+    const fixed = await h.admin('PATCH', `/help/articles/${id}`, article({ title: 'Track a parcel (v2, carriers)', slug: 'track-a-parcel' }), h.staff(author));
+    expect(fixed.statusCode).toBe(200);
+    expect(fixed.json()).toMatchObject({ draftVersion: 2, draftReview: { state: 'changes_requested', reason: 'Add the carrier list' } });
+
+    expect((await t(id, { action: 'submit' }, author)).json()).toMatchObject({ draftReview: { state: 'in_review', reason: null } });
+    expect((await t(id, { action: 'approve' }, author)).json().error.code).toBe('SAME_REVIEWER');
+    const ok = (await t(id, { action: 'approve' }, reviewer)).json();
+    expect(ok).toMatchObject({ status: 'published', canApprove: false, draftReview: { state: 'approved', by: { id: reviewer } } });
+    expect((await h.admin('PATCH', `/help/articles/${id}`, article({ title: 'Late edit', slug: 'track-a-parcel' }), h.staff(author))).json().error.code).toBe('CONFLICT');
+    // a live article is not scheduled (it would go offline until then): publish the approved draft now
+    expect((await t(id, { action: 'schedule', publishAt: new Date(Date.now() + DAY).toISOString() }, reviewer)).json().error.code).toBe('ILLEGAL_TRANSITION');
+
+    const live = (await t(id, { action: 'publish' }, reviewer)).json();
+    expect(live).toMatchObject({ status: 'published', liveVersion: 2, draftVersion: null, draftReview: null });
+    expect((await h.store('GET', '/help/articles/track-a-parcel')).json()).toMatchObject({ title: 'Track a parcel (v2, carriers)', version: 2 });
+  });
+
+  it('an unpublished article with a new draft needs the draft approved before it is published or scheduled', async () => {
+    await t(id, { action: 'unpublish', reason: 'Carrier change' }, reviewer);
+    await h.admin('PATCH', `/help/articles/${id}`, article({ title: 'Track a parcel (v3)', slug: 'track-a-parcel' }), h.staff(author));
+    const at = new Date(Date.now() + DAY).toISOString();
+    expect((await t(id, { action: 'schedule', publishAt: at }, reviewer)).json().error.code).toBe('ILLEGAL_TRANSITION');
+    expect((await t(id, { action: 'publish' }, reviewer)).json().error.code).toBe('ILLEGAL_TRANSITION');
+    await t(id, { action: 'submit' }, author);
+    expect((await t(id, { action: 'approve' }, reviewer)).json()).toMatchObject({ status: 'unpublished', draftReview: { state: 'approved' } });
+    expect((await t(id, { action: 'schedule', publishAt: at }, reviewer)).json()).toMatchObject({ status: 'scheduled', draftReview: { state: 'approved' } });
+  });
+});

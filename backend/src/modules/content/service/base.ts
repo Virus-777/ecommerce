@@ -50,11 +50,16 @@ export const actorFromKey = (key: string | null | undefined): common.Actor => {
   return { kind: kind || 'system', id: id || null };
 };
 
-/** Snapshot meta for a draft under review when the item itself is already live */
+/**
+ * Snapshot meta for a draft under review when the item itself is already live (it keeps its status meanwhile).
+ * changes_requested is used by help articles only (pages clear the marker instead): it keeps the reviewer's note
+ * for the author until the draft is submitted again.
+ */
 export interface DraftReview {
-  state: 'in_review' | 'approved';
+  state: 'in_review' | 'approved' | 'changes_requested';
   by?: common.Actor | null;
   at?: string | null;
+  reason?: string | null;
 }
 
 export type SettingsShape = { page: boolean; section: boolean; article: boolean };
