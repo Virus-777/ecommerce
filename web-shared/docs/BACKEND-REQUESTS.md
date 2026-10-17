@@ -4,7 +4,7 @@ The web apps don't change `backend/`. This file lists what they need from it: **
 
 > **Backend answers (2026-10-16):** every item below has a status and the exact fields or endpoints to use in [BACKEND-ANSWERS.md](BACKEND-ANSWERS.md).
 >
-> **Web integration (2026-10-16, backend `e7a23235`):** the three apps now use those answers. The G1–G79 tables still describe the workarounds as they were; what is still open after the integration is **R4** and **G80–G95** below.
+> **Web integration (2026-10-16, backend `e7a23235`):** the three apps now use those answers. The G1–G79 tables still describe the workarounds as they were; what is still open after the integration is **R4** and **G80–G97** below.
 
 ## Requests
 
@@ -210,3 +210,5 @@ Bugs and contract questions first, then missing data. Each is worked around in t
 | G93 | GraphQL `case(ref)` returns null for a dev-token customer with no customer profile | Testing help cases with dev customer tokens | Test with a seeded customer |
 | G94 | Official Store profile has no delivery or warranty terms | The Official Store promise strip ("Free delivery over $35…") is still the design's text | Design text |
 | G95 | **Doc fixes in BACKEND-ANSWERS:** R1: the invitation code is at `data.invite.code` (topic `seller.application.invitation`), not `data.invite.url`; G10: `PATCH /api/admin/catalog/products/{id}/variants/{variantId}` requires `reason`. **Data:** the seeded `companyLine` setting still says San Francisco; old notices keep empty refs, incomplete links and old icon names (no backfill, by decision) | — | The seed and apps follow the real behaviour |
+| G96 | **Bug (lost update):** two `POST /api/store/sellers/applications/{id}/documents` at once (owner ID with `ownerId`, and business registration) lose the owner's ID link; `POST …/submit` then answers 400 `APPLICATION_INCOMPLETE` (`verification: owners.idDocumentIds`). `addApplicationDocument` (sellers/service/applications.ts) reads the verification section before its transaction and writes the whole section back | Any client that sends documents in parallel (the seed did) | The store application form already sends them one at a time; the seed now does too. Ask: update the section inside the transaction |
+| G97 | An accepted seller `images` correction is only recorded: the owner can't change an approved product's files, so the correction can never be carried out | Staff can't get photos fixed on a seller product without reopening it | The seed reopens the product (variants correction → request changes → seller resubmits). Ask: apply accepted image corrections, or let the owner replace images on an approved product |
