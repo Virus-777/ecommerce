@@ -45,6 +45,8 @@ const FS_FEES = 'fulfillment-service.fees.manage';
  * migration 2026-10-17-staff-work-uploads.
  */
 export const STAFF_UPLOADS = 'media.uploads.create';
+/** The Marketing Manager searches offers when adding flash-sale items (Admin › Promotions); installs seeded before it get it from the same migration */
+export const MARKETING_OFFERS_VIEW = 'offers.offers.view';
 
 export const SYSTEM_ROLES: SeedRole[] = [
   {
@@ -239,7 +241,7 @@ export const SYSTEM_ROLES: SeedRole[] = [
     workArea: 'Marketing and content',
     description: 'Promotions, homepage and marketing broadcasts.',
     escalationRoleKey: BUSINESS_OWNER,
-    permissions: ['promotions.*', 'content.homepage.manage', 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', STAFF_UPLOADS, ...QUEUES],
+    permissions: ['promotions.*', 'content.homepage.manage', 'reports.customers-marketing.view', 'notifications.broadcasts.manage', 'advertising.campaigns.review', MARKETING_OFFERS_VIEW, STAFF_UPLOADS, ...QUEUES],
     limits: { 'promotions.budgets.approve': upTo(5_000) },
   },
   {

@@ -4,7 +4,7 @@
  */
 import { allSpecs } from '../../kernel/module-system/loader.js';
 import type { MongoMigration } from '../../kernel/mongo/schema.js';
-import { BUSINESS_OWNER, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
+import { BUSINESS_OWNER, MARKETING_OFFERS_VIEW, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
 
 /** Every staff permission key ending in `.view`, from every module's spec (enabled or not, like the registry) */
 export function staffViewKeys(): string[] {
@@ -46,8 +46,10 @@ export const businessOwnerViewKeys: MongoMigration = {
  * media.assets.manage, which only the Catalog and Content Managers held, so warehouse, returns and other Ops staff
  * could not attach the photos Receiving, Pick & pack and Return inspection ask for. New installs get the key from the
  * seed (STAFF_UPLOADS in domain/seed.ts); this gives it once to the seeded roles that have it in the seed, and to every
- * role holding media.assets.manage (custom roles included), so nobody who could upload before loses it. It runs once,
- * so a key the owner removes afterwards stays removed.
+ * role holding media.assets.manage (custom roles included), so nobody who could upload before loses it.
+ * Same fix round: the seeded Marketing Manager also gets offers.offers.view (MARKETING_OFFERS_VIEW in domain/seed.ts),
+ * to search offers when adding flash-sale items in Admin › Promotions.
+ * It runs once, so a key the owner removes afterwards stays removed.
  */
 export const staffWorkUploads: MongoMigration = {
   id: '2026-10-17-staff-work-uploads',
@@ -55,11 +57,13 @@ export const staffWorkUploads: MongoMigration = {
     const roles = await db.collection('access.roles').find({ archived_at: null }).toArray();
     if (!roles.length) return; // a new install: the registry sync seeds the roles with the key
     const now = new Date();
+    const grant = (roleId: unknown, key: string) =>
+      db.collection('access.role_permissions').updateOne({ role_id: roleId, permission_key: key }, { $setOnInsert: { granted_by: 'system', granted_at: now } }, { upsert: true });
     const seeded = new Set(SYSTEM_ROLES.filter((r) => r.permissions.includes(STAFF_UPLOADS)).map((r) => r.key));
     const managers = new Set((await db.collection('access.role_permissions').find({ permission_key: 'media.assets.manage' }).toArray()).map((p) => String(p.role_id)));
     for (const role of roles) {
-      if (!(role.system && seeded.has(String(role.key))) && !managers.has(String(role._id))) continue;
-      await db.collection('access.role_permissions').updateOne({ role_id: role._id, permission_key: STAFF_UPLOADS }, { $setOnInsert: { granted_by: 'system', granted_at: now } }, { upsert: true });
+      if (role.system && role.key === 'marketing_manager') await grant(role._id, MARKETING_OFFERS_VIEW);
+      if ((role.system && seeded.has(String(role.key))) || managers.has(String(role._id))) await grant(role._id, STAFF_UPLOADS);
     }
   },
 };
