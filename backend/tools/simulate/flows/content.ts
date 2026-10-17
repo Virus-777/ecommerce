@@ -183,9 +183,9 @@ async function navigation(sim: Sim, writer: Staff, visitor: Session): Promise<vo
   const header = CATEGORIES.map((c) => cats.find((x) => x.name === c.name && !x.parentId))
     .filter((c): c is CategoryNode => Boolean(c))
     .map((c) => ({ label: c.name, url: `/c/${c.slug}`, kind: 'category' }));
-  header.push({ label: 'Deals', url: '/deals', kind: 'deals' }, { label: 'Official Store', url: '/official', kind: 'page' });
+  header.push({ label: 'Deals', url: '/deals', kind: 'deals' }, { label: 'Official Store', url: '/official', kind: 'page' }, { label: 'Brands', url: '/brands', kind: 'page' });
   const footer = [
-    { title: 'Shop', links: [{ label: 'All categories', url: '/categories', kind: 'page' }, { label: 'Deals', url: '/deals', kind: 'deals' }, { label: 'Official Store', url: '/official', kind: 'page' }] },
+    { title: 'Shop', links: [{ label: 'All categories', url: '/categories', kind: 'page' }, { label: 'Deals', url: '/deals', kind: 'deals' }, { label: 'Official Store', url: '/official', kind: 'page' }, { label: 'Brands', url: '/brands', kind: 'page' }] },
     { title: 'Help', links: [{ label: 'Help Center', url: '/help', kind: 'help' }, { label: 'Returns', url: '/policies/returns', kind: 'policy' }, { label: 'Shipping', url: '/policies/shipping', kind: 'policy' }] },
     { title: 'Sell on Marketly', links: [{ label: 'Start selling', url: '/sell', kind: 'page' }, { label: 'Seller rules', url: '/policies/seller_rules', kind: 'policy' }] },
     { title: 'Marketly', links: [{ label: 'About us', url: '/about', kind: 'page' }, { label: 'Privacy', url: '/policies/privacy', kind: 'policy' }, { label: 'Purchase terms', url: '/policies/purchase_terms', kind: 'policy' }] },
