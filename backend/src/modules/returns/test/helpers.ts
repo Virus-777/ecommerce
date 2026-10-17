@@ -7,7 +7,7 @@
  *   offers.snapshotForOrder, catalog.snapshotForOrder → purchase snapshots for orders.createOrder (as orders' tests);
  *     product({ categoryId }) puts the category on the snapshot, so orders keeps it on the order item.
  *   customers.getCustomerByUserId → the customer id equals the account id.
- *   identity.hasGuestOrderAccess → h.guestGrants ("sessionId:orderId").
+ *   identity.hasGuestOrderAccess → h.guestGrants ("sessionId:orderId"); verifyReauthToken accepts REAUTH (purpose approval).
  *   shipping (not built): createLabel returns a label and a return shipment (cost $6.50, QR for prepaid_qr,
  *     drop-off in 7 days); voidLabel, registerReturnTracking and findDropOffPoints are recorded.
  *   payments (not built): remainingRefundable = paid (orders.getPaidAmounts) − refunds started here;
@@ -37,6 +37,8 @@ import type { ReturnsService } from '../service.js';
 
 export const USD = (amount: number) => ({ amount, currency: 'USD' });
 export const now = () => new Date().toISOString();
+/** The re-auth token (purpose approval) the identity stub accepts */
+export const REAUTH = 'dev-reauth.approval';
 
 export interface Harness {
   app: FastifyInstance;
@@ -152,6 +154,10 @@ export async function harness(o: { only?: string[] } = {}): Promise<Harness> {
       },
       identity: {
         hasGuestOrderAccess: async (sessionId, orderId) => h.guestGrants.has(`${sessionId}:${orderId}`),
+        // staff password re-auth (step-up): REAUTH is the token identity issued for purpose approval; others are refused
+        verifyReauthToken: async (_p, token, purpose) => token === REAUTH && purpose === 'approval',
+        consumeReauthToken: async () => true,
+        releaseReauthToken: async () => {},
       },
       audit: {
         record: async (entry) => {

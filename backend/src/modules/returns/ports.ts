@@ -194,6 +194,7 @@ export interface RefundFilter {
   status?: string;
   statuses?: string[];
   source?: string;
+  sources?: string[];
   sellerId?: string;
   orderId?: string;
   caseId?: string;

@@ -196,6 +196,7 @@ export class ReturnsRepository {
     if (f.status) conds.push({ status: f.status });
     if (f.statuses) conds.push({ status: { $in: f.statuses } });
     if (f.source) conds.push({ source: f.source });
+    if (f.sources) conds.push({ source: { $in: f.sources } });
     if (f.sellerId) conds.push({ seller_id: f.sellerId });
     if (f.orderId) conds.push({ order_id: f.orderId });
     if (f.caseId) conds.push({ case_id: f.caseId });

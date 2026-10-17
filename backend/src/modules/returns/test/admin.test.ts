@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { OFFICIAL_STORE_ID } from '../../../spec/common.js';
 import { PENDING_REFUND } from '../domain/rules.js';
-import { group, harness, idem, line, now, placeOrder, product, tokens, type Harness } from './helpers.js';
+import { group, harness, idem, line, now, placeOrder, product, REAUTH, tokens, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -84,22 +84,34 @@ describe('Official Store returns', () => {
     expect(h.named('returns.return.inspected').find((e) => e.returnId === m.ret.id)).toMatchObject({ ownerType: 'official', orderItemId: m.items[0]![0]!, variantId: m.p.variantId, stockItemId: m.p.stockItemId, quantity: 1, proposedStockOutcome: 'return_to_supplier' });
     expect(h.audits.at(-1)).toMatchObject({ action: 'returns.inspection.record' });
 
-    const remedy = await h.call('POST', `/api/admin/returns/requests/${m.ret.id}/remedy`, staff(), { kind: 'full_refund' }, idem());
+    // the inspector has no refund authority (access denied): the refund still goes to Finance, through an approval request
+    h.authority.decision = 'denied';
+    const remedy = await h.call('POST', `/api/admin/returns/requests/${m.ret.id}/remedy`, tokens.staff(['returns.requests.manage'], { sub: me }), { kind: 'full_refund' }, idem());
     expect(remedy.status, JSON.stringify(remedy.body)).toBe(200);
-    expect(remedy.body.refundRequest).toMatchObject({ source: 'return', status: 'under_review', fundedBy: 'official_store', breakdown: { total: { amount: 5400 } } });
+    expect(remedy.body.refundRequest).toMatchObject({ source: 'return', status: 'under_review', fundedBy: 'official_store', breakdown: { total: { amount: 5400 } }, approval: { required: true } });
     const rr = remedy.body.refundRequest;
+    expect(h.calls.approvals.at(-1)).toMatchObject({ action: 'returns.refunds.approve', amount: { amount: 5400 }, target: { type: 'refund_request', id: rr.id, screen: 'admin/finance' }, requestedBy: { kind: 'staff', accountId: me } });
     expect(h.named('returns.refund.requested').find((e) => e.refundRequestId === rr.id)).toMatchObject({ source: 'return', total: { amount: 5400 } });
     expect(h.calls.refunds.find((r) => r.originId === rr.id)).toBeUndefined();
 
-    const queue = await h.call('GET', '/api/admin/returns/refunds?status=under_review', staff());
-    expect(queue.body.items.map((r: any) => r.id)).toContain(rr.id);
+    // Finance's Refunds to approve list
+    const queue = await h.call('GET', '/api/admin/returns/refunds?awaitingApproval=true', staff());
+    expect(queue.status, JSON.stringify(queue.body)).toBe(200);
+    expect(queue.body.items.find((r: any) => r.id === rr.id)).toMatchObject({ orderRef: m.order.ref, returnRef: m.ret.ref, source: 'return', breakdown: { total: { amount: 5400 } }, approval: { required: true }, canApprove: false });
+    expect(queue.body.items.every((r: any) => ['requested', 'under_review'].includes(r.status) && r.source !== 'seller')).toBe(true);
+    h.authority.decision = 'allowed';
+    expect((await h.call('GET', `/api/admin/returns/refunds/${rr.id}`, staff())).body.canApprove).toBe(true);
+    // without the approve permission nobody can approve from the list
+    expect((await h.call('GET', `/api/admin/returns/refunds/${rr.id}`, tokens.staff(['returns.requests.view']))).body.canApprove).toBe(false);
 
+    // an approver records an approval that still needs a second reviewer: the request stays under review
     h.authority.decision = 'approval_required';
+    h.authority.decideStatus = 'partially_approved';
     const above = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), {}, idem());
     // saved pending approval: 200 with the approval in the body (FORMAT.md, Approval responses)
     expect(above.status).toBe(200);
     expect(above.body).toMatchObject({ id: rr.id, status: 'under_review', approval: { required: true } });
-    expect(h.calls.approvals.at(-1)).toMatchObject({ action: 'returns.refunds.approve', amount: { amount: 5400 }, target: { type: 'refund_request', id: rr.id } });
+    expect(h.calls.decided.at(-1)).toBe(rr.approval.approvalRequestId);
     const pending = await h.call('GET', `/api/admin/returns/refunds/${rr.id}`, staff());
     expect(pending.body).toMatchObject({ status: 'under_review', approval: { required: true } });
 
@@ -124,6 +136,8 @@ describe('Official Store returns', () => {
     const m = await officialReturn();
     await h.service.recordWarehouseReceipt(m.ret.id, now(), { kind: 'staff', id: newId() }, null);
     await h.call('POST', `/api/admin/returns/requests/${m.ret.id}/inspection`, staff(), { conditionOutcome: 'missing_parts', grade: 'good', missingParts: ['Lid'], proposedStockOutcome: 'repair' });
+    // returns staff without refund authority propose and revise; Finance approves
+    h.authority.decision = 'denied';
     const remedy = await h.call('POST', `/api/admin/returns/requests/${m.ret.id}/remedy`, staff(), { kind: 'full_refund' }, idem());
     const rr = remedy.body.refundRequest;
     const declined = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/decline`, staff(), { reason: 'The lid is missing; deduct it' });
@@ -132,7 +146,10 @@ describe('Official Store returns', () => {
     expect((await h.call('POST', `/api/admin/returns/refunds/${rr.id}/decline`, staff(), { reason: 'again' })).status).toBe(409);
     const revised = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/revise`, staff(), { kind: 'partial_refund', deductions: [{ label: 'Missing lid', amount: { amount: 900, currency: 'USD' }, reason: 'The lid was not returned' }] });
     expect(revised.status, JSON.stringify(revised.body)).toBe(200);
-    expect(revised.body).toMatchObject({ status: 'under_review', breakdown: { total: { amount: 4500 }, deductions: [{ label: 'Missing lid' }] } });
+    expect(revised.body).toMatchObject({ status: 'under_review', breakdown: { total: { amount: 4500 }, deductions: [{ label: 'Missing lid' }] }, approval: { required: true } });
+    // the resubmission is a new approval request (decline withdrew the first one)
+    expect(h.calls.approvals.at(-1)).toMatchObject({ target: { id: rr.id }, amount: { amount: 4500 } });
+    h.authority.decision = 'allowed';
     const ok = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), { note: 'OK' }, idem());
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body.status).toBe('processing');
@@ -208,14 +225,46 @@ describe('platform interventions', () => {
     expect(h.named('returns.return.approved').find((e) => e.returnId === b.ret.id)).toMatchObject({ withoutReturn: true, platformDecision: true });
     expect((await h.call('POST', `/api/admin/returns/requests/${b.ret.id}/overturn`, staff(), { withoutReturn: true, reason: 'again' })).status).toBe(409);
     const remedy = await h.call('POST', `/api/admin/returns/requests/${b.ret.id}/remedy`, staff(), { kind: 'full_refund' }, idem());
-    expect(remedy.body.refundRequest).toMatchObject({ status: 'under_review', fundedBy: 'seller' });
+    // within the staff member's refund limit: approved and handed to payments in the same call
+    expect(remedy.body.refundRequest).toMatchObject({ status: 'processing', fundedBy: 'seller', approval: null });
+  });
+
+  it('asks the staff member for the password again when their own limit covers a refund above stepUpAbove', async () => {
+    const b = await sellerReturn();
+    await h.call('POST', `/api/seller/returns/requests/${b.ret.id}/reject`, b.seller, { reasonCode: 'damaged_by_customer', explanation: 'Dropped' });
+    await h.call('POST', `/api/admin/returns/requests/${b.ret.id}/overturn`, staff(), { withoutReturn: true, reason: 'Transit damage' });
+    h.authority.stepUp = true;
+    try {
+      const missing = await h.call('POST', `/api/admin/returns/requests/${b.ret.id}/remedy`, staff(), { kind: 'full_refund' }, idem());
+      expect(missing.body.error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { purpose: 'approval' } });
+      // nothing saved: the same remedy goes through with the token
+      expect((await h.call('GET', `/api/admin/returns/requests/${b.ret.id}`, staff())).body.refundRequest).toBeNull();
+      const ok = await h.call('POST', `/api/admin/returns/requests/${b.ret.id}/remedy`, staff(), { kind: 'full_refund', reauthToken: REAUTH }, idem());
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body.refundRequest).toMatchObject({ status: 'processing' });
+      expect(h.audits.find((a) => a.action === 'returns.remedy.decide' && a.target.id === b.ret.id)!.after).not.toHaveProperty('reauthToken', REAUTH);
+
+      const c = await sellerReturn();
+      const noToken = await h.call('POST', `/api/admin/returns/requests/${c.ret.id}/approve-without-return`, staff(), { reasonCode: 'unsafe_to_ship', details: 'Leaking', remedy: { kind: 'full_refund' } }, idem());
+      expect(noToken.body.error.code).toBe('STEP_UP_REQUIRED');
+      expect((await h.call('GET', `/api/admin/returns/requests/${c.ret.id}`, staff())).body.detail.status).toBe('requested');
+      const withToken = await h.call('POST', `/api/admin/returns/requests/${c.ret.id}/approve-without-return`, staff(), { reasonCode: 'unsafe_to_ship', details: 'Leaking', remedy: { kind: 'full_refund' }, reauthToken: REAUTH }, idem());
+      expect(withToken.status, JSON.stringify(withToken.body)).toBe(200);
+      expect(withToken.body).toMatchObject({ refundRequest: { status: 'processing' }, exception: { approvedBy: { kind: 'staff' } } });
+    } finally {
+      h.authority.stepUp = false;
+    }
   });
 
   it('proposes refund without return for Finance and approves the exception with the refund', async () => {
     const m = await sellerReturn();
+    // above the proposer's refund limit: waits for Finance with an approval request
+    h.authority.decision = 'approval_required';
     const res = await h.call('POST', `/api/admin/returns/requests/${m.ret.id}/approve-without-return`, staff(), { reasonCode: 'unsafe_to_ship', details: 'Shattered glass', remedy: { kind: 'full_refund' } }, idem());
     expect(res.status, JSON.stringify(res.body)).toBe(200);
-    expect(res.body).toMatchObject({ detail: { status: 'awaiting_remedy' }, exception: { reasonCode: 'unsafe_to_ship', approvedBy: null, stockOutcome: 'write_off' }, refundRequest: { status: 'under_review' } });
+    expect(res.body).toMatchObject({ detail: { status: 'awaiting_remedy' }, exception: { reasonCode: 'unsafe_to_ship', approvedBy: null, stockOutcome: 'write_off' }, refundRequest: { status: 'under_review', approval: { required: true } } });
+    expect(h.calls.approvals.at(-1)).toMatchObject({ action: 'returns.refunds.approve', target: { type: 'refund_request', id: res.body.refundRequest.id } });
+    h.authority.decision = 'allowed';
     expect(res.body.flags.map((f: any) => f.kind)).toContain('refund_without_return_proposed');
     expect(h.named('returns.exception.proposed').find((e) => e.returnId === m.ret.id)).toMatchObject({ reasonCode: 'unsafe_to_ship' });
     const ok = await h.call('POST', `/api/admin/returns/refunds/${res.body.refundRequest.id}/approve`, staff(), {}, idem());
@@ -362,8 +411,9 @@ describe('staff reads and case refunds for support', () => {
     const review = await ask(m.items[0]![0]!, 2000);
     const moving = await ask(m.items[0]![1]!, 1500);
     expect((await h.call('POST', `/api/admin/returns/refunds/${moving.id}/approve`, staff(), {}, idem())).body.status).toBe('processing');
-    // above the approver's limit: waiting for access, cancelled with its approval request
+    // above the approver's limit: waiting for access (the approval is recorded, a second reviewer still needed), cancelled with its approval request
     h.authority.decision = 'approval_required';
+    h.authority.decideStatus = 'partially_approved';
     const waiting = await ask(m.items[0]![2]!, 1000);
     // saved pending approval: the normal answer with the approval in the body (FORMAT.md, Approval responses)
     const pending = await h.call('POST', `/api/admin/returns/refunds/${waiting.id}/approve`, staff(), {}, idem());
@@ -378,7 +428,8 @@ describe('staff reads and case refunds for support', () => {
     expect(res.cancelled.map((r) => r.id).sort()).toEqual([review.id, waiting.id].sort());
     expect(res.cancelled.every((r) => r.status === 'cancelled')).toBe(true);
     expect(res.notCancellable).toEqual([expect.objectContaining({ id: moving.id, status: 'processing' })]);
-    expect(h.calls.cancelledApprovals.length).toBe(cancelledApprovals + 1);
+    // every case refund waits with an approval request: both cancelled ones withdraw theirs
+    expect(h.calls.cancelledApprovals.length).toBe(cancelledApprovals + 2);
     expect(h.audits.filter((a) => a.action === 'returns.refund.cancel').map((a) => a.target.id)).toEqual(expect.arrayContaining([review.id, waiting.id]));
     // recorded as the staff member deciding the appeal, and published
     expect(h.audits.filter((a) => a.action === 'returns.refund.cancel').every((a) => a.actor.id === appealer.id)).toBe(true);

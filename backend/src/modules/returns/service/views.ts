@@ -652,6 +652,7 @@ export class Views {
       trustReportId: area === 'admin' ? rr.trust_report_id : null,
       earningsImpact: impact,
       approval: area === 'admin' ? approval : null,
+      canApprove: null, // set for the caller by the admin refund endpoints (Refunds.withCanApprove)
       proposedBy: actorFrom(rr.proposed_by) ?? { kind: 'system', id: null },
       approvedBy: actorFrom(rr.approved_by),
       declineReason: rr.decline_reason,

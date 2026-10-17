@@ -136,7 +136,8 @@ describe('Fulfilled by Marketly returns', () => {
     expect(sellerRemedy.status).toBe(409);
     const remedy = await h.call('POST', `/api/admin/returns/requests/${ret.id}/remedy`, staff(), { kind: 'full_refund' }, idem());
     expect(remedy.status, JSON.stringify(remedy.body)).toBe(200);
-    expect(remedy.body.refundRequest).toMatchObject({ source: 'return', status: 'under_review', fundedBy: 'seller', ownerType: 'seller', sellerId: m.sellerId });
+    expect(remedy.body.refundRequest).toMatchObject({ source: 'return', status: 'processing', fundedBy: 'seller', ownerType: 'seller', sellerId: m.sellerId });
+    // within the staff member's refund limit it was approved in the same call; approving again is harmless
     const ok = await h.call('POST', `/api/admin/returns/refunds/${remedy.body.refundRequest.id}/approve`, staff(), {}, idem());
     expect(ok.body.status).toBe('processing');
     expect(h.named('returns.refund.approved').find((e) => e.refundRequestId === remedy.body.refundRequest.id)).toMatchObject({ ownerType: 'seller', fundedBy: 'seller' });
