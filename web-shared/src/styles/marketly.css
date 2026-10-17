@@ -324,7 +324,10 @@
 .app a:hover { text-decoration: underline; }
 .app button { font: inherit; color: inherit; }
 .app img, .app svg { max-width: 100%; }
-.app :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
+/* a dialog or drawer box takes focus on open only to hold the keyboard inside it: no ring and its own corners
+   (:where keeps this rule's specificity unchanged) */
+.app :focus-visible:not(:where([data-dialog])) { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
+[data-dialog]:focus { outline: none; }
 .app h1, .app h2, .app h3, .app h4, .app p, .app ul, .app ol, .app dl, .app dd, .app figure { margin: 0; }
 .app ul, .app ol { padding: 0; list-style: none; }
 .app ol.ol { list-style: decimal; padding-left: var(--sp-5); }

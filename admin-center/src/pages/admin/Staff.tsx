@@ -14,11 +14,13 @@ import {
 } from './data/staff';
 import { isStepUpCancel, reauthField, useStepUp } from './data/step-up';
 import { StaffInvitations } from './data/staff-invitations';
+import { InvitationLinkDialog, type IssuedLink } from './data/invitation-link';
 import { StaffMemberDrawer } from './data/staff-member-drawer';
 
 // Design: pages/admin/admin-staff.html · view "edit-role" = full-page role editor (?view=edit-role&role=<role id>;
 // without a role it opens the Finance Manager, the design's example).
 // Data: access roles, members, coverage, away periods, role detail; invitations and permission changes are confirmed with the password (reauth).
+// Sending an invitation opens a dialog with the link and pass code the API returns once (data/invitation-link.tsx).
 // A member row opens the member drawer (data/staff-member-drawer.tsx: roles, account status, disable, lock, sign out…);
 // Staff members › Invited lists the identity invitations with Resend and Cancel (data/staff-invitations.tsx).
 
@@ -106,6 +108,8 @@ export default function Staff() {
   const nameRef = useRef<HTMLInputElement>(null);
   const inviteErr = inviteTried ? validateInvite(invite) : {};
   const setInv = <K extends keyof Invite>(k: K, v: Invite[K]) => setInvite((f) => ({ ...f, [k]: v }));
+  /** The link and pass code of the invitation just sent, shown once */
+  const [issued, setIssued] = useState<IssuedLink | null>(null);
 
   const inviteM = useMutation({
     mutationFn: (f: Invite) =>
@@ -116,18 +120,19 @@ export default function Staff() {
           }),
         ),
       ),
-    onSuccess: (m, f) => {
+    onSuccess: (sent, f) => {
+      const m = sent.member;
       void qc.invalidateQueries({ queryKey: ['access'] });
       setInvite(EMPTY_INVITE);
       setInviteTried(false);
       const roleName = roles.find((r) => r.id === f.roleId)?.name ?? 'staff';
       const manager = members.find((x) => x.account.id === f.managerId)?.account.displayName;
       const pendingGrant = m.roles.length === 0;
-      // Offline server: no email arrives and the response never carries the pass code, so the server operator
-      // prints the person's link and pass code with staff-link.
+      // Offline server: no email arrives, so the inviter hands over the link and pass code from the response
+      setIssued({ name: m.account.displayName, email: m.account.email, acceptUrl: sent.acceptUrl, passCode: sent.passCode, expiresAt: sent.expiresAt });
       flash(
         `${m.account.displayName} is invited`,
-        `Invited as ${roleName}${manager ? `, reporting to ${manager}` : ''}. Ask the server operator to run staff-link for ${m.account.email} to get their link and pass code; no email is sent from this server. The invitation expires after 7 days.` +
+        `Invited as ${roleName}${manager ? `, reporting to ${manager}` : ''}. The invitation expires on ${date(sent.expiresAt)}; if the link or pass code is lost, use Resend under Staff members › Invited.` +
           (pendingGrant ? ' The role carries sensitive permissions, so a second reviewer approves it before it applies.' : '') +
           (f.requestLimits ? ` Approval limits were requested from ${ownerText}.` : ''),
       );
@@ -811,6 +816,7 @@ export default function Staff() {
         </Field>
       </Dialog>
       <StaffMemberDrawer accountId={memberId} member={members.find((x) => x.account.id === memberId)} roles={roles} onClose={() => setMemberId(null)} onDone={flash} />
+      <InvitationLinkDialog link={issued} title={issued ? `${issued.name} is invited` : 'Invitation sent'} onClose={() => setIssued(null)} />
       {stepUp.dialog}
     </AdminLayout>
   );

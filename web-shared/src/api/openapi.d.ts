@@ -233,7 +233,7 @@ export interface paths {
         put?: never;
         /**
          * Invite a staff member with roles
-         * @description Calls identity.inviteStaff (7-day link; the person accepts with the link, a pass code and a new password) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.
+         * @description Calls identity.inviteStaff (7-day link; the person accepts with the link, a pass code and a new password) and returns the link and pass code once, for the inviter to hand over (no-store; never logged). Also creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.
          *
          *     **Permission:** `access.roles.manage`
          *
@@ -9328,7 +9328,7 @@ export interface paths {
         put?: never;
         /**
          * Resend a staff invitation (new 7-day link)
-         * @description Issues a new link and pass code (the old ones stop working). The pass code is not shown here: the server operator prints the link and pass code with npm run staff-link and hands them over.
+         * @description Issues a new link and pass code (the old ones stop working) and returns both once, for the caller to hand over (no-store; never logged). npm run staff-link does the same on the server.
          *
          *     **Permission:** `identity.staff-accounts.manage`
          *
@@ -29184,6 +29184,18 @@ export interface components {
             /** @description Open or decided Business Owner review of this member's approval limits (requestLimitReview on the invitation) */
             limitReview?: components["schemas"]["ApprovalInfo"] | null;
         };
+        "access.StaffInvitationSent": {
+            member: components["schemas"]["access.StaffMember"];
+            /**
+             * Format: uri
+             * @description SENSITIVE: the accept link to hand over (no email is sent from an offline server)
+             */
+            acceptUrl: string;
+            /** @description SENSITIVE: the pass code (XXXX-XXXX) that goes with the link, shown once to the inviter. Only its hash is stored; it is never in an event or a log */
+            passCode: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
         "access.StaffMemberDetail": {
             member: components["schemas"]["access.StaffMember"];
             assignments: components["schemas"]["access.RoleAssignment"][];
@@ -34585,7 +34597,7 @@ export interface components {
              * @description SENSITIVE: the accept link (also in identity.invitation.created)
              */
             acceptUrl: string;
-            /** @description SENSITIVE, in-process only: the pass code, shown once as XXXX-XXXX. Only its hash is stored; it is never in an event, an HTTP response or a log */
+            /** @description SENSITIVE: the pass code, shown once as XXXX-XXXX (to the inviter in the invite or resend response, or printed by the server tools). Only its hash is stored; it is never in an event or a log */
             passCode: string;
         };
         "identity.AccountListItem": {
@@ -47866,7 +47878,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["access.StaffMember"];
+                    "application/json": components["schemas"]["access.StaffInvitationSent"];
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
@@ -75465,7 +75477,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["identity.Invitation"];
+                    "application/json": components["schemas"]["identity.StaffInvitationIssued"];
                 };
             };
             /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */

@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { call, errorMessage, useApi } from '@marketly/web-shared/api';
-import { Alert, announce, Button, CopyButton, Dialog, Field, StatusBadge, TableWrap, Textarea } from '@marketly/web-shared/ui';
+import { Alert, announce, Button, Dialog, Field, StatusBadge, TableWrap, Textarea } from '@marketly/web-shared/ui';
 import { LoadError, SkeletonLines, date, shortDate } from '@/app/parts';
 import { isStepUpCancel, reauthField, useStepUp } from './step-up';
-import { INVITATION_STATUS, INVITATIONS_KEY, staffLinkCommand, useInvitations, type Invitation } from './staff-member';
+import { INVITATION_STATUS, INVITATIONS_KEY, useInvitations, type Invitation } from './staff-member';
+import { InvitationLinkDialog, type IssuedLink } from './invitation-link';
 
 // Admin › Staff and roles › Staff members › Invited: the staff invitations not accepted yet (identity), with Resend
-// and Cancel. Both ask for the password again (step-up purpose staff-account). Offline there is no email and the API
-// never returns the pass code, so after a resend the person still needs the server operator to print their link
-// and pass code with npm run staff-link (which itself issues a fresh link: the one from Resend can't be shown).
+// and Cancel. Both ask for the password again (step-up purpose staff-account). Offline there is no email: Resend
+// returns the new link and pass code once and they are shown in InvitationLinkDialog to hand over.
 
 type Ask = { kind: 'resend' | 'revoke'; inv: Invitation };
 
@@ -21,15 +21,17 @@ export function StaffInvitations({ onDone }: { onDone: (title: string, text: str
   const [ask, setAsk] = useState<Ask | null>(null);
   const [reason, setReason] = useState('');
   const [tried, setTried] = useState(false);
+  const [issued, setIssued] = useState<IssuedLink | null>(null);
 
   const act = useMutation({
     mutationFn: async ({ kind, inv }: Ask) => {
       const path = { params: { path: { id: inv.id } } };
       if (kind === 'resend') {
-        const r = (await stepUp.run((t) => call(api.POST('/api/admin/identity/invitations/{id}/resend', { ...path, body: { ...reauthField(t) } })))) as Invitation;
+        const r = await stepUp.run((t) => call(api.POST('/api/admin/identity/invitations/{id}/resend', { ...path, body: { ...reauthField(t) } })));
+        setIssued({ name: inv.name, email: inv.email, acceptUrl: r.acceptUrl, passCode: r.passCode, expiresAt: r.invitation.expiresAt });
         return {
           title: `New invitation for ${inv.name}`,
-          text: `Valid until ${date(r.expiresAt)}; the old link and pass code no longer work. No email is sent from this server: ask the server operator to run ${staffLinkCommand(inv.email)} to print the link and pass code to hand over.`,
+          text: `Valid until ${date(r.invitation.expiresAt)}; the old link and pass code no longer work.`,
         };
       }
       await stepUp.run((t) => call(api.POST('/api/admin/identity/invitations/{id}/revoke', { ...path, body: { reason: reason.trim(), ...reauthField(t) } })));
@@ -172,7 +174,7 @@ export function StaffInvitations({ onDone }: { onDone: (title: string, text: str
           <>
             {ask.kind === 'resend' ? (
               <span className="small">
-                {ask.inv.name} gets a new invitation valid for 7 days; the old link and pass code stop working. No email is sent from this server and pass codes are never shown here: after this, the server operator prints the link and pass code to hand over.
+                {ask.inv.name} gets a new invitation valid for 7 days; the old link and pass code stop working. No email is sent from this server: the next window shows the new link and pass code to hand over.
               </span>
             ) : (
               <span className="small">The invitation link for {ask.inv.name} ({ask.inv.email}) stops working, and the roles waiting for it end. A cancelled invitation can’t be resent: invite the person again if needed.</span>
@@ -187,15 +189,10 @@ export function StaffInvitations({ onDone }: { onDone: (title: string, text: str
                 <Textarea id="si-reason" value={reason} onChange={(e) => setReason(e.target.value)} />
               </Field>
             )}
-            {ask.kind === 'resend' && (
-              <span className="xs muted row gap-2 wrap">
-                On the server: <span className="mono">{staffLinkCommand(ask.inv.email)}</span>
-                <CopyButton text={staffLinkCommand(ask.inv.email)} label="Copy the command" />
-              </span>
-            )}
           </>
         )}
       </Dialog>
+      <InvitationLinkDialog link={issued} title={issued ? `New invitation for ${issued.name}` : 'New invitation'} onClose={() => setIssued(null)} />
       {stepUp.dialog}
     </>
   );
