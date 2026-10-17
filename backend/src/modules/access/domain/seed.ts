@@ -71,6 +71,8 @@ export const SYSTEM_ROLES: SeedRole[] = [
       'access.away.manage',
       'access.limits.propose',
       'identity.staff-accounts.manage',
+      // lock, unlock, sign out everywhere and require a new password (staff offboarding; fix round 2026-10-17)
+      'identity.accounts.manage',
       'identity.accounts.view',
       'settings.view',
       'settings.changes.propose',

@@ -4,7 +4,7 @@
  */
 import { allSpecs } from '../../kernel/module-system/loader.js';
 import type { MongoMigration } from '../../kernel/mongo/schema.js';
-import { BUSINESS_OWNER, MARKETING_OFFERS_VIEW, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
+import { BUSINESS_OWNER, MARKETING_OFFERS_VIEW, PLATFORM_ADMINISTRATOR, STAFF_UPLOADS, SYSTEM_ROLES, viewCompanions } from './domain/seed.js';
 
 /** Every staff permission key ending in `.view`, from every module's spec (enabled or not, like the registry) */
 export function staffViewKeys(): string[] {
@@ -68,4 +68,20 @@ export const staffWorkUploads: MongoMigration = {
   },
 };
 
-export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads];
+/**
+ * Fix round 2026-10-17 (staff offboarding): locking, unlocking, signing out everywhere and requiring a new password
+ * (identity.accounts.manage) were held by no seeded role, so no one could use them from Admin › Staff. The Platform
+ * Administrator, who already disables staff accounts, gets the key once; new installs get it from the seed.
+ */
+export const platformAdminAccountActions: MongoMigration = {
+  id: '2026-10-17-platform-admin-account-actions',
+  async up(db) {
+    const role = await db.collection('access.roles').findOne({ key: PLATFORM_ADMINISTRATOR, system: true, archived_at: null });
+    if (!role) return; // a new install: the registry sync seeds the role with the key
+    await db
+      .collection('access.role_permissions')
+      .updateOne({ role_id: role._id, permission_key: 'identity.accounts.manage' }, { $setOnInsert: { granted_by: 'system', granted_at: new Date() } }, { upsert: true });
+  },
+};
+
+export const mongoMigrations: readonly MongoMigration[] = [businessOwnerViewKeys, staffWorkUploads, platformAdminAccountActions];

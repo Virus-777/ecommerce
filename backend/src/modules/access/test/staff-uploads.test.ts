@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
-import { staffWorkUploads } from '../migrations.js';
+import { platformAdminAccountActions, staffWorkUploads } from '../migrations.js';
 import { STAFF_UPLOADS } from '../domain/seed.js';
 import { accessFixture, type Fixture } from './fixture.js';
 
@@ -73,5 +73,16 @@ describe('staff uploads (media.uploads.create)', () => {
     expect(await keysOf('content_manager')).not.toContain('offers.offers.view');
     expect((await f.table('role_permissions').find({ role_id: custom })).map((r) => r.permission_key)).toEqual(expect.arrayContaining(['media.assets.manage', STAFF_UPLOADS]));
     expect(await f.table('role_permissions').find({ role_id: await f.roleId('warehouse_worker'), permission_key: STAFF_UPLOADS })).toHaveLength(1);
+  });
+});
+
+describe('staff account actions (identity.accounts.manage)', () => {
+  it('the Platform Administrator may lock, unlock, sign out and force a password reset: seed, and migration once', async () => {
+    expect(await keysOf('platform_administrator')).toContain('identity.accounts.manage');
+    await f.table('role_permissions').deleteMany({ role_id: await f.roleId('platform_administrator'), permission_key: 'identity.accounts.manage' });
+    await platformAdminAccountActions.up(f.app.kernel.mongo.db);
+    await platformAdminAccountActions.up(f.app.kernel.mongo.db); // safe to run again
+    expect(await f.table('role_permissions').find({ role_id: await f.roleId('platform_administrator'), permission_key: 'identity.accounts.manage' })).toHaveLength(1);
+    expect(await keysOf('reports_analyst')).not.toContain('identity.accounts.manage');
   });
 });
