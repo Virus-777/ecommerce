@@ -97,6 +97,8 @@ export const storeRoutes = (service: ReviewsService) =>
     deleteFeedback: async (i) => service.feedback.remove(customerWho(i), i.params.id),
     /** POST /me/appeals: Appeal a moderation decision on my content */
     customerAppeal: async (i) => service.moderation.submitAppeal({ kind: 'customer', id: customerIdOf(i.scope), actor: i.actor, requestId: i.requestId }, i.body),
+    /** GET /me/answers: My answers to other shoppers' questions, with status */
+    listMyAnswers: async ({ scope, page }) => service.qa.listMine(customerIdOf(scope), page),
     /** PATCH /me/answers/{id}: Edit my answer, or fix and resubmit it after an edit request */
     editMyAnswer: async (i) => {
       const who = customerWho(i);

@@ -6,7 +6,7 @@ import { isUuid, newId } from '../../../kernel/lib/ids.js';
 import { pageOf, type PageRequest } from '../../../kernel/lib/pagination.js';
 import type * as common from '../../../spec/common.js';
 import type * as offers from '../../../spec/offers.js';
-import type { AdminQuestionRow, Answer, Question, SellerQuestionRow } from '../../../spec/reviews.js';
+import type { AdminQuestionRow, Answer, MyAnswer, Question, SellerQuestionRow } from '../../../spec/reviews.js';
 import { ageLabel, isOrderSpecific, qaChecks } from '../domain/rules.js';
 import { answerMachine } from '../domain/state-machines.js';
 import type { AnswerRec, QuestionRec } from '../ports.js';
@@ -172,6 +172,30 @@ export class QaPart {
       by,
     );
     return answer;
+  }
+
+  /** The customer's own answers, newest first, with their question and product (Account › Reviews) */
+  async listMine(customerId: string | null, page: PageRequest): Promise<common.Page<MyAnswer>> {
+    if (!customerId) return pageOf([], page);
+    const repo = this.core.repo;
+    const rows = await repo.page('answers', { author_kind: 'customer', author_id: customerId }, page, { column: 'created_at', direction: 'desc' });
+    const questions = new Map((await Promise.all([...new Set(rows.items.map((a) => a.question_id))].map((id) => repo.get('questions', id)))).filter((q) => !!q).map((q) => [q!.id, q!]));
+    const products = await this.core.products([...new Set([...questions.values()].map((q) => q.product_id))]);
+    const items = rows.items.map((a): MyAnswer => {
+      const q = questions.get(a.question_id);
+      const p = q ? products.get(q.product_id) : undefined;
+      const status = a.status as Answer['status'];
+      return {
+        answer: this.views.answerOut(a),
+        questionId: a.question_id,
+        questionText: q?.text ?? '',
+        productId: q?.product_id ?? '',
+        productTitle: p?.title ?? 'Product',
+        productSlug: p?.slug ?? null,
+        canEdit: answerMachine.can(status, status === 'edit_requested' ? 'resubmit' : 'edit'),
+      };
+    });
+    return { ...rows, items };
   }
 
   /**

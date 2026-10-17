@@ -91,6 +91,15 @@
       "viewerVotedHelpful": { "type": "bool?", "desc": "The signed-in customer marked this answer helpful; null without a customer session and outside the store's question list" },
       "status": "enum(pending_review|published|edit_requested|removed)"
     },
+    "MyAnswer": {
+      "answer": "Answer",
+      "questionId": "uuid",
+      "questionText": "text",
+      "productId": "uuid",
+      "productTitle": "string",
+      "productSlug": "string?",
+      "canEdit": { "type": "bool", "desc": "PATCH /me/answers/{id} applies: a published answer can be edited, one with an edit request fixed and resubmitted" }
+    },
     "Question": {
       "id": "uuid",
       "productId": "uuid",
@@ -417,6 +426,7 @@
     { "id": "listQuestions", "area": "store", "method": "GET", "path": "/products/{productId}/questions", "summary": "Questions with answers labelled Seller, Marketly staff or Customer", "auth": "visitor", "params": { "productId": "uuid" }, "paging": true, "query": { "q": "string?", "state": { "type": "enum(answered|awaiting)?", "desc": "answered: at least one published answer; awaiting: none yet (count: RatingSummary.awaitingQuestions)" }, "sort": "enum(most_helpful|newest)?" }, "response": "Question", "screens": ["store/product"] },
     { "id": "askQuestion", "area": "store", "method": "POST", "path": "/products/{productId}/questions", "summary": "Ask a question about the product", "desc": "Order-specific questions are redirected to order messages.", "auth": "customer", "params": { "productId": "uuid" }, "body": { "text": "text" }, "response": "Question", "status": 201, "events": ["reviews.question.asked"], "screens": ["store/product"] },
     { "id": "answerAsCustomer", "area": "store", "method": "POST", "path": "/questions/{id}/answers", "summary": "Answer another shopper's question (labelled Customer)", "auth": "customer", "params": { "id": "uuid" }, "body": { "text": "text" }, "response": "Answer", "status": 201, "events": ["reviews.answer.published"], "screens": ["store/product"] },
+    { "id": "listMyAnswers", "area": "store", "method": "GET", "path": "/me/answers", "summary": "My answers to other shoppers' questions, with status", "desc": "Newest first, every status except removed by the author, so a held answer or an edit request can be found and fixed.", "auth": "customer", "paging": true, "response": "MyAnswer", "screens": ["account/reviews"] },
     { "id": "editMyAnswer", "area": "store", "method": "PATCH", "path": "/me/answers/{id}", "summary": "Edit my answer, or fix and resubmit it after an edit request", "desc": "Published answers go back through the automatic checks (edit); answers with an edit request are resubmitted for review (resubmit).", "auth": "customer", "params": { "id": "uuid" }, "body": { "text": "text" }, "response": "Answer", "errors": ["ILLEGAL_TRANSITION", "NOT_FOUND"], "events": ["reviews.answer.published"], "screens": ["store/product", "account/reviews"] },
     { "id": "voteHelpful", "area": "store", "method": "POST", "path": "/votes", "summary": "Mark a review or answer helpful (or undo)", "auth": "customer", "body": { "targetType": "enum(product_review|answer)", "targetId": "uuid", "helpful": "bool" }, "response": { "helpfulCount": "int" }, "screens": ["store/product"] },
     { "id": "reportContent", "area": "store", "method": "POST", "path": "/reports", "summary": "Report a review, feedback, question, answer or seller response", "desc": "The reporter's name is never shown to the author. The outcome appears under Reports you made.", "auth": "customer", "body": "ReportInput", "response": "MyReport", "status": 201, "errors": ["ALREADY_REPORTED"], "events": ["reviews.report.created"], "screens": ["store/product", "store/seller"] },

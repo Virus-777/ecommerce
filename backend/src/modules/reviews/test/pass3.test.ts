@@ -46,6 +46,13 @@ describe('answers: edit requests and author edits', () => {
     expect(req.status, JSON.stringify(req.body)).toBe(200);
     expect(req.body.answer.status).toBe('edit_requested');
 
+    // fix round: the author finds the answer with its edit request in Account › Reviews (GET /me/answers)
+    const mine = await k.call('GET', STORE + '/me/answers', tokens.customer(answerer));
+    expect(mine.status, JSON.stringify(mine.body)).toBe(200);
+    expect(mine.body.items).toHaveLength(1);
+    expect(mine.body.items[0]).toMatchObject({ questionId: q.body.id, questionText: 'Does the stand tilt and swivel?', productId: p.productId, canEdit: true, answer: { id: a.body.id, status: 'edit_requested' } });
+    expect((await k.call('GET', STORE + '/me/answers', tokens.customer(newId()))).body.items).toHaveLength(0);
+
     expect((await k.call('PATCH', `${STORE}/me/answers/${a.body.id}`, tokens.customer(newId()), { text: 'Not mine' })).status).toBe(404);
     const fixed = await k.call('PATCH', `${STORE}/me/answers/${a.body.id}`, tokens.customer(answerer), { text: 'Yes, it tilts 5 to 25 degrees per the manual.' });
     expect(fixed.status, JSON.stringify(fixed.body)).toBe(200);
