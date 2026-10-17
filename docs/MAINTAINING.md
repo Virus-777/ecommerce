@@ -201,7 +201,10 @@ In short:
 3. The first time: `make-cert.sh` makes the HTTPS certificate (`TLS_CERT_FILE`, `TLS_KEY_FILE`), signed by a
    root made on the server that each staff PC trusts once. HTTPS is required: the staff refresh cookie
    (`__Secure-mk_refresh_admin`) only travels over HTTPS, and production on a non-loopback `HOST` refuses to start
-   without TLS (unless `TRUST_PROXY` says a proxy terminates it).
+   without TLS (unless `TRUST_PROXY` says a proxy terminates it). Staff may open the Admin Center by the
+   `API_URL` name or by any other name or IP the certificate covers (`https://192.168.1.10`): the session refresh
+   accepts a page on the address the request came to (`ownOrigin` in `kernel/auth/chain.ts`), so they stay signed
+   in across reloads either way.
 4. Health: `GET /health` on `HEALTH_PORT` (plain HTTP on `127.0.0.1`); `sudo marketly check` checks it and
    everything else.
 5. On a new database only: create the first admins (next section). On the server the commands are

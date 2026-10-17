@@ -451,13 +451,14 @@ export class AuthChain {
   }
 
   /**
-   * Cookie refresh and sign-out: an allowed Origin (an app's, or this API's own when the website is served
-   * through it) and the custom X-Requested-With header, which a cross-site form or link can't send.
-   * Android sends its refresh token in the body, never a cookie, so it is not asked for either.
+   * Cookie refresh and sign-out: an allowed Origin (an app's, this API's own API_URL, or the address the request
+   * itself came to, see ownOrigin) and the custom X-Requested-With header, which a cross-site form or link can't
+   * send. Android sends its refresh token in the body, never a cookie, so it is not asked for either.
    */
   #assertAppPage(request: FastifyRequest) {
     const origin = request.headers.origin;
-    if (!origin || !(appOrigins(this.k.config).includes(origin) || origin === new URL(this.k.config.apiUrl).origin)) {
+    const allowed = origin && (appOrigins(this.k.config).includes(origin) || origin === new URL(this.k.config.apiUrl).origin || origin === ownOrigin(request));
+    if (!allowed) {
       throw new AppError('FORBIDDEN', 'Refresh the session from a Marketly app', { reason: 'origin_not_allowed' });
     }
     if (!request.headers['x-requested-with']) {
@@ -485,6 +486,26 @@ export class AuthChain {
   /** Flush cached answers when the modules that own them announce a change. */
   invalidate(kind: 'permissions' | 'members' | 'customers') {
     this[kind].clear();
+  }
+}
+
+/**
+ * The origin the browser sent this request to: scheme + Host, or the TRUST_PROXY proxies' X-Forwarded-Proto and
+ * X-Forwarded-Host (Fastify reads those only from trusted proxies). It lets the Admin Center this server serves
+ * itself (ADMIN_APP_DIR) keep its session when staff open it by IP or by another name than API_URL
+ * (https://192.168.1.10 while API_URL is https://marketly.lan): page and API are then the same origin.
+ *
+ * Why this is no CSRF hole: the browser writes both headers, not the page. A page on another site sends its own
+ * origin (https://evil.example) while Host names our server, so the two never match; they only match when the page
+ * is on the very address the browser is talking to, i.e. a page this server served. A DNS-rebinding page (its name
+ * pointed at our IP) would match, but the browser keeps our cookie under our name (host-only, no Domain), so it has
+ * no cookie to send, and over HTTPS our certificate does not fit its name.
+ */
+export function ownOrigin(request: Pick<FastifyRequest, 'protocol' | 'host'>): string | undefined {
+  try {
+    return new URL(`${request.protocol}://${request.host}`).origin; // lower-case, default port dropped, like Origin
+  } catch {
+    return undefined; // a Host header that is not a host name
   }
 }
 
