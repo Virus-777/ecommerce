@@ -1,19 +1,21 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router';
-import { ApiError, call, errorMessage, useApi, useUploads, type UploadItem } from '@marketly/web-shared/api';
+import { ApiError, call, errorMessage, useApi, useUploads, type paths, type UploadItem } from '@marketly/web-shared/api';
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Avatar, Badge, Button, Checkbox, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, Meter, OptionCard, Select, Steps, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Badge, Button, Checkbox, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, Meter, OptionCard, Select, Steps, TextInput, announce, type IconName } from '@marketly/web-shared/ui';
 import { dayDateYear, timePT } from '../help/data/format';
 import { ApiLink } from '../help/data/links';
 import { LoadError, Loading, SkLines } from '../help/data/states';
 import { UploadList } from '../help/data/UploadList';
 import { APPLICATION_KEY, displayPhone, e164, formatAddress, sections, stateName, US_STATES, useApplication, type SellerApplication } from './data/application';
+import { CodePanel, splitName, useNewLoginApi, usePurchaseTerms, type VerificationChallenge } from './data/new-login';
 import { contactLine, useSellerProgram } from './data/program';
+import { PasswordInput, PolicyRules, authError, emptyCode, passwordChecks, usePasswordPolicy } from '../auth/data/parts';
 
 // Design: pages/store/sell-apply.html (step 1, account) · views business-details, verification,
 // payout-and-return-address (steps 4–5 on one page) and agreement. Each step validates, then saves:
@@ -26,8 +28,11 @@ import { contactLine, useSellerProgram } from './data/program';
 //   step 4–5 PATCH { step: payout } (only when the bank details changed) and PATCH { step: return_address }
 //   step 6  POST …/{id}/submit { acceptances: [{ key, versionLabel }], signedName } → sell/status
 // GET …/applications/current fills the form, progress, checklist and agreements. The applicant must be signed
-// in: the sellers API has no in-flow creation of a separate seller login, so "Create a new seller login" is
-// shown disabled with an explanation. A submitted application goes to sell/status.
+// in. In step 1 they either add seller access to that account (accountMode existing_member) or choose "Create a new
+// seller login": the page registers the business email through identity, the applicant enters the emailed code,
+// the new login is signed in in this browser and the application is created with accountMode new_seller_login
+// (data/new-login.tsx). A saved draft keeps the login it was started with. A submitted application goes to
+// sell/status; a withdrawn or expired one can be started again here (a new POST).
 
 type View = '' | 'business-details' | 'verification' | 'payout-and-return-address' | 'agreement';
 const VIEWS: View[] = ['', 'business-details', 'verification', 'payout-and-return-address', 'agreement'];
@@ -125,7 +130,9 @@ const EMPTY: Form = {
   rsame: true, rname: '', rphone: '', rline1: '', rcity: '', rstate: '', rzip: '', agreed: {}, sign: '',
 };
 
-type Errors = Partial<Record<keyof Form | 'idDoc' | 'regDoc' | 'w9Doc', string>>;
+type Errors = Partial<Record<keyof Form | 'idDoc' | 'regDoc' | 'w9Doc' | 'pw', string>>;
+/** PATCH …/applications/{id} body: one step's section (sellers.Application*Input, PayoutDetailsInput, ReturnAddressInput). */
+type ApplicationPatch = paths['/api/store/sellers/applications/{id}']['patch']['requestBody']['content']['application/json'];
 
 /** "3315 SE Division St, Portland, OR 97202" → street, city, state code, ZIP (null when it doesn't parse). */
 function splitAddress(a: string) {
@@ -159,12 +166,36 @@ interface StepProps {
   app: SellerApplication | null;
 }
 
-function AccountStep({ f, set, e, app, email, inviteNeeded }: StepProps & { email: string; inviteNeeded: boolean }) {
+/**
+ * Step 1. `loginPanel` is the "Create a new seller login" part (password and rules, the email code, or the login
+ * already made), built by the page because it drives the identity calls.
+ */
+function AccountStep({ f, set, e, app, email, inviteNeeded, loginLocked, loginPanel }: StepProps & { email: string; inviteNeeded: boolean; loginLocked: boolean; loginPanel: ReactNode }) {
+  // A saved draft (or a seller login just made) keeps its login: the choice can't change any more.
+  const locked = Boolean(app) || loginLocked;
   return (
     <>
       <div className="buy-opts c2">
-        <OptionCard id="ap-acct-existing" name="ap-acct" checked={f.acct === 'existing'} onChange={() => set('acct', 'existing')} title={<span className="small strong">Use my Marketly account</span>} body="Seller access is added to the account you're signed in with." right={<Icon name="user-round" />} />
-        <OptionCard id="ap-acct-new" name="ap-acct" disabled title={<span className="small strong">Create a new seller login</span>} body="To use a separate business login, sign out, create a Marketly account with your business email and apply from it." right={<Icon name="user-plus" />} />
+        <OptionCard
+          id="ap-acct-existing"
+          name="ap-acct"
+          checked={f.acct === 'existing'}
+          disabled={locked && f.acct !== 'existing'}
+          onChange={() => set('acct', 'existing')}
+          title={<span className="small strong">Use my Marketly account</span>}
+          body="Seller access is added to the account you're signed in with."
+          right={<Icon name="user-round" />}
+        />
+        <OptionCard
+          id="ap-acct-new"
+          name="ap-acct"
+          checked={f.acct === 'new'}
+          disabled={locked && f.acct !== 'new'}
+          onChange={() => set('acct', 'new')}
+          title={<span className="small strong">Create a new seller login</span>}
+          body={locked && f.acct !== 'new' ? 'Your draft belongs to the account you’re signed in with.' : 'A separate login with your business email, just for selling. Your shopping account stays as it is.'}
+          right={<Icon name="user-plus" />}
+        />
       </div>
       {!app && (
         <Field label="Invitation code" optional={!inviteNeeded} hint={inviteNeeded ? 'Applications are invite-only during our launch. Enter the code from your invitation email.' : 'If you were invited, enter the code from your invitation email.'} error={e.invite}>
@@ -179,13 +210,22 @@ function AccountStep({ f, set, e, app, email, inviteNeeded }: StepProps & { emai
           <TextInput id="ap-cphone" type="tel" value={f.cphone} error={!!e.cphone} onChange={(ev) => set('cphone', ev.target.value)} autoComplete="tel" />
         </Field>
       </div>
-      <div className="panel row gap-3">
-        <Icon name="user-round" />
-        <span className="small grow">Seller access is added to {email}. You sign in to Seller Center with the same password.</span>
-      </div>
-      <Field label="Work email" hint="Order, payout and application notices go here." error={e.cemail}>
-        <TextInput id="ap-cemail" type="email" value={f.cemail} error={!!e.cemail} onChange={(ev) => set('cemail', ev.target.value)} autoComplete="email" />
-      </Field>
+      {f.acct === 'existing' && (
+        <div className="panel row gap-3">
+          <Icon name="user-round" />
+          <span className="small grow">Seller access is added to {email}. You sign in to Seller Center with the same password.</span>
+        </div>
+      )}
+      {f.acct === 'new' && !app ? (
+        <Field label="Business email" hint="Your new seller login. We send a code to confirm it, and order, payout and application notices go here." error={e.cemail}>
+          <TextInput id="ap-cemail" type="email" value={f.cemail} error={!!e.cemail} onChange={(ev) => set('cemail', ev.target.value)} autoComplete="email" />
+        </Field>
+      ) : (
+        <Field label="Work email" hint="Order, payout and application notices go here." error={e.cemail}>
+          <TextInput id="ap-cemail" type="email" value={f.cemail} error={!!e.cemail} onChange={(ev) => set('cemail', ev.target.value)} autoComplete="email" />
+        </Field>
+      )}
+      {f.acct === 'new' && loginPanel}
       <Field label="Store name" hint="Shown to customers on your offers and storefront. You can change it later; changes are reviewed." error={e.store}>
         <TextInput id="ap-cstore" value={f.store} error={!!e.store} onChange={(ev) => set('store', ev.target.value)} />
       </Field>
@@ -482,6 +522,9 @@ function CardHead({ title, sub, as: H = 'h2' }: { title: string; sub: string; as
   );
 }
 
+/** A withdrawn or expired application: followed on sell/status, and a new one can be started here. */
+const closed = (a: SellerApplication) => a.state === 'withdrawn' || a.state === 'expired';
+
 const MISSING_STEP: Record<string, string> = { account: 'Account', business: 'Business', verification: 'Verification', payout: 'Payout', return_address: 'Return address', agreement: 'Agreement' };
 
 export default function Apply() {
@@ -489,7 +532,7 @@ export default function Apply() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
-  const { signedIn, ready, customer } = useSession();
+  const { signedIn, ready, customer, adopt } = useSession();
   const [view, setView] = useView<Exclude<View, ''>>();
   const step = Math.max(0, VIEWS.indexOf(view as View));
   const meta = META[step];
@@ -507,11 +550,24 @@ export default function Apply() {
   const [removing, setRemoving] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState('');
 
+  // "Create a new seller login" (data/new-login.tsx): the password typed here, the email code challenge once the
+  // login is registered, and the login's email once it is verified and signed in. From then on step 1 only
+  // creates the application (a retry after, say, a wrong invitation code doesn't register again).
+  const [pw, setPw] = useState('');
+  const [challenge, setChallenge] = useState<VerificationChallenge | null>(null);
+  const [code, setCode] = useState<string[]>(() => emptyCode());
+  const [codeError, setCodeError] = useState('');
+  const [newLogin, setNewLogin] = useState<string | null>(null);
+  const loginApi = useNewLoginApi();
+  const policy = usePasswordPolicy(f.acct === 'new');
+  const terms = usePurchaseTerms(f.acct === 'new' && !appQ.data);
+
   // Fill the form once from the saved application (or the customer's profile for a new one).
   const filled = useRef('');
   useEffect(() => {
     const key = app ? app.id : customer ? `new:${customer.id}` : '';
-    if (!key || filled.current === key || appQ.isPending) return;
+    // Right after a new seller login signs in there is a new customer but no application yet: keep what was typed.
+    if (!key || filled.current === key || appQ.isPending || (!app && newLogin)) return;
     filled.current = key;
     const s = sections(app);
     const a = s.account;
@@ -520,6 +576,7 @@ export default function Apply() {
     const r = s.returnAddress;
     setF((cur) => ({
       ...cur,
+      acct: a?.accountMode === 'new_seller_login' ? 'new' : a ? 'existing' : cur.acct,
       contact: a?.contactName ?? customer?.name ?? '',
       cphone: displayPhone(a?.contactPhone ?? customer?.phone ?? ''),
       cemail: a?.workEmail ?? customer?.email ?? '',
@@ -547,8 +604,11 @@ export default function Apply() {
       agreed: Object.fromEntries((app?.agreementsAccepted ?? []).map((x) => [(x as { key: string }).key, true])),
     }));
     // A returning applicant lands on the step they reached.
-    if (app && !view && app.completedSteps.includes('account')) setView(STEP_VIEW[app.currentStep] as Exclude<View, ''>, { replace: true });
-  }, [app, customer, appQ.isPending, view, setView]);
+    if (app && !closed(app) && !view && app.completedSteps.includes('account')) setView(STEP_VIEW[app.currentStep] as Exclude<View, ''>, { replace: true });
+  }, [app, customer, appQ.isPending, view, setView, newLogin]);
+
+  /** The application still being filled in; null for none, or a withdrawn or expired one (a new POST starts again). */
+  const live = app && !closed(app) ? app : null;
 
   const p = program.data;
   const inviteNeeded = p ? !p.applicationsOpen : true;
@@ -562,17 +622,30 @@ export default function Apply() {
     return [f.brout, f.bacct, f.bacct2].some((x) => x.trim()) || f.bname.trim() !== on.accountHolderName || (kindOnFile && f.bkind !== on.accountType);
   };
 
+  /** Step 1 still has to register and verify a new seller login before the application can be created. */
+  const registering = f.acct === 'new' && !live && !newLogin;
+  const pwChecks = registering ? passwordChecks(pw, [...Object.values(splitName(f.contact)), f.cemail.split('@')[0]], policy.data) : [];
+
   const validate = (st: number): Errors => {
     const e: Errors = {};
     const req = (k: keyof Form, msg: string) => {
       if (!String(f[k]).trim()) e[k] = msg;
     };
     if (st === 0) {
-      if (!app && inviteNeeded && !f.invite.trim()) e.invite = 'Enter the invitation code from your email.';
+      if (!live && inviteNeeded && !f.invite.trim()) e.invite = 'Enter the invitation code from your email.';
       req('contact', 'Enter the contact person.');
       if (f.cphone.replace(/\D/g, '').length < 10) e.cphone = 'Enter a 10-digit US phone number.';
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.cemail.trim())) e.cemail = 'Enter an email address, like name@business.com.';
       req('store', 'Enter the store name customers will see.');
+      if (registering) {
+        // identity needs a first and last name for the new login, and its own email.
+        if (f.contact.trim() && !splitName(f.contact).last) e.contact = 'Enter a first and last name. It is also the name on your new seller login.';
+        if (customer && f.cemail.trim().toLowerCase() === customer.email.toLowerCase()) e.cemail = 'That’s the email of the account you’re signed in with. Use another business email, or choose “Use my Marketly account”.';
+        if (!challenge) {
+          if (!pw) e.pw = 'Create a password for your seller login.';
+          else if (!pwChecks.every((c) => c.ok)) e.pw = 'Your password needs to meet every rule below.';
+        }
+      }
     }
     if (st === 1) {
       req('legal', f.stype === 'biz' ? 'Enter the legal name on your registration.' : 'Enter your full legal name.');
@@ -621,7 +694,7 @@ export default function Apply() {
   };
 
   const accountBody = () => ({
-    accountMode: 'existing_member' as const,
+    accountMode: f.acct === 'new' ? ('new_seller_login' as const) : ('existing_member' as const),
     contactName: f.contact.trim(),
     contactPhone: e164(f.cphone),
     workEmail: f.cemail.trim(),
@@ -631,14 +704,13 @@ export default function Apply() {
     tipsOptIn: f.tips,
   });
 
-  const patch = (id: string, body: Record<string, unknown>) =>
-    call(api.PATCH('/api/store/sellers/applications/{id}', { params: { path: { id } }, body: body as never })) as Promise<SellerApplication>;
+  const patch = (id: string, body: ApplicationPatch) => call(api.PATCH('/api/store/sellers/applications/{id}', { params: { path: { id } }, body }));
 
   const save = useMutation({
     mutationFn: async (st: number): Promise<SellerApplication> => {
       if (st === 0) {
-        if (!app) return call(api.POST('/api/store/sellers/applications', { body: { ...accountBody(), invitationCode: f.invite.trim() || undefined } }));
-        return patch(app.id, { step: 'account', account: accountBody() });
+        if (!live) return call(api.POST('/api/store/sellers/applications', { body: { ...accountBody(), invitationCode: f.invite.trim() || undefined } }));
+        return patch(live.id, { step: 'account', account: accountBody() });
       }
       const id = app!.id;
       if (st === 1) {
@@ -706,6 +778,60 @@ export default function Apply() {
     },
   });
 
+  // Step 1 with "Create a new seller login": first click registers the login and sends the email code; the next
+  // (with the code) verifies it, signs the new login in and creates the application on that session.
+  const createLogin = useMutation({
+    mutationFn: async (): Promise<SellerApplication | null> => {
+      if (!challenge) {
+        const version = terms.data?.version ?? (await terms.refetch({ throwOnError: true })).data?.version;
+        if (!version) throw new Error('We couldn’t load the purchase terms. Try again.');
+        const { first, last } = splitName(f.contact);
+        const c = await loginApi.register({ email: f.cemail.trim(), password: pw, firstName: first, lastName: last, termsVersion: version });
+        setChallenge(c);
+        setCode(emptyCode(c.codeLength || 6));
+        setCodeError('');
+        announce(`We sent a code to ${c.emailMasked}`);
+        return null;
+      }
+      let tokens;
+      try {
+        tokens = (await loginApi.confirm(challenge.id, code.join(''))).tokens;
+      } catch (e) {
+        // A wrong or expired code stays in the code panel; the form above is fine.
+        setCodeError(authError(e));
+        setCode(emptyCode(challenge.codeLength || 6));
+        return null;
+      }
+      if (!tokens) throw new Error('Your email is verified. Sign in with your new seller login to continue.');
+      // Read the form before the session changes (the new customer's profile loads next).
+      const body = { ...accountBody(), invitationCode: f.invite.trim() || undefined };
+      setNewLogin(f.cemail.trim());
+      setChallenge(null);
+      setPw('');
+      adopt(tokens);
+      const created = await call(api.POST('/api/store/sellers/applications', { body }));
+      // adopt() refetches everything for the new login; don't let that read (no application yet) win.
+      await qc.cancelQueries({ queryKey: APPLICATION_KEY });
+      return created;
+    },
+    onSuccess: (created) => {
+      if (!created) return;
+      qc.setQueryData(APPLICATION_KEY, created);
+      announce('Your seller login is ready and your application is started.');
+      go(1);
+    },
+  });
+  const resendCode = useMutation({
+    mutationFn: () => loginApi.resend(challenge!.id),
+    onSuccess: (c) => {
+      setChallenge(c);
+      setCode(emptyCode(c.codeLength || 6));
+      setCodeError('');
+      announce(`We sent a new code to ${c.emailMasked}`);
+    },
+    onError: (e) => setCodeError(authError(e)),
+  });
+
   const removeDoc = async (d: AppDoc) => {
     if (!app) return;
     setRemoving(d.id);
@@ -731,6 +857,16 @@ export default function Apply() {
   const next = () => {
     setTried((t) => t.map((v, i) => (i === step ? true : v)));
     if (Object.keys(validate(step)).length) return;
+    if (step === 0 && registering) {
+      if (challenge && code.some((d) => !d)) {
+        setCodeError(`Enter all ${code.length} digits of the code.`);
+        return;
+      }
+      save.reset();
+      createLogin.mutate();
+      return;
+    }
+    createLogin.reset();
     save.mutate(step);
   };
 
@@ -780,7 +916,7 @@ export default function Apply() {
     ),
   );
   const pct = appForForm?.percentComplete ?? 0;
-  const serverError = save.error;
+  const serverError = save.error ?? createLogin.error;
   const missing = serverError instanceof ApiError && serverError.code === 'APPLICATION_INCOMPLETE' ? ((serverError.details.missing ?? appForForm?.missing ?? {}) as Record<string, string[]>) : null;
   const fieldIssues = serverError instanceof ApiError ? Object.values(serverError.fieldErrors) : [];
 
@@ -794,16 +930,90 @@ export default function Apply() {
         Back
       </Button>
     );
-  const label = save.isPending ? (step === VIEWS.length - 1 ? 'Submitting…' : 'Saving…') : step === 0 && !appForForm ? 'Start application and continue' : meta.next;
+  const busy = save.isPending || createLogin.isPending;
+  const label =
+    step === 0 && registering
+      ? createLogin.isPending
+        ? challenge
+          ? 'Verifying…'
+          : 'Creating your login…'
+        : challenge
+          ? 'Verify email and start application'
+          : 'Create seller login'
+      : save.isPending
+        ? step === VIEWS.length - 1
+          ? 'Submitting…'
+          : 'Saving…'
+        : step === 0 && !appForForm
+          ? 'Start application and continue'
+          : meta.next;
   const primary =
     step === VIEWS.length - 1 ? (
-      <Button icon="send" onClick={next} disabled={save.isPending}>
+      <Button icon="send" onClick={next} disabled={busy}>
         {label}
       </Button>
     ) : (
-      <Button iconRight="arrow-right" onClick={next} disabled={save.isPending}>
+      <Button iconRight="arrow-right" onClick={next} disabled={busy}>
         {label}
       </Button>
+    );
+
+  // The "Create a new seller login" part of step 1: password, then the email code, then the login that was made.
+  const loginPanel =
+    appForForm || newLogin ? (
+      <div className="panel row gap-3">
+        <Icon name="user-round" />
+        <span className="small grow">
+          Your seller login is {newLogin ?? customer?.email ?? 'the account you’re signed in with'}. You sign in to Seller Center with it.
+        </span>
+      </div>
+    ) : challenge ? (
+      <CodePanel
+        challenge={challenge}
+        code={code}
+        setCode={(v) => {
+          setCode(v);
+          setCodeError('');
+        }}
+        error={codeError}
+        onResend={() => resendCode.mutate()}
+        resending={resendCode.isPending}
+        onRestart={() => {
+          setChallenge(null);
+          setCodeError('');
+        }}
+      />
+    ) : (
+      <>
+        <div className="field">
+          <label className="label" htmlFor="ap-pass">
+            Password for your seller login
+          </label>
+          <PasswordInput id="ap-pass" value={pw} onChange={setPw} error={!!errors.pw} describedBy={errors.pw ? 'ap-pass-err' : undefined} autoComplete="new-password" />
+          {errors.pw && (
+            <span className="error-text" id="ap-pass-err">
+              <Icon name="circle-alert" className="ic-sm" />
+              {errors.pw}
+            </span>
+          )}
+        </div>
+        <PolicyRules loading={policy.isPending} error={policy.error} onRetry={() => void policy.refetch()} checks={pwChecks} />
+        <Alert tone="info" title="You’ll be signed in with the new login">
+          Once you confirm the email, this browser switches to your seller login. Your shopping account{customer ? ` (${customer.email})` : ''}, its orders and its cart stay as they are: sign in
+          with it again to shop.
+        </Alert>
+        <p className="xs muted">
+          By creating a login, you agree to the{' '}
+          <Link to={href('info/policy', 'purchase-terms')} className="link-inline">
+            Purchase terms
+          </Link>{' '}
+          and confirm you’ve read the{' '}
+          <Link to={href('info/policy', 'privacy')} className="link-inline">
+            Privacy policy
+          </Link>
+          .
+        </p>
+      </>
     );
   const foot = (
     <div className="card-foot">
@@ -819,7 +1029,7 @@ export default function Apply() {
         </Alert>
       )}
       {serverError && nErrors === 0 && (
-        <Alert tone="danger" title={serverError instanceof ApiError && serverError.code === 'INVITATION_REQUIRED' ? 'Invitation code needed' : missing ? 'Some steps aren’t finished' : 'We couldn’t save this step'}>
+        <Alert tone="danger" title={serverError instanceof ApiError && serverError.code === 'INVITATION_REQUIRED' ? 'Invitation code needed' : missing ? 'Some steps aren’t finished' : serverError === createLogin.error && !newLogin ? 'We couldn’t create your seller login' : 'We couldn’t save this step'}>
           {missing ? (
             <span className="stack gap-1">
               {Object.entries(missing).map(([k, fields]) => (
@@ -834,7 +1044,7 @@ export default function Apply() {
           ) : fieldIssues.length ? (
             fieldIssues.join(' ')
           ) : (
-            errorMessage(serverError)
+            authError(serverError)
           )}
         </Alert>
       )}
@@ -906,7 +1116,7 @@ export default function Apply() {
               {step === 4 && <CardHead title="Review and accept" sub="Step 6 of 6 · Read each document before you accept it." />}
               <div className="card-body">
                 {summary}
-                {step === 0 && <AccountStep {...formProps} email={customer?.email ?? ''} inviteNeeded={inviteNeeded} />}
+                {step === 0 && <AccountStep {...formProps} email={customer?.email ?? ''} inviteNeeded={inviteNeeded} loginLocked={Boolean(newLogin || challenge)} loginPanel={loginPanel} />}
                 {step === 1 && <BusinessStep {...formProps} categories={p?.launchCategories ?? []} />}
                 {step === 2 && <VerificationStep {...formProps} docs={docs} onRemove={removeDoc} removing={removing} />}
                 {step === 4 && <AgreementStep {...formProps} agreements={agreements} />}

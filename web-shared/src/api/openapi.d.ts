@@ -19287,6 +19287,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/store/reviews/me/answers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * My answers to other shoppers' questions, with status
+         * @description Newest first, every status except removed by the author, so a held answer or an edit request can be found and fixed.
+         *
+         *     **Screens:** account/reviews
+         */
+        get: operations["reviews.listMyAnswers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/store/reviews/me/answers/{id}": {
         parameters: {
             query?: never;
@@ -31529,6 +31551,8 @@ export interface components {
             totals: components["schemas"]["checkout.QuoteTotals"];
             legal: components["schemas"]["checkout.LegalInfo"];
             giftNote?: string | null;
+            /** @description Gift option: the packing slip shows no prices (PUT /sessions/{id}/preferences) */
+            hidePricesOnSlip: boolean;
             readyToPlace: boolean;
             blockers: string[];
             /** @description 'Tapping twice or refreshing won't create two orders or charge you twice.' */
@@ -41325,6 +41349,18 @@ export interface components {
             viewerVotedHelpful?: boolean | null;
             /** @enum {string} */
             status: "pending_review" | "published" | "edit_requested" | "removed";
+        };
+        "reviews.MyAnswer": {
+            answer: components["schemas"]["reviews.Answer"];
+            /** Format: uuid */
+            questionId: string;
+            questionText: string;
+            /** Format: uuid */
+            productId: string;
+            productTitle: string;
+            productSlug?: string | null;
+            /** @description PATCH /me/answers/{id} applies: a published answer can be edited, one with an edit request fixed and resubmitted */
+            canEdit: boolean;
         };
         "reviews.Question": {
             /** Format: uuid */
@@ -106513,6 +106549,67 @@ export interface operations {
             };
             /** @description NOT_FOUND: The record does not exist or is not visible to this caller. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    "reviews.listMyAnswers": {
+        parameters: {
+            query?: {
+                /** @description Opaque cursor from the previous response. Used by the Android app's infinite scroll. */
+                cursor?: string | null;
+                /** @description 1-based page number. Used by the website's numbered pages. */
+                page?: number | null;
+                /** @description Items per batch, 1–100, default 24 */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["reviews.MyAnswer"][];
+                        /** @description Pass as ?cursor= for the next batch (app). Null at the end. */
+                        nextCursor: string | null;
+                        page?: number;
+                        totalPages?: number;
+                        total?: number;
+                    };
+                };
+            };
+            /** @description VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

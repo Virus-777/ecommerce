@@ -6,8 +6,9 @@ import { CheckoutLayout } from '@/layouts';
 import { formatMoney } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
 import { ApiError, call, errorMessage, useApi, type Api } from '@marketly/web-shared/api';
-import { Alert, Avatar, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, Select, SellerBadge, SummaryRow, TextInput, announce } from '@marketly/web-shared/ui';
+import { Alert, Avatar, Badge, Button, Card, Checkbox, Dialog, Field, Icon, OptionCard, Select, SellerBadge, SummaryRow, TextInput, Textarea, announce } from '@marketly/web-shared/ui';
 import { BuyMini, CheckoutSteps, PurchaseSkeleton, SecN, plural } from './data/purchase';
+import { AddressSuggestion, useAddressCheck, type AddressCheck } from './data/address-check';
 import {
   DEV_CARDS,
   US_STATES,
@@ -19,6 +20,7 @@ import {
   orderWithin,
   paymentHref,
   returnUrl,
+  reviewChangesHref,
   routeForStatus,
   savedCardTitle,
   timePT,
@@ -40,6 +42,9 @@ import {
 //   view "coupon-rejected" = follows the real coupon result (POST …/coupons → status rejected + reason)
 // Place order: Idempotency-Key per attempt → confirmation, payment result (failed / pending / bank check) or
 // review changes, as PlaceOrderResult.next says. New cards use development provider tokens (gap G9).
+// Addresses typed here are checked first (POST /api/store/customers/addresses/validate, data/address-check.tsx).
+// Gift options: PUT …/preferences (gift note, hide prices on the packing slip). Coming back to the tab after a
+// while re-checks prices and stock (POST …/revalidate); Place order re-checks on the server anyway.
 
 export default function Checkout() {
   const [params] = useSearchParams();
@@ -183,6 +188,22 @@ function serverAddressErrors(e: unknown, prefix: string): Errors | null {
   return Object.keys(out).length ? out : { [`${prefix}line1`]: e.message };
 }
 
+/** Address-check issues (API fields: line1, region, postalCode…) → form field errors. */
+function checkErrors(issues: Extract<AddressCheck, { kind: 'fix' }>['issues'], prefix: string): Errors {
+  const out: Errors = {};
+  for (const i of issues) {
+    const key = i.field === 'postalCode' ? 'zip' : i.field;
+    const k = ['name', 'phone', 'line1', 'line2', 'city', 'region', 'zip'].includes(key) ? key : 'line1';
+    out[`${prefix}${k}`] ??= i.message;
+  }
+  return out;
+}
+
+/** The validator's suggestion keeps the name and phone the customer typed. */
+const withSuggestion = (typed: Addr, s: Address): Addr => ({ ...typed, line1: s.line1, line2: s.line2 ?? '', city: s.city, region: s.region, zip: s.postalCode });
+
+type Ask = Extract<AddressCheck, { kind: 'ask' }>;
+
 const addressLines = (a: Address) => (
   <>
     {a.name}
@@ -247,6 +268,11 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
   const [draft, setDraft] = useState<Addr | null>(null);
   const [draftTried, setDraftTried] = useState(false);
   const [draftServer, setDraftServer] = useState<Errors>({});
+  const addressCheck = useAddressCheck();
+  const [gaAsk, setGaAsk] = useState<Ask | null>(null);
+  const [draftAsk, setDraftAsk] = useState<Ask | null>(null);
+  const [giftNote, setGiftNote] = useState(c.giftNote ?? '');
+  const [hidePrices, setHidePrices] = useState(c.hidePricesOnSlip);
 
   const save = (v: CheckoutView) => qc.setQueryData(checkoutKey(id), v);
   const options = c.payment.options;
@@ -301,6 +327,55 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
     onError: (e) => setNotice({ tone: 'danger', title: "We couldn't apply your credit", body: errorMessage(e) }),
   });
 
+  // Gift options. Only the changed field is sent: the backend keeps the other one as it was.
+  const putPrefs = (body: { giftNote?: string | null; hidePricesOnSlip?: boolean }) => call(api.PUT('/api/store/checkout/sessions/{id}/preferences', { params: { path: { id } }, body }));
+  const prefsM = useMutation({ mutationFn: putPrefs, onSuccess: save });
+  const giftDirty = giftNote.trim() !== (c.giftNote ?? '');
+  const saveGiftNote = () => {
+    if (giftDirty && !prefsM.isPending) prefsM.mutate({ giftNote: giftNote.trim() || null }, { onSuccess: () => announce(giftNote.trim() ? 'Gift note saved' : 'Gift note removed') });
+  };
+  const toggleHidePrices = (on: boolean) => {
+    setHidePrices(on);
+    prefsM.mutate(
+      { hidePricesOnSlip: on },
+      {
+        onSuccess: () => {
+          announce(on ? 'Prices will be hidden on the packing slip' : 'Prices will show on the packing slip');
+        },
+        onError: () => setHidePrices(!on),
+      },
+    );
+  };
+
+  // Coming back to this tab after a while: check prices, stock and delivery again so the total shown is current.
+  // Changes the customer must review open the review-changes page; Place order also re-checks on the server.
+  const revalidateM = useMutation({
+    mutationFn: () => call(api.POST('/api/store/checkout/sessions/{id}/revalidate', { params: { path: { id } } })),
+    onSuccess: (r) => {
+      const before = c.totals.total.amount;
+      save(r.checkout);
+      if (r.outcome === 'changes_found') {
+        navigate(reviewChangesHref(id, r.changeSet?.id ?? r.checkout.openChangeSetId));
+        return;
+      }
+      if (r.checkout.totals.total.amount !== before) setNotice({ tone: 'info', title: 'Your total changed', body: `We checked prices and stock again. Your total is now ${formatMoney(r.checkout.totals.total)}.` });
+    },
+  });
+  const revalidateNow = useRef<() => void>(() => undefined);
+  revalidateNow.current = () => {
+    if (c.status === 'open' && !place.isPending && !revalidateM.isPending) revalidateM.mutate();
+  };
+  useEffect(() => {
+    // Short tab switches don't call the API; after a minute away, the quote may be out of date.
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.hidden) hiddenAt = Date.now();
+      else if (hiddenAt && Date.now() - hiddenAt > 60_000) revalidateNow.current();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
   const method = (p: Pay = pay, card = devCard): MethodSelection =>
     p === 'new' ? { kind: 'new_card', providerToken: card } : { kind: 'saved_card', savedMethodId: p.slice('saved:'.length) };
   const putMethod = (m: MethodSelection) => call(api.PUT('/api/store/checkout/sessions/{id}/payment-method', { params: { path: { id } }, body: m }));
@@ -349,9 +424,24 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
   const saveContact = () => {
     if (contactDirty && !errors.email && !errors.gphone && !contactM.isPending) contactM.mutate();
   };
-  const saveGuestAddress = () => {
-    if (!addressDirty || Object.keys(addressErrors(ga, 'a-')).length || addressM.isPending) return;
-    addressM.mutate({ address: toApi(ga) }, { onError: (e) => setGaServer(serverAddressErrors(e, 'a-') ?? { 'a-line1': errorMessage(e) }) });
+  const saveGuestAddress = async () => {
+    if (!addressDirty || Object.keys(addressErrors(ga, 'a-')).length || addressM.isPending || addressCheck.checking) return;
+    const typed = toApi(ga);
+    const r = await addressCheck.check(typed);
+    if (r.kind === 'fix') return setGaServer(checkErrors(r.issues, 'a-'));
+    // A suggestion doesn't hold the checkout up: what was typed is saved, and the customer can switch to the suggestion.
+    setGaAsk(r.kind === 'ask' ? r : null);
+    addressM.mutate({ address: typed }, { onError: (e) => setGaServer(serverAddressErrors(e, 'a-') ?? { 'a-line1': errorMessage(e) }) });
+  };
+  const setGuestAddress = (a: Addr) => {
+    setGa(a);
+    setGaAsk(null);
+  };
+  const takeGuestSuggestion = (s: Address) => {
+    const next = withSuggestion(ga, s);
+    setGa(next);
+    setGaAsk(null);
+    addressM.mutate({ address: toApi(next) }, { onError: (e) => setGaServer(serverAddressErrors(e, 'a-') ?? { 'a-line1': errorMessage(e) }) });
   };
 
   /* ---------- Place order ---------- */
@@ -364,6 +454,8 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
         cur = await call(api.PUT('/api/store/checkout/sessions/{id}/address', { params: { path: { id } }, body: { address: toApi(ga) } }));
         save(cur);
       }
+      // A gift note typed but not yet saved (the field saves on leaving it) goes with the order.
+      if (giftDirty) cur = await putPrefs({ giftNote: giftNote.trim() || null });
       const retry = cur.status === 'payment_failed';
       const m = method();
       if (!retry) cur = await putMethod(m);
@@ -428,15 +520,27 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
   };
 
   const draftErrors: Errors = draft && draftTried ? { ...addressErrors(draft, ''), ...draftServer } : {};
-  const saveDraft = () => {
+  const commitDraft = (a: Addr) => {
+    setDraftAsk(null);
+    addressM.mutate(
+      { address: toApi(a), saveToAddressBook: false },
+      { onSuccess: () => setDraft(null), onError: (e) => setDraftServer(serverAddressErrors(e, '') ?? { line1: errorMessage(e) }) },
+    );
+  };
+  const saveDraft = async () => {
     if (!draft) return;
     setDraftTried(true);
     setDraftServer({});
+    setDraftAsk(null);
     if (Object.keys(addressErrors(draft, '')).length) return;
-    addressM.mutate(
-      { address: toApi(draft), saveToAddressBook: false },
-      { onSuccess: () => setDraft(null), onError: (e) => setDraftServer(serverAddressErrors(e, '') ?? { line1: errorMessage(e) }) },
-    );
+    const r = await addressCheck.check(toApi(draft));
+    if (r.kind === 'fix') return setDraftServer(checkErrors(r.issues, ''));
+    if (r.kind === 'ask') return setDraftAsk(r);
+    commitDraft(draft);
+  };
+  const editDraft = (a: Addr) => {
+    setDraft(a);
+    setDraftAsk(null);
   };
 
   /* ---------- derived ---------- */
@@ -574,7 +678,10 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
             </div>
             <div className="card-body">
               {guest ? (
-                addrField(ga, setGa, 'a-', shown, 'co-a-', saveGuestAddress)
+                <>
+                  {addrField(ga, setGuestAddress, 'a-', shown, 'co-a-', () => void saveGuestAddress())}
+                  {gaAsk && <AddressSuggestion ask={gaAsk} busy={addressM.isPending} onUse={takeGuestSuggestion} onKeep={() => setGaAsk(null)} />}
+                </>
               ) : (
                 <>
                   {addressesQ.isError && (
@@ -936,6 +1043,22 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
                   {c.excludedLines.map((l) => `${l.title}${l.note ? ` (${l.note})` : ''}`).join(', ')}. {c.excludedLines.length === 1 ? 'It stays' : 'They stay'} in your cart.
                 </Alert>
               )}
+              <hr />
+              <div className="stack gap-3">
+                <span className="small strong">
+                  <Icon name="gift" className="ic-sm" /> Gift options
+                </span>
+                <Checkbox id="co-gift-hide" label="Hide prices on the packing slip" checked={hidePrices} disabled={prefsM.isPending} onChange={(e) => toggleHidePrices(e.target.checked)} />
+                <Field label="Gift note" optional hint={`Printed on the packing slip of every package in this order. ${500 - giftNote.length} characters left.`}>
+                  <Textarea id="co-gift-note" value={giftNote} maxLength={500} rows={3} onChange={(e) => setGiftNote(e.target.value)} onBlur={saveGiftNote} />
+                </Field>
+                {prefsM.isError && (
+                  <span className="error-text" role="alert">
+                    <Icon name="circle-alert" className="ic-sm" />
+                    {errorMessage(prefsM.error)}
+                  </span>
+                )}
+              </div>
             </div>
           </section>
         </div>
@@ -1013,14 +1136,15 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
             <Button variant="ghost" onClick={() => setDraft(null)}>
               Cancel
             </Button>
-            <Button onClick={saveDraft} disabled={addressM.isPending}>
-              Use this address
+            <Button onClick={() => void saveDraft()} disabled={addressM.isPending || addressCheck.checking || !!draftAsk}>
+              {addressCheck.checking ? 'Checking…' : 'Use this address'}
             </Button>
           </>
         }
       >
-        {draft && addrField(draft, setDraft, '', draftErrors, 'co-new-')}
+        {draft && addrField(draft, editDraft, '', draftErrors, 'co-new-')}
         <span className="xs muted">Used for this order only. Your saved addresses don't change.</span>
+        {draft && draftAsk && <AddressSuggestion ask={draftAsk} busy={addressM.isPending} onUse={(s) => commitDraft(withSuggestion(draft, s))} onKeep={() => commitDraft(draft)} />}
       </Dialog>
     </CheckoutShell>
   );

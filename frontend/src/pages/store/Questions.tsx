@@ -12,7 +12,10 @@ import { Alert, Badge, Breadcrumbs, Button, Chip, Dialog, EmptyState, Field, Ico
 import NotFound from './NotFound';
 import { useOfferComparison } from './data/offers';
 import { fmtDate, productHref, useProductParams, useSignInHref, type CatalogProduct } from './data/product';
-import { QA_ROLES, QA_SORTS, roleOf, useAskQuestion, useDebounced, useQuestionFeed, useQuestionPage, type ApiAnswer, type ApiQuestion, type QaRole, type QaSort } from './data/questions';
+import {
+  ANSWER_MAX, ANSWER_MIN, QA_ROLES, QA_SORTS, roleOf, useAnswerQuestion, useAskQuestion, useDebounced, useEditMyAnswer, useQuestionFeed, useQuestionPage,
+  type ApiAnswer, type ApiQuestion, type QaRole, type QaSort,
+} from './data/questions';
 import { useHelpfulVote, useReviewPage } from './data/reviews';
 import {
   Highlight, ListSkeleton, LoadError, matchCount, Photo, ProductSummary, ReviewSource, subpageCrumbs, SummaryActionBar, tokens, useProductContext, type VoteState,
@@ -27,6 +30,10 @@ import './Reviews.css';
 // ?q=<words> starts with a search. Questions and reviews are searched on the server (questions q, reviews q);
 // the Answered / Awaiting answer chips are the server's state filter, counted by the rating summary
 // (answeredQuestions, awaitingQuestions). Helpful votes start from the server's viewerVotedHelpful.
+// Any signed-in customer can answer another shopper's question (not their own): "Answer" under each question opens
+// the Answer dialog. The answer is labelled Customer (Verified buyer when they bought the item); held answers wait
+// for moderation. The API has no list of my answers and the question list shows published answers only, so the
+// answers written on this visit are kept on the page (with Edit) until the shopper leaves it.
 
 type View = 'ask' | 'no-match';
 type Filter = 'all' | 'answered' | 'awaiting';
@@ -57,6 +64,9 @@ export default function Questions() {
   const [votes, setVotes] = useState<Record<string, VoteState>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [askDraft, setAskDraft] = useState('');
+  // Answers you wrote on this visit, by question id (see the header comment).
+  const [myAnswers, setMyAnswers] = useState<Record<string, ApiAnswer[]>>({});
+  const [answering, setAnswering] = useState<{ q: ApiQuestion; edit?: ApiAnswer } | null>(null);
   const listTop = useRef<HTMLHeadingElement>(null);
   const vote = useHelpfulVote();
 
@@ -159,6 +169,29 @@ export default function Questions() {
     void qc.invalidateQueries({ queryKey: ['reviews', 'questions'] });
     void qc.invalidateQueries({ queryKey: ['reviews', 'questions-feed'] });
     announce(q.status === 'pending_review' ? 'Your question was sent. It shows once it passes our checks.' : 'Your question is posted. It shows as Awaiting answer until someone replies.');
+  };
+
+  const openAnswer = (q: ApiQuestion, edit?: ApiAnswer) => {
+    if (!signedIn) {
+      navigate(signIn(`${href('store/questions', '', { slug, id })}#question-${q.id}`));
+      return;
+    }
+    setAnswering({ q, edit });
+  };
+  const onAnswered = (a: ApiAnswer, edited: boolean) => {
+    setMyAnswers((m) => ({ ...m, [a.questionId]: [a, ...(m[a.questionId] ?? []).filter((x) => x.id !== a.id)] }));
+    setAnswering(null);
+    // A published answer moves the question to Answered: refresh the lists and the answered/awaiting counts.
+    void qc.invalidateQueries({ queryKey: ['reviews', 'questions'] });
+    void qc.invalidateQueries({ queryKey: ['reviews', 'questions-feed'] });
+    void qc.invalidateQueries({ queryKey: ['reviews', 'rating-summary', id] });
+    announce(
+      a.status === 'published'
+        ? edited
+          ? 'Your answer was updated.'
+          : 'Thanks. Your answer is posted.'
+        : 'Your answer was sent. It shows on this page once it passes our checks.',
+    );
   };
 
   if (ctx.notFound) return <NotFound />;
@@ -336,6 +369,10 @@ export default function Questions() {
                           onExpand={() => setExpanded((m) => ({ ...m, [q.id]: !m[q.id] }))}
                           voteOf={voteOf}
                           onVote={onVote}
+                          yours={myAnswers[q.id] ?? []}
+                          // Not on your own question (the backend refuses it) or on one still being checked.
+                          canAnswer={!mineIds.has(q.id) && q.status === 'published'}
+                          onAnswer={(edit) => openAnswer(q, edit)}
                         />
                       ))}
                     </div>
@@ -412,6 +449,15 @@ export default function Questions() {
         onPosted={onPosted}
         askedAs={askedAs}
       />
+
+      <AnswerDialog
+        key={answering ? `${answering.q.id}-${answering.edit?.id ?? 'new'}` : 'closed'}
+        open={!!answering}
+        question={answering?.q}
+        edit={answering?.edit}
+        onClose={() => setAnswering(null)}
+        onDone={onAnswered}
+      />
     </StoreLayout>
   );
 }
@@ -436,7 +482,7 @@ const ROLE_NOTE: Record<QaRole, string> = {
 /* ---------------- One question ---------------- */
 
 function QuestionItem({
-  q, toks, isNew, expanded, onExpand, voteOf, onVote,
+  q, toks, isNew, expanded, onExpand, voteOf, onVote, yours, canAnswer, onAnswer,
 }: {
   q: ApiQuestion;
   toks: string[];
@@ -445,10 +491,17 @@ function QuestionItem({
   onExpand: () => void;
   voteOf: (a: ApiAnswer) => VoteState;
   onVote: (a: ApiAnswer) => void;
+  /** Answers you wrote on this visit (newest first), shown above the others with their status. */
+  yours: ApiAnswer[];
+  canAnswer: boolean;
+  /** Open the Answer dialog: a new answer, or editing one of yours. */
+  onAnswer: (edit?: ApiAnswer) => void;
 }) {
-  const answers = [...q.answers].sort(byVotes);
+  const yourIds = new Set(yours.map((a) => a.id));
+  const answers = [...q.answers].filter((a) => !yourIds.has(a.id)).sort(byVotes);
   const shownAnswers = expanded ? answers : answers.slice(0, SHOW_ANSWERS);
   const more = answers.length - SHOW_ANSWERS;
+  const published = answers.length + yours.filter((a) => a.status === 'published').length;
   return (
     <article className={cx('shop-qa', isNew && 'rv-new')} id={`question-${q.id}`}>
       <div className="stack gap-1">
@@ -463,10 +516,37 @@ function QuestionItem({
         </div>
         <span className="xs muted">
           Asked by {q.askedBy} · {fmtDate(q.askedAt)}
-          {q.answers.length > 0 && ` · ${q.answers.length} answer${q.answers.length === 1 ? '' : 's'}`}
+          {published > 0 && ` · ${published} answer${published === 1 ? '' : 's'}`}
         </span>
       </div>
-      {q.answers.length === 0 && (
+      {yours.map((a) => {
+        const role = QA_ROLES[roleOf(a)];
+        return (
+          <div key={a.id} className="a">
+            <div className="row gap-2">
+              <Badge tone={role.tone} icon={role.icon}>
+                {role.label}
+              </Badge>
+              <span className="xs muted">Your answer · {fmtDate(a.answeredAt)}</span>
+              {a.status !== 'published' && (
+                <Badge tone="warning" icon="hourglass">
+                  {a.status === 'edit_requested' ? 'Changes requested' : a.status === 'removed' ? 'Removed' : 'Being checked'}
+                </Badge>
+              )}
+            </div>
+            <span>{a.text}</span>
+            {a.status === 'pending_review' && <span className="xs muted">Other shoppers see it once it passes our checks.</span>}
+            {(a.status === 'published' || a.status === 'edit_requested') && (
+              <div className="row gap-2">
+                <Button variant="ghost" size="sm" icon="pencil" onClick={() => onAnswer(a)}>
+                  {a.status === 'edit_requested' ? 'Fix and resubmit' : 'Edit your answer'}
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {published === 0 && yours.length === 0 && (
         <div className="a">
           <span>
             <Badge tone="warning" icon="hourglass">
@@ -505,6 +585,13 @@ function QuestionItem({
         <button type="button" className="btn btn-link small rv-more-answers" aria-expanded={expanded} onClick={onExpand}>
           {expanded ? 'Show fewer answers' : `See ${more} more answer${more === 1 ? '' : 's'}`}
         </button>
+      )}
+      {canAnswer && (
+        <div className="row gap-2">
+          <Button variant="secondary" size="sm" icon="message-square-text" onClick={() => onAnswer()}>
+            Answer
+          </Button>
+        </div>
       )}
     </article>
   );
@@ -665,6 +752,90 @@ function AskDialog({
           order messages
         </Link>
         .
+      </p>
+    </Dialog>
+  );
+}
+
+/* ---------------- Answer a question ---------------- */
+
+/** Answers with links are held for a check (reviews qaChecks): say so before posting. */
+const LINK = /(https?:\/\/|www\.)\S+/i;
+
+function AnswerDialog({
+  open, question, edit, onClose, onDone,
+}: {
+  open: boolean;
+  question?: ApiQuestion;
+  /** Set when editing one of your answers (PATCH); otherwise a new answer (POST). */
+  edit?: ApiAnswer;
+  onClose: () => void;
+  onDone: (a: ApiAnswer, edited: boolean) => void;
+}) {
+  const answer = useAnswerQuestion();
+  const change = useEditMyAnswer();
+  const busy = answer.isPending || change.isPending;
+  const [text, setText] = useState(edit?.text ?? '');
+  const [error, setError] = useState('');
+
+  const submit = () => {
+    const t = text.trim();
+    let e = '';
+    if (t.length < ANSWER_MIN) e = 'Write your answer.';
+    else if (EMAIL.test(t) || ORDER_NO.test(t)) e = 'Remove personal details such as email addresses or order numbers. Answers are public.';
+    setError(e);
+    if (e || !question) return;
+    const onError = (err: unknown) => setError(err instanceof ApiError && err.fieldErrors.text ? err.fieldErrors.text : errorMessage(err));
+    if (edit) change.mutate({ answerId: edit.id, text: t }, { onSuccess: (a) => onDone(a, true), onError });
+    else answer.mutate({ questionId: question.id, text: t }, { onSuccess: (a) => onDone(a, false), onError });
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title={edit ? 'Edit your answer' : 'Answer this question'}
+      foot={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button icon="send" onClick={submit} disabled={busy}>
+            {edit ? (edit.status === 'edit_requested' ? 'Resubmit answer' : 'Save answer') : 'Post answer'}
+          </Button>
+        </>
+      }
+    >
+      {question && (
+        <div className="stack gap-1">
+          <span className="xs strong">Question</span>
+          <span className="small">{question.text}</span>
+          <span className="xs muted">Asked by {question.askedBy}</span>
+        </div>
+      )}
+      <Field label="Your answer" hint={`${text.length}/${ANSWER_MAX}. Answer from your own experience with the item.`} error={error}>
+        <Textarea
+          id="qa-answer"
+          rows={4}
+          maxLength={ANSWER_MAX}
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setError('');
+          }}
+        />
+      </Field>
+      {LINK.test(text) && (
+        <Alert tone="info" title="Answers with links are checked first">
+          It shows to other shoppers once it passes our checks.
+        </Alert>
+      )}
+      <p className="xs muted">
+        Your answer is public and shows your first name and last initial, labelled Customer, or Verified buyer if you bought this item on Marketly. Answers with links,
+        medical claims or offers to sell outside Marketly wait for a check before they show.{' '}
+        <Link to={href('help/article', '', { slug: 'how-reviews-work' })} className="link-inline">
+          How reviews and answers work
+        </Link>
       </p>
     </Dialog>
   );

@@ -10,12 +10,15 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Breadcrumbs, Button, Card, CopyButton, Img, StatusBadge, SummaryRow, Timeline, Track, type TimelineEvent } from '@marketly/web-shared/ui';
 import { caseHref, fmtDateTime, fmtWeekday, humanize, orderHref, refundTone, returnTone, stateTone, useReturnDetail, type ReturnDetail, type TrackStep } from './data/orders';
 import { DetailSkeleton, LoadError, NotFoundCard, SellerLineApi } from './data/order-parts';
+import { AddTrackingForm, canDo, EscalateReturnButton, InfoReplyCard, WithdrawReturnButton } from './data/return-actions';
 
 // Design: pages/store/account-return.html · the three design views now follow the return's data:
 // approved and waiting for drop-off (QR code + label), refund sent (`refund.status` SENT), and the
 // replacement on its way (`replacement`). Data: the ReturnDetail screen query (return(ref)) plus REST
 // returns/requests/{id} for the drop-off code (drawn as a QR) and the refund estimate; "Email me
-// the code" is POST returns/requests/{id}/label/email.
+// the code" is POST returns/requests/{id}/label/email. What the customer can do comes from
+// `actions` (data/return-actions.tsx): answer a question, add tracking for a return they ship
+// themselves, withdraw, ask Marketly to step in, get the label, report a problem.
 
 const REFUND_STEPS = ['Requested', 'Under review', 'Approved', 'Processing', 'Sent'];
 
@@ -59,6 +62,12 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
   });
   const sh = r.shipment;
   const waiting = !!sh && sh.status.toUpperCase() === 'LABEL_ISSUED' && r.open;
+  // A label or drop-off code exists only when the seller ships it (GET_LABEL); a return the customer
+  // sends themselves (customer-arranged) needs their carrier and tracking number instead (ADD_TRACKING).
+  const getLabel = canDo(r, 'GET_LABEL');
+  const addTracking = canDo(r, 'ADD_TRACKING');
+  const selfShip = sh?.method.toUpperCase() === 'CUSTOMER_ARRANGED';
+  const escalate = canDo(r, 'ESCALATE');
   const refund = r.refund;
   const refundSent = refund?.status.toUpperCase() === 'SENT';
   const repl = r.replacement;
@@ -71,7 +80,7 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
   const extra = useQuery({
     queryKey: ['returns', 'request', r.id],
     queryFn: () => call(api.GET('/api/store/returns/requests/{id}', { params: { path: { id: r.id } } })),
-    enabled: waiting || (!r.refund && r.open),
+    enabled: (waiting && getLabel) || (!r.refund && r.open),
   });
   const code = extra.data?.shipment?.dropOffCode ?? null;
   const estimate = extra.data?.refundEstimate ?? null;
@@ -81,7 +90,7 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
   const rejected = r.decision?.kind.toUpperCase() === 'REJECTED';
 
   const shipmentEvents: TimelineEvent[] = [
-    ...(waiting && sh?.dropOffBy ? [{ t: 'Waiting for drop-off', d: `Drop off by ${fmtWeekday(sh.dropOffBy)}`, state: 'current' as const, body: 'The label activates when the carrier scans your QR code.' }] : []),
+    ...(waiting && sh?.dropOffBy ? [{ t: 'Waiting for drop-off', d: `Drop off by ${fmtWeekday(sh.dropOffBy)}`, state: 'current' as const, body: selfShip ? "Add the carrier and tracking number once you've sent it." : 'The label activates when the carrier scans your QR code.' }] : []),
     ...[...(sh?.events ?? []), ...r.timeline]
       .sort((a, b) => b.at.localeCompare(a.at))
       .map((e) => ({ t: e.label, d: fmtDateTime(e.at), state: 'done' as const, body: e.detail ?? undefined })),
@@ -130,14 +139,46 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
             {isReplacement && <span className="xs muted">Remedy: replacement</span>}
           </span>
           <Track labels={r.track.map((t) => t.label)} done={trackDone(r.track)} tone={rejected ? 'danger' : undefined} />
+          {r.open && r.nextStep && (
+            <span className="xs sub">
+              Next: {r.nextStep}
+              {r.nextDeadline && !r.nextStep.includes(fmtWeekday(r.nextDeadline.dueAt)) ? ` · by ${fmtDateTime(r.nextDeadline.dueAt)} PT` : ''}
+            </span>
+          )}
         </div>
       </section>
 
       <div className="acct-split">
         <div className="stack gap-4">
+          {canDo(r, 'REPLY_INFO') && <InfoReplyCard r={r} />}
           {rejected && (
             <Alert tone="danger" title="Return not approved">
-              {r.decision?.explanation ?? 'The seller did not approve this return.'} If you disagree, open a support case and Marketly will take a look.
+              <span className="stack gap-2">
+                <span>
+                  {r.decision?.explanation ?? 'The seller did not approve this return.'}{' '}
+                  {escalate ? 'If you disagree, ask Marketly to step in and a support agent will decide.' : r.escalation ? '' : 'If you disagree, open a support case and Marketly will take a look.'}
+                </span>
+                {escalate && (
+                  <span className="row gap-2">
+                    <EscalateReturnButton r={r} size="sm" label="I disagree: ask Marketly" />
+                  </span>
+                )}
+              </span>
+            </Alert>
+          )}
+          {r.escalation && r.open && (
+            <Alert tone="info" title="Marketly is looking at this return">
+              Marketly stepped in on {fmtWeekday(r.escalation.at)}. A support agent reviews the return and decides.
+              {r.escalation.caseRef && (
+                <>
+                  {' '}
+                  Follow it in case{' '}
+                  <Link className="mono" to={caseHref(r.escalation.caseRef)}>
+                    {r.escalation.caseRef}
+                  </Link>
+                  .
+                </>
+              )}
             </Alert>
           )}
           {waiting && sh && (
@@ -151,7 +192,16 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
                   Your refund hasn't been sent yet. It starts once we receive and inspect the item.
                 </Alert>
               )}
-              <Card title={sh.dropOffBy ? `Send it back by ${fmtWeekday(sh.dropOffBy)}` : 'Send it back'} sub={sh.paidBy.toUpperCase() === 'CUSTOMER' ? `Return shipping${sh.cost ? ` of ${formatMoney(sh.cost)}` : ''} is deducted from your refund.` : 'Prepaid. No printer or box label needed.'}>
+              <Card
+                title={sh.dropOffBy ? `Send it back by ${fmtWeekday(sh.dropOffBy)}` : 'Send it back'}
+                sub={
+                  selfShip
+                    ? 'You arrange the shipping: use a tracked service, then add the tracking number here.'
+                    : sh.paidBy.toUpperCase() === 'CUSTOMER'
+                      ? `Return shipping${sh.cost ? ` of ${formatMoney(sh.cost)}` : ''} is deducted from your refund.`
+                      : 'Prepaid. No printer or box label needed.'
+                }
+              >
                 <div className="row gap-5 top">
                   {code && (
                     // The API sends the code the carrier scans (dropOffCode); the app draws the QR (G26a).
@@ -172,21 +222,23 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
                         </li>
                       )}
                     </ol>
-                    <div className="row gap-2">
-                      <Button variant="secondary" size="sm" icon={email.isSuccess ? 'check' : 'mail'} onClick={() => email.mutate()} disabled={email.isSuccess || email.isPending}>
-                        {email.isSuccess ? 'Code emailed' : 'Email me the code'}
-                      </Button>
-                      {sh.labelUrl && (
-                        <Button variant="ghost" size="sm" icon="printer" href={sh.labelUrl}>
-                          Print label instead
+                    {getLabel && (
+                      <div className="row gap-2">
+                        <Button variant="secondary" size="sm" icon={email.isSuccess ? 'check' : 'mail'} onClick={() => email.mutate()} disabled={email.isSuccess || email.isPending}>
+                          {email.isSuccess ? 'Code emailed' : 'Email me the code'}
                         </Button>
-                      )}
-                      {sh.qrCodeUrl && (
-                        <Button variant="ghost" size="sm" icon="external-link" href={sh.qrCodeUrl}>
-                          Open drop-off link
-                        </Button>
-                      )}
-                    </div>
+                        {sh.labelUrl && (
+                          <Button variant="ghost" size="sm" icon="printer" href={sh.labelUrl}>
+                            Print label instead
+                          </Button>
+                        )}
+                        {sh.qrCodeUrl && (
+                          <Button variant="ghost" size="sm" icon="external-link" href={sh.qrCodeUrl}>
+                            Open drop-off link
+                          </Button>
+                        )}
+                      </div>
+                    )}
                     {email.isError && <span className="xs t-danger-text">{errorMessage(email.error)}</span>}
                     {sh.to && (
                       <span className="xs muted">
@@ -196,6 +248,12 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
                     )}
                   </div>
                 </div>
+                {addTracking && (
+                  <>
+                    <hr />
+                    <AddTrackingForm r={r} />
+                  </>
+                )}
               </Card>
             </>
           )}
@@ -380,9 +438,16 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
               <Button variant="secondary" block icon="message-square" to={href('account/messages', '', undefined, r.conversation ? { conversation: r.conversation.id } : { order: r.orderRef })}>
                 Message {r.conversation?.counterparty.name ?? r.sellerName}
               </Button>
+              {/* Rejected returns offer escalation in the "not approved" alert; a missed deadline or a late refund offers it here. */}
+              {escalate && !rejected && <EscalateReturnButton r={r} variant="ghost" block className="btn-wrap" />}
               {r.case ? (
                 <Button variant="ghost" block icon="life-buoy" to={caseHref(r.case.ref)} className="btn-wrap">
                   View support case {r.case.ref}
+                </Button>
+              ) : canDo(r, 'REPORT_PROBLEM') ? (
+                // Problems with an open return go through a support case (help/order-problem), the backend's route for them.
+                <Button variant="ghost" block icon="flag" to={href('help/order-problem', '', undefined, { order: r.orderRef, ...(r.items[0] ? { item: r.items[0].orderItemId } : {}) })}>
+                  Report a problem
                 </Button>
               ) : (
                 <Button variant="ghost" block icon="life-buoy" to={href('help/order-problem', '', undefined, { order: r.orderRef })}>
@@ -391,6 +456,12 @@ function ReturnView({ r, crumbs }: { r: ReturnDetail; crumbs: ReactNode }) {
               )}
             </div>
           </Card>
+          {canDo(r, 'WITHDRAW') && (
+            <Card title="Changed your mind?" titleAs="h3">
+              <span className="xs sub">You can withdraw the return until the item is on its way back. You keep the item and no refund is made.</span>
+              <WithdrawReturnButton r={r} variant="secondary" block />
+            </Card>
+          )}
         </aside>
       </div>
     </AccountLayout>

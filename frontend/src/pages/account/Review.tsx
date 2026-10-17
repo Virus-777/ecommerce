@@ -534,7 +534,7 @@ export default function Review() {
                 <li key={g}>{g}</li>
               ))}
             </ul>
-            <Link className="small strong" to={href('help/article')}>
+            <Link className="small strong" to={href('help/article', '', { slug: 'how-reviews-work' })}>
               Full review rules
             </Link>
           </Card>

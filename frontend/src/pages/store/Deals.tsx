@@ -6,10 +6,11 @@ import { useSession } from '@/app/session';
 import { call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { dollars, money } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Badge, Button, Countdown, Dialog, EmptyState, Icon, Meter, Price, Tabs, announce } from '@marketly/web-shared/ui';
-import { ApiProductCard, CardGridSkeleton, LoadError, Pic, SkLines } from '@/api/cards';
+import { Badge, Button, Countdown, Dialog, EmptyState, Icon, Meter, Pager, Price, Tabs, announce } from '@marketly/web-shared/ui';
+import { ApiProductCard, CardGridSkeleton, InfiniteRow, LoadError, Pic, SkLines } from '@/api/cards';
 import { OFFICIAL_STORE_ID } from '@marketly/web-shared/config';
 import { productHref, useProductCards, type SearchCard, type StoreCard } from '@/api/search';
+import { useClearanceList, useCouponList, type DealList } from './data/deals';
 
 // Design: pages/store/store-deals.html. Data: GET /api/store/promotions/deals?tab= (tabs with counts,
 // flash sales with live meters, coupons, clearance, upcoming events, rules; deal items name their seller's
@@ -17,7 +18,9 @@ import { productHref, useProductCards, type SearchCard, type StoreCard } from '@
 // flash and clearance items carry no product slug). Clip/unclip a coupon
 // (POST/DELETE /api/store/promotions/coupons/{campaignId}/clip) and event reminders
 // (POST/DELETE /api/store/promotions/events/{campaignId}/reminder) need a signed-in customer; "Eligible items"
-// lists GET /api/store/promotions/campaigns/{id}/eligible-products.
+// lists GET /api/store/promotions/campaigns/{id}/eligible-products. The overview answers at most 12 clearance
+// products and 12 coupons, so the Clearance and Coupons tabs page through GET /api/store/promotions/deals/clearance
+// and /deals/coupons (data/deals.ts).
 
 type DealTab = 'all' | 'flash' | 'clearance' | 'coupons' | 'events';
 type FlashItem = components['schemas']['promotions.FlashItem'];
@@ -89,7 +92,13 @@ export default function Deals() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { signedIn } = useSession();
-  const [tab, setTab] = useState<DealTab>('all');
+  const [tab, setTabState] = useState<DealTab>('all');
+  // Website page number of the Clearance / Coupons tab list (the phone loads more as it scrolls).
+  const [page, setPage] = useState(1);
+  const setTab = (t: DealTab) => {
+    setTabState(t);
+    setPage(1);
+  };
   const [eligible, setEligible] = useState<Coupon | null>(null);
   const [actionError, setActionError] = useState('');
 
@@ -98,8 +107,14 @@ export default function Deals() {
     queryFn: () => call(api.GET('/api/store/promotions/deals', { params: { query: { tab } } })),
   });
   const d = deals.data;
+  // On their own tab, clearance and coupons come from the paged lists (the overview stops at 12).
+  const clearanceList = useClearanceList(page, tab === 'clearance');
+  const couponList = useCouponList(page, tab === 'coupons');
+  const clearance = tab === 'clearance' ? clearanceList.items : (d?.clearance ?? []);
+  const coupons = tab === 'coupons' ? couponList.items : (d?.coupons ?? []);
+  const pagedList: DealList<unknown> | null = tab === 'clearance' ? clearanceList : tab === 'coupons' ? couponList : null;
   const flashItems = (d?.flashSales ?? []).flatMap((f) => f.items);
-  const cards = useProductCards([...flashItems.map((i) => i.productId), ...(d?.clearance ?? []).map((c) => c.productId)]);
+  const cards = useProductCards([...flashItems.map((i) => i.productId), ...clearance.map((c) => c.productId)]);
   const card = (id: string) => cards.data?.get(id);
   const show = (t: DealTab) => tab === 'all' || tab === t;
   const refresh = () => void qc.invalidateQueries({ queryKey: ['promotions'] });
@@ -138,7 +153,21 @@ export default function Deals() {
     return { value: k, label: t?.label ?? { all: 'All deals', flash: 'Flash sales', clearance: 'Clearance', coupons: 'Coupons', events: 'Upcoming events' }[k], count: t?.count };
   });
   const clearanceCount = d?.tabs.find((t) => t.key === 'clearance')?.count ?? 0;
+  const couponCount = d?.tabs.find((t) => t.key === 'coupons')?.count ?? 0;
   const empty = d && !d.flashSales.length && !d.coupons.length && !d.clearance.length && !d.upcomingEvents.length;
+  /** "See all N" on the All deals overview: opens the type's tab, which pages through every item. */
+  const seeAll = (t: DealTab, n: number) => (
+    <a
+      className="small strong"
+      href="#"
+      onClick={(e) => {
+        e.preventDefault();
+        setTab(t);
+      }}
+    >
+      See all {n} <Icon name="arrow-right" className="ic-sm" />
+    </a>
+  );
 
   return (
     <StoreLayout nav="deals" tab="deals">
@@ -192,18 +221,21 @@ export default function Deals() {
             </section>
           ))}
 
-        {d && show('coupons') && d.coupons.length > 0 && (
+        {d && show('coupons') && coupons.length > 0 && (
           <section className="stack gap-4" aria-labelledby="dl-cp">
             <div className="row between base">
               <h2 className="h2">
                 <span id="dl-cp">Coupons</span>
               </h2>
-              <Link className="small strong" to={href('account/coupons')}>
-                My coupons <Icon name="arrow-right" className="ic-sm" />
-              </Link>
+              <span className="row gap-4">
+                {tab === 'all' && couponCount > coupons.length && seeAll('coupons', couponCount)}
+                <Link className="small strong" to={href('account/coupons')}>
+                  My coupons <Icon name="arrow-right" className="ic-sm" />
+                </Link>
+              </span>
             </div>
             <div className="shop-coupons">
-              {d.coupons.map((c) => (
+              {coupons.map((c) => (
                 <article key={c.campaignId} className="shop-coupon">
                   <div className="amt">
                     {c.amountLabel}
@@ -257,34 +289,43 @@ export default function Deals() {
           </section>
         )}
 
-        {d && show('clearance') && d.clearance.length > 0 && (
+        {d && show('clearance') && clearance.length > 0 && (
           <section className="stack gap-4" aria-labelledby="dl-cl">
             <div className="row between base">
               <h2 className="h2">
                 <span id="dl-cl">Clearance</span>
               </h2>
-              {tab === 'all' && clearanceCount > d.clearance.length && (
-                <a
-                  className="small strong"
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setTab('clearance');
-                  }}
-                >
-                  See all {clearanceCount} <Icon name="arrow-right" className="ic-sm" />
-                </a>
-              )}
+              {tab === 'all' && clearanceCount > clearance.length && seeAll('clearance', clearanceCount)}
             </div>
             <p className="small sub" style={{ marginTop: 'calc(-1 * var(--sp-2))' } as CSSProperties}>
               Clearance prices last while the listed seller’s current stock lasts. Normal return terms apply.
             </p>
             <div className="grid-products wide">
-              {d.clearance.map((p) => (
+              {clearance.map((p) => (
                 <ApiProductCard key={p.offerId} c={dealToCard(p, card(p.productId))} from showSeller />
               ))}
             </div>
           </section>
+        )}
+
+        {pagedList?.isPending && !deals.isPending && <CardGridSkeleton n={5} wide />}
+        {pagedList?.error ? <LoadError error={pagedList.error} onRetry={pagedList.refetch} title="We couldn’t load this list" /> : null}
+        {pagedList && !pagedList.isPending && (
+          <>
+            {pagedList.phone && <InfiniteRow listing={pagedList} />}
+            {!pagedList.phone && pagedList.totalPages > 1 && (
+              <Pager
+                page={pagedList.page}
+                total={pagedList.totalPages}
+                onPage={(n) => {
+                  setPage(n);
+                  window.scrollTo({ top: 0 });
+                }}
+                grid
+                only="website"
+              />
+            )}
+          </>
         )}
 
         {d && show('events') && d.upcomingEvents.length > 0 && (

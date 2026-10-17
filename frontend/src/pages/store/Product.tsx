@@ -22,6 +22,8 @@ import {
 import { useDebounced, useQuestionPage, type ApiAnswer } from './data/questions';
 import { useHelpfulVote, useReviewPage, type ApiReview, type ReviewFilters } from './data/reviews';
 import { LoadError, ListSkeleton, Photo, type VoteState } from './data/review-parts';
+import { ReportDialog, type ReportTarget } from './data/report-dialog';
+import { useProductViewSignal } from './data/signals';
 
 /** A product image at one of its two sizes: 'detail' for the gallery, 'thumb' for thumbnails and cards (BACKEND-PRODUCT-IMAGES.md). */
 const sized = <M extends { url: string }>(m: M | null | undefined, size: 'detail' | 'thumb'): M | undefined => (m ? { ...m, url: renditionUrl(m, size) ?? m.url } : undefined);
@@ -60,6 +62,8 @@ function ProductScreen() {
     recorded.current = true;
     record.mutate({ productId: id }, { onError: () => undefined });
   }, [product.data, id, record]);
+  // Product view for the discovery reports (views, conversion): once per page view, after the product loaded.
+  useProductViewSignal(product.data ? id : null);
 
   const setOffer = (o: string | null) =>
     setParams(
@@ -149,6 +153,8 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
   const [deliverOpen, setDeliverOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const askSeller = () => (signedIn ? setAskOpen(true) : navigate(signIn()));
+  const [reportOpen, setReportOpen] = useState(false);
+  const reportListing = () => (signedIn ? setReportOpen(true) : navigate(signIn()));
   const offer = box?.selected ?? null;
   const featured = box?.featured ?? null;
   const isFeatured = box?.selectedBy === 'featured';
@@ -230,6 +236,12 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
   const barNote = offer ? (offer.delivery.free || !shipping?.amount ? offer.delivery.label : `+ ${formatMoney(shipping)} shipping`) : '';
   const offersLink = href('store/offers', '', { slug, id }, variantId ? { variant: variantId } : undefined);
   const sellerFeedback = offer && !offer.seller.official ? offer.seller : null;
+  // Report: the product itself, the offer in the buy box, and its seller (not the Official Store, which is Marketly).
+  const reportTargets: ReportTarget[] = [
+    { kind: 'product', id, label: `The product: ${product.title}` },
+    ...(offer ? [{ kind: 'offer' as const, id: offer.offerId, label: `The offer from ${offer.seller.name}` }] : []),
+    ...(offer && !offer.seller.official && offer.seller.sellerId ? [{ kind: 'seller' as const, id: offer.seller.sellerId, label: `The seller: ${offer.seller.name}` }] : []),
+  ];
 
   return (
     <StoreLayout
@@ -593,6 +605,12 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                 <KeyValue pairs={specPairs(product)} />
               </div>
             </PhoneCollapse>
+            <p className="xs muted">
+              Something wrong with this listing, like a fake item or a misleading description?{' '}
+              <button type="button" className="btn-bare link-inline" onClick={reportListing}>
+                <Icon name="flag" className="ic-sm" /> Report it
+              </button>
+            </p>
           </div>
         </section>
 
@@ -721,7 +739,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
                   icon="message-square-text"
                   title="Be the first to review after you buy it"
                   action={
-                    <Button variant="secondary" size="sm" to={href('help/article')}>
+                    <Button variant="secondary" size="sm" to={href('help/article', '', { slug: 'how-reviews-work' })}>
                       How reviews work
                     </Button>
                   }
@@ -818,6 +836,7 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
       {offer && (
         <AskSellerDialog open={askOpen} onClose={() => setAskOpen(false)} sellerName={offer.seller.name} offers={[{ offerId: offer.offerId, title: color ? `${product.title} (${color})` : product.title }]} />
       )}
+      <ReportDialog open={reportOpen} onClose={() => setReportOpen(false)} targets={reportTargets} />
       <DeliverToDialog open={deliverOpen} onClose={() => setDeliverOpen(false)} signedIn={signedIn} current={box?.deliverTo} />
     </StoreLayout>
   );

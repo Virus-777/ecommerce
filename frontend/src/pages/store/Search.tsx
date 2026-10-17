@@ -8,6 +8,7 @@ import { initialsOf, tintOf } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, LogoPic, SkLines } from '@/api/cards';
 import { ActiveFilters, FacetFilters, SortRadios, SortSelect, useListingParams } from '@/api/listing';
 import { readPage, readQuery, toCardProduct, useFacets, useListing, useSearchClick } from '@/api/search';
+import { RankingPolicyLink } from './data/ranking';
 
 // Design: pages/store/store-search.html · view "suggestions-open" = the search suggestions panel, which
 // the store layout opens when the header search field is focused or typed in. Data: the URL holds the
@@ -115,7 +116,7 @@ export default function Search() {
               <h2 className="h4" id="sr-sp">
                 Sponsored products
               </h2>
-              <Link className="xs" to={href('help/article')}>
+              <Link className="xs" to={href('help/article', '', { slug: 'why-you-see-ads' })}>
                 Why these ads?
               </Link>
             </div>
@@ -178,7 +179,10 @@ export default function Search() {
               </EmptyState>
             ) : null}
             <div className="row between">
-              <span className="xs muted">Results match product names, brands and descriptions. Sponsored items are labeled.</span>
+              <span className="xs muted">
+                Results match product names, brands and descriptions. Sponsored items are labeled.{' '}
+                <RankingPolicyLink className="link-inline" />
+              </span>
               <ListingPager listing={listing} onPage={lp.setPage} />
             </div>
           </div>

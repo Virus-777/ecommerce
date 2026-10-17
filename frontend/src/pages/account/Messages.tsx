@@ -22,11 +22,13 @@ import {
   type Message,
 } from './data/messages';
 import { daySeparator, listTime, time } from './data/when';
+import { ReportDialog } from '../store/data/report-dialog';
 
 // Design: pages/store/account-messages.html (one view): inbox + the open conversation.
 // On the phone (Android app) the conversation fills the screen; "All messages" shows the inbox.
 // API: messaging (GET /api/store/messaging/conversations, …/{id}, …/{id}/messages; POST …/{id}/messages,
 // …/{id}/read); attachments through media uploads (purpose message_attachment). ?conversation=<id> opens one.
+// Report under another person's message: POST /api/store/messaging/messages/{id}/report (data/report-dialog.tsx).
 
 type Counterparty = ConversationSummary['counterparty'];
 /** The Official Store's seller id (docs/api/README.md "Constants"). */
@@ -71,6 +73,9 @@ export default function Messages() {
   const fileRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const clientMessageId = useRef<string | null>(null);
+  // Report a message (messaging moderation, data/report-dialog.tsx); `reported` marks it until the log refetches.
+  const [reportFor, setReportFor] = useState<{ id: string; from: string } | null>(null);
+  const [reported, setReported] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     const t = setTimeout(() => setQuery(q.trim()), 300);
@@ -427,6 +432,20 @@ export default function Messages() {
                           ))}
                         <span className="xs muted">
                           {m.fromMe ? 'You' : m.authorLabel} · {time(m.at)}
+                          {/* Other people's messages can be reported (abuse, spam, off-platform contact, fraud). */}
+                          {!m.fromMe &&
+                            !m.hidden &&
+                            cp?.kind !== 'marketplace_support' &&
+                            (m.viewerReported || reported.has(m.id) ? (
+                              ' · Reported'
+                            ) : (
+                              <>
+                                {' · '}
+                                <button type="button" className="btn-bare link-inline" onClick={() => setReportFor({ id: m.id, from: m.authorLabel })}>
+                                  Report<span className="sr-only"> this message from {m.authorLabel}</span>
+                                </button>
+                              </>
+                            ))}
                         </span>
                       </div>
                     )}
@@ -490,6 +509,15 @@ export default function Messages() {
           </div>
         </div>
       </section>
+      <ReportDialog
+        open={!!reportFor}
+        onClose={() => setReportFor(null)}
+        targets={reportFor ? [{ kind: 'message', id: reportFor.id, label: `A message from ${reportFor.from}` }] : []}
+        onReported={(t) => {
+          setReported((s) => new Set(s).add(t.id));
+          void qc.invalidateQueries({ queryKey: ['messaging', 'messages', activeId] });
+        }}
+      />
     </AccountLayout>
   );
 }

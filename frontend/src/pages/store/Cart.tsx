@@ -9,12 +9,16 @@ import { ApiError, call, errorMessage, useApi } from '@marketly/web-shared/api';
 import { Alert, Badge, Button, Card, EmptyState, Icon, QuantityStepper, SectionHeader, SummaryRow, announce } from '@marketly/web-shared/ui';
 import { ApiProductCard, ItemImg, PkgHead, PurchaseSkeleton, conditionLabel, plural, productHref } from './data/purchase';
 import { checkoutHref, type CartItem, type CartNotice, type CartView } from './data/checkout-api';
+import { SwitchOfferDialog } from './data/switch-offer';
 
 // Design: pages/store/store-cart.html · view "empty" = no items. Data: GET /api/store/cart/cart (CartView),
 // writes on /api/store/cart/cart/…; the empty cart shows recently viewed (customers + search cards).
-// Save for later and "Tell me when it's back" are phase 3 (501 / wishlist off): hidden.
+// Save for later and "Tell me when it's back" are phase 3 (501 / wishlist off): hidden. "See other offers" opens
+// the switch-offer dialog (POST …/items/{id}/switch-offer); "Remove unavailable items" is POST …/remove-unavailable.
 
 const CART_KEY = ['cart', 'view'] as const;
+
+const lineCount = (c: CartView | undefined) => (c?.packages ?? []).reduce((n, p) => n + p.items.length, 0);
 
 /** Bold the lead-in of a notice sentence ("Price changed since you added it: …"). */
 function boldLead(msg: string): ReactNode {
@@ -55,6 +59,7 @@ export default function Cart() {
   const [codeError, setCodeError] = useState('');
   const [lineError, setLineError] = useState<Record<string, string>>({});
   const [draftQty, setDraftQty] = useState<Record<string, number>>({});
+  const [switching, setSwitching] = useState<CartItem | null>(null);
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => () => Object.values(timers.current).forEach(clearTimeout), []);
 
@@ -118,6 +123,15 @@ export default function Cart() {
       announce(`${removed} removed`);
     },
     onError: (e) => setCodeError(errorMessage(e)),
+  });
+  const removeUnavailable = useMutation({
+    mutationFn: () => call(api.POST('/api/store/cart/cart/remove-unavailable')),
+    onSuccess: (c) => {
+      // The backend re-checks the cart before removing, so count the lines that actually went.
+      const removed = lineCount(cart) - lineCount(c);
+      setCart(c);
+      announce(removed > 0 ? `Removed ${plural(removed, 'unavailable item')} from your cart` : 'Nothing to remove: every item can be checked out');
+    },
   });
   const startCheckout = useMutation({
     mutationFn: () => call(api.POST('/api/store/checkout/sessions', { body: { source: 'cart' } })),
@@ -197,6 +211,7 @@ export default function Cart() {
   const count = cart.itemCount;
   const ready = cart.checkoutReady;
   const officialPkg = cart.packages.some((p) => p.seller.official);
+  const unavailableCount = cart.packages.reduce((n, p) => n + p.items.filter((l) => l.state === 'unavailable').length, 0);
   const verified = [...new Set(cart.packages.filter((p) => !p.seller.official && p.seller.verified).map((p) => p.seller.name))];
   const checkoutBtn = (size?: 'lg') => (
     <Button size={size} block={size === 'lg'} disabled={!ready || startCheckout.isPending} onClick={() => startCheckout.mutate()} iconRight="arrow-right">
@@ -230,6 +245,20 @@ export default function Cart() {
             {cart.attention.message}
           </Alert>
         )}
+        {unavailableCount > 0 && (
+          <div className="row between gap-2">
+            <span className="small sub">{plural(unavailableCount, 'item')} in your cart can't be checked out right now.</span>
+            <Button variant="secondary" size="sm" icon="trash-2" disabled={removeUnavailable.isPending} onClick={() => removeUnavailable.mutate()}>
+              Remove unavailable items
+            </Button>
+            {removeUnavailable.isError && (
+              <span className="error-text" role="alert">
+                <Icon name="circle-alert" className="ic-sm" />
+                {errorMessage(removeUnavailable.error)}
+              </span>
+            )}
+          </div>
+        )}
         <div className="split">
           <div className="stack gap-4">
             {cart.packages.map((pkg) => {
@@ -252,6 +281,7 @@ export default function Cart() {
                       onRemove={() => remove.mutate(l)}
                       onAccept={(notices) => accept.mutate({ l, notices })}
                       onQty={(q) => setQty(l, q)}
+                      onOtherOffers={() => setSwitching(l)}
                     />
                   ))}
                   <div className="card-foot between">
@@ -360,6 +390,18 @@ export default function Cart() {
           </aside>
         </div>
       </div>
+      {switching && (
+        <SwitchOfferDialog
+          line={switching}
+          onClose={() => setSwitching(null)}
+          onSwitched={(c, seller) => {
+            setCart(c);
+            clearLineError(switching.id);
+            setSwitching(null);
+            announce(`${switching.title} switched to the offer from ${seller}`);
+          }}
+        />
+      )}
     </StoreLayout>
   );
 }
@@ -395,9 +437,10 @@ interface LineRowProps {
   onRemove: () => void;
   onAccept: (notices: CartNotice[]) => void;
   onQty: (q: number) => void;
+  onOtherOffers: () => void;
 }
 
-function LineRow({ l, qty, error, busy, onRemove, onAccept, onQty }: LineRowProps) {
+function LineRow({ l, qty, error, busy, onRemove, onAccept, onQty, onOtherOffers }: LineRowProps) {
   const to = productHref(l.productId, l.productSlug);
   const blocking = l.notices.find((n) => n.severity === 'blocking');
   const unavailable = l.state === 'unavailable' || !!blocking;
@@ -414,12 +457,13 @@ function LineRow({ l, qty, error, busy, onRemove, onAccept, onQty }: LineRowProp
       Remove
     </button>
   );
+  // Opens the switch-offer dialog: choosing there replaces this line (the All offers page would add a second line).
   const offersLink = alt && (
-    <Link to={href('store/offers', '', { slug: (alt.productId === l.productId ? l.productSlug : null) || 'item', id: alt.productId })} aria-label={`See other offers (${alt.count}${alt.lowestPrice ? ` from ${formatMoney(alt.lowestPrice)}` : ''}): ${l.title}`}>
+    <button type="button" onClick={onOtherOffers} disabled={busy} aria-label={`See other offers (${alt.count}${alt.lowestPrice ? ` from ${formatMoney(alt.lowestPrice)}` : ''}): ${l.title}`}>
       <Icon name="store" className="ic-sm" />
       See other offers ({alt.count}
       {alt.lowestPrice ? ` from ${formatMoney(alt.lowestPrice)}` : ''})
-    </Link>
+    </button>
   );
   const head = (
     <Link to={to} aria-label={l.title}>

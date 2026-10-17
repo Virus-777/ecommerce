@@ -6,9 +6,12 @@ import { ApiError, call, errorMessage, useApi, type components } from '@marketly
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Button, Checkbox, Dialog, Field, Icon, Select, Textarea, TextInput, type IconName } from '@marketly/web-shared/ui';
+import { AddressSuggestion, useAddressCheck, type AddressCheck } from '@/pages/store/data/address-check';
 
 // Design: pages/store/account-addresses.html · view "edit-address" = the add/edit dialog.
 // API: customers saved addresses (GET/POST/PATCH/DELETE /api/store/customers/addresses, make-default).
+// Save address first checks it (POST /api/store/customers/addresses/validate): a suggested correction is
+// offered next to what the customer typed, and they choose which one to save.
 
 type SavedAddress = components['schemas']['customers.SavedAddress'];
 
@@ -81,6 +84,8 @@ function validate(a: Draft) {
   return e;
 }
 
+const addressOf = (d: Draft) => ({ name: d.name.trim(), line1: d.line1.trim(), line2: d.line2.trim() || null, city: d.city.trim(), region: d.state, postalCode: d.zip.trim(), country: 'US', phone: d.phone.trim() || null });
+
 /** Field errors from VALIDATION_FAILED or ADDRESS_UNDELIVERABLE (details.issues: { path?, field?, message }). */
 function serverFieldErrors(e: unknown): Partial<Record<FieldKey, string>> {
   if (!(e instanceof ApiError)) return {};
@@ -109,11 +114,16 @@ export default function Addresses() {
   });
   const notShipped = openOrders.data?.items.find((o) => ['payment_pending', 'confirmed', 'preparing', 'delayed'].includes(o.status.value));
 
+  const addressCheck = useAddressCheck();
+  // The validator's answer while the customer chooses, and the field problems it found.
+  const [ask, setAsk] = useState<Extract<AddressCheck, { kind: 'ask' }> | null>(null);
+  const [checkErrors, setCheckErrors] = useState<Partial<Record<FieldKey, string>>>({});
+
   const save = useMutation({
     mutationFn: (d: Draft) => {
       const body = {
         label: d.label.trim() || null,
-        address: { name: d.name.trim(), line1: d.line1.trim(), line2: d.line2.trim() || null, city: d.city.trim(), region: d.state, postalCode: d.zip.trim(), country: 'US', phone: d.phone.trim() || null },
+        address: addressOf(d),
         deliveryInstructions: d.note.trim() || null,
         makeDefault: d.isDefault,
       };
@@ -148,7 +158,7 @@ export default function Addresses() {
   const open = view === 'edit-address';
   const server = save.isError ? serverFieldErrors(save.error) : {};
   const local = attempted ? validate(draft) : {};
-  const errors: Partial<Record<FieldKey, string>> = { ...server, ...local };
+  const errors: Partial<Record<FieldKey, string>> = { ...server, ...checkErrors, ...local };
   const nErrors = Object.keys(errors).length;
   const formError = save.isError && !Object.keys(server).length ? save.error : null;
   const rows = list.data ?? [];
@@ -157,18 +167,39 @@ export default function Addresses() {
   const edit = (a?: SavedAddress) => {
     setDraft(a ? toDraft(a) : { ...EMPTY, isDefault: !rows.length });
     setAttempted(false);
+    setAsk(null);
+    setCheckErrors({});
     save.reset();
     setView('edit-address');
   };
   const close = () => setView('');
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => {
     setDraft((d) => ({ ...d, [k]: v }));
+    // Editing a field answers the "Did you mean" question too: the address is checked again on Save.
+    setAsk(null);
+    setCheckErrors({});
     if (save.isError) save.reset();
   };
-  const submit = () => {
+  const submit = async () => {
     setAttempted(true);
     if (Object.keys(validate(draft)).length) return;
-    save.mutate(draft);
+    const r = await addressCheck.check(addressOf(draft));
+    if (r.kind === 'fix') {
+      const out: Partial<Record<FieldKey, string>> = {};
+      for (const i of r.issues) {
+        const k = API_FIELD[i.field];
+        if (k && !out[k]) out[k] = /[.!?]$/.test(i.message) ? i.message : `${i.message}.`;
+      }
+      setCheckErrors(Object.keys(out).length ? out : { line1: r.issues[0]?.message ?? 'Check this address.' });
+    } else if (r.kind === 'ask') setAsk(r);
+    else save.mutate(draft);
+  };
+  /** The customer took the suggested address: put it in the form and save it. */
+  const takeSuggestion = (a: { line1: string; line2?: string | null; city: string; region: string; postalCode: string }) => {
+    const next = { ...draft, line1: a.line1, line2: a.line2 ?? '', city: a.city, state: a.region, zip: a.postalCode };
+    setDraft(next);
+    setAsk(null);
+    save.mutate(next);
   };
   const actionError = makeDefault.error ?? remove.error;
 
@@ -273,8 +304,8 @@ export default function Addresses() {
             <Button variant="ghost" onClick={close}>
               Cancel
             </Button>
-            <Button onClick={submit} disabled={save.isPending}>
-              {save.isPending ? 'Saving…' : 'Save address'}
+            <Button onClick={() => void submit()} disabled={save.isPending || addressCheck.checking || !!ask}>
+              {save.isPending ? 'Saving…' : addressCheck.checking ? 'Checking…' : 'Save address'}
             </Button>
           </>
         }
@@ -322,6 +353,17 @@ export default function Addresses() {
         </Field>
         <Checkbox id="ad-default" label="Make this my default address" checked={draft.isDefault} disabled={editingDefault} onChange={(e) => set('isDefault', e.target.checked)} />
         <span className="xs muted">Saving won't change orders already placed.</span>
+        {ask && (
+          <AddressSuggestion
+            ask={ask}
+            busy={save.isPending}
+            onUse={takeSuggestion}
+            onKeep={() => {
+              setAsk(null);
+              save.mutate(draft);
+            }}
+          />
+        )}
       </Dialog>
     </AccountLayout>
   );

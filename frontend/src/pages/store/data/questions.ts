@@ -1,6 +1,6 @@
 // API access for product questions and answers (store/questions and the Q&A block of store/product):
-// questions with answers (server-side search, answered/awaiting filter and sort, page numbers or cursor), asking a question
-// and who answered (role labels).
+// questions with answers (server-side search, answered/awaiting filter and sort, page numbers or cursor), asking a question,
+// answering another shopper's question and editing that answer, and who answered (role labels).
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { call, useApi, type components } from '@marketly/web-shared/api';
@@ -72,6 +72,31 @@ export function useAskQuestion(productId: string) {
   const { api } = useApi();
   return useMutation({
     mutationFn: (text: string) => call(api.POST('/api/store/reviews/products/{productId}/questions', { params: { path: { productId } }, body: { text } })),
+  });
+}
+
+/** Answer limits the backend checks (reviews qa.ts textIssues: at least 2 characters, at most 1,000). */
+export const ANSWER_MIN = 2;
+export const ANSWER_MAX = 1000;
+
+/**
+ * Answer another shopper's question (any signed-in customer except the one who asked). The answer is labelled
+ * Customer, or Verified buyer when the answerer bought the item. Answers with links, medical claims or off-platform
+ * offers are held (status pending_review) until moderation publishes them.
+ */
+export function useAnswerQuestion() {
+  const { api } = useApi();
+  return useMutation({
+    mutationFn: (v: { questionId: string; text: string }) =>
+      call(api.POST('/api/store/reviews/questions/{id}/answers', { params: { path: { id: v.questionId } }, body: { text: v.text } })),
+  });
+}
+
+/** Edit my answer (published → checked again), or fix and resubmit it after an edit request. */
+export function useEditMyAnswer() {
+  const { api } = useApi();
+  return useMutation({
+    mutationFn: (v: { answerId: string; text: string }) => call(api.PATCH('/api/store/reviews/me/answers/{id}', { params: { path: { id: v.answerId } }, body: { text: v.text } })),
   });
 }
 

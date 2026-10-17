@@ -65,7 +65,12 @@ function PhonePane({ cat }: { cat: Category }) {
       )}
       {(brands.data?.items.length ?? 0) > 0 && (
         <div className="stack gap-3">
-          <h2 className="h4">Popular brands</h2>
+          <div className="row between base">
+            <h2 className="h4">Popular brands</h2>
+            <Link className="small strong" to={href('store/brands')}>
+              See all brands
+            </Link>
+          </div>
           <div className="shop-tiles">
             {brands.data!.items.map((b) => (
               <Link key={b.id} className="shop-tile" to={href('store/brand', '', { slug: b.slug })}>

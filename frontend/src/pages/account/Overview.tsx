@@ -82,6 +82,7 @@ const MENU: Array<{ title: string; links: MenuLink[] }> = [
       { id: 'account/messages', icon: 'message-square', label: 'Messages', count: 'messages' },
       { id: 'account/notifications', icon: 'bell', label: 'Notifications', count: 'notifications' },
       { id: 'account/reviews', icon: 'star', label: 'Reviews and feedback' },
+      { id: 'account/reports', icon: 'shield-alert', label: 'Reports and appeals' },
     ],
   },
   {

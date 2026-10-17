@@ -10,11 +10,13 @@ import { href } from '@marketly/web-shared/routes';
 import { Alert, Breadcrumbs, Button, Card, Field, Img, Select, StatusBadge, SummaryRow, Textarea, Timeline, type TimelineEvent } from '@marketly/web-shared/ui';
 import { fmtDateTime, humanize, orderHref, productHref, refundTone, returnHref, stateTone, useOrderDetail, type Cancellation, type OrderDetail, type OrderGroup } from './data/orders';
 import { DetailSkeleton, LoadError, NotFoundCard, SellerLineApi, SkeletonRows } from './data/order-parts';
+import { canWithdrawCancellation, WithdrawCancellationButton } from './data/cancel-actions';
 
 // Design: pages/store/account-cancel.html · view "cancellation-requested" = after "Request cancellation"
 // (shows the order's open cancellation requests from OrderDetail). Data: OrderDetail (ref → id, items,
 // cancellations), GET orders/orders/{id}/cancellation-options (eligibility, alternatives, refund per
 // line), POST …/cancellation-preview (refund preview), POST …/cancellations with an Idempotency-Key.
+// A pending request can be withdrawn (data/cancel-actions.tsx, POST …/cancellations/{id}/withdraw).
 
 type ReasonCode = 'changed_mind' | 'ordered_by_mistake' | 'found_better_price' | 'delivery_too_slow' | 'other';
 const REASONS: Array<{ value: ReasonCode | ''; label: string }> = [
@@ -329,6 +331,10 @@ function Requested({ order, crumbs, ids }: { order: OrderDetail; crumbs: ReactNo
         <Alert tone="success" title="Cancelled">
           {sellers.join(' and ')} cancelled the item{lines.length > 1 ? 's' : ''}. Your other items are not affected.
         </Alert>
+      ) : status === 'WITHDRAWN' ? (
+        <Alert tone="info" title="You withdrew this request">
+          The item{lines.length > 1 ? 's' : ''} stay{lines.length > 1 ? '' : 's'} in your order and ship as normal.
+        </Alert>
       ) : (
         <Alert tone="success" title={`We sent your request to ${sellers.join(' and ')}`}>
           Your other items are not affected.
@@ -395,6 +401,8 @@ function Requested({ order, crumbs, ids }: { order: OrderDetail; crumbs: ReactNo
             <Button variant="secondary" block icon="message-square" to={href('account/messages', '', undefined, { order: order.ref })}>
               Message {sellers[0]}
             </Button>
+            {/* Only while the seller hasn't answered: the backend refuses to withdraw a decided request. */}
+            <WithdrawCancellationButton orderId={order.id} requests={shown.map((x) => x.c).filter(canWithdrawCancellation)} variant="ghost" block />
           </div>
           <span className="xs muted">If the seller ships before confirming, you can refuse the delivery or return it free of charge.</span>
         </aside>

@@ -40,10 +40,23 @@ const FALLBACK: Partial<Record<string, ScreenId>> = {
 };
 const REF_PREFIX: Partial<Record<string, string>> = { 'account/order': 'MK-', 'account/tracking': 'MK-', 'account/cancel': 'MK-', 'account/return': 'RT-', 'help/case': 'CS-' };
 
+/**
+ * Trust & Risk notices name the help/case screen but link a trust record (report, evidence request, appeal): those
+ * open Account › Reports and appeals on the matching view, with the record highlighted.
+ */
+function trustLink(kind: string, id: string): string | null {
+  if (kind === 'report') return href('account/reports', '', undefined, { report: id });
+  if (kind === 'evidence_request') return href('account/reports', 'requests', undefined, { request: id });
+  if (kind === 'appeal') return href('account/reports', 'actions', undefined, { appeal: id });
+  return null;
+}
+
 /** App route for a NoticeLink: the record's screen with its ref (a package's tracking also gets ?shipment=<id>). */
 function linkOf(n: Notice): string {
   const l = n.link;
   if (l.url) return l.url;
+  const trust = trustLink(l.kind, l.id);
+  if (trust) return trust;
   const screen = l.screen as ScreenId;
   if (!SCREEN_BY_ID[screen]) return href('account/notifications');
   if (!SCREEN_BY_ID[screen].path.includes(':ref')) return href(screen);

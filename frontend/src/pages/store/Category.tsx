@@ -12,6 +12,7 @@ import { findCategory, useCategoryTree } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, SkLines } from '@/api/cards';
 import { ActiveFilters, Count, FacetFilters, SortRadios, SortSelect, useListingParams } from '@/api/listing';
 import { readPage, readQuery, shownRange, toCardProduct, useFacets, useListing, useSearchClick, type SearchContext } from '@/api/search';
+import { RankingPolicyLink } from './data/ranking';
 
 // Design: pages/store/store-category.html · view "filters-phone-sheet" = the phone filters & sort sheet.
 // Data: GET /api/store/catalog/categories/{slug} (header, 404), GET /api/store/search/facets and
@@ -186,9 +187,7 @@ export default function Category({ slug: fixedSlug }: { slug?: string } = {}) {
             <div className="row between">
               <span className="xs muted">
                 Sponsored items are paid placements and are labeled.{' '}
-                <Link to={href('help/article')} className="link-inline">
-                  How results are ranked
-                </Link>
+                <RankingPolicyLink className="link-inline" />
               </span>
               <ListingPager listing={listing} onPage={lp.setPage} />
             </div>

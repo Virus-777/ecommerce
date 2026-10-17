@@ -5,12 +5,14 @@ import { AccountLayout } from '@/layouts';
 import { ApiError, call, errorMessage, useApi, type components } from '@marketly/web-shared/api';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, announce, Badge, Button, Card, Dialog, Field, Icon, Switch, Textarea, TextInput } from '@marketly/web-shared/ui';
+import { WhatWeSend } from './data/notification-settings';
 import { NO_PASSWORD_NOTE, isPasswordNotSet } from './data/password';
 import { dateLong } from './data/when';
 
 // Design: pages/store/account-profile.html (one view): personal details form, message preferences,
 // search history, data export and account closure (blocked while orders/returns/cases are open).
-// API: customers profile, marketing preferences, data requests and closure eligibility; the sign-in email
+// API: customers profile, marketing preferences, data requests and closure eligibility; "What we send" is
+// notifications preferences (data/notification-settings.tsx); the sign-in email
 // changes through identity (password re-auth, then a 6-digit code sent to the new address).
 
 type Prefs = components['schemas']['customers.MarketingPreferences'];
@@ -312,15 +314,8 @@ export default function Profile() {
           </div>
         )}
       </Card>
-      <Card title="Order and account messages" titleAs="h3" sub="Always on. You need these to receive your orders safely.">
-        <div className="row gap-2 small">
-          <Icon name="lock" className="ic-sm" />
-          <span className="sub">Sent in your account and by email: order accepted, payment result, dispatch, delays, delivery, cancellations, return and refund updates, case replies and security alerts.</span>
-        </div>
-        <Link className="small strong" to={href('account/notifications')}>
-          See recent notifications
-        </Link>
-      </Card>
+      {/* Order and account messages: what is always sent and where, plus app order updates (phase 3) */}
+      <WhatWeSend />
       <Card title="Promotions and offers" titleAs="h3" sub="Optional. Turning these off never affects order updates.">
         {setPrefs.isError && <Alert tone="danger" title="We couldn't change that setting">{errorMessage(setPrefs.error)}</Alert>}
         {prefs.isError ? (

@@ -44,8 +44,13 @@ interface AppRouterOptions {
 
 /**
  * The router every web app uses: one route per screen of this app (catalogue paths), /design (screen
- * index), /design/check (dev only: compares routes with the design export) and a catch-all not-found page.
+ * index), /design/check (compares routes with the design export) and a catch-all not-found page.
+ * The design showcase (the design system pages under /design, the ad format samples under /ads and the screen
+ * index) runs on sample data, so production builds leave it out.
  */
+/** Design showcase screens (sample data only): the design system pages and the ad format samples. */
+const isShowcase = (id: string) => id.startsWith('theme/') || id.startsWith('ads/');
+
 export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, extraRoutes = [] }: AppRouterOptions) {
   function Root() {
     // A page rendered: the one-time reload for stale page code (RouteError) may happen again later.
@@ -108,7 +113,7 @@ export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, ex
     );
   }
 
-  const screenRoutes: RouteObject[] = SCREENS.filter((s) => s.app === CURRENT_APP).map((s) => {
+  const screenRoutes: RouteObject[] = SCREENS.filter((s) => s.app === CURRENT_APP && (import.meta.env.DEV || !isShowcase(s.id))).map((s) => {
     const Page = pages[s.id];
     if (!Page) throw new Error(`No page module for ${s.id}`);
     return { path: s.path, element: <Page /> };
@@ -121,8 +126,12 @@ export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, ex
       children: [
         ...screenRoutes,
         ...extraRoutes,
-        { path: '/design', element: <DesignIndex /> },
-        ...(import.meta.env.DEV ? [{ path: '/design/check', element: <DesignCheck /> }] : []),
+        ...(import.meta.env.DEV
+          ? [
+              { path: '/design', element: <DesignIndex /> },
+              { path: '/design/check', element: <DesignCheck /> },
+            ]
+          : []),
         { path: '*', element: <NotFound /> },
       ],
     },

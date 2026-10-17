@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
+import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
 import { ApiError } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
@@ -9,12 +10,14 @@ import { href } from '@marketly/web-shared/routes';
 import { Badge, Breadcrumbs, Button, Chip, EmptyState, Icon, Stars, TableWrap } from '@marketly/web-shared/ui';
 import NotFound from './NotFound';
 import { CONDITIONS, kitNote, splitStep, useOfferComparison, type ConditionGroup } from './data/offers';
-import { productCrumbs, productHref, sellerHref, useCartButton, useCategories, useProductParams, useRatingSummary, variantAxis, variantName, type OfferView } from './data/product';
+import { productCrumbs, productHref, sellerHref, useCartButton, useCategories, useProductParams, useRatingSummary, useSignInHref, variantAxis, variantName, type OfferView } from './data/product';
 import { ListSkeleton, LoadError, Photo } from './data/review-parts';
+import { ReportDialog, type ReportTarget } from './data/report-dialog';
 
 // Design: pages/store/store-offers.html (sorted by total cost)
 //   view "fastest-delivery" = the same offers sorted by earliest arrival
 // ?variant=<variantId> compares the offers of that variant (default: the product's default variant).
+// Each row has Report (the offer or its seller, to Trust and Risk: data/report-dialog.tsx).
 
 type View = 'fastest-delivery';
 type CondFilter = 'all' | ConditionGroup;
@@ -31,6 +34,12 @@ export default function Offers() {
   const variantId = params.get('variant') ?? undefined;
   const [cond, setCond] = useState<CondFilter>('all');
   const cart = useCartButton('offers_list');
+  // Report an offer or its seller (Trust and Risk). Visitors go to sign-in first.
+  const { signedIn } = useSession();
+  const navigate = useNavigate();
+  const signIn = useSignInHref();
+  const [reportFor, setReportFor] = useState<OfferView | null>(null);
+  const report = (o: OfferView) => (signedIn ? setReportFor(o) : navigate(signIn()));
 
   const comparison = useOfferComparison(id, { variantId, condition: cond, sort: view === 'fastest-delivery' ? 'fastest_delivery' : 'total_cost' });
   const summary = useRatingSummary(id);
@@ -176,6 +185,7 @@ export default function Offers() {
                           <span>{addLabel(o)}</span>
                         </button>
                         {addError(o)}
+                        <ReportLink o={o} onReport={report} />
                       </article>
                     );
                   })}
@@ -246,6 +256,9 @@ export default function Offers() {
                                   <span className="sr-only"> {o.seller.name}</span>
                                 </button>
                                 {addError(o)}
+                                <div className="mt-1-5">
+                                  <ReportLink o={o} onReport={report} />
+                                </div>
                               </td>
                             </tr>
                           );
@@ -282,7 +295,22 @@ export default function Offers() {
           </>
         )}
       </div>
+      <ReportDialog open={!!reportFor} onClose={() => setReportFor(null)} targets={reportFor ? reportTargets(reportFor) : []} />
     </StoreLayout>
+  );
+}
+
+/** What a row's Report covers: the offer, and its seller (the Official Store is Marketly itself). */
+const reportTargets = (o: OfferView): ReportTarget[] => [
+  { kind: 'offer', id: o.offerId, label: `This offer from ${o.seller.name}` },
+  ...(!o.seller.official && o.seller.sellerId ? [{ kind: 'seller' as const, id: o.seller.sellerId, label: `The seller: ${o.seller.name}` }] : []),
+];
+
+function ReportLink({ o, onReport }: { o: OfferView; onReport: (o: OfferView) => void }) {
+  return (
+    <button type="button" className="btn-bare link-inline xs muted" onClick={() => onReport(o)}>
+      <Icon name="flag" className="ic-sm" /> Report<span className="sr-only"> the offer from {o.seller.name}</span>
+    </button>
   );
 }
 

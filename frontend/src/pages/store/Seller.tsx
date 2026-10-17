@@ -5,11 +5,14 @@ import { AppbarSearch, StoreLayout } from '@/layouts';
 import { useSession } from '@/app/session';
 import NotFound from './NotFound';
 import { AskSellerDialog } from './data/ask-seller';
+import { useCollectionOffers, useStorefrontCollection, type CollectionOffer } from './data/collections';
 import { useSignInHref } from './data/product';
+import { ReportDialog } from './data/report-dialog';
+import { Photo } from './data/review-parts';
 import { ApiError, call, useApi } from '@marketly/web-shared/api';
-import { num } from '@marketly/web-shared/lib/format';
+import { dollars, num, percentOff } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, KeyValue, SearchInput, SellerBadge, Stars, Stat, Tabs } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, KeyValue, Price, SearchInput, SellerBadge, Stars, Stat, Tabs } from '@marketly/web-shared/ui';
 import { initialsOf, tintOf } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, LogoPic, SkLines } from '@/api/cards';
 import { SortSelect, useListingParams } from '@/api/listing';
@@ -21,7 +24,9 @@ import { readPage, readQuery, toCardProduct, useFacets, useListing, useSearchCli
 // GET /api/store/search/products?seller={slug}&q&category&sort (+ /search/facets for the category chips).
 // "Contact seller" starts a pre-sale conversation about one of the store's products
 // (POST /api/store/messaging/product-conversations; signed-in customers, a visitor goes to sign-in first).
-// Not shown: featured collections (REST gives offer ids only, no product cards).
+// Featured collections: cards from the storefront response; ?collection=<id> opens one above the
+// product grid (GET …/stores/{slug}/collections/{collectionId}, its offers from data/collections.ts).
+// "Report this seller" sends a Trust and Risk report (data/report-dialog.tsx; visitors sign in first).
 // REST rather than the SellerStorefront screen query: that query would reload the whole storefront for
 // every search keystroke, filter and page, and its product cards have no stock state or thumbUrl.
 
@@ -30,34 +35,6 @@ const PER_PAGE = 12;
 type Tab = 'products' | 'feedback' | 'about';
 const TAB_TARGET: Record<Tab, string> = { products: 'sl-all', feedback: 'sl-fb', about: 'sl-pol' };
 const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-// Storefront fields typed `unknown` in the API spec (shapes from GET /api/store/sellers/stores/{slug}).
-interface Highlights {
-  positivePct?: number | null;
-  ratingCount?: number | null;
-  onTimeDispatchPct?: number | null;
-  repliesWithin24hPct?: number | null;
-  medianReplyHours?: number | null;
-}
-interface Shipping {
-  shipsFrom?: string | null;
-  shipsTo?: string | null;
-  dispatch?: string | null;
-  carriers?: string[];
-}
-interface Returns {
-  window?: string | null;
-  returnShipping?: string | null;
-  warranty?: string | null;
-}
-interface Contact {
-  canMessage?: boolean;
-  replyTarget?: string | null;
-}
-interface Promotion {
-  title?: string;
-  detail?: string;
-}
 
 const REPLY: Record<string, string> = { within_24h: 'Usually within 24 hours', within_48h: 'Usually within 2 days', within_12h: 'Usually within 12 hours' };
 const monthYear = (d: string) => new Date(`${d.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -71,6 +48,7 @@ export default function Seller() {
   const [tab, setTab] = useState<Tab>('products');
   const [allFeedback, setAllFeedback] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const { signedIn } = useSession();
   const navigate = useNavigate();
   const signIn = useSignInHref();
@@ -102,11 +80,13 @@ export default function Seller() {
   const s = store.data;
   const seller = s?.seller;
   const name = seller?.storeName ?? '';
-  const hl = (s?.highlights ?? {}) as Highlights;
-  const ship = (s?.shipping ?? {}) as Shipping;
-  const ret = (s?.returns ?? {}) as Returns;
-  const contact = (s?.contact ?? {}) as Contact;
-  const promo = (s?.promotion ?? null) as Promotion | null;
+  const hl = s?.highlights;
+  const ship = s?.shipping;
+  const ret = s?.returns;
+  const contact = s?.contact;
+  const promo = s?.promotion ?? null;
+  const collections = (s?.collections ?? []).filter((c) => c.visible && c.itemCount > 0);
+  const openCollection = lp.params.get('collection');
   const chips = base.data?.facets.find((f) => f.kind === 'category')?.values ?? [];
   const chip = lp.params.get('category') ?? '';
   const q = lp.params.get('q') ?? '';
@@ -136,14 +116,15 @@ export default function Seller() {
     );
 
   const policies: Array<[string, string]> = [
-    ['Ships from', ship.shipsFrom ?? ''],
-    ['Ships to', ship.shipsTo ?? ''],
-    ['Dispatch', ship.dispatch ?? seller?.dispatchLabel ?? ''],
-    ['Carriers', (ship.carriers ?? []).join(', ')],
-    ['Returns', [ret.window, ret.returnShipping].filter(Boolean).join(' · ')],
-    ['Warranty', ret.warranty ?? s?.warranty ?? ''],
-    ['Replies', contact.replyTarget ? (REPLY[contact.replyTarget] ?? contact.replyTarget.replace(/_/g, ' ')) : ''],
+    ['Ships from', ship?.shipsFrom ?? ''],
+    ['Ships to', ship?.shipsTo ?? ''],
+    ['Dispatch', ship?.dispatch ?? seller?.dispatchLabel ?? ''],
+    ['Carriers', (ship?.carriers ?? []).join(', ')],
+    ['Returns', [ret?.window, ret?.returnShipping].filter(Boolean).join(' · ')],
+    ['Warranty', ret?.warranty ?? s?.warranty ?? ''],
+    ['Replies', contact?.replyTarget ? (REPLY[contact.replyTarget] ?? contact.replyTarget.replace(/_/g, ' ')) : ''],
   ];
+  const reportSeller = () => (signedIn ? setReportOpen(true) : navigate(signIn()));
 
   return (
     <StoreLayout
@@ -239,13 +220,17 @@ export default function Seller() {
               <Button
                 variant="secondary"
                 icon="message-square"
-                disabled={!s || contact.canMessage === false || (signedIn && askOffers.length === 0)}
-                title={contact.canMessage === false ? 'This seller isn’t taking messages right now.' : undefined}
+                disabled={!s || contact?.canMessage === false || (signedIn && askOffers.length === 0)}
+                title={contact?.canMessage === false ? 'This seller isn’t taking messages right now.' : undefined}
                 onClick={contactSeller}
               >
                 Contact seller
               </Button>
               <CopyButton text={typeof window !== 'undefined' ? window.location.href : href('store/seller', '', { slug })} label="Share store" icon="share-2" />
+              <Button variant="ghost" icon="flag" disabled={!seller} onClick={reportSeller}>
+                Report
+                <span className="sr-only"> this seller</span>
+              </Button>
             </div>
           </div>
           {s?.introduction && <p className="small sub measure-lg u-p-0-sp-5-sp-5">{s.introduction}</p>}
@@ -262,6 +247,30 @@ export default function Seller() {
               active={tab}
               onChange={openTab}
             />
+            {openCollection ? (
+              <CollectionView slug={slug} collectionId={openCollection} storeName={name} onClose={() => setParam('collection', '')} />
+            ) : (
+              collections.length > 0 && (
+                <section className="stack gap-3" aria-labelledby="sl-col">
+                  <h2 className="h3" id="sl-col">
+                    Featured collections
+                  </h2>
+                  <div className="shop-collections">
+                    {collections.map((c) => (
+                      <Link key={c.id} className="shop-coll" to={href('store/seller', '', { slug }, { collection: c.id })}>
+                        <Photo media={c.image} icon="layers" className="tint-2" />
+                        <span className="stack gap-1">
+                          <span className="strong">{c.title}</span>
+                          <span className="xs muted">
+                            {num(c.itemCount)} product{c.itemCount === 1 ? '' : 's'}
+                          </span>
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )
+            )}
             {promo?.title && (
               <div className="shop-promo">
                 <Icon name="ticket-percent" />
@@ -360,9 +369,9 @@ export default function Seller() {
               </div>
               <div className="card-body">
                 <div className="grid md3 gap-4">
-                  <Stat label={`Positive, last ${summary.data?.periodMonths ?? 12} months`} value={pct(summary.data?.positivePct ?? hl.positivePct)} note={summary.data?.label ?? `${num(ratingCount)} ratings`} />
-                  <Stat label="On-time dispatch" value={pct(hl.onTimeDispatchPct ?? summary.data?.onTimeDispatchPct)} note={hl.onTimeDispatchPct == null ? 'Not enough orders yet' : 'Last 90 days'} />
-                  <Stat label="Replies within 24 h" value={pct(hl.repliesWithin24hPct)} note={hl.medianReplyHours != null ? `Median ${Math.round(hl.medianReplyHours)} h` : 'Not enough messages yet'} />
+                  <Stat label={`Positive, last ${summary.data?.periodMonths ?? 12} months`} value={pct(summary.data?.positivePct ?? hl?.positivePct)} note={summary.data?.label ?? `${num(ratingCount)} ratings`} />
+                  <Stat label="On-time dispatch" value={pct(hl?.onTimeDispatchPct ?? summary.data?.onTimeDispatchPct)} note={hl?.onTimeDispatchPct == null ? 'Not enough orders yet' : 'Last 90 days'} />
+                  <Stat label="Replies within 24 h" value={pct(hl?.repliesWithin24hPct)} note={hl?.medianReplyHours != null ? `Median ${Math.round(hl.medianReplyHours)} h` : 'Not enough messages yet'} />
                 </div>
                 {feedback.isPending ? (
                   <SkLines n={3} />
@@ -432,10 +441,10 @@ export default function Seller() {
                             <b>Not checked:</b> {v}
                             {i === 0 && (
                               <>
-                                . If a listing looks wrong,{' '}
-                                <Link to={href('help/contact')} className="link-inline">
-                                  report it
-                                </Link>
+                                . If something looks wrong,{' '}
+                                <button type="button" className="btn-bare link-inline" onClick={reportSeller}>
+                                  report this seller
+                                </button>
                                 .
                               </>
                             )}
@@ -468,6 +477,106 @@ export default function Seller() {
         </div>
       </div>
       <AskSellerDialog open={askOpen} onClose={() => setAskOpen(false)} sellerName={name} offers={askOffers} />
+      {seller && <ReportDialog open={reportOpen} onClose={() => setReportOpen(false)} targets={[{ kind: 'seller', id: seller.id, label: name }]} />}
     </StoreLayout>
+  );
+}
+
+/**
+ * One featured collection (?collection=<id>): its title and the products in it, each opening the
+ * product page with this store's offer chosen. A hidden or removed collection (404) says so.
+ */
+function CollectionView({ slug, collectionId, storeName, onClose }: { slug: string; collectionId: string; storeName: string; onClose: () => void }) {
+  const collection = useStorefrontCollection(slug, collectionId);
+  const offers = useCollectionOffers(slug, collectionId);
+  const c = collection.data;
+  const gone = collection.error instanceof ApiError && collection.error.status === 404;
+  const error = gone ? null : (collection.error ?? offers.error);
+  const items = offers.data ?? [];
+
+  return (
+    <section className="card" aria-labelledby="sl-coll-h">
+      <div className="card-head">
+        <div className="row gap-3 nowrap min-w-0">
+          {c && (
+            <span className="none" style={{ width: '56px' }}>
+              <Photo media={c.image} icon="layers" className="tint-2" />
+            </span>
+          )}
+          <div className="stack gap-0 min-w-0">
+            <span className="xs muted">Collection from {storeName || 'this store'}</span>
+            <h2 className="h3" id="sl-coll-h">
+              {c?.title ?? (gone ? 'Collection not available' : 'Collection')}
+            </h2>
+          </div>
+        </div>
+        <Button variant="ghost" size="sm" icon="arrow-left" onClick={onClose}>
+          All products
+        </Button>
+      </div>
+      <div className="card-body">
+        {gone ? (
+          <EmptyState icon="layers" title="This collection isn’t available any more">
+            The seller may have removed or hidden it. Their other products are below.
+          </EmptyState>
+        ) : error ? (
+          <LoadError
+            error={error}
+            onRetry={() => {
+              void collection.refetch();
+              void offers.refetch();
+            }}
+            title="We couldn’t load this collection"
+          />
+        ) : collection.isPending || offers.isPending ? (
+          <CardGridSkeleton n={4} />
+        ) : items.length === 0 ? (
+          <EmptyState icon="package" title="Nothing in this collection is for sale right now">
+            The products in it are out of stock or paused. Check back later.
+          </EmptyState>
+        ) : (
+          <>
+            <span className="xs muted">
+              {num(items.length)} product{items.length === 1 ? '' : 's'}
+              {c && c.offerCount > items.length ? ` · ${num(c.offerCount - items.length)} not available right now` : ''}
+            </span>
+            <div className="grid-products">
+              {items.map((o) => (
+                <CollectionCard key={o.id} o={o} />
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** Product card (.pcard) for an offer in a collection: this store's price, linking to its offer. */
+function CollectionCard({ o }: { o: CollectionOffer }) {
+  const p = o.product;
+  const to = href('store/product', 'seller-offer-selected', { slug: p.slug || 'product', id: p.id }, { offer: o.id });
+  const price = dollars(o.deal?.price ?? o.price);
+  const was = o.deal?.wasPrice ? dollars(o.deal.wasPrice) : null;
+  const off = percentOff(price, was);
+  const rating = p.reviewSummary?.hasReviews ? p.reviewSummary : null;
+  return (
+    <article className="pcard">
+      <div className="pcard-media">
+        <Link to={to} aria-label={p.title}>
+          <Photo media={p.images[0]} icon="package" />
+        </Link>
+        {off > 0 && (
+          <div className="tags">
+            <Badge tone="deal">−{off}%</Badge>
+          </div>
+        )}
+      </div>
+      <Link className="name" to={to}>
+        {p.title}
+      </Link>
+      {rating?.average != null && <Stars rating={rating.average} count={rating.ratingCount} />}
+      <Price amount={price} was={was} noOff />
+    </article>
   );
 }

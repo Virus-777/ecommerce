@@ -252,10 +252,18 @@ export interface ReturnDetail {
   nextStep: string | null;
   open: boolean;
   requestedAt: string;
+  /** What the customer can do now (ReturnCustomerAction): WITHDRAW, REPLY_INFO, GET_LABEL, ADD_TRACKING, ESCALATE, REPORT_PROBLEM. */
   actions: string[];
   media: GImage[];
   track: TrackStep[];
   items: Array<{ orderItemId: string; title: string; imageUrl: string | null; quantity: number; options: Array<{ name: string; value: string }>; unitPrice: GMoney }>;
+  /** When the seller (or Marketly) must answer the request. */
+  responseDue?: Deadline | null;
+  nextDeadline?: Deadline | null;
+  /** A question to the customer; returns.info-expiry cancels the return when replyDueAt passes without a reply. */
+  infoRequest?: { question: string; askedAt: string; replyDueAt: string; reply: string | null; repliedAt: string | null; askedBy: { kind: string; name: string } } | null;
+  /** Set once the customer (or a deadline job) asked Marketly to step in. */
+  escalation?: { at: string; reason: string; caseRef: string | null } | null;
   decision: { kind: string; explanation: string | null; decidedAt: string } | null;
   shipment: {
     id: string;

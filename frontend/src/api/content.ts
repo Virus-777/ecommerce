@@ -20,6 +20,20 @@ export function contentLinkTo(url: string): string {
 
 export const isExternal = (url: string) => /^[a-z]+:/i.test(url);
 
+/**
+ * contentLinkTo for links staff edit (header and footer navigation, service strip), or null when the URL
+ * is not one the store should open: only store paths, #anchors, http(s), mailto and tel. The backend
+ * already refuses javascript:, data: and protocol-relative URLs on save (content domain/rules.ts); this
+ * keeps a bad row from ever becoming a clickable link if one slips through.
+ */
+export function safeContentLinkTo(url: string | null | undefined): string | null {
+  const u = (url ?? '').trim();
+  if (!u) return null;
+  if (u.startsWith('/') && !u.startsWith('//')) return contentLinkTo(u);
+  if (u.startsWith('#') || /^(https?:\/\/|mailto:|tel:)/i.test(u)) return u;
+  return null;
+}
+
 /** Icons the content module may name (promise items, page sections) that the icon set has. */
 const CONTENT_ICONS = [
   'store', 'calendar-check', 'undo-2', 'life-buoy', 'shield-check', 'truck', 'badge-check', 'headset', 'lock', 'package-check', 'rotate-ccw',

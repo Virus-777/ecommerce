@@ -11,7 +11,7 @@ import { StoreLayout } from './StoreLayout';
 
 export type AccountNavKey =
   | 'overview' | 'orders' | 'returns' | 'cases' | 'messages' | 'notifications' | 'reviews'
-  | 'wishlist' | 'coupons' | 'profile' | 'addresses' | 'payment' | 'security';
+  | 'reports' | 'wishlist' | 'coupons' | 'profile' | 'addresses' | 'payment' | 'security';
 
 type NavItem = { grp: string } | { key: AccountNavKey; label: string; icon: IconName; id: ScreenId };
 
@@ -24,6 +24,7 @@ export const ACCOUNT_NAV: NavItem[] = [
   { key: 'messages', label: 'Messages', icon: 'message-square', id: 'account/messages' },
   { key: 'notifications', label: 'Notifications', icon: 'bell', id: 'account/notifications' },
   { key: 'reviews', label: 'Reviews and feedback', icon: 'star', id: 'account/reviews' },
+  { key: 'reports', label: 'Reports and appeals', icon: 'shield-alert', id: 'account/reports' },
   { grp: 'Saved' },
   { key: 'wishlist', label: 'Wishlist and alerts', icon: 'heart', id: 'account/wishlist' },
   { key: 'coupons', label: 'Coupons and credit', icon: 'ticket-percent', id: 'account/coupons' },

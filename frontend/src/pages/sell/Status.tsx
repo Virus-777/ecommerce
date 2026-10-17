@@ -5,7 +5,7 @@ import { ApiError, call, errorMessage, useApi, useUploads } from '@marketly/web-
 import { useSession } from '@/app/session';
 import { StoreLayout } from '@/layouts';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Dialog, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, Select, StatusBadge, Textarea, TextInput, Timeline, type IconName, type TimelineEvent } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Dialog, EmptyState, Field, FileDrop, Icon, IconButton, KeyValue, Select, StatusBadge, Textarea, TextInput, Timeline, announce, type IconName, type TimelineEvent } from '@marketly/web-shared/ui';
 import { dateLong, dayDate, dayDateYear, daysUntil, humanize } from '../help/data/format';
 import { LoadError, Loading, SkLines } from '../help/data/states';
 import { UploadList } from '../help/data/UploadList';
@@ -23,6 +23,8 @@ import { contactLine, useSellerProgram } from './data/program';
 // POST …/{id}/respond { items: [{ itemId, documentIds?, note? }] }. Rejection appeal →
 // POST …/{id}/appeal { argument, evidenceIds }, read back as application.appeal (state, decideBy, decision).
 // Seller team contact: GET /api/store/sellers/program.
+// "Withdraw application" (Your application card) → POST …/{id}/withdraw { reason? }, offered only in the states the
+// backend allows it from (draft, submitted, information_required: not while a Seller Manager is reviewing it).
 
 type App = SellerApplication;
 type Item = NonNullable<App['informationRequest']>['items'][number];
@@ -41,6 +43,8 @@ const NEEDED_FOR: Record<string, string> = { account: 'Account', business: 'Busi
 const PAYOUT_TONE: Record<string, 'success' | 'warning' | 'danger' | ''> = { verified: 'success', verification_pending: 'warning', change_under_review: 'warning', not_added: '', blocked: 'danger' };
 const APPEAL_OUTCOME: Record<'upheld' | 'overturned' | 'partly_overturned', string> = { upheld: 'decision upheld', overturned: 'decision overturned', partly_overturned: 'decision partly overturned' };
 const STEP_ICON:Record<string, IconName> = { done: 'circle-check', action_needed: 'circle-alert', pending: 'clock', locked: 'lock', not_started: 'circle' };
+/** States the applicant can withdraw from (sellers.md, SellerApplication.state: draft, submitted, information_required → withdrawn). */
+const WITHDRAWABLE: Array<App['state']> = ['draft', 'submitted', 'information_required'];
 
 function Head({ app, status, title, sub }: { app: App; status: string; title: string; sub: ReactNode }) {
   const legal = sections(app).business?.legalName ?? sections(app).account?.storeName;
@@ -311,6 +315,17 @@ export default function Status() {
       void qc.invalidateQueries({ queryKey: APPLICATION_KEY });
     },
   });
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawReason, setWithdrawReason] = useState('');
+  const withdraw = useMutation({
+    mutationFn: () => call(api.POST('/api/store/sellers/applications/{id}/withdraw', { params: { path: { id: appQ.data!.id } }, body: { reason: withdrawReason.trim() || null } })),
+    onSuccess: (next) => {
+      qc.setQueryData(APPLICATION_KEY, next);
+      setWithdrawOpen(false);
+      setWithdrawReason('');
+      announce(`Application ${next.ref} withdrawn`);
+    },
+  });
   const appealErrors = appealTried ? { doc: evidence.uploading ? 'Wait for the upload to finish.' : evidence.failed ? 'Remove the file that failed to upload.' : undefined, msg: appealMsg.trim() ? undefined : 'Tell us what our check got wrong.' } : {};
   const submitAppeal = () => {
     setAppealTried(true);
@@ -419,6 +434,21 @@ export default function Status() {
             ]}
           />
         </div>
+        {WITHDRAWABLE.includes(app.state) && (
+          <div className="card-foot">
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="undo-2"
+              onClick={() => {
+                withdraw.reset();
+                setWithdrawOpen(true);
+              }}
+            >
+              Withdraw application
+            </Button>
+          </div>
+        )}
       </section>
       {contact && (
         <div className="card pad stack gap-1">
@@ -656,6 +686,34 @@ export default function Status() {
         </div>
         <Field label="What did our check get wrong?" error={appealErrors.msg ?? (appeal.isError ? errorMessage(appeal.error) : undefined)}>
           <Textarea id="st-appeal" value={appealMsg} maxLength={5000} onChange={(e) => setAppealMsg(e.target.value)} />
+        </Field>
+      </Dialog>
+      <Dialog
+        open={withdrawOpen}
+        onClose={() => setWithdrawOpen(false)}
+        title="Withdraw your application?"
+        size="sm"
+        foot={
+          <>
+            <Button variant="ghost" onClick={() => setWithdrawOpen(false)}>
+              Keep my application
+            </Button>
+            <Button variant="danger" icon="undo-2" onClick={() => withdraw.mutate()} disabled={withdraw.isPending}>
+              {withdraw.isPending ? 'Withdrawing…' : 'Withdraw application'}
+            </Button>
+          </>
+        }
+      >
+        <p className="small sub">
+          Application <span className="mono">{app.ref}</span> closes and we stop reviewing it. You can’t reopen it, but you can start a new application at any time.
+        </p>
+        {withdraw.isError && (
+          <Alert tone="danger" title="We couldn’t withdraw it">
+            {errorMessage(withdraw.error)}
+          </Alert>
+        )}
+        <Field label="Why are you withdrawing?" optional hint="Helps us improve. Only the seller team sees it.">
+          <Textarea id="st-withdraw" value={withdrawReason} maxLength={1000} onChange={(e) => setWithdrawReason(e.target.value)} />
         </Field>
       </Dialog>
     </>

@@ -9,6 +9,7 @@ import {
   type OrderDetail, type OrderGroup, type OrderItem,
 } from './data/orders';
 import { DetailSkeleton, LoadError, NotFoundCard } from './data/order-parts';
+import { WithdrawCancellationButton, withdrawableFor } from './data/cancel-actions';
 
 // Design: pages/store/account-order.html (one view). Data: the OrderDetail screen query (order(ref))
 // for packages, item states and actions, payment, returns, refunds, cases and documents; documents
@@ -400,6 +401,9 @@ function ItemRow({ order, it }: { order: OrderDetail; it: OrderItem }) {
             Cancel item
           </Button>
         )}
+        {/* A cancellation the customer asked for and the seller hasn't answered yet can be taken back. */}
+        <WithdrawCancellationButton orderId={order.id} requests={withdrawableFor(order, it.id)} size="sm" />
+
         {it.actions.includes('REPORT_PROBLEM') && (
           <Button variant="ghost" size="sm" to={href('help/order-problem', '', undefined, { order: order.ref, item: it.id })}>
             Report a problem

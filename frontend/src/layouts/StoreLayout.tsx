@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { call, useApi, useAppConfig, useMarket } from '@marketly/web-shared/api';
 import { BRAND } from '@marketly/web-shared/config';
 import { useSession } from '@/app/session';
-import { contentLinkTo, isExternal, useNavigation } from '@/api/content';
+import { isExternal, safeContentLinkTo, useNavigation } from '@/api/content';
 import { SearchSuggestions } from '@/api/suggestions';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { useView } from '@marketly/web-shared/lib/hooks';
@@ -13,14 +13,133 @@ import { Logo } from '@marketly/web-shared/layouts';
 import { Icon, IconButton, type IconName } from '@marketly/web-shared/ui';
 
 export type StoreNavKey = 'categories' | 'deals' | 'official' | 'new' | 'best' | 'brands';
-const STORE_NAV: Array<{ key: StoreNavKey; label: string; icon?: IconName; to: string; deal?: boolean }> = [
-  { key: 'categories', label: 'All categories', icon: 'menu', to: href('store/categories') },
-  { key: 'deals', label: 'Deals', icon: 'tag', to: href('store/deals'), deal: true },
-  { key: 'official', label: 'Official Store', icon: 'badge-check', to: href('store/official') },
-  { key: 'new', label: 'New arrivals', to: href('store/collection', '', { slug: 'new-arrivals' }) },
-  { key: 'best', label: 'Best sellers', to: href('store/collection', '', { slug: 'best-sellers' }) },
-  { key: 'brands', label: 'Brands', to: href('store/brand') },
+
+/* ---- header category bar and footer links ----
+ * Both come from the published navigation (GET /api/store/content/navigation; staff edit it in the Admin
+ * Center with PUT /api/admin/content/navigation). The lists below are the fallback while it loads, when
+ * the read fails, and when nothing is published. */
+
+interface NavItem {
+  key: string;
+  /** The tab this link is, when it is one of the store's own browse pages (active highlight, icon). */
+  navKey?: StoreNavKey;
+  label: string;
+  icon?: IconName;
+  to: string;
+  deal?: boolean;
+}
+
+const ALL_CATEGORIES: NavItem = { key: 'categories', navKey: 'categories', label: 'All categories', icon: 'menu', to: href('store/categories') };
+const STORE_NAV: NavItem[] = [
+  ALL_CATEGORIES,
+  { key: 'deals', navKey: 'deals', label: 'Deals', icon: 'tag', to: href('store/deals'), deal: true },
+  { key: 'official', navKey: 'official', label: 'Official Store', icon: 'badge-check', to: href('store/official') },
+  { key: 'new', navKey: 'new', label: 'New arrivals', to: href('store/collection', '', { slug: 'new-arrivals' }) },
+  { key: 'best', navKey: 'best', label: 'Best sellers', to: href('store/collection', '', { slug: 'best-sellers' }) },
+  { key: 'brands', navKey: 'brands', label: 'Brands', to: href('store/brands') },
 ];
+
+/** Store paths that are a category-bar tab, so a published link to them highlights and looks like that tab. */
+const NAV_BY_PATH: Record<string, StoreNavKey> = {
+  [href('store/categories')]: 'categories',
+  [href('store/deals')]: 'deals',
+  [href('store/official')]: 'official',
+  [href('store/collection', '', { slug: 'new-arrivals' })]: 'new',
+  [href('store/collection', '', { slug: 'best-sellers' })]: 'best',
+  [href('store/brands')]: 'brands',
+};
+const NAV_ICON: Partial<Record<StoreNavKey, IconName>> = { categories: 'menu', deals: 'tag', official: 'badge-check' };
+
+const pathOf = (to: string) => to.split(/[?#]/)[0]!;
+
+/** Category bar items: the published header, led by "All categories" (the bar's menu entry in the design)
+ * unless the header already links there. */
+function useStoreNav(): NavItem[] {
+  const navQ = useNavigation();
+  const items = (navQ.data?.header ?? []).flatMap((l, i): NavItem[] => {
+    const to = safeContentLinkTo(l.url);
+    if (!to || !l.label.trim()) return [];
+    const navKey = isExternal(to) ? undefined : NAV_BY_PATH[pathOf(to)];
+    return [{ key: `${i}:${to}`, navKey, label: l.label, icon: navKey && NAV_ICON[navKey], to, deal: navKey === 'deals' || l.kind === 'deals' }];
+  });
+  if (!items.length) return STORE_NAV;
+  return items.some((n) => n.navKey === 'categories') ? items : [ALL_CATEGORIES, ...items];
+}
+
+interface FooterGroup {
+  title: string;
+  links: Array<{ label: string; to: string }>;
+}
+
+const STORE_FOOTER: FooterGroup[] = [
+  {
+    title: 'Shop',
+    links: [
+      { label: 'All categories', to: href('store/categories') },
+      { label: 'Deals', to: href('store/deals') },
+      { label: 'Official Store', to: href('store/official') },
+      { label: 'New arrivals', to: href('store/collection', '', { slug: 'new-arrivals' }) },
+      { label: 'Brands', to: href('store/brands') },
+    ],
+  },
+  {
+    title: 'Help',
+    links: [
+      { label: 'Help Center', to: href('help/center') },
+      { label: 'Track an order', to: href('account/orders') },
+      { label: 'Returns and refunds', to: href('account/returns') },
+      { label: 'Contact us', to: href('help/contact') },
+      { label: 'Guest order lookup', to: href('auth/guest-orders') },
+    ],
+  },
+  {
+    title: 'Policies',
+    links: [
+      { label: 'Shipping', to: href('info/policy', 'shipping') },
+      { label: 'Returns', to: href('info/policy') },
+      { label: 'Privacy', to: href('info/policy', 'privacy') },
+      { label: 'Purchase terms', to: href('info/policy', 'purchase-terms') },
+      { label: 'Seller rules', to: href('info/policy', 'seller-rules') },
+    ],
+  },
+  {
+    title: 'Sell with us',
+    links: [
+      { label: `Sell on ${BRAND}`, to: href('sell/landing') },
+      { label: 'Seller requirements', to: href('sell/landing') },
+      { label: 'Fees', to: href('sell/landing') },
+      { label: 'Seller Center', to: href('seller/dashboard') },
+      { label: 'About us', to: href('info/about') },
+    ],
+  },
+];
+
+/** Footer link groups: the published footer (unsafe links and empty groups left out), else the list above. */
+function useFooterGroups(): FooterGroup[] {
+  const navQ = useNavigation();
+  const groups = (navQ.data?.footer ?? []).flatMap((g): FooterGroup[] => {
+    const links = g.links.flatMap((l) => {
+      const to = safeContentLinkTo(l.url);
+      return to && l.label.trim() ? [{ label: l.label, to }] : [];
+    });
+    return links.length ? [{ title: g.title, links }] : [];
+  });
+  return groups.length ? groups : STORE_FOOTER;
+}
+
+/** A store route as a router Link; an absolute URL (http, mailto, tel, another app) as a plain anchor. */
+function SiteLink({ to, className, current, children }: { to: string; className?: string; current?: boolean; children: ReactNode }) {
+  const aria = current ? ('page' as const) : undefined;
+  return isExternal(to) ? (
+    <a href={to} className={className} aria-current={aria}>
+      {children}
+    </a>
+  ) : (
+    <Link to={to} className={className} aria-current={aria}>
+      {children}
+    </Link>
+  );
+}
 
 /** "Deliver to" label: the cart's delivery destination (set from the default address or a ZIP), else the market's
  * default delivery location (app-config market.defaultDeliveryLocation). */
@@ -85,6 +204,12 @@ function SearchForm({ id, phone, box }: { id: string; phone?: boolean; box: Sear
 function StoreHeader({ nav, box, hideOnPhone }: { nav?: StoreNavKey; box: SearchBox; hideOnPhone?: boolean }) {
   const { signedIn, customer, cartCount, unreadNotifications } = useSession();
   const deliverTo = useDeliverTo();
+  const items = useStoreNav();
+  // A link to the page being shown wins (a published category link on its category page); otherwise the
+  // page's own tab (`nav`), e.g. "All categories" on a subcategory page.
+  const { pathname } = useLocation();
+  const exact = items.find((n) => !isExternal(n.to) && pathOf(n.to) === pathname);
+  const isActive = (n: NavItem) => (exact ? n === exact : !!nav && n.navKey === nav);
   return (
     <header className={cx('store-header', hideOnPhone && 'no-phone')}>
       <div className="container">
@@ -125,11 +250,11 @@ function StoreHeader({ nav, box, hideOnPhone }: { nav?: StoreNavKey; box: Search
       <div className="no-phone nav-row">
         <div className="container">
           <nav className="store-nav" aria-label="Shop">
-            {STORE_NAV.map((n) => (
-              <Link key={n.key} to={n.to} className={cx(nav === n.key && 'is-active', n.deal && 'deal')} aria-current={nav === n.key ? 'page' : undefined}>
+            {items.map((n) => (
+              <SiteLink key={n.key} to={n.to} className={cx(isActive(n) && 'is-active', n.deal && 'deal')} current={isActive(n)}>
                 {n.icon && <Icon name={n.icon} className="ic-sm" />}
                 {n.label}
-              </Link>
+              </SiteLink>
             ))}
             <span className="spacer" />
             <Link to={href('sell/landing')}>
@@ -230,6 +355,7 @@ function StoreFooter() {
   const support = config?.support;
   const market = config?.market;
   const company = market?.company;
+  const groups = useFooterGroups();
   return (
     <footer className="store-footer no-phone">
       <div className="container">
@@ -251,46 +377,18 @@ function StoreFooter() {
               </div>
             )}
           </div>
-          <div>
-            <h4>Shop</h4>
-            <ul>
-              <li><Link to={href('store/categories')}>All categories</Link></li>
-              <li><Link to={href('store/deals')}>Deals</Link></li>
-              <li><Link to={href('store/official')}>Official Store</Link></li>
-              <li><Link to={href('store/collection')}>New arrivals</Link></li>
-              <li><Link to={href('store/brand')}>Brands</Link></li>
-            </ul>
-          </div>
-          <div>
-            <h4>Help</h4>
-            <ul>
-              <li><Link to={href('help/center')}>Help Center</Link></li>
-              <li><Link to={href('account/orders')}>Track an order</Link></li>
-              <li><Link to={href('account/returns')}>Returns and refunds</Link></li>
-              <li><Link to={href('help/contact')}>Contact us</Link></li>
-              <li><Link to={href('auth/guest-orders')}>Guest order lookup</Link></li>
-            </ul>
-          </div>
-          <div>
-            <h4>Policies</h4>
-            <ul>
-              <li><Link to={href('info/policy', 'shipping')}>Shipping</Link></li>
-              <li><Link to={href('info/policy')}>Returns</Link></li>
-              <li><Link to={href('info/policy', 'privacy')}>Privacy</Link></li>
-              <li><Link to={href('info/policy', 'purchase-terms')}>Purchase terms</Link></li>
-              <li><Link to={href('info/policy', 'seller-rules')}>Seller rules</Link></li>
-            </ul>
-          </div>
-          <div>
-            <h4>Sell with us</h4>
-            <ul>
-              <li><Link to={href('sell/landing')}>Sell on {BRAND}</Link></li>
-              <li><Link to={href('sell/landing')}>Seller requirements</Link></li>
-              <li><Link to={href('sell/landing')}>Fees</Link></li>
-              <li><Link to={href('seller/dashboard')}>Seller Center</Link></li>
-              <li><Link to={href('info/about')}>About us</Link></li>
-            </ul>
-          </div>
+          {groups.map((g, i) => (
+            <div key={`${i}:${g.title}`}>
+              <h4>{g.title}</h4>
+              <ul>
+                {g.links.map((l, j) => (
+                  <li key={`${j}:${l.to}`}>
+                    <SiteLink to={l.to}>{l.label}</SiteLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
         <div className="legal">
           <span>
@@ -359,22 +457,16 @@ function PromoStrip() {
   if (navQ.isSuccess && !strip) return null;
   const text = strip?.text ?? 'Free delivery on Official Store orders over $35 · 30-day returns on most items';
   const link = strip ? strip.link : { label: 'Delivery details', url: '/policies/shipping' };
-  const to = link ? contentLinkTo(link.url) : null;
+  const to = link ? safeContentLinkTo(link.url) : null;
   return (
     <div className="store-promo no-phone">
       {text}
       {link && to && (
         <>
           {' · '}
-          {isExternal(to) ? (
-            <a href={to} className="link-inline">
-              {link.label}
-            </a>
-          ) : (
-            <Link to={to} className="link-inline">
-              {link.label}
-            </Link>
-          )}
+          <SiteLink to={to} className="link-inline">
+            {link.label}
+          </SiteLink>
         </>
       )}
     </div>

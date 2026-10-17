@@ -8,14 +8,15 @@ import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Badge, Button, Card, Dialog, Field, Icon, Img, LogoTile, Pager, Stars5, StatusBadge, Tabs, Textarea, type IconName, type Tone } from '@marketly/web-shared/ui';
 import { sellerTile } from './data/messages';
+import { MyAnswers, useMyAnswers } from './data/my-answers';
 import { date, slugify } from './data/when';
 
 // Design: pages/store/account-reviews.html · tabs as views: "" = product reviews,
-// "seller-feedback", "reports-you-made".
+// "seller-feedback", "reports-you-made", plus "answers" (no design: answers to other shoppers' questions).
 // API: reviews (GET /api/store/reviews/me/pending, …/me/reviews, …/me/feedback, …/me/reports, DELETE, appeals)
 // and trust (GET /api/store/trust/reports): "Reports you made" merges both.
 
-type View = 'seller-feedback' | 'reports-you-made';
+type View = 'seller-feedback' | 'reports-you-made' | 'answers';
 type MyReview = components['schemas']['reviews.MyReview'];
 type MyFeedback = components['schemas']['reviews.MyFeedback'];
 type ReviewReport = components['schemas']['reviews.MyReport'];
@@ -118,7 +119,7 @@ export default function Reviews() {
   const { api } = useApi();
   const qc = useQueryClient();
   const [rawView, setView] = useView<View>();
-  const view: View | '' = rawView === 'seller-feedback' || rawView === 'reports-you-made' ? rawView : '';
+  const view: View | '' = rawView === 'seller-feedback' || rawView === 'reports-you-made' || rawView === 'answers' ? rawView : '';
   const [page, setPage] = useState({ reviews: 1, feedback: 1 });
   const [confirm, setConfirm] = useState<{ kind: 'review' | 'feedback'; id: string; name: string } | null>(null);
   const [appeal, setAppeal] = useState<MyReview | null>(null);
@@ -135,6 +136,7 @@ export default function Reviews() {
     queryFn: () => call(api.GET('/api/store/reviews/me/feedback', { params: { query: { page: page.feedback, limit: LIMIT } } })),
   });
   const reports = useQuery({ queryKey: ['reviews', 'me', 'reports'], queryFn: () => call(api.GET('/api/store/reviews/me/reports', { params: { query: { page: 1, limit: 50 } } })) });
+  const answers = useMyAnswers(1);
   const trustReports = useQuery({ queryKey: ['trust', 'reports'], queryFn: () => call(api.GET('/api/store/trust/reports', { params: { query: { page: 1, limit: 50 } } })) });
 
   const doDelete = useMutation({
@@ -181,6 +183,7 @@ export default function Reviews() {
         items={[
           { value: '', label: 'Product reviews', count: reviews.data ? (reviews.data.total ?? reviews.data.items.length) : undefined },
           { value: 'seller-feedback', label: 'Seller feedback', count: feedback.data ? (feedback.data.total ?? feedback.data.items.length) : undefined },
+          { value: 'answers', label: 'Your answers', count: answers.data ? (answers.data.total ?? answers.data.items.length) : undefined },
           { value: 'reports-you-made', label: 'Reports you made', count: reportCount },
         ]}
       />
@@ -286,7 +289,7 @@ export default function Reviews() {
                             )
                           )}
                           {m.appealBy && !r.appeal && r.canAppeal && <span className="muted">Appeal by {date(m.appealBy)}</span>}
-                          <Link to={href('help/article')} className="link-inline">
+                          <Link to={href('help/article', '', { slug: 'how-reviews-work' })} className="link-inline">
                             Review rules
                           </Link>
                         </span>
@@ -439,9 +442,14 @@ export default function Reviews() {
           </>
         )}
 
+        {view === 'answers' && <MyAnswers />}
+
         {view === 'reports-you-made' && (
           <>
-            <p className="small sub">Reports you sent about reviews, answers or listings from other people. The people you report never see your name.</p>
+            <p className="small sub">
+              Reports you sent about reviews, answers or listings from other people. The people you report never see your name. Requests for information and actions on your
+              account are in <Link to={href('account/reports')}>Reports and appeals</Link>.
+            </p>
             {reports.isError && <ListError error={reports.error} retry={() => void reports.refetch()} what="your review reports" />}
             {trustReports.isError && <ListError error={trustReports.error} retry={() => void trustReports.refetch()} what="your listing reports" />}
             {(reports.isPending || trustReports.isPending) && cardSkeleton}
