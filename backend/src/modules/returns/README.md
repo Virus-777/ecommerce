@@ -732,6 +732,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | amount | `Money?` Partial amount; capped at maxRefundable |
 | explanation | `text?` |
 | exchangeVariantId | `uuid?` |
+| reauthToken | `string?` Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved |
 
 ### ExceptionInput
 
@@ -740,6 +741,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | reasonCode | `enum(return_cost_exceeds_value|unsafe_to_ship|damaged_beyond_resale|lost_by_carrier|customer_goodwill|other)` |
 | details | `text` |
 | remedy | `RemedyInput` |
+| reauthToken | `string?` Staff only (admin approve-without-return; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved |
 
 ### ExceptionRefundLine
 
@@ -762,6 +764,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | trustReportId | `uuid?` Set when the refund executes a trust recommendation (refund_buyers); trust confirms it from returns.refund.approved |
 | destination | `enum(original_method|store_credit)?` Refund to the original payment (default) or to store credit. store_credit needs the wallet module (plan phase 3); refused with REMEDY_NOT_AVAILABLE while it is off |
 | note | `text?` |
+| reauthToken | `string?` Order-page refund: re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved |
 
 ### EarningsImpact
 
@@ -803,6 +806,7 @@ Return policies (platform baseline, seller terms, category exceptions, who pays 
 | trustReportId | `uuid?` |
 | earningsImpact | `EarningsImpact?` |
 | approval | `ApprovalInfo?` |
+| canApprove | `bool?` Admin GET /refunds and GET /refunds/{id}: true when the caller could approve it now with POST /refunds/{id}/approve (requested or under review, the returns.refunds.approve permission, a refund limit covering the amount, and not the person who asked for its approval). Above stepUpAbove that call still needs reauthToken. Null in other responses |
 | proposedBy | `Actor` |
 | approvedBy | `Actor?` |
 | declineReason | `text?` |

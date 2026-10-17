@@ -1308,6 +1308,8 @@ export interface RemedyInput {
   amount?: common.Money | null;
   explanation?: string | null;
   exchangeVariantId?: string | null;
+  /** Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
+  reauthToken?: string | null;
 }
 
 export const RemedyInput: z.ZodType<RemedyInput> = z.object({
@@ -1320,12 +1322,15 @@ export const RemedyInput: z.ZodType<RemedyInput> = z.object({
   },
   explanation: z.string().nullish(),
   exchangeVariantId: z.uuid().nullish(),
+  reauthToken: z.string().describe("Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved").nullish(),
 }).register(common.apiTypes, { id: "returns.RemedyInput" });
 
 export interface ExceptionInput {
   reasonCode: "return_cost_exceeds_value" | "unsafe_to_ship" | "damaged_beyond_resale" | "lost_by_carrier" | "customer_goodwill" | "other";
   details: string;
   remedy: RemedyInput;
+  /** Staff only (admin approve-without-return; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
+  reauthToken?: string | null;
 }
 
 export const ExceptionInput: z.ZodType<ExceptionInput> = z.object({
@@ -1334,6 +1339,7 @@ export const ExceptionInput: z.ZodType<ExceptionInput> = z.object({
   get remedy() {
     return RemedyInput;
   },
+  reauthToken: z.string().describe("Staff only (admin approve-without-return; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved").nullish(),
 }).register(common.apiTypes, { id: "returns.ExceptionInput" });
 
 export interface ExceptionRefundLine {
@@ -1363,6 +1369,8 @@ export interface ExceptionRefundInput {
   /** Refund to the original payment (default) or to store credit. store_credit needs the wallet module (plan phase 3); refused with REMEDY_NOT_AVAILABLE while it is off */
   destination?: "original_method" | "store_credit" | null;
   note?: string | null;
+  /** Order-page refund: re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved */
+  reauthToken?: string | null;
 }
 
 export const ExceptionRefundInput: z.ZodType<ExceptionRefundInput> = z.object({
@@ -1379,6 +1387,7 @@ export const ExceptionRefundInput: z.ZodType<ExceptionRefundInput> = z.object({
   trustReportId: z.uuid().describe("Set when the refund executes a trust recommendation (refund_buyers); trust confirms it from returns.refund.approved").nullish(),
   destination: z.enum(["original_method", "store_credit"]).describe("Refund to the original payment (default) or to store credit. store_credit needs the wallet module (plan phase 3); refused with REMEDY_NOT_AVAILABLE while it is off").nullish(),
   note: z.string().nullish(),
+  reauthToken: z.string().describe("Order-page refund: re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved").nullish(),
 }).register(common.apiTypes, { id: "returns.ExceptionRefundInput" });
 
 export interface EarningsImpact {
@@ -1444,6 +1453,8 @@ export interface RefundRequest {
   trustReportId?: string | null;
   earningsImpact?: EarningsImpact | null;
   approval?: common.ApprovalInfo | null;
+  /** Admin GET /refunds and GET /refunds/{id}: true when the caller could approve it now with POST /refunds/{id}/approve (requested or under review, the returns.refunds.approve permission, a refund limit covering the amount, and not the person who asked for its approval). Above stepUpAbove that call still needs reauthToken. Null in other responses */
+  canApprove?: boolean | null;
   proposedBy: common.Actor;
   approvedBy?: common.Actor | null;
   declineReason?: string | null;
@@ -1489,6 +1500,7 @@ export const RefundRequest: z.ZodType<RefundRequest> = z.object({
   get approval() {
     return common.ApprovalInfo.nullish();
   },
+  canApprove: z.boolean().describe("Admin GET /refunds and GET /refunds/{id}: true when the caller could approve it now with POST /refunds/{id}/approve (requested or under review, the returns.refunds.approve permission, a refund limit covering the amount, and not the person who asked for its approval). Above stepUpAbove that call still needs reauthToken. Null in other responses").nullish(),
   get proposedBy() {
     return common.Actor;
   },
@@ -3690,7 +3702,7 @@ export const endpoints = defineEndpoints({
     permission: "returns.exceptions.propose",
     scope: "staff",
     summary: "Propose refund-without-return (controlled exception)",
-    desc: "Records the reason and details (visible to Finance and in the action history), sets the stock outcome to written off, and sends the refund request to Finance approval.",
+    desc: "Records the reason and details (visible to Finance and in the action history) and sets the stock outcome to written off. Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments.",
     params: () =>
       z.object({
         id: z.string().describe("Return id or its RT- reference"),
@@ -3698,9 +3710,10 @@ export const endpoints = defineEndpoints({
     body: () => ExceptionInput,
     response: () => ReturnCase,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND"],
+    errors: ["ILLEGAL_TRANSITION","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","STEP_UP_REQUIRED"],
     idempotent: true,
     audited: true,
+    approval: "Approval action returns.refunds.approve (see desc)",
     events: ["returns.exception.proposed","returns.refund.requested"],
     screens: ["admin/returns"],
     phase: 1,
@@ -3836,7 +3849,7 @@ export const endpoints = defineEndpoints({
     permission: "returns.requests.manage",
     scope: "staff",
     summary: "Decide the remedy for an Official Store or platform-handled return",
-    desc: "Refunds go to Finance as an under-review refund request; replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.",
+    desc: "Refunds: Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments. Replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.",
     params: () =>
       z.object({
         id: z.string().describe("Return id or its RT- reference"),
@@ -3844,9 +3857,10 @@ export const endpoints = defineEndpoints({
     body: () => RemedyInput,
     response: () => ReturnCase,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","REMEDY_NOT_AVAILABLE","EXCHANGE_NOT_ALLOWED"],
+    errors: ["ILLEGAL_TRANSITION","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","REMEDY_NOT_AVAILABLE","EXCHANGE_NOT_ALLOWED","STEP_UP_REQUIRED"],
     idempotent: true,
     audited: true,
+    approval: "Approval action returns.refunds.approve (see desc)",
     events: ["returns.refund.requested","returns.replacement.created"],
     screens: ["admin/returns","ops/return-inspection"],
     phase: 1,
@@ -3883,11 +3897,11 @@ export const endpoints = defineEndpoints({
     permission: "returns.exceptions.propose",
     scope: "staff",
     summary: "Issue a refund from the order page (exception refund request)",
-    desc: "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception that goes through Finance approval like any other; within the caller's limit it is approved in the same call and handed to payments. Optional trustReportId links it to a trust recommendation. Above the caller's limit it is saved under review and the response (201) carries `approval` (FORMAT.md, Approval responses). VALIDATION_FAILED also when the items belong to more than one seller group; NOT_FOUND for an unknown order; REMEDY_NOT_AVAILABLE for store credit while wallet is off or for a guest order.",
+    desc: "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception. Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments. The response is 201 either way. Optional trustReportId links it to a trust recommendation. VALIDATION_FAILED also when the items belong to more than one seller group; NOT_FOUND for an unknown order; REMEDY_NOT_AVAILABLE for store credit while wallet is off or for a guest order.",
     body: () => ExceptionRefundInput,
     response: () => RefundRequest,
     status: 201,
-    errors: ["VALIDATION_FAILED","NOT_FOUND","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","REMEDY_NOT_AVAILABLE"],
+    errors: ["VALIDATION_FAILED","NOT_FOUND","REFUND_EXCEEDS_REFUNDABLE","DUPLICATE_REFUND","REMEDY_NOT_AVAILABLE","STEP_UP_REQUIRED"],
     idempotent: true,
     audited: true,
     approval: "Approval action returns.refunds.approve. Within the caller's refund limit it is approved at once; above it a Finance member whose limit covers it, and a second reviewer above that limit's threshold, approve through access",
@@ -3903,8 +3917,10 @@ export const endpoints = defineEndpoints({
     permission: "returns.requests.view",
     scope: "staff",
     summary: "Refund approval queue for Finance",
+    desc: "Finance's Refunds to approve list: awaitingApproval=true (newest first). Each row has orderRef, returnRef (null without a return), breakdown.total, reason and reasonCode, source, proposedBy, createdAt, approval (the access approval request, when there is one) and canApprove for the caller.",
     query: () =>
       z.object({
+        awaitingApproval: z.stringbool().describe("Only requests waiting for a refund approver: requested or under review, without the seller's own refunds (the seller approves those)").optional(),
         status: z.enum(["requested", "under_review", "approved", "declined", "processing", "sent", "failed", "cancelled"]).optional(),
         source: z.enum(["return", "case", "exception", "seller"]).optional(),
         sellerId: z.uuid().optional(),
@@ -3941,7 +3957,7 @@ export const endpoints = defineEndpoints({
     permission: "returns.refunds.approve",
     scope: "staff",
     summary: "Finance approves the refund and hands it to payments",
-    desc: "Approved is not sent: the customer sees Approved, then Processing, then Sent when payments confirms.",
+    desc: "Approved is not sent: the customer sees Approved, then Processing, then Sent when payments confirms. With an open access approval request the call decides it through access (its rules: not the requester, a covering limit, reauthToken above stepUpAbove). Otherwise the caller's refund limit decides: within it approved now (reauthToken above stepUpAbove, else STEP_UP_REQUIRED); above it saved with an approval request and answered 200 with `approval`; no refund authority at all: FORBIDDEN.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3957,7 +3973,7 @@ export const endpoints = defineEndpoints({
     audited: true,
     approval: "Approval action returns.refunds.approve. Above the approver's refund limit (e.g. $2,000) a second Finance reviewer or the Business Owner approves through access",
     events: ["returns.refund.approved"],
-    screens: ["admin/returns","admin/case","ops/return-inspection"],
+    screens: ["admin/finance","admin/returns","admin/case","ops/return-inspection"],
     phase: 1,
   },
   declineRefund: {
@@ -3980,7 +3996,7 @@ export const endpoints = defineEndpoints({
     errors: ["ILLEGAL_TRANSITION"],
     audited: true,
     events: ["returns.refund.declined"],
-    screens: ["admin/returns"],
+    screens: ["admin/finance","admin/returns"],
     phase: 1,
   },
   reviseRefund: {
@@ -3991,6 +4007,7 @@ export const endpoints = defineEndpoints({
     permission: "returns.requests.manage",
     scope: "staff",
     summary: "Change a declined refund and resubmit",
+    desc: "The resubmission takes the same decision path as a new staff refund: within the reviser's refund limit approved now (reauthToken in the body above stepUpAbove, else STEP_UP_REQUIRED and nothing changes); otherwise under review with an access approval request for Finance (`approval` in the response).",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -3998,8 +4015,9 @@ export const endpoints = defineEndpoints({
     body: () => RemedyInput,
     response: () => RefundRequest,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","REFUND_EXCEEDS_REFUNDABLE"],
+    errors: ["ILLEGAL_TRANSITION","REFUND_EXCEEDS_REFUNDABLE","STEP_UP_REQUIRED"],
     audited: true,
+    approval: "Approval action returns.refunds.approve (see desc)",
     events: ["returns.refund.requested"],
     screens: ["admin/returns"],
     phase: 1,

@@ -1004,10 +1004,10 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/uploads",
     auth: "staff",
-    permission: "media.assets.manage",
+    permission: "media.uploads.create",
     scope: "staff",
     summary: "Start a staff upload (Official Store products, content, ad creatives, inspection photos, evidence)",
-    desc: "Staff uploads for content, ads and Official Store are owned by the platform; evidence uploads are owned by the staff member.",
+    desc: "ownerKind platform (what the Admin Center sends for every upload): the file belongs to the platform and the upload records the staff member who started it. Modules that take a staff member's file (return inspection, warehouse damage reports and return parcels, case and trust evidence) accept the staff member's own files and platform files that staff member uploaded, never another staff member's. ownerKind staff: the file belongs to the staff member. Without ownerKind, evidence purposes (return_evidence, case_evidence, inspection_photo, verification_document, message_attachment, other_document) default to staff and the rest to platform. Needs media.uploads.create only: editing and deleting platform files stay with media.assets.manage.",
     body: () => z.object({
       get upload() {
         return UploadRequest;
@@ -1025,7 +1025,7 @@ export const endpoints = defineEndpoints({
     method: "POST",
     path: "/uploads/{id}/complete",
     auth: "staff",
-    permission: "media.assets.manage",
+    permission: "media.uploads.create",
     scope: "staff",
     summary: "Confirm a staff upload",
     desc: "Only the staff member who started the upload may complete it; anyone else gets NOT_FOUND (the response carries the asset, so completing someone else's upload would leak a private file).",
@@ -1044,7 +1044,7 @@ export const endpoints = defineEndpoints({
     method: "PUT",
     path: "/uploads/{id}/content",
     auth: "staff",
-    permission: "media.assets.manage",
+    permission: "media.uploads.create",
     scope: "staff",
     summary: "Send the file bytes of a staff upload",
     desc: "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL. Only the staff member who started the upload may send its bytes (NOT_FOUND otherwise).",
@@ -1303,9 +1303,14 @@ export const spec = defineModuleSpec({
       "desc": "Browse all files and their usages"
     },
     {
+      "key": "media.uploads.create",
+      "audience": "staff",
+      "desc": "Upload files for their own work (inspection and damage photos, evidence, Official Store, content and ad files); attaching a file still needs the permission of the screen that uses it"
+    },
+    {
       "key": "media.assets.manage",
       "audience": "staff",
-      "desc": "Upload, edit and delete platform files (Official Store, content, ads, evidence)"
+      "desc": "Edit and delete platform files (Official Store, content, ads, evidence)"
     },
     {
       "key": "media.assets.moderate",

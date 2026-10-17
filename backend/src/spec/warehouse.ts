@@ -39,6 +39,7 @@ export interface BinAssignment {
   label: string;
   binId: string;
   binCode: string;
+  binKind: "pick" | "bulk" | "returns" | "quarantine" | "packing" | "dock";
   primary: boolean;
 }
 
@@ -48,6 +49,7 @@ export const BinAssignment: z.ZodType<BinAssignment> = z.object({
   label: z.string(),
   binId: z.uuid(),
   binCode: z.string(),
+  binKind: z.enum(["pick", "bulk", "returns", "quarantine", "packing", "dock"]),
   primary: z.boolean(),
 }).register(common.apiTypes, { id: "warehouse.BinAssignment" });
 
@@ -1124,6 +1126,25 @@ export const endpoints = defineEndpoints({
     status: 200,
     errors: ["BIN_NOT_EMPTY"],
     audited: true,
+    phase: 1,
+  },
+  listStockItemBins: {
+    area: "admin",
+    method: "GET",
+    path: "/stock-items/{stockItemId}/bins",
+    auth: "staff",
+    permission: "warehouse.view",
+    scope: "staff",
+    summary: "The bins a company stock item is stored in, primary first",
+    desc: "What PUT /stock-items/{stockItemId}/bins replaces: read it first so saving keeps the other bins. Quantities are not kept per bin (inventory counts the location). An item without bins answers an empty list.",
+    params: () =>
+      z.object({
+        stockItemId: z.uuid(),
+      }),
+    response: () => z.array(BinAssignment),
+    status: 200,
+    errors: ["NOT_FOUND"],
+    screens: ["ops/inventory"],
     phase: 1,
   },
   setStockItemBins: {

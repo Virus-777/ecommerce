@@ -1010,6 +1010,8 @@ export interface HelpArticleAdmin {
   draftAuthor?: common.Actor | null;
   /** The draft waits for review and the caller is not its author, so the Approve button can show */
   canApprove: boolean;
+  /** Review of the new draft of a live article (status published or unpublished), which keeps its status while the draft is reviewed. Null when there is no draft or it was never submitted, and before the first publication (status says it then) */
+  draftReview?: HelpArticleDraftReview | null;
 }
 
 export const HelpArticleAdmin: z.ZodType<HelpArticleAdmin> = z.object({
@@ -1032,7 +1034,29 @@ export const HelpArticleAdmin: z.ZodType<HelpArticleAdmin> = z.object({
     return common.Actor.nullish();
   },
   canApprove: z.boolean().describe("The draft waits for review and the caller is not its author, so the Approve button can show"),
+  get draftReview() {
+    return HelpArticleDraftReview.nullish();
+  },
 }).register(common.apiTypes, { id: "content.HelpArticleAdmin" });
+
+export interface HelpArticleDraftReview {
+  /** in_review after submit; approved (publish puts the draft live); changes_requested (edit the draft and submit again; the note stays until then) */
+  state: "in_review" | "approved" | "changes_requested";
+  /** Who submitted, approved or asked for changes */
+  by: common.Actor;
+  at: string;
+  /** What needs to change (changes_requested) */
+  reason?: string | null;
+}
+
+export const HelpArticleDraftReview: z.ZodType<HelpArticleDraftReview> = z.object({
+  state: z.enum(["in_review", "approved", "changes_requested"]).describe("in_review after submit; approved (publish puts the draft live); changes_requested (edit the draft and submit again; the note stays until then)"),
+  get by() {
+    return common.Actor;
+  },
+  at: z.iso.datetime({ offset: true }),
+  reason: z.string().describe("What needs to change (changes_requested)").nullish(),
+}).register(common.apiTypes, { id: "content.HelpArticleDraftReview" });
 
 export interface ContentTable {
   /** e.g. Who pays return shipping */
@@ -2852,7 +2876,7 @@ export const endpoints = defineEndpoints({
     permission: "content.help.manage",
     scope: "staff",
     summary: "Submit, approve, request changes, schedule, publish, unpublish or remove an article",
-    desc: "One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt.",
+    desc: "One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.",
     params: () =>
       z.object({
         id: z.uuid(),

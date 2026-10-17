@@ -1,6 +1,6 @@
 # Marketly API design
 
-Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1,319 endpoints.
+Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 1,320 endpoints.
 
 - **GraphQL read layer:** [graphql/README.md](graphql/README.md), composed schemas `graphql/schema.{store,seller,admin}.graphql`, screen queries in `graphql/operations/`
 - **OpenAPI 3.1:** [openapi.json](openapi.json) (open in Swagger UI, Redoc or Postman)
@@ -13,7 +13,7 @@ Generated from `docs/api/spec/` by `node docs/api/tools/build.mjs`. 33 modules, 
 |---|---|---|---|---|
 | Store API | `/api/store/{module}` | Customers and guests on the website and the Android app | Every request carries a token: a visitor token (guests, issued when the app opens) or a customer access token. | 264 |
 | Seller API | `/api/seller/{module}` | Seller owners and seller staff in Seller Center (website + Android app) | Seller member session. Every request acts for one seller account; seller member permissions apply. | 273 |
-| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 752 |
+| Admin API | `/api/admin/{module}` | Internal staff in the Admin Center and Operations Center | Staff session. Role permissions and approval limits apply. | 753 |
 | Public API | `/api/public/{module}` | Anyone (sign-in, registration, public settings) | Visitor token of any app. Refresh and sign-out take the refresh token; the bootstrap endpoint takes an app proof. | 21 |
 | Webhooks | `/webhooks/{module}` | Payment, carrier and email providers | Provider signature header, verified per provider | 9 |
 
@@ -28,7 +28,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 | Store API | `customer` | Signed-in customer | 101 |
 | Store API | `account` | Any signed-in account, any realm (self-service security endpoints) | 11 |
 | Seller API | `seller` | Seller member acting for the seller in the token; optional `permission` narrows it | 273 |
-| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 752 |
+| Admin API | `staff` | Staff member (email and password sign-in); optional `permission` narrows it | 753 |
 | Public API | `visitor` | Any valid token of the app: a visitor token (before sign-in) or a signed-in access token | 18 |
 | Public API | `refresh` | Refresh token only (website: the cookie of the app named by audience in the body; Android: refreshToken in the body) | 2 |
 | Public API | `bootstrap` | No token: an app proof (Play Integrity or bot challenge). Only POST /api/public/identity/app-sessions | 1 |
@@ -63,7 +63,7 @@ Every endpoint needs a token ([../03-auth-middleware.md](../03-auth-middleware.m
 | [offers](modules/offers.md) | 1 | How one seller (or the Official Store) sells one variant in one condition: price and authentic was-price, purchase limit, seller SKU, dispatch, shipping profile, return and warranty terms, offer status, and the published featured-offer rule that picks the main offer for a delivery location. | catalog, sellers, inventory | 49 |
 | [purchasing](modules/purchasing.md) | 1 | Buying stock for the Official Store: suppliers and their price lists, purchase orders (Draft, Sent, Partly received, Received, Cancelled) with buying costs and expected deliveries, receiving records (expected vs received, shortages, damage) that feed inventory, and supplier claims. | inventory | 31 |
 | [search](modules/search.md) | 1 | Finding products: a product index built from catalog, offers, inventory and reviews events; search with misspelling tolerance and corrections, suggestions (queries, categories, brands, stores, products, recent searches), universal and category filters with counts, sorting, sponsored slots from advertising, and guidance for empty or unavailable results. | catalog, offers | 23 |
-| [warehouse](modules/warehouse.md) | 1 | Physical work for Official Store stock: bins, put-away of received goods, pick waves and pick lists by order with bin locations and scanning, packing stations (item checklist, box and weight, carrier label through shipping, packing slip), shortage and damage reports, and receipt of return parcels handed over to returns inspection. | inventory, orders | 33 |
+| [warehouse](modules/warehouse.md) | 1 | Physical work for Official Store stock: bins, put-away of received goods, pick waves and pick lists by order with bin locations and scanning, packing stations (item checklist, box and weight, carrier label through shipping, packing slip), shortage and damage reports, and receipt of return parcels handed over to returns inspection. | inventory, orders | 34 |
 
 ## Buying
 

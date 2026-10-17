@@ -33,6 +33,7 @@ Physical work for Official Store stock: bins, put-away of received goods, pick w
 | GET | `/api/admin/warehouse/bins` | Bins with their kind and assigned items | staff<br>`warehouse.view` | Page<Bin> |
 | POST | `/api/admin/warehouse/bins` | Create bins (one or a list of codes) _(audited)_ | staff<br>`warehouse.bins.manage` | `{ locationId: uuid, codes: string[], kind: enum(pick|bulk|returns|quarantine|packing|dock) }` → `Bin[]` |
 | PATCH | `/api/admin/warehouse/bins/{id}` | Change kind or deactivate a bin _(audited)_ | staff<br>`warehouse.bins.manage` | `{ kind: enum(pick|bulk|returns|quarantine|packing|dock)?, active: bool? }` → `Bin` |
+| GET | `/api/admin/warehouse/stock-items/{stockItemId}/bins` | The bins a company stock item is stored in, primary first | staff<br>`warehouse.view` | `BinAssignment[]` |
 | PUT | `/api/admin/warehouse/stock-items/{stockItemId}/bins` | Set the bins a company stock item is stored in (one primary) _(audited)_ | staff<br>`warehouse.bins.manage` | `{ bins: BinAssignmentInput[] }` → `BinAssignment[]` |
 | GET | `/api/admin/warehouse/fulfillments` | Official Store and Fulfilled by Marketly orders to pick and pack, most urgent first | staff<br>`warehouse.view` | Page<FulfillmentRow> |
 | GET | `/api/admin/warehouse/fulfillments/{id}` | One fulfillment with lines, bins, packages, hold reason and mixed-order note | staff<br>`warehouse.view` | `Fulfillment` |
@@ -86,6 +87,7 @@ Physical work for Official Store stock: bins, put-away of received goods, pick w
 | label | `string` |
 | binId | `uuid` |
 | binCode | `string` |
+| binKind | `enum(pick|bulk|returns|quarantine|packing|dock)` |
 | primary | `bool` |
 
 ### BinAssignmentInput

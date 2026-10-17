@@ -605,6 +605,16 @@ Store content managed by the Content Manager: ordered and scheduled homepage sec
 | schedule | `Schedule` |
 | draftAuthor | `Actor?` Who wrote the current draft version (null without a draft); the author cannot approve it (SAME_REVIEWER) |
 | canApprove | `bool` The draft waits for review and the caller is not its author, so the Approve button can show |
+| draftReview | `HelpArticleDraftReview?` Review of the new draft of a live article (status published or unpublished), which keeps its status while the draft is reviewed. Null when there is no draft or it was never submitted, and before the first publication (status says it then) |
+
+### HelpArticleDraftReview
+
+| Field | Type |
+|---|---|
+| state | `enum(in_review|approved|changes_requested)` in_review after submit; approved (publish puts the draft live); changes_requested (edit the draft and submit again; the note stays until then) |
+| by | `Actor` Who submitted, approved or asked for changes |
+| at | `datetime` |
+| reason | `text?` What needs to change (changes_requested) |
 
 ### ContentTable
 

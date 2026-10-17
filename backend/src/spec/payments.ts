@@ -1795,6 +1795,7 @@ export const endpoints = defineEndpoints({
     permission: "payments.payments.manage",
     scope: "staff",
     summary: "Capture an authorization manually (e.g. after a capture failure)",
+    desc: "Limits through access (approval action payments.payments.correct, amount: the amount asked, else what is still authorized and not captured): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1805,12 +1806,14 @@ export const endpoints = defineEndpoints({
       },
       groupId: z.uuid().nullish(),
       reason: z.string(),
+      reauthToken: z.string().describe("Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done").nullish(),
     }),
     response: () => PaymentDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","CAPTURE_EXCEEDS_AUTHORIZED","PROVIDER_UNAVAILABLE"],
+    errors: ["ILLEGAL_TRANSITION","CAPTURE_EXCEEDS_AUTHORIZED","PROVIDER_UNAVAILABLE","STEP_UP_REQUIRED","APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
+    approval: "Approval action payments.payments.correct (see desc)",
     events: ["payments.payment.captured"],
     screens: ["admin/order"],
     phase: 1,
@@ -1823,18 +1826,21 @@ export const endpoints = defineEndpoints({
     permission: "payments.payments.manage",
     scope: "staff",
     summary: "Void an authorization that should not be captured",
+    desc: "Limits through access (approval action payments.payments.correct, amount: what is authorized and not captured, the money the marketplace gives up): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
       reason: z.string(),
+      reauthToken: z.string().describe("Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done").nullish(),
     }),
     response: () => PaymentDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","STEP_UP_REQUIRED","APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
+    approval: "Approval action payments.payments.correct (see desc)",
     events: ["payments.payment.voided"],
     screens: ["admin/order","admin/finance"],
     phase: 1,
@@ -1847,7 +1853,7 @@ export const endpoints = defineEndpoints({
     permission: "payments.payments.manage",
     scope: "staff",
     summary: "Refund or link a payment that has no order",
-    desc: "link_to_order only when the checkout session did create the order; otherwise the money is returned.",
+    desc: "link_to_order only when the checkout session did create the order; otherwise the money is returned. link_to_order moves no money and needs no limit. refund: Limits through access (approval action payments.payments.correct, amount: the captured money not refunded yet, else the authorized amount): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -1856,12 +1862,14 @@ export const endpoints = defineEndpoints({
       action: z.enum(["refund", "link_to_order"]),
       orderId: z.uuid().nullish(),
       reason: z.string(),
+      reauthToken: z.string().describe("Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done").nullish(),
     }),
     response: () => PaymentDetail,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","VALIDATION_FAILED"],
+    errors: ["ILLEGAL_TRANSITION","VALIDATION_FAILED","STEP_UP_REQUIRED","APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
+    approval: "Approval action payments.payments.correct (see desc)",
     events: ["payments.refund.status_changed"],
     screens: ["admin/finance"],
     phase: 1,
@@ -1931,18 +1939,21 @@ export const endpoints = defineEndpoints({
     permission: "payments.refunds.manage",
     scope: "staff",
     summary: "Retry a failed refund (checks the provider first)",
+    desc: "Limits through access (approval action payments.payments.correct, amount: the refund amount): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
       reason: z.string(),
+      reauthToken: z.string().describe("Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done").nullish(),
     }),
     response: () => Refund,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION","REFUND_RETRY_LIMIT","REFUND_OUTCOME_UNKNOWN"],
+    errors: ["ILLEGAL_TRANSITION","REFUND_RETRY_LIMIT","REFUND_OUTCOME_UNKNOWN","STEP_UP_REQUIRED","APPROVAL_REQUIRED"],
     idempotent: true,
     audited: true,
+    approval: "Approval action payments.payments.correct (see desc)",
     events: ["payments.refund.status_changed"],
     screens: ["admin/finance"],
     phase: 1,
@@ -1978,18 +1989,20 @@ export const endpoints = defineEndpoints({
     permission: "payments.refunds.manage",
     scope: "staff",
     summary: "Cancel a requested or failed refund with a reason",
-    desc: "Releases the in-flight amount; returns or support must record how the customer is made whole.",
+    desc: "Releases the in-flight amount; returns or support must record how the customer is made whole. Limits through access (approval action payments.payments.correct, amount: the refund amount): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.",
     params: () =>
       z.object({
         id: z.uuid(),
       }),
     body: () => z.object({
       reason: z.string(),
+      reauthToken: z.string().describe("Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done").nullish(),
     }),
     response: () => Refund,
     status: 200,
-    errors: ["ILLEGAL_TRANSITION"],
+    errors: ["ILLEGAL_TRANSITION","STEP_UP_REQUIRED","APPROVAL_REQUIRED"],
     audited: true,
+    approval: "Approval action payments.payments.correct (see desc)",
     events: ["payments.refund.status_changed"],
     screens: ["admin/finance"],
     phase: 1,
@@ -2135,7 +2148,7 @@ export const spec = defineModuleSpec({
   chapters: [6,7,13,14],
   summary: "Charging customers through provider adapters (card, digital wallet): payment intents per checkout attempt, authorization and capture per order and seller group, declines with retry, uncertain results resolved by a status-check job, refund execution (Requested → Processing → Sent / Failed) capped at the remaining refundable amount, chargebacks and payment disputes, saved payment methods and provider webhooks.",
   dependsOn: ["orders"],
-  optionalDeps: ["access","customers","media","wallet","audit","checkout","inventory","promotions","support","trust"],
+  optionalDeps: ["access","customers","media","wallet","audit","checkout","inventory","promotions","support","trust","identity"],
   publicApi: ["listOptions","authorize","linkOrder","completeAction","getIntentStatus","voidIntent","remainingRefundable","startRefund","getRefund","methodLabel","getPaymentForOrder","listRefundsForOrder","listDisputesForOrder","listSavedMethods","listFailedPaymentsForCustomer","exportCustomerData"],
   permissions: [
     {
@@ -2171,6 +2184,13 @@ export const spec = defineModuleSpec({
       "limit": "money",
       "secondReviewer": "above-limit",
       "approvers": "Finance staff within their dispute limit; Finance Manager above it (example values)"
+    },
+    {
+      "key": "payments.payments.correct",
+      "desc": "Move money on a payment by hand: capture or void an authorization, return the money of a payment without an order, retry or cancel a refund",
+      "limit": "money",
+      "secondReviewer": "above-limit",
+      "approvers": "Finance Manager within their limit; Business Owner above it (example values)"
     }
   ],
   stateMachines: {
@@ -2367,7 +2387,7 @@ export const spec = defineModuleSpec({
       "shipping.shipment.dispatched": "Capture the group's allocation when captureMode is per_group_on_dispatch: the card is charged only the group's card share (allocation minus its store-credit share, reported as creditAmount; a group paid entirely by credit is captured with amount 0)",
       "orders.order.cancelled": "Void the authorization if nothing was captured, and return the uncaptured store-credit share to the wallet",
       "orders.item.cancelled": "Start a cancellation refund for the item's refund breakdown (origin cancellation, originId = the event's cancellationId, no Finance approval; one cancellation of several items publishes one event per item, so each item gets its own refund keyed by cancellationId + itemId and the (origin, origin_id) uniqueness does not apply to cancellations) or reduce the uncaptured authorization (partial reversal through the adapter when supported). Before capture, the item's store-credit share goes back to the wallet (wallet.creditRefund, keyed by the item) and only its card share is taken off the authorization; an authorization whose remaining card amount drops to 0 is voided (payments.payment.voided) instead of being left to lapse",
-      "access.approval.decided": "Complete or drop a dispute concession waiting for approval"
+      "access.approval.decided": "Complete or drop a dispute concession waiting for approval; carry out an approved manual money action (payments.payments.correct: capture, void, orphan refund, refund retry or cancel) with what was asked, as the approver"
     },
   },
   jobs: {

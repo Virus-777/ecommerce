@@ -5,7 +5,7 @@
 Charging customers through provider adapters (card, digital wallet): payment intents per checkout attempt, authorization and capture per order and seller group, declines with retry, uncertain results resolved by a status-check job, refund execution (Requested → Processing → Sent / Failed) capped at the remaining refundable amount, chargebacks and payment disputes, saved payment methods and provider webhooks.
 
 - **Group:** Buying · **Launch phase:** 1 · **Plan chapters:** 6, 7, 13, 14
-- **Depends on:** [orders](../orders/README.md) · **Optional:** [access](../access/README.md), [customers](../customers/README.md), [media](../media/README.md), [wallet](../wallet/README.md), [audit](../audit/README.md), [checkout](../checkout/README.md), [inventory](../inventory/README.md), [promotions](../promotions/README.md), [support](../support/README.md), [trust](../trust/README.md)
+- **Depends on:** [orders](../orders/README.md) · **Optional:** [access](../access/README.md), [customers](../customers/README.md), [media](../media/README.md), [wallet](../wallet/README.md), [audit](../audit/README.md), [checkout](../checkout/README.md), [inventory](../inventory/README.md), [promotions](../promotions/README.md), [support](../support/README.md), [trust](../trust/README.md), [identity](../identity/README.md)
 - **Required by:** [checkout](../checkout/README.md), [finance](../finance/README.md), [returns](../returns/README.md), [wallet](../wallet/README.md)
 
 ## Owns
@@ -52,15 +52,15 @@ Charging customers through provider adapters (card, digital wallet): payment int
 | GET | `/api/admin/payments/orders/{orderId}/summary` | Payment panel of an order (method, authorized, captured, processor ref, refunded, attempts) | staff<br>`payments.payments.view` | `OrderPaymentSummary` |
 | GET | `/api/admin/payments/orders/{orderId}/refundable` | Remaining refundable amount per item (the cap shown in refund dialogs) | staff<br>`payments.payments.view` | `RefundableSummary` |
 | POST | `/api/admin/payments/payments/{id}/check` | Ask the provider for the current result | staff<br>`payments.payments.manage` | `PaymentDetail` |
-| POST | `/api/admin/payments/payments/{id}/capture` | Capture an authorization manually (e.g. after a capture failure) _(idempotent, audited)_ | staff<br>`payments.payments.manage` | `{ amount: Money?, groupId: uuid?, reason: text }` → `PaymentDetail` |
-| POST | `/api/admin/payments/payments/{id}/void` | Void an authorization that should not be captured _(idempotent, audited)_ | staff<br>`payments.payments.manage` | `{ reason: text }` → `PaymentDetail` |
-| POST | `/api/admin/payments/payments/{id}/resolve-orphan` | Refund or link a payment that has no order _(idempotent, audited)_ | staff<br>`payments.payments.manage` | `{ action: enum(refund|link_to_order), orderId: uuid?, reason: text }` → `PaymentDetail` |
+| POST | `/api/admin/payments/payments/{id}/capture` | Capture an authorization manually (e.g. after a capture failure) _(idempotent, audited)_ | staff<br>`payments.payments.manage` | `{ amount: Money?, groupId: uuid?, reason: text, reauthToken: string? }` → `PaymentDetail` |
+| POST | `/api/admin/payments/payments/{id}/void` | Void an authorization that should not be captured _(idempotent, audited)_ | staff<br>`payments.payments.manage` | `{ reason: text, reauthToken: string? }` → `PaymentDetail` |
+| POST | `/api/admin/payments/payments/{id}/resolve-orphan` | Refund or link a payment that has no order _(idempotent, audited)_ | staff<br>`payments.payments.manage` | `{ action: enum(refund|link_to_order), orderId: uuid?, reason: text, reauthToken: string? }` → `PaymentDetail` |
 | GET | `/api/admin/payments/refunds` | Refund executions, e.g. failing refunds | staff<br>`payments.refunds.view` | Page<Refund> |
 | GET | `/api/admin/payments/refunds/{id}` | One refund with items, attempts and history | staff<br>`payments.refunds.view` | `Refund` |
 | POST | `/api/admin/payments/refunds/{id}/check` | Ask the provider for the refund's outcome | staff<br>`payments.refunds.manage` | `Refund` |
-| POST | `/api/admin/payments/refunds/{id}/retry` | Retry a failed refund (checks the provider first) _(idempotent, audited)_ | staff<br>`payments.refunds.manage` | `{ reason: text }` → `Refund` |
+| POST | `/api/admin/payments/refunds/{id}/retry` | Retry a failed refund (checks the provider first) _(idempotent, audited)_ | staff<br>`payments.refunds.manage` | `{ reason: text, reauthToken: string? }` → `Refund` |
 | POST | `/api/admin/payments/refunds/{id}/request-destination` | Ask the customer for a new payment method for a failed refund _(audited)_ | staff<br>`payments.refunds.manage` | `{ message: text? }` → `Refund` |
-| POST | `/api/admin/payments/refunds/{id}/cancel` | Cancel a requested or failed refund with a reason _(audited)_ | staff<br>`payments.refunds.manage` | `{ reason: text }` → `Refund` |
+| POST | `/api/admin/payments/refunds/{id}/cancel` | Cancel a requested or failed refund with a reason _(audited)_ | staff<br>`payments.refunds.manage` | `{ reason: text, reauthToken: string? }` → `Refund` |
 | GET | `/api/admin/payments/disputes` | Chargebacks and payment disputes, evidence due first | staff<br>`payments.disputes.manage` | Page<Dispute> |
 | GET | `/api/admin/payments/disputes/{id}` | One dispute with order, evidence and seller balance effect | staff<br>`payments.disputes.manage` | `Dispute` |
 | POST | `/api/admin/payments/disputes/{id}/assign` | Set the owner _(audited)_ | staff<br>`payments.disputes.manage` | `{ ownerStaffId: uuid }` → `Dispute` |
@@ -795,7 +795,7 @@ Indexes: `unique (kind, day)`
 | `shipping.shipment.dispatched` | shipping | Capture the group's allocation when captureMode is per_group_on_dispatch: the card is charged only the group's card share (allocation minus its store-credit share, reported as creditAmount; a group paid entirely by credit is captured with amount 0) |
 | `orders.order.cancelled` | orders | Void the authorization if nothing was captured, and return the uncaptured store-credit share to the wallet |
 | `orders.item.cancelled` | orders | Start a cancellation refund for the item's refund breakdown (origin cancellation, originId = the event's cancellationId, no Finance approval; one cancellation of several items publishes one event per item, so each item gets its own refund keyed by cancellationId + itemId and the (origin, origin_id) uniqueness does not apply to cancellations) or reduce the uncaptured authorization (partial reversal through the adapter when supported). Before capture, the item's store-credit share goes back to the wallet (wallet.creditRefund, keyed by the item) and only its card share is taken off the authorization; an authorization whose remaining card amount drops to 0 is voided (payments.payment.voided) instead of being left to lapse |
-| `access.approval.decided` | access | Complete or drop a dispute concession waiting for approval |
+| `access.approval.decided` | access | Complete or drop a dispute concession waiting for approval; carry out an approved manual money action (payments.payments.correct: capture, void, orphan refund, refund retry or cancel) with what was asked, as the approver |
 
 ## In-process API (for other modules)
 
@@ -835,6 +835,7 @@ Checked through the access module (limits per role, second reviewer).
 | Action | Limit | Second reviewer | Approvers | Meaning |
 |---|---|---|---|---|
 | `payments.disputes.accept` | money | above-limit | Finance staff within their dispute limit; Finance Manager above it (example values) | Accept a chargeback or payment dispute instead of contesting it |
+| `payments.payments.correct` | money | above-limit | Finance Manager within their limit; Business Owner above it (example values) | Move money on a payment by hand: capture or void an authorization, return the money of a payment without an order, retry or cancel a refund |
 
 ## Error codes
 

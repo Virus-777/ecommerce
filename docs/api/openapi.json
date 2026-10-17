@@ -26438,7 +26438,7 @@
           "Admin API · Content"
         ],
         "summary": "Submit, approve, request changes, schedule, publish, unpublish or remove an article",
-        "description": "One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt.\n\n**Permission:** `content.help.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.article.published`, `content.page.removed`\n\n**Screens:** admin/help-content",
+        "description": "One action endpoint for the Content publication state machine on articles. remove needs kind and reason; schedule needs publishAt; requestChanges needs reason. A live article (published or unpublished) edited with PATCH keeps its status while the new draft is reviewed: submit, approve and requestChanges then act on HelpArticleAdmin.draftReview (in_review → approved or changes_requested; submit again after changes_requested), and publish puts the approved draft live (draftReview becomes null). A published article is not scheduled (it would be offline until then): publish its draft, or unpublish it first.\n\n**Permission:** `content.help.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `content.article.published`, `content.page.removed`\n\n**Screens:** admin/help-content",
         "security": [
           {
             "bearer": []
@@ -55041,7 +55041,7 @@
           "Admin API · Media"
         ],
         "summary": "Start a staff upload (Official Store products, content, ad creatives, inspection photos, evidence)",
-        "description": "Staff uploads for content, ads and Official Store are owned by the platform; evidence uploads are owned by the staff member.\n\n**Permission:** `media.assets.manage`\n\n**Screens:** admin/official, admin/content, admin/help-content, admin/ad-assets, admin/case, ops/return-inspection, ops/receiving",
+        "description": "ownerKind platform (what the Admin Center sends for every upload): the file belongs to the platform and the upload records the staff member who started it. Modules that take a staff member's file (return inspection, warehouse damage reports and return parcels, case and trust evidence) accept the staff member's own files and platform files that staff member uploaded, never another staff member's. ownerKind staff: the file belongs to the staff member. Without ownerKind, evidence purposes (return_evidence, case_evidence, inspection_photo, verification_document, message_attachment, other_document) default to staff and the rest to platform. Needs media.uploads.create only: editing and deleting platform files stay with media.assets.manage.\n\n**Permission:** `media.uploads.create`\n\n**Screens:** admin/official, admin/content, admin/help-content, admin/ad-assets, admin/case, ops/return-inspection, ops/receiving",
         "security": [
           {
             "bearer": []
@@ -55140,7 +55140,7 @@
         "x-module": "media",
         "x-area": "admin",
         "x-auth": "staff",
-        "x-permission": "media.assets.manage",
+        "x-permission": "media.uploads.create",
         "x-screens": [
           "admin/official",
           "admin/content",
@@ -55160,7 +55160,7 @@
           "Admin API · Media"
         ],
         "summary": "Confirm a staff upload",
-        "description": "Only the staff member who started the upload may complete it; anyone else gets NOT_FOUND (the response carries the asset, so completing someone else's upload would leak a private file).\n\n**Permission:** `media.assets.manage`\n\n**Screens:** admin/official, admin/content, admin/ad-assets",
+        "description": "Only the staff member who started the upload may complete it; anyone else gets NOT_FOUND (the response carries the asset, so completing someone else's upload would leak a private file).\n\n**Permission:** `media.uploads.create`\n\n**Screens:** admin/official, admin/content, admin/ad-assets",
         "security": [
           {
             "bearer": []
@@ -55262,7 +55262,7 @@
         "x-module": "media",
         "x-area": "admin",
         "x-auth": "staff",
-        "x-permission": "media.assets.manage",
+        "x-permission": "media.uploads.create",
         "x-screens": [
           "admin/official",
           "admin/content",
@@ -55278,7 +55278,7 @@
           "Admin API · Media"
         ],
         "summary": "Send the file bytes of a staff upload",
-        "description": "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL. Only the staff member who started the upload may send its bytes (NOT_FOUND otherwise).\n\n**Permission:** `media.assets.manage`",
+        "description": "The ticket URL when storage takes uploads through the API (the server's disk; memory in tests). The body is the raw file (any content type), streamed to storage and never held in memory: at most the ticket's maxBytes, counted while it streams (a larger Content-Length is refused before reading; nothing is kept when the limit is passed). The write is atomic; sending again before complete replaces an earlier attempt. Answers DIRECT_UPLOAD_ONLY (409) when storage takes the bytes directly at its own ticket URL. Only the staff member who started the upload may send its bytes (NOT_FOUND otherwise).\n\n**Permission:** `media.uploads.create`",
         "security": [
           {
             "bearer": []
@@ -55385,7 +55385,7 @@
         "x-module": "media",
         "x-area": "admin",
         "x-auth": "staff",
-        "x-permission": "media.assets.manage",
+        "x-permission": "media.uploads.create",
         "x-phase": 1
       }
     },
@@ -77334,7 +77334,7 @@
           "Admin API · Payments"
         ],
         "summary": "Capture an authorization manually (e.g. after a capture failure)",
-        "description": "**Permission:** `payments.payments.manage`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.payment.captured`\n\n**Screens:** admin/order",
+        "description": "Limits through access (approval action payments.payments.correct, amount: the amount asked, else what is still authorized and not captured): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.\n\n**Permission:** `payments.payments.manage`\n\n**Approval:** Approval action payments.payments.correct (see desc)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.payment.captured`\n\n**Screens:** admin/order",
         "security": [
           {
             "bearer": []
@@ -77386,6 +77386,13 @@
                   },
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done"
                   }
                 },
                 "required": [
@@ -77427,7 +77434,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -77447,7 +77454,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
             "content": {
               "application/json": {
                 "schema": {
@@ -77499,7 +77506,7 @@
           "Admin API · Payments"
         ],
         "summary": "Void an authorization that should not be captured",
-        "description": "**Permission:** `payments.payments.manage`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.payment.voided`\n\n**Screens:** admin/order, admin/finance",
+        "description": "Limits through access (approval action payments.payments.correct, amount: what is authorized and not captured, the money the marketplace gives up): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.\n\n**Permission:** `payments.payments.manage`\n\n**Approval:** Approval action payments.payments.correct (see desc)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.payment.voided`\n\n**Screens:** admin/order, admin/finance",
         "security": [
           {
             "bearer": []
@@ -77534,6 +77541,13 @@
                 "properties": {
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done"
                   }
                 },
                 "required": [
@@ -77575,7 +77589,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -77595,7 +77609,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
             "content": {
               "application/json": {
                 "schema": {
@@ -77628,7 +77642,7 @@
           "Admin API · Payments"
         ],
         "summary": "Refund or link a payment that has no order",
-        "description": "link_to_order only when the checkout session did create the order; otherwise the money is returned.\n\n**Permission:** `payments.payments.manage`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.refund.status_changed`\n\n**Screens:** admin/finance",
+        "description": "link_to_order only when the checkout session did create the order; otherwise the money is returned. link_to_order moves no money and needs no limit. refund: Limits through access (approval action payments.payments.correct, amount: the captured money not refunded yet, else the authorized amount): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.\n\n**Permission:** `payments.payments.manage`\n\n**Approval:** Approval action payments.payments.correct (see desc)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.refund.status_changed`\n\n**Screens:** admin/finance",
         "security": [
           {
             "bearer": []
@@ -77677,6 +77691,13 @@
                   },
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done"
                   }
                 },
                 "required": [
@@ -77719,7 +77740,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -77739,7 +77760,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
             "content": {
               "application/json": {
                 "schema": {
@@ -78157,7 +78178,7 @@
           "Admin API · Payments"
         ],
         "summary": "Retry a failed refund (checks the provider first)",
-        "description": "**Permission:** `payments.refunds.manage`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.refund.status_changed`\n\n**Screens:** admin/finance",
+        "description": "Limits through access (approval action payments.payments.correct, amount: the refund amount): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.\n\n**Permission:** `payments.refunds.manage`\n\n**Approval:** Approval action payments.payments.correct (see desc)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.refund.status_changed`\n\n**Screens:** admin/finance",
         "security": [
           {
             "bearer": []
@@ -78192,6 +78213,13 @@
                 "properties": {
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done"
                   }
                 },
                 "required": [
@@ -78233,7 +78261,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -78253,7 +78281,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nREFUND_RETRY_LIMIT: The refund reached its maximum attempts; ask the customer for a new destination.\nREFUND_OUTCOME_UNKNOWN: The provider has not confirmed the earlier attempt; check status before retrying.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nREFUND_RETRY_LIMIT: The refund reached its maximum attempts; ask the customer for a new destination.\nREFUND_OUTCOME_UNKNOWN: The provider has not confirmed the earlier attempt; check status before retrying.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
             "content": {
               "application/json": {
                 "schema": {
@@ -78403,7 +78431,7 @@
           "Admin API · Payments"
         ],
         "summary": "Cancel a requested or failed refund with a reason",
-        "description": "Releases the in-flight amount; returns or support must record how the customer is made whole.\n\n**Permission:** `payments.refunds.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.refund.status_changed`\n\n**Screens:** admin/finance",
+        "description": "Releases the in-flight amount; returns or support must record how the customer is made whole. Limits through access (approval action payments.payments.correct, amount: the refund amount): within the caller's limit it is done now, and above access stepUpAbove only with reauthToken (STEP_UP_REQUIRED otherwise); above the limit an approval request goes to the approvers and the call answers 409 APPROVAL_REQUIRED (details.approvalRequestId, approval); payments carries the action out by itself once that request is approved (no second call); no authority at all: FORBIDDEN.\n\n**Permission:** `payments.refunds.manage`\n\n**Approval:** Approval action payments.payments.correct (see desc)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `payments.refund.status_changed`\n\n**Screens:** admin/finance",
         "security": [
           {
             "bearer": []
@@ -78429,6 +78457,13 @@
                 "properties": {
                   "reason": {
                     "type": "string"
+                  },
+                  "reauthToken": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password); needed when the amount is above access stepUpAbove, otherwise STEP_UP_REQUIRED and nothing is done"
                   }
                 },
                 "required": [
@@ -78470,7 +78505,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -78490,7 +78525,7 @@
             }
           },
           "409": {
-            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.",
+            "description": "ILLEGAL_TRANSITION: The status does not allow this action (e.g. approving a rejected product). details.from, details.event.\nAPPROVAL_REQUIRED: Above the caller's limit or needs a second reviewer, and nothing was saved (the action cannot be recorded until it is approved). details.approvalRequestId tracks it. When the module saves the record pending approval it answers its normal success status instead, with `approval` (ApprovalInfo) in the body (FORMAT.md, Approval responses).",
             "content": {
               "application/json": {
                 "schema": {
@@ -97150,7 +97185,7 @@
           "Admin API · Returns"
         ],
         "summary": "Propose refund-without-return (controlled exception)",
-        "description": "Records the reason and details (visible to Finance and in the action history), sets the stock outcome to written off, and sends the refund request to Finance approval.\n\n**Permission:** `returns.exceptions.propose`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.exception.proposed`, `returns.refund.requested`\n\n**Screens:** admin/returns",
+        "description": "Records the reason and details (visible to Finance and in the action history) and sets the stock outcome to written off. Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments.\n\n**Permission:** `returns.exceptions.propose`\n\n**Approval:** Approval action returns.refunds.approve (see desc)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.exception.proposed`, `returns.refund.requested`\n\n**Screens:** admin/returns",
         "security": [
           {
             "bearer": []
@@ -97218,7 +97253,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -97968,7 +98003,7 @@
           "Admin API · Returns"
         ],
         "summary": "Decide the remedy for an Official Store or platform-handled return",
-        "description": "Refunds go to Finance as an under-review refund request; replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.\n\n**Permission:** `returns.requests.manage`\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`, `returns.replacement.created`\n\n**Screens:** admin/returns, ops/return-inspection",
+        "description": "Refunds: Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments. Replacements and exchanges allocate stock (inventory.allocateForOrder, no expiry) and create a replacement shipment. Exchanges: same product, same seller, same price, else EXCHANGE_NOT_ALLOWED.\n\n**Permission:** `returns.requests.manage`\n\n**Approval:** Approval action returns.refunds.approve (see desc)\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`, `returns.replacement.created`\n\n**Screens:** admin/returns, ops/return-inspection",
         "security": [
           {
             "bearer": []
@@ -98036,7 +98071,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -98218,7 +98253,7 @@
           "Admin API · Returns"
         ],
         "summary": "Issue a refund from the order page (exception refund request)",
-        "description": "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception that goes through Finance approval like any other; within the caller's limit it is approved in the same call and handed to payments. Optional trustReportId links it to a trust recommendation. Above the caller's limit it is saved under review and the response (201) carries `approval` (FORMAT.md, Approval responses). VALIDATION_FAILED also when the items belong to more than one seller group; NOT_FOUND for an unknown order; REMEDY_NOT_AVAILABLE for store credit while wallet is off or for a guest order.\n\n**Permission:** `returns.exceptions.propose`\n\n**Approval:** Approval action returns.refunds.approve. Within the caller's refund limit it is approved at once; above it a Finance member whose limit covers it, and a second reviewer above that limit's threshold, approve through access\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`, `returns.refund.approved`\n\n**Screens:** admin/order",
+        "description": "Admin 'Issue refund' dialog on admin/order. Items and amounts of one seller group, reason and funding; the dialog shows the cap from payments (GET /api/admin/payments/orders/{orderId}/refundable, in-process payments.remainingRefundable) and amounts above it return REFUND_EXCEEDS_REFUNDABLE. Creates a refund request with source exception. Staff refunds all take one decision path (approval action returns.refunds.approve, access): within the caller's refund limit the refund is approved in the same call and handed to payments, and above access stepUpAbove that needs reauthToken (STEP_UP_REQUIRED otherwise, nothing saved); above the limit, or when the caller has no refund authority (e.g. warehouse staff), it is saved under review with an access approval request routed to the refund approvers (Finance Inbox), and the refund request in the response carries `approval` (FORMAT.md, Approval responses). Once that request is approved the refund is approved and handed to payments. The response is 201 either way. Optional trustReportId links it to a trust recommendation. VALIDATION_FAILED also when the items belong to more than one seller group; NOT_FOUND for an unknown order; REMEDY_NOT_AVAILABLE for store credit while wallet is off or for a guest order.\n\n**Permission:** `returns.exceptions.propose`\n\n**Approval:** Approval action returns.refunds.approve. Within the caller's refund limit it is approved at once; above it a Finance member whose limit covers it, and a second reviewer above that limit's threshold, approve through access\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`, `returns.refund.approved`\n\n**Screens:** admin/order",
         "security": [
           {
             "bearer": []
@@ -98277,7 +98312,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -98338,13 +98373,25 @@
           "Admin API · Returns"
         ],
         "summary": "Refund approval queue for Finance",
-        "description": "**Permission:** `returns.requests.view`\n\n**Screens:** admin/returns, admin/order, admin/finance",
+        "description": "Finance's Refunds to approve list: awaitingApproval=true (newest first). Each row has orderRef, returnRef (null without a return), breakdown.total, reason and reasonCode, source, proposedBy, createdAt, approval (the access approval request, when there is one) and canApprove for the caller.\n\n**Permission:** `returns.requests.view`\n\n**Screens:** admin/returns, admin/order, admin/finance",
         "security": [
           {
             "bearer": []
           }
         ],
         "parameters": [
+          {
+            "name": "awaitingApproval",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Only requests waiting for a refund approver: requested or under review, without the seller's own refunds (the seller approves those)"
+            }
+          },
           {
             "name": "status",
             "in": "query",
@@ -98623,7 +98670,7 @@
           "Admin API · Returns"
         ],
         "summary": "Finance approves the refund and hands it to payments",
-        "description": "Approved is not sent: the customer sees Approved, then Processing, then Sent when payments confirms.\n\n**Permission:** `returns.refunds.approve`\n\n**Approval:** Approval action returns.refunds.approve. Above the approver's refund limit (e.g. $2,000) a second Finance reviewer or the Business Owner approves through access\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.approved`\n\n**Screens:** admin/returns, admin/case, ops/return-inspection",
+        "description": "Approved is not sent: the customer sees Approved, then Processing, then Sent when payments confirms. With an open access approval request the call decides it through access (its rules: not the requester, a covering limit, reauthToken above stepUpAbove). Otherwise the caller's refund limit decides: within it approved now (reauthToken above stepUpAbove, else STEP_UP_REQUIRED); above it saved with an approval request and answered 200 with `approval`; no refund authority at all: FORBIDDEN.\n\n**Permission:** `returns.refunds.approve`\n\n**Approval:** Approval action returns.refunds.approve. Above the approver's refund limit (e.g. $2,000) a second Finance reviewer or the Business Owner approves through access\n\n**Idempotent:** send an Idempotency-Key.\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.approved`\n\n**Screens:** admin/finance, admin/returns, admin/case, ops/return-inspection",
         "security": [
           {
             "bearer": []
@@ -98751,6 +98798,7 @@
         "x-auth": "staff",
         "x-permission": "returns.refunds.approve",
         "x-screens": [
+          "admin/finance",
           "admin/returns",
           "admin/case",
           "ops/return-inspection"
@@ -98770,7 +98818,7 @@
           "Admin API · Returns"
         ],
         "summary": "Send a refund request back with a reason",
-        "description": "**Permission:** `returns.refunds.approve`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.declined`\n\n**Screens:** admin/returns",
+        "description": "**Permission:** `returns.refunds.approve`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.declined`\n\n**Screens:** admin/finance, admin/returns",
         "security": [
           {
             "bearer": []
@@ -98872,6 +98920,7 @@
         "x-auth": "staff",
         "x-permission": "returns.refunds.approve",
         "x-screens": [
+          "admin/finance",
           "admin/returns"
         ],
         "x-events": [
@@ -98888,7 +98937,7 @@
           "Admin API · Returns"
         ],
         "summary": "Change a declined refund and resubmit",
-        "description": "**Permission:** `returns.requests.manage`\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`\n\n**Screens:** admin/returns",
+        "description": "The resubmission takes the same decision path as a new staff refund: within the reviser's refund limit approved now (reauthToken in the body above stepUpAbove, else STEP_UP_REQUIRED and nothing changes); otherwise under review with an access approval request for Finance (`approval` in the response).\n\n**Permission:** `returns.requests.manage`\n\n**Approval:** Approval action returns.refunds.approve (see desc)\n\n**Audited:** recorded in the action history.\n\n**Publishes:** `returns.refund.requested`\n\n**Screens:** admin/returns",
         "security": [
           {
             "bearer": []
@@ -98947,7 +98996,7 @@
             }
           },
           "403": {
-            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.\nSTEP_UP_REQUIRED: A fresh proof is needed: a re-auth token for this purpose in the body (reauthToken, from the app's re-auth endpoint). details.kind (reauth), details.purpose.",
             "content": {
               "application/json": {
                 "schema": {
@@ -140100,6 +140149,93 @@
       }
     },
     "/api/admin/warehouse/stock-items/{stockItemId}/bins": {
+      "get": {
+        "operationId": "warehouse.listStockItemBins",
+        "tags": [
+          "Admin API · Warehouse"
+        ],
+        "summary": "The bins a company stock item is stored in, primary first",
+        "description": "What PUT /stock-items/{stockItemId}/bins replaces: read it first so saving keeps the other bins. Quantities are not kept per bin (inventory counts the location). An item without bins answers an empty list.\n\n**Permission:** `warehouse.view`\n\n**Screens:** ops/inventory",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "stockItemId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/warehouse.BinAssignment"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED: Fields are missing or invalid. details.issues lists each field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED: No token, or the token is invalid, expired or revoked (details.reason token_*), or this session can't use the endpoint (details.reason, e.g. sign_in_required, session_idle). Refresh only when details.reason starts with token_.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "WRONG_AUDIENCE: The token is for another app (store, Seller Center or Admin Center).\nFORBIDDEN: Signed in, but the role or seller permission does not allow this. details.permission names it; other refusals give details.reason.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND: The record does not exist or is not visible to this caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-module": "warehouse",
+        "x-area": "admin",
+        "x-auth": "staff",
+        "x-permission": "warehouse.view",
+        "x-screens": [
+          "ops/inventory"
+        ],
+        "x-phase": 1
+      },
       "put": {
         "operationId": "warehouse.setStockItemBins",
         "tags": [
@@ -163069,6 +163205,17 @@
           "canApprove": {
             "type": "boolean",
             "description": "The draft waits for review and the caller is not its author, so the Approve button can show"
+          },
+          "draftReview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/content.HelpArticleDraftReview"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Review of the new draft of a live article (status published or unpublished), which keeps its status while the draft is reviewed. Null when there is no draft or it was never submitted, and before the first publication (status says it then)"
           }
         },
         "required": [
@@ -163078,6 +163225,40 @@
           "feedbackCount",
           "schedule",
           "canApprove"
+        ]
+      },
+      "content.HelpArticleDraftReview": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "in_review",
+              "approved",
+              "changes_requested"
+            ],
+            "description": "in_review after submit; approved (publish puts the draft live); changes_requested (edit the draft and submit again; the note stays until then)"
+          },
+          "by": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "Who submitted, approved or asked for changes"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What needs to change (changes_requested)"
+          }
+        },
+        "required": [
+          "state",
+          "by",
+          "at"
         ]
       },
       "content.ContentTable": {
@@ -196068,6 +196249,13 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "reauthToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Staff only (admin remedy and revise; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved"
           }
         },
         "required": [
@@ -196093,6 +196281,13 @@
           },
           "remedy": {
             "$ref": "#/components/schemas/returns.RemedyInput"
+          },
+          "reauthToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Staff only (admin approve-without-return; sellers leave it out): re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved"
           }
         },
         "required": [
@@ -196193,6 +196388,13 @@
               "string",
               "null"
             ]
+          },
+          "reauthToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Order-page refund: re-auth token (purpose approval, from POST /api/admin/identity/reauth with the password). Needed when the refund is within the caller's refund limit and above access stepUpAbove (it is approved in the same call), otherwise STEP_UP_REQUIRED and nothing is saved"
           }
         },
         "required": [
@@ -196411,6 +196613,13 @@
                 "type": "null"
               }
             ]
+          },
+          "canApprove": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Admin GET /refunds and GET /refunds/{id}: true when the caller could approve it now with POST /refunds/{id}/approve (requested or under review, the returns.refunds.approve permission, a refund limit covering the amount, and not the person who asked for its approval). Above stepUpAbove that call still needs reauthToken. Null in other responses"
           },
           "proposedBy": {
             "$ref": "#/components/schemas/Actor"
@@ -217619,6 +217828,17 @@
           "binCode": {
             "type": "string"
           },
+          "binKind": {
+            "type": "string",
+            "enum": [
+              "pick",
+              "bulk",
+              "returns",
+              "quarantine",
+              "packing",
+              "dock"
+            ]
+          },
           "primary": {
             "type": "boolean"
           }
@@ -217629,6 +217849,7 @@
           "label",
           "binId",
           "binCode",
+          "binKind",
           "primary"
         ]
       },
