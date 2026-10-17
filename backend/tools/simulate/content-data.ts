@@ -201,6 +201,26 @@ export const HELP_ARTICLES: HelpArticleSeed[] = [
     policyKeys: ['seller_rules'],
   },
   {
+    key: 'how-reviews-work',
+    category: 'shopping',
+    title: 'How reviews and ratings work',
+    summary: 'Who can review, what we check, and when a review is removed.',
+    body: `<p>Product reviews come from customers who bought the item on Marketly and received it. Those reviews carry the <b>Verified Purchase</b> label. Seller feedback (delivery, packing, service) is kept separate from product reviews, so a late package doesn't lower a product's rating.</p>
+<h2>Writing a review</h2><ul><li>Open the order and choose <b>Write a review</b> next to the delivered item.</li><li>Give a rating, a headline and your experience. Photos are welcome.</li><li>You can edit or delete your review later from Account › Reviews.</li></ul>
+<h2>What we remove</h2><p>We remove reviews that break the review rules: personal information, offensive language, reviews about something other than the product, and reviews paid for or written by someone with a stake in the product. Honest negative reviews are never removed.</p>
+<h2>Reporting and appeals</h2><p>Choose <b>Report</b> on any review, answer or seller response you think breaks the rules. The reporter and the author both see the outcome, and the author can appeal a decision; a different moderator reviews the appeal.</p>`,
+  },
+  {
+    key: 'why-you-see-ads',
+    category: 'shopping',
+    title: 'Why you see ads and sponsored products',
+    summary: 'How ads are labelled, where they never appear, and what they use.',
+    body: `<p>Some places in the store show ads: banners, sponsored products and sponsored stores. Every ad carries an <b>Ad</b> or <b>Sponsored</b> label, and a promoted offer always names the seller behind it. Paying for a position never changes the price you pay.</p>
+<h2>Where ads never appear</h2><p>Ads never cover checkout, payment results, order tracking or returns. Only one overlay is shown at a time, always with a visible close control.</p>
+<h2>What ads are based on</h2><p>On the Marketly website, ads are chosen from the page you are on (for example the category or your search), not from a personal profile.</p>
+<p>Search results are ranked by relevance first. Choose <b>How results are ranked</b> under any search for the details.</p>`,
+  },
+  {
     key: 'cancel-before-ship',
     category: 'cancellations',
     title: 'Cancel items before they ship',
