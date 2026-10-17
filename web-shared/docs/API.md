@@ -6,9 +6,8 @@ The web apps talk to the backend (`backend/`, API docs in `docs/api/`) through `
 
 ```
 # backend (separate checkout, e.g. E:/Work/Ecommerce-api/backend): MONGO_DATA_DIR, JOBS_ENABLED=true, RATE_LIMITS=false
-npm run dev                                   # http://127.0.0.1:4000
+npm run dev                                   # http://127.0.0.1:4000 (sample data: npm run simulate in the backend)
 # web (this repo)
-npm run seed                                  # fills the backend with sample data through its API (tools/seed/README.md)
 npm run dev:store | dev:seller | dev:admin    # the dev servers proxy /api, /graphql, /files to :4000 (MARKETLY_API_URL)
 npm run gen:api -- <backend docs/api dir>     # after the API changes: regenerates src/api/openapi.d.ts + GraphQL operations
 ```

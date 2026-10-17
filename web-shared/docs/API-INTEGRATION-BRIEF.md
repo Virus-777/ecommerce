@@ -205,6 +205,8 @@ Clears only the store cookie. Signing out with an unknown or already-ended token
 
 ## 2. Dev tokens and seeding
 
+> **2026-10-17:** the web seed (`web-shared/tools/seed`) has been removed. The apps are wired to the backend, and sample data comes from the backend's own simulator (`npm run simulate` in the backend). This section is kept as history.
+
 **Bottom line.** No seed tool exists in `Ecommerce-api`. `backend/src/testing/flows.ts` is the reference for the real setup sequences, but it is **not HTTP-only**: it runs in-process (`app.inject`, fake clock), drains events after every call (`flows.ts:102-108`), reads invitation links and email codes from in-process events (`:99-101,130,194`), reads the seller invitation code from the service (`:222-223`), runs `media.process` directly (`:212`) and publishes `finance.destination.verified` itself (`:377`, with a stale "finance is not built" comment). A seed script **outside** the backend can still do everything by combining real HTTP flows with self-minted dev tokens and a few values it computes itself (2.4). Items marked **[unverified]** were not traced in code.
 
 ### 2.1 Server settings for a seed run
@@ -620,6 +622,8 @@ Goal: a working **browse → product → cart → checkout → order → account
 Home comes late on purpose: it depends on almost every module being seeded (content, promotions, search, sellers) and its persisted query fails at launch. Until step 9, `/` can render category shortcuts and a `search/products?sort=newest` row.
 
 ### 5.2 Minimal seed for steps 1–6 (in order)
+
+> **2026-10-17:** the web seed (`web-shared/tools/seed`) has been removed. The apps are wired to the backend, and sample data comes from the backend's own simulator (`npm run simulate` in the backend). This section is kept as history.
 
 1. Server: `MONGO_DATA_DIR`, `JOBS_ENABLED=true`, `RATE_LIMITS=false`, dev tokens on (§2.1).
 2. `bootstrap-owner` (server stopped) → start server → accept both invitations (TOTP) → keep `ownerId`, `deputyId` (§2.4).

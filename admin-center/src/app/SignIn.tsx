@@ -119,7 +119,6 @@ export function SignIn({ startError, notice }: { startError?: unknown; notice?: 
             {busy ? 'Signing in…' : 'Sign in'}
           </Button>
           <p className="xs muted">Forgot your password? Ask your administrator for a reset link.</p>
-          {import.meta.env.DEV && <p className="xs muted">Development: seeded staff passwords are in web-shared/.seed/state.json.</p>}
         </form>
       )}
     </AuthFrame>

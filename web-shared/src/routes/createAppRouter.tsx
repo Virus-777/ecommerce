@@ -4,7 +4,6 @@ import { Button, EmptyState } from '../ui';
 import { APP_NAMES, CURRENT_APP } from './apps';
 import { SCREENS, type ScreenId } from './catalogue';
 import DesignIndex from './DesignIndex';
-import type { DesignCheckOptions } from './designSamples';
 
 const DesignCheck = lazy(() => import('./DesignCheck'));
 
@@ -41,15 +40,13 @@ interface AppRouterOptions {
   wrap?: (children: ReactNode) => ReactNode;
   /** Routes outside the screen catalogue (e.g. targets of emailed links that redirect to a screen). */
   extraRoutes?: RouteObject[];
-  /** Development only: how /design/check switches this app's session per sample (see DesignCheck). */
-  designCheck?: DesignCheckOptions;
 }
 
 /**
  * The router every web app uses: one route per screen of this app (catalogue paths), /design (screen
  * index), /design/check (dev only: compares routes with the design export) and a catch-all not-found page.
  */
-export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, extraRoutes = [], designCheck }: AppRouterOptions) {
+export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, extraRoutes = [] }: AppRouterOptions) {
   function Root() {
     // A page rendered: the one-time reload for stale page code (RouteError) may happen again later.
     useEffect(() => {
@@ -125,7 +122,7 @@ export function createAppRouter({ pages, notFound: NotFound, wrap = (c) => c, ex
         ...screenRoutes,
         ...extraRoutes,
         { path: '/design', element: <DesignIndex /> },
-        ...(import.meta.env.DEV ? [{ path: '/design/check', element: <DesignCheck {...designCheck} /> }] : []),
+        ...(import.meta.env.DEV ? [{ path: '/design/check', element: <DesignCheck /> }] : []),
         { path: '*', element: <NotFound /> },
       ],
     },

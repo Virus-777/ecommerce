@@ -1,15 +1,12 @@
 import { Link } from 'react-router';
 import { APP_NAMES, APP_URLS, CURRENT_APP } from './apps';
 import { AREAS, SCREENS } from './catalogue';
-import { sampleHref, sampleKey, useDesignSamples } from './designSamples';
+import { href } from './href';
 import type { ScreenId } from './catalogue';
 
 /** /design: every screen and view, for review against the design export. */
 export default function DesignIndex() {
-  // In development the links open the live records of the seed's design samples (npm run seed -- --only design).
-  const samples = useDesignSamples();
-  const file = samples.status === 'ready' ? samples.file : null;
-  const link = (id: string, view = '') => sampleHref(id as ScreenId, view, file?.samples[sampleKey(id, view)]);
+  const link = (id: string, view = '') => href(id as ScreenId, view);
   return (
     <main className="container page stack gap-6" id="main">
       <div className="stack gap-2">

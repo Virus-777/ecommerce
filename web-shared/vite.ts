@@ -5,8 +5,6 @@ import type { UserConfig } from 'vite';
 const SHARED_DIR = fileURLToPath(new URL('.', import.meta.url));
 /** The extracted design export (npm run design:extract), used by /design/check. Forward slashes for /@fs/ URLs. */
 const DESIGN_DIR = fileURLToPath(new URL('./.design', import.meta.url)).split('\\').join('/').replace(/\/$/, '');
-/** The seed's output folder (git-ignored): /design/check reads design-samples.json from it (npm run seed -- --only design). */
-const SEED_DIR = fileURLToPath(new URL('./.seed', import.meta.url)).split('\\').join('/').replace(/\/$/, '');
 
 /**
  * The backend behind /api, /graphql and /files (default: the backend dev server on :4000; override with
@@ -29,7 +27,6 @@ export function marketlyApp({ app, port, root }: { app: 'store' | 'seller' | 'ad
     define: {
       __APP__: JSON.stringify(app),
       __DESIGN_DIR__: JSON.stringify(DESIGN_DIR),
-      __SEED_DIR__: JSON.stringify(SEED_DIR),
     },
     // IPv4 explicitly: on this machine Chrome cannot reach Vite's default [::1] bind.
     server: { host: '127.0.0.1', port, strictPort: true, proxy: apiProxy(), fs: { allow: [fileURLToPath(new URL('.', root)), SHARED_DIR] } },

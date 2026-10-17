@@ -1,18 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { useApi } from '../api';
 import { SCREENS, type Screen, type ScreenId, type ScreenView } from './catalogue';
 import { CURRENT_APP } from './apps';
-import { sampleHref, sampleKey, useDesignSamples, type DesignCheckOptions, type DesignCheckSessions, type DesignSample, type DesignSamplesFile, type SampleSession } from './designSamples';
+import { href } from './href';
 
 // /design/check (dev only): renders every screen view in an iframe and compares it with the
 // design export file (served from /.design/ by the dev server). Reports a class-token
 // similarity score, classes missing/extra, the h1 count, horizontal overflow and console errors.
-//
-// Each view is opened on the live record its design state needs: web-shared/.seed/design-samples.json (written by
-// `npm run seed -- --only design`) gives the params, query and session per "<screenId>@<view>". Rows run grouped
-// by session (visitor first, then customer) through the app's `useSessions` hook; apps without one (Seller Center,
-// Admin Center for now) keep their current session. The check ends signed in as the samples' customer.
+// Views open on the catalogue's example params in the current session, so scores depend on the live data.
 
 interface Row {
   key: string;
@@ -20,11 +15,6 @@ interface Row {
   view: string;
   url: string;
   design: string;
-  session?: SampleSession;
-  before?: DesignSample['before'];
-  /** False when the samples file has no entry for this view (the catalogue example is used). */
-  sampled: boolean;
-  note?: string;
   score?: number;
   missing?: string[];
   extra?: string[];
@@ -49,9 +39,6 @@ const DESIGN_ROOT = `/@fs/${__DESIGN_DIR__.replace(/^\/+/, '')}/marketly-ui-fina
 const IGNORE = /^(lucide|lucide-.*|is-active|is-copied|is-scrollable|at-start|at-end|ic-sm)$/;
 /** Still loading: the route fallback, skeletons, busy regions */
 const LOADING = '.route-loading, .sk, .sk-line, .sk-lines, .sk-card, .sk-row, .sk-grid, .sk-list, .sk-img, .sk-thumb, [aria-busy="true"]';
-const DEFAULT_CUSTOMER ={ email: 'jordan.lee@example.com', first: 'Jordan', last: 'Lee' };
-/** Groups in run order; rows without a session run last, in whatever session the groups left. */
-const GROUPS: Array<SampleSession | undefined> = ['visitor', 'customer', undefined];
 
 function tokens(root: ParentNode): Map<string, number> {
   const m = new Map<string, number>();
@@ -81,80 +68,32 @@ function compare(a: Map<string, number>, b: Map<string, number>) {
   return { score: union ? inter / union : 1, missing, extra };
 }
 
-const allRows = (file: DesignSamplesFile | null): Row[] =>
+const allRows = (): Row[] =>
   // Screens added after the design (no design file) have nothing to compare with.
   SCREENS.filter((s) => s.app === CURRENT_APP && s.file).flatMap((s) => {
     const designed = (s.views as readonly ScreenView[]).filter((v) => !v.noDesign);
     const views = designed.length ? designed.map((v) => v.slug) : [''];
-    return views.map((v) => {
-      const key = sampleKey(s.id, v);
-      const sample = file?.samples[key];
-      return {
-        key,
-        screen: s as Screen,
-        view: v,
-        url: sampleHref(s.id as ScreenId, v, sample),
-        design: `${DESIGN_ROOT}/${s.area}/${s.file}${v ? `--${v}` : ''}.html`,
-        session: sample?.session,
-        before: sample?.before,
-        sampled: Boolean(sample),
-        note: sample?.note,
-      };
-    });
+    return views.map((v) => ({
+      key: `${s.id}@${v}`,
+      screen: s as Screen,
+      view: v,
+      url: href(s.id as ScreenId, v),
+      design: `${DESIGN_ROOT}/${s.area}/${s.file}${v ? `--${v}` : ''}.html`,
+    }));
   });
 
-const noSessions = (): DesignCheckSessions | undefined => undefined;
-
-export default function DesignCheck({ useSessions }: DesignCheckOptions) {
-  // A stable hook per app (passed once to createAppRouter), so the hook order never changes.
-  const sessions = (useSessions ?? noSessions)();
-  const { session } = useApi();
-  const samples = useDesignSamples();
-  const file = samples.status === 'ready' ? samples.file : null;
-  const [rows, setRows] = useState<Row[]>(() => allRows(null));
+export default function DesignCheck() {
+  const [rows, setRows] = useState<Row[]>(allRows);
   const [running, setRunning] = useState(false);
   const [filter, setFilter] = useState('');
   const [width, setWidth] = useState(1440);
-  const [current, setCurrent] = useState<SampleSession | null>(null);
   const frame = useRef<HTMLIFrameElement>(null);
-  const currentRef = useRef<SampleSession | null>(null);
-
-  // Rows follow the samples once they are read.
-  useEffect(() => {
-    if (samples.status !== 'loading') setRows(allRows(file));
-  }, [samples.status, file]);
-
-  /** Puts the app in a sample's session; the token call makes the session (and its refresh cookie) exist before an iframe resumes it. */
-  const switchTo = async (s: SampleSession) => {
-    if (!sessions) return;
-    if (s === 'visitor') await sessions.visitor();
-    else await sessions.customer(file?.customer ?? DEFAULT_CUSTOMER);
-    await session.token();
-    currentRef.current = s;
-    setCurrent(s);
-  };
-
-  /** The sample's set-up requests, in the current session (e.g. a visitor's cart, a guest order look-up). */
-  const runBefore = async (r: Row): Promise<string[]> => {
-    const problems: string[] = [];
-    for (const b of r.before ?? []) {
-      const token = await session.token();
-      const res = await fetch(b.path, {
-        method: b.method,
-        headers: { Authorization: `Bearer ${token}`, 'X-Client': 'web', ...(b.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
-        body: b.body !== undefined ? JSON.stringify(b.body) : undefined,
-      });
-      if (!res.ok) problems.push(`set-up ${b.method} ${b.path} → ${res.status}`);
-    }
-    return problems;
-  };
 
   const checkOne = async (r: Row): Promise<Row> => {
-    const setup = await runBefore(r);
     const html = await fetch(r.design).then((x) => (x.ok ? x.text() : ''));
     const designDoc = new DOMParser().parseFromString(html, 'text/html');
     const f = frame.current!;
-    const errors: string[] = [...setup];
+    const errors: string[] = [];
     await new Promise<void>((resolve) => {
       f.onload = () => resolve();
       f.src = r.url;
@@ -192,25 +131,12 @@ export default function DesignCheck({ useSessions }: DesignCheckOptions) {
   const run = async (only?: Row[]) => {
     setRunning(true);
     const list = only ?? rows.filter((r) => !filter || r.key.includes(filter));
-    let switched = false;
-    // a full run always starts each group with a fresh session; single rows reuse the current one
-    if (!only) currentRef.current = null;
     try {
-      for (const group of GROUPS) {
-        const part = list.filter((r) => (sessions ? r.session : undefined) === group);
-        if (!part.length) continue;
-        if (group && sessions && currentRef.current !== group) {
-          await switchTo(group);
-          switched = true;
-        }
-        for (const r of part) {
-          const res = await checkOne(r).catch((e) => ({ ...r, errors: [String(e)] }));
-          setRows((prev) => prev.map((p) => (p.key === r.key ? res : p)));
-        }
+      for (const r of list) {
+        const res = await checkOne(r).catch((e) => ({ ...r, errors: [String(e)] }));
+        setRows((prev) => prev.map((p) => (p.key === r.key ? res : p)));
       }
     } finally {
-      // The store's everyday dev session is the samples' customer: end there.
-      if (switched && currentRef.current !== 'customer') await switchTo('customer').catch(() => undefined);
       setRunning(false);
     }
   };
@@ -218,20 +144,6 @@ export default function DesignCheck({ useSessions }: DesignCheckOptions) {
   const shown = rows.filter((r) => !filter || r.key.includes(filter));
   const done = shown.filter((r) => r.score !== undefined);
   const avg = done.length ? done.reduce((a, r) => a + (r.score ?? 0), 0) / done.length : 0;
-  const unsampled = shown.filter((r) => !r.sampled).length;
-  const samplesLine =
-    samples.status === 'loading'
-      ? 'Reading the design samples…'
-      : samples.status === 'missing'
-        ? `Catalogue examples only: ${samples.reason}.`
-        : [
-            `Samples from ${samples.file.generatedAt ? new Date(samples.file.generatedAt).toLocaleString() : 'the seed'}`,
-            unsampled ? `${unsampled} view${unsampled === 1 ? '' : 's'} without a sample` : '',
-            sessions ? `sessions: visitor, then ${file?.customer?.first ?? DEFAULT_CUSTOMER.first}` : 'this app keeps its current session',
-            current ? `now: ${current}` : '',
-          ]
-            .filter(Boolean)
-            .join(' · ');
 
   return (
     <main className="container page stack gap-4" id="main">
@@ -241,9 +153,7 @@ export default function DesignCheck({ useSessions }: DesignCheckOptions) {
           <p className="small sub">
             {done.length}/{shown.length} checked · average class similarity {(avg * 100).toFixed(1)}% · <Link to="/design">All screens</Link>
           </p>
-          <p className="xs muted" id="design-check-samples">
-            {samplesLine}
-          </p>
+          <p className="xs muted">Views open on the catalogue’s example records, in the current session.</p>
         </div>
         <div className="row gap-2">
           <select className="select" aria-label="Viewport width" value={width} onChange={(e) => setWidth(Number(e.target.value))}>
@@ -252,7 +162,7 @@ export default function DesignCheck({ useSessions }: DesignCheckOptions) {
             <option value={390}>Phone 390</option>
           </select>
           <input className="input" placeholder="Filter (e.g. admin/)" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter screens" />
-          <button type="button" className="btn btn-primary" disabled={running || samples.status === 'loading'} onClick={() => run()}>
+          <button type="button" className="btn btn-primary" disabled={running} onClick={() => run()}>
             <span>{running ? 'Checking…' : 'Run check'}</span>
           </button>
         </div>
@@ -277,9 +187,6 @@ export default function DesignCheck({ useSessions }: DesignCheckOptions) {
               <tr key={r.key} data-key={r.key}>
                 <td className="nowrap">
                   <Link to={r.url}>{r.key}</Link> · <a href={r.design} target="_blank" rel="noreferrer">design</a>
-                  {r.session && <span className="xs muted"> · {r.session}</span>}
-                  {!r.sampled && samples.status === 'ready' && <span className="xs muted"> · no sample (catalogue example)</span>}
-                  {r.note && <span className="xs muted"> · {r.note}</span>}
                 </td>
                 <td className="r num">{r.stub ? 'stub' : r.score === undefined ? '' : `${(r.score * 100).toFixed(0)}%`}</td>
                 <td className="r">{r.h1}</td>

@@ -6,8 +6,6 @@ declare const __APP__: 'store' | 'seller' | 'admin';
 /** Absolute path of the extracted design export (dev only, for /design/check); defined in vite.config.ts. */
 declare const __DESIGN_DIR__: string;
 
-/** Absolute path of the seed output folder web-shared/.seed (dev only, for /design/check samples); defined in vite.config.ts. */
-declare const __SEED_DIR__: string;
 
 interface ImportMetaEnv {
   readonly VITE_BRAND?: string;
