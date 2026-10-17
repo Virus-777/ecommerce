@@ -39,7 +39,7 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | GET | `/api/admin/access/permissions` | Permission registry grouped by work area | staff<br>`access.roles.view` | `PermissionGroup[]` |
 | GET | `/api/admin/access/members` | Staff members with roles, lead/backup duties and away status | staff<br>`access.roles.view` | Page<StaffMember> |
 | GET | `/api/admin/access/members/{accountId}` | One staff member: assignments, effective permissions and limits, away periods | staff<br>`access.roles.view` | `StaffMemberDetail` |
-| POST | `/api/admin/access/staff-invitations` | Invite a staff member with roles _(audited, step-up: reauth)_ | staff<br>`access.roles.manage` | `StaffInvitationInput` → `StaffMember` |
+| POST | `/api/admin/access/staff-invitations` | Invite a staff member with roles _(audited, step-up: reauth)_ | staff<br>`access.roles.manage` | `StaffInvitationInput` → `StaffInvitationSent` |
 | POST | `/api/admin/access/role-assignments` | Give a staff member a role _(audited, step-up: reauth)_ | staff<br>`access.roles.manage` | `{ accountId: uuid, roleId: uuid, reason: text, expiresAt: datetime?, reauthToken: string }` → `RoleAssignment` |
 | POST | `/api/admin/access/role-assignments/{id}/revoke` | Remove a role from a staff member _(audited)_ | staff<br>`access.roles.manage` | `{ reason: text }` → `RoleAssignment` |
 | GET | `/api/admin/access/approval-actions` | Actions that can have approval limits | staff<br>`access.roles.view` | `ApprovalAction[]` |
@@ -328,6 +328,15 @@ What staff may do and how much they may approve: staff roles, the permission reg
 | reportsTo | `StaffRef?` |
 | status | `enum(invited|active|locked|disabled)` |
 | limitReview | `ApprovalInfo?` Open or decided Business Owner review of this member's approval limits (requestLimitReview on the invitation) |
+
+### StaffInvitationSent
+
+| Field | Type |
+|---|---|
+| member | `StaffMember` |
+| acceptUrl | `url` SENSITIVE: the accept link to hand over (no email is sent from an offline server) |
+| passCode | `string` SENSITIVE: the pass code (XXXX-XXXX) that goes with the link, shown once to the inviter. Only its hash is stored; it is never in an event or a log |
+| expiresAt | `datetime` |
 
 ### StaffMemberDetail
 

@@ -656,7 +656,7 @@ export interface StaffInvitationIssued {
   invitation: Invitation;
   /** SENSITIVE: the accept link (also in identity.invitation.created) */
   acceptUrl: string;
-  /** SENSITIVE, in-process only: the pass code, shown once as XXXX-XXXX. Only its hash is stored; it is never in an event, an HTTP response or a log */
+  /** SENSITIVE: the pass code, shown once as XXXX-XXXX (to the inviter in the invite or resend response, or printed by the server tools). Only its hash is stored; it is never in an event or a log */
   passCode: string;
 }
 
@@ -665,7 +665,7 @@ export const StaffInvitationIssued: z.ZodType<StaffInvitationIssued> = z.object(
     return Invitation;
   },
   acceptUrl: z.url().describe("SENSITIVE: the accept link (also in identity.invitation.created)"),
-  passCode: z.string().describe("SENSITIVE, in-process only: the pass code, shown once as XXXX-XXXX. Only its hash is stored; it is never in an event, an HTTP response or a log"),
+  passCode: z.string().describe("SENSITIVE: the pass code, shown once as XXXX-XXXX (to the inviter in the invite or resend response, or printed by the server tools). Only its hash is stored; it is never in an event or a log"),
 }).register(common.apiTypes, { id: "identity.StaffInvitationIssued" });
 
 export interface AccountListItem {
@@ -1095,7 +1095,7 @@ export interface IdentityPublicApi {
   getAccounts(accountIds: string[]): Promise<AccountSummary[]>;
   /** Used when inviting someone who may already have an account Used by: sellers, access. */
   findAccountByEmail(email: string, realm: 'member' | 'staff'): Promise<AccountSummary | null>;
-  /** Create an invited staff account and send the accept link (event identity.invitation.created). Returns the invitation with its link and pass code in-process (the pass code is never in the event, an HTTP response or a log; the server tools print it). access assigns the roles. Used by: access. */
+  /** Create an invited staff account and send the accept link (event identity.invitation.created). Returns the invitation with its link and pass code (never in the event or a log; the inviter sees them once in the invite response, the server tools print them). access assigns the roles. Used by: access. */
   inviteStaff(input: { email: string, name: string, invitedBy: common.Actor }): Promise<StaffInvitationIssued>;
   /** Invite a person to act for a seller. Reuses an existing member account when the email has one. Used by: sellers. */
   inviteSellerMember(input: { email: string, name: string, sellerId: string, sellerName: string, invitedBy: common.Actor }): Promise<Invitation>;
@@ -2205,7 +2205,7 @@ export const endpoints = defineEndpoints({
     stepUp: {"kind":"reauth","purpose":"staff-account"},
     scope: "staff",
     summary: "Resend a staff invitation (new 7-day link)",
-    desc: "Issues a new link and pass code (the old ones stop working). The pass code is not shown here: the server operator prints the link and pass code with npm run staff-link and hands them over.",
+    desc: "Issues a new link and pass code (the old ones stop working) and returns both once, for the caller to hand over (no-store; never logged). npm run staff-link does the same on the server.",
     params: () =>
       z.object({
         id: z.uuid(),
@@ -2213,7 +2213,7 @@ export const endpoints = defineEndpoints({
     body: () => z.object({
       reauthToken: z.string(),
     }),
-    response: () => Invitation,
+    response: () => StaffInvitationIssued,
     status: 200,
     errors: ["ILLEGAL_TRANSITION","STEP_UP_REQUIRED"],
     audited: true,

@@ -597,6 +597,24 @@ export const StaffMember: z.ZodType<StaffMember> = z.object({
   },
 }).register(common.apiTypes, { id: "access.StaffMember" });
 
+export interface StaffInvitationSent {
+  member: StaffMember;
+  /** SENSITIVE: the accept link to hand over (no email is sent from an offline server) */
+  acceptUrl: string;
+  /** SENSITIVE: the pass code (XXXX-XXXX) that goes with the link, shown once to the inviter. Only its hash is stored; it is never in an event or a log */
+  passCode: string;
+  expiresAt: string;
+}
+
+export const StaffInvitationSent: z.ZodType<StaffInvitationSent> = z.object({
+  get member() {
+    return StaffMember;
+  },
+  acceptUrl: z.url().describe("SENSITIVE: the accept link to hand over (no email is sent from an offline server)"),
+  passCode: z.string().describe("SENSITIVE: the pass code (XXXX-XXXX) that goes with the link, shown once to the inviter. Only its hash is stored; it is never in an event or a log"),
+  expiresAt: z.iso.datetime({ offset: true }),
+}).register(common.apiTypes, { id: "access.StaffInvitationSent" });
+
 export interface StaffMemberDetail {
   member: StaffMember;
   assignments: RoleAssignment[];
@@ -1571,9 +1589,9 @@ export const endpoints = defineEndpoints({
     stepUp: {"kind":"reauth","purpose":"role-grant"},
     scope: "staff",
     summary: "Invite a staff member with roles",
-    desc: "Calls identity.inviteStaff (7-day link; the person accepts with the link, a pass code and a new password) and creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.",
+    desc: "Calls identity.inviteStaff (7-day link; the person accepts with the link, a pass code and a new password) and returns the link and pass code once, for the inviter to hand over (no-store; never logged). Also creates pending_acceptance assignments. Approval limits come with the roles; they are never set per invitation. With requestLimitReview the invitation also opens an access.limits.change approval request to the Business Owner; any change the Business Owner makes goes through the normal limit change (role-level, effective-dated), and the member cannot approve anything until the review is decided. Roles that need a second reviewer (access.roles.sensitive-grant) are saved as pending_approval assignments; the invitation is still 201 and GET /members/{accountId} shows each assignment's approval.",
     body: () => StaffInvitationInput,
-    response: () => StaffMember,
+    response: () => StaffInvitationSent,
     status: 201,
     errors: ["VALIDATION_FAILED","CONFLICT","STEP_UP_REQUIRED"],
     audited: true,
