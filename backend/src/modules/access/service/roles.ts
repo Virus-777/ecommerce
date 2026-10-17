@@ -147,9 +147,10 @@ export class Roles {
     if (role.archived_at) throw new AppError('CONFLICT', 'Archived roles cannot be changed');
     const registry = new Map((await this.core.repo.listPermissions()).map((p) => [p.key, p]));
     const desired = uniq(permissionKeys);
-    const unknown = desired.filter((k) => !registry.get(k) || registry.get(k)!.unavailable_since);
-    if (unknown.length) throw new AppError('UNKNOWN_PERMISSION', `Not in the permission registry: ${unknown.join(', ')}`, { keys: unknown });
     const current = (await this.core.repo.rolePermissions([id])).map((r) => r.permission_key);
+    // a held key of a module that is off comes back from the role detail as granted: keep it, never add one
+    const unknown = desired.filter((k) => !registry.get(k) || (registry.get(k)!.unavailable_since && !current.includes(k)));
+    if (unknown.length) throw new AppError('UNKNOWN_PERMISSION', `Not in the permission registry: ${unknown.join(', ')}`, { keys: unknown });
     const remove = current.filter((k) => !desired.includes(k));
     const add = desired.filter((k) => !current.includes(k));
     const dir = await loadDirectory(this.core.repo, this.core.now());

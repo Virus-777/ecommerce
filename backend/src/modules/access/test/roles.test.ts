@@ -81,6 +81,23 @@ describe('role permissions', () => {
     expect(granted.sort()).toEqual(['catalog.products.review', 'media.assets.view']);
   });
 
+  it('keeps held keys of a module that is off when the role detail is sent back, but never adds one', async () => {
+    const roleId = await f.roleId('support_agent'); // seeded with wallet.credit.view; wallet is off at launch
+    const detail = await f.call('GET', `/roles/${roleId}`, f.token(admin));
+    const held = detail.body.permissions.flatMap((g: any) => g.permissions.filter((p: any) => p.granted).map((p: any) => p.permission));
+    expect(held.find((p: any) => p.key === 'wallet.credit.view')).toMatchObject({ available: false });
+    const keys = held.map((p: any) => p.key).filter((k: string) => k !== 'customers.notes.write');
+    const ok = await f.call('PUT', `/roles/${roleId}/permissions`, f.token(admin), { permissionKeys: keys, reason: 'Notes move to leads' });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    const after = ok.body.permissions.flatMap((g: any) => g.permissions.filter((p: any) => p.granted).map((p: any) => p.permission.key));
+    expect(after).toContain('wallet.credit.view');
+    expect(after).not.toContain('customers.notes.write');
+    const role = await f.call('POST', '/roles', f.token(admin), { name: 'Credit Viewer', workArea: 'Customers and support', reason: 'r' });
+    const add = await f.call('PUT', `/roles/${role.body.id}/permissions`, f.token(admin), { permissionKeys: ['wallet.credit.view'], reason: 'r' });
+    expect(add.status).toBe(400);
+    expect(add.body.error).toMatchObject({ code: 'UNKNOWN_PERMISSION', details: { keys: ['wallet.credit.view'] } });
+  });
+
   it('holds sensitive permissions for a second staff member with access.roles.manage', async () => {
     const role = await f.call('POST', '/roles', f.token(admin), { name: 'Payout Clerk', workArea: 'Finance', reason: 'r' });
     const res = await f.call('PUT', `/roles/${role.body.id}/permissions`, f.token(admin), { permissionKeys: ['finance.ledger.view', 'workqueues.items.view'], reason: 'Clerk duties' });
