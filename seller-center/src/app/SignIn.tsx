@@ -4,12 +4,12 @@ import { Link } from 'react-router';
 import { ApiError, call, errorMessage, useApi, useSessionState, type SessionTokens } from '@marketly/web-shared/api';
 import { Logo } from '@marketly/web-shared/layouts';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Checkbox, Dialog, Field, TextInput } from '@marketly/web-shared/ui';
+import { Alert, Button, Checkbox, Field, TextInput } from '@marketly/web-shared/ui';
 import { StorePicker, type SellerContextItem } from './session';
 
 // Seller Center sign-in (designed in React; no design file). Seller members sign in with their Marketly
 // account (the same login as the store), answer 2-step if it's on, and pick a store when they belong to
-// several. Development: "Continue with Google" uses the backend's dev ID token (seeded sellers have no password).
+// several.
 
 type Result = {
   status: 'signed_in' | 'second_factor_required' | 'seller_context_required' | 'password_reset_required';
@@ -53,8 +53,6 @@ export function SignIn() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState<string | null>(null);
-  const [devOpen, setDevOpen] = useState(false);
-  const [dev, setDev] = useState({ email: '', first: '', last: '' });
 
   // Signed in without a store yet (several stores, or after a fresh sign-in): choose one.
   const needsStore = state.kind === 'seller' && !state.claims?.sellerId;
@@ -103,14 +101,6 @@ export function SignIn() {
     const c = code.replace(/[\s-]/g, '');
     if (!c) return setError(method === 'totp' ? 'Enter the 6-digit code from your authenticator app.' : 'Enter one of your recovery codes.');
     void run(() => call(api.POST('/api/public/identity/sign-in-challenges/{id}/verify', { params: { path: { id: challenge.id } }, body: { method, code: c, rememberDevice: false, device: device() } as never, credentials: 'include' })) as Promise<Result>);
-  };
-
-  const devSignIn = (e: FormEvent) => {
-    e.preventDefault();
-    if (!dev.email.trim()) return;
-    const names = dev.first || dev.last ? `:${dev.first}:${dev.last}` : '';
-    setDevOpen(false);
-    void run(() => call(api.POST('/api/public/identity/external-sign-ins', { body: { provider: 'google', idToken: `dev:${dev.email.trim()}${names}`, audience: 'seller', device: device(), marketingOptIn: false }, credentials: 'include' })) as Promise<Result>);
   };
 
   const pick = async (sellerId: string) => {
@@ -189,10 +179,6 @@ export function SignIn() {
                 <Button type="submit" block disabled={busy}>
                   {busy ? 'Signing in…' : 'Sign in'}
                 </Button>
-                <Button variant="secondary" block icon="log-in" onClick={() => setDevOpen(true)} disabled={!import.meta.env.DEV || busy}>
-                  Continue with Google
-                </Button>
-                {!import.meta.env.DEV && <p className="xs muted">Google sign-in isn’t available yet.</p>}
                 <p className="small">
                   <Link to={href('auth/recover')}>Forgot your password?</Link>
                 </p>
@@ -204,34 +190,6 @@ export function SignIn() {
           </p>
         </div>
       </main>
-      <Dialog
-        open={devOpen}
-        onClose={() => setDevOpen(false)}
-        title="Development sign-in"
-        foot={
-          <>
-            <Button variant="ghost" onClick={() => setDevOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={devSignIn as never}>Continue</Button>
-          </>
-        }
-      >
-        <p className="small sub">Google isn’t configured in development. Enter the email of a seller member: the backend’s dev ID token signs in to that account (for example a seeded store owner such as hannah@northwindaudio.example.com).</p>
-        <form className="stack gap-3" onSubmit={devSignIn}>
-          <Field label="Email">
-            <TextInput id="sc-dev-email" type="email" value={dev.email} onChange={(e) => setDev({ ...dev, email: e.target.value })} />
-          </Field>
-          <div className="grid md2 gap-3">
-            <Field label="First name" optional>
-              <TextInput id="sc-dev-first" value={dev.first} onChange={(e) => setDev({ ...dev, first: e.target.value })} />
-            </Field>
-            <Field label="Last name" optional>
-              <TextInput id="sc-dev-last" value={dev.last} onChange={(e) => setDev({ ...dev, last: e.target.value })} />
-            </Field>
-          </div>
-        </form>
-      </Dialog>
     </div>
   );
 }

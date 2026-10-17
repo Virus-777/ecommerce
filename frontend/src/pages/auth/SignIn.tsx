@@ -6,11 +6,9 @@ import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Checkbox, Icon, TextInput, announce } from '@marketly/web-shared/ui';
 import {
-  AppleButton,
   AuthShell,
   CodeInput,
   EMAIL_RE,
-  GoogleButton,
   PasswordInput,
   WITH_COOKIE,
   authError,
@@ -249,11 +247,6 @@ function Credentials({
           Reset your password
         </Button>
       )}
-      <div className="buy-or">or</div>
-      <div className="stack gap-2">
-        <GoogleButton onResult={(r) => onResult(r, r.account?.email ?? '')} />
-        <AppleButton />
-      </div>
       <p className="small center">
         New to Marketly?{' '}
         <Link className="strong link-inline" to={href('auth/register', undefined, undefined, nextQuery)}>

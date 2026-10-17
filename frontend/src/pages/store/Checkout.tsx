@@ -14,7 +14,6 @@ import {
   brandName,
   checkoutHref,
   checkoutKey,
-  devWalletToken,
   expiry,
   nextHref,
   orderWithin,
@@ -203,13 +202,12 @@ const addressLines = (a: Address) => (
 
 /* ---------------- Payment choice ---------------- */
 
-type Pay = `saved:${string}` | 'new' | 'wallet';
+type Pay = `saved:${string}` | 'new';
 
 function initialPay(c: CheckoutView): Pay {
   const sel = c.payment.selected;
   const saved = c.payment.options.savedMethods.filter((m) => !m.expired);
   if (sel?.kind === 'saved_card' && sel.savedMethodId) return `saved:${sel.savedMethodId}`;
-  if (sel?.kind === 'digital_wallet') return 'wallet';
   if (sel?.kind === 'new_card') return 'new';
   const def = saved.find((m) => m.isDefault) ?? saved[0];
   return def ? `saved:${def.id}` : 'new';
@@ -304,11 +302,7 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
   });
 
   const method = (p: Pay = pay, card = devCard): MethodSelection =>
-    p === 'new'
-      ? { kind: 'new_card', providerToken: card }
-      : p === 'wallet'
-        ? { kind: 'digital_wallet', providerToken: devWalletToken(options.walletKinds) }
-        : { kind: 'saved_card', savedMethodId: p.slice('saved:'.length) };
+    p === 'new' ? { kind: 'new_card', providerToken: card } : { kind: 'saved_card', savedMethodId: p.slice('saved:'.length) };
   const putMethod = (m: MethodSelection) => call(api.PUT('/api/store/checkout/sessions/{id}/payment-method', { params: { path: { id } }, body: m }));
   const payM = useMutation({
     mutationFn: putMethod,
@@ -876,17 +870,6 @@ function CheckoutForm({ c }: { c: CheckoutView }) {
                       />
                     </Field>
                   </div>
-                )}
-                {options.walletAvailable && (
-                  <OptionCard
-                    id="co-pay-wallet"
-                    name="co-pay"
-                    checked={pay === 'wallet'}
-                    onChange={() => choosePay('wallet')}
-                    title={<span className="small strong">Digital wallet</span>}
-                    body={`${options.walletKinds.map((k) => (k === 'apple_pay' ? 'Apple Pay' : 'Google Pay')).join(' or ')}. In development the test wallet approves the payment.`}
-                    right={<Icon name="smartphone" />}
-                  />
                 )}
               </div>
               <span className="xs muted">

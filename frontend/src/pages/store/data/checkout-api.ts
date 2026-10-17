@@ -149,9 +149,6 @@ export function useDevSettle() {
   };
 }
 
-/** Test wallet token for the first wallet kind the API offers. */
-export const devWalletToken = (kinds: string[]) => (kinds[0] === 'google_pay' ? 'tok_googlepay' : 'tok_applepay');
-
 /** Dev 3-D Secure results for complete-action: approve or fail the bank check. */
 export const DEV_3DS_OK = '3ds_ok';
 export const DEV_3DS_FAIL = '3ds_fail';

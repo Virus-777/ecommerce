@@ -1,17 +1,15 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useEffect, useState, type FormEvent } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link, useLocation } from 'react-router';
 import { ApiError, call, useApi } from '@marketly/web-shared/api';
 import { useView } from '@marketly/web-shared/lib/hooks';
 import { href } from '@marketly/web-shared/routes';
 import { Alert, Button, Checkbox, Field, Icon, TextInput, announce } from '@marketly/web-shared/ui';
 import {
-  AppleButton,
   AuthShell,
   CodeInput,
   DevOutboxHint,
   EMAIL_RE,
-  GoogleButton,
   PasswordInput,
   PolicyRules,
   WITH_COOKIE,
@@ -26,7 +24,6 @@ import {
   usePasswordPolicy,
   useRedirectSignedIn,
   useSecondsUntil,
-  type SignInResult,
   type VerificationChallenge,
 } from './data/parts';
 
@@ -69,9 +66,7 @@ export default function Register() {
 
 function CreateAccount({ form, setForm, onCreated }: { form: Form; setForm: (f: Form) => void; onCreated: (c: VerificationChallenge) => void }) {
   const { api } = useApi();
-  const navigate = useNavigate();
   const nextQuery = useNextQuery();
-  const finish = useFinishSignIn();
   const policy = usePasswordPolicy();
   // The purchase terms version shown on the form is recorded with the account (acceptedTermsVersion).
   const terms = useQuery({
@@ -137,11 +132,6 @@ function CreateAccount({ form, setForm, onCreated }: { form: Form; setForm: (f: 
     if (!register.isPending) register.mutate();
   };
 
-  const onGoogle = (r: SignInResult) => {
-    if (r.status === 'signed_in' && r.tokens) finish(r.tokens, 'Signed in with Google');
-    else if (r.status === 'second_factor_required' && r.challenge) navigate(href('auth/sign-in', 'two-step-code', undefined, nextQuery), { state: { challenge: r.challenge, email: r.account?.email ?? '' } });
-  };
-
   return (
     <AuthShell title="Create account" back={href('auth/sign-in', undefined, undefined, nextQuery)} onSubmit={submit}>
       <div className="stack gap-1">
@@ -191,11 +181,6 @@ function CreateAccount({ form, setForm, onCreated }: { form: Form; setForm: (f: 
         </Link>
         .
       </p>
-      <div className="buy-or">or</div>
-      <div className="stack gap-2">
-        <GoogleButton onResult={onGoogle} marketingOptIn={form.marketing} />
-        <AppleButton />
-      </div>
       <p className="small center">
         Already have an account?{' '}
         <Link className="strong link-inline" to={href('auth/sign-in', undefined, undefined, nextQuery)} state={{ email: form.email.trim() }}>

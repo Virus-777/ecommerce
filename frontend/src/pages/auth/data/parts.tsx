@@ -1,8 +1,7 @@
 // Building blocks shared by the sign-in, register, recover and guest order screens: the auth card shell,
 // password field with show/hide, code entry, password rules from the server's policy, resend timers,
-// error copy for the identity error codes, finishing a sign-in (adopt tokens, claim the guest cart, go on)
-// and "Continue with Google" (development: the backend's dev ID tokens).
-import { useMutation, useQuery } from '@tanstack/react-query';
+// error copy for the identity error codes and finishing a sign-in (adopt tokens, claim the guest cart, go on).
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useSession } from '@/app/session';
@@ -10,7 +9,7 @@ import { StoreLayout } from '@/layouts';
 import { ApiError, call, errorMessage, useApi, useSessionState, type components } from '@marketly/web-shared/api';
 import { cx } from '@marketly/web-shared/lib/cx';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Button, Dialog, Field, Icon, TextInput, announce } from '@marketly/web-shared/ui';
+import { Alert, Icon, announce } from '@marketly/web-shared/ui';
 
 export type SignInResult = components['schemas']['identity.SignInResult'];
 export type SignInChallenge = components['schemas']['identity.SignInChallenge'];
@@ -151,8 +150,6 @@ export function authError(e: unknown): string {
       return 'Sign in to see this order. It belongs to a Marketly account.';
     case 'METHOD_NOT_AVAILABLE':
       return 'That verification method isn’t available yet. Use your authenticator app or a backup code.';
-    case 'NOT_IMPLEMENTED':
-      return 'Sign-in with Google isn’t available right now. Sign in with your email and password.';
     default:
       return errorMessage(e);
   }
@@ -368,120 +365,5 @@ export function DevOutboxHint({ what }: { what: string }) {
     <p className="xs muted">
       <Icon name="info" className="ic-sm" /> Development: the {what} goes to the backend's dev outbox, not a real inbox (readable once the dev outbox endpoint exists).
     </p>
-  );
-}
-
-/**
- * "Continue with Google". Google isn't configured: in development it opens a small dialog and signs in with the
- * backend's dev ID token (`dev:<email>:<first>:<last>`); elsewhere it is disabled with a note.
- * onResult gets the SignInResult (signed_in, or second_factor_required for accounts with 2-step).
- */
-export function GoogleButton({ onResult, marketingOptIn }: { onResult: (r: SignInResult) => void; marketingOptIn?: boolean }) {
-  const [open, setOpen] = useState(false);
-  if (!import.meta.env.DEV)
-    return (
-      <>
-        <Button variant="secondary" block disabled aria-describedby="google-unavailable">
-          Continue with Google
-        </Button>
-        <span className="xs muted center" id="google-unavailable">
-          Sign-in with Google isn't available yet.
-        </span>
-      </>
-    );
-  return (
-    <>
-      <Button variant="secondary" block onClick={() => setOpen(true)}>
-        Continue with Google
-      </Button>
-      <DevGoogleDialog open={open} onClose={() => setOpen(false)} onResult={onResult} marketingOptIn={marketingOptIn} />
-    </>
-  );
-}
-
-/** Apple sign-in has no verifier in any environment yet. */
-export function AppleButton() {
-  return (
-    <>
-      <Button variant="secondary" block disabled aria-describedby="apple-unavailable">
-        Continue with Apple
-      </Button>
-      <span className="xs muted center" id="apple-unavailable">
-        Sign-in with Apple isn't available yet.
-      </span>
-    </>
-  );
-}
-
-const NAME_PART_RE = /[:\s]/;
-
-function DevGoogleDialog({ open, onClose, onResult, marketingOptIn }: { open: boolean; onClose: () => void; onResult: (r: SignInResult) => void; marketingOptIn?: boolean }) {
-  const { api } = useApi();
-  const [form, setForm] = useState({ email: '', first: '', last: '' });
-  const [tried, setTried] = useState(false);
-  const emailError = tried && !EMAIL_RE.test(form.email.trim()) ? 'Enter an email address, like name@example.com.' : undefined;
-  const nameError = (v: string) => (tried && NAME_PART_RE.test(v.trim()) ? 'Use one word, without spaces or colons.' : undefined);
-  const signIn = useMutation({
-    mutationFn: () => {
-      const first = form.first.trim();
-      const last = form.last.trim();
-      const names = first || last ? `:${first}:${last}` : '';
-      return call(
-        api.POST('/api/public/identity/external-sign-ins', {
-          body: { provider: 'google', idToken: `dev:${form.email.trim()}${names}`, audience: 'store', device: deviceInfo(), marketingOptIn: marketingOptIn ?? false },
-          ...WITH_COOKIE,
-        }),
-      );
-    },
-    onSuccess: (r) => {
-      onClose();
-      onResult(r);
-    },
-  });
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    // The dialog is portalled, but React events still bubble to the page's own <form>.
-    e.stopPropagation();
-    setTried(true);
-    if (!EMAIL_RE.test(form.email.trim()) || NAME_PART_RE.test(form.first.trim()) || NAME_PART_RE.test(form.last.trim())) return;
-    signIn.mutate();
-  };
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title="Development sign-in"
-      size="sm"
-      foot={
-        <>
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" form="dev-google" disabled={signIn.isPending}>
-            {signIn.isPending ? 'Signing in…' : 'Continue'}
-          </Button>
-        </>
-      }
-    >
-      <form id="dev-google" className="stack gap-3" onSubmit={submit} noValidate>
-        <p className="small sub">Google isn't configured in development. Enter any email: the backend's dev ID token signs in to that account, or creates a verified one without a password.</p>
-        {signIn.isError && (
-          <Alert tone="danger" title="Couldn't sign in">
-            {authError(signIn.error)}
-          </Alert>
-        )}
-        <Field label="Email" error={emailError}>
-          <TextInput id="dg-email" type="email" value={form.email} error={!!emailError} autoComplete="email" onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        </Field>
-        <div className="grid c2">
-          <Field label="First name" optional error={nameError(form.first)}>
-            <TextInput id="dg-first" value={form.first} error={!!nameError(form.first)} autoComplete="given-name" onChange={(e) => setForm({ ...form, first: e.target.value })} />
-          </Field>
-          <Field label="Last name" optional error={nameError(form.last)}>
-            <TextInput id="dg-last" value={form.last} error={!!nameError(form.last)} autoComplete="family-name" onChange={(e) => setForm({ ...form, last: e.target.value })} />
-          </Field>
-        </div>
-      </form>
-    </Dialog>
   );
 }

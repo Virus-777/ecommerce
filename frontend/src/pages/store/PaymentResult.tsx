@@ -18,7 +18,6 @@ import {
   checkoutKey,
   confirmationHref,
   dateTimePT,
-  devWalletToken,
   intentKey,
   nextHref,
   returnUrl,
@@ -138,7 +137,7 @@ function OrderAside({ c, extra }: { c: CheckoutView; extra?: ReactNode }) {
   );
 }
 
-type Retry = `saved:${string}` | 'new' | 'wallet';
+type Retry = `saved:${string}` | 'new';
 
 function Failed({ c, p }: { c: CheckoutView; p: PaymentStatusView }) {
   const id = c.id;
@@ -155,7 +154,7 @@ function Failed({ c, p }: { c: CheckoutView; p: PaymentStatusView }) {
   const saved = retry.startsWith('saved:') ? usable.find((m) => `saved:${m.id}` === retry) : undefined;
 
   const method = (): MethodSelection =>
-    retry === 'new' ? { kind: 'new_card', providerToken: devCard } : retry === 'wallet' ? { kind: 'digital_wallet', providerToken: devWalletToken(opts.walletKinds) } : { kind: 'saved_card', savedMethodId: retry.slice('saved:'.length) };
+    retry === 'new' ? { kind: 'new_card', providerToken: devCard } : { kind: 'saved_card', savedMethodId: retry.slice('saved:'.length) };
   const pay = useMutation({
     mutationFn: () => {
       const m = method();
@@ -172,7 +171,7 @@ function Failed({ c, p }: { c: CheckoutView; p: PaymentStatusView }) {
       if (e instanceof ApiError && e.code === 'QUOTE_OUTDATED') void qc.invalidateQueries({ queryKey: checkoutKey(id) });
     },
   });
-  const label = saved ? `Pay ${total} with ${savedCardTitle(saved)}` : retry === 'new' ? `Pay ${total} with the test card` : `Pay ${total} with digital wallet`;
+  const label = saved ? `Pay ${total} with ${savedCardTitle(saved)}` : `Pay ${total} with the test card`;
   const d = p.decline;
   const codes = c.coupons.filter((x) => x.status === 'applied').map((x) => x.code);
   const canRetry = p.retryAllowed && c.status === 'payment_failed';
@@ -220,7 +219,6 @@ function Failed({ c, p }: { c: CheckoutView; p: PaymentStatusView }) {
                     </Field>
                   </div>
                 )}
-                {opts.walletAvailable && <OptionCard id="pr-wallet" name="pr-pay" checked={retry === 'wallet'} onChange={() => setRetry('wallet')} title={<span className="small strong">Digital wallet</span>} body="Confirm on this device" right={<Icon name="smartphone" />} />}
               </div>
               {pay.isError && (
                 <span className="error-text">
