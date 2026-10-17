@@ -42,12 +42,13 @@ describe('categories', () => {
     expect((await a.admin('PATCH', `/categories/${newId()}`, { name: 'Y' })).statusCode).toBe(404);
   });
 
-  it('hidden categories (and their subcategories) leave the store tree; coming soon stays with count 0', async () => {
+  it('hidden and empty categories (and their subcategories) leave the store tree; coming soon stays with count 0', async () => {
     const root = await category(t, 'Garden');
     await category(t, 'Tools', { parentId: root.id });
     const soon = await category(t, 'Pets', { comingSoon: true });
     let store = (await a.store('/categories')).json();
-    expect(store.map((c: { id: string }) => c.id)).toContain(root.id);
+    expect(store.map((c: { id: string }) => c.id)).not.toContain(root.id); // visible, but no eligible stock yet
+    expect((await a.store('/categories/garden')).statusCode).toBe(200); // the page itself still opens
     expect(store.find((c: { id: string }) => c.id === soon.id)).toMatchObject({ comingSoon: true, productCount: 0, offerCount: null });
 
     const hidden = await a.admin('PATCH', `/categories/${root.id}`, { visible: false, name: 'Garden & Outdoor' });

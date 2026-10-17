@@ -49,7 +49,8 @@ describe('listing read model and counts', () => {
     const row = (await a.admin('GET', `/products/${id}`)).json();
     expect(row).toMatchObject({ offerCount: 3, liveOfferCount: 2, bestPrice: { amount: 11900, currency: 'USD' }, offerNote: 'Gadget Grove offer paused · 2 other offers live' });
 
-    expect((await a.store(`/categories`)).json().find((c: { id: string }) => c.id === parent.id).productCount).toBe(0);
+    // empty until the counts job sees the stock, so not in the store menu yet
+    expect((await a.store(`/categories`)).json().find((c: { id: string }) => c.id === parent.id)).toBeUndefined();
     await t.app.kernel.jobs.runNow('catalog.refresh-counts');
     const store = (await a.store('/categories')).json().find((c: { id: string }) => c.id === parent.id);
     expect(store).toMatchObject({ productCount: 1, offerCount: null, children: [expect.objectContaining({ id: cat.id, productCount: 1 })] });

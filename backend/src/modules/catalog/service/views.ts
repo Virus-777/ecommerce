@@ -19,6 +19,8 @@ export class CatalogViews extends CatalogBase {
     const [tax, statRows] = await Promise.all([opts.tax ?? this.taxonomy(), this.repo.categoryStats()]);
     const stats = new Map(statRows.map((s) => [s.category_id, s]));
     const refs = await this.refsMap(tax.rows.map((r) => r.image_media_id));
+    // shoppers see a visible category while it has eligible stock (in it or below it), or while it says coming soon
+    const shown = (c: CategoryRow) => opts.includeHidden || (c.visible && (c.coming_soon || (stats.get(c.id)?.product_count ?? 0) > 0));
     const node = (r: CategoryRow): Category => ({
       id: r.id,
       parentId: r.parent_id,
@@ -30,15 +32,9 @@ export class CatalogViews extends CatalogBase {
       productCount: r.coming_soon && !opts.admin ? 0 : (stats.get(r.id)?.product_count ?? 0),
       offerCount: opts.admin ? (stats.get(r.id)?.offer_count ?? 0) : null,
       image: (r.image_media_id && refs.get(r.image_media_id)) || null,
-      children: tax
-        .children(r.id)
-        .filter((c) => opts.includeHidden || c.visible)
-        .map(node),
+      children: tax.children(r.id).filter(shown).map(node),
     });
-    return tax
-      .children(null)
-      .filter((c) => opts.includeHidden || c.visible)
-      .map(node);
+    return tax.children(null).filter(shown).map(node);
   }
 
   /** Attributes of a category and its ancestors (ancestors first) */
