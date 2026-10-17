@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import type * as offers from '../../../spec/offers.js';
-import { group, harness, idem, line, now, placeOrder, product, tokens, USD, type Harness } from './helpers.js';
+import { group, harness, idem, line, now, placeOrder, product, REAUTH, tokens, USD, type Harness } from './helpers.js';
 
 let h: Harness;
 beforeAll(async () => {
@@ -253,7 +253,13 @@ describe('case refunds (requestRefund)', () => {
     const sellerId = newId();
     const p = product(h, { title: 'Sofa', price: 90000, sellerId });
     const m = await placeOrder(h, [group(h, [line(p, 1)], { sellerId })]);
-    const rr = await h.service.requestRefund({ source: 'case', caseId: newId(), orderId: m.order.id, orderItemIds: [m.items[0]![0]!], breakdown: breakdown(90000, 90000), fundedBy: 'seller', reason: 'Wrong item', proposedBy: { kind: 'staff', id: newId() } });
+    const proposer = newId();
+    const rr = await h.service.requestRefund({ source: 'case', caseId: newId(), orderId: m.order.id, orderItemIds: [m.items[0]![0]!], breakdown: breakdown(90000, 90000), fundedBy: 'seller', reason: 'Wrong item', proposedBy: { kind: 'staff', id: proposer } });
+    // a case refund always waits for Finance through an approval request, filed under the support staff member
+    expect(rr).toMatchObject({ status: 'under_review', approval: { required: true } });
+    expect(h.calls.approvals.at(-1)).toMatchObject({ action: 'returns.refunds.approve', target: { type: 'refund_request', id: rr.id }, requestedBy: { kind: 'staff', accountId: proposer } });
+    // a request left from before approval requests existed: Finance's own limit decides
+    await h.service.core.repo.update('refund_requests', rr.id, { approval_request_id: null });
     h.authority.stepUp = true;
     try {
       const missing = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), {}, idem());
@@ -261,9 +267,84 @@ describe('case refunds (requestRefund)', () => {
       // a token identity did not issue to this session is refused the same way
       const wrong = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), { reauthToken: 'ra.-.not-issued' }, idem());
       expect(wrong.body.error.code).toBe('STEP_UP_REQUIRED');
+      expect(h.calls.refunds.find((r) => r.originId === rr.id)).toBeUndefined();
+      const ok = await h.call('POST', `/api/admin/returns/refunds/${rr.id}/approve`, staff(), { reauthToken: REAUTH }, idem());
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body.status).toBe('processing');
     } finally {
       h.authority.stepUp = false;
     }
+  });
+});
+
+describe('staff refunds take one decision path (access returns.refunds.approve)', () => {
+  const body = (orderId: string, orderItemId: string, amount: number) => ({ orderId, items: [{ orderItemId, quantity: 1, amount: USD(amount) }], reasonCode: 'late_delivery', reason: 'Late', fundedBy: 'platform' });
+  async function order(price = 20000) {
+    const sellerId = newId();
+    const p = product(h, { title: 'Lamp', price, sellerId });
+    return placeOrder(h, [group(h, [line(p, 1)], { sellerId })]);
+  }
+
+  it('order page within the limit above stepUpAbove: the password first, nothing saved without it', async () => {
+    const m = await order();
+    h.authority.stepUp = true;
+    try {
+      const missing = await h.call('POST', '/api/admin/returns/refunds', staff(), body(m.order.id, m.items[0]![0]!, 15000), idem());
+      expect(missing.status).toBe(403);
+      expect(missing.body.error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'approval' } });
+      expect(await h.service.listRefundRequestsForOrder(m.order.id)).toEqual([]);
+      const ok = await h.call('POST', '/api/admin/returns/refunds', staff(), { ...body(m.order.id, m.items[0]![0]!, 15000), reauthToken: REAUTH }, idem());
+      expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      expect(ok.body).toMatchObject({ status: 'processing', approval: null });
+      expect(h.calls.refunds.find((r) => r.originId === ok.body.id)).toBeTruthy();
+    } finally {
+      h.authority.stepUp = false;
+    }
+  });
+
+  it('order page without refund authority: saved under review with an approval request; approving it hands the refund over', async () => {
+    const m = await order();
+    h.authority.decision = 'denied';
+    const before = h.calls.approvals.length;
+    const res = await h.call('POST', '/api/admin/returns/refunds', staff(), body(m.order.id, m.items[0]![0]!, 5000), idem());
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ status: 'under_review', approval: { required: true, approvalRequestId: expect.any(String) } });
+    expect(h.calls.approvals.length).toBe(before + 1);
+    expect(h.calls.approvals.at(-1)).toMatchObject({ action: 'returns.refunds.approve', amount: USD(5000), target: { type: 'refund_request', id: res.body.id, screen: 'admin/finance' } });
+    // the caller cannot approve it from the list, and approving is refused for them
+    expect((await h.call('GET', `/api/admin/returns/refunds/${res.body.id}`, staff())).body.canApprove).toBe(false);
+    h.authority.decision = 'allowed';
+    // the approver decides in access (Inbox)
+    const requestId = res.body.approval.approvalRequestId;
+    await h.publish('access', 'access.approval.decided', { requestId, ref: 'AP-1', actionKey: 'returns.refunds.approve', module: 'returns', target: { type: 'refund_request', id: res.body.id }, outcome: 'approved', decidedBy: { kind: 'staff', id: newId(), name: 'Fran Finance' }, reason: null, amount: USD(5000), approverIds: [], requestedById: newId() });
+    const after = await h.call('GET', `/api/admin/returns/refunds/${res.body.id}`, staff());
+    expect(after.body).toMatchObject({ status: 'processing', approvedBy: { name: 'Fran Finance' } });
+    expect(h.calls.refunds.find((r) => r.originId === res.body.id)).toMatchObject({ origin: 'exception' });
+  });
+
+  it('approve without permission to refund at all is refused, not forwarded', async () => {
+    const m = await order();
+    h.authority.decision = 'denied';
+    const res = await h.call('POST', '/api/admin/returns/refunds', staff(), body(m.order.id, m.items[0]![0]!, 4000), idem());
+    // the open approval request is decided by access; with none, a caller without refund authority gets FORBIDDEN
+    await h.service.core.repo.update('refund_requests', res.body.id, { approval_request_id: null });
+    const refused = await h.call('POST', `/api/admin/returns/refunds/${res.body.id}/approve`, staff(), {}, idem());
+    expect(refused.status).toBe(403);
+    h.authority.decision = 'allowed';
+  });
+
+  it('awaitingApproval lists only refunds waiting for a refund approver', async () => {
+    const m = await order();
+    h.authority.decision = 'approval_required';
+    const waiting = await h.call('POST', '/api/admin/returns/refunds', staff(), body(m.order.id, m.items[0]![0]!, 3000), idem());
+    h.authority.decision = 'allowed';
+    const m2 = await order();
+    const done = await h.call('POST', '/api/admin/returns/refunds', staff(), body(m2.order.id, m2.items[0]![0]!, 3000), idem());
+    const list = await h.call('GET', '/api/admin/returns/refunds?awaitingApproval=true', staff());
+    const ids = list.body.items.map((r: any) => r.id);
+    expect(ids).toContain(waiting.body.id);
+    expect(ids).not.toContain(done.body.id);
+    expect(list.body.items.find((r: any) => r.id === waiting.body.id)).toMatchObject({ orderRef: m.order.ref, returnRef: null, source: 'exception', reason: 'Late', proposedBy: { kind: 'staff' }, createdAt: expect.any(String), canApprove: true });
   });
 });
 

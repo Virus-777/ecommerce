@@ -198,6 +198,26 @@ export class Core {
     return this.ctx.use('access').requestApproval({ ...input, requestedBy: this.principalOf(by) });
   }
 
+  /**
+   * Above access stepUpAbove whoever acts on money confirms with their password again (owner decision 2026-10-14:
+   * staff have no 2-step): a re-auth token for purpose approval issued to this session, from POST
+   * /api/admin/identity/reauth. Claimed here (single use); STEP_UP_REQUIRED otherwise. Give it back with
+   * releaseReauth when the action then fails, so the retry can use it again.
+   */
+  async claimApprovalReauth(by: By, token: string | null | undefined, message: string): Promise<string> {
+    const refuse = () => new AppError('STEP_UP_REQUIRED', message, { kind: 'reauth', purpose: 'approval' });
+    const identity = this.ctx.tryUse('identity');
+    if (!token || !identity || !by.principal) throw refuse();
+    if (!(await identity.verifyReauthToken(by.principal, token, 'approval'))) throw refuse();
+    if (!(await identity.consumeReauthToken(token))) throw refuse();
+    return token;
+  }
+
+  async releaseReauth(token: string | null): Promise<void> {
+    // best effort: an unreleased token only means the person enters the password once more
+    if (token) await this.ctx.tryUse('identity')?.releaseReauthToken(token).catch(() => undefined);
+  }
+
   approvalRequired(request: { id: string; ref?: string | null }, details: Record<string, unknown>, message = 'Above your limit: this needs approval') {
     return new AppError('APPROVAL_REQUIRED', message, { approvalRequestId: request.id, ...(request.ref ? { approvalRef: request.ref } : {}), ...details });
   }

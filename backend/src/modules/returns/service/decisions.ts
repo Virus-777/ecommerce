@@ -4,6 +4,7 @@
  * interventions: take over, overturn a rejection, assign an owner.
  */
 import { newId } from '../../../kernel/lib/ids.js';
+import { money } from '../../../kernel/lib/money.js';
 import type { ExceptionInput, ReturnDecision } from '../../../spec/returns.js';
 import { returnMachine, returnShipmentMachine } from '../domain/state-machines.js';
 import { addDays, is, isFault, LIVE_REFUND, shortDate, type ReturnStatus } from '../domain/rules.js';
@@ -289,6 +290,11 @@ export class Decisions {
       const rr = agg.refunds.find((x) => is(LIVE_REFUND, x.status));
       if (rr) {
         if (mode === 'seller' && rr.status === 'requested') await this.refunds.approveAndHandOver(rr.id, by.actor, by);
+        // staff: a refund left waiting without a decision (an earlier call that stopped half-way) is decided now
+        if (mode === 'admin' && rr.status === 'under_review' && !rr.approval_request_id) {
+          const d = await this.refunds.authorize(by, money(rr.total, rr.currency), input.reauthToken);
+          await this.refunds.settle(rr.id, by, d, input.details.trim());
+        }
         return;
       }
     }
@@ -300,13 +306,15 @@ export class Decisions {
     const plan = isRefund ? await this.refunds.plan(agg, input.remedy) : null;
     if (!isRefund) await this.handling.checkReplacement(agg, input.remedy);
     const ref = plan ? await this.core.refundRef() : null;
+    // staff: the caller's refund authority decides before anything is saved (approve now, or Finance approval)
+    const refundDecision = mode === 'admin' && plan ? await this.refunds.authorize(by, money(plan.b.total, plan.currency), input.reauthToken) : null;
     const now = this.core.now();
     const approvedNow = mode === 'seller' || !isRefund;
     const exception = { reasonCode: input.reasonCode, details: input.details.trim(), proposedBy: by.actor, proposedAt: now.toISOString(), approvedBy: approvedNow ? by.actor : null, approvedAt: approvedNow ? now.toISOString() : null, stockOutcome: 'write_off' };
     const decision: ReturnDecision = { kind: 'approved_without_return', reasonCode: input.reasonCode, explanation: input.remedy.explanation ?? null, decidedBy: by.actor, decidedAt: now.toISOString(), platformDecision: this.platformDecision(agg, mode) };
     const shipment = this.core.shipmentOf(agg);
     const labelToVoid = shipment && shipment.status === 'label_issued' && shipment.method !== 'customer_arranged' ? (shipment.label_id ?? shipment.id) : null;
-    const rrId = await this.core.write(id, by, async (tx, a, batch) => {
+    const save = () => this.core.write(id, by, async (tx, a, batch) => {
       const status = returnMachine.next(a.ret.status as ReturnStatus, event);
       await tx.update('returns', id, { status, decision, exception, ...(mode === 'admin' ? this.platformPatch(a, 'admin') : {}), updated_at: now });
       const sh = this.core.shipmentOf(a);
@@ -327,6 +335,7 @@ export class Decisions {
       }
       return rr?.id ?? null;
     });
+    const rrId = refundDecision ? await this.refunds.unlessSaved(refundDecision, save) : await save();
     await this.voidLabel(labelToVoid, 'Refund without return');
     if (mode === 'admin') {
       await this.core.audit(
@@ -340,5 +349,7 @@ export class Decisions {
       return;
     }
     if (mode === 'seller' && rrId) await this.refunds.approveAndHandOver(rrId, by.actor, by);
+    // staff: approved and handed over now within the caller's refund limit, otherwise an approval request for Finance
+    if (refundDecision && rrId) await this.refunds.settle(rrId, by, refundDecision, input.details.trim());
   }
 }

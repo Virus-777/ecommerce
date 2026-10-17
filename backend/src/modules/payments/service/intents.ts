@@ -9,6 +9,7 @@
  */
 import { AppError } from '../../../kernel/errors/index.js';
 import { newId } from '../../../kernel/lib/ids.js';
+import { format } from '../../../kernel/lib/money.js';
 import type * as common from '../../../spec/common.js';
 import type { Allocation, AuthorizeInput, AuthorizeResult, PaymentDetail, PaymentStatusView, Tender } from '../../../spec/payments.js';
 import { paymentIntentMachine } from '../domain/state-machines.js';
@@ -1078,7 +1079,11 @@ export class Intents {
     return this.views.paymentDetail(i, this.core.lookup(), await this.core.cfg());
   }
 
-  async adminCapture(intentId: string, body: { amount?: common.Money | null; groupId?: string | null; reason: string }, by: By & { idempotencyKey: string }): Promise<PaymentDetail> {
+  /**
+   * Manual money actions: limits and step-up through access (Core.manual, approval action payments.payments.correct).
+   * o.approvedBy: the approved access request this call carries out (onManualApproved), checked there already.
+   */
+  async adminCapture(intentId: string, body: { amount?: common.Money | null; groupId?: string | null; reason: string; reauthToken?: string | null }, by: By & { idempotencyKey: string }, o: { approvedBy?: string | null } = {}): Promise<PaymentDetail> {
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
     const before = await this.get(intentId);
     if (body.amount && body.amount.currency !== before.currency) throw invalid([{ path: 'amount.currency', message: `Use ${before.currency}` }]);
@@ -1086,69 +1091,91 @@ export class Intents {
       const allocations = await this.repo.find('allocations', { intent_id: intentId, group_id: body.groupId });
       if (!allocations.length) throw invalid([{ path: 'groupId', message: 'This seller group is not part of the payment' }]);
     }
-    const capture = await this.capture(intentId, { key: `${intentId}:capture:admin:${by.idempotencyKey}`, groupId: body.groupId ?? null, amount: body.amount?.amount ?? null, final: !body.groupId && !body.amount, by, strict: true });
-    const after = await this.get(intentId);
-    await this.core.audit(
-      {
-        action: 'payments.payment.capture',
-        actionLabel: 'Captured a payment manually',
-        category: 'financial',
-        target: { type: 'payment', id: intentId, ref: before.ref, label: before.method.label, screen: 'admin/order' },
-        reason: body.reason,
-        before: { status: before.status, captured: before.captured_amount },
-        after: { status: after.status, captured: after.captured_amount, capture: capture ? { id: capture.id, amount: capture.amount, status: capture.status } : null },
-      },
-      by,
-    );
-    return this.detail(after);
+    // the amount access weighs: the amount asked, else what is still authorized and not captured
+    const amount = this.m(body.amount?.amount ?? Math.max(0, before.authorized_amount - before.captured_amount), before.currency);
+    const op = { kind: 'payment_capture' as const, id: intentId, ref: before.ref, label: before.method.label, summary: `Capture ${format(amount)} of payment ${before.ref}`, amount, reason: body.reason.trim(), params: { amount: body.amount ?? null, groupId: body.groupId ?? null } };
+    return this.core.manual(op, by, { reauthToken: body.reauthToken, approvedBy: o.approvedBy }, async () => {
+      const capture = await this.capture(intentId, { key: `${intentId}:capture:admin:${by.idempotencyKey}`, groupId: body.groupId ?? null, amount: body.amount?.amount ?? null, final: !body.groupId && !body.amount, by, strict: true });
+      const after = await this.get(intentId);
+      await this.core.audit(
+        {
+          action: 'payments.payment.capture',
+          actionLabel: 'Captured a payment manually',
+          category: 'financial',
+          target: { type: 'payment', id: intentId, ref: before.ref, label: before.method.label, screen: 'admin/order' },
+          reason: body.reason,
+          before: { status: before.status, captured: before.captured_amount },
+          after: { status: after.status, captured: after.captured_amount, capture: capture ? { id: capture.id, amount: capture.amount, status: capture.status } : null },
+          approvalRequestId: o.approvedBy ?? null,
+        },
+        by,
+      );
+      return this.detail(after);
+    });
   }
 
-  async adminVoid(intentId: string, reason: string, by: By): Promise<PaymentDetail> {
+  async adminVoid(intentId: string, reason: string, by: By, o: { reauthToken?: string | null; approvedBy?: string | null } = {}): Promise<PaymentDetail> {
     if (!reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
     const before = await this.get(intentId);
     if (before.status !== 'voided') paymentIntentMachine.next(before.status as never, 'void'); // only authorizations
-    const after = await this.void(intentId, reason, by, { strict: true });
-    if (before.status !== after.status) {
-      await this.core.audit(
-        { action: 'payments.payment.void', actionLabel: 'Voided an authorization', category: 'financial', target: { type: 'payment', id: intentId, ref: before.ref, label: before.method.label, screen: 'admin/order' }, reason, before: { status: before.status }, after: { status: after.status } },
-        by,
-      );
-    }
-    return this.detail(after);
+    if (before.status === 'voided') return this.detail(before); // already voided: nothing to weigh
+    // the money the marketplace gives up: authorized and not captured
+    const amount = this.m(Math.max(0, before.authorized_amount - before.captured_amount), before.currency);
+    const op = { kind: 'payment_void' as const, id: intentId, ref: before.ref, label: before.method.label, summary: `Void ${format(amount)} authorized on payment ${before.ref}`, amount, reason: reason.trim() };
+    return this.core.manual(op, by, o, async () => {
+      const after = await this.void(intentId, reason, by, { strict: true });
+      if (before.status !== after.status) {
+        await this.core.audit(
+          { action: 'payments.payment.void', actionLabel: 'Voided an authorization', category: 'financial', target: { type: 'payment', id: intentId, ref: before.ref, label: before.method.label, screen: 'admin/order' }, reason, before: { status: before.status }, after: { status: after.status }, approvalRequestId: o.approvedBy ?? null },
+          by,
+        );
+      }
+      return this.detail(after);
+    });
   }
 
-  async resolveOrphan(intentId: string, body: { action: 'refund' | 'link_to_order'; orderId?: string | null; reason: string }, by: By): Promise<PaymentDetail> {
+  async resolveOrphan(intentId: string, body: { action: 'refund' | 'link_to_order'; orderId?: string | null; reason: string; reauthToken?: string | null }, by: By, o: { approvedBy?: string | null } = {}): Promise<PaymentDetail> {
     if (!body.reason?.trim()) throw invalid([{ path: 'reason', message: 'Give a reason' }]);
     const before = await this.get(intentId);
     if (!before.orphan && before.order_id) throw illegal('This payment already belongs to an order');
     if (!is(ACCEPTED, before.status) && before.status !== 'pending_check') throw illegal('Only money that was authorized or captured can be resolved', { status: before.status });
     if (body.action === 'link_to_order') {
+      // no money moves: no limit
       if (!body.orderId) throw invalid([{ path: 'orderId', message: 'Choose the order this checkout created' }]);
       const order = await this.core.lookup().order(body.orderId);
       const session = await this.core.soft('checkout', 'getSessionForOrder', (c) => c.getSessionForOrder(before.checkout_session_id));
       const madeBySession = order && (order.paymentIntentId === before.id || session?.orderId === order.id);
       if (!order || !madeBySession) throw invalid([{ path: 'orderId', message: "This checkout did not create that order. Refund the payment instead." }]);
       await this.linkOrder(before.id, order.id, this.allocationsOfOrder(order).map((a) => ({ ...a, amount: { ...a.amount, currency: before.currency } })));
-    } else {
-      if (before.status === 'pending_check') throw illegal('The payment result is not known yet. Check it with the provider first.');
-      if (before.order_id) throw illegal('This payment belongs to an order: refund it from the order');
+      return this.afterOrphan(before, body, by, null);
+    }
+    if (before.status === 'pending_check') throw illegal('The payment result is not known yet. Check it with the provider first.');
+    if (before.order_id) throw illegal('This payment belongs to an order: refund it from the order');
+    // what goes back: the captured money not refunded yet, else the authorized amount
+    const amount = this.m(before.captured_amount > 0 ? Math.max(0, before.captured_amount - before.refunded_amount) : before.authorized_amount, before.currency);
+    const op = { kind: 'payment_orphan_refund' as const, id: intentId, ref: before.ref, label: before.method.label, summary: `Return ${format(amount)} of payment ${before.ref}, which has no order`, amount, reason: body.reason.trim() };
+    return this.core.manual(op, by, { reauthToken: body.reauthToken, approvedBy: o.approvedBy }, async () => {
       const action = await this.handleOrphan(before, by, body.reason);
       if (action === 'needs_review') throw this.core.error('PROVIDER_UNAVAILABLE');
-    }
-    const after = await this.get(intentId);
+      return this.afterOrphan(before, body, by, o.approvedBy ?? null);
+    });
+  }
+
+  private async afterOrphan(before: IntentRec, body: { action: 'refund' | 'link_to_order'; reason: string }, by: By, approvalRequestId: string | null): Promise<PaymentDetail> {
+    const after = await this.get(before.id);
     await this.core.audit(
       {
         action: 'payments.payment.resolve_orphan',
         actionLabel: body.action === 'refund' ? 'Returned money of a payment without an order' : 'Linked a payment to its order',
         category: 'financial',
-        target: { type: 'payment', id: intentId, ref: before.ref, label: before.method.label, screen: 'admin/finance' },
+        target: { type: 'payment', id: before.id, ref: before.ref, label: before.method.label, screen: 'admin/finance' },
         reason: body.reason,
         before: { status: before.status, orphan: before.orphan, orderId: before.order_id },
         after: { status: after.status, orphan: after.orphan, orderId: after.order_id },
+        approvalRequestId,
       },
       by,
     );
     return this.detail(after);
   }
 }
-

@@ -358,11 +358,13 @@ export class Reads {
 
   /* ---------------------------------------------------------------- refund requests */
 
-  refundFilter(q: { status?: string; source?: string; sellerId?: string; orderId?: string }): RefundFilter {
+  refundFilter(q: { status?: string; source?: string; sellerId?: string; orderId?: string; awaitingApproval?: boolean }): RefundFilter {
+    // waiting for a refund approver (Finance): requested or under review; the seller approves its own refunds
+    if (q.awaitingApproval) return { status: q.status, statuses: ['requested', 'under_review'], sources: q.source ? [q.source].filter((x) => x !== 'seller') : ['return', 'case', 'exception'], sellerId: q.sellerId, orderId: q.orderId };
     return { status: q.status, source: q.source, sellerId: q.sellerId, orderId: q.orderId };
   }
 
-  async listRefunds(q: { status?: string; source?: string; sellerId?: string; orderId?: string }, page: PageRequest): Promise<common.Page<RefundRequest>> {
+  async listRefunds(q: { status?: string; source?: string; sellerId?: string; orderId?: string; awaitingApproval?: boolean }, page: PageRequest): Promise<common.Page<RefundRequest>> {
     const res = await this.core.repo.listRefunds(this.refundFilter(q), page);
     return { ...res, items: await this.views.refundRequests(res.items) };
   }

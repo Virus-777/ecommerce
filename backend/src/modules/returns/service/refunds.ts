@@ -19,6 +19,8 @@ import { Batch, invalid, invalidField, notFound, SYSTEM, type Agg, type By, type
 import type { Views } from './views.js';
 
 export const APPROVE_ACTION = 'returns.refunds.approve';
+/** Where staff open a refund waiting for approval: Admin › Finance › Refunds to approve (the view refunds-to-approve picks the refund_request target) */
+const REFUND_SCREEN = 'admin/finance';
 const OUTCOME: Record<string, 'refunded' | 'partly_refunded' | 'credited'> = { partial_refund: 'partly_refunded', store_credit: 'credited' };
 
 export interface RefundPlan {
@@ -28,6 +30,13 @@ export interface RefundPlan {
   destinationLabel: string;
   kind: string;
   currency: string;
+}
+
+/** What the caller's refund authority allows (Refunds.authorize); claimed: the re-auth token used up for it */
+export interface RefundDecision {
+  decision: 'allowed' | 'approval_required' | 'denied' | 'unavailable';
+  reason: string | null;
+  claimed: string | null;
 }
 
 export class Refunds {
@@ -209,13 +218,15 @@ export class Refunds {
     const currency = input.items[0]!.amount.currency;
     if (over.length || itemsTotal + shipping > cap) throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', 'The amount is above what can still be refunded for these items', { maxRefundable: money(cap, currency), items: over });
     const total = itemsTotal + shipping;
+    // decided before anything is saved: a missing password (STEP_UP_REQUIRED) leaves no request behind
+    const decision = await this.authorize(by, money(total, currency), input.reauthToken);
     const perItem = input.items.map((l, n) => ({ orderItemId: l.orderItemId, amount: l.amount.amount + (n === 0 ? shipping : 0) }));
     const sellerShare = input.fundedBy === 'seller' ? total : input.fundedBy === 'shared' ? Math.floor(total / 2) : null;
     const platformShare = input.fundedBy === 'platform' || input.fundedBy === 'official_store' ? total : input.fundedBy === 'shared' ? total - Math.floor(total / 2) : null;
     const now = this.core.now();
     const ref = await this.core.refundRef();
     const methodLabel = destination === 'store_credit' ? 'Marketly store credit' : order.progress.payment.methodLabel || 'Original payment method';
-    const rr = await this.repo.insert('refund_requests', {
+    const rr = await this.unlessSaved(decision, () => this.repo.insert('refund_requests', {
       id: newId(),
       ref,
       source: 'exception',
@@ -268,7 +279,7 @@ export class Refunds {
       idempotency_key: idempotencyKey,
       created_at: now,
       updated_at: now,
-    });
+    }));
     this.core.publish('returns.refund.requested', { refundRequestId: rr.id, orderId: rr.order_id, total: money(total, currency), source: 'exception' }, by);
     await this.core.audit(
       {
@@ -282,7 +293,8 @@ export class Refunds {
       },
       by,
     );
-    return this.decideOrQueue(rr, by, null);
+    await this.settle(rr.id, by, decision);
+    return this.viewOf(rr.id);
   }
 
   /**
@@ -402,34 +414,82 @@ export class Refunds {
     });
     if (linked) await this.core.timeline(this.repo, linked.id, [{ kind: 'refund_requested', label: 'Refund sent for review', detail: `${rr.ref} from case decision`, visibility: 'customer', actor: input.proposedBy }]);
     this.core.publish('returns.refund.requested', { refundRequestId: rr.id, orderId: rr.order_id, total: b.total, source: input.source }, { actor: input.proposedBy });
-    return this.views.refundRequest(rr);
+    // A case decision arrives in-process without the staff member's session, so neither their refund limit nor their
+    // password can be confirmed here: it always waits for a refund approver (Finance) through an access approval request.
+    await this.queue(rr, { actor: input.proposedBy }, null);
+    return this.views.refundRequest((await this.repo.get('refund_requests', rr.id))!);
   }
 
   /* ---------------------------------------------------------------- approving and handing over */
 
-  /** Within the caller's limit: approve now; above it: an access approval request (the request stays under review) */
-  private async decideOrQueue(rr: RefundRec, by: By, note: string | null): Promise<RefundRequest> {
+  /*
+   * The one decision path of every refund staff start (order-page exception, refund without return, the remedy after
+   * inspection, a revised refund, and Finance's approve):
+   *   1. authorize(), before anything is saved: what the caller's refund authority (access returns.refunds.approve)
+   *      allows for the amount. Allowed above access stepUpAbove needs the caller's password again (reauthToken,
+   *      purpose approval), else STEP_UP_REQUIRED, and since nothing is saved yet the same call can simply be repeated.
+   *   2. settle(), once the request is saved: allowed → approved and handed to payments now; approval_required or
+   *      denied → it stays under review with an access approval request routed to the refund approvers (Finance), so
+   *      it shows in their Inbox. Denied (e.g. warehouse staff recording an inspection) never blocks the proposal:
+   *      it only means the proposer cannot approve it themselves.
+   * The approval request finishes in onApprovalDecided: approved → approved and handed over.
+   */
+
+  /** What the caller may do with a refund of this amount; claims the re-auth token when the amount needs it */
+  async authorize(by: By, amount: common.Money, reauthToken?: string | null): Promise<RefundDecision> {
     const access = this.core.ctx.tryUse('access');
-    if (access && by.principal) {
-      const check = await access.check(by.principal, APPROVE_ACTION, { money: money(rr.total, rr.currency) });
-      if (check.decision === 'allowed') {
-        await this.approveAndHandOver(rr.id, by.actor, by, { note: note ?? check.reason });
-        return this.viewOf(rr.id);
-      }
-      if (check.decision === 'approval_required') {
-        const req = await access.requestApproval({
-          action: APPROVE_ACTION,
-          target: { type: 'refund_request', id: rr.id, ref: rr.ref, label: `Refund ${rr.ref}`, sellerId: rr.seller_id, screen: 'admin/refunds' },
-          amount: money(rr.total, rr.currency),
-          summary: `Refund ${rr.ref} of ${(rr.total / 100).toFixed(2)} ${rr.currency}`,
-          details: { orderId: rr.order_id, orderItemIds: rr.order_item_ids, fundedBy: rr.funded_by },
-          reason: rr.reason ?? 'Refund approval',
-          requestedBy: by.principal,
-        });
-        await this.repo.update('refund_requests', rr.id, { approval_request_id: req.id, updated_at: this.core.now() });
-      }
+    if (!access || !by.principal) return { decision: 'unavailable', reason: null, claimed: null };
+    const check = await access.check(by.principal, APPROVE_ACTION, { money: amount });
+    if (check.decision !== 'allowed') return { decision: check.decision, reason: check.reason, claimed: null };
+    const claimed = check.stepUpRequired ? await this.claimApprovalReauth(reauthToken, by) : null;
+    return { decision: 'allowed', reason: check.reason, claimed };
+  }
+
+  /** Runs the save that follows authorize(); when it fails the claimed re-auth token works again for the retry */
+  async unlessSaved<T>(d: RefundDecision, save: () => Promise<T>): Promise<T> {
+    try {
+      return await save();
+    } catch (err) {
+      await this.release(d);
+      throw err;
     }
-    return this.viewOf(rr.id);
+  }
+
+  async release(d: RefundDecision | null): Promise<void> {
+    if (d?.claimed) await this.core.soft('identity', 'release re-auth token', (i) => i.releaseReauthToken(d.claimed!));
+  }
+
+  /** Carries out authorize()'s answer on the saved request: approve and hand over now, or ask for approval */
+  async settle(id: string, by: By, d: RefundDecision, note: string | null = null): Promise<void> {
+    const rr = (await this.repo.get('refund_requests', id))!;
+    if (d.decision !== 'allowed') return this.queue(rr, by, note);
+    await this.unlessSaved(d, () => this.approveAndHandOver(id, by.actor, by, { note: note ?? d.reason }));
+    await this.auditApproval(rr, by, null, note ?? d.reason);
+  }
+
+  /**
+   * The request waits under review with an access approval request (access gives back the open one for the same
+   * refund). Access routes it to the roles whose refund limit covers the amount, also when the requester has no
+   * refund authority at all.
+   */
+  private async queue(rr: RefundRec, by: By, note: string | null): Promise<void> {
+    const access = this.core.ctx.tryUse('access');
+    if (!access) {
+      // access is a core module; without it Finance still finds the request in GET /refunds?awaitingApproval=true
+      this.core.ctx.log.warn({ refundRequestId: rr.id }, 'returns: no access module, refund waits without an approval request');
+      return;
+    }
+    const req = await access.requestApproval({
+      action: APPROVE_ACTION,
+      target: { type: 'refund_request', id: rr.id, ref: rr.ref, label: `Refund ${rr.ref}`, sellerId: rr.seller_id, screen: REFUND_SCREEN },
+      amount: money(rr.total, rr.currency),
+      summary: `Refund ${rr.ref} of ${(rr.total / 100).toFixed(2)} ${rr.currency}`,
+      details: { orderId: rr.order_id, orderRef: rr.order_ref, returnId: rr.return_id, caseId: rr.case_id, orderItemIds: rr.order_item_ids, fundedBy: rr.funded_by, source: rr.source },
+      reason: note ?? rr.reason ?? 'Refund approval',
+      // case decisions come in-process with only the staff member: the request is filed under their account
+      requestedBy: by.principal ?? { kind: 'staff', accountId: by.actor.kind === 'staff' ? (by.actor.id ?? null) : null, sessionId: `returns:${by.actor.kind}` },
+    });
+    await this.repo.update('refund_requests', rr.id, { approval_request_id: req.id, updated_at: this.core.now() });
   }
 
   private async viewOf(id: string): Promise<RefundRequest> {
@@ -464,33 +524,39 @@ export class Refunds {
         return this.viewOf(id);
       }
     }
-    const check = await access.check(by.principal, APPROVE_ACTION, { money: money(rr.total, rr.currency) });
-    if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'You cannot approve refunds');
-    // above access stepUpAbove whoever approves confirms with their password again (a re-auth token, purpose approval)
-    const claimed = check.decision === 'allowed' && check.stepUpRequired ? await this.claimApprovalReauth(body.reauthToken, by) : null;
-    if (check.decision === 'approval_required') {
-      const req = await access.requestApproval({
-        action: APPROVE_ACTION,
-        target: { type: 'refund_request', id: rr.id, ref: rr.ref, label: `Refund ${rr.ref}`, sellerId: rr.seller_id, screen: 'admin/refunds' },
-        amount: money(rr.total, rr.currency),
-        summary: `Refund ${rr.ref} of ${(rr.total / 100).toFixed(2)} ${rr.currency}`,
-        details: { orderId: rr.order_id, orderItemIds: rr.order_item_ids, fundedBy: rr.funded_by },
-        reason: body.note ?? rr.reason ?? 'Refund approval',
-        requestedBy: by.principal,
-      });
-      await this.repo.update('refund_requests', rr.id, { approval_request_id: req.id, updated_at: this.core.now() });
-      // saved pending approval: the request stays under review with approval in the body (FORMAT.md, Approval responses)
-      return this.viewOf(id);
-    }
-    try {
-      await this.approveAndHandOver(rr.id, by.actor, by, { note: body.note ?? check.reason });
-    } catch (err) {
-      // not approved: the re-auth token works again for the retry
-      if (claimed) await this.core.soft('identity', 'release re-auth token', (i) => i.releaseReauthToken(claimed));
-      throw err;
-    }
-    await this.auditApproval(rr, by, null, check.reason);
+    // the same path as a refund staff start: within the limit approved now (password again above stepUpAbove),
+    // above it an approval request; saved pending approval it answers 200 with approval in the body (FORMAT.md)
+    const d = await this.authorize(by, money(rr.total, rr.currency), body.reauthToken);
+    // here the caller asks to approve: with no refund authority at all that is refused, not forwarded
+    if (d.decision === 'denied') throw new AppError('FORBIDDEN', d.reason || 'You cannot approve refunds');
+    await this.settle(rr.id, by, d, body.note ?? null);
     return this.viewOf(id);
+  }
+
+  /**
+   * Whether the caller could approve each waiting request with POST /refunds/{id}/approve now (Finance list): the
+   * approve permission and a refund limit covering the amount (access), and not the person who asked for its approval.
+   * Above stepUpAbove the approve call still asks for the password.
+   */
+  async withCanApprove(items: RefundRequest[], by: By): Promise<RefundRequest[]> {
+    const access = this.core.ctx.tryUse('access');
+    const allowedToApprove = !!access && !!by.principal && (!by.can || (await by.can(APPROVE_ACTION)));
+    const out: RefundRequest[] = [];
+    for (const r of items) {
+      let ok = allowedToApprove && is(['requested', 'under_review'], r.status) && r.source !== 'seller';
+      if (ok) {
+        const check = await this.core.soft('access', 'refund authority', (a) => a.check(by.principal!, APPROVE_ACTION, { money: r.breakdown.total }));
+        ok = check?.decision === 'allowed';
+      }
+      const requestId = r.approval?.approvalRequestId;
+      if (ok && requestId) {
+        // the person who asked for the approval cannot decide it (access refuses SELF_APPROVAL_NOT_ALLOWED)
+        const req = await this.core.soft('access', 'approval request', (a) => a.getApproval(requestId));
+        ok = !req || !['pending', 'partially_approved'].includes(req.status) || req.requestedBy?.id !== by.actor.id;
+      }
+      out.push({ ...r, canApprove: ok });
+    }
+    return out;
   }
 
   /** Claims the approver's re-auth token (single use, issued for purpose approval to this session); STEP_UP_REQUIRED otherwise */
@@ -509,7 +575,7 @@ export class Refunds {
         action: 'returns.refund.approve',
         actionLabel: `Approved refund ${rr.ref} of ${(rr.total / 100).toFixed(2)} ${rr.currency}`,
         category: 'financial',
-        target: { type: 'refund_request', id: rr.id, ref: rr.ref, label: `Refund ${rr.ref}`, screen: 'admin/refunds' },
+        target: { type: 'refund_request', id: rr.id, ref: rr.ref, label: `Refund ${rr.ref}`, screen: REFUND_SCREEN },
         before: { status: rr.status },
         after: { status: 'approved' },
         approvalRequestId,
@@ -710,6 +776,10 @@ export class Refunds {
     return this.viewOf(id);
   }
 
+  /**
+   * Change a declined request and resubmit it: the resubmission goes through the same decision path as a new refund
+   * (within the reviser's refund limit approved now, otherwise an approval request for Finance).
+   */
   async revise(id: string, remedy: RemedyInput, by: By): Promise<RefundRequest> {
     const rr = await this.repo.get('refund_requests', id);
     if (!rr) throw notFound('Refund request');
@@ -720,45 +790,54 @@ export class Refunds {
       const agg = await this.core.load(rr.return_id);
       if (agg) p = await this.plan(agg, remedy, { except: rr.id });
     }
+    // decided on the new amount before anything is saved (STEP_UP_REQUIRED leaves the request declined)
+    const decision = await this.authorize(by, money(this.revised(rr, remedy, p).patch.total!, rr.currency), remedy.reauthToken);
     const now = this.core.now();
-    const after = await this.repo.transaction(async (tx) => {
-      const locked = (await tx.get('refund_requests', id, { forUpdate: true }))!;
-      const status = refundRequestMachine.next(locked.status as RefundStatus, 'revise');
-      let patch: Partial<RefundRec>;
-      let items: RefundItem[];
-      if (p) {
-        patch = {
+    const after = await this.unlessSaved(decision, () =>
+      this.repo.transaction(async (tx) => {
+        const locked = (await tx.get('refund_requests', id, { forUpdate: true }))!;
+        const status = refundRequestMachine.next(locked.status as RefundStatus, 'revise');
+        const { patch, items } = this.revised(locked, remedy, p);
+        await tx.setRefundItems(id, items);
+        await tx.addRefundEvents(id, [this.ev('Refund revised and resubmitted', remedy.explanation ?? null, by.actor, now)]);
+        const updated = await tx.update('refund_requests', id, { ...patch, status, decline_reason: null, updated_at: now });
+        if (updated.return_id) await this.core.timeline(tx, updated.return_id, [{ kind: 'refund_revised', label: 'Refund revised', detail: remedy.explanation ?? null, visibility: 'staff', actor: by.actor }]);
+        return updated;
+      }),
+    );
+    this.core.publish('returns.refund.requested', { refundRequestId: id, orderId: after.order_id, total: money(after.total, after.currency), source: after.source }, by);
+    await this.core.audit({ action: 'returns.refund.revise', actionLabel: `Revised refund ${after.ref}`, category: 'financial', target: { type: 'refund_request', id, ref: after.ref, label: `Refund ${after.ref}` }, before: { total: rr.total, status: rr.status }, after: { total: after.total, status: after.status } }, by);
+    await this.settle(id, by, decision, remedy.explanation ?? null);
+    return this.viewOf(id);
+  }
+
+  /** The amounts of a revised request: a return's refund from its new plan; case and exception refunds from the asked amount */
+  private revised(row: RefundRec, remedy: RemedyInput, p: RefundPlan | null): { patch: Partial<RefundRec>; items: RefundItem[] } {
+    if (p) {
+      return {
+        patch: {
           item_amount: p.b.itemAmount,
           discount_share: p.b.discountShare,
           shipping_refund: p.b.shippingRefund,
           return_shipping_deduction: p.b.returnShippingDeduction,
           total: p.b.total,
-          seller_share: locked.seller_share === null ? null : p.b.total,
-          platform_share: locked.platform_share === null ? null : p.b.total,
+          seller_share: row.seller_share === null ? null : p.b.total,
+          platform_share: row.platform_share === null ? null : p.b.total,
           ...this.planColumns(p),
-        };
-        items = Refunds.items(locked.order_item_ids, p.b.perItem, locked.items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity ?? 0 })).filter((q) => q.quantity > 0), p.b.total);
-      } else {
-        // case and exception refunds: the amount is the asked partial amount within the stored cap
-        const deductions = remedy.deductions ?? [];
-        const full = locked.item_amount - locked.discount_share + locked.shipping_refund - locked.return_shipping_deduction;
-        const total = remedy.amount?.amount ?? Math.max(0, full - deductions.reduce((s, d) => s + d.amount.amount, 0));
-        if (total > locked.max_refundable) throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', 'The amount is above what can still be refunded for these items', { maxRefundable: money(locked.max_refundable, locked.currency) });
-        const ratio = locked.total > 0 ? total / locked.total : 0;
-        patch = { total, deductions };
-        items = locked.items.map((x) => ({ ...x, amount: Math.floor(x.amount * ratio) }));
-        const sum = items.reduce((s, x) => s + x.amount, 0);
-        if (items.length) items[0]!.amount += total - sum;
-      }
-      await tx.setRefundItems(id, items);
-      await tx.addRefundEvents(id, [this.ev('Refund revised and resubmitted', remedy.explanation ?? null, by.actor, now)]);
-      const updated = await tx.update('refund_requests', id, { ...patch, status, decline_reason: null, updated_at: now });
-      if (updated.return_id) await this.core.timeline(tx, updated.return_id, [{ kind: 'refund_revised', label: 'Refund revised', detail: remedy.explanation ?? null, visibility: 'staff', actor: by.actor }]);
-      return updated;
-    });
-    this.core.publish('returns.refund.requested', { refundRequestId: id, orderId: after.order_id, total: money(after.total, after.currency), source: after.source }, by);
-    await this.core.audit({ action: 'returns.refund.revise', actionLabel: `Revised refund ${after.ref}`, category: 'financial', target: { type: 'refund_request', id, ref: after.ref, label: `Refund ${after.ref}` }, before: { total: rr.total, status: rr.status }, after: { total: after.total, status: after.status } }, by);
-    return this.viewOf(id);
+        },
+        items: Refunds.items(row.order_item_ids, p.b.perItem, row.items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity ?? 0 })).filter((q) => q.quantity > 0), p.b.total),
+      };
+    }
+    // case and exception refunds: the amount is the asked partial amount within the stored cap
+    const deductions = remedy.deductions ?? [];
+    const full = row.item_amount - row.discount_share + row.shipping_refund - row.return_shipping_deduction;
+    const total = remedy.amount?.amount ?? Math.max(0, full - deductions.reduce((s, d) => s + d.amount.amount, 0));
+    if (total > row.max_refundable) throw this.core.error('REFUND_EXCEEDS_REFUNDABLE', 'The amount is above what can still be refunded for these items', { maxRefundable: money(row.max_refundable, row.currency) });
+    const ratio = row.total > 0 ? total / row.total : 0;
+    const items = row.items.map((x) => ({ ...x, amount: Math.floor(x.amount * ratio) }));
+    const sum = items.reduce((s, x) => s + x.amount, 0);
+    if (items.length) items[0]!.amount += total - sum;
+    return { patch: { total, deductions }, items };
   }
 
   /* ---------------------------------------------------------------- payments mirrors */

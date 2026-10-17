@@ -8,7 +8,8 @@
  * Stubbed APIs:
  *   offers.snapshotForOrder / catalog.snapshotForOrder → h.offers / h.products (purchase snapshots for orders).
  *   customers.getCustomerByUserId → the customer id equals the account id; getCustomer → 'Sam Rivera'.
- *   access.check / requestApproval / getStaffRef → h.access (decision per test; approval requests recorded).
+ *   access.check / requestApproval / getApproval / getStaffRef → h.access (decision and stepUp per test; approval requests recorded).
+ *   identity.verifyReauthToken → accepts REAUTH for purpose approval.
  *   checkout.getSessionForOrder / getSessionView (checkout is built in parallel) → h.sessions by session id.
  *   media.refs → MediaRefs for any id in h.files.
  *   settings.get → h.settings ('payments.captureMode' …), else the spec defaults.
@@ -27,6 +28,8 @@ import { auth, buildTestApp, callers, movingClock, signWebhook, tokenClock } fro
 import type { PaymentsService } from '../service.js';
 
 export const USD = (amount: number): common.Money => ({ amount, currency: 'USD' });
+/** The re-auth token (purpose approval) the identity stub accepts */
+export const REAUTH = 'dev-reauth.approval';
 
 export interface Harness {
   app: FastifyInstance;
@@ -39,7 +42,8 @@ export interface Harness {
   offers: Map<string, offers.OfferSnapshot>;
   products: Map<string, catalog.ProductSnapshot>;
   sessions: Map<string, { orderId: string | null; status: string; customerId: string | null; guestSessionId?: string | null }>;
-  access: { decision: access.AuthorityCheck['decision']; requests: access.RequestApprovalInput[]; staff: Map<string, string> };
+  /** stepUp: check answers stepUpRequired (above stepUpAbove); requests by approval request id in byId (getApproval answers them approved) */
+  access: { decision: access.AuthorityCheck['decision']; requests: access.RequestApprovalInput[]; staff: Map<string, string>; stepUp: boolean; byId: Map<string, access.RequestApprovalInput> };
   files: Set<string>;
   /** media.attach calls (dispute evidence) */
   attached: { assetId: string; usage: { module: string; kind: string; refId: string; refLabel?: string | null }; owner: unknown }[];
@@ -64,7 +68,7 @@ export async function harness(o: { modules?: string[] } = {}): Promise<Harness> 
     offers: new Map<string, offers.OfferSnapshot>(),
     products: new Map<string, catalog.ProductSnapshot>(),
     sessions: new Map() as Harness['sessions'],
-    access: { decision: 'allowed' as access.AuthorityCheck['decision'], requests: [] as access.RequestApprovalInput[], staff: new Map<string, string>() },
+    access: { decision: 'allowed' as access.AuthorityCheck['decision'], requests: [] as access.RequestApprovalInput[], staff: new Map<string, string>(), stepUp: false, byId: new Map<string, access.RequestApprovalInput>() },
     files: new Set<string>(),
     attached: [] as Harness['attached'],
   };
@@ -97,13 +101,25 @@ export async function harness(o: { modules?: string[] } = {}): Promise<Harness> 
             approvalsNeeded: h.access.decision === 'approval_required' ? 1 : 0,
             eligibleApproverRoles: [],
             eligibleApprovers: [],
-            stepUpRequired: false,
+            stepUpRequired: h.access.stepUp,
           }) as access.AuthorityCheck,
         requestApproval: async (input) => {
           h.access.requests.push(input);
-          return { id: newId(), ref: 'AP-261009-0001', status: 'pending', target: input.target } as unknown as access.ApprovalRequest;
+          const id = newId();
+          h.access.byId.set(id, input);
+          return { id, ref: 'AP-261009-0001', status: 'pending', target: input.target } as unknown as access.ApprovalRequest;
+        },
+        getApproval: async (id) => {
+          const input = h.access.byId.get(id);
+          return input ? ({ id, ref: 'AP-261009-0001', status: 'approved', target: input.target, details: input.details, requestedBy: { kind: 'staff', id: input.requestedBy.accountId } } as unknown as access.ApprovalRequest) : null;
         },
         getStaffRef: async (id) => (h.access.staff.has(id) ? { accountId: id, name: h.access.staff.get(id)!, away: false } : null),
+      },
+      // staff password re-auth: REAUTH is the token identity issued for purpose approval
+      identity: {
+        verifyReauthToken: async (_p, token, purpose) => token === REAUTH && purpose === 'approval',
+        consumeReauthToken: async () => true,
+        releaseReauthToken: async () => {},
       },
       checkout: {
         getSessionForOrder: async (id) => {

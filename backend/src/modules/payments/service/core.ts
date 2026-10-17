@@ -30,6 +30,24 @@ export interface By {
 }
 
 export const SYSTEM: common.Actor = { kind: 'system', id: null, name: 'Marketly' };
+
+/** Approval action of the manual money actions on the payments admin API (Core.manual) */
+export const MANUAL_ACTION = 'payments.payments.correct';
+
+/** One manual money action as access sees it */
+export interface ManualOp {
+  /** What is done; also the approval target type */
+  kind: 'payment_capture' | 'payment_void' | 'payment_orphan_refund' | 'refund_retry' | 'refund_cancel';
+  /** The payment (intent) or refund id */
+  id: string;
+  ref: string | null;
+  label: string;
+  summary: string;
+  amount: common.Money;
+  reason: string;
+  /** What the action needs again when it runs after approval (capture amount and seller group) */
+  params?: Record<string, unknown>;
+}
 export const PROVIDER_ACTOR: common.Actor = { kind: 'provider', id: null, name: 'Payment processor' };
 
 /** Settings read before a transaction (settings use their own connection) */
@@ -210,6 +228,65 @@ export class Core {
     } catch (err) {
       this.ctx.log.warn({ err, action: entry.action }, 'payments: audit entry not written');
     }
+  }
+
+  /* ---------------------------------------------------------------- manual money actions (limits through access) */
+
+  /**
+   * Staff moving money by hand on the payments admin API (capture, void, returning an orphan payment, retrying or
+   * cancelling a refund) is held to the same rules as every other money action: access decides with approval action
+   * payments.payments.correct and the amount (a permission alone never allows it).
+   * - allowed: done now; above access stepUpAbove only with the caller's password again (reauthToken, purpose
+   *   approval), else STEP_UP_REQUIRED. The token is given back when the action then fails.
+   * - approval_required: an approval request (the action and its parameters in details) and 409 APPROVAL_REQUIRED,
+   *   as for dispute concessions: these endpoints answer the payment or refund, which has no pending state to save,
+   *   so nothing changes until the request is approved; then onManualApproved carries the action out by itself.
+   * - denied: FORBIDDEN.
+   * approvedBy: the approval request this run carries out (the decision was made in access, so no check again).
+   */
+  async manual<T>(op: ManualOp, by: By, o: { reauthToken?: string | null; approvedBy?: string | null }, run: () => Promise<T>): Promise<T> {
+    if (o.approvedBy) return run();
+    const access = this.ctx.tryUse('access');
+    // without access no staff permission reaches these endpoints either; the kernel's permission check stands
+    if (!access) return run();
+    if (!by.principal) throw new AppError('FORBIDDEN', 'Manual money actions need a staff session');
+    const check = await access.check(by.principal, MANUAL_ACTION, { money: op.amount });
+    if (check.decision === 'denied') throw new AppError('FORBIDDEN', check.reason || 'Your role cannot move money on payments by hand');
+    if (check.decision === 'approval_required') {
+      const request = await access.requestApproval({
+        action: MANUAL_ACTION,
+        // the kind is the target type, so a capture and a void asked on the same payment are separate requests
+        target: { type: op.kind, id: op.id, ref: op.ref, label: op.label, screen: 'admin/finance' },
+        amount: op.amount,
+        summary: op.summary,
+        details: { kind: op.kind, reason: op.reason, ...(op.params ?? {}) },
+        reason: op.reason,
+        requestedBy: by.principal,
+      });
+      await this.audit({ action: 'payments.manual.request_approval', actionLabel: `Asked for approval: ${op.summary}`, category: 'financial', target: { type: op.kind, id: op.id, ref: op.ref, label: op.label, screen: 'admin/finance' }, reason: op.reason, approvalRequestId: request.id }, by);
+      throw new AppError('APPROVAL_REQUIRED', `${check.reason || 'Above your limit'}; sent for approval. It is carried out once approved.`, {
+        approvalRequestId: request.id,
+        approval: { required: true, reason: check.reason, approvalRequestId: request.id, approvers: (check.eligibleApproverRoles ?? []).map((r) => r.name) },
+      });
+    }
+    const claimed = check.stepUpRequired ? await this.claimApprovalReauth(by, o.reauthToken) : null;
+    try {
+      return await run();
+    } catch (err) {
+      // not done: the token works again for the retry (best effort)
+      if (claimed) await this.soft('identity', 'release re-auth token', (i) => i.releaseReauthToken(claimed));
+      throw err;
+    }
+  }
+
+  /** Claims the caller's re-auth token (single use, issued for purpose approval to this session); STEP_UP_REQUIRED otherwise */
+  private async claimApprovalReauth(by: By, token: string | null | undefined): Promise<string> {
+    const refuse = () => new AppError('STEP_UP_REQUIRED', 'Enter your password again to move this money', { kind: 'reauth', purpose: 'approval' });
+    const identity = this.ctx.tryUse('identity');
+    if (!token || !identity || !by.principal) throw refuse();
+    if (!(await identity.verifyReauthToken(by.principal, token, 'approval'))) throw refuse();
+    if (!(await identity.consumeReauthToken(token))) throw refuse();
+    return token;
   }
 
   /** An optional module's answer; off, not built or failing → undefined (the caller degrades) */

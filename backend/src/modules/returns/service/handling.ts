@@ -15,7 +15,7 @@ import { actorText, draftInspection, human, is, LIVE_REFUND, type ReturnStatus }
 import type { ReplacementRec, ReturnRec } from '../ports.js';
 import type { ReturnsRepository } from '../repository.js';
 import { Batch, illegal, invalid, invalidField, notFound, SYSTEM, type Agg, type By, type Core } from './core.js';
-import type { Refunds } from './refunds.js';
+import type { RefundDecision, Refunds } from './refunds.js';
 import type { Views } from './views.js';
 
 export class Handling {
@@ -184,22 +184,30 @@ export class Handling {
     }
     if (live) throw this.refunds.duplicate(live);
     if (agg.replacements.some((x) => x.status !== 'cancelled')) throw illegal('A replacement is already on its way', { from: r.status });
+    let decision: RefundDecision | null = null;
+    let refundRequestId: string | null = null;
     if (input.kind === 'replacement' || input.kind === 'exchange') {
       await this.createReplacement(agg, input, by);
       if (agg.draft) await this.core.repo.remove('inspection_drafts', id);
     } else {
       const plan = await this.refunds.plan(agg, input);
       const ref = await this.core.refundRef();
-      const rr = await this.core.write(id, by, async (tx, a, batch) => {
-        if (a.ret.status !== 'awaiting_remedy') throw illegal('The return changed; reload it', { from: a.ret.status });
-        const rec = await this.refunds.insertForReturn(tx, a, plan, { source: mode === 'seller' ? 'seller' : 'return', status: mode === 'seller' ? 'requested' : 'under_review', by, reasonCode: input.kind, reason: input.explanation ?? null, ref });
-        if (a.draft) await tx.remove('inspection_drafts', id);
-        if (mode === 'admin') batch.push('returns.refund.requested', { refundRequestId: rec.id, orderId: rec.order_id, total: { amount: rec.total, currency: rec.currency }, source: rec.source });
-        return rec;
-      });
+      // staff: the caller's refund authority decides before anything is saved (approve now, or Finance approval)
+      decision = mode === 'admin' ? await this.refunds.authorize(by, money(plan.b.total, plan.currency), input.reauthToken) : null;
+      const write = () =>
+        this.core.write(id, by, async (tx, a, batch) => {
+          if (a.ret.status !== 'awaiting_remedy') throw illegal('The return changed; reload it', { from: a.ret.status });
+          const rec = await this.refunds.insertForReturn(tx, a, plan, { source: mode === 'seller' ? 'seller' : 'return', status: mode === 'seller' ? 'requested' : 'under_review', by, reasonCode: input.kind, reason: input.explanation ?? null, ref });
+          if (a.draft) await tx.remove('inspection_drafts', id);
+          if (mode === 'admin') batch.push('returns.refund.requested', { refundRequestId: rec.id, orderId: rec.order_id, total: { amount: rec.total, currency: rec.currency }, source: rec.source });
+          return rec;
+        });
+      const rr = decision ? await this.refunds.unlessSaved(decision, write) : await write();
+      refundRequestId = rr.id;
       if (mode === 'seller') await this.refunds.approveAndHandOver(rr.id, by.actor, by);
     }
-    if (mode === 'admin') await this.core.audit({ action: 'returns.remedy.decide', actionLabel: `Decided the remedy for return ${r.ref}: ${human(input.kind)}`, category: 'financial', target: this.target(agg), after: input, reason: input.explanation ?? null }, by);
+    if (mode === 'admin') await this.core.audit({ action: 'returns.remedy.decide', actionLabel: `Decided the remedy for return ${r.ref}: ${human(input.kind)}`, category: 'financial', target: this.target(agg), after: { ...input, reauthToken: undefined }, reason: input.explanation ?? null }, by);
+    if (decision && refundRequestId) await this.refunds.settle(refundRequestId, by, decision, input.explanation ?? null);
   }
 
   /* ---------------------------------------------------------------- replacements */

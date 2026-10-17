@@ -101,9 +101,12 @@ export const adminRoutes = (service: ReturnsService) => {
     /** POST /refunds: Issue a refund from the order page (exception refund request) */
     createExceptionRefund: async (i) => service.refunds.createException(i.body, by(i), i.idempotencyKey),
     /** GET /refunds: Refund approval queue for Finance */
-    listRefundRequests: async ({ query, page }) => service.reads.listRefunds(query, page),
+    listRefundRequests: async (i) => {
+      const res = await service.reads.listRefunds(i.query, i.page);
+      return { ...res, items: await service.refunds.withCanApprove(res.items, by(i)) };
+    },
     /** GET /refunds/{id}: One refund request with breakdown, funding and earnings impact */
-    getRefundRequest: async ({ params }) => service.reads.refundById(params.id),
+    getRefundRequest: async (i) => (await service.refunds.withCanApprove([await service.reads.refundById(i.params.id)], by(i)))[0]!,
     /** POST /refunds/{id}/approve: Finance approves the refund and hands it to payments */
     approveRefund: async (i) => {
       await service.reads.refundById(i.params.id);
