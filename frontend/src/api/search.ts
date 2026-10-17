@@ -48,7 +48,8 @@ export interface StoreCard {
 
 export const productHref = (p: { id: string; slug?: string | null }, view = '') => href('store/product', view, { slug: p.slug || 'product', id: p.id });
 
-const cue = (s?: string | null) => (s ? s.replace(/^Arrives\s+/i, '') : null);
+/** The date part of a delivery cue ("Free delivery Mon, Oct 26" → "Mon, Oct 26"): the card adds its own label. */
+const cue = (s?: string | null) => (s ? s.replace(/^(Arrives|Free delivery)\s+/i, '') : null);
 
 /** A search product card (search results, /search/cards, similar products, empty-result popular items). */
 export function toCardProduct(c: SearchCard, hit?: Pick<SearchHit, 'kind' | 'position' | 'sponsored'>): StoreCard {
