@@ -1,7 +1,7 @@
 import { useState, type MouseEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { StoreLayout } from '@/layouts';
+import { AppbarSearch, StoreLayout } from '@/layouts';
 import { useSession } from '@/app/session';
 import NotFound from './NotFound';
 import { AskSellerDialog } from './data/ask-seller';
@@ -9,7 +9,7 @@ import { useSignInHref } from './data/product';
 import { ApiError, call, useApi } from '@marketly/web-shared/api';
 import { num } from '@marketly/web-shared/lib/format';
 import { href } from '@marketly/web-shared/routes';
-import { Alert, Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, IconButton, KeyValue, SearchInput, SellerBadge, Stars, Stat, Tabs } from '@marketly/web-shared/ui';
+import { Alert, Badge, Button, Chip, ChipRow, CopyButton, EmptyState, Icon, KeyValue, SearchInput, SellerBadge, Stars, Stat, Tabs } from '@marketly/web-shared/ui';
 import { initialsOf, tintOf } from '@/api/catalog';
 import { ApiProductCard, CardGridSkeleton, ListingPager, LoadError, LogoPic, SkLines } from '@/api/cards';
 import { SortSelect, useListingParams } from '@/api/listing';
@@ -150,7 +150,19 @@ export default function Seller() {
       appbar={{
         title: name || 'Store',
         back: href('store/home'),
-        actions: <IconButton icon="search" label="Search this store" onClick={() => document.getElementById('sl-q')?.focus()} />,
+        // phone: the store search lives in the app bar; typing the first letter scrolls to the products
+        actions: (
+          <AppbarSearch
+            id="sl-mq"
+            label="Search this store"
+            value={q}
+            onChange={(v) => {
+              if (v && !q) toAll();
+              setParam('q', v, true);
+            }}
+            onSubmit={() => toAll()}
+          />
+        ),
       }}
     >
       <div className="container page gap-6">
@@ -280,7 +292,7 @@ export default function Seller() {
                 </ChipRow>
               )}
               <div className="shop-toolbar">
-                <SearchInput id="sl-q" placeholder="Search this store" value={q} onChange={(v) => setParam('q', v, true)} />
+                <SearchInput id="sl-q" className="no-phone" placeholder="Search this store" value={q} onChange={(v) => setParam('q', v, true)} />
                 <span className="shop-sort">
                   <label className="small sub nowrap" htmlFor="sl-sort">
                     Sort by

@@ -247,15 +247,16 @@ function ProductPage({ slug, id, product, box, boxError, onRetryBox, summary, cr
       actionBar={
         offer ? (
           <>
-            <div className="stack gap-0 none">
+            <div className="stack gap-0 grow">
               <Price amount={dollars(offer.price)} was={offer.compareAt ? dollars(offer.compareAt.amount) : null} noOff />
-              <span className="xs muted">{barNote}</span>
+              <span className="xs muted truncate" title={barNote}>
+                {barNote}
+              </span>
             </div>
-            <span className="grow" />
-            <Button size="sm" onClick={addToCart} disabled={cart.pending === offer.offerId}>
+            <Button size="sm" className="none nowrap" onClick={addToCart} disabled={cart.pending === offer.offerId}>
               {addLabel}
             </Button>
-            <Button variant="secondary" size="sm" onClick={buy} disabled={buyNow.isPending}>
+            <Button variant="secondary" size="sm" className="none nowrap" onClick={buy} disabled={buyNow.isPending}>
               Buy now
             </Button>
           </>

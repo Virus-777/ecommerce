@@ -769,7 +769,12 @@
 .store-header .acct:hover { background: var(--surface-2); }
 .store-header .cart-btn { display: inline-flex; align-items: center; gap: var(--sp-2); height: 44px; padding: 0 14px 0 10px; border-radius: var(--r-pill); background: var(--text); color: var(--text-inverse) !important; font-weight: var(--fw-bold); text-decoration: none !important; position: relative; font-size: var(--fs-sm); }
 .store-header .cart-btn .n { background: var(--deal); color: var(--on-deal); border-radius: var(--r-pill); padding: 1px 7px; font-size: var(--fs-2xs); }
-.store-header .mobile-search { margin-bottom: var(--sp-3); }
+/* phone: one row of logo mark, search and notifications; the brand name stays for screen readers */
+@container app (max-width: 767.98px) {
+  .store-header .logo > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .store-header .bar { gap: var(--sp-2); }
+  .store-header .bar > .icon-btn { margin-inline: -6px; } /* keeps the 44px tap area, closer to the search */
+}
 .store-nav { display: flex; gap: var(--sp-1); align-items: center; overflow-x: auto; scrollbar-width: none; min-height: 44px; }
 .store-nav::-webkit-scrollbar { display: none; }
 .store-nav a { display: inline-flex; align-items: center; gap: var(--sp-1-5); padding: 0 var(--sp-3); min-height: var(--ctl-chip); border-radius: var(--r-pill); color: var(--text-2) !important; font-size: var(--fs-sm); font-weight: var(--fw-semibold); white-space: nowrap; text-decoration: none !important; }
@@ -802,6 +807,14 @@
 .appbar { position: sticky; top: 0; z-index: var(--z-header); display: flex; align-items: center; gap: var(--sp-2); min-height: var(--appbar-h); padding: 0 var(--sp-2); background: var(--surface); border-bottom: 1px solid var(--border); }
 .appbar .title { font-weight: var(--fw-bold); font-size: var(--fs-lg); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @container app (min-width: 768px) { .appbar { display: none; } }
+/* App bar search: grows leftwards from the search button over the title; hidden (not focusable) while closed */
+.appbar-search { position: absolute; right: var(--sp-2); top: 50%; transform: translateY(-50%); z-index: 1; display: flex; align-items: center; gap: var(--sp-1); width: var(--tap); height: 40px; padding-left: var(--sp-3); border-radius: var(--r-pill); background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3); overflow: hidden; opacity: 0; visibility: hidden; transition: width var(--dur) var(--ease), opacity var(--dur-fast) var(--ease), visibility 0s linear var(--dur); }
+.appbar-search.is-open { width: calc(100% - var(--tap) - var(--sp-2) * 3); opacity: 1; visibility: visible; transition-delay: 0s; }
+.appbar-search input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; font: inherit; color: var(--text); }
+.appbar-search input:focus { outline: none; }
+.appbar-search input::-webkit-search-cancel-button { display: none; }
+.appbar-search:focus-within { outline: 2px solid var(--focus); outline-offset: -1px; background: var(--surface); }
+.appbar-search .icon-btn { flex: none; width: 36px; height: 36px; }
 /* Sticky mobile action bar (Add to cart, Checkout) */
 .action-bar { position: sticky; bottom: 0; z-index: var(--z-action-bar); background: var(--surface); border-top: 1px solid var(--border); padding: var(--sp-3) var(--sp-4); display: flex; gap: var(--sp-2); align-items: center; box-shadow: var(--sh-up); }
 @container app (min-width: 1024px) { .action-bar { display: none; } }
@@ -1017,7 +1030,7 @@
     @container app (min-width: 1024px) { .shop-listing { grid-template-columns: 248px minmax(0, 1fr); } }
     .shop-toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); align-items: center; justify-content: space-between; }
     .shop-toolbar .select { width: auto; min-height: var(--ctl-md); height: var(--ctl-md); font-size: var(--fs-sm); }
-    .shop-sort { display: inline-flex; align-items: center; gap: var(--sp-2); }
+    .shop-sort { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; } /* right-aligned, also when it is alone (phone) */
     .shop-fg { border-bottom: 1px solid var(--border); padding-block: var(--sp-2) var(--sp-3); }
     .shop-fg > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-weight: var(--fw-bold); font-size: var(--fs-sm); min-height: 36px; }
     .shop-fg > summary::-webkit-details-marker { display: none; }

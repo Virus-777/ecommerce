@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { call, useApi, useAppConfig, useMarket } from '@marketly/web-shared/api';
@@ -97,7 +97,7 @@ function StoreHeader({ nav, box, hideOnPhone }: { nav?: StoreNavKey; box: Search
             <b>{deliverTo}</b>
           </button>
           <SearchForm id="hdr-q" box={box} />
-          <span className="grow only-phone" />
+          <SearchForm id="hdr-mq" phone box={box} />
           {signedIn ? (
             <Link className="acct no-phone" to={href('account/overview')}>
               <span>Hello{customer ? `, ${customer.first}` : ''}</span>
@@ -119,11 +119,8 @@ function StoreHeader({ nav, box, hideOnPhone }: { nav?: StoreNavKey; box: Search
             <span>Cart</span>
             <span className="n">{cartCount}</span>
           </Link>
-          <span className="only-phone">
-            <IconButton icon="shopping-cart" label={`Cart, ${cartCount} items`} to={href('store/cart')} count={cartCount} />
-          </span>
+          {/* phone: logo mark, search and notifications on one row; the cart is in the tab bar */}
         </div>
-        <SearchForm id="hdr-mq" phone box={box} />
       </div>
       <div className="no-phone nav-row">
         <div className="container">
@@ -157,16 +154,72 @@ export interface AppbarOptions {
   actions?: ReactNode;
 }
 
-/** Phone app bar: back + title (+ actions). Only rendered on the phone layout. */
+/** Phone app bar: back + title (+ actions). Only rendered on the phone layout (.appbar hides itself from tablet up);
+ * no wrapper, so it stays stuck to the top while the page scrolls. */
 export function Appbar({ title, back, actions }: AppbarOptions) {
   return (
-    <div className="only-phone">
-      <div className="appbar">
-        <IconButton icon="arrow-left" label="Back" to={back ?? href('store/home')} />
-        <span className="title">{title}</span>
-        {actions}
-      </div>
+    <div className="appbar">
+      <IconButton icon="arrow-left" label="Back" to={back ?? href('store/home')} />
+      <span className="title">{title}</span>
+      {actions}
     </div>
+  );
+}
+
+/** App bar search (phone): a search button that grows into a field to its left, over the title. It opens with a
+ * query already set; Escape or the close button clears it and closes; leaving it empty closes it. */
+export function AppbarSearch({ id, label, value, onChange, onSubmit }: { id: string; label: string; value: string; onChange: (v: string) => void; onSubmit?: () => void }) {
+  const [open, setOpen] = useState(!!value);
+  const [focusOnOpen, setFocusOnOpen] = useState(false);
+  // own text while typing: `value` (the URL query) arrives a render late and would undo fast keystrokes
+  const [text, setText] = useState(value);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (document.activeElement !== input.current) setText(value);
+  }, [value]);
+  useEffect(() => {
+    if (open && focusOnOpen) input.current?.focus();
+  }, [open, focusOnOpen]);
+  const show = () => {
+    setFocusOnOpen(true);
+    setOpen(true);
+  };
+  const close = () => {
+    setFocusOnOpen(false);
+    setText('');
+    onChange('');
+    setOpen(false);
+  };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    input.current?.blur();
+    onSubmit?.();
+  };
+  return (
+    <>
+      <IconButton icon="search" label={label} onClick={show} aria-expanded={open} aria-controls={id} />
+      <form className={cx('appbar-search', open && 'is-open')} role="search" onSubmit={submit}>
+        <Icon name="search" className="ic-sm" />
+        <label htmlFor={id} className="sr-only">
+          {label}
+        </label>
+        <input
+          ref={input}
+          id={id}
+          type="search"
+          placeholder={label}
+          value={text}
+          autoComplete="off"
+          onChange={(e) => {
+            setText(e.target.value);
+            onChange(e.target.value);
+          }}
+          onKeyDown={(e) => e.key === 'Escape' && close()}
+          onBlur={() => !text && setOpen(false)}
+        />
+        <IconButton icon="x" label="Close search" onClick={close} />
+      </form>
+    </>
   );
 }
 
