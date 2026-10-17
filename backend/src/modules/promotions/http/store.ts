@@ -24,7 +24,7 @@ export const storeRoutes = (service: PromotionsService) =>
     /** GET /deals: Deals page: flash sales, coupons, clearance and upcoming events */
     getDeals: async ({ query, scope }) => service.storefront.getDealsPage({ customerId: customerOf(scope) ?? undefined }, query.tab),
     /** GET /deals/clearance: More clearance products */
-    listClearance: async ({ query, page }) => pageOf(await service.storefront.clearanceProducts({ categoryId: query.categoryId }), page),
+    listClearance: async ({ query, page, scope }) => pageOf(await service.storefront.clearanceProducts({ categoryId: query.categoryId, customerId: customerOf(scope) }), page),
     /** GET /deals/coupons: More clippable coupons */
     listDealCoupons: async ({ query, page, scope }) => service.storefront.listDealCoupons(customerOf(scope), query.sellerId, page),
     /** GET /flash-sales/{campaignId}: One flash sale with live claimed meters */

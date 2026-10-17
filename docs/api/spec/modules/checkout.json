@@ -130,6 +130,7 @@
       "totals": "QuoteTotals",
       "legal": "LegalInfo",
       "giftNote": "string?",
+      "hidePricesOnSlip": { "type": "bool", "desc": "Gift option: the packing slip shows no prices (PUT /sessions/{id}/preferences)" },
       "readyToPlace": "bool",
       "blockers": "string[]",
       "doubleSubmitNote": { "type": "string", "desc": "'Tapping twice or refreshing won't create two orders or charge you twice.'" },

@@ -234,6 +234,7 @@ export class Views {
       totals: q.totals,
       legal,
       giftNote: row.gift_note,
+      hidePricesOnSlip: account.hidePricesOnSlip,
       readyToPlace: row.status === 'open' && blockers.length === 0,
       blockers,
       doubleSubmitNote: DOUBLE_SUBMIT_NOTE,
