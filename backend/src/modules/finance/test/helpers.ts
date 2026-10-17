@@ -66,6 +66,8 @@ export interface Kit {
   authority: Map<string, Decision>;
   /** access.requestApproval: whether the requester counts as the first approver (second-reviewer cases) */
   countsAsFirst: { value: boolean };
+  /** access.check answers stepUpRequired (the amount is above stepUpAbove) */
+  stepUp: { value: boolean };
   refunds: unknown[];
   staff: string;
   of(name: string): any[];
@@ -127,6 +129,7 @@ export async function boot(o: { modules?: string[]; apiStubs?: NonNullable<Param
   const approvals = new Map<string, access.RequestApprovalInput & { status: string }>();
   const authority = new Map<string, Decision>();
   const countsAsFirst = { value: false };
+  const stepUp = { value: false };
   const refunds: unknown[] = [];
   const itemById = () => new Map([...orders.values()].flatMap((ord) => ord.groups.flatMap((g) => g.items.map((i) => [i.id, i] as const))));
   const app = await buildTestApp({
@@ -154,7 +157,7 @@ export async function boot(o: { modules?: string[]; apiStubs?: NonNullable<Param
       access: {
         check: async (_p: any, action: string) => {
           const decision = authority.get(action) ?? 'allowed';
-          return { decision, action, reason: decision === 'allowed' ? 'Within your limit' : decision === 'denied' ? 'Your role has no authority for this' : 'Above your limit: Finance Manager approval', requiresSecondReviewer: decision === 'approval_required', approvalsNeeded: decision === 'approval_required' ? 1 : 0, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: false } as any;
+          return { decision, action, reason: decision === 'allowed' ? 'Within your limit' : decision === 'denied' ? 'Your role has no authority for this' : 'Above your limit: Finance Manager approval', requiresSecondReviewer: decision === 'approval_required', approvalsNeeded: decision === 'approval_required' ? 1 : 0, eligibleApproverRoles: [], eligibleApprovers: [], stepUpRequired: stepUp.value } as any;
         },
         requestApproval: async (input: access.RequestApprovalInput) => {
           const existing = [...approvals.entries()].find(([, a]) => a.status === 'pending' && a.action === input.action && a.target.id === input.target.id);
@@ -178,6 +181,12 @@ export async function boot(o: { modules?: string[]; apiStubs?: NonNullable<Param
         },
         getStaffRef: async (id: string) => ({ accountId: id, name: 'Fran Finance', away: false, roleLabel: 'Finance Specialist' }),
         resolveRecipients: async (roleKey: string) => ({ roleKey, leadAccountId: null, accountIds: [], ccAccountIds: [], viaBackup: false }),
+      },
+      // staff password re-auth: dev-reauth.<purpose> is the token identity issued for that purpose
+      identity: {
+        verifyReauthToken: async (_p: any, token: string, purpose: string) => token === `dev-reauth.${purpose}`,
+        consumeReauthToken: async () => true,
+        releaseReauthToken: async () => {},
       },
       payments: {
         startRefund: async (input: any) => {
@@ -214,6 +223,7 @@ export async function boot(o: { modules?: string[]; apiStubs?: NonNullable<Param
     approvals,
     authority,
     countsAsFirst,
+    stepUp,
     refunds,
     get staff() {
       return callers.staff();

@@ -365,12 +365,19 @@ export class PayoutsPart extends Part {
     }
 
     if (check.decision === 'allowed') {
-      // within the approver's payout limit (access): one approval releases the run
+      // within the approver's payout limit (access): one approval releases the run; above access stepUpAbove only
+      // with the approver's password again (on the second-reviewer path above access.decide checks it)
+      const claimed = check.stepUpRequired ? await this.core.claimApprovalReauth(by, body.reauthToken, 'Enter your password again to approve this payout run') : null;
       const slot = approvals.find((a) => a.status === 'pending');
       if (slot) Object.assign(slot, mine(slot.role, slot.order));
       else approvals.push(mine('Finance Manager', approvals.length + 1));
-      await this.repo.update('payout_runs', id, { approvals: approvals as never });
-      await this.finishApproval(id, by);
+      try {
+        await this.repo.update('payout_runs', id, { approvals: approvals as never });
+        await this.finishApproval(id, by);
+      } catch (err) {
+        await this.core.releaseReauth(claimed);
+        throw err;
+      }
       await this.core.audit({ action: 'finance.payout_run.approve', actionLabel: 'Approved a payout run', category: 'financial', target: { type: 'payout_run', id, ref: run.ref, screen: 'admin/payouts' }, reason: body.note ?? null, approvalNote: check.reason }, by);
       return this.runView((await this.repo.get('payout_runs', id))!, by);
     }

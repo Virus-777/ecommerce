@@ -190,6 +190,27 @@ describe('payout run approval', () => {
     await k.call('POST', `${ADMIN}/payout-runs/${r.id}/send-back`, k.staff, { reason: 'Later' });
   });
 
+  it("within the approver's own limit but above stepUpAbove: the password again (reauthToken, purpose approval)", async () => {
+    await credit(S, 2_000_000);
+    const r = await newRun();
+    await k.call('POST', `${ADMIN}/payout-runs/${r.id}/submit`, k.staff);
+    k.stepUp.value = true;
+    try {
+      const missing = await k.call('POST', `${ADMIN}/payout-runs/${r.id}/approve`, k.staff, { confirmedReview: true }, idem());
+      expect(missing.status).toBe(403);
+      expect(missing.body.error).toMatchObject({ code: 'STEP_UP_REQUIRED', details: { kind: 'reauth', purpose: 'approval' } });
+      const wrongPurpose = await k.call('POST', `${ADMIN}/payout-runs/${r.id}/approve`, k.staff, { confirmedReview: true, reauthToken: 'dev-reauth.payout-destination' }, idem());
+      expect(wrongPurpose.body.error.code).toBe('STEP_UP_REQUIRED');
+      // nothing recorded without it
+      expect((await k.call('GET', `${ADMIN}/payout-runs/${r.id}`, k.staff)).body).toMatchObject({ status: 'pending_approval', approvals: [{ status: 'pending' }] });
+      const ok = await k.call('POST', `${ADMIN}/payout-runs/${r.id}/approve`, k.staff, { confirmedReview: true, reauthToken: 'dev-reauth.approval' }, idem());
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(ok.body.status).toBe('approved');
+    } finally {
+      k.stepUp.value = false;
+    }
+  });
+
   it("a run within the approver's payout limit (access) is approved by one person, whatever its size (no threshold setting)", async () => {
     await credit(S, 6_000_000);
     const big = await newRun();
