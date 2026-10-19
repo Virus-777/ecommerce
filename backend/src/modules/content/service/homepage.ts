@@ -26,6 +26,8 @@ interface SectionConfig {
   name?: string | null;
   /** Set when the linked promotion ended (the section stays hidden) */
   hiddenByPromotion?: boolean | null;
+  /** Hidden by staff (the eye button); content and schedule are kept */
+  hidden?: boolean | null;
 }
 
 /** One section in a published layout version */
@@ -267,7 +269,7 @@ export class ContentHomepage extends ContentPages {
     return rule ? { mode: 'rule', rule: { kind: rule.kind, days: rule.days ?? null, description: rule.description } } : null;
   }
 
-  private async sectionAdmin(r: SectionRow, position: number, owner: HomeSectionAdmin['owner']): Promise<HomeSectionAdmin> {
+  private async sectionAdmin(r: SectionRow, position: number, owner: HomeSectionAdmin['owner'], hiddenLive = false): Promise<HomeSectionAdmin> {
     const s = this.snapOf(r);
     const ad = r.kind === 'ad_position';
     let productCount = 0;
@@ -315,6 +317,8 @@ export class ContentHomepage extends ContentPages {
       adPlacementKey: r.ad_placement_key,
       managedIn: ad ? AD_MANAGED : null,
       config: ad ? null : this.inputOf(r, position),
+      hidden: Boolean(s.config.hidden),
+      hiddenLive,
       unavailableHidden: hidden,
       productCount,
       updatedAt: r.updated_at.toISOString(),
@@ -345,18 +349,20 @@ export class ContentHomepage extends ContentPages {
   }
 
   /** Sections shown in the admin list: the draft layout plus sections removed from the draft that are still live */
-  private async adminRows(): Promise<{ row: SectionRow; position: number }[]> {
+  private async adminRows(): Promise<{ row: SectionRow; position: number; hiddenLive: boolean }[]> {
     const rows = await this.repo.listSections();
     const { live } = await this.homepageVersions();
-    const liveIds = new Set(this.layoutOf(live).sections.map((s) => s.id));
+    const liveSections = this.layoutOf(live).sections;
+    const liveIds = new Set(liveSections.map((s) => s.id));
+    const hiddenLive = new Set(liveSections.filter((s) => s.config.hidden).map((s) => s.id));
     const active = rows.filter((r) => r.status !== 'removed');
     const pendingRemoval = rows.filter((r) => r.status === 'removed' && liveIds.has(r.id));
-    return [...active.map((row, i) => ({ row, position: i + 1 })), ...pendingRemoval.map((row) => ({ row, position: 0 }))];
+    return [...active.map((row, i) => ({ row, position: i + 1 })), ...pendingRemoval.map((row) => ({ row, position: 0 }))].map((x) => ({ ...x, hiddenLive: hiddenLive.has(x.row.id) }));
   }
 
-  private async sectionsAdmin(list: { row: SectionRow; position: number }[]): Promise<HomeSectionAdmin[]> {
+  private async sectionsAdmin(list: { row: SectionRow; position: number; hiddenLive: boolean }[]): Promise<HomeSectionAdmin[]> {
     const owners = await this.owners(list.map((x) => ({ staffId: x.row.owner_staff_id, role: x.row.owner_role })));
-    return Promise.all(list.map((x, i) => this.sectionAdmin(x.row, x.position, owners[i]!)));
+    return Promise.all(list.map((x, i) => this.sectionAdmin(x.row, x.position, owners[i]!, x.hiddenLive)));
   }
 
   async getHomepageAdmin(): Promise<HomepageAdmin> {
@@ -378,7 +384,7 @@ export class ContentHomepage extends ContentPages {
     const row = hit?.row ?? (await this.repo.getSection(id));
     if (!row) throw notFound('Section');
     const [owner] = await this.owners([{ staffId: row.owner_staff_id, role: row.owner_role }]);
-    return this.sectionAdmin(row, hit?.position ?? 0, owner!);
+    return this.sectionAdmin(row, hit?.position ?? 0, owner!, hit?.hiddenLive ?? false);
   }
 
   async listHomepageVersions(page: PageRequest): Promise<common.Page<Version>> {
@@ -609,6 +615,36 @@ export class ContentHomepage extends ContentPages {
     return out;
   }
 
+  /**
+   * Hiding takes the section off the live homepage now (a new live version, no review) and keeps it hidden in the
+   * draft. Showing it again only changes the draft: customers see it after the layout is published.
+   */
+  async setHomeSectionVisibility(id: string, body: { hidden: boolean }, by: By): Promise<HomeSectionAdmin> {
+    const row = await this.editableSection(id);
+    if (row.status === 'removed') throw new AppError('CONFLICT', 'The section was removed from the draft');
+    const hidden = body.hidden;
+    const title = this.sectionTitle(this.snapOf(row));
+    let version: VersionRow | null = null;
+    await this.repo.transaction(async (tx) => {
+      await tx.updateSection(id, { config: { ...((row.config ?? {}) as SectionConfig), hidden } as never, updated_by: actorKey(by.actor), updated_at: this.now() });
+      const { live, draft } = await this.homepageVersions(tx);
+      const liveLayout = this.layoutOf(live);
+      if (hidden && liveLayout.sections.some((s) => s.id === id && !s.config.hidden)) {
+        const sections = liveLayout.sections.map((s) => (s.id === id ? { ...s, config: { ...s.config, hidden: true } } : s));
+        version = await this.recordLive(tx, { sections }, by, `Hid ${title}`);
+      }
+      // a hide is live already, so an open draft only follows it (its review stays as it is)
+      if (!hidden) await this.touchDraft(tx, by, `Showed ${title}`);
+      else if (draft) await tx.updateVersion(draft.id, { snapshot: this.draftLayout(await tx.listSections()) as never });
+    });
+    if (version) this.publishedEvent(version, by);
+    this.invalidateHome();
+    await this.logAction('home_section', id, hidden ? 'hide' : 'show', by);
+    const out = await this.sectionAdminById(id);
+    await this.audit({ action: `content.homepage.section.${hidden ? 'hide' : 'show'}`, actionLabel: hidden ? 'Hid homepage section' : 'Showed homepage section in the draft', target: { type: 'home_section', id, label: title }, before: { hidden: Boolean((row.config as SectionConfig | null)?.hidden) }, after: { hidden, live: Boolean(version) } }, by);
+    return out;
+  }
+
   async reorderHomeSections(sectionIds: string[], by: By): Promise<HomepageAdmin> {
     await this.repo.transaction(async (tx) => {
       const active = (await tx.listSections()).filter((r) => r.status !== 'removed');
@@ -747,7 +783,7 @@ export class ContentHomepage extends ContentPages {
     if (s.kind === 'ad_position') return true;
     if (s.status !== 'published' && s.status !== 'scheduled') return false;
     if (!inWindow(at, s.showFrom, s.removeAt)) return false;
-    if (s.config.hiddenByPromotion) return false;
+    if (s.config.hiddenByPromotion || s.config.hidden) return false;
     // a linked promotion, or a deals source limited to one promotion: the section hides when it is not running
     for (const campaignId of unique([s.linkedPromotionId, this.dealsCampaignOf(s)].filter((x): x is string => Boolean(x)))) {
       if (!(await campaignActive(campaignId))) return false;

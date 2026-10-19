@@ -207,6 +207,26 @@ describe('section schedules', () => {
     expect(again.json().error.code).toBe('ILLEGAL_TRANSITION');
     await h.admin('POST', '/homepage/publish', { summary: 'Clean up' });
   });
+
+  it('hides a live section now; showing it again waits for Publish', async () => {
+    const lamp = h.card({ title: 'Paper floor lamp' });
+    h.cards.set(lamp.productId, lamp);
+    const live = (await h.admin('POST', '/homepage/sections', { kind: 'featured_products', heading: 'Lamps', productSource: { mode: 'manual', productIds: [lamp.productId] } })).json();
+    await h.admin('POST', '/homepage/publish', { summary: 'Lamps' });
+    expect((await home()).sections.some((s: any) => s.id === live.id)).toBe(true);
+    const before = await admin();
+    const hid = await h.admin('POST', `/homepage/sections/${live.id}/visibility`, { hidden: true });
+    expect(hid.statusCode).toBe(200);
+    expect(hid.json()).toMatchObject({ hidden: true, hiddenLive: true, status: 'published' });
+    expect((await admin()).liveVersion).toBeGreaterThan(before.liveVersion);
+    expect((await home()).sections.some((s: any) => s.id === live.id)).toBe(false);
+    const shown = (await h.admin('POST', `/homepage/sections/${live.id}/visibility`, { hidden: false })).json();
+    expect(shown).toMatchObject({ hidden: false, hiddenLive: true });
+    expect((await admin()).hasDraft).toBe(true);
+    expect((await home()).sections.some((s: any) => s.id === live.id)).toBe(false);
+    await h.admin('POST', '/homepage/publish', { summary: 'Shown again' });
+    expect((await home()).sections.some((s: any) => s.id === live.id)).toBe(true);
+  });
 });
 
 describe('store homepage resolution', () => {

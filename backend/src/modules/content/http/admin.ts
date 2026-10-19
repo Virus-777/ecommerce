@@ -18,6 +18,7 @@ export const adminRoutes = (service: ContentService) =>
     listHomeSectionProducts: async (i) => service.listHomeSectionProducts(i.params.id, { includeHidden: i.query.includeHidden }, i.page),
     scheduleHomeSection: async (i) => service.scheduleHomeSection(i.params.id, i.body, by(i)),
     removeHomeSection: async (i) => service.removeHomeSection(i.params.id, i.body, by(i)),
+    setHomeSectionVisibility: async (i) => service.setHomeSectionVisibility(i.params.id, i.body, by(i)),
     reorderHomeSections: async (i) => service.reorderHomeSections(i.body.sectionIds, by(i)),
     previewHomepage: async (i) => service.previewHomePage(i.body),
     publishHomepage: async (i) => service.publishHomepage(i.body, by(i)),
