@@ -340,3 +340,51 @@ describe('admin review search and consumers', () => {
     await k.app.kernel.jobs.runNow('reviews.moderation-sla');
   });
 });
+
+describe('review integrity', () => {
+  it('a seller’s report never hides a review by itself, and a kept review is not hidden again by a new report', async () => {
+    const r = await published({ rating: 1 });
+    const visible = async () => (await k.call('GET', `${STORE}/products/${r.productId}/reviews`, tokens.visitor())).body.items.map((x: any) => x.id);
+    await k.call('POST', `${SELLER}/reports`, tokens.seller(r.sellerId), { targetType: 'product_review', targetId: r.reviewId, reason: 'personal_information' });
+    expect(await visible(), 'waits for a moderator, still shown').toEqual([r.reviewId]);
+    const item = await itemOf(r.reviewId);
+    expect((await k.call('POST', `${ADMIN}/moderation-items/${item.id}/decide`, tokens.staff(), { decision: 'keep', reasonCode: 'legitimate_experience' })).status).toBe(200);
+    // a shopper's report with a hiding reason, right after the moderator kept it
+    await report(tokens.customer(newId()), r.reviewId, 'hate_or_harassment');
+    expect(await visible(), 'kept within the cooldown: queued, not hidden').toEqual([r.reviewId]);
+  });
+
+  it('the seller’s own team cannot review its products or leave it feedback', async () => {
+    const customerId = newId();
+    const sellerId = seller(k, 'Self Store');
+    const p = product(k);
+    const ord = order(k, customerId, [{ sellerId, lines: [{ productId: p.productId }] }]);
+    k.members.add(`${sellerId}:${customerId}`);
+    const review = await k.call('POST', `${STORE}/me/reviews`, tokens.customer(customerId), reviewInput(ord.itemIds[0]!));
+    expect([review.status, review.body.error?.code]).toEqual([422, 'REVIEW_NOT_ELIGIBLE']);
+    const feedback = await k.call('POST', `${STORE}/me/feedback`, tokens.customer(customerId), { orderId: ord.orderId, sellerId, asDescribed: true, dispatchRating: 5, communicationRating: 5, comment: 'Great seller, fast shipping.' });
+    expect([feedback.status, feedback.body.error?.code]).toEqual([422, 'REVIEW_NOT_ELIGIBLE']);
+  });
+
+  it('a review removed as proven fake cannot be posted again; one removed for other reasons comes back through a moderator', async () => {
+    for (const [reasonCode, expected] of [['proven_fake', 'refused'], ['personal_information', 'held']] as const) {
+      const r = await published({ rating: 5 });
+      await report(tokens.customer(newId()), r.reviewId, 'off_topic');
+      const item = await itemOf(r.reviewId);
+      expect((await k.call('POST', `${ADMIN}/moderation-items/${item.id}/decide`, tokens.staff(), { decision: 'remove', reasonCode, messageToAuthor: 'Removed.' })).status).toBe(200);
+      expect((await k.call('DELETE', `${STORE}/me/reviews/${r.reviewId}`, r.author)).status).toBeLessThan(300);
+      const again = await k.call('POST', `${STORE}/me/reviews`, r.author, reviewInput(r.itemIds[0]!, { rating: 5 }));
+      if (expected === 'refused') expect([again.status, again.body.error?.code]).toEqual([422, 'REVIEW_NOT_ELIGIBLE']);
+      else expect(again.body.status, JSON.stringify(again.body)).toBe('held');
+    }
+  });
+
+  it('a returned item can be reviewed, but not as a verified purchase', async () => {
+    const customerId = newId();
+    const p = product(k);
+    const ord = order(k, customerId, [{ sellerId: seller(k), lines: [{ productId: p.productId, state: 'refunded' }] }]);
+    const res = await k.call('POST', `${STORE}/me/reviews`, tokens.customer(customerId), reviewInput(ord.itemIds[0]!, { rating: 2 }));
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.review.author.verifiedPurchase).toBe(false);
+  });
+});

@@ -176,3 +176,16 @@ describe('lists', () => {
     expect(status[0]).toMatchObject({ feedbackEligible: false, feedbackGiven: true });
   });
 });
+
+describe('a package that all went back', () => {
+  it('keeps its feedback visible but out of the seller score', async () => {
+    const customerId = newId();
+    const s = seller(k, 'Refund Row');
+    const p = product(k);
+    const ord = order(k, customerId, [{ sellerId: s, lines: [{ productId: p.productId, state: 'refunded' }] }]);
+    const res = await k.call('POST', `${STORE}/me/feedback`, tokens.customer(customerId), input(ord.orderId, s, { asDescribed: false, dispatchRating: 1, communicationRating: 1, comment: 'Arrived broken, sent it back.' }));
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect((await k.call('GET', `${STORE}/sellers/${s}/feedback-summary`, tokens.visitor())).body.count).toBe(0);
+    expect((await k.call('GET', `${STORE}/sellers/${s}/feedback`, tokens.visitor())).body.items).toHaveLength(1);
+  });
+});

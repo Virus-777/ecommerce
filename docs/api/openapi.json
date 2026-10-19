@@ -103036,7 +103036,7 @@
           "Store API · Reviews"
         ],
         "summary": "Report a review, feedback, question, answer or seller response",
-        "description": "The reporter's name is never shown to the author. The outcome appears under Reports you made.\n\n**Publishes:** `reviews.report.created`\n\n**Screens:** store/product, store/seller",
+        "description": "The reporter's name is never shown to the author. The outcome appears under Reports you made. A reason in hideOnReportReasons hides the content while it is reviewed, unless a moderator kept it within reportCooldownDays (then it is queued only); a seller's report (sellerReport) never hides content by itself.\n\n**Publishes:** `reviews.report.created`\n\n**Screens:** store/product, store/seller",
         "security": [
           {
             "bearer": []
@@ -103673,7 +103673,7 @@
           "Store API · Reviews"
         ],
         "summary": "Write a product review (or save a draft)",
-        "description": "**Publishes:** `reviews.review.published`\n\n**Screens:** account/review",
+        "description": "The seller's own team (sellers.getMemberAccess) cannot review its products (REVIEW_NOT_ELIGIBLE). A returned or refunded item can be reviewed, but not as a verified purchase. After moderation removed the customer's earlier review of the product (since deleted) for proven_fake, payment_for_review or conflict_of_interest, no new one is accepted (REVIEW_NOT_ELIGIBLE); after any other removal the new one is held for a moderator.\n\n**Publishes:** `reviews.review.published`\n\n**Screens:** account/review",
         "security": [
           {
             "bearer": []
@@ -103901,7 +103901,7 @@
           "Store API · Reviews"
         ],
         "summary": "Leave seller feedback for a delivered package (or save a draft)",
-        "description": "draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false.\n\n**Publishes:** `reviews.feedback.published`\n\n**Screens:** account/review",
+        "description": "draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false. The seller's own team cannot leave it feedback (REVIEW_NOT_ELIGIBLE). Feedback on a package that all went back (returned or refunded) is shown but left out of the seller score.\n\n**Publishes:** `reviews.feedback.published`\n\n**Screens:** account/review",
         "security": [
           {
             "bearer": []

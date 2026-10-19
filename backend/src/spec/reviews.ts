@@ -1465,6 +1465,8 @@ export interface ReviewsDb {
     comment: string | null;
     status: string;
     visible: boolean;
+    /** every item of the package went back: shown, but left out of the seller score */
+    refunded: boolean | null;
     created_at: Date;
     edited_at: Date | null;
   };
@@ -1821,7 +1823,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Report a review, feedback, question, answer or seller response",
-    desc: "The reporter's name is never shown to the author. The outcome appears under Reports you made.",
+    desc: "The reporter's name is never shown to the author. The outcome appears under Reports you made. A reason in hideOnReportReasons hides the content while it is reviewed, unless a moderator kept it within reportCooldownDays (then it is queued only); a seller's report (sellerReport) never hides content by itself.",
     body: () => ReportInput,
     response: () => MyReport,
     status: 201,
@@ -1943,6 +1945,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Write a product review (or save a draft)",
+    desc: "The seller's own team (sellers.getMemberAccess) cannot review its products (REVIEW_NOT_ELIGIBLE). A returned or refunded item can be reviewed, but not as a verified purchase. After moderation removed the customer's earlier review of the product (since deleted) for proven_fake, payment_for_review or conflict_of_interest, no new one is accepted (REVIEW_NOT_ELIGIBLE); after any other removal the new one is held for a moderator.",
     body: () => ReviewInput,
     response: () => MyReview,
     status: 201,
@@ -1994,7 +1997,7 @@ export const endpoints = defineEndpoints({
     auth: "customer",
     scope: "own-customer",
     summary: "Leave seller feedback for a delivered package (or save a draft)",
-    desc: "draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false.",
+    desc: "draft: true stores it unpublished (status draft) so the review page can save both parts together; submit later with PATCH /me/feedback/{id} and draft: false. The seller's own team cannot leave it feedback (REVIEW_NOT_ELIGIBLE). Feedback on a package that all went back (returned or refunded) is shown but left out of the seller score.",
     body: () => FeedbackInput,
     response: () => MyFeedback,
     status: 201,
@@ -3389,12 +3392,14 @@ export const spec = defineModuleSpec({
         "comment",
         "status",
         "visible",
+        "refunded",
         "created_at",
         "edited_at"
       ],
       "nullable": [
         "communication_rating",
         "comment",
+        "refunded",
         "edited_at"
       ],
       "decimal": [],
@@ -3483,6 +3488,12 @@ export const spec = defineModuleSpec({
             },
             "visible": {
               "bsonType": "bool"
+            },
+            "refunded": {
+              "bsonType": [
+                "bool",
+                "null"
+              ]
             },
             "created_at": {
               "bsonType": "date"

@@ -42,6 +42,8 @@ export interface Kit {
   orders: Map<string, orders.OrderDetail>;
   products: Map<string, catalog.Product>;
   names: Map<string, string>;
+  /** Seller team members, as `${sellerId}:${accountId}` (sellers.getMemberAccess) */
+  members: Set<string>;
   sellers: Map<string, sellers.SellerSnapshot>;
   offers: offers.Offer[];
   foreignAssets: Set<string>;
@@ -64,6 +66,7 @@ export async function boot(): Promise<Kit> {
     orders: new Map<string, orders.OrderDetail>(),
     products: new Map<string, catalog.Product>(),
     names: new Map<string, string>(),
+    members: new Set<string>(),
     sellers: new Map<string, sellers.SellerSnapshot>(),
     offers: [] as offers.Offer[],
     foreignAssets: new Set<string>(),
@@ -133,6 +136,7 @@ export async function boot(): Promise<Kit> {
       sellers: {
         getSeller: async (id) => h.sellers.get(id) ?? null,
         getSellers: async (ids) => ids.flatMap((id) => (h.sellers.has(id) ? [h.sellers.get(id)!] : [])),
+        getMemberAccess: async (sellerId, accountId) => (h.members.has(`${sellerId}:${accountId}`) ? { memberId: newId(), role: 'owner', permissions: [], isOwner: true } : null),
       },
       offers: {
         listOwnOffersForProduct: async (sellerId, productIds) => Object.fromEntries(productIds.map((p) => [p, h.offers.filter((o) => o.sellerId === sellerId && o.productId === p)])),

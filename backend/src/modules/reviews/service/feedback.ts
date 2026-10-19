@@ -101,6 +101,10 @@ export class FeedbackPart {
     if (!order || order.contact.customerId !== customerId) throw notFound('Order');
     const pkg = this.core.packageFor(order, input.sellerId);
     if (!pkg) throw notFound('Package');
+    await this.core.assertNotSellerTeam(who, pkg.sellerId, 'feedback');
+    // a package that all went back is a real experience to show, but it does not move the seller's score
+    const items = order.groups.find((g) => g.id === pkg.groupId)?.items ?? [];
+    const refunded = items.length > 0 && items.every((i) => i.state === 'returned' || i.state === 'refunded');
     const state = await this.packageState(customerId, pkg);
     if (state.feedback) throw this.core.ctx.error('ALREADY_REVIEWED', 'You already left feedback for this package. Edit it instead.', { id: state.feedback.id });
     this.assertOpen(pkg, state);
@@ -128,6 +132,7 @@ export class FeedbackPart {
         dispatch_rating: input.dispatchRating,
         communication_rating: input.communicationRating ?? null,
         overall,
+        refunded,
         sentiment: sentimentOf(overall, threshold),
         comment,
         status,

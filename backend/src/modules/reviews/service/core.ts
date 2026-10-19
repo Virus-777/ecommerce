@@ -206,6 +206,13 @@ export class Core {
     if (can && !can.allowed) throw this.ctx.error('REVIEWS_RESTRICTED', can.reason ?? 'Reviews are paused on this account');
   }
 
+  /** Conflict of interest: the account is on the seller's team (owner or member), so it does not review that seller */
+  async assertNotSellerTeam(who: CustomerWho, sellerId: string, what: string): Promise<void> {
+    if (!who.accountId || isOfficial(sellerId) || !isUuid(sellerId)) return;
+    const member = await this.soft('sellers.getMemberAccess', () => this.ctx.use('sellers').getMemberAccess(sellerKey(sellerId), who.accountId!));
+    if (member) throw this.ctx.error('REVIEW_NOT_ELIGIBLE', `You're on this seller's team, so you can't leave ${what} for it.`);
+  }
+
   /** Customers' full display names (customers, optional) */
   async customerNames(ids: readonly string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();

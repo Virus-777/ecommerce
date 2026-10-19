@@ -820,6 +820,7 @@ Indexes: `(customer_id, product_id) unique`, `(product_id, status, helpful_count
 | comment | text? |
 | status | text |
 | visible | bool |
+| refunded | bool? (every item of the package went back: shown, but left out of the seller score) |
 | created_at | timestamptz |
 | edited_at | timestamptz? |
 
