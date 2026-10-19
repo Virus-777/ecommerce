@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../../kernel/lib/ids.js';
 import { callers } from '../../../testing/app.js';
-import { ADMIN, boot, SELLER, SELLER_A, SELLER_B, track, USD, type Kit } from './helpers.js';
+import { ADMIN, boot, campaignInput, openingCreatives, SELLER, SELLER_A, SELLER_B, track, USD, type Kit } from './helpers.js';
 
 let k: Kit;
 const sellerA = () => callers.seller({ sellerId: SELLER_A });
@@ -255,5 +255,48 @@ describe('seller sponsored campaigns', () => {
     const res = await k.call('POST', `${SELLER}/campaigns`, sellerA(), request([k.offer().id]));
     expect(res.status).toBe(403);
     k.restricted.delete(SELLER_A);
+  });
+});
+
+describe('a seller is billed only for ads it asked for', () => {
+  const click = async (offerId: string, n: number) => {
+    const slots = await k.svc.sponsoredForResults({ page: 'search', query: 'boost', visitorId: `vb-${n}`, sessionId: `sb-${n}`, device: 'web', organicOfferIds: [offerId], personalizationAllowed: false });
+    expect((await track(k, [{ impressionToken: slots[0]!.impression.impressionToken, kind: 'click' }])).status).toBe(202);
+  };
+
+  it('refuses a billed campaign staff create for a seller; an unbilled one is fine', async () => {
+    const creativeIds = (await openingCreatives(k)).map((c: any) => c.id);
+    const billed = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { advertiser: { kind: 'seller', sellerId: SELLER_A }, budget: { billing: 'cpc', rate: USD(35), dailyLimit: USD(100), totalLimit: USD(1000) }, creativeIds }));
+    expect(billed.status).toBe(400);
+    expect(billed.body.error.details.issues.map((i: any) => i.path)).toContain('budget.billing');
+    const free = await k.call('POST', `${ADMIN}/campaigns`, k.staff, campaignInput(k, { advertiser: { kind: 'seller', sellerId: SELLER_A }, budget: { billing: 'none', deliveryCap: 500 }, creativeIds }));
+    expect(free.status, JSON.stringify(free.body)).toBe(201);
+  });
+
+  it('checks the seller may advertise when its request is approved', async () => {
+    const created = await k.call('POST', `${SELLER}/campaigns`, sellerA(), request([k.offer().id], { name: 'Late check' }));
+    const id = created.body.campaign.id;
+    expect((await k.call('POST', `${SELLER}/campaigns/${id}/submit`, sellerA())).status).toBe(200);
+    k.restricted.set(SELLER_A, 'Advertising restricted while a review is open');
+    try {
+      const res = await k.call('POST', `${ADMIN}/campaigns/${id}/approve`, callers.staff(), { role: 'advertising' });
+      expect(res.status).toBe(403);
+    } finally {
+      k.restricted.delete(SELLER_A);
+    }
+  });
+
+  it('never posts a charge of a campaign the seller did not request (made by staff before that was refused)', async () => {
+    const offer = k.offer({ title: 'Boost lamp' });
+    const id = await liveRequest([offer.id], { name: 'Lamp boost' });
+    await click(offer.id, 1);
+    await k.job('advertising.accrue-charges');
+    // as the audit's staff-made campaigns were: billed to the seller without its request
+    await k.svc.core.repo.update('campaigns', id, { origin: 'staff' });
+    k.clock.advance(86_400_000);
+    await k.job('advertising.post-charges');
+    expect(k.adCharges.filter((c) => c.campaignId === id)).toEqual([]);
+    const charges = await k.call('GET', `${ADMIN}/charges?campaignId=${id}`, k.staff);
+    expect(charges.body.items).toEqual([expect.objectContaining({ state: 'voided', reason: 'Not billable: the seller did not request this campaign' })]);
   });
 });

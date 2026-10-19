@@ -278,6 +278,8 @@ export class CampaignsPart extends Part {
     const own = advertiserIsOwn(adv.kind);
     const b = input.budget ?? null;
     const billing = own ? 'none' : (b?.billing ?? 'none');
+    // a seller is billed only for ads it asked for itself (its ad request is its consent); staff ads for a seller are unbilled
+    if (o.origin === 'staff' && adv.kind === 'seller' && billing !== 'none') issues.push({ path: 'budget.billing', message: 'A seller pays only for ads it requests itself; a staff campaign for a seller is unbilled (billing none)' });
     const cur = this.core.currency();
     const amount = (m: common.Money | null | undefined, path: string) => {
       if (!m) return null;
@@ -565,6 +567,8 @@ export class CampaignsPart extends Part {
     const body = { ...input, role: await this.campaignRole(row, input.role, by) };
     const slot = stepFor(body.role, row.advertiser_kind);
     if (!slot) throw invalid([{ path: 'role', message: 'Marketing reviews own promotions; seller and brand ads need Content' }], 'This role cannot approve this campaign');
+    // a billed seller request goes live only while paid seller ads are on and the seller may advertise
+    if (row.seller_id && row.origin === 'seller_request' && row.billing !== 'none') await this.core.assertPaidSellerAds(row.seller_id);
     const reviewer = encodeActor(by.actor);
     const done = await this.repo.transaction(async (tx) => {
       const locked = await tx.get('campaigns', id, { forUpdate: true });

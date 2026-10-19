@@ -148,11 +148,8 @@ export class SellerPart extends Part {
 
   /* ---------------------------------------------------------------- requests */
 
-  private async assertPaidAdsOn(sellerId: string) {
-    const rules = await this.core.rules();
-    if (!rules.paidSellerAdsEnabled) throw this.ctx.error('PAID_ADS_DISABLED', 'Paid seller advertising is not enabled yet.');
-    const can = await this.core.optional('sellers', (s) => s.canSell(sellerId, { activity: 'advertising' }));
-    if (can && !can.allowed) throw new AppError('FORBIDDEN', can.reason ?? 'Advertising is restricted for this account', { restrictionId: can.restrictionId ?? null, appealRoute: can.appealRoute ?? null });
+  private assertPaidAdsOn(sellerId: string) {
+    return this.core.assertPaidSellerAds(sellerId);
   }
 
   /** Own active offers with enough stock only (OFFER_NOT_PROMOTABLE otherwise) */
